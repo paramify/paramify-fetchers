@@ -54,6 +54,8 @@ class RunEvent(Message):
 
 
 class RunPage(Vertical):
+    HINTS = [("ctrl+r", "run"), ("1-4", "tabs"), ("q", "quit")]
+
     BINDINGS = [Binding("ctrl+r", "run_manifest", "Run")]
 
     def compose(self) -> ComposeResult:

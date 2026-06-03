@@ -14,9 +14,10 @@ from typing import Optional
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Footer, Header, TabbedContent, TabPane
+from textual.widgets import TabbedContent, TabPane
 
 from framework import api
+from framework.tui.components.chrome import AppHeader, HintFooter
 from framework.tui.screens.catalog import CatalogPage
 from framework.tui.screens.evidence import EvidencePage
 from framework.tui.screens.manifest import ManifestPage
@@ -54,7 +55,7 @@ class FetcherApp(App):
         self.manifest: Optional[dict] = None
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield AppHeader()
         with TabbedContent(initial="tab-catalog"):
             with TabPane("Catalog", id="tab-catalog"):
                 yield CatalogPage(id="catalog-page")
@@ -64,11 +65,30 @@ class FetcherApp(App):
                 yield RunPage(id="run-page")
             with TabPane("Evidence", id="tab-evidence"):
                 yield EvidencePage(id="evidence-page")
-        yield Footer()
+        yield HintFooter()
 
     def on_mount(self) -> None:
+        self.theme = "tokyo-night"
         self._load_catalog()
         self._load_manifest()
+        self._update_chrome()
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        self._update_chrome()
+
+    def _update_chrome(self) -> None:
+        """Sync the header breadcrumb + footer hints to the active tab."""
+        tabs = self.query_one(TabbedContent)
+        active = tabs.active or ""
+        self.query_one(AppHeader).set_crumb(active.removeprefix("tab-"))
+        hints = []
+        pane = tabs.active_pane
+        if pane is not None:
+            for child in pane.walk_children():
+                if getattr(child, "HINTS", None):
+                    hints = child.HINTS
+                    break
+        self.query_one(HintFooter).set_hints(hints)
 
     def _load_catalog(self) -> None:
         try:

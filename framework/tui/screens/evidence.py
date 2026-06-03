@@ -25,6 +25,8 @@ from framework.tui.modals import PreviewModal
 
 
 class EvidencePage(Vertical):
+    HINTS = [("↑↓", "runs"), ("enter", "view"), ("ctrl+r", "refresh"), ("q", "quit")]
+
     BINDINGS = [Binding("ctrl+r", "refresh_runs", "Refresh")]
 
     def compose(self) -> ComposeResult:

@@ -1,39 +1,51 @@
-/* TUI styles. Layout only — colors come from the active Textual theme. */
+/* TUI styles. Layout + chrome; colors come from the tokyo-night theme. */
+
+/* ---- shared chrome: header bar, footer hint bar, focus-aware panels ---- */
+#app-header {
+    height: auto;
+    border-bottom: solid $panel;
+    padding: 0 1;
+}
+#app-header-left { width: auto; }
+#app-header-crumb { width: 1fr; text-align: center; color: #7DCFFF; }
+#app-header-clock { width: auto; color: $text-muted; }
+
+#app-footer {
+    height: auto;
+    border-top: solid $panel;
+    padding: 0 1;
+}
 
 TabbedContent {
     height: 1fr;
 }
 
-/* Catalog page: tree on the left, contract detail on the right. */
-CatalogPage {
-    height: 1fr;
-}
-
-#catalog-left {
-    width: 40%;
-    min-width: 32;
-    border-right: solid $panel;
-}
-
-#catalog-search {
-    margin: 1 1 0 1;
-}
-
-#catalog-tree {
-    height: 1fr;
+/* A titled box whose border highlights when it (or a child) holds focus. */
+.panel {
+    border: round $panel;
     padding: 0 1;
 }
-
-#catalog-detail-scroll {
-    width: 1fr;
-    padding: 1 2;
+.panel:focus-within {
+    border: round $primary;
+}
+.panel-title {
+    color: $text-muted;
+    text-style: bold;
 }
 
-/* Placeholder pages (Phases 3-4). */
-.placeholder-text {
-    width: auto;
-    text-align: center;
+/* ---- Catalog ---- */
+CatalogPage { height: 1fr; padding: 1 1 0 1; }
+
+#catalog-left { width: 42%; min-width: 32; }
+#catalog-search { margin: 1 0; }
+#catalog-tree {
+    height: 1fr;
+    background: $background;
 }
+#catalog-tree > .tree--cursor { background: $primary; color: $background; text-style: bold; }
+#catalog-tree > .tree--guides { color: $panel; }
+
+#catalog-detail-scroll { width: 1fr; margin-left: 1; }
 
 /* Manifest editor */
 ManifestPage {
