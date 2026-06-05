@@ -6,7 +6,7 @@ to disk as JSON. A separate uploader stage pushes that evidence to Paramify.
 This repo is the fetchers, the runner that executes them, and the uploader; the
 fetchers themselves never talk to Paramify directly.
 
-There are 56 fetchers across 7 categories today. If you're a GRC or security
+There are 58 fetchers across 8 categories today. If you're a GRC or security
 engineer here to add evidence collection for a new control or a new tool, this
 README is for you.
 
@@ -127,7 +127,7 @@ principles keep that from happening again:
 
 - **One contract, schema-enforced.** A fetcher declares itself in `fetcher.yaml`,
   validated at discovery time. Anything not in the schema is not a thing a
-  fetcher can do. This is what lets the runner treat all 56 fetchers identically.
+  fetcher can do. This is what lets the runner treat all 58 fetchers identically.
 - **Fetchers run on customer infrastructure**, never Paramify's. So a fetcher
   never assumes a Paramify connection, and the framework owns no scheduling.
 - **Secrets are source-agnostic.** A fetcher reads `OKTA_API_TOKEN` from the

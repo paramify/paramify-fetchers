@@ -6,9 +6,9 @@ customer tools (Okta, AWS, GitLab, etc.) and produce JSON evidence files
 that get uploaded to Paramify.
 
 ## Current state
-Pre-1.0. 56 fetchers ported across 7 categories (aws 30, okta 8, sentinelone 5,
-knowbe4 4, gitlab 3, k8s 3, rippling 3); the AWS category is complete and all
-30 are region/profile fanout. Every fetcher carries an `evidence_set` block
+Pre-1.0. 58 fetchers ported across 8 categories (aws 30, okta 8, sentinelone 5,
+knowbe4 4, gitlab 3, k8s 3, rippling 3, checkov 2); the AWS category is complete
+and all 30 are region/profile fanout. Every fetcher carries an `evidence_set` block
 (reference_id/name/instructions) in its `fetcher.yaml`. v0.x runner built
 (`framework/runner/`); manifest format settled (see `examples/minimal_run.yaml`).
 Ported fetchers are version 0.x and write raw evidence payloads; the runner
@@ -106,7 +106,7 @@ CLI surface (`paramify <cmd>`, all accept `--json`):
   honor it yet — only `comparators/_template` exists; logger.py, retry.py,
   dependency_graph.py are still empty stubs)
 - Categories with only a `_categories/<name>.yaml` stub and no ported
-  fetchers: azure, checkov, ssllabs, wiz
+  fetchers: azure, ssllabs, wiz
 - Aggregate fanout mode (declared in the schema; no fetcher uses it)
 - Structured exit code categories (auth-failure vs. target-unreachable
   vs. internal); v0.x is binary 0/1 (plus 124 = runner timeout-kill)

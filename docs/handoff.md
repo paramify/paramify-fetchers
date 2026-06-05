@@ -35,7 +35,7 @@ For project overview see [`design.md`](design.md). For porting procedure see [`p
 - **Issues uploader `paramify_issues` — EMPTY STUB (NOT built)** — `uploaders/paramify_issues/` has zero-byte `uploader.py`/`uploader.yaml`. This is the assessment-intake variant that Wiz needs; it blocks Wiz.
 - **Evidence-set identity in `fetcher.yaml` + envelope (landed 2026-05-28)** — optional `evidence_set` block (`reference_id`, `name`, `instructions`, `description`-fallback) in `fetcher_schema.json` / `contract.py` / `config_loader.py`; the runner carries it into `metadata.evidence_set` so evidence files are self-describing for upload. 1 fetcher = 1 evidence set; customer overrides `reference_id` per program in the (now-built) `paramify_evidence` uploader config. **Backfilled onto all 56 fetchers** (2026-05-28): 53 from the upstream catalog (id/name/instructions), 3 generated for fetchers absent from the catalog (`aws_rds_tls_configuration`→EVD-RDS-TLS-CONFIG, `okta_authenticators`→EVD-OKTA-AUTHENTICATORS, `rippling_devices`→EVD-RIPPLING-DEVICES) — these 3 have **no `instructions` yet** (worth filling). All referenceIds unique. See `docs/uploader_design.md`.
 
-**56 fetchers across 7 categories:**
+**58 fetchers across 8 categories:**
 
 | Category | Count | Notes |
 |---|---|---|
@@ -46,6 +46,7 @@ For project overview see [`design.md`](design.md). For porting procedure see [`p
 | K8s | 3 | Bash, uses AWS CLI + kubectl |
 | Rippling | 3 | Single-target Python |
 | AWS | 30 | All bash; all 30 are fanout (region/profile) — see AWS section below |
+| Checkov | 2 | Bash IaC scanners (terraform + kubernetes); self-acquire source via git clone, run the `checkov` CLI |
 
 **Docs landed:** root `README.md` (entry point for engineers adding fetchers), `design.md`, `porting_playbook.md`, `ai_port_recipe.md`, `fetcher_contract.md`, `run_manifest_reference.md`, `authoring_a_fetcher.md`, `config_injection_design.md`, `fetcher_purity_audit.md`, `envelope_design.md` (implemented, runner-wraps approach), `uploader_design.md` (evidence-set identity in fetcher.yaml, get-or-create, control linkage stays manual — `paramify_evidence` now built per this design).
 
@@ -227,11 +228,10 @@ For pulling 5 at a time, use the batched pattern from prior sessions (output to 
 
 ## Remaining work — categories with NO ported fetchers yet
 
-`azure`, `checkov`, `ssllabs`, `wiz` exist **only as `_categories/<name>.yaml` stubs** — there are no fetcher dirs under `fetchers/<cat>/` for any of them (in particular, **no azure fetchers exist in this tree**). The Rippling comparators are also unported. Each is blocked or constrained by framework work, or simply not started:
+`azure`, `ssllabs`, `wiz` exist **only as `_categories/<name>.yaml` stubs** — there are no fetcher dirs under `fetchers/<cat>/` for any of them (in particular, **no azure fetchers exist in this tree**). The Rippling comparators are also unported. Each is blocked or constrained by framework work, or simply not started:
 
 | Category | Scripts | Blocked on |
 |---|---|---|
-| **Checkov** | 2 bash | Not blocked, but huge (22 + 28KB) and runs the `checkov` CLI binary. Also has skip-checks config files to figure out. |
 | **SSLLabs** | 1 Python | `aggregation: aggregate` runner support. Source iterates hosts *internally* — that's the aggregate shape. Two options: add aggregate-mode to the runner, OR restructure source to per-target fanout. |
 | **Wiz** | 1 Python | The evidence uploader (`paramify_evidence`) is built; Wiz needs the **`paramify_issues`** uploader — the assessment-intake variant (`POST /assessment/{id}/intake`, multipart CSV + artifact JSON). It's currently an empty stub (`uploaders/paramify_issues/`). Thin second uploader, same auth/pattern as `paramify_evidence`. |
 | **Azure** | — | Category-yaml stub only; no source ported yet. |
@@ -349,15 +349,15 @@ Two specific cleanup opportunities flagged in the audit but **not yet acted on**
 
 ## How to start the next session
 
-56 fetchers across 7 categories are ported; the collect→upload chain is built
-(manifest → runner/api/web run → enveloped JSON → `paramify_evidence` uploader).
+58 fetchers across 8 categories are ported; the collect→upload chain is built
+(manifest → runner/api run → enveloped JSON → `paramify_evidence` uploader).
 What's left is new categories and the framework pieces that gate them (see
 "Remaining work" above):
 
 - **`paramify_issues` uploader** — empty stub at `uploaders/paramify_issues/`; unblocks **Wiz**. Copy the `paramify_evidence` pattern.
 - **`aggregation: aggregate` mode** in `executor.py` — unblocks **SSLLabs**.
 - **`depends_on` execution** — `dependency_graph.py`/`logger.py`/`retry.py` are empty stubs; unblocks the **Rippling comparators** (`comparators/` has only `_template`).
-- **Checkov** (2 bash) and **Azure** (no source ported) are not framework-blocked, just unstarted.
+- **Azure** (no source ported) is not framework-blocked, just unstarted.
 
 Pick a framework piece, then the script. All work routes through `framework.api`
 (the human CLI, the `--json` AI CLI, and the `paramify tui` all
@@ -371,9 +371,9 @@ The 3 fetchers without `evidence_set.instructions` (`aws_rds_tls_configuration`,
 
 ## State summary (TL;DR)
 
-- **56 fetchers across 7 categories** (aws 30, okta 8, sentinelone 5, knowbe4 4, gitlab 3, k8s 3, rippling 3). All 30 AWS are fanout (22 regional, 5 global profile-only, 3 mixed-scope).
+- **58 fetchers across 8 categories** (aws 30, okta 8, sentinelone 5, knowbe4 4, gitlab 3, k8s 3, rippling 3, checkov 2). All 30 AWS are fanout (22 regional, 5 global profile-only, 3 mixed-scope).
 - **`framework/api.py` is the single facade** behind 3 front-ends, all steered by one `paramify` CLI: human CLI (`paramify`), AI CLI (same + `--json`), and terminal UI (`paramify tui`). A manifest-builder CLI (`manifest <sub>`) reads each `fetcher.yaml` and reports what's still missing.
-- **Built:** config injection + `auth.passthrough_env`, envelope wrapping (`{schema_version, metadata, payload}`), `evidence_set` identity backfilled onto all 56, the `paramify_evidence` uploader, per-invocation timeout (124 on kill), `stderr_tail` on failure, AWS region/profile fanout. Collect→upload glue example: `run_and_upload.sh`.
-- **Not built:** `paramify_issues` uploader (empty stub → blocks Wiz); comparators / `depends_on` / retry / logger (empty stubs); `aggregate` fanout mode (declared, unused). `azure`/`checkov`/`ssllabs`/`wiz` are category-yaml stubs with **no ported fetchers**.
+- **Built:** config injection + `auth.passthrough_env`, envelope wrapping (`{schema_version, metadata, payload}`), `evidence_set` identity backfilled onto all fetchers, the `paramify_evidence` uploader, per-invocation timeout (124 on kill), `stderr_tail` on failure, AWS region/profile fanout. Collect→upload glue example: `run_and_upload.sh`.
+- **Not built:** `paramify_issues` uploader (empty stub → blocks Wiz); comparators / `depends_on` / retry / logger (empty stubs); `aggregate` fanout mode (declared, unused). `azure`/`ssllabs`/`wiz` are category-yaml stubs with **no ported fetchers**.
 - Exit codes still binary 0/1 (plus 124 = runner timeout-kill).
 - Foundation reviewed 2026-05-28: sound. The one exit-code bug (`k8s_eks_microservice_segmentation`) is fixed.

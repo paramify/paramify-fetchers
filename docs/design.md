@@ -311,7 +311,7 @@ paramify-fetchers/
 │       ├── fetcher_schema.json
 │       └── run_manifest_schema.json
 │
-├── fetchers/                         # 56 fetchers across 7 categories
+├── fetchers/                         # 58 fetchers across 8 categories
 │   ├── _categories/                  # category metadata (per-category access docs)
 │   │   ├── okta.yaml
 │   │   ├── aws.yaml
@@ -334,7 +334,7 @@ paramify-fetchers/
 │
 ├── catalog/                          # not built yet (will be GENERATED from fetcher.yaml files)
 │
-├── examples/                         # sample manifests (minimal_run, multi_region_aws, full_compliance_run, upload.yaml, ...)
+├── examples/                         # sample manifests (minimal_run, multi_region_aws, with_platform_config, upload.yaml, ...)
 │   └── minimal_run.yaml              # exercises single-target + fanout
 │
 ├── manifest.yaml                     # repo-root sample manifest
@@ -400,14 +400,14 @@ The current approach parses JSON output with regex to determine pass/fail. Most 
 ## Current state of the work
 
 **The authoritative, kept-current account of what's ported and what's in
-progress lives in [`handoff.md`](handoff.md).** Snapshot: 56 fetchers across
-7 categories (okta, aws, sentinelone, knowbe4, gitlab, k8s, rippling); the
+progress lives in [`handoff.md`](handoff.md).** Snapshot: 58 fetchers across
+8 categories (okta, aws, sentinelone, knowbe4, gitlab, k8s, rippling, checkov); the
 AWS port is complete (30/30). The pieces that make this run:
 
 - **Facade + three front-ends** (`framework/api.py`) — all discovery, manifest editing, validate, and run go through one facade; the human CLI, the `--json` AI CLI, and the Textual TUI (`paramify tui`) all call only the facade
 - **Fetcher schema** (`framework/schemas/fetcher_schema.json`) — supports fanout: `supports_targets`, `target_schema`, `per_target` secrets, `output.aggregation`. Extended additively from the original minimal version.
 - **Runner** (`framework/runner/`) — `list` / `catalog` / `describe` / `validate` / `run` / `manifest` subcommands (all with `--json`); single-target + fanout execution via `subprocess.Popen` + streamed stdout, per-invocation timeout (default 600s, exit 124 on kill), per-target failure isolation, env-whitelist + config/secret/passthrough injection, secret resolution from `${env:...}` references, envelope wrapping, `_run_metadata.json` recording (run_id, per-invocation timestamps, durations, exit codes, outputs)
-- **Manifest schema** (`framework/schemas/run_manifest_schema.json`) + builder CLI (`manifest` subcommands) + working examples (`examples/minimal_run.yaml`, `multi_region_aws.yaml`, `full_compliance_run.yaml`, ...)
+- **Manifest schema** (`framework/schemas/run_manifest_schema.json`) + builder CLI (`manifest` subcommands) + working examples (`examples/minimal_run.yaml`, `multi_region_aws.yaml`, `with_platform_config.yaml`, ...)
 - **Secret resolver** (`framework/secret_resolver.py`) — `${env:VAR_NAME}` only for v0.x; shape leaves room for future backends (`${aws-secret:...}`, `${vault:...}`)
 - **Conventions established**:
   - Logging: Python `logging` module; bash uses structured `printf` with a matching format
@@ -429,7 +429,7 @@ What's deferred:
 - **Structured exit codes** — still binary 0/1 (plus 124 = runner timeout-kill). Categorized auth/network/internal/partial codes are contract-era work.
 - **Catalog generator** — fetchers self-describe; the derived `catalog.json` walker isn't written yet
 - **`aggregate` mode** — declared in schema; no fetcher uses it yet
-- **Unported categories** — `azure`, `checkov`, `ssllabs`, and `wiz` exist only as `_categories/<name>.yaml` stubs with no ported fetchers
+- **Unported categories** — `azure`, `ssllabs`, and `wiz` exist only as `_categories/<name>.yaml` stubs with no ported fetchers
 - **Shared module refactor** — `okta_iam_core.py` still reads env directly (with one tiny additive change: it now exposes `api_failures` for exit-code purposes). Full rework waits on the framework's secret resolver taking over per-fetcher invocation.
 - **Cleanup**: `framework/common/env_loader.py` (3.4KB) is a verbatim copy of the upstream `common/env_loader.py` that we explicitly chose not to port. The runner doesn't import it; it's unused dead weight that should be removed.
 

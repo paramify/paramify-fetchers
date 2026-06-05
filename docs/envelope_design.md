@@ -41,7 +41,7 @@ emit `{metadata:{profile,region,...}, results:[...]}`, Okta/GitLab/Rippling emit
 a bare dict with no metadata, SentinelOne tucks `api_failures` in the body. A
 file pulled out of its run directory is unattributable. The envelope makes every
 file self-describing and gives the uploader **one shape** to consume instead of
-56 ad-hoc ones.
+58 ad-hoc ones.
 
 ---
 
@@ -77,14 +77,14 @@ fetcher writes it. Fetchers do not change.**
 Rationale:
 - The runner already knows every metadata field — it computes the same values for
   `_run_metadata.json` (name, version, target, run_id, timestamps, exit_code).
-- **Zero fetcher changes.** Wrapping in each of the 56 fetchers would be 56 edits
+- **Zero fetcher changes.** Wrapping in each of the 58 fetchers would be 58 edits
   and would grow with every new port. One implementation point instead.
 - Keeps the v0.x interim clause true: fetchers still write raw evidence dicts;
   the framework adds the envelope. A fetcher can later emit its own envelope and
   the runner detects it (already-enveloped → don't double-wrap).
 
 Alternative (each fetcher emits its own envelope) matches the contract literally
-but costs the 56 edits and re-touches finished work. Defer that until/unless a
+but costs the 58 edits and re-touches finished work. Defer that until/unless a
 fetcher needs payload-level control the runner can't provide.
 
 ### Runner behavior
@@ -136,7 +136,7 @@ def wrap_outputs(result, fetcher, run_id, run_dir):
   (each `InvocationResult.outputs` is the per-target diff, so attribution is correct).
 - **Failure** — the payload may be partial or empty; `status: failed`, `exit_code`,
   and `error` (stderr tail) make that explicit. The file is still wrapped.
-- **Non-JSON outputs** (`output.type: csv|html`) — out of scope for v0.x; all 56
+- **Non-JSON outputs** (`output.type: csv|html`) — out of scope for v0.x; all 58
   current fetchers are JSON. Later: a payload-by-reference variant (`payload_path`
   + `content_type`) rather than inlining. Note it, don't build it.
 - **Comparators** — when they land, they read *payload* of prior envelopes, not the
