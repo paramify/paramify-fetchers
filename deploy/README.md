@@ -7,6 +7,9 @@ would generate.
 
 > All commands below are run from the **repo root**.
 
+> **Just want to try it end-to-end on your laptop (with a test AWS secret)?**
+> Follow [`LOCAL_TESTING.md`](LOCAL_TESTING.md) — a step-by-step local run.
+
 ## What's in here
 
 | File | What it is |
