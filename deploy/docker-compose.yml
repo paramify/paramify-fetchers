@@ -3,7 +3,7 @@
 #   build      : docker compose -f deploy/docker-compose.yml build
 #   sanity     : docker compose -f deploy/docker-compose.yml run --rm collector paramify list
 #   collect    : docker compose -f deploy/docker-compose.yml run --rm collector \
-#                    ./deploy/run-and-upload.sh manifests/minimal.yaml
+#                    ./deploy/run-and-upload.sh examples/minimal_run.yaml
 #   explore TUI: docker compose -f deploy/docker-compose.yml run --rm collector paramify tui
 #   shell      : docker compose -f deploy/docker-compose.yml run --rm collector bash
 #   schedule   : docker compose -f deploy/docker-compose.yml up scheduler   # cron schedule

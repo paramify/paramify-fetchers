@@ -9,7 +9,7 @@
 #          --from-literal=AWS_ACCESS_KEY_ID=... --from-literal=AWS_SECRET_ACCESS_KEY=... \
 #          --from-literal=AWS_SESSION_TOKEN=... --from-literal=AWS_REGION=...
 #   2. kubectl create configmap paramify-manifest \
-#          --from-file=minimal.yaml=manifests/minimal.yaml         # note: KEY=PATH, '=' not '/'
+#          --from-file=minimal_run.yaml=examples/minimal_run.yaml  # note: KEY=PATH, '=' not '/'
 #   3. (edit PARAMIFY_SECRETS_ID below) kubectl apply -f deploy/k8s/cronjob.yaml
 #   4. kubectl create job --from=cronjob/paramify-collector test-1 # trigger now, don't wait for 02:00
 ---
@@ -56,7 +56,7 @@ spec:
               #   (a) hydrates secrets from AWS Secrets Manager when PARAMIFY_SECRETS_ID is set, and
               #   (b) defaults PARAMIFY_API_BASE_URL (https://stage.paramify.com/api/v0).
               # Setting `args` overrides only the CMD, so the entrypoint runs this:
-              args: ["./deploy/run-and-upload.sh", "manifests/minimal.yaml"]
+              args: ["./deploy/run-and-upload.sh", "examples/minimal_run.yaml"]
               env:
                 # The SM secret (a flat JSON object of VAR->value) the entrypoint
                 # hydrates — PARAMIFY_UPLOAD_API_TOKEN, OKTA_API_TOKEN, OKTA_ORG_URL, …
@@ -77,12 +77,13 @@ spec:
                 # - secretRef:
                 #     name: paramify-secrets
               volumeMounts:
-                # The manifest comes from a ConfigMap, NOT baked into the image:
-                # edit the ConfigMap + re-trigger to change what's collected — no
-                # rebuild. This overlays the example baked at the same path.
+                # Manifests are baked into the image, but a ConfigMap mounted over
+                # one lets you change what's collected by editing the ConfigMap +
+                # re-triggering — no image rebuild. Here it overlays the baked
+                # examples/minimal_run.yaml; for your own, mount over manifests/<name>.yaml.
                 - name: manifest
-                  mountPath: /app/manifests/minimal.yaml
-                  subPath: minimal.yaml
+                  mountPath: /app/examples/minimal_run.yaml
+                  subPath: minimal_run.yaml
                   readOnly: true
                 # Transient scratch for collected evidence: written here, shipped to
                 # Paramify by run-and-upload.sh, then GONE when the Pod ends. There is

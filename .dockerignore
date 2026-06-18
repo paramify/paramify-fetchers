@@ -18,6 +18,8 @@ evidence/
 .env.*
 **/.env
 **/.env.*
-# Local working manifests (real ones live outside the image).
+# Manifests ARE baked into the image: `manifests/` (the folder the TUI builds
+# into) is copied in at build time so the scheduler can run them by path. Build
+# and test your manifests before `docker compose build`; rebuild to pick up edits.
+# (Still excluded: the legacy scratch `manifest.yaml` at the repo root.)
 manifest.yaml
-manifests/

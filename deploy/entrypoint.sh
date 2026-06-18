@@ -72,8 +72,8 @@ case "${1:-}" in
     echo
     echo "examples:"
     echo "   docker compose run --rm collector paramify list"
-    echo "   docker compose run --rm collector paramify run manifests/minimal.yaml"
-    echo "   docker compose run --rm collector ./deploy/run-and-upload.sh manifests/minimal.yaml"
+    echo "   docker compose run --rm collector paramify run examples/minimal_run.yaml"
+    echo "   docker compose run --rm collector ./deploy/run-and-upload.sh examples/minimal_run.yaml"
     echo "   docker compose run --rm collector paramify tui"
     echo "   docker compose run --rm collector bash"
     exec paramify list

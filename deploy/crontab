@@ -4,11 +4,11 @@
 SHELL=/bin/bash
 BASH_ENV=/tmp/container-env.sh
 
-# Each line maps a TIME to a MANIFEST (a path under ./manifests/). These are
-# EXAMPLES — edit them to your manifests and the cadence you want. Build/test a
-# manifest with `paramify tui` (or `paramify run manifests/<name>.yaml`), then
-# point a line here at it.
+# Each line maps a TIME to a MANIFEST path. The active line runs a shipped sample
+# (examples/, baked in) so the scheduler works out of the box. For your own
+# manifests: build/test one with `paramify tui` (it writes to manifests/), rebuild
+# the image so it's baked in, then point a line at manifests/<name>.yaml.
 #
 # min  hour  dom  mon  dow   command
-0     2     *    *    *      cd /app && ./deploy/run-and-upload.sh manifests/minimal.yaml >/proc/1/fd/1 2>/proc/1/fd/2
-# 0   3     *    *    1      cd /app && ./deploy/run-and-upload.sh manifests/aws-ambient.yaml >/proc/1/fd/1 2>/proc/1/fd/2
+0     2     *    *    *      cd /app && ./deploy/run-and-upload.sh examples/minimal_run.yaml >/proc/1/fd/1 2>/proc/1/fd/2
+# 0   3     *    *    1      cd /app && ./deploy/run-and-upload.sh manifests/your-manifest.yaml >/proc/1/fd/1 2>/proc/1/fd/2

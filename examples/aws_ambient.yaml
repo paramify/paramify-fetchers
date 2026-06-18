@@ -1,0 +1,22 @@
+# Ambient-identity AWS example — "collect the account/region I'm deployed into."
+#
+# No profiles: the fetchers use the AWS CLI's ambient credential chain (EKS IRSA /
+# instance role / SSO / env keys / ~/.aws default). This is the smooth single-
+# account path. Contrast with examples/multi_region_aws.yaml, which fans out across
+# accounts by naming a `profile` per target.
+run:
+  output_dir: ./evidence
+
+  fetchers:
+    # GLOBAL service (IAM): one empty target ({}) -> ONE ambient run. (A
+    # supports_targets fetcher needs at least one target entry.) Region defaults
+    # to us-east-1 for the API endpoint; identity is whatever the runner has.
+    - use: aws_iam_roles
+      targets:
+        - {}
+
+    # REGIONAL service: ambient identity, but you still choose the region(s).
+    # One target per region; omit `profile` to use the ambient identity.
+    - use: aws_guard_duty
+      targets:
+        - region: us-east-2

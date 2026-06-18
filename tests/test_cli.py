@@ -171,6 +171,12 @@ def _json(result):
     return json.loads(result.output)
 
 
+def _json_err(result):
+    """Parse the JSON an error path printed (--json still emits a JSON body on exit 1)."""
+    assert result.exit_code == 1, f"exit={result.exit_code}\n{result.output}"
+    return json.loads(result.output)
+
+
 def _entry(manifest_dict, use):
     for e in manifest_dict["run"]["fetchers"]:
         if e["use"] == use:
@@ -275,6 +281,23 @@ def test_upload_dry_run_json(tmp_path, in_repo):
 def test_evidence_missing_exits_1(tmp_path):
     result = runner.invoke(app, ["evidence", str(tmp_path / "nope.json")])
     assert result.exit_code == 1
+
+
+def test_run_missing_manifest_errors_not_noop(tmp_path):
+    # Regression: a missing manifest path used to load as an empty manifest and
+    # silently produce a zero-fetcher run (exit 0, "invocations": []). It must error.
+    missing = tmp_path / "does-not-exist.yaml"
+    result = runner.invoke(app, ["run", str(missing)])
+    assert result.exit_code == 1
+    data = _json_err(runner.invoke(app, ["run", str(missing), "--json"]))
+    assert data["ok"] is False and "no such manifest" in data["error"]
+
+
+def test_validate_missing_manifest_exits_1(tmp_path):
+    missing = tmp_path / "does-not-exist.yaml"
+    assert runner.invoke(app, ["validate", str(missing)]).exit_code == 1
+    data = _json_err(runner.invoke(app, ["validate", str(missing), "--json"]))
+    assert data["ok"] is False and any("no such manifest" in e for e in data["errors"])
 
 
 # --------------------------------------------------------------------------- #

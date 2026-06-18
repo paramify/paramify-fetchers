@@ -384,8 +384,16 @@ def validate_cmd(
 ):
     """Validate a manifest against the schema + discovered fetchers."""
     root = api.find_repo_root()
+    mpath = Path(manifest).resolve()
+    if not mpath.is_file():
+        msg = f"no such manifest: {manifest}"
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "errors": [msg]}, indent=2))
+        else:
+            _err(f"Validation failed: {msg}")
+        raise typer.Exit(1)
     try:
-        m = api.read_manifest(Path(manifest).resolve())
+        m = api.read_manifest(mpath)
     except Exception as e:  # noqa: BLE001 — surface any load error to the user
         if json_out:
             typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
@@ -411,8 +419,16 @@ def run_cmd(
 ):
     """Run a manifest; streams per-fetcher results (or a JSON summary with --json)."""
     root = api.find_repo_root()
+    mpath = Path(manifest).resolve()
+    if not mpath.is_file():
+        msg = f"no such manifest: {manifest}"
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "error": msg}, indent=2))
+        else:
+            _err(f"Setup failed: {msg}")
+        raise typer.Exit(1)
     try:
-        m = api.read_manifest(Path(manifest).resolve())
+        m = api.read_manifest(mpath)
     except Exception as e:  # noqa: BLE001
         if json_out:
             typer.echo(json.dumps({"ok": False, "error": str(e)}, indent=2))

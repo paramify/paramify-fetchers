@@ -28,13 +28,14 @@ real EKS** — the two prod differences are flagged as `PROD SWAP #1/#2` in
 The `aws-creds` Secret is **not** for an AWS fetcher. Its only job is to let the
 entrypoint read AWS Secrets Manager (exactly like the Docker run in
 [`../README.md`](../README.md)), which hydrates the
-`OKTA_*` + `PARAMIFY_UPLOAD_API_TOKEN` the `minimal.yaml` manifest references. On
+`OKTA_*` + `PARAMIFY_UPLOAD_API_TOKEN` the `minimal_run.yaml` manifest references. On
 EKS, IRSA replaces those static creds — that's SWAP #1.
 
-> This walkthrough schedules `manifests/minimal.yaml`, which collects an Okta
-> target plus two GitLab targets. Without `GITLAB_TOKEN_*` in your secret the
-> GitLab targets just report a missing secret — harmless for proving the
-> plumbing. Point the CronJob at any manifest in `manifests/` you like.
+> This walkthrough schedules the shipped sample `examples/minimal_run.yaml`, which
+> collects an Okta target plus two GitLab targets. Without `GITLAB_TOKEN_*` in your
+> secret the GitLab targets just report a missing secret — harmless for proving the
+> plumbing. Point the CronJob at any manifest you like; your own live in `manifests/`
+> (baked into the image), and you swap the ConfigMap source + mount path to match.
 
 ## Prerequisites
 
@@ -68,19 +69,19 @@ kubectl create secret generic aws-creds \
 ## 2. Create the manifest ConfigMap
 
 This is the step that bit earlier — the flag is `--from-file=KEY=PATH`, with an
-**`=`** (not `/`) between the key and the path, and the path is **`manifests/...`**
-from the repo root:
+**`=`** (not `/`) between the key and the path, and the path is from the repo root
+(here a shipped sample; for your own use `manifests/<name>.yaml`):
 
 ```bash
 kubectl create configmap paramify-manifest \
-  --from-file=minimal.yaml=manifests/minimal.yaml
+  --from-file=minimal_run.yaml=examples/minimal_run.yaml
 ```
 
-`minimal.yaml` is the key (the filename the Pod sees); `manifests/minimal.yaml`
+`minimal_run.yaml` is the key (the filename the Pod sees); `examples/minimal_run.yaml`
 is the file on disk. Verify it landed:
 
 ```bash
-kubectl describe configmap paramify-manifest   # shows a `minimal.yaml:` data key
+kubectl describe configmap paramify-manifest   # shows a `minimal_run.yaml:` data key
 ```
 
 This is the "manifest via ConfigMap" lesson: edit the ConfigMap (or recreate it
@@ -124,7 +125,7 @@ kubectl logs -f job/test-1
 
 You should see, in order:
 1. `[entrypoint] loading secrets from AWS Secrets Manager: …` — the static creds reading SM
-2. `==> collect: manifests/minimal.yaml` — `paramify run` over the ConfigMap manifest
+2. `==> collect: examples/minimal_run.yaml` — `paramify run` over the ConfigMap manifest
 3. `==> upload latest run -> https://stage.paramify.com/api/v0` — the uploader
 
 > A fetcher that reaches a real tool and **fails with 401/DNS** still proves the
@@ -194,5 +195,5 @@ SM → a K8s Secret → `envFrom` — see [`../README.md`](../README.md) option 
 | Pod stuck `CreateContainerConfigError` | A referenced Secret/ConfigMap is missing. `kubectl describe pod <name>` names it — you skipped step 1 or 2. |
 | `[entrypoint] ERROR: cannot read secret …` | AWS creds expired or wrong region → recreate `aws-creds` (step 1); or wrong `PARAMIFY_SECRETS_ID`. |
 | `secret … must be a flat JSON object` | The SM secret isn't `{"VAR":"value", …}` — fix the secret's shape. |
-| Fetcher logs "missing secret" | A `${env:VAR}` in `minimal.yaml` has no matching key in your SM secret — align the names. |
+| Fetcher logs "missing secret" | A `${env:VAR}` in `minimal_run.yaml` has no matching key in your SM secret — align the names. |
 | k9s shows nothing | You're on the empty `default` namespace before triggering, or looking at `kube-system`. Trigger step 4, then watch `default`. |

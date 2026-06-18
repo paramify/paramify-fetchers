@@ -21,11 +21,18 @@ is a guided run against a test AWS Secrets Manager secret.
 | `crontab` | The schedule — maps a time to a manifest path |
 | `run-and-upload.sh` | Chains `paramify run <manifest>` → upload to Paramify |
 | `.env.example` | Template for the secrets you inject at run time |
-
-Manifests are **not** kept here — there's one source, the repo-root `manifests/`
-(the same folder `paramify tui` builds into). Schedule whichever ones you want;
-name them however makes sense to you.
 | `k8s/` | Kubernetes `CronJob`s + a local→EKS walkthrough ([`k8s/LOCAL_K8S.md`](k8s/LOCAL_K8S.md)) and multi-account setup ([`k8s/AWS_MULTI_ACCOUNT.md`](k8s/AWS_MULTI_ACCOUNT.md)) |
+
+### Where manifests come from
+There's one source: the repo-root `manifests/` — the same folder `paramify tui`
+builds into. **They're baked into the image at build time** (`docker compose build`
+copies your working tree), so build and test your manifests *before* you build the
+image; rebuild to pick up changes. Name them however makes sense for your schedule.
+
+`manifests/` is gitignored (your manifests are yours, not committed), so a fresh
+clone has none — the repo ships ready-to-run samples in `examples/` (also baked in)
+that every command below uses, so the bundle works before you've built your own.
+On Kubernetes the manifest is injected by a `ConfigMap` instead (see [`k8s/`](k8s/)).
 
 ## 1. Configure secrets
 
@@ -92,11 +99,11 @@ docker compose -f deploy/docker-compose.yml run --rm collector paramify list
 
 # see what a manifest requires (it reports missing secrets/config)
 docker compose -f deploy/docker-compose.yml run --rm collector \
-    paramify run manifests/minimal.yaml
+    paramify run examples/minimal_run.yaml
 
 # collect + upload one manifest
 docker compose -f deploy/docker-compose.yml run --rm collector \
-    ./deploy/run-and-upload.sh manifests/minimal.yaml
+    ./deploy/run-and-upload.sh examples/minimal_run.yaml
 
 # explore runs/evidence with your own TUI, inside the container
 docker compose -f deploy/docker-compose.yml run --rm collector paramify tui
@@ -117,7 +124,9 @@ docker compose -f deploy/docker-compose.yml exec scheduler bash # get inside it
 ```
 
 Edit `deploy/crontab` to change the schedule (each line maps a time to a manifest
-path under `manifests/`); edit the manifests in `manifests/` to change what runs.
+path). The active example runs a shipped `examples/` sample; point a line at your
+own `manifests/<name>.yaml` once you've built it and rebuilt the image (manifests
+are baked in — see [Where manifests come from](#where-manifests-come-from)).
 Times are **UTC** (the container clock).
 
 ## Walk through it end-to-end on your laptop (Docker Desktop + a test AWS secret)
@@ -158,18 +167,18 @@ pf run --rm collector bash -lc '[ -n "$PARAMIFY_UPLOAD_API_TOKEN" ] && echo "sec
 
 # 5. Run a collection and look at the evidence (appears on your host).
 pf run --rm collector paramify list
-pf run --rm collector paramify run manifests/minimal.yaml
+pf run --rm collector paramify run examples/minimal_run.yaml
 ls -R evidence/
 
 # 6. (Optional) Full chain — collect AND upload. Hits real Paramify; uses
 #    PARAMIFY_UPLOAD_API_TOKEN from the secret (PARAMIFY_API_BASE_URL defaults to stage).
-pf run --rm collector ./deploy/run-and-upload.sh manifests/minimal.yaml
+pf run --rm collector ./deploy/run-and-upload.sh examples/minimal_run.yaml
 
 # 7. Confirm no secrets are baked into the image (prints nothing = good).
 docker run --rm paramify-fetchers:beta sh -c 'find / -name ".env" 2>/dev/null' || true
 ```
 
-Point a manifest in `manifests/` at a fetcher whose creds are in your test
+Point the manifest at a fetcher whose creds are in your test
 secret. A fetcher that reaches a real tool and **fails with 401/DNS** still proves
 the secret plumbing works — exit 0 with empty data would be the bug. If upload
 ingestion rejects the file, try `artifact_payload: payload` in an uploader config
@@ -182,7 +191,7 @@ You don't SSH in — use Docker:
 | Want to… | Command |
 |---|---|
 | Get a shell | `docker compose -f deploy/docker-compose.yml exec scheduler bash` |
-| Run something once | `... run --rm collector paramify run manifests/minimal.yaml` |
+| Run something once | `... run --rm collector paramify run examples/minimal_run.yaml` |
 | See output | `... logs -f scheduler` |
 | Open the TUI inside | `... run --rm collector paramify tui` |
 | Get evidence out | it's already on the host in `./evidence/` (or `docker cp`) |

@@ -29,7 +29,7 @@ kubectl create secret generic aws-cli --from-file=credentials=/tmp/aws-credentia
 
 # 2. Upload token + the manifest.
 kubectl create secret generic paramify-upload --from-literal=PARAMIFY_UPLOAD_API_TOKEN=<token>
-kubectl create configmap aws-manifest --from-file=aws-ambient.yaml=manifests/aws-ambient.yaml
+kubectl create configmap aws-manifest --from-file=aws_ambient.yaml=examples/aws_ambient.yaml
 ```
 
 In [`cronjob-aws.yaml`](cronjob-aws.yaml) uncomment the **LOCAL ONLY** `aws-cli`
@@ -46,7 +46,7 @@ those creds directly. The evidence is named `aws_<name>_ambient[_<region>].json`
 with the real `account_id` in the metadata.
 
 > Want to verify the tool itself first, no cluster? From the repo root:
-> `aws sso login && paramify run manifests/aws-ambient.yaml` — the AWS category
+> `aws sso login && paramify run examples/aws_ambient.yaml` — the AWS category
 > passthrough lets your ambient creds through, so it collects this account.
 
 ---
@@ -87,9 +87,10 @@ flowchart TB
 3. **Profile map** — fill [`aws-config.configmap.yaml`](aws-config.configmap.yaml):
    `[profile home]` = HomeRole + the IRSA token file; one `[profile <name>]` per
    account = its TargetRole, `source_profile = home`. Apply it.
-4. **Manifest** — give each fetcher a `profile:` per account (see
-   [`../../manifests/aws-multi-region.yaml`](../../manifests/aws-multi-region.yaml)),
-   and point the CronJob's ConfigMap + `args` at it instead of `aws-ambient.yaml`.
+4. **Manifest** — give each fetcher a `profile:` per account (see the shipped
+   sample [`../../examples/multi_region_aws.yaml`](../../examples/multi_region_aws.yaml),
+   or your own in `manifests/`), and point the CronJob's ConfigMap + `args` at it
+   instead of `aws_ambient.yaml`.
 5. **Image** — point at your registry (PROD SWAP #2), unsuspend the CronJob.
 
 ### What the CLI actually does (per target)
