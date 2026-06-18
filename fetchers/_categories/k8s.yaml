@@ -1,15 +1,31 @@
 description: >
   Kubernetes / EKS evidence fetchers (bash, aws CLI + kubectl). Each fetcher
-  reaches EKS through the AWS credential chain (AWS_PROFILE + AWS_DEFAULT_REGION
-  and `aws eks update-kubeconfig`).
+  reaches EKS through the standard AWS credential chain and `aws eks
+  update-kubeconfig`. Identity/region are OPTIONAL: set AWS_PROFILE /
+  AWS_DEFAULT_REGION to scope a run, or leave them unset to use the ambient
+  identity/region of wherever the runner is deployed (EKS IRSA / instance role).
 
-# k8s fetchers authenticate via AWS, so they share the aws category's ambient-
-# credential needs. The runner strips ambient env by default; for cloud-identity
-# auth (e.g. EKS IRSA / instance roles) the customer opts these back in per run
-# under manifest platforms.k8s.auth.passthrough_env. They only take effect when
-# actually set in the runner's environment, so listing them here is safe.
+# k8s fetchers authenticate to AWS exactly like the aws category, so they share
+# its passthrough set. The runner strips ambient env by default; these vars opt
+# the standard cred/region + cloud-identity vars back in so both the explicit
+# (profile/region) and ambient (IRSA / instance role / SSO) paths work. They only
+# take effect when actually set in the runner's environment, so listing them is
+# safe. Profile/region are NOT secrets — they are non-sensitive selectors, and
+# modeling them as required secrets would break the ambient in-cluster path.
 auth:
   passthrough_env:
+    # Explicit identity/region selection (set by the runner, or ambient).
+    - AWS_PROFILE
+    - AWS_DEFAULT_REGION
+    - AWS_REGION
+    # Static keys (local dev / non-AWS runners; prefer a role where possible).
+    - AWS_ACCESS_KEY_ID
+    - AWS_SECRET_ACCESS_KEY
+    - AWS_SESSION_TOKEN
+    # Alternate config/credentials file locations.
+    - AWS_CONFIG_FILE
+    - AWS_SHARED_CREDENTIALS_FILE
+    # Cloud-identity auth (EKS IRSA / Pod Identity / ECS / EC2 instance role).
     - AWS_WEB_IDENTITY_TOKEN_FILE
     - AWS_ROLE_ARN
     - AWS_ROLE_SESSION_NAME

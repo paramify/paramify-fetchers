@@ -10,7 +10,8 @@
 #   - pod resource limits
 #
 # Output: $EVIDENCE_DIR/k8s_eks_microservice_segmentation.json
-# Required env: AWS_PROFILE, AWS_DEFAULT_REGION
+# Optional env (else the AWS CLI's ambient identity/region — EKS IRSA /
+#   instance role / SSO / ~/.aws): AWS_PROFILE, AWS_DEFAULT_REGION
 # Required tools: aws, kubectl, jq
 
 set -o pipefail
@@ -20,17 +21,12 @@ set -o pipefail
 OUTPUT_DIR="${EVIDENCE_DIR:-./evidence}"
 mkdir -p "$OUTPUT_DIR"
 
-if [ -z "${AWS_PROFILE:-}" ]; then
-    echo "ERROR k8s_eks_microservice_segmentation: AWS_PROFILE is not set" >&2
-    exit 1
-fi
-if [ -z "${AWS_DEFAULT_REGION:-}" ]; then
-    echo "ERROR k8s_eks_microservice_segmentation: AWS_DEFAULT_REGION is not set" >&2
-    exit 1
-fi
-
-PROFILE="$AWS_PROFILE"
-REGION="$AWS_DEFAULT_REGION"
+# Identity/region come from the AWS CLI's own credential chain — env vars when
+# the runner sets them, else ambient (EKS IRSA / instance role / SSO / ~/.aws).
+# We do NOT pass --profile/--region; the CLI reads AWS_PROFILE / AWS_DEFAULT_REGION
+# itself. Recorded in evidence metadata only; empty = ambient.
+PROFILE="${AWS_PROFILE:-}"
+REGION="${AWS_DEFAULT_REGION:-}"
 
 OUTPUT_JSON="$OUTPUT_DIR/k8s_eks_microservice_segmentation.json"
 _FETCHER_TMP_JSON="$(mktemp -t k8s_eks_microservice_segmentation.XXXXXX.json)"
@@ -56,7 +52,7 @@ echo '{
   }
 }' > "$OUTPUT_JSON"
 
-clusters=$(aws eks list-clusters --profile "$PROFILE" --region "$REGION" --query "clusters" --output json 2>&1)
+clusters=$(aws eks list-clusters --query "clusters" --output json 2>&1)
 if [ $? -ne 0 ]; then
     log_error "Failed to list EKS clusters: $clusters"
     exit 1
@@ -75,7 +71,7 @@ error_occurred=false
 while read -r cluster_name; do
     log_info "Processing cluster $cluster_name"
 
-    if ! aws eks update-kubeconfig --region "$REGION" --name "$cluster_name" --profile "$PROFILE" >/dev/null 2>&1; then
+    if ! aws eks update-kubeconfig --name "$cluster_name" >/dev/null 2>&1; then
         log_error "Failed to update kubeconfig for cluster $cluster_name"
         error_occurred=true
         continue
@@ -106,7 +102,7 @@ while read -r cluster_name; do
     if ! node_instance_ids=$(aws ec2 describe-instances \
         --filters "Name=tag:kubernetes.io/cluster/$cluster_name,Values=owned" \
         --query "Reservations[*].Instances[*].InstanceId" \
-        --output text --region "$REGION" --profile "$PROFILE" 2>/dev/null); then
+        --output text 2>/dev/null); then
         log_error "Failed to list node instances for cluster $cluster_name"
         error_occurred=true
         continue
@@ -117,7 +113,7 @@ while read -r cluster_name; do
         sg=$(aws ec2 describe-instances \
             --instance-ids "$id" \
             --query "Reservations[*].Instances[*].SecurityGroups" \
-            --output json --region "$REGION" --profile "$PROFILE" 2>/dev/null)
+            --output json 2>/dev/null)
         if [ $? -ne 0 ]; then
             log_error "Failed to describe node instance $id for cluster $cluster_name"
             error_occurred=true

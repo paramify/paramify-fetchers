@@ -10,7 +10,8 @@
 # pre-exported AWS credentials, etc.) before invoking.
 #
 # Output: $EVIDENCE_DIR/k8s_eks_pod_inventory.json
-# Required env: AWS_PROFILE, AWS_DEFAULT_REGION
+# Optional env (else the AWS CLI's ambient identity/region — EKS IRSA /
+#   instance role / SSO / ~/.aws): AWS_PROFILE, AWS_DEFAULT_REGION
 # Required tools: aws, kubectl, jq
 
 set -o pipefail
@@ -20,17 +21,12 @@ set -o pipefail
 OUTPUT_DIR="${EVIDENCE_DIR:-./evidence}"
 mkdir -p "$OUTPUT_DIR"
 
-if [ -z "${AWS_PROFILE:-}" ]; then
-    echo "ERROR k8s_eks_pod_inventory: AWS_PROFILE is not set" >&2
-    exit 1
-fi
-if [ -z "${AWS_DEFAULT_REGION:-}" ]; then
-    echo "ERROR k8s_eks_pod_inventory: AWS_DEFAULT_REGION is not set" >&2
-    exit 1
-fi
-
-PROFILE="$AWS_PROFILE"
-REGION="$AWS_DEFAULT_REGION"
+# Identity/region come from the AWS CLI's own credential chain — env vars when
+# the runner sets them, else ambient (EKS IRSA / instance role / SSO / ~/.aws).
+# We do NOT pass --profile/--region; the CLI reads AWS_PROFILE / AWS_DEFAULT_REGION
+# itself. Recorded in evidence metadata only; empty = ambient.
+PROFILE="${AWS_PROFILE:-}"
+REGION="${AWS_DEFAULT_REGION:-}"
 
 OUTPUT_JSON="$OUTPUT_DIR/k8s_eks_pod_inventory.json"
 _FETCHER_TMP_JSON="$(mktemp -t k8s_eks_pod_inventory.XXXXXX.json)"
@@ -41,7 +37,7 @@ log_error() { printf '%s ERROR k8s_eks_pod_inventory %s\n' "$(date -u +'%Y-%m-%d
 
 echo "[]" > "$OUTPUT_JSON"
 
-if ! clusters=$(aws eks list-clusters --profile "$PROFILE" --region "$REGION" --query "clusters[]" --output text 2>&1); then
+if ! clusters=$(aws eks list-clusters --query "clusters[]" --output text 2>&1); then
     log_error "Failed to list EKS clusters: $clusters"
     exit 1
 fi
@@ -52,7 +48,7 @@ error_occurred=false
 for cluster in $clusters; do
     log_info "Fetching pods for cluster $cluster"
 
-    if ! aws eks update-kubeconfig --name "$cluster" --profile "$PROFILE" --region "$REGION" >/dev/null 2>&1; then
+    if ! aws eks update-kubeconfig --name "$cluster" >/dev/null 2>&1; then
         log_error "Failed to update kubeconfig for cluster $cluster"
         error_occurred=true
         continue

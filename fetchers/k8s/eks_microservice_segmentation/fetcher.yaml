@@ -13,11 +13,10 @@ output:
   type: json
   path: k8s_eks_microservice_segmentation.json
 
-secrets:
-- name: aws_profile
-  env: AWS_PROFILE
-- name: aws_region
-  env: AWS_DEFAULT_REGION
+# No secrets: AWS identity/region come from the credential chain — ambient
+# (EKS IRSA / instance role), or AWS_PROFILE/AWS_DEFAULT_REGION via the k8s
+# category's passthrough_env. They are selectors, not secrets.
+secrets: []
 
 evidence_set:
   reference_id: EVD-EKS-MICROSERVICE-SEG
