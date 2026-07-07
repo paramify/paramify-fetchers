@@ -35,6 +35,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-IAM-03
+  - KSI-IAM-04
+
 evidence_set:
   reference_id: EVD-IAM-ROLES
   name: IAM Roles

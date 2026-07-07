@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-CNA-02
+
 evidence_set:
   reference_id: EVD-EC2-PUBLIC-EXPOSURE
   name: EC2 Public Exposure

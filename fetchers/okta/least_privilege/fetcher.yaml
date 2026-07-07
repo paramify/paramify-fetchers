@@ -19,6 +19,9 @@ secrets:
 - name: org_url
   env: OKTA_ORG_URL
 
+ksis:
+  - KSI-IAM-05
+
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-05
   name: Okta Least Privilege (KSI-IAM-05)

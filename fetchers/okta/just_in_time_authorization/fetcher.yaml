@@ -19,6 +19,9 @@ secrets:
 - name: org_url
   env: OKTA_ORG_URL
 
+ksis:
+  - KSI-IAM-04
+
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-04
   name: Okta Just-in-Time Authorization (KSI-IAM-04)

@@ -37,6 +37,9 @@ secrets:
   env: GITLAB_API_TOKEN
   per_target: true
 
+ksis:
+  - KSI-CMT-03
+
 evidence_set:
   reference_id: EVD-GITLAB-CICD-CONFIG
   name: GitLab CI/CD Pipeline Configuration

@@ -28,6 +28,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-SVC-01
+  - KSI-SVC-07
+
 evidence_set:
   reference_id: EVD-SSM-PATCH
   name: AWS SSM Patch Compliance

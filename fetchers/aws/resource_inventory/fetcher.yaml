@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-PIY-01
+
 evidence_set:
   reference_id: EVD-RESOURCE-INVENTORY
   name: AWS Resource Inventory

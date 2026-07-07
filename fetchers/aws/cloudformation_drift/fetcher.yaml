@@ -28,6 +28,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-CMT-02
+  - KSI-MLA-05
+
 evidence_set:
   reference_id: EVD-CLOUDFORMATION-DRIFT
   name: AWS CloudFormation Drift

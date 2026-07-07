@@ -28,6 +28,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-CNA-03
+  - KSI-MLA-01
+
 evidence_set:
   reference_id: EVD-VPC-FLOW-LOGS
   name: VPC Flow Logs

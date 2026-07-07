@@ -28,6 +28,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-SVC-06
+  - KSI-IAM-03
+
 evidence_set:
   reference_id: EVD-SECRETS-ROTATION
   name: Secrets Manager Rotation

@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-SVC-02
+
 evidence_set:
   reference_id: EVD-AWS-SSL-ENFORCEMENT
   name: AWS Component SSL Enforcement

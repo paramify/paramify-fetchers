@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-SVC-06
+
 evidence_set:
   reference_id: EVD-KMS-ROT
   name: KMS Key Rotation

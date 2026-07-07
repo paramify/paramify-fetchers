@@ -19,6 +19,9 @@ secrets:
 - name: org_url
   env: OKTA_ORG_URL
 
+ksis:
+  - KSI-IAM-01
+
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-01
   name: Okta Phishing-Resistant MFA (KSI-IAM-01)

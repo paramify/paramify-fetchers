@@ -28,6 +28,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-MLA-01
+  - KSI-CMT-01
+
 evidence_set:
   reference_id: EVD-CLOUDTRAIL-CONFIG
   name: CloudTrail Configuration

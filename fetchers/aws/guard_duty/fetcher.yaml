@@ -28,6 +28,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-MLA-03
+  - KSI-IAM-06
+
 evidence_set:
   reference_id: EVD-GUARD-DUTY
   name: GuardDuty Configuration

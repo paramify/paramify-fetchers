@@ -28,6 +28,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-MLA-01
+  - KSI-MLA-06
+
 evidence_set:
   reference_id: EVD-SECURITYHUB
   name: Security Hub Status

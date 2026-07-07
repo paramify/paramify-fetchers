@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-CMT-03
+
 evidence_set:
   reference_id: EVD-CODEBUILD-CONFIG
   name: AWS CodeBuild Pipeline Configuration

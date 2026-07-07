@@ -28,6 +28,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-CMT-01
+  - KSI-PIY-01
+
 evidence_set:
   reference_id: EVD-DETECT-NEW-RESOURCE
   name: Detect New AWS Resource

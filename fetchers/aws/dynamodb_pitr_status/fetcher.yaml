@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-RPL-03
+
 evidence_set:
   reference_id: EVD-DYNAMODB-PITR
   name: DynamoDB Point-in-Time Recovery Status

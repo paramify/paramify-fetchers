@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-IAM-02
+
 evidence_set:
   reference_id: EVD-IAM-PASSWORD-POLICY
   name: IAM Account Password Policy

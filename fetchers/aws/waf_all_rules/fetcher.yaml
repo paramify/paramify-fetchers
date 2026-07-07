@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-CNA-05
+
 evidence_set:
   reference_id: EVD-WAF-ALL-RULES
   name: WAF All Rules

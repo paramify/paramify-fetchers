@@ -28,6 +28,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-IAM-01
+  - KSI-IAM-04
+
 evidence_set:
   reference_id: EVD-IAM-IDENTITY-CENTER
   name: IAM Identity Center

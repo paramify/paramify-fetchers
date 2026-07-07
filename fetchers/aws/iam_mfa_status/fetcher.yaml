@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-IAM-01
+
 evidence_set:
   reference_id: EVD-IAM-MFA
   name: IAM MFA Status

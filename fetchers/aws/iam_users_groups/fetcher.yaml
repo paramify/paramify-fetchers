@@ -28,6 +28,11 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-IAM-01
+  - KSI-IAM-02
+  - KSI-IAM-04
+
 evidence_set:
   reference_id: EVD-IAM-USERS-GROUPS
   name: IAM Users and Groups

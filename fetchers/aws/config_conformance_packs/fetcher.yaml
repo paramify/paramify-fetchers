@@ -28,6 +28,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-SVC-04
+  - KSI-MLA-05
+
 evidence_set:
   reference_id: EVD-CONFIG-PACKS
   name: AWS Config Conformance Packs

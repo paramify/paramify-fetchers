@@ -49,6 +49,9 @@ secrets:
   env: GITLAB_API_TOKEN
   per_target: true
 
+ksis:
+  - KSI-CMT-04
+
 evidence_set:
   reference_id: EVD-GITLAB-MR-SUMMARY
   name: GitLab Merge Request Summary

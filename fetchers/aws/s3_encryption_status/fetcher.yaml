@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-SVC-03
+
 evidence_set:
   reference_id: EVD-S3-ENC
   name: S3 Encryption

@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-CNA-06
+
 evidence_set:
   reference_id: EVD-EKS-HA
   name: EKS High Availability

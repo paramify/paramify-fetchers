@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-CNA-03
+
 evidence_set:
   reference_id: EVD-VPC-SEGMENTATION
   name: VPC Network Segmentation

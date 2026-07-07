@@ -19,6 +19,9 @@ secrets:
 - name: org_url
   env: OKTA_ORG_URL
 
+ksis:
+  - KSI-IAM-06
+
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-06
   name: Okta Suspicious Activity (KSI-IAM-06)

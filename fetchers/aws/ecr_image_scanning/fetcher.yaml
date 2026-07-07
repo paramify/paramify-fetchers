@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-TPR-04
+
 evidence_set:
   reference_id: EVD-ECR-IMAGE-SCANNING
   name: ECR Image Scanning Configuration

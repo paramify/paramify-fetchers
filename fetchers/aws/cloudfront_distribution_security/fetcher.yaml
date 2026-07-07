@@ -28,6 +28,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-CNA-05
+  - KSI-SVC-02
+
 evidence_set:
   reference_id: EVD-CLOUDFRONT-SECURITY
   name: AWS CloudFront Distribution Security

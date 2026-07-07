@@ -19,6 +19,9 @@ secrets:
 - name: org_url
   env: OKTA_ORG_URL
 
+ksis:
+  - KSI-IAM-02
+
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-02
   name: Okta Passwordless Authentication (KSI-IAM-02)

@@ -36,6 +36,9 @@ secrets:
   env: GITLAB_API_TOKEN
   per_target: true
 
+ksis:
+  - KSI-PIY-01
+
 evidence_set:
   reference_id: EVD-GITLAB-PROJECT-SUMMARY
   name: GitLab Project Summary

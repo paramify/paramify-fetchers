@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-MLA-01
+
 evidence_set:
   reference_id: EVD-CLOUDWATCH-HA
   name: CloudWatch High Availability

@@ -28,6 +28,10 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-CNA-01
+  - KSI-CNA-03
+
 evidence_set:
   reference_id: EVD-NETWORK-FIREWALL
   name: Network Firewall Rules

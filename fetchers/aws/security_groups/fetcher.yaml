@@ -28,6 +28,11 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-CNA-01
+  - KSI-CNA-02
+  - KSI-CNA-03
+
 evidence_set:
   reference_id: EVD-SECURITY-GROUPS
   name: Security Groups

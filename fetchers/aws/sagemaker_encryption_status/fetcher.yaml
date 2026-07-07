@@ -28,6 +28,9 @@ target_schema:
 
 secrets: []
 
+ksis:
+  - KSI-SVC-03
+
 evidence_set:
   reference_id: EVD-SAGEMAKER-ENC
   name: SageMaker Encryption
