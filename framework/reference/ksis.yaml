@@ -49,7 +49,7 @@ ksis:
   - {id: KSI-SVC-07, family: SVC, evidenceable: true,  statement: Apply risk-informed patching.}
 
   # --- MLA: Monitoring, Logging & Auditing (config) ---
-  - {id: KSI-MLA-01, family: MLA, evidenceable: true,  statement: Centralized, tamper-resistant logging / SIEM.}
+  - {id: KSI-MLA-01, family: MLA, evidenceable: true,  statement: "Centralized, tamper-resistant logging / SIEM."}
   - {id: KSI-MLA-02, family: MLA, evidenceable: true,  statement: Regularly review and audit logs.}
   - {id: KSI-MLA-03, family: MLA, evidenceable: true,  statement: Detect and remediate vulnerabilities.}
   - {id: KSI-MLA-04, family: MLA, evidenceable: true,  statement: Perform authenticated vulnerability scanning.}
