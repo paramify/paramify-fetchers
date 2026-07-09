@@ -1,0 +1,24 @@
+name: demo_hello
+version: 0.1.0
+description: >
+  Emits synthetic MFA-policy evidence so you can run the full
+  collect → envelope pipeline with no credentials. Not real evidence.
+category: demo
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: demo_hello.json
+
+# The whole point of the demo: no secrets, no config, no targets.
+secrets: []
+
+evidence_set:
+  reference_id: EVD-DEMO-HELLO
+  name: Demo — Synthetic MFA Policy
+  instructions: >
+    Script: fetcher.py. Generates a fixed synthetic payload; requires no
+    credentials or network access. For trying the pipeline only.

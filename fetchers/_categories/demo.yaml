@@ -1,0 +1,4 @@
+# Demo category — a single credential-free fetcher that emits synthetic
+# evidence, so you can exercise the whole run → envelope pipeline with no cloud
+# account. Not real evidence; safe to delete.
+description: Synthetic evidence for trying the pipeline with no credentials.

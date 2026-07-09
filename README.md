@@ -1,8 +1,11 @@
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/paramify/paramify-fetchers)
-
-
 # Paramify Fetchers
+
+[![CI](https://github.com/paramify/paramify-fetchers/actions/workflows/ci.yml/badge.svg)](https://github.com/paramify/paramify-fetchers/actions/workflows/ci.yml)
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-1467ff.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-1467ff.svg)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.2.0-1467ff.svg)](CHANGELOG.md)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/paramify/paramify-fetchers)
 
 Fetchers are small scripts that collect compliance evidence from your infrastructure and write it to disk as JSON. A separate uploader stage pushes that evidence to Paramify. This repo contains the fetchers, the runner that executes them, and the uploader — the fetchers themselves never talk to Paramify directly.
 
@@ -10,49 +13,6 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
   customer tool  ──fetcher──▶  JSON evidence file  ──uploader──▶  Paramify
                                (on disk, per run)     (separate stage)
 ```
-
-The `paramify` CLI is the way in — list the catalog, then inspect any one
-fetcher's contract:
-
-![Browsing the fetcher catalog with the paramify CLI](docs/demo/catalog.gif)
-
----
-
-## Quick start
-
-**Prerequisites:** Python 3.10+. The CLIs your fetchers need (`aws`, `jq`, `curl`, `kubectl`, etc.) must be on your `PATH` — install only what applies to the categories you'll run. Each service's credential setup guide is in `fetchers/<category>/README.md`.
-
-```bash
-# 1. Clone and install
-git clone https://github.com/paramify/paramify-fetchers.git
-cd paramify-fetchers
-python -m venv .venv && source .venv/bin/activate   # recommended
-pip install -e .
-# To add the TUI: pip install -e '.[all]'
-
-# 2. Browse available fetchers by category
-paramify catalog
-
-# 3. Start a manifest and wire in your fetchers
-paramify manifest init
-paramify manifest add okta_phishing_resistant_mfa
-paramify manifest set-secret okta_phishing_resistant_mfa api_token OKTA_API_TOKEN
-paramify manifest set-secret okta_phishing_resistant_mfa org_url OKTA_ORG_URL
-# The manifest builder reports missing secrets after each step —
-# keep going until it says the manifest is runnable.
-
-# 4. Set your credentials and run
-export OKTA_API_TOKEN=<your token>
-export OKTA_ORG_URL=https://your-org.okta.com
-paramify validate manifest.yaml
-paramify run     manifest.yaml         # evidence → ./evidence/run-<timestamp>/
-
-# 5. Upload to Paramify
-export PARAMIFY_UPLOAD_API_TOKEN=<your token>   # see uploaders/paramify_evidence/README.md for setup
-paramify upload                                  # push the latest run
-```
-
-Use `paramify describe <fetcher>` to see exactly what secrets and config any fetcher needs. Each service has a credential setup guide in its fetcher directory — for example, [`fetchers/okta/README.md`](fetchers/okta/README.md) covers creating an Okta API token and the required admin role. See [`examples/`](examples/) for complete worked manifests (multi-region AWS, GitLab fanout, etc.) and [`deploy/README.md`](deploy/README.md) for running on a schedule in Docker or Kubernetes.
 
 ---
 
@@ -100,64 +60,101 @@ Azure · and more
 
 ---
 
-## How it runs
+## Install
 
-Four pieces, kept deliberately separate:
-
-- **Fetcher** — a small script (`fetcher.py` or `fetcher.sh`) that collects from
-  *one* source and writes a JSON file. It reads everything it needs from
-  environment variables and writes only to `EVIDENCE_DIR`.
-- **`fetcher.yaml`** — the fetcher's self-description: its name, what secrets and
-  config it needs, what it outputs, and its `evidence_set` identity. Ships with
-  the code, validated against a schema. Customers never edit this.
-- **Run manifest** — the customer's intent: which fetchers to run, with what
-  config, against what targets. Lives in the customer's environment, not here.
-- **Runner** — reads `fetcher.yaml` files and a manifest, resolves secrets and
-  config into environment variables, and executes each fetcher.
-
-```mermaid
-flowchart LR
-    subgraph infra["runs on customer infrastructure"]
-        direction LR
-        Y["fetcher.yaml<br/>self-description"] --> R["runner"]
-        M["run manifest<br/>which fetchers + config"] --> R
-        R -->|"secrets + config<br/>as env vars"| F["fetcher<br/>one source each"]
-        F -->|"raw JSON"| R
-        R -->|"wrap in envelope"| E[("evidence files<br/>one run dir")]
-        E --> U["uploader"]
-    end
-    U -->|"Paramify REST v0 · HTTPS only"| P[("Paramify")]
-```
-
-Everything goes through one facade, `framework.api` — discovery, manifest
-editing, validation, and running. One CLI, `paramify`, sits on top of it and
-steers every front-end; because they all share that single code path they behave
-identically. Install it once from the repo (editable), then:
+**Prerequisites:** Python 3.10+. The CLIs your fetchers need (`aws`, `jq`, `curl`, `kubectl`, etc.) must be on your `PATH` — install only what applies to the categories you'll run. Each service's credential setup guide is in `fetchers/<category>/README.md`.
 
 ```bash
-pip install -e .                  # installs the `paramify` command
-                                  # (use `pip install -e '.[all]'` to add the TUI)
-
-paramify <cmd>                    # human CLI
-paramify <cmd> --json             # same commands, machine-readable (for AI/scripts)
-paramify tui                      # interactive terminal UI
+git clone https://github.com/paramify/paramify-fetchers.git
+cd paramify-fetchers
+python -m venv .venv && source .venv/bin/activate
+pip install -e '.[all]'      # '[all]' bundles the TUI; use `pip install -e .` for the headless CLI only
 ```
 
-> Back-compat: `python -m framework.runner <cmd>` and `python -m framework.tui`
-> still work and are exactly equivalent to the corresponding `paramify`
-> subcommands.
+There are three ways to drive it — an interactive **TUI**, an **AI agent**, or the **CLI** directly. All three go through one facade (`framework.api`), so they behave identically; pick whichever fits how you work.
 
-`paramify tui` drives that same facade interactively — browse the catalog, build
-and validate a manifest, run it, and review evidence without leaving the keyboard:
+---
+
+## The TUI
+
+The fastest way in. `paramify tui` browses the catalog, builds and validates a
+manifest, runs it, and reviews evidence — all without leaving the keyboard:
 
 ![The paramify terminal UI](docs/demo/tui.gif)
 
-The CLI command surface:
+> **Zero-credential first run:** the bundled `demo_hello` fetcher emits synthetic
+> evidence, so you can watch the whole collect → envelope pipeline before wiring
+> up a real service:
+>
+> ```bash
+> paramify run examples/demo.yaml                    # synthetic evidence — no credentials
+> paramify evidence evidence/run-*/demo_hello.json   # inspect the enveloped result
+> ```
+
+---
+
+## Drive it with an AI agent
+
+Every command takes `--json`, and each `paramify manifest` edit returns a stable
+`{ok, path, errors}` object — so an agent can assemble a runnable manifest by
+reading `errors` and closing each gap, no screen-scraping:
+
+```bash
+paramify catalog --json                                  # discover what's available
+paramify manifest add okta_phishing_resistant_mfa --json # → {"ok": false, "errors": [ …missing secrets… ]}
+paramify manifest set-secret okta_phishing_resistant_mfa api_token OKTA_API_TOKEN --json
+# …repeat until:
+paramify validate manifest.yaml --json                   # → {"ok": true, "errors": []}
+```
+
+The repo also ships Claude Code skills under [`.claude/skills/`](.claude/skills/) —
+`create-fetcher`, `wire-manifest`, and `suggest-validator` — so an agent can
+scaffold a new fetcher, wire it into a manifest, or propose a validator directly.
+
+---
+
+## Using the CLI
+
+The same operations, run by hand. `paramify catalog` lists the catalog and
+`paramify describe <fetcher>` shows exactly what any one fetcher needs:
+
+![Browsing the fetcher catalog with the paramify CLI](docs/demo/catalog.gif)
+
+A typical run, step by step:
+
+```bash
+# 1. Browse available fetchers by category
+paramify catalog
+
+# 2. Start a manifest and wire in your fetchers
+paramify manifest init
+paramify manifest add okta_phishing_resistant_mfa
+paramify manifest set-secret okta_phishing_resistant_mfa api_token OKTA_API_TOKEN
+paramify manifest set-secret okta_phishing_resistant_mfa org_url OKTA_ORG_URL
+# The manifest builder reports missing secrets after each step —
+# keep going until it says the manifest is runnable.
+
+# 3. Set your credentials and run
+export OKTA_API_TOKEN=<your token>
+export OKTA_ORG_URL=https://your-org.okta.com
+paramify validate manifest.yaml
+paramify run     manifest.yaml         # evidence → ./evidence/run-<timestamp>/
+
+# 4. Upload to Paramify
+export PARAMIFY_UPLOAD_API_TOKEN=<your token>   # see uploaders/paramify_evidence/README.md for setup
+paramify upload                                  # push the latest run
+```
+
+Each service has a credential setup guide in its fetcher directory — for example, [`fetchers/okta/README.md`](fetchers/okta/README.md) covers creating an Okta API token and the required admin role. See [`examples/`](examples/) for complete worked manifests (multi-region AWS, GitLab fanout, etc.) and [`deploy/README.md`](deploy/README.md) for running on a schedule in Docker or Kubernetes.
+
+The full command surface:
 
 ```bash
 paramify list                  # discovered fetchers (flat)
 paramify catalog               # categories → fetchers → editable fields
 paramify describe <fetcher>    # one fetcher's config / secrets / target fields
+paramify ksi                   # FedRAMP 20x KSI coverage
+paramify doctor   [manifest]   # preflight: Python, required CLIs, manifest secrets
 paramify manifests             # discovered run manifests (manifests/*.yaml)
 paramify validate <manifest>   # validate a manifest without running
 paramify run      <manifest>   # run it
@@ -167,54 +164,24 @@ paramify upload   [run-dir]    # push a run's evidence to Paramify (default: lat
 paramify manifest <sub>        # build/edit a manifest (see below)
 ```
 
-Output lands in `<output_dir>/run-<UTC-timestamp>/`, one JSON file per fetcher
-(or per target for fan-out), alongside a `_run_metadata.json` run index. The
-runner wraps each evidence file in an envelope —
-`{schema_version, metadata, payload}` — where `metadata` carries the fetcher
-name/version/category, run id, target, `collected_at`, status, exit code, and
-the `evidence_set` identity; failed invocations also get a `stderr_tail`. The
-`_run_metadata.json` index itself is not enveloped.
+> Back-compat: `python -m framework.runner <cmd>` and `python -m framework.tui`
+> still work and are exactly equivalent to the corresponding `paramify`
+> subcommands.
 
-A finished evidence file looks like this — an AWS VPC-segmentation run,
-abbreviated:
+Before a real run, `paramify doctor <manifest>` preflights the environment —
+Python, the CLIs each category needs, and whether the manifest's secret env vars
+are set — and exits non-zero if anything's missing, so it drops straight into CI:
 
-```json
-{
-  "schema_version": "1.0",
-  "metadata": {
-    "fetcher_name": "aws_vpc_network_segmentation",
-    "fetcher_version": "0.1.0",
-    "category": "aws",
-    "run_id": "2026-06-16T15-56-41Z",
-    "target": { "region": "us-east-1" },
-    "collected_at": "2026-06-16T16:00:14Z",
-    "status": "success",
-    "exit_code": 0,
-    "evidence_set": {
-      "reference_id": "EVD-VPC-SEGMENTATION",
-      "name": "VPC Network Segmentation",
-      "instructions": "Script: fetcher.sh. Commands: aws ec2 describe-vpcs, describe-subnets, describe-vpc-peering-connections, describe-vpc-endpoints. Maps to KSI-CNA-03.",
-      "description": "Lists VPCs, subnets, peering connections, and endpoints to document network topology and segmentation."
-    }
-  },
-  "payload": {
-    "metadata": { "account_id": "111122223333", "region": "us-east-1", "datetime": "2026-06-16T16:00:14Z" },
-    "results": [
-      { "ResourceType": "Vpcs", "Items": [
-        { "VpcId": "vpc-0a1b2c3d", "CidrBlock": "172.31.0.0/16", "IsDefault": true, "State": "available" }
-      ] },
-      { "ResourceType": "Subnets", "Items": [
-        { "SubnetId": "subnet-0d7e6de0", "VpcId": "vpc-0a1b2c3d", "CidrBlock": "172.31.80.0/20", "AvailabilityZone": "us-east-1b" }
-      ] }
-    ]
-  }
-}
+```text
+$ paramify doctor examples/minimal_run.yaml
+✅ Python 3.11.9 (need ≥ 3.10)
+
+Manifest secrets (examples/minimal_run.yaml):
+  ❌ okta_phishing_resistant_mfa  missing: OKTA_API_TOKEN, OKTA_ORG_URL
+  ❌ gitlab_ci_cd_pipeline_config  missing: GITLAB_TOKEN_1, GITLAB_TOKEN_2
+
+Issues found — see above.
 ```
-
-The runner owns the `metadata` envelope; the fetcher owns `payload`. The
-`evidence_set` block (from `fetcher.yaml`) is what an uploaded file maps to in
-Paramify. Note there is no pass/fail verdict — that judgment is Paramify-side, by
-design (peering connections and endpoints are omitted above for brevity).
 
 ### Building a manifest
 
@@ -267,35 +234,88 @@ example glue.
 
 ---
 
-## Why the design is strict
+## How it runs
 
-Every fetcher is forced through one contract, validated by JSON Schema, with a
-narrow set of allowed shapes. That rigidity is intentional. The previous
-generation of fetchers were freeform scripts, and each one invented its own
-conventions for config, secrets, and output — which is exactly why none of them
-composed and the central catalog had to be hand-maintained in sync. A few
-principles keep that from happening again:
+Four pieces, kept deliberately separate:
 
-- **One contract, schema-enforced.** A fetcher declares itself in `fetcher.yaml`,
-  validated at discovery time. Anything not in the schema is not a thing a
-  fetcher can do. This is what lets the runner treat all 107 fetchers identically.
-- **Fetchers run on customer infrastructure**, never Paramify's. So a fetcher
-  never assumes a Paramify connection, and the framework owns no scheduling.
-- **Secrets are source-agnostic.** A fetcher reads `OKTA_API_TOKEN` from the
-  environment. It never knows or cares whether that came from a `.env` file,
-  AWS Secrets Manager, Vault, or a CI secret block — because every one of those
-  already knows how to set an environment variable. We do not write per-provider
-  secret integrations, and we don't intend to.
-- **Collect facts; interpret elsewhere.** A fetcher gathers evidence. Whether
-  that evidence *satisfies* a control is a Paramify-side mapping, not the
-  fetcher's job. Keep pass/fail verdicts and compliance thresholds out of
-  fetchers.
-- **One source per fetcher.** Cross-source comparison (e.g. Okta users vs.
-  Rippling employees) is a separate "comparator" that reads prior outputs — same
-  contract, different inputs. A fetcher never reads another fetcher's output.
+- **Fetcher** — a small script (`fetcher.py` or `fetcher.sh`) that collects from
+  *one* source and writes a JSON file. It reads everything it needs from
+  environment variables and writes only to `EVIDENCE_DIR`.
+- **`fetcher.yaml`** — the fetcher's self-description: its name, what secrets and
+  config it needs, what it outputs, and its `evidence_set` identity. Ships with
+  the code, validated against a schema. Customers never edit this.
+- **Run manifest** — the customer's intent: which fetchers to run, with what
+  config, against what targets. Lives in the customer's environment, not here.
+- **Runner** — reads `fetcher.yaml` files and a manifest, resolves secrets and
+  config into environment variables, and executes each fetcher.
 
-The full contract is in [`docs/fetcher_contract.md`](docs/fetcher_contract.md);
-the rationale is in [`docs/design.md`](docs/design.md).
+```mermaid
+flowchart LR
+    subgraph infra["runs on customer infrastructure"]
+        direction LR
+        Y["fetcher.yaml<br/>self-description"] --> R["runner"]
+        M["run manifest<br/>which fetchers + config"] --> R
+        R -->|"secrets + config<br/>as env vars"| F["fetcher<br/>one source each"]
+        F -->|"raw JSON"| R
+        R -->|"wrap in envelope"| E[("evidence files<br/>one run dir")]
+        E --> U["uploader"]
+    end
+    U -->|"Paramify REST v0 · HTTPS only"| P[("Paramify")]
+```
+
+Everything goes through one facade, `framework.api` — discovery, manifest
+editing, validation, and running. The TUI, the CLI, and the `--json` surface an
+agent drives all sit on that single code path, which is why they behave
+identically.
+
+Output lands in `<output_dir>/run-<UTC-timestamp>/`, one JSON file per fetcher
+(or per target for fan-out), alongside a `_run_metadata.json` run index. The
+runner wraps each evidence file in an envelope —
+`{schema_version, metadata, payload}` — where `metadata` carries the fetcher
+name/version/category, run id, target, `collected_at`, status, exit code, and
+the `evidence_set` identity; failed invocations also get a `stderr_tail`. The
+`_run_metadata.json` index itself is not enveloped.
+
+A finished evidence file looks like this — an AWS VPC-segmentation run,
+abbreviated:
+
+```json
+{
+  "schema_version": "1.0",
+  "metadata": {
+    "fetcher_name": "aws_vpc_network_segmentation",
+    "fetcher_version": "0.1.0",
+    "category": "aws",
+    "run_id": "2026-06-16T15-56-41Z",
+    "target": { "region": "us-east-1" },
+    "collected_at": "2026-06-16T16:00:14Z",
+    "status": "success",
+    "exit_code": 0,
+    "evidence_set": {
+      "reference_id": "EVD-VPC-SEGMENTATION",
+      "name": "VPC Network Segmentation",
+      "instructions": "Script: fetcher.sh. Commands: aws ec2 describe-vpcs, describe-subnets, describe-vpc-peering-connections, describe-vpc-endpoints. Maps to KSI-CNA-03.",
+      "description": "Lists VPCs, subnets, peering connections, and endpoints to document network topology and segmentation."
+    }
+  },
+  "payload": {
+    "metadata": { "account_id": "111122223333", "region": "us-east-1", "datetime": "2026-06-16T16:00:14Z" },
+    "results": [
+      { "ResourceType": "Vpcs", "Items": [
+        { "VpcId": "vpc-0a1b2c3d", "CidrBlock": "172.31.0.0/16", "IsDefault": true, "State": "available" }
+      ] },
+      { "ResourceType": "Subnets", "Items": [
+        { "SubnetId": "subnet-0d7e6de0", "VpcId": "vpc-0a1b2c3d", "CidrBlock": "172.31.80.0/20", "AvailabilityZone": "us-east-1b" }
+      ] }
+    ]
+  }
+}
+```
+
+The runner owns the `metadata` envelope; the fetcher owns `payload`. The
+`evidence_set` block (from `fetcher.yaml`) is what an uploaded file maps to in
+Paramify. Note there is no pass/fail verdict — that judgment is Paramify-side, by
+design (peering connections and endpoints are omitted above for brevity).
 
 > **Status:** pre-1.0 (v0.x). The runner now wraps every output in the
 > `metadata`+`payload` envelope, but fetchers still write raw evidence dicts and

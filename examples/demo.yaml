@@ -1,0 +1,13 @@
+# Zero-credential demo. Run it as-is — no secrets, no cloud account:
+#
+#     paramify run examples/demo.yaml
+#     paramify evidence evidence/run-*/demo_hello.json
+#
+# The demo_hello fetcher writes synthetic evidence, so this exercises the whole
+# collect → envelope pipeline end to end. Delete once you've seen it work.
+
+run:
+  output_dir: ./evidence
+
+  fetchers:
+    - use: demo_hello

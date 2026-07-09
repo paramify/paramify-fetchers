@@ -20,6 +20,9 @@ materialized internally (parse_manifest) for semantic validation and execution.
 import importlib.util
 import json
 import os
+import re
+import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -216,6 +219,113 @@ def ksi_coverage(root: Path) -> dict:
         "families": fam_rollup,
         "ksis": ksi_entries,
         "unknown_ksis": [{"id": k, "fetchers": by_ksi[k]} for k in unknown],
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Doctor — preflight environment check
+# --------------------------------------------------------------------------- #
+
+# External CLIs a category's fetchers shell out to. Categories not listed here
+# are pure-Python/HTTP fetchers that need no external tool. (AWS fetcher.sh files
+# declare "Required tools: aws, jq"; k8s uses kubectl; checkov clones + scans.)
+CATEGORY_TOOLS = {
+    "aws": ["aws", "jq"],
+    "k8s": ["kubectl"],
+    "checkov": ["checkov", "git"],
+}
+
+_ENV_REF = re.compile(r"\$\{env:([^}]+)\}")
+
+
+def doctor(root: Path, manifest_path: Optional[Path] = None) -> dict:
+    """Preflight check for running fetchers here.
+
+    Reports the Python version, whether the external CLIs the relevant categories
+    need are on PATH, and — if a manifest is given — which secret env vars it
+    references are actually set. Presentation-agnostic; the CLI and TUI render
+    this one model. `ok` is a go/no-go: Python must clear the floor, and when a
+    manifest is supplied its categories' tools must be present and its secret env
+    vars set. Without a manifest, missing tools are informational (you may run
+    only some categories), so `ok` reflects the Python check alone.
+    """
+    py = sys.version_info
+    python = {
+        "version": f"{py.major}.{py.minor}.{py.micro}",
+        "required": "3.10",
+        "ok": (py.major, py.minor) >= (3, 10),
+    }
+
+    fetchers = discover_fetchers(root)
+    categories = sorted({f.category for f in fetchers.values() if f.category})
+    tools_required = manifest_path is not None
+
+    manifest_report = None
+    if manifest_path is not None:
+        data = read_manifest(manifest_path)
+        entries = (data.get("run") or {}).get("fetchers") or []
+        used_cats = sorted({
+            c for c in (
+                fetchers[e["use"]].category
+                for e in entries
+                if e.get("use") in fetchers
+            )
+            if c
+        })
+        if used_cats:
+            categories = used_cats
+
+        fetcher_reports = []
+        manifest_ok = True
+        for e in entries:
+            refs: set = set()
+            for v in (e.get("secrets") or {}).values():
+                refs |= set(_ENV_REF.findall(str(v)))
+            for t in e.get("targets") or []:
+                for v in (t.get("secrets") or {}).values():
+                    refs |= set(_ENV_REF.findall(str(v)))
+            missing = sorted(r for r in refs if not os.environ.get(r))
+            manifest_ok = manifest_ok and not missing
+            fetcher_reports.append({
+                "use": e.get("use"),
+                "env_refs": sorted(refs),
+                "missing": missing,
+                "ok": not missing,
+            })
+        manifest_report = {
+            "path": str(manifest_path),
+            "fetchers": fetcher_reports,
+            "ok": manifest_ok,
+        }
+
+    seen: set = set()
+    tools = []
+    for cat in categories:
+        for tool in CATEGORY_TOOLS.get(cat, []):
+            if tool in seen:
+                continue
+            seen.add(tool)
+            resolved = shutil.which(tool)
+            tools.append({
+                "name": tool,
+                "categories": [c for c in categories if tool in CATEGORY_TOOLS.get(c, [])],
+                "present": resolved is not None,
+                "path": resolved,
+            })
+    tools.sort(key=lambda t: str(t["name"]))
+
+    ok = python["ok"]
+    if tools_required:
+        tools_ok = all(t["present"] for t in tools)
+        ok = ok and tools_ok and (manifest_report["ok"] if manifest_report else True)
+
+    return {
+        "python": python,
+        "categories": categories,
+        "tools": tools,
+        "tools_required": tools_required,
+        "manifest": manifest_report,
+        "ok": ok,
     }
 
 
