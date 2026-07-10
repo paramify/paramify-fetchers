@@ -45,13 +45,19 @@ class UploadPage(Vertical):
                 yield DataTable(id="upload-summary")
             with Vertical(id="upload-log-panel", classes="panel"):
                 yield RichLog(id="upload-log", markup=False, wrap=True, highlight=False)
+                yield Static(
+                    f"upload progress streams here — [bold {palette.ACCENT}]ctrl+u[/] to upload",
+                    classes="empty-hint",
+                )
 
     def on_mount(self) -> None:
         self._uploading = False
         self._run_dir: str | None = None
         self._preflight: dict | None = None
         self.query_one("#upload-summary-panel", Vertical).border_title = "ready to upload"
-        self.query_one("#upload-log-panel", Vertical).border_title = "log"
+        log_panel = self.query_one("#upload-log-panel", Vertical)
+        log_panel.border_title = "log"
+        log_panel.set_class(True, "empty")
         table = self.query_one("#upload-summary", DataTable)
         table.cursor_type = "row"
         table.zebra_stripes = True
@@ -172,6 +178,7 @@ class UploadPage(Vertical):
         self._uploading = True
         self.query_one("#upload-refresh", Button).disabled = True
         self.query_one("#upload-submit", Button).disabled = True
+        self.query_one("#upload-log-panel", Vertical).set_class(False, "empty")
         self.query_one("#upload-log", RichLog).clear()
         self._set_banner(Text("uploading to Paramify...", style=palette.WARN))
         self._upload_worker(run_dir, self.app.root_path)

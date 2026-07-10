@@ -56,6 +56,7 @@ class ManifestPage(Vertical):
         with Horizontal(id="manifest-body"):
             with Vertical(id="manifest-entries-panel", classes="panel"):
                 yield DataTable(id="manifest-entries")
+                yield Static("", id="manifest-empty-hint", classes="empty-hint")
             with VerticalScroll(id="manifest-detail-scroll", classes="panel"):
                 yield Static(render.empty_detail("No fetcher selected."), id="manifest-detail")
         yield Static(id="manifest-issues")
@@ -101,6 +102,7 @@ class ManifestPage(Vertical):
         dt = self.query_one("#manifest-entries", DataTable)
         if self._manifest is None:
             dt.clear()
+            self._set_empty(f"no manifest loaded — press [bold {palette.ACCENT}]m[/] to pick one")
             self._set_issues(["(no manifest loaded)"])
             return
 
@@ -139,6 +141,12 @@ class ManifestPage(Vertical):
             )
             row_keys.append(use)
 
+        self._set_empty(
+            None
+            if entries
+            else f"manifest is empty — press [bold {palette.ACCENT}]a[/] to add fetchers"
+        )
+
         # preserve selection across rebuilds
         if row_keys:
             target = self._selected if self._selected in row_keys else row_keys[0]
@@ -152,6 +160,13 @@ class ManifestPage(Vertical):
 
         self._refresh_detail()
         self._set_issues(self._errors)
+
+    def _set_empty(self, hint: Optional[str]) -> None:
+        """Show the hatched placeholder (with the given message) instead of the
+        entries table, or the table again when hint is None."""
+        if hint:
+            self.query_one("#manifest-empty-hint", Static).update(hint)
+        self.query_one("#manifest-entries-panel", Vertical).set_class(bool(hint), "empty")
 
     def _refresh_detail(self) -> None:
         detail = self.query_one("#manifest-detail", Static)

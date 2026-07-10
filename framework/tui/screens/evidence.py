@@ -37,8 +37,13 @@ class EvidencePage(Vertical):
         with Horizontal(id="evidence-body"):
             with Vertical(id="evidence-left", classes="panel"):
                 yield DataTable(id="evidence-runs")
+                yield Static(
+                    f"no runs yet — execute the manifest on tab [bold {palette.ACCENT}]3[/]",
+                    classes="empty-hint",
+                )
             with Vertical(id="evidence-right", classes="panel"):
                 yield DataTable(id="evidence-files")
+                yield Static("evidence files from the selected run appear here", classes="empty-hint")
 
     def on_mount(self) -> None:
         self._runs: List[dict] = []
@@ -90,10 +95,13 @@ class EvidencePage(Vertical):
                 key=r["dir"],
             )
 
+        self.query_one("#evidence-left", Vertical).set_class(not self._runs, "empty")
         if self._runs:
             self._show_run(self._runs[0]["dir"])
         else:
-            self.query_one("#evidence-right", Vertical).border_title = "files (no runs)"
+            right = self.query_one("#evidence-right", Vertical)
+            right.border_title = "files"
+            right.set_class(True, "empty")
             self.query_one("#evidence-files", DataTable).clear()
 
     def _show_run(self, run_dir: str) -> None:
@@ -103,9 +111,11 @@ class EvidencePage(Vertical):
         if run is None:
             return
         # The run's scoreboard lives in the panel border, Posting-style.
-        self.query_one("#evidence-right", Vertical).border_title = (
+        right = self.query_one("#evidence-right", Vertical)
+        right.border_title = (
             f"{run['run_id']}  [{palette.OK}]✓ {run['ok']}[/]  [{palette.FAIL}]✗ {run['fail']}[/]"
         )
+        right.set_class(not run["files"], "empty")
         for f in run["files"]:
             tgt = f.get("target")
             tlabel = "  ".join(f"{k}={v}" for k, v in tgt.items()) if isinstance(tgt, dict) else ""

@@ -108,6 +108,24 @@ TabbedContent {
     text-style: bold;
 }
 
+/* Hatched empty states: tag a .panel with .empty to swap its table/log for
+   the instructional .empty-hint placeholder (Posting's empty-state idiom). */
+.empty-hint {
+    display: none;
+    height: 1fr;
+    color: $text-muted;
+    hatch: right $surface-lighten-1 50%;
+    content-align: center middle;
+    text-align: center;
+    padding: 1 4;
+}
+.panel.empty > .empty-hint {
+    display: block;
+}
+.panel.empty > DataTable, .panel.empty > RichLog {
+    display: none;
+}
+
 /* ---- Catalog ---- */
 CatalogPage { height: 1fr; padding: 1 1 0 1; }
 

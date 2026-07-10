@@ -55,8 +55,13 @@ class RunPage(Vertical):
         with Horizontal(id="run-body"):
             with Vertical(id="run-status-panel", classes="panel"):
                 yield DataTable(id="run-status")
+                yield Static(
+                    f"no run yet — [bold {palette.ACCENT}]ctrl+r[/] executes the manifest",
+                    classes="empty-hint",
+                )
             with Vertical(id="run-log-panel", classes="panel"):
                 yield RichLog(id="run-log", markup=False, wrap=True, highlight=False)
+                yield Static("run output streams here, fetcher by fetcher", classes="empty-hint")
         yield Static("", id="run-summary")
 
     def on_mount(self) -> None:
@@ -70,6 +75,7 @@ class RunPage(Vertical):
         dt.zebra_stripes = True
         self._cols = dt.add_columns("fetcher", "mode", "status", "info")
         self._set_banner(Text("press Ctrl+R (or Run) to execute the manifest", style="dim"))
+        self._set_empty(True)
 
     def focus_default(self) -> None:
         self.query_one("#btn-run", Button).focus()
@@ -84,6 +90,7 @@ class RunPage(Vertical):
         self.query_one("#run-status", DataTable).clear()
         self.query_one("#run-log", RichLog).clear()
         self._set_banner(Text("press Ctrl+R (or Run) to execute the manifest", style="dim"))
+        self._set_empty(True)
         self._refresh_summary()
 
     # -- run control ------------------------------------------------------ #
@@ -109,10 +116,16 @@ class RunPage(Vertical):
         else:
             self._start_run()
 
+    def _set_empty(self, empty: bool) -> None:
+        """Swap the status table / log for their hatched placeholders (and back)."""
+        self.query_one("#run-status-panel", Vertical).set_class(empty, "empty")
+        self.query_one("#run-log-panel", Vertical).set_class(empty, "empty")
+
     def _start_run(self) -> None:
         self._running = True
         self._state = {}
         self._rows = {}
+        self._set_empty(False)
         self.query_one("#run-status", DataTable).clear()
         self.query_one("#run-log", RichLog).clear()
         self.query_one("#btn-run", Button).disabled = True
@@ -143,6 +156,7 @@ class RunPage(Vertical):
         log = self.query_one("#run-log", RichLog)
 
         if etype == "run_start":
+            self._set_empty(False)  # the worker isn't the only caller: synthetic events too
             self._state = {
                 use: {"status": "queued", "total": None, "ok": 0, "fail": 0, "fanout": False}
                 for use in ev.get("fetchers", [])
