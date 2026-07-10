@@ -10,6 +10,25 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+## [0.2.1-beta] - 2026-07-10
+
+### Changed
+
+- The `deploy/` bundle is now **Docker-only** (Dockerfile + compose + cron) — a
+  smaller, less prescriptive deployment footprint for public use.
+
+### Removed
+
+- The Kubernetes deployment manifests and the multi-account hub-and-spoke
+  Terraform (`deploy/k8s/`). The Kubernetes *fetchers* (`fetchers/k8s/`) are
+  unaffected.
+
+### Fixed
+
+- The containerized deploy no longer defaults evidence uploads to Paramify
+  staging; it uses production (`app.paramify.com`), matching the uploader's own
+  default.
+
 ## [0.2.0-beta] - 2026-07-10
 
 First public release — a beta / pre-release. Pre-1.0, so the contract may still
@@ -48,7 +67,11 @@ change before 1.0 (see [`docs/versioning.md`](docs/versioning.md)).
 ### Changed
 
 - Licensed under GPL-3.0-only.
-- Documentation rewritten for public consumption.
+- Documentation rewritten for public consumption; the README leads with the TUI,
+  then the AI-agent path, then the CLI.
+- TUI restyled — border titles, status pills, denser controls, and hatched empty
+  states.
 
-[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.2.0-beta...HEAD
+[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.2.1-beta...HEAD
+[0.2.1-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.2.0-beta...v0.2.1-beta
 [0.2.0-beta]: https://github.com/paramify/paramify-fetchers/releases/tag/v0.2.0-beta
