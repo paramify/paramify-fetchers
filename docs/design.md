@@ -448,7 +448,7 @@ What's deferred:
 
 ## Near-term deployment: the containerized bundle
 
-The MVP deployment is the bundle in `deploy/` — a Docker image run on a schedule (compose/cron on a single host; a Kubernetes `CronJob` per cadence in-cluster). The collector runs collect→upload and the pod/container is transient. Secrets are hydrated at startup from the environment (or AWS Secrets Manager when `PARAMIFY_SECRETS_ID` is set); AWS auth uses the ambient credential chain (IRSA / instance role in-cluster, a named profile locally), with optional multi-account assume-role fanout. See [`deploy/README.md`](../deploy/README.md) and [`deploy/k8s/`](../deploy/k8s/).
+The MVP deployment is the bundle in `deploy/` — a Docker image run on a schedule (compose/cron on a single host). The collector runs collect→upload and the container is transient. Secrets are hydrated at startup from the environment (or AWS Secrets Manager when `PARAMIFY_SECRETS_ID` is set); AWS auth uses the ambient credential chain (an instance role / IRSA in cloud, a named profile locally). See [`deploy/README.md`](../deploy/README.md).
 
 Two principles this honors, so the deployment doesn't constrain the eventual framework:
 

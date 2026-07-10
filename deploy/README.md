@@ -21,7 +21,6 @@ is a guided run against a test AWS Secrets Manager secret.
 | `crontab` | The schedule — maps a time to a manifest path |
 | `run-and-upload.sh` | Chains `paramify run <manifest>` → upload to Paramify |
 | `.env.example` | Template for the secrets you inject at run time |
-| `k8s/` | Kubernetes `CronJob`s + a local→EKS walkthrough ([`k8s/LOCAL_K8S.md`](k8s/LOCAL_K8S.md)) and multi-account setup ([`k8s/AWS_MULTI_ACCOUNT.md`](k8s/AWS_MULTI_ACCOUNT.md)) |
 
 ### Where manifests come from
 There's one source: the repo-root `manifests/` — the same folder `paramify tui`
@@ -32,7 +31,6 @@ image; rebuild to pick up changes. Name them however makes sense for your schedu
 `manifests/` is gitignored (your manifests are yours, not committed), so a fresh
 clone has none — the repo ships ready-to-run samples in `examples/` (also baked in)
 that every command below uses, so the bundle works before you've built your own.
-On Kubernetes the manifest is injected by a `ConfigMap` instead (see [`k8s/`](k8s/)).
 
 ## 1. Configure secrets
 
@@ -66,17 +64,16 @@ Three options, in order of preference:
    also serves as the AWS *fetchers'* identity — they don't use SM, they use the
    role directly via `auth.passthrough_env`.)
 
-2. **Orchestrator-native injection (cleaner on ECS/EKS).** Skip the entrypoint
-   fetch and let the platform map SM → env vars: on **ECS**, the task definition's
-   `secrets:` field (SM ARN → env var); on **EKS**, the External Secrets Operator
-   or Secrets Store CSI driver (SM → a K8s Secret → `envFrom`). No app change.
+2. **Orchestrator-native injection.** Skip the entrypoint fetch and let your
+   platform map secrets → env vars directly (most schedulers and orchestrators can
+   inject a secret store into a task's environment). No app change.
 
 3. **Plain values in `deploy/.env`** — fine for local dev; not for production.
 
 > Caveats for the long-running `scheduler`: SM is read once at container start, so
 > rotated secrets need a restart; and the cron env-snapshot writes secrets to a
-> file inside the container (`/tmp`). Both are reasons to prefer option 2 +
-> CronJobs for production.
+> file inside the container (`/tmp`). Both are reasons to prefer option 2 for
+> production.
 
 ## 2. Build
 
@@ -171,7 +168,7 @@ pf run --rm collector paramify run examples/minimal_run.yaml
 ls -R evidence/
 
 # 6. (Optional) Full chain — collect AND upload. Hits real Paramify; uses
-#    PARAMIFY_UPLOAD_API_TOKEN from the secret (PARAMIFY_API_BASE_URL defaults to stage).
+#    PARAMIFY_UPLOAD_API_TOKEN from the secret (PARAMIFY_API_BASE_URL defaults to production).
 pf run --rm collector ./deploy/run-and-upload.sh examples/minimal_run.yaml
 
 # 7. Confirm no secrets are baked into the image (prints nothing = good).
@@ -226,9 +223,6 @@ You don't SSH in — use Docker:
   in an uploader config if needed (see `examples/upload.yaml`).
 - **Pin the source.** This image `COPY`s your working tree. For reproducible
   customer images, build from a tagged commit.
-- **Prefer compose/K8s scheduling for production.** In-container cron is fine for
-  a single host; on Kubernetes use a `CronJob` per manifest (same image, secrets
-  via K8s Secrets, AWS via IRSA). Apply-and-watch YAML + a local walkthrough live
-  in [`k8s/`](k8s/) ([`k8s/LOCAL_K8S.md`](k8s/LOCAL_K8S.md)). For the AWS fetchers
-  specifically — ambient single-account vs. multi-account hub-and-spoke (IRSA +
-  assume-role + example Terraform) — see [`k8s/AWS_MULTI_ACCOUNT.md`](k8s/AWS_MULTI_ACCOUNT.md).
+- **In-container cron is single-host.** It's fine for one machine; for production,
+  schedule the container with your platform's own scheduler (a managed cron / task
+  scheduler) so each run is an isolated, ephemeral task.
