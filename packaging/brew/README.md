@@ -28,6 +28,11 @@ shasum -a 256 /tmp/pf.tar.gz          # → stamp url + sha256 in the formula
 
 # 2. regenerate every python resource stanza (expands the transitive tree)
 brew update-python-resources Formula/paramify-fetchers.rb
+# If that balks (the package isn't on PyPI), generate the stanzas directly:
+# fresh venv → pip install the runtime deps → pip freeze --all → for each
+# name==version, take the sdist url+sha256 from
+# https://pypi.org/pypi/<name>/<version>/json. (This is how the first test
+# formula was stamped.)
 
 # 3. verify locally before pushing the tap
 brew install --build-from-source Formula/paramify-fetchers.rb
