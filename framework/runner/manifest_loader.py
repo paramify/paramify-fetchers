@@ -1,23 +1,22 @@
 """Load and validate run manifests."""
 
-import json
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import yaml
 from jsonschema import Draft202012Validator
 
+from framework.config_loader import load_schema
 from framework.contract import Manifest, ManifestEntry, PlatformConfig, TargetInstance
 
 
-def _load_schema(repo_root: Path) -> dict:
-    schema_path = repo_root / "framework" / "schemas" / "run_manifest_schema.json"
-    return json.loads(schema_path.read_text())
+def schema_errors(data: dict, repo_root: Optional[Path] = None) -> List[str]:
+    """Return manifest schema-validation errors as readable strings (empty if valid).
 
-
-def schema_errors(data: dict, repo_root: Path) -> List[str]:
-    """Return manifest schema-validation errors as readable strings (empty if valid)."""
-    validator = Draft202012Validator(_load_schema(repo_root))
+    The schema is core and resolves from the framework package itself;
+    repo_root is accepted (and ignored) for backwards compatibility.
+    """
+    validator = Draft202012Validator(load_schema("run_manifest_schema.json"))
     return [
         f"{'.'.join(str(p) for p in e.absolute_path) or '<root>'}: {e.message}"
         for e in validator.iter_errors(data)
@@ -61,7 +60,7 @@ def parse_manifest(data: dict) -> Manifest:
     return Manifest(output_dir=output_dir, entries=entries, platforms=platforms)
 
 
-def load_manifest(path: Path, repo_root: Path) -> Manifest:
+def load_manifest(path: Path, repo_root: Optional[Path] = None) -> Manifest:
     """Load a manifest yaml, validate against the manifest schema, return a Manifest.
 
     Raises ValueError if the file is schema-invalid.

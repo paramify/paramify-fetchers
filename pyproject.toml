@@ -21,14 +21,15 @@ dependencies = [
     "pyyaml",
     "jsonschema",
     "typer>=0.12",
+    "platformdirs",
 ]
 
 [project.optional-dependencies]
 tui = ["textual>=1.0,<2.0"]
 checkov = ["checkov"]
-dev = ["pytest", "ruff", "mypy"]
+dev = ["pytest", "ruff", "mypy", "setuptools>=64", "wheel"]
 # Convenience: every front-end + dev tooling in one install.
-all = ["textual>=1.0,<2.0", "checkov", "pytest", "ruff", "mypy"]
+all = ["textual>=1.0,<2.0", "checkov", "pytest", "ruff", "mypy", "setuptools>=64", "wheel"]
 
 # The single entry point. `paramify` steers every front-end: the headless
 # commands, plus `paramify tui`. (Renaming later is a one-line change here; add
@@ -36,18 +37,18 @@ all = ["textual>=1.0,<2.0", "checkov", "pytest", "ruff", "mypy"]
 [project.scripts]
 paramify = "framework.cli:app"
 
-# Supported install is editable/source: `pip install -e .` in the clone. Only
-# the importable `framework` package's .py modules are shipped here. The data
-# files (framework/schemas/*.json, framework/tui/styles/*.tcss) are NOT
-# packaged: schemas resolve via the cwd-discovered repo root, while the TUI
-# stylesheet is read relative to its own module file — both present in an
-# editable/source tree. A pure built wheel therefore can't serve the TUI
-# (missing data files) or run fetchers (they execute as subprocesses out of
-# fetchers/, never shipped). If a non-editable wheel is ever needed, add
-# [tool.setuptools.package-data] for those dirs.
+# Installable distribution (docs/distribution_design.md): the wheel ships the
+# framework engine, its data files (schemas, KSI reference, TUI styles), the
+# uploader package, and a framework/_bundled/ content snapshot (fetchers +
+# examples) assembled at build time by setup.py's build_py hook. A dev checkout
+# still works editable: framework.roots prefers the checkout's fetchers/ and
+# treats a missing _bundled/ as "dev tree".
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["framework*"]
+include = ["framework*", "uploaders*"]
+
+[tool.setuptools.package-data]
+framework = ["schemas/*.json", "reference/*.yaml", "tui/styles/*.tcss"]
 
 # pytest: scope collection to the framework test suite. Per-fetcher tests/ dirs
 # (e.g. the _template scaffold) are placeholders with no settled convention yet;
@@ -81,4 +82,11 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "framework.tui.*"
+ignore_errors = true
+
+# The uploader is held to the same bar as fetchers (working v0.x code, not the
+# gated framework core); it entered mypy's import graph when api.py gained the
+# packaged-module fallback. Gate it when it gets its own typing pass.
+[[tool.mypy.overrides]]
+module = "uploaders.*"
 ignore_errors = true

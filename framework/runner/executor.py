@@ -163,6 +163,13 @@ def _build_env(
     manifest + fetcher.yaml + category platform spec.
     """
     env = {k: os.environ[k] for k in _INHERITED_ENV_VARS if k in os.environ}
+    # Console scripts installed next to the running interpreter (a pipx venv,
+    # an unactivated .venv) must be visible to fetchers — e.g. the `checkov`
+    # extra, whose CLI lands in a bin/ that pipx never puts on PATH.
+    interp_bin = str(Path(sys.executable).parent)
+    parts = env.get("PATH", "").split(os.pathsep) if env.get("PATH") else []
+    if interp_bin not in parts:
+        env["PATH"] = os.pathsep.join([interp_bin, *parts])
     env["PYTHONUNBUFFERED"] = "1"
     env["EVIDENCE_DIR"] = str(output_dir.resolve())
 

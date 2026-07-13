@@ -17,7 +17,7 @@ class WelcomeDemo(App):
     def on_mount(self) -> None:
         self.theme = "tokyo-night"
         try:
-            self.root_path = api.find_repo_root()
+            self.root_path = api.locate_root()
             self.catalog_data = api.catalog(self.root_path)
         except Exception:
             self.root_path = None

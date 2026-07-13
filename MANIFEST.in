@@ -1,0 +1,13 @@
+# sdist completeness: setup.py assembles framework/_bundled/ from fetchers/ and
+# examples/ at build time, so an sdist (or the GitHub source tarball) must carry
+# both, plus the core data files, or a wheel built from it comes out hollow.
+graft fetchers
+graft examples
+graft framework/schemas
+graft framework/reference
+graft framework/tui/styles
+graft uploaders
+include requirements.txt
+
+prune fetchers/logos
+global-exclude __pycache__ *.py[cod] .DS_Store

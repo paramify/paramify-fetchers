@@ -148,7 +148,7 @@ class WelcomeScreen(Screen):
         dt.cursor_type = "row"
         dt.add_columns("manifest", "fetchers", "status", "last run")
         if self._manifests is None:
-            self._manifests = api.list_manifests(self.app.root_path) if self.app.root_path else []
+            self._manifests = api.list_manifests(self.app.root_path)
         for m in self._manifests:
             dt.add_row(
                 Text(m["name"], style="#7DCFFF"),
@@ -410,7 +410,7 @@ class WelcomeScreen(Screen):
         self.app.push_screen(ConfirmModal(f"Delete '{Path(path).name}' (the file on disk)?"), done)
 
     def _reload_table(self) -> None:
-        self._manifests = api.list_manifests(self.app.root_path) if self.app.root_path else []
+        self._manifests = api.list_manifests(self.app.root_path)
         dt = self.query_one("#welcome-manifests", DataTable)
         dt.clear()
         for m in self._manifests:

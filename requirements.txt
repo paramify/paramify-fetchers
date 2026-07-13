@@ -3,6 +3,7 @@ python-dotenv
 requests
 pyyaml
 jsonschema
+platformdirs
 
 # Unified CLI (`paramify` / framework.cli) — the single command surface that
 # steers every front-end (headless commands + `paramify tui`).

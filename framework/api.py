@@ -29,7 +29,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
-from framework.config_loader import discover_fetchers, discover_platforms
+from framework import roots as roots_mod
+from framework.config_loader import discover, discover_platforms
 from framework.contract import ConfigField, Secret, TargetField
 from framework.envelope import is_enveloped, wrap_outputs
 from framework.runner import manifest_loader
@@ -42,14 +43,29 @@ _STDERR_TAIL_CHARS = 4000
 # --------------------------------------------------------------------------- #
 
 def find_repo_root(start: Optional[Path] = None) -> Path:
-    """Locate the repo root by walking up for sibling fetchers/ + framework/ dirs."""
-    cur = (start or Path.cwd()).resolve()
-    for parent in [cur, *cur.parents]:
-        if (parent / "fetchers").is_dir() and (parent / "framework").is_dir():
-            return parent
-    raise RuntimeError(
-        "Could not locate repo root (looking for sibling fetchers/ and framework/ dirs)"
-    )
+    """Locate the repo root by walking up for sibling fetchers/ + framework/ dirs.
+
+    Raises outside a checkout — kept for callers that require a source tree.
+    Front-ends should prefer locate_root(), which returns None instead: content
+    then resolves via the overlay search path (framework.roots) and user data
+    (manifests/) falls back to the cwd."""
+    root = roots_mod.find_checkout_root(start)
+    if root is None:
+        raise RuntimeError(
+            "Could not locate repo root (looking for sibling fetchers/ and framework/ dirs)"
+        )
+    return root
+
+
+def locate_root(start: Optional[Path] = None) -> Optional[Path]:
+    """The dev checkout root when inside one, else None (installed mode)."""
+    return roots_mod.find_checkout_root(start)
+
+
+def content_roots(root: Optional[Path] = None) -> List[Path]:
+    """The ordered fetchers/ search path (env override → checkout → user dir →
+    installed bundle). `root` pins the checkout explicitly when already known."""
+    return roots_mod.fetcher_roots(checkout=root)
 
 
 # --------------------------------------------------------------------------- #
@@ -106,12 +122,15 @@ def _fetcher_descriptor(f) -> dict:
     }
 
 
-def catalog(root: Path) -> dict:
-    """Discover all fetchers, group them by category, and describe every editable
-    field. This single structure is both the UI form schema and the AI-readable
-    `catalog --json` output."""
-    fetchers = discover_fetchers(root)
-    platforms = discover_platforms(root)
+def catalog(root: Optional[Path] = None) -> dict:
+    """Discover all fetchers across the content roots, group them by category,
+    and describe every editable field. This single structure is both the UI
+    form schema and the AI-readable `catalog --json` output. Cross-root name
+    shadows are reported in `shadows`, never resolved silently."""
+    roots = content_roots(root)
+    result = discover(roots)
+    fetchers = result.fetchers
+    platforms = discover_platforms(roots)
 
     by_category: Dict[str, List[Any]] = {}
     for f in fetchers.values():
@@ -136,19 +155,26 @@ def catalog(root: Path) -> dict:
             ],
         })
 
-    return {"categories": categories, "fetcher_count": len(fetchers)}
+    return {
+        "categories": categories,
+        "fetcher_count": len(fetchers),
+        "roots": [str(r) for r in roots],
+        "shadows": result.shadows,
+        "invalid": result.invalid,
+    }
 
 
 # --------------------------------------------------------------------------- #
 # KSI coverage — join fetcher `ksis` against the FedRAMP 20x reference
 # --------------------------------------------------------------------------- #
 
-def _load_ksi_reference(root: Path) -> dict:
-    """Load the canonical FedRAMP 20x KSI reference (the coverage denominator)."""
-    return yaml.safe_load((root / "framework" / "reference" / "ksis.yaml").read_text())
+def _load_ksi_reference() -> dict:
+    """Load the canonical FedRAMP 20x KSI reference (the coverage denominator).
+    A core asset — resolves from the framework package, not the content roots."""
+    return yaml.safe_load((Path(__file__).parent / "reference" / "ksis.yaml").read_text())
 
 
-def ksi_coverage(root: Path) -> dict:
+def ksi_coverage(root: Optional[Path] = None) -> dict:
     """Coverage of the FedRAMP 20x KSIs by discovered fetchers.
 
     Joins each fetcher's `ksis` against framework/reference/ksis.yaml and returns
@@ -159,8 +185,8 @@ def ksi_coverage(root: Path) -> dict:
     config-evidenceable; else `organizational` (evidenced by HR/training/manual,
     not cloud config). coverage_pct is over the config-evidenceable set only.
     """
-    ref = _load_ksi_reference(root)
-    fetchers = discover_fetchers(root)
+    ref = _load_ksi_reference()
+    fetchers = discover(content_roots(root)).fetchers
 
     by_ksi: Dict[str, List[str]] = {}
     for f in fetchers.values():
@@ -238,7 +264,7 @@ CATEGORY_TOOLS = {
 _ENV_REF = re.compile(r"\$\{env:([^}]+)\}")
 
 
-def doctor(root: Path, manifest_path: Optional[Path] = None) -> dict:
+def doctor(root: Optional[Path] = None, manifest_path: Optional[Path] = None) -> dict:
     """Preflight check for running fetchers here.
 
     Reports the Python version, whether the external CLIs the relevant categories
@@ -256,7 +282,9 @@ def doctor(root: Path, manifest_path: Optional[Path] = None) -> dict:
         "ok": (py.major, py.minor) >= (3, 10),
     }
 
-    fetchers = discover_fetchers(root)
+    roots = content_roots(root)
+    result = discover(roots)
+    fetchers = result.fetchers
     categories = sorted({f.category for f in fetchers.values() if f.category})
     tools_required = manifest_path is not None
 
@@ -325,8 +353,213 @@ def doctor(root: Path, manifest_path: Optional[Path] = None) -> dict:
         "tools": tools,
         "tools_required": tools_required,
         "manifest": manifest_report,
+        "distribution": {
+            "tool_version": _tool_version(),
+            "install_path": str(Path(__file__).resolve().parent),
+            "user_dir": str(roots_mod.user_home()),
+            "roots": [str(r) for r in roots],
+            "shadows": result.shadows,
+            "invalid": result.invalid,
+            "stale_overrides": _stale_overrides(result),
+        },
         "ok": ok,
     }
+
+
+# --------------------------------------------------------------------------- #
+# User content — scaffold new fetchers + copy-on-write overrides
+# (docs/distribution_design.md §6: the tool writes into the user dir only here)
+# --------------------------------------------------------------------------- #
+
+_SIDECAR = ".customized.json"
+_NAME_PART = re.compile(r"^[a-z0-9][a-z0-9_]*$")
+
+
+def _tool_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("paramify-fetchers")
+    except Exception:
+        return "unknown"
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _copy_fetcher_dir(src: Path, dest: Path) -> Dict[str, str]:
+    """Copy a fetcher dir (skipping caches and the sidecar) and return
+    {relative posix path: sha256} for every file copied."""
+    hashes: Dict[str, str] = {}
+    for f in sorted(src.rglob("*")):
+        rel = f.relative_to(src)
+        if "__pycache__" in rel.parts or f.name == _SIDECAR or f.name.endswith((".pyc", ".pyo")):
+            continue
+        target = dest / rel
+        if f.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(f.read_bytes())
+        hashes[rel.as_posix()] = _sha256(target)
+    return hashes
+
+
+def _find_template(root: Optional[Path]) -> Path:
+    """The scaffold source: the first content root that ships a _template/."""
+    for r in content_roots(root):
+        candidate = r / "_template"
+        if candidate.is_dir():
+            return candidate
+    raise RuntimeError("No fetcher template found in any content root (_template/)")
+
+
+def create_fetcher(spec: str, root: Optional[Path] = None, category_file: bool = False) -> dict:
+    """Scaffold a new fetcher at <user dir>/fetchers/<category>/<short>/ from the
+    shipped _template, substituting the name placeholders so it is discoverable
+    immediately. `spec` is "<category>/<short_name>". Refuses to overwrite, and
+    refuses a name that already resolves (shadowing an existing fetcher by
+    accident is a footgun — that's what customize is for)."""
+    category, sep, short = spec.partition("/")
+    if not sep or not _NAME_PART.match(category) or not _NAME_PART.match(short):
+        raise ValueError(
+            f"invalid spec {spec!r}: expected <category>/<short_name>, "
+            "lowercase [a-z0-9_] each"
+        )
+    name = f"{category}_{short}"
+
+    result = discover(content_roots(root))
+    if name in result.fetchers:
+        raise FileExistsError(
+            f"a fetcher named '{name}' already exists at "
+            f"{result.fetchers[name].path} — to override a built-in, use customize"
+        )
+
+    dest = roots_mod.user_home() / "fetchers" / category / short
+    if dest.exists():
+        raise FileExistsError(f"refusing to overwrite {dest}")
+
+    template = _find_template(root)
+    files = _copy_fetcher_dir(template, dest)
+    for fname in ("fetcher.yaml", "README.md"):
+        p = dest / fname
+        if p.exists():
+            text = p.read_text().replace("<category>", category).replace("<short_name>", short)
+            p.write_text(text)
+
+    cat_file = None
+    if category_file:
+        platforms = discover_platforms(content_roots(root))
+        if category not in platforms:
+            cat_dir = roots_mod.user_home() / "fetchers" / "_categories"
+            cat_dir.mkdir(parents=True, exist_ok=True)
+            cat_path = cat_dir / f"{category}.yaml"
+            if not cat_path.exists():
+                cat_path.write_text(
+                    f"description: <what the {category} platform is>\n"
+                    "# auth:\n"
+                    "#   passthrough_env:\n"
+                    "#     - <UPPER_SNAKE_ENV_VAR>\n"
+                )
+            cat_file = str(cat_path)
+
+    return {
+        "name": name,
+        "path": str(dest),
+        "files": sorted(files),
+        "category_file": cat_file,
+    }
+
+
+def customize_fetcher(name: str, root: Optional[Path] = None) -> dict:
+    """Copy-on-write override: copy the resolved fetcher into the user dir,
+    where it shadows the original by name. Writes a .customized.json sidecar
+    (source, tool_version, per-file hashes) so doctor can flag the override as
+    stale when the original moves on. Refuses to overwrite."""
+    result = discover(content_roots(root))
+    fetcher = result.fetchers.get(name)
+    if fetcher is None:
+        raise ValueError(f"unknown fetcher: {name}")
+
+    user_fetchers = roots_mod.user_home() / "fetchers"
+    src = Path(fetcher.path)
+    try:
+        src.relative_to(user_fetchers.resolve())
+        raise FileExistsError(f"'{name}' is already in your user dir ({src}) — edit it directly")
+    except ValueError:
+        pass  # not under the user dir: it's a built-in, proceed
+
+    dest = user_fetchers / src.parent.name / src.name
+    if dest.exists():
+        raise FileExistsError(f"refusing to overwrite existing override at {dest}")
+
+    hashes = _copy_fetcher_dir(src, dest)
+    sidecar = {
+        "schema": "paramify-customized/v1",
+        "name": name,
+        "source": str(src),
+        "tool_version": _tool_version(),
+        "copied_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "files": hashes,
+    }
+    (dest / _SIDECAR).write_text(json.dumps(sidecar, indent=2) + "\n")
+
+    # Whether the copy actually wins discovery now: in a dev checkout it does
+    # NOT (the checkout outranks the user dir) — say so instead of lying.
+    resolved = discover(content_roots(root)).fetchers.get(name)
+    active = resolved is not None and Path(resolved.path) == dest.resolve()
+
+    return {
+        "name": name,
+        "path": str(dest),
+        "source": str(src),
+        "files": sorted(hashes),
+        "active": active,
+    }
+
+
+def _stale_overrides(result) -> List[dict]:
+    """Overrides whose original has changed since the copy: compare the current
+    counterpart's files against the hashes recorded in each sidecar. The
+    counterpart is the fetcher this override currently shadows (falling back to
+    the recorded source path); an override whose original vanished upstream is
+    reported as orphaned."""
+    by_winner = {s["winner"]: s["shadowed"] for s in result.shadows}
+    stale: List[dict] = []
+    user_fetchers = roots_mod.user_home() / "fetchers"
+    if not user_fetchers.is_dir():
+        return stale
+    for sidecar_path in sorted(user_fetchers.glob(f"*/*/{_SIDECAR}")):
+        try:
+            sidecar = json.loads(sidecar_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        override_dir = sidecar_path.parent
+        counterpart = by_winner.get(str(override_dir.resolve())) or sidecar.get("source")
+        if not counterpart or not Path(counterpart).is_dir():
+            stale.append({
+                "name": sidecar.get("name") or override_dir.name,
+                "path": str(override_dir),
+                "status": "orphaned",
+                "copied_tool_version": sidecar.get("tool_version"),
+                "changed": [],
+            })
+            continue
+        changed = []
+        for rel, recorded in (sidecar.get("files") or {}).items():
+            current = Path(counterpart) / rel
+            if not current.is_file() or _sha256(current) != recorded:
+                changed.append(rel)
+        if changed:
+            stale.append({
+                "name": sidecar.get("name") or override_dir.name,
+                "path": str(override_dir),
+                "status": "stale",
+                "copied_tool_version": sidecar.get("tool_version"),
+                "changed": sorted(changed),
+            })
+    return stale
 
 
 # --------------------------------------------------------------------------- #
@@ -343,7 +576,7 @@ def read_manifest(path: Path) -> dict:
     return data if isinstance(data, dict) else init_manifest()
 
 
-def dump_manifest(manifest: dict, path: Path, root: Path) -> None:
+def dump_manifest(manifest: dict, path: Path, root: Optional[Path] = None) -> None:
     """Write a manifest dict to YAML. Refuses to write a structurally invalid
     (schema-invalid) manifest; semantic gaps (e.g. a not-yet-filled secret) are
     allowed so work-in-progress can be saved."""
@@ -456,7 +689,9 @@ def set_passthrough_env(m: dict, category: str, env_vars: List[str]) -> dict:
 # on a merely-incomplete manifest)
 # --------------------------------------------------------------------------- #
 
-def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[str]:
+def validate(
+    manifest: dict, root: Optional[Path] = None, fetchers=None, platforms=None
+) -> List[str]:
     """Validate a manifest dict against the schema and the discovered fetchers.
 
     Returns a list of human-readable error strings (empty == valid+runnable).
@@ -468,10 +703,12 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
     if errors:
         return errors  # can't do semantic checks on a structurally-broken manifest
 
-    if fetchers is None:
-        fetchers = discover_fetchers(root)
-    if platforms is None:
-        platforms = discover_platforms(root)
+    if fetchers is None or platforms is None:
+        roots = content_roots(root)
+        if fetchers is None:
+            fetchers = discover(roots).fetchers
+        if platforms is None:
+            platforms = discover_platforms(roots)
     parsed = manifest_loader.parse_manifest(manifest)
 
     for i, entry in enumerate(parsed.entries):
@@ -547,19 +784,21 @@ def _invocation_record(r) -> dict:
     return record
 
 
-def _manifest_id(path, root: Path) -> str:
+def _manifest_id(path, root: Optional[Path]) -> str:
     """Stable identity for a manifest in run metadata: its path relative to the
-    repo root (so attribution survives the repo moving), absolute otherwise."""
+    project root (checkout if present, else cwd — so attribution survives the
+    project moving), absolute otherwise."""
     p = Path(path).resolve()
+    base = Path(root) if root is not None else Path.cwd()
     try:
-        return str(p.relative_to(Path(root).resolve()))
+        return str(p.relative_to(base.resolve()))
     except ValueError:
         return str(p)
 
 
 def run(
     manifest: dict,
-    root: Path,
+    root: Optional[Path] = None,
     on_event: Optional[Callable[[dict], None]] = None,
     manifest_path: Optional[Path] = None,
 ) -> dict:
@@ -579,8 +818,9 @@ def run(
     if errs:
         raise ValueError("manifest schema invalid:\n  " + "\n  ".join(errs))
 
-    fetchers = discover_fetchers(root)
-    platforms = discover_platforms(root)
+    roots = content_roots(root)
+    fetchers = discover(roots).fetchers
+    platforms = discover_platforms(roots)
     parsed = manifest_loader.parse_manifest(manifest)
 
     def emit(event: dict) -> None:
@@ -676,9 +916,23 @@ def run(
 # Upload — Paramify evidence uploader facade (powers CLI + TUI)
 # --------------------------------------------------------------------------- #
 
-def _load_paramify_uploader(root: Path):
-    """Load the source-tree uploader without requiring uploaders/ to be packaged."""
-    path = Path(root) / "uploaders" / "paramify_evidence" / "uploader.py"
+def _load_paramify_uploader(root: Optional[Path] = None):
+    """Load the Paramify evidence uploader.
+
+    In a dev checkout, load uploader.py by path from the tree (in-tree edits
+    win, matching content-root precedence). Installed, import the packaged
+    uploaders.paramify_evidence module shipped in the wheel."""
+    base = root or roots_mod.find_checkout_root()
+    if base is None:
+        try:
+            from uploaders.paramify_evidence import uploader as module
+            return module
+        except ImportError as exc:
+            raise RuntimeError(
+                "Paramify evidence uploader not found: not inside a source "
+                "checkout and the packaged uploader is not installed."
+            ) from exc
+    path = Path(base) / "uploaders" / "paramify_evidence" / "uploader.py"
     if not path.exists():
         raise RuntimeError(f"Paramify evidence uploader not found at {path}")
     spec = importlib.util.spec_from_file_location("paramify_evidence_uploader", path)
@@ -691,7 +945,7 @@ def _load_paramify_uploader(root: Path):
 
 def upload_preflight(
     run_dir,
-    root: Path,
+    root: Optional[Path] = None,
     config_path: Optional[Path] = None,
     *,
     dry_run: bool = False,
@@ -738,7 +992,7 @@ def upload_preflight(
 
 def upload_run(
     run_dir,
-    root: Path,
+    root: Optional[Path] = None,
     config_path: Optional[Path] = None,
     *,
     dry_run: bool = False,
@@ -861,7 +1115,9 @@ def read_evidence(path) -> dict:
 # Manifests — discover selectable run manifests (powers the welcome screen)
 # --------------------------------------------------------------------------- #
 
-def _manifest_summary(path: Path, root: Path, fetchers=None, platforms=None) -> Optional[dict]:
+def _manifest_summary(
+    path: Path, root: Optional[Path], fetchers=None, platforms=None
+) -> Optional[dict]:
     """Summarize a manifest file, or return None if it isn't a run manifest
     (its top level must be a mapping with a `run` key)."""
     summary = {
@@ -908,17 +1164,19 @@ def _manifest_summary(path: Path, root: Path, fetchers=None, platforms=None) -> 
     return summary
 
 
-def list_manifests(root) -> List[dict]:
-    """Discover selectable run manifests: <root>/manifests/*.yaml, plus a legacy
-    <root>/manifest.yaml if present (listed first). Each is summarized with its
-    fetcher count, validity (issues), and last-run info for the welcome picker.
-    Non-manifest YAML files (no top-level `run`) are skipped."""
-    root = Path(root)
+def list_manifests(root=None) -> List[dict]:
+    """Discover selectable run manifests: <project>/manifests/*.yaml, plus a
+    legacy <project>/manifest.yaml if present (listed first). Manifests are
+    user data: the project dir is the checkout when inside one, else the cwd.
+    Each is summarized with its fetcher count, validity (issues), and last-run
+    info for the welcome picker. Non-manifest YAML files (no top-level `run`)
+    are skipped."""
+    project = Path(root) if root is not None else Path.cwd()
     paths: List[Path] = []
-    mdir = root / "manifests"
+    mdir = project / "manifests"
     if mdir.is_dir():
         paths += sorted(mdir.glob("*.yaml"))
-    legacy = root / "manifest.yaml"
+    legacy = project / "manifest.yaml"
     if legacy.exists() and legacy.resolve() not in {p.resolve() for p in paths}:
         paths.insert(0, legacy)
     if not paths:
@@ -928,24 +1186,28 @@ def list_manifests(root) -> List[dict]:
     fetchers: Optional[dict] = None
     platforms: Optional[dict] = None
     try:
-        fetchers = discover_fetchers(root)
-        platforms = discover_platforms(root)
+        roots = content_roots(root)
+        fetchers = discover(roots).fetchers
+        platforms = discover_platforms(roots)
     except Exception:
         pass
     summaries = [_manifest_summary(p, root, fetchers, platforms) for p in paths]
     return [s for s in summaries if s is not None]
 
 
-def new_manifest_path(root, name: str, output_dir: str = "./evidence") -> Path:
-    """Create a fresh manifest file at <root>/manifests/<name>.yaml and return
-    its path. Raises FileExistsError if it already exists, ValueError on a bad
-    name."""
+def new_manifest_path(
+    root: Optional[Path], name: str, output_dir: str = "./evidence"
+) -> Path:
+    """Create a fresh manifest file at <project>/manifests/<name>.yaml and
+    return its path (project = checkout when inside one, else cwd). Raises
+    FileExistsError if it already exists, ValueError on a bad name."""
     safe = name.strip()
     if not safe or "/" in safe or safe.startswith("."):
         raise ValueError(f"invalid manifest name: {name!r}")
     if not safe.endswith(".yaml"):
         safe += ".yaml"
-    mdir = Path(root) / "manifests"
+    project = Path(root) if root is not None else Path.cwd()
+    mdir = project / "manifests"
     mdir.mkdir(parents=True, exist_ok=True)
     path = mdir / safe
     if path.exists():

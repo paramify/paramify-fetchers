@@ -108,7 +108,7 @@ def _tui_api_calls() -> set[str]:
 # by every command (repo discovery / manifest read+write plumbing) rather than
 # its own command. Keep this in sync with the TUI; the test below enforces it.
 API_TO_CLI = {
-    "find_repo_root": "<implicit: every command>",
+    "locate_root": "<implicit: every command>",
     "catalog": "list / catalog / describe",
     "list_manifests": "manifests",
     "read_manifest": "manifest show",

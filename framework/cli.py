@@ -18,6 +18,10 @@ Read / discover:
   paramify evidence <path> [--json]            # read one evidence file
   paramify upload [run-dir] [--dry-run] [--json]
 
+User content (the only commands that write into your user dir):
+  paramify create <category>/<name> [--category-file]  # scaffold a new fetcher
+  paramify customize <fetcher>                 # override a built-in (copy-on-write)
+
 Manifest editing (writes the manifest file; -f/--file, default ./manifest.yaml;
 every subcommand accepts --json, emitting {"ok", "path", "errors"}):
   paramify manifest init [--output-dir DIR]
@@ -128,7 +132,7 @@ def _find_fetcher(cat: dict, name: str):
     return None
 
 
-def _config_type(root: Path, fetcher_name: str, key: str) -> str:
+def _config_type(root: Optional[Path], fetcher_name: str, key: str) -> str:
     """Look up a config field's declared type (fetcher then platform), else string."""
     cat = api.catalog(root)
     f = _find_fetcher(cat, fetcher_name)
@@ -145,7 +149,7 @@ def _config_type(root: Path, fetcher_name: str, key: str) -> str:
     return "string"
 
 
-def _platform_config_type(root: Path, category: str, key: str) -> str:
+def _platform_config_type(root: Optional[Path], category: str, key: str) -> str:
     cat = api.catalog(root)
     for c in cat["categories"]:
         if c["name"] == category and c.get("platform"):
@@ -155,7 +159,7 @@ def _platform_config_type(root: Path, category: str, key: str) -> str:
     return "string"
 
 
-def _target_field_type(root: Path, fetcher_name: str, key: str) -> str:
+def _target_field_type(root: Optional[Path], fetcher_name: str, key: str) -> str:
     cat = api.catalog(root)
     f = _find_fetcher(cat, fetcher_name)
     if f:
@@ -231,7 +235,7 @@ def _human_upload_printer():
 @app.command("list")
 def list_cmd(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
     """List discovered fetchers (flat)."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     cat = api.catalog(root)
     fetchers = sorted(
         (f for c in cat["categories"] for f in c["fetchers"]),
@@ -252,7 +256,7 @@ def list_cmd(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
 @app.command("catalog")
 def catalog_cmd(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
     """Show categories -> fetchers -> editable fields."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     cat = api.catalog(root)
     if json_out:
         typer.echo(json.dumps(cat, indent=2))
@@ -274,7 +278,7 @@ def describe_cmd(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Describe one fetcher's config / secrets / target fields."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     cat = api.catalog(root)
     f = _find_fetcher(cat, fetcher)
     if f is None:
@@ -299,7 +303,7 @@ def describe_cmd(
 @app.command("ksi")
 def ksi_cmd(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
     """Show FedRAMP 20x KSI coverage across discovered fetchers."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     cov = api.ksi_coverage(root)
     if json_out:
         typer.echo(json.dumps(cov, indent=2))
@@ -340,7 +344,7 @@ def doctor_cmd(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Preflight: Python version, required CLIs on PATH, and (with a manifest) secrets."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     rep = api.doctor(root, Path(manifest) if manifest else None)
     if json_out:
         typer.echo(json.dumps(rep, indent=2))
@@ -371,14 +375,100 @@ def doctor_cmd(
             else:
                 typer.echo(f"  {bad_mark} {fr['use']}  missing: {', '.join(fr['missing'])}")
 
+    dist = rep.get("distribution") or {}
+    if dist:
+        typer.echo(
+            f"\nDistribution: paramify-fetchers {dist['tool_version']}"
+            f"  (install: {dist['install_path']})"
+        )
+        typer.echo(f"  user dir: {dist['user_dir']}")
+        typer.echo("  content roots (first wins):")
+        for i, r in enumerate(dist["roots"], 1):
+            typer.echo(f"    {i}. {r}")
+        for s in dist["shadows"]:
+            typer.echo(f"  ⤷ shadow: {s['name']}  {s['winner']}  (hides {s['shadowed']})")
+        for o in dist["stale_overrides"]:
+            if o["status"] == "orphaned":
+                typer.echo(f"  {bad_mark} override {o['name']} is orphaned — its original is gone ({o['path']})")
+            else:
+                typer.echo(
+                    f"  ⚠️ override {o['name']} is stale — the original changed since you "
+                    f"copied it (v{o['copied_tool_version']}): {', '.join(o['changed'])}"
+                )
+        for inv in dist["invalid"]:
+            typer.echo(f"  {bad_mark} invalid fetcher.yaml skipped: {inv['path']}")
+
     typer.echo(f"\n{'All good.' if rep['ok'] else 'Issues found — see above.'}")
     raise typer.Exit(0 if rep["ok"] else 1)
+
+
+# --------------------------------------------------------------------------- #
+# User content — scaffold + copy-on-write overrides
+# --------------------------------------------------------------------------- #
+
+@app.command("create")
+def create_cmd(
+    spec: str = typer.Argument(..., help="<category>/<short_name>, e.g. datadog/monitors"),
+    category_file: bool = typer.Option(
+        False, "--category-file",
+        help="Also scaffold _categories/<category>.yaml when the category is new",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Scaffold a new fetcher in your user dir from the shipped template."""
+    root = api.locate_root()
+    try:
+        res = api.create_fetcher(spec, root, category_file=category_file)
+    except (ValueError, FileExistsError, RuntimeError) as exc:
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "errors": [str(exc)]}))
+        else:
+            typer.echo(f"Create failed: {exc}", err=True)
+        raise typer.Exit(1)
+    if json_out:
+        typer.echo(json.dumps({"ok": True, **res}, indent=2))
+        return
+    typer.echo(f"Scaffolded {res['name']} at {res['path']}")
+    for f in res["files"]:
+        typer.echo(f"  {f}")
+    if res["category_file"]:
+        typer.echo(f"  + category file: {res['category_file']}")
+    typer.echo("Fill in the placeholders, then wire it into a manifest "
+               f"(`paramify manifest add {res['name']}`).")
+
+
+@app.command("customize")
+def customize_cmd(
+    fetcher: str = typer.Argument(..., help="Name of the built-in fetcher to override"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Copy a built-in fetcher into your user dir, where it overrides the original."""
+    root = api.locate_root()
+    try:
+        res = api.customize_fetcher(fetcher, root)
+    except (ValueError, FileExistsError, RuntimeError) as exc:
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "errors": [str(exc)]}))
+        else:
+            typer.echo(f"Customize failed: {exc}", err=True)
+        raise typer.Exit(1)
+    if json_out:
+        typer.echo(json.dumps({"ok": True, **res}, indent=2))
+        return
+    typer.echo(f"Copied {res['name']} → {res['path']}")
+    if res["active"]:
+        typer.echo(f"  (from {res['source']}; your copy now wins — `paramify doctor` "
+                   "flags it if the original changes)")
+    else:
+        typer.echo(f"  (from {res['source']}; a higher-priority root still wins here — "
+                   "inside a checkout the in-tree copy is used. `paramify doctor` shows "
+                   "the shadow.)")
 
 
 @app.command("manifests")
 def manifests_cmd(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
     """List discovered run manifests (manifests/*.yaml + legacy manifest.yaml)."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     items = api.list_manifests(root)
     if json_out:
         typer.echo(json.dumps(items, indent=2))
@@ -464,7 +554,7 @@ def validate_cmd(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Validate a manifest against the schema + discovered fetchers."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     mpath = Path(manifest).resolve()
     if not mpath.is_file():
         msg = f"no such manifest: {manifest}"
@@ -499,7 +589,7 @@ def run_cmd(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
     """Run a manifest; streams per-fetcher results (or a JSON summary with --json)."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     mpath = Path(manifest).resolve()
     if not mpath.is_file():
         msg = f"no such manifest: {manifest}"
@@ -542,7 +632,7 @@ def upload_cmd(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
     """Upload one evidence run to Paramify."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     if run_dir:
         resolved_run_dir = Path(run_dir).resolve()
     else:
@@ -607,7 +697,9 @@ def _read_for_edit(path: Path, json_out: bool) -> dict:
         raise typer.Exit(1)
 
 
-def _save_and_report(manifest: dict, path: Path, root: Path, json_out: bool, *, verb: str = "Wrote") -> None:
+def _save_and_report(
+    manifest: dict, path: Path, root: Optional[Path], json_out: bool, *, verb: str = "Wrote"
+) -> None:
     """Dump + validate, then report. Exit 0 even when not-yet-runnable (errors are
     surfaced) so a manifest can be built incrementally; exit 1 only if the dump is
     rejected as structurally invalid."""
@@ -637,7 +729,7 @@ def manifest_init(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Create a new empty manifest file."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     m = api.init_manifest(output_dir)
     _save_and_report(m, Path(file).resolve(), root, json_out)
 
@@ -649,7 +741,7 @@ def manifest_new(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Create a fresh manifest at manifests/<name>.yaml (the picker convention)."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     try:
         path = api.new_manifest_path(root, name, output_dir)
     except (FileExistsError, ValueError) as e:
@@ -674,7 +766,7 @@ def manifest_add(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Add a fetcher entry to the manifest."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     path = Path(file).resolve()
     m = _read_for_edit(path, json_out)
     api.add_entry(m, fetcher)
@@ -688,7 +780,7 @@ def manifest_remove(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Remove a fetcher entry from the manifest."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     path = Path(file).resolve()
     m = _read_for_edit(path, json_out)
     api.remove_entry(m, fetcher)
@@ -703,7 +795,7 @@ def manifest_set_config(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Set a config key on a fetcher entry."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     path = Path(file).resolve()
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
@@ -721,7 +813,7 @@ def manifest_set_secret(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Set a secret reference (${env:VAR}) on a fetcher entry."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     path = Path(file).resolve()
     m = _read_for_edit(path, json_out)
     api.set_secret(m, fetcher, secret_name, env_var)
@@ -737,7 +829,7 @@ def manifest_add_target(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Append a fanout target (with optional per-target secrets) to a fetcher."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     path = Path(file).resolve()
     m = _read_for_edit(path, json_out)
     vals = {}
@@ -760,7 +852,7 @@ def manifest_remove_target(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Remove the fanout target at the given index from a fetcher entry."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     path = Path(file).resolve()
     m = _read_for_edit(path, json_out)
     api.remove_target(m, fetcher, index)
@@ -775,7 +867,7 @@ def manifest_set_platform_config(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Set a platform-wide config key for a category."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     path = Path(file).resolve()
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
@@ -792,7 +884,7 @@ def manifest_set_passthrough(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Set the ambient passthrough env vars for a platform category."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     path = Path(file).resolve()
     m = _read_for_edit(path, json_out)
     api.set_passthrough_env(m, category, env_vars)
@@ -806,7 +898,7 @@ def manifest_set_output_dir(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Set the manifest's run output directory."""
-    root = api.find_repo_root()
+    root = api.locate_root()
     path = Path(file).resolve()
     m = _read_for_edit(path, json_out)
     api.set_output_dir(m, output_dir)
@@ -845,7 +937,13 @@ def tui_cmd(
     try:
         from framework.tui.__main__ import launch
     except ImportError as e:
-        _err(f"The TUI requires the 'tui' extra (textual). Install it:  pip install 'paramify[tui]'\n  ({e})")
+        _err(
+            "The TUI requires the 'tui' extra (textual). Install it:\n"
+            "  pipx:  pipx install --force 'paramify-fetchers[tui]'   "
+            "(or: pipx inject paramify-fetchers textual)\n"
+            "  pip:   pip install 'paramify-fetchers[tui]'\n"
+            f"  ({e})"
+        )
         raise typer.Exit(1)
     launch(manifest, at)
 

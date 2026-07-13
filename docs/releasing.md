@@ -57,12 +57,24 @@ Using `X.Y.Z` as the version (no `v` in files; the **tag** is `vX.Y.Z`).
    ```
 
    GitHub automatically attaches the **source code** as `.tar.gz` and `.zip` to
-   every release — that is our release artifact for now (see
-   [Artifacts](#artifacts)). Add `--generate-notes` if you also want GitHub's
+   every release. Add `--generate-notes` if you also want GitHub's
    auto-generated commit/PR list appended.
 
-7. **Verify:** `gh release view vX.Y.Z` — confirm the notes, the tag, and that
-   the source archives are attached.
+7. **Build and attach the wheel** (the pipx-installable artifact — see
+   [Artifacts](#artifacts)). The `setup.py` build hook assembles the
+   `framework/_bundled/` content snapshot into it:
+
+   ```bash
+   .venv/bin/pip wheel --no-deps --no-build-isolation -w dist .
+   gh release upload vX.Y.Z dist/*.whl
+   ```
+
+8. **Bump the Homebrew tap** (if published): stamp the new tarball url/sha256
+   and regenerate the python resources — see
+   [`packaging/brew/README.md`](../packaging/brew/README.md).
+
+9. **Verify:** `gh release view vX.Y.Z` — confirm the notes, the tag, the
+   source archives, and the wheel.
 
 ## Pre-releases
 
@@ -80,13 +92,31 @@ Use `-rc.N` (release candidate) or `-beta.N`. These sort before the final
 
 ## Artifacts
 
-- **Now:** the GitHub-attached **source tarball/zip**. The supported install is
-  from source (`pip install -e .`), so the source archive is the artifact.
-- **Deferred:** wheel/sdist + PyPI publishing. Blocked on the editable-only /
-  cwd-repo-root packaging issue (schemas resolve via the discovered repo root,
-  and fetchers execute as subprocesses out of `fetchers/`, which a plain wheel
-  doesn't ship). Revisit when that's fixed; a build+publish step then slots into
-  step 6.
+- **Source tarball/zip** — attached by GitHub automatically. Installs work from
+  source (`pip install .` — the build hook assembles the content bundle) and
+  editable in a clone (`pip install -e .`).
+- **Wheel** — built and attached in step 7; carries the engine, schemas, the
+  `framework/_bundled/` content snapshot, and the uploader. This is the
+  **pipx** path (the universal install: Mac/Windows/Linux):
+
+  ```bash
+  pipx install https://github.com/paramify/paramify-fetchers/releases/download/vX.Y.Z/paramify_fetchers-X.Y.Z-py3-none-any.whl
+  ```
+
+  Upgrading to a new release is `pipx install --force <new wheel url>`.
+  Caveat (found in dist testing): pipx ≥ 1.15 with the uv backend can fail
+  `--force` into an existing venv (`uv venv` refuses to overwrite, exit 1,
+  old version left in place) — prepend `UV_VENV_CLEAR=1`, or
+  `pipx uninstall paramify-fetchers` first.
+
+  (The former blocker — cwd-repo-root schemas, unshipped fetchers — was removed
+  by the overlay distribution work; see `docs/distribution_design.md`.)
+- **Homebrew tap** — the Mac/Linux convenience layer on top; can also declare
+  the external CLIs (`aws`/`kubectl`/`jq`/`git`/`checkov`) as dependencies.
+  Formula template + bump procedure: [`packaging/brew/`](../packaging/brew/README.md).
+- **Deferred: PyPI publishing.** Nothing blocks it anymore technically; it's a
+  distribution-channel decision (name squatting, support expectations), not a
+  packaging one.
 
 ## What a release does *not* touch
 

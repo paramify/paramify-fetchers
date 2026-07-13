@@ -165,8 +165,27 @@ def test_build_env_strips_undeclared_ambient_vars(tmp_path, monkeypatch):
 
     assert "SNEAKY_AMBIENT_SECRET" not in env       # stripped
     assert env["EVIDENCE_DIR"] == str(tmp_path.resolve())
-    if "PATH" in os.environ:                          # whitelist still passes PATH
-        assert env["PATH"] == os.environ["PATH"]
+    if "PATH" in os.environ:  # whitelist still passes PATH (interp bin may be prepended)
+        assert env["PATH"].endswith(os.environ["PATH"])
+
+
+def test_build_env_prepends_interpreter_bin_to_path(tmp_path, monkeypatch):
+    """Console scripts living next to the running interpreter (a pipx venv, an
+    unactivated .venv) must be resolvable by fetchers — e.g. the checkov CLI,
+    which pipx installs into a bin/ it never puts on PATH."""
+    import sys
+    from pathlib import Path as _P
+    interp_bin = str(_P(sys.executable).parent)
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    fetcher = make_fetcher(tmp_path)
+    env = _build_env(fetcher, ManifestEntry(use="x"), None, tmp_path)
+    assert env["PATH"].split(os.pathsep) == [interp_bin, "/usr/bin"]
+
+    # already on PATH → not duplicated
+    monkeypatch.setenv("PATH", os.pathsep.join([interp_bin, "/usr/bin"]))
+    env2 = _build_env(fetcher, ManifestEntry(use="x"), None, tmp_path)
+    assert env2["PATH"].split(os.pathsep).count(interp_bin) == 1
 
 
 def test_build_env_injects_resolved_secret_under_declared_name(tmp_path, monkeypatch):

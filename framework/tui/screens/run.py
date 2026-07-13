@@ -103,7 +103,7 @@ class RunPage(Vertical):
         if self._running:
             self.notify("A run is already in progress.")
             return
-        if self.app.manifest is None or self.app.root_path is None:
+        if self.app.manifest is None:
             return
         errors = api.validate(self.app.manifest, self.app.root_path)
         if errors:

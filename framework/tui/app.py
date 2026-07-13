@@ -52,7 +52,7 @@ class FetcherApp(App):
 
     def _discover(self) -> None:
         try:
-            self.root_path = api.find_repo_root(self._root_override)
+            self.root_path = api.locate_root(self._root_override)
             self.catalog_data = api.catalog(self.root_path)
         except Exception as exc:  # repo-root discovery / fetcher load failures
             self.catalog_data = None
@@ -88,8 +88,6 @@ class FetcherApp(App):
 
     def open_manifest_picker(self) -> None:
         """Quick-picker overlay to swap the active manifest without leaving the workspace."""
-        if self.root_path is None:
-            return
         options = []
         for m in api.list_manifests(self.root_path):
             flag = f"  ⚠ {m['issues']}" if m["issues"] else ""
