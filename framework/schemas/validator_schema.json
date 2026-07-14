@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Validator Schema",
+  "description": "One validator in the central validators/ registry. A validator is a first-class, DEDUPLICATED object: it is defined exactly once and names — via `evidence_sets` — every evidence set it applies to. This mirrors Paramify's own model (the validator owns its evidence-set list), so a validator shared across fetchers is a single file, never a copy. Validators no longer live inline in fetcher.yaml. See docs/validators_design.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["key", "name", "type", "statement", "evidence_sets"],
+  "properties": {
+    "key": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$",
+      "description": "Stable repo identity, unique across the registry. Must equal the file's basename (e.g. alb_encryption_in_transit -> validators/aws/alb_encryption_in_transit.yaml). This is what tools reference; it never changes even when `name` does."
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable validator display name (Paramify `name`)."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["AUTOMATED", "ATTESTATION"],
+      "description": "Paramify validator type (REST API v0.6.0). AUTOMATED = a regex over artifact content evaluated by validation_rules. ATTESTATION = reviewer yes/no questions evaluated by attestation_rules (no regex)."
+    },
+    "role": {
+      "type": "string",
+      "enum": ["completeness", "configuration"],
+      "description": "Repo-side classification of what this validator checks (NOT a Paramify field). `completeness` = 'do I have the full population?' — an evidence set has exactly one. `configuration` = a posture/configuration check — an evidence set may have many. See docs/validators_design.md."
+    },
+    "statement": {
+      "type": "string",
+      "description": "The control statement — what passing this validator asserts (Paramify `statement`)."
+    },
+    "regex": {
+      "type": "string",
+      "description": "Regex matched against the whole evidence envelope (schema_version + metadata + payload, as written to disk). Its capture groups feed validation_rules. Required for AUTOMATED validators."
+    },
+    "rules_summary": {
+      "type": "string",
+      "description": "Human-readable summary of the pass/fail logic, e.g. 'MATCH_GROUP[1] EQUALS MATCH_GROUP[2]' (Paramify `rules_summary`). Derivable from validation_rules; kept for readability."
+    },
+    "validation_rules": {
+      "type": "array",
+      "description": "Structured pass/fail logic for AUTOMATED validators. Maps 1:1 to the REST API v0.6.0 `validationRules` (native YAML instead of a JSON string). Rules evaluate in index order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["regexOperation", "criteria", "value"],
+        "properties": {
+          "regexOperation": {
+            "type": "object",
+            "description": "How the regex result is extracted before comparison.",
+            "required": ["type"],
+            "properties": {
+              "type": { "type": "string", "enum": ["MATCH_COUNT", "MATCH_GROUP"], "description": "MATCH_COUNT = number of matches; MATCH_GROUP = contents of one capture group." },
+              "groupNumber": { "type": "integer", "description": "Capture group; required when type is MATCH_GROUP." }
+            },
+            "allOf": [
+              { "if": { "properties": { "type": { "const": "MATCH_GROUP" } }, "required": ["type"] }, "then": { "required": ["groupNumber"] } }
+            ]
+          },
+          "criteria": {
+            "type": "string",
+            "enum": ["CONTAINS", "DOES_NOT_CONTAIN", "ENDS_WITH", "DOES_NOT_END_WITH", "EQUALS", "NOT_EQUALS", "GREATER_THAN", "GREATER_THAN_OR_EQUAL_TO", "LESS_THAN", "LESS_THAN_OR_EQUAL_TO", "STARTS_WITH", "DOES_NOT_START_WITH"],
+            "description": "Comparison operator between the extracted value and `value`."
+          },
+          "value": {
+            "type": "object",
+            "description": "Right-hand side of the comparison.",
+            "required": ["type"],
+            "properties": {
+              "type": { "type": "string", "enum": ["MATCH_COUNT", "MATCH_GROUP", "CUSTOM_TEXT"], "description": "MATCH_GROUP uses a capture group (groupNumber); CUSTOM_TEXT uses a literal (customText)." },
+              "groupNumber": { "type": "integer" },
+              "customText": { "type": "string" }
+            },
+            "allOf": [
+              { "if": { "properties": { "type": { "const": "MATCH_GROUP" } }, "required": ["type"] }, "then": { "required": ["groupNumber"] } },
+              { "if": { "properties": { "type": { "const": "CUSTOM_TEXT" } }, "required": ["type"] }, "then": { "required": ["customText"] } }
+            ]
+          }
+        }
+      }
+    },
+    "attestation_rules": {
+      "type": "array",
+      "description": "Structured logic for ATTESTATION validators. Maps 1:1 to the REST API v0.6.0 `attestationRules` (native YAML). Empty ([]) for AUTOMATED validators.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["question", "yesDisposition", "noDisposition", "nestedRules"],
+        "properties": {
+          "question": { "type": "string", "description": "The yes/no question presented to the reviewer." },
+          "yesDisposition": { "type": "string", "enum": ["PASS", "FAIL", "BASED_ON_NESTED"], "description": "Outcome when answered Yes." },
+          "noDisposition": { "type": "string", "enum": ["PASS", "FAIL", "BASED_ON_NESTED"], "description": "Outcome when answered No." },
+          "nestedRules": { "type": "array", "description": "Follow-on rules when a disposition is BASED_ON_NESTED (nestable up to two more layers). Same item shape.", "items": { "type": "object", "additionalProperties": true } }
+        }
+      }
+    },
+    "evidence_sets": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "Every evidence set this validator applies to, by stable `reference_id` (matches a fetcher's evidence_set.reference_id). Listing more than one set here IS the dedup mechanism — one validator, many sets, no copies. A reference_id may name a manual/non-automated set that has no fetcher."
+    }
+  },
+  "allOf": [
+    {
+      "comment": "AUTOMATED validators must carry the regex + rules the API's POST /validators requires.",
+      "if": { "properties": { "type": { "const": "AUTOMATED" } }, "required": ["type"] },
+      "then": { "required": ["regex", "validation_rules"] }
+    },
+    {
+      "comment": "ATTESTATION validators must carry attestation_rules (and no regex logic).",
+      "if": { "properties": { "type": { "const": "ATTESTATION" } }, "required": ["type"] },
+      "then": { "required": ["attestation_rules"] }
+    }
+  ]
+}

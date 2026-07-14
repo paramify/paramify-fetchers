@@ -17,6 +17,9 @@ venv/
 .env.*
 !.env.example
 
+# --- Customer-side sync state (validator key -> Paramify id); never commit ---
+.paramify/
+
 # --- Generated collect output (runner writes evidence/run-<timestamp>/) ---
 /evidence/
 

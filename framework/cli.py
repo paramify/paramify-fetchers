@@ -73,6 +73,12 @@ manifest_app = typer.Typer(
     help="Create/edit a manifest file (-f/--file, default ./manifest.yaml).",
 )
 app.add_typer(manifest_app, name="manifest")
+validators_app = typer.Typer(
+    no_args_is_help=True,
+    context_settings=_HELP_OPTS,
+    help="Sync registry validators to Paramify and associate them to evidence sets.",
+)
+app.add_typer(validators_app, name="validators")
 
 
 # --------------------------------------------------------------------------- #
@@ -221,6 +227,41 @@ def _human_upload_printer():
             )
             if ev.get("log_path"):
                 typer.echo(f"upload_log.json → {ev['log_path']}")
+    return on_event
+
+
+def _human_validator_printer():
+    """Return an on_event callback for Paramify validator-sync progress."""
+    def on_event(ev: dict) -> None:
+        kind = ev["event"]
+        if kind == "sync_start":
+            mode = " (dry-run)" if ev.get("dry_run") else ""
+            upd = " (update)" if ev.get("update") else ""
+            typer.echo(f"Sync {ev['validators']} validator(s) → {ev['base_url']}{mode}{upd}\n")
+        elif kind == "sync_validator":
+            outcome = ev.get("outcome") or ""
+            mark = {
+                "created": "OK", "updated": "OK",
+                "skipped_exists": "SKIP",
+                "would_create": "DRY", "would_update": "DRY", "would_skip_exists": "DRY",
+            }.get(outcome, "FAIL" if outcome == "error" else "..")
+            extra = ""
+            if ev.get("associated"):
+                extra += f"  associated={','.join(ev['associated'])}"
+            if ev.get("set_not_found"):
+                extra += f"  set_not_found={','.join(ev['set_not_found'])}"
+            if ev.get("error"):
+                extra += f"  {ev['error']}"
+            typer.echo(f"        [{mark}] {ev.get('key', '?')}  {outcome}{extra}")
+        elif kind == "sync_complete":
+            typer.echo(
+                "\nDone: "
+                f"created={ev['created']} updated={ev['updated']} skipped={ev['skipped']} "
+                f"associated={ev['associated']} set_not_found={ev['set_not_found']} "
+                f"errors={ev['errors']}"
+            )
+            if not ev.get("dry_run"):
+                typer.echo(f"lock → {ev['lock_path']}")
     return on_event
 
 
@@ -539,6 +580,7 @@ def upload_cmd(
     output_dir: str = typer.Option("./evidence", "-o", "--output-dir", help="Base dir to find latest run"),
     config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and report what would upload; no API calls"),
+    with_validators: bool = typer.Option(False, "--with-validators", help="After upload, sync validators for the sets this run produced (create-or-skip)"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
     """Upload one evidence run to Paramify."""
@@ -586,6 +628,65 @@ def upload_cmd(
             typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
         else:
             _err(f"Upload failed: {e}")
+        raise typer.Exit(1)
+
+    vsummary = None
+    if with_validators:
+        try:
+            refs = list(api.reference_ids_from_run(resolved_run_dir))
+            vsummary = api.sync_validators(
+                root,
+                reference_ids=refs,
+                config_path=config_path,
+                dry_run=dry_run,
+                on_event=None if json_out else _human_validator_printer(),
+            )
+        except Exception as e:  # noqa: BLE001
+            if json_out:
+                typer.echo(json.dumps(
+                    {**summary, "ok": False, "validators": {"ok": False, "error": str(e)}},
+                    indent=2, default=str,
+                ))
+            else:
+                _err(f"Validator sync failed: {e}")
+            raise typer.Exit(1)
+
+    # Combined success — top-level `ok` reflects BOTH stages, matching the exit code
+    # (a consumer reading .ok must not see true when the validator sync failed).
+    ok = summary["ok"] and (vsummary is None or vsummary["ok"])
+    if json_out:
+        out = dict(summary) if vsummary is None else {**summary, "validators": vsummary}
+        out["ok"] = ok
+        typer.echo(json.dumps(out, indent=2, default=str))
+    raise typer.Exit(0 if ok else 1)
+
+
+@validators_app.command("sync")
+def validators_sync_cmd(
+    manifest: Optional[str] = typer.Option(None, "-m", "--manifest", help="Scope to validators for this manifest's fetchers (default: whole registry)"),
+    config: Optional[str] = typer.Option(None, "--config", help="Syncer config YAML (base_url, lock_path)"),
+    lock: Optional[str] = typer.Option(None, "--lock", help="Lock file path (default ./.paramify/validators-sync.lock.json)"),
+    update: bool = typer.Option(False, "--update", help="Also PATCH existing validators (overwrites customer tuning)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report planned actions; make no writes"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
+):
+    """Create/associate registry validators in Paramify. Create-or-skip by default."""
+    root = api.find_repo_root()
+    try:
+        summary = api.sync_validators(
+            root,
+            Path(manifest).resolve() if manifest else None,
+            Path(config).resolve() if config else None,
+            dry_run=dry_run,
+            update=update,
+            lock_path=lock,
+            on_event=None if json_out else _human_validator_printer(),
+        )
+    except Exception as e:  # noqa: BLE001 — surface setup errors to CLI users
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
+        else:
+            _err(f"Validator sync failed: {e}")
         raise typer.Exit(1)
     if json_out:
         typer.echo(json.dumps(summary, indent=2, default=str))
