@@ -1,0 +1,40 @@
+# Template validator. Copy this file to validators/<category>/<key>.yaml and
+# fill in the placeholders. See docs/validators_design.md for the full model.
+#
+# Validated against framework/schemas/validator_schema.json.
+#
+# A validator is a first-class, DEDUPLICATED object: define it ONCE, then list
+# EVERY evidence set it applies to under `evidence_sets`. A validator shared by
+# several fetchers is a single file with several entries there — never a copy.
+
+key: <category>_<short_name>            # stable id; MUST equal this file's basename
+# No Paramify UUID lives here — these files are shared TEMPLATES. The per-instance
+# validator id is resolved and cached customer-side at sync time; the customer's
+# tuned copy is never overwritten. See docs/validators_design.md.
+
+name: <Validator display name>          # e.g. ALB Encryption In Transit
+type: AUTOMATED                         # AUTOMATED (regex-driven) | ATTESTATION (reviewer Q&A)
+# role: configuration                   # optional repo-side tag: completeness | configuration
+statement: <what passing this validator asserts>
+
+# --- AUTOMATED validators: regex over the evidence envelope + structured logic ---
+# (omit this block for ATTESTATION validators)
+regex: '<regex with capture groups, matched against the whole evidence envelope>'
+rules_summary: <human summary, e.g. MATCH_GROUP[1] EQUALS MATCH_GROUP[2]>
+validation_rules:
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # or { type: MATCH_COUNT }
+    criteria: EQUALS                                        # CONTAINS | EQUALS | GREATER_THAN | ... (12 operators)
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # or { type: CUSTOM_TEXT, customText: "..." } / { type: MATCH_COUNT }
+
+# --- ATTESTATION validators: reviewer yes/no questions (use INSTEAD of regex/validation_rules) ---
+# attestation_rules:
+#   - question: <yes/no question for the reviewer>
+#     yesDisposition: PASS      # PASS | FAIL | BASED_ON_NESTED
+#     noDisposition: FAIL
+#     nestedRules: []           # follow-on rules when a disposition is BASED_ON_NESTED
+
+# Evidence sets this validator applies to, by reference_id (a fetcher's
+# evidence_set.reference_id). Add one line per set that reuses this validator —
+# that list IS the dedup mechanism.
+evidence_sets:
+  - <EVD-REFERENCE-ID>
