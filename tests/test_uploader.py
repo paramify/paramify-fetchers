@@ -82,7 +82,8 @@ class FakeClient:
 
 
 def write_evidence(run_dir, name, *, reference_id="EVD-1", set_name="Set",
-                   status="success", run_id="RID", target=None, enveloped=True):
+                   status="success", run_id="RID", target=None, enveloped=True,
+                   exit_code=None, validation=None):
     if not enveloped:
         (run_dir / name).write_text(json.dumps({"just": "data"}))
         return
@@ -91,11 +92,13 @@ def write_evidence(run_dir, name, *, reference_id="EVD-1", set_name="Set",
         "metadata": {
             "fetcher_name": "f", "fetcher_version": "0.1.0", "run_id": run_id,
             "collected_at": "2026-01-01T00:00:00Z", "status": status,
-            "exit_code": 0 if status == "success" else 1,
+            "exit_code": exit_code if exit_code is not None else (0 if status == "success" else 1),
             "evidence_set": {"reference_id": reference_id, "name": set_name},
         },
         "payload": {"k": 1},
     }
+    if validation is not None:
+        env["metadata"]["validation"] = validation
     if target:
         env["metadata"]["target"] = target
     (run_dir / name).write_text(json.dumps(env))
@@ -247,6 +250,86 @@ def test_failed_status_uploads_by_default(tmp_path, monkeypatch):
     summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
 
     assert summary["uploaded"] == 1 and "f.json" in fake.uploaded
+
+
+# --------------------------------------------------------------------------- #
+# Schema-validation holds — eligibility filter for the verify stage
+# --------------------------------------------------------------------------- #
+
+def _failed_validation(schema_id="https://fixtures.paramify.invalid/schemas/sample-report.json"):
+    return {
+        "schema_id": schema_id, "pinned_version": "1.0.0",
+        "validator": "jsonschema 4.23.0", "ok": False,
+        "errors": [{"path": "/report_id", "message": "does not match pattern"}],
+        "error_count": 1,
+    }
+
+
+def test_schema_failed_artifact_is_held_but_siblings_upload(tmp_path, monkeypatch):
+    """Required case 6, uploader half: one held artifact never blocks the rest
+    of the run, and the hold is reported distinctly from a generic error."""
+    run_dir = tmp_path / "run-x"
+    run_dir.mkdir()
+    write_evidence(run_dir, "bad.json", status="failed", exit_code=2,
+                   validation=_failed_validation())
+    write_evidence(run_dir, "good_a.json", reference_id="EVD-A")
+    write_evidence(run_dir, "good_b.json", reference_id="EVD-B")
+    fake = FakeClient()
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+
+    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
+
+    assert sorted(fake.uploaded) == ["good_a.json", "good_b.json"]   # batch continued
+    assert summary["held_validation"] == 1 and summary["uploaded"] == 2
+    assert summary["errors"] == 0 and summary["ok"] is True   # a hold is not an error
+    assert summary["held"] == [{"file": "bad.json",
+                                "reason": summary["held"][0]["reason"]}]
+    assert "failed schema validation" in summary["held"][0]["reason"]
+    held_result = next(r for r in summary["results"] if r["file"] == "bad.json")
+    assert held_result["outcome"] == "held_validation"
+
+
+def test_passing_validation_block_uploads_normally(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run-x"
+    run_dir.mkdir()
+    ok_validation = dict(_failed_validation(), ok=True, errors=[], error_count=0)
+    write_evidence(run_dir, "a.json", validation=ok_validation)
+    fake = FakeClient()
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+
+    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
+
+    assert summary["uploaded"] == 1 and summary["held_validation"] == 0
+
+
+def test_fetcher_own_exit_2_without_validation_block_is_not_held(tmp_path, monkeypatch):
+    """A fetcher that exits 2 on its OWN (collection failure, no validation
+    block) is an ordinary failed artifact, not a schema hold — the envelope's
+    validation block is the authoritative signal, not the bare exit code."""
+    run_dir = tmp_path / "run-x"
+    run_dir.mkdir()
+    write_evidence(run_dir, "f.json", status="failed", exit_code=2)   # no validation block
+    fake = FakeClient()
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+
+    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
+
+    assert summary["held_validation"] == 0
+    assert summary["uploaded"] == 1   # default skip_failed=False uploads failed files
+
+
+def test_dry_run_reports_hold_not_would_upload(tmp_path):
+    run_dir = tmp_path / "run-x"
+    run_dir.mkdir()
+    write_evidence(run_dir, "bad.json", status="failed", exit_code=2,
+                   validation=_failed_validation())
+    write_evidence(run_dir, "good.json", reference_id="EVD-G")
+
+    summary = uploader.upload_run(run_dir, base_url="https://app.example.com/api/v0",
+                                  dry_run=True)
+
+    outcomes = {r["file"]: r["outcome"] for r in summary["results"]}
+    assert outcomes == {"bad.json": "held_validation", "good.json": "would_upload"}
 
 
 def test_https_guard_rejects_http_remote(tmp_path):

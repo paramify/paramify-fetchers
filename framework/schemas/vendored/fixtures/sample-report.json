@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixtures.paramify.invalid/schemas/sample-report.json",
+  "title": "Fixture sample report",
+  "description": "Report-shaped fixture for the verify stage. Sits on top of common-defs.json via absolute-$id $refs, so validating against it proves cross-file resolution works against the local registry only. Real report schemas (vendored from their publishers) land beside it later; this fixture is what keeps the mechanism and its tests real in the meantime.",
+  "type": "object",
+  "required": ["report_id", "generated_at", "items"],
+  "properties": {
+    "report_id": {
+      "$ref": "https://fixtures.paramify.invalid/schemas/common-defs.json#/$defs/identifier"
+    },
+    "generated_at": {
+      "$ref": "https://fixtures.paramify.invalid/schemas/common-defs.json#/$defs/timestamp"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "status": {
+            "$ref": "https://fixtures.paramify.invalid/schemas/common-defs.json#/$defs/status"
+          }
+        }
+      }
+    }
+  }
+}

@@ -320,9 +320,11 @@ design (peering connections and endpoints are omitted above for brevity).
 > **Status:** pre-1.0 (v0.x). The runner now wraps every output in the
 > `metadata`+`payload` envelope, but fetchers still write raw evidence dicts and
 > read env directly rather than receiving a typed secrets object — both are
-> tracked interim shortcuts, not the target. Comparators (`depends_on`),
-> the `paramify_issues` uploader, and structured exit-code categories (still
-> binary `0`/`1`, plus `124` for a runner timeout-kill) are not built yet. See
+> tracked interim shortcuts, not the target. Comparators (`depends_on`) and
+> the `paramify_issues` uploader are not built yet, and exit codes are only
+> partially structured (fetchers return `0`/`1`; the runner reserves `2` for a
+> schema-validation failure, `124` for a timeout-kill, and `255` for a target
+> setup failure — see `docs/design.md` § "Exit-code scheme"). See
 > `docs/design.md` for what's deferred.
 
 ---

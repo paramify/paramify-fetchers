@@ -1,0 +1,28 @@
+# Index of vendored (pinned) external JSON Schemas.
+#
+# This file is the store's source of truth: framework/verify resolves a
+# fetcher's schema_binding (schema_id + pinned_version) against these entries
+# and refuses to validate against anything not listed here. Every $ref is
+# resolved from the files below — never over the network.
+#
+# Adding or bumping an entry is a reviewed change; see README.md in this
+# directory for the procedure. One version per $id at a time: a bump replaces
+# the entry (and its file), it does not add a sibling.
+
+schemas:
+  # Fixture pair exercising the shared-base $ref pattern (a report schema on
+  # top of a common-defs schema). These exist so the verify mechanism and its
+  # tests are real before any actual report schema is vendored; real report
+  # schemas (e.g. FedRAMP machine-readable formats) get their own entries here
+  # with a real source_url when their fetchers land.
+  - schema_id: "https://fixtures.paramify.invalid/schemas/common-defs.json"
+    version: "1.0.0"
+    file: fixtures/common-defs.json
+    source_url: null   # repo-authored fixture; no upstream
+    retrieved: "2026-07-15"
+
+  - schema_id: "https://fixtures.paramify.invalid/schemas/sample-report.json"
+    version: "1.0.0"
+    file: fixtures/sample-report.json
+    source_url: null   # repo-authored fixture; no upstream
+    retrieved: "2026-07-15"

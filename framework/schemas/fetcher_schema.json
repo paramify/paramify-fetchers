@@ -101,6 +101,25 @@
         "description": {
           "type": "string",
           "description": "Evidence-set description. Defaults to the fetcher's top-level description when omitted."
+        },
+        "schema_binding": {
+          "type": "object",
+          "description": "OPTIONAL. Declares which vendored JSON Schema this fetcher's payload claims to conform to. When present, the runner verifies each JSON artifact against that schema after collection (framework/verify) and records the result in envelope metadata.validation; a non-conformant artifact gets exit code 2 and is held from upload. Absent = no verification, behavior unchanged. schema_id + pinned_version must match an entry in framework/schemas/vendored/index.yaml — a pinned_version the store doesn't have is a hard error at verify time, never a silent fallback.",
+          "required": ["schema_id", "pinned_version"],
+          "properties": {
+            "schema_id": {
+              "type": "string",
+              "description": "The $id of the target schema in the vendored store."
+            },
+            "pinned_version": {
+              "type": "string",
+              "description": "The vendored version this fetcher expects (must equal the store's pinned version for that $id)."
+            }
+          }
+        },
+        "package_group": {
+          "type": ["string", "null"],
+          "description": "RESERVED for future package-completeness logic (e.g. 'these N artifacts form one report package'). Intentionally ignored today — nothing reads it; declared now only so adding grouping later isn't a contract migration."
         }
       }
     },

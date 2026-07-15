@@ -20,3 +20,11 @@ secrets:
   - name: api_token
     env: <UPPER_SNAKE_ENV_VAR>
   # Add one entry per env var the fetcher (or its shared modules) reads.
+
+# evidence_set:                            # Paramify evidence-set identity (see docs/fetcher_contract.md)
+#   reference_id: EVD-<SHORT-NAME>
+#   name: <display name>
+#   schema_binding:                        # OPTIONAL — only for fetchers whose payload must conform
+#     schema_id: <the $id of a schema in framework/schemas/vendored/>
+#     pinned_version: "<the vendored version>"
+#   package_group: null                    # reserved for future package-completeness logic; ignored today

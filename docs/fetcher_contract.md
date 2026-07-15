@@ -39,6 +39,8 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 | `target_schema.<field>.env` | string | Env var the runner sets from this field per target |
 | `depends_on` | array | Fetcher names this one depends on (not yet honored by the runner) |
 | `evidence_set` | object | Paramify evidence-set identity: `{reference_id, name, instructions?}`. Carried into envelope metadata and used by the uploader to get-or-create the set. |
+| `evidence_set.schema_binding` | object | Optional `{schema_id, pinned_version}` claim that this fetcher's payload conforms to a vendored JSON Schema. Presence of the binding is what triggers schema verification (below); absent = no verification, behavior unchanged. |
+| `evidence_set.package_group` | string\|null | **Reserved.** Placeholder for future package-completeness logic; intentionally ignored today — nothing reads it. |
 | `ksis` | array | FedRAMP 20x KSIs this fetcher's evidence speaks to (1+). Intrinsic to the fetcher; per-customer control mappings stay Paramify-side. |
 | `validators` | array | Regex checks over the evidence payload that show the control is being implemented. Each entry: `{id, regex, proves?, failure_modes?}` (`id` + `regex` required); each regex matches the whole payload. |
 
@@ -64,7 +66,9 @@ The runner does NOT pass the customer's full environment through. If your fetche
 - **Exit code:**
   - `0` = collection succeeded
   - non-zero = collection encountered failures (at least one API call, target, or precondition failed)
+  - `2` = reserved: the runner re-labels a collected-ok invocation with this code when its artifact fails schema verification (don't return this yourself — see "Schema verification" below; the authoritative signal is envelope `metadata.validation`, not the bare code)
   - `124` = reserved: the runner killed the invocation for exceeding its timeout (don't return this yourself)
+  - `255` = reserved: the runner could not set up a fanout target invocation (secret/config resolution failed)
 
 Detection of "did collection fail" is fetcher-defined — see [`porting_playbook.md`](porting_playbook.md) § "Exit code convention" for the patterns currently in use.
 
@@ -91,6 +95,57 @@ A fetcher declares `supports_targets: true` when it's intended to be invoked onc
 The runner sets per-target env vars, exec's the entry once per target, and isolates failures — a 403 on one project doesn't abort the others.
 
 Worked example: [`fetchers/gitlab/ci_cd_pipeline_config/fetcher.yaml`](../fetchers/gitlab/ci_cd_pipeline_config/fetcher.yaml).
+
+---
+
+## Schema verification (opt-in via `schema_binding`)
+
+Some fetchers produce artifacts that must conform to an externally defined
+JSON Schema (machine-readable report formats). Such a fetcher declares a
+**schema binding** in its `evidence_set`:
+
+```yaml
+evidence_set:
+  reference_id: EVD-...
+  name: ...
+  schema_binding:                # OPTIONAL — absent means no verification
+    schema_id: "<the $id of the target schema>"
+    pinned_version: "<the vendored version this fetcher expects>"
+  package_group: null            # reserved for future package-completeness logic; ignored today
+```
+
+How it works:
+
+- **The trigger is the presence of the binding**, not a report-type branch.
+  A fetcher with no binding is completely unaffected — verify never runs, no
+  new metadata fields, no changed exit codes.
+- **The schema is data, selected by identity.** `schema_id` + `pinned_version`
+  must match an entry in the vendored store
+  ([`framework/schemas/vendored/`](../framework/schemas/vendored/)). The verify
+  stage ([`framework/verify/`](../framework/verify/)) is schema-agnostic: adding
+  a new report type is a new fetcher + a new vendored schema + a binding, with
+  zero changes to verify code.
+- **Offline and deterministic.** Every `$ref` resolves against the local
+  vendored copies via a registry keyed by `$id` — never over the network. A
+  `pinned_version` the store doesn't have, or a `$ref` to an un-vendored
+  schema, is a **hard error** (recorded as a failed validation), never a silent
+  fallback.
+- **Verify computes; the runner records.** After a successful collection, the
+  runner validates each JSON artifact's payload and writes a `validation` block
+  into envelope `metadata` (`{schema_id, pinned_version, validator, ok,
+  errors[], error_count}`; each error is a JSON-pointer `path` + `message`).
+  On failure it re-labels the invocation exit code `2`. Fetchers never touch
+  metadata — the ownership boundary above is unchanged.
+- **The uploader holds non-conformant artifacts.** An artifact with
+  `metadata.validation.ok == false` is not upload-eligible; it is held and
+  reported distinctly (`held_validation`), and never blocks the rest of the
+  run's artifacts. Each artifact is judged independently.
+- **Conformance, not quality.** This answers "is the artifact structurally
+  valid against its declared schema" — a build-correctness gate in the same
+  category as the `fetcher.yaml`-against-schema check. It is *not* a judgment
+  of whether the compliance content is correct; that stays Paramify-side (and
+  is the province of the evidence-content *validators*, an unrelated mechanism
+  despite the similar name).
 
 ---
 
@@ -126,7 +181,7 @@ These are accepted violations during the porting period. Each is tracked, scoped
 - **Fetchers may read env directly.** v0.x entry scripts call `load_dotenv()` and use `os.getenv()` / shell env access rather than receiving a typed secrets object. The framework's secret resolver replaces this once it takes over per-fetcher invocation. The runner already sets the right env vars for the child; this clause is about the entry script reading them rather than receiving them as arguments.
 - **Fetchers write a raw evidence dict; the runner wraps it.** A fetcher emits its plain payload; the runner wraps each output file in the standard envelope `{schema_version, metadata, payload}` after the invocation. `metadata` carries `fetcher_name`/`version`/`category`/`run_id`/`target`/`collected_at`/`status`/`exit_code`, the fetcher's `evidence_set` when present, and an `error` on failed invocations. The per-run `_run_metadata.json` index is not enveloped. Fetchers don't build the envelope themselves in v0.x. See [`envelope_design.md`](envelope_design.md).
 - **CLI flags** like Okta's `--skip-check` aren't declarable in the current schema. Treat as interim plumbing; they become `config_schema` entries when the runner is invoking fetchers.
-- **Structured exit codes** are not categorized — only `0` vs. non-zero. Future contract work distinguishes auth-failure, target-unreachable, partial-success, internal.
+- **Structured exit codes** are mostly uncategorized — `0` vs. non-zero from the fetcher, plus the runner-reserved `2` (schema-validation failure), `124` (timeout-kill), and `255` (target setup failure). Future contract work distinguishes auth-failure, target-unreachable, partial-success, internal.
 - **`output.path` semantics** for per-target fanout (relative filename vs. base name vs. template) aren't pinned by the schema. v0.x convention: the fetcher derives its own per-target filename from the target identifier.
 
 ---

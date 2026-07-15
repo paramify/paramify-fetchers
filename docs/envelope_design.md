@@ -56,9 +56,10 @@ file self-describing and gives the uploader **one shape** to consume instead of
 | `target` | object\|null | manifest | Fanout target (`null` for single-target) |
 | `collected_at` | string (ISO-8601 UTC) | runner | When the invocation ran |
 | `status` | `success`\|`failed` | derived from `exit_code` | Did collection succeed |
-| `exit_code` | int | runner | Raw exit code (incl. 124 = timeout) |
+| `exit_code` | int | runner | Raw exit code (incl. 2 = schema-validation failure, 124 = timeout) |
 | `error` | string (optional) | runner | Bounded stderr tail, with injected secret values redacted (see *Secrets in stderr* below); present only when `status` = `failed` |
 | `evidence_set` | object (optional) | fetcher.yaml | `reference_id`/`name` (+ `instructions`/`description` when present) for uploader routing; present when the fetcher declares one |
+| `validation` | object (optional) | runner | Schema-verification record (`schema_id`/`pinned_version`/`validator`/`ok`/`errors`/`error_count`); present only when the fetcher declares an `evidence_set.schema_binding`. `ok: false` ⇒ exit code 2 and the uploader holds the artifact. See `fetcher_contract.md` § "Schema verification" |
 
 `schema_version` (top level) versions the envelope format itself, so it can
 evolve without breaking consumers.

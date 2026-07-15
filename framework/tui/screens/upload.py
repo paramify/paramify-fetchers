@@ -214,6 +214,9 @@ class UploadPage(Vertical):
                 icon, style = "OK", palette.OK
             elif outcome in ("skipped_duplicate", "skipped_failed", "would_upload"):
                 icon, style = "SKIP", palette.WARN
+            elif outcome == "held_validation":
+                # failed its declared schema — an expected hold, not a crash
+                icon, style = "HELD", palette.WARN
             else:
                 icon, style = "FAIL", palette.FAIL
             ref = f"  set={ev.get('reference_id')}" if ev.get("reference_id") else ""

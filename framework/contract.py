@@ -27,17 +27,35 @@ class TargetField:
 
 
 @dataclass
+class SchemaBinding:
+    """A fetcher's claim that its payload conforms to a vendored JSON Schema.
+
+    Declared under evidence_set.schema_binding in fetcher.yaml. The pair must
+    match an entry in framework/schemas/vendored/index.yaml; the runner verifies
+    each JSON artifact against that schema and records the result in envelope
+    metadata.validation. Absent binding = no verification (the common case).
+    """
+    schema_id: str
+    pinned_version: str
+
+
+@dataclass
 class EvidenceSet:
     """Paramify evidence-set identity for a fetcher (1 fetcher = 1 evidence set).
 
     Shipped default declared in fetcher.yaml; the runner carries it into the
     envelope and the uploader get-or-creates the set by reference_id. Customers
     override reference_id per program in the uploader config, not here.
+
+    The optional package_group field in fetcher.yaml is reserved for future
+    package-completeness logic and deliberately NOT parsed here — nothing may
+    read it yet.
     """
     reference_id: str
     name: str
     instructions: Optional[str] = None
     description: Optional[str] = None
+    schema_binding: Optional[SchemaBinding] = None
 
 
 @dataclass

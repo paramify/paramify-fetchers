@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixtures.paramify.invalid/schemas/common-defs.json",
+  "title": "Fixture common definitions",
+  "description": "Shared-base fixture for the verify stage: report fixture schemas $ref these definitions, exercising the same one-common-defs-file pattern real report schema families use. The .invalid host (RFC 2606) can never resolve, so any accidental network dereference of this $id fails loudly.",
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}-[0-9]{1,6}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["open", "closed", "accepted"]
+    }
+  }
+}

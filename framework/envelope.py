@@ -10,6 +10,7 @@ adds the envelope, not the fetcher. See docs/envelope_design.md.
 import json
 import logging
 from pathlib import Path
+from typing import Dict, Optional
 
 from framework.contract import Fetcher, InvocationResult
 
@@ -50,12 +51,21 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
 
 
 def wrap_outputs(
-    result: InvocationResult, fetcher: Fetcher, run_id: str, run_dir: Path
+    result: InvocationResult,
+    fetcher: Fetcher,
+    run_id: str,
+    run_dir: Path,
+    validations: Optional[Dict[str, dict]] = None,
 ) -> None:
     """Wrap each JSON output file from one invocation in an envelope, in place.
 
     Non-JSON files and already-enveloped files are left untouched. A failure to
     wrap a single file is logged and skipped — it never aborts the run.
+
+    `validations` maps output filename -> schema-verification metadata block
+    (computed by the runner when the fetcher declares a schema_binding). It is
+    per-file because one invocation's files share the rest of the metadata but
+    are each validated on their own payload.
     """
     meta = build_metadata(result, fetcher, run_id)
     for name in result.outputs:
@@ -69,9 +79,13 @@ def wrap_outputs(
             continue
         if is_enveloped(raw):
             continue
+        file_meta = meta
+        if validations and name in validations:
+            file_meta = dict(meta)
+            file_meta["validation"] = validations[name]
         envelope = {
             "schema_version": ENVELOPE_SCHEMA_VERSION,
-            "metadata": meta,
+            "metadata": file_meta,
             "payload": raw,
         }
         path.write_text(json.dumps(envelope, indent=2))

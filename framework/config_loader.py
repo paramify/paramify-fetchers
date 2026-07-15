@@ -16,6 +16,7 @@ from framework.contract import (
     EvidenceSet,
     Fetcher,
     PlatformSpec,
+    SchemaBinding,
     Secret,
     TargetField,
 )
@@ -102,11 +103,19 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
     evidence_set = None
     raw_es = data.get("evidence_set")
     if raw_es:
+        binding = None
+        raw_binding = raw_es.get("schema_binding")
+        if raw_binding:
+            binding = SchemaBinding(
+                schema_id=raw_binding["schema_id"],
+                pinned_version=raw_binding["pinned_version"],
+            )
         evidence_set = EvidenceSet(
             reference_id=raw_es["reference_id"],
             name=raw_es["name"],
             instructions=raw_es.get("instructions"),
             description=raw_es.get("description") or data["description"],
+            schema_binding=binding,
         )
 
     return Fetcher(

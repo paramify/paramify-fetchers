@@ -68,6 +68,13 @@ python uploaders/paramify_evidence/uploader.py --config examples/upload.yaml
 Writes an `upload_log.json` into the run directory. Exits non-zero if any file
 failed to upload or was missing its evidence-set block.
 
+Artifacts that failed schema verification (`metadata.validation.ok == false` —
+the runner marks these exit `2`; see `docs/fetcher_contract.md` § "Schema
+verification") are **held**, not uploaded: each is reported distinctly
+(`held_validation`, with the schema and error count) and never blocks the rest
+of the run — every other eligible artifact uploads normally. A hold is an
+expected, explainable outcome, not an error, so it doesn't flip the exit code.
+
 ## Config (`--config`, optional)
 
 See [`examples/upload.yaml`](../../examples/upload.yaml):

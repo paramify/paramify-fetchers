@@ -9,9 +9,12 @@ re-upload. See docs/uploader_design.md.
 
 Per evidence file the uploader:
   1. reads the envelope `metadata.evidence_set` (skips with a warning if absent),
-  2. applies any customer override (reference_id / name / instructions),
-  3. get-or-creates the evidence set by reference_id,
-  4. attaches the evidence as an artifact (idempotent: skips if an artifact with
+  2. holds the file if it failed schema verification (`metadata.validation.ok`
+     is false / exit code 2) — an expected, per-file outcome that never blocks
+     the rest of the batch,
+  3. applies any customer override (reference_id / name / instructions),
+  4. get-or-creates the evidence set by reference_id,
+  5. attaches the evidence as an artifact (idempotent: skips if an artifact with
      the same filename + run_id already exists on the set).
 
 Auth: PARAMIFY_UPLOAD_API_TOKEN (source-agnostic env — .env, secret manager, CI).
@@ -36,6 +39,14 @@ logger = logging.getLogger("paramify_evidence_uploader")
 DEFAULT_BASE_URL = "https://app.paramify.com/api/v0"
 _REQUEST_TIMEOUT = 30
 _ENVELOPE_KEYS = {"schema_version", "metadata", "payload"}
+
+# Exit code the runner stamps on an invocation whose artifact failed its
+# declared schema (framework/verify). Duplicated here on purpose — this module
+# stays standalone (reads nothing from fetcher/framework source) and the
+# self-describing envelope is the real signal: `metadata.validation.ok == false`
+# is authoritative, the exit code is corroborating (a fetcher's OWN exit 2 has
+# no validation block and is treated as an ordinary failure, not a hold).
+SCHEMA_VALIDATION_EXIT_CODE = 2
 
 
 def _utc_now() -> str:
@@ -151,6 +162,23 @@ def iter_evidence_files(run_dir: Path):
         if p.name in ("_run_metadata.json", "upload_log.json"):
             continue
         yield p
+
+
+def failed_schema_validation(metadata: Dict) -> Optional[str]:
+    """Reason string when this artifact failed its declared schema, else None.
+
+    An artifact is upload-eligible iff it did not fail schema verification;
+    each artifact is judged independently (`package_group` is reserved but
+    deliberately ignored — no package-completeness logic yet).
+    """
+    validation = metadata.get("validation")
+    if isinstance(validation, dict) and validation.get("ok") is False:
+        n = validation.get("error_count", len(validation.get("errors") or []))
+        return (
+            f"failed schema validation against {validation.get('schema_id')} "
+            f"(exit {SCHEMA_VALIDATION_EXIT_CODE}; {n} error(s))"
+        )
+    return None
 
 
 def resolve_evidence_set(metadata: Dict, overrides: Dict) -> Optional[Dict]:
@@ -280,6 +308,7 @@ def upload_run(
     client = None if dry_run else ParamifyClient(token, base_url)
     results: List[Dict] = []
     uploaded = skipped_dup = skipped_failed = errors = seen = 0
+    held: List[Dict] = []   # schema-validation holds: expected outcomes, not errors
 
     def add_result(result: Dict) -> None:
         results.append(result)
@@ -313,6 +342,21 @@ def upload_run(
                 )
                 errors += 1
                 add_result({"file": path.name, "outcome": "error", "reason": "missing/incomplete evidence_set"})
+                continue
+
+            hold_reason = failed_schema_validation(metadata)
+            if hold_reason:
+                # Hold ONLY this artifact — every other eligible file in the
+                # run still uploads. Reported distinctly from errors: a held
+                # artifact is an expected, explainable outcome, not a crash.
+                logger.info("%s: held — %s", path.name, hold_reason)
+                held.append({"file": path.name, "reason": hold_reason})
+                add_result({
+                    "file": path.name,
+                    "outcome": "held_validation",
+                    "reason": hold_reason,
+                    "reference_id": es["reference_id"],
+                })
                 continue
 
             if metadata.get("status") == "failed" and skip_failed:
@@ -377,6 +421,7 @@ def upload_run(
             "uploaded": uploaded,
             "skipped_duplicate": skipped_dup,
             "skipped_failed": skipped_failed,
+            "held_validation": len(held),
             "errors": errors,
             "results": results,
         }
@@ -394,16 +439,24 @@ def upload_run(
         "uploaded": uploaded,
         "skipped_duplicate": skipped_dup,
         "skipped_failed": skipped_failed,
+        "held_validation": len(held),
+        "held": held,
         "errors": errors,
         "files": seen,
         "results": results,
         "log_path": str(log_path) if log_path else None,
+        # Holds are expected outcomes and don't flip ok; errors do.
         "ok": errors == 0,
     }
     logger.info(
-        "Done: uploaded=%d skipped_duplicate=%d skipped_failed=%d errors=%d",
-        uploaded, skipped_dup, skipped_failed, errors,
+        "Done: uploaded=%d skipped_duplicate=%d skipped_failed=%d held_validation=%d errors=%d",
+        uploaded, skipped_dup, skipped_failed, len(held), errors,
     )
+    if held:
+        logger.info(
+            "held %d artifact(s): %s",
+            len(held), "; ".join(f"{h['file']} {h['reason']}" for h in held),
+        )
     _emit(on_event, {"event": "upload_complete", **summary})
     return summary
 

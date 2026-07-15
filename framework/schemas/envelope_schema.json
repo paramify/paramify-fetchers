@@ -29,6 +29,30 @@
             "instructions": { "type": "string" },
             "description": { "type": "string" }
           }
+        },
+        "validation": {
+          "type": "object",
+          "description": "Schema-verification record, written by the runner only when the fetcher declares an evidence_set.schema_binding. ok=false means the artifact failed its declared schema (exit code 2; held from upload). Conformance to structure only — never a judgment of compliance content.",
+          "required": ["schema_id", "pinned_version", "validator", "ok", "errors"],
+          "properties": {
+            "schema_id": { "type": "string" },
+            "pinned_version": { "type": "string" },
+            "validator": { "type": "string", "description": "Library + version that performed the validation." },
+            "ok": { "type": "boolean" },
+            "errors": {
+              "type": "array",
+              "description": "Machine-readable failures (capped; error_count is the true total). path is a JSON pointer into the payload ('' = root).",
+              "items": {
+                "type": "object",
+                "required": ["path", "message"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "message": { "type": "string" }
+                }
+              }
+            },
+            "error_count": { "type": "integer" }
+          }
         }
       }
     },

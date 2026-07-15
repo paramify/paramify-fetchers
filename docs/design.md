@@ -427,18 +427,50 @@ AWS port is complete (79/79). The pieces that make this run:
   - Output filenames: per_target fetchers derive their own filename from the target identifier
 - **Docs** — see the `docs/` tree above.
 
+### Exit-code scheme
+
+One invocation's exit code, as recorded in envelope metadata and
+`_run_metadata.json`:
+
+| Code | Meaning | Who sets it |
+|---|---|---|
+| `0` | success — collected (and validated, when a `schema_binding` is declared) | fetcher |
+| `1` (any other non-zero) | collection failure — the fetcher couldn't produce its output | fetcher |
+| `2` | **schema-validation failure** — collected fine, but the artifact failed its declared schema | runner (post-hoc; see below) |
+| `124` | timeout-kill | runner |
+| `255` | fanout target setup failure (secret/config resolution) | runner |
+
+The `1` vs. `2` distinction is load-bearing: "couldn't collect" and "built a
+non-conformant artifact" are different problems for whoever debugs, and the
+uploader holds only the latter. Because fetchers own their non-zero codes, a
+fetcher's *own* exit `2` cannot be distinguished by code alone — which is why
+the runner-assigned case always carries a `metadata.validation` block, and the
+uploader keys on that block, not the bare code.
+
 Done since the last revision:
 
 - ~~**Envelope schema**~~ — DONE (2026-05-28). The runner wraps each output file in the standard `metadata` + `payload` envelope (metadata carries fetcher/version/category/run_id/target/collected_at/status/exit_code, plus `evidence_set` when present and an `error` (stderr tail) on failure); fetchers still write raw payloads. See [`envelope_design.md`](envelope_design.md).
 - ~~**Config injection**~~ — DONE. Category defaults ← platform config ← per-fetcher config, injected as env vars via `config_schema` `env` mappings; `auth.passthrough_env` opens the whitelist for ambient cloud vars.
 - ~~**Evidence-set identity**~~ — DONE. Every `fetcher.yaml` carries an `evidence_set` block (reference_id / name / instructions), backfilled from the upstream catalog; it flows into the envelope and drives uploader get-or-create.
 - ~~**Evidence uploader**~~ — DONE. `uploaders/paramify_evidence/` ships (get-or-create by reference_id, multipart upload, idempotent, `--dry-run`, https-only token guard).
+- ~~**Schema verification**~~ — DONE. A fetcher may declare an
+  `evidence_set.schema_binding` (`schema_id` + `pinned_version`); the runner
+  then validates each JSON artifact against the pinned schema from the vendored
+  store (`framework/schemas/vendored/`, offline `$ref` resolution only),
+  records a `validation` block in envelope metadata, and re-labels a
+  non-conformant invocation exit `2`; the uploader holds those artifacts
+  (`held_validation`) without blocking the rest of the run. Schema-agnostic by
+  construction — the binding selects the schema, never a code path — and
+  conformance-only: content correctness stays Paramify-side. No binding = no
+  change. See the "Schema verification" section of
+  [`fetcher_contract.md`](fetcher_contract.md).
 
 What's deferred:
 
 - **Issues uploader** — `uploaders/paramify_issues/` is an empty stub; the Wiz-style write-issues-back case is not built
 - **Comparators** — `comparators/_template/` scaffold exists but no comparator ported; `depends_on` is in the schema but not honored by the runner because nothing consumes it (`runner/logger.py`, `retry.py`, `dependency_graph.py` are still empty stubs)
-- **Structured exit codes** — still binary 0/1 (plus 124 = runner timeout-kill). Categorized auth/network/internal/partial codes are contract-era work.
+- **Structured exit codes** — partially structured: fetchers still return binary 0/1, with runner-reserved 2 (schema-validation failure), 124 (timeout-kill), and 255 (target setup failure) on top — see "Exit-code scheme" above. Categorized auth/network/internal/partial codes are contract-era work.
+- **Package-group completeness** — `evidence_set.package_group` is reserved in the schema but deliberately unread; each artifact is upload-judged independently until partial-package logic is actually needed.
 - **Catalog generator** — fetchers self-describe; the derived `catalog.json` walker isn't written yet
 - **`aggregate` mode** — declared in schema; no fetcher uses it yet
 - **Unported categories** — `azure`, `ssllabs`, and `wiz` exist only as `_categories/<name>.yaml` stubs with no ported fetchers

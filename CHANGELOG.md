@@ -10,6 +10,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Added
+
+- Schema verification stage: a fetcher may declare an
+  `evidence_set.schema_binding` (`schema_id` + `pinned_version`) claiming its
+  payload conforms to a vendored JSON Schema. When present, the runner
+  validates each JSON artifact against the pinned schema
+  (`framework/verify/`, offline `$ref` resolution against
+  `framework/schemas/vendored/` only), records a `validation` block in
+  envelope metadata, and marks non-conformant invocations with the new
+  reserved exit code `2`; `paramify upload` holds those artifacts
+  (`held_validation`) without blocking the rest of the run. Fetchers without a
+  binding are unaffected. Also reserves the (unread) nullable
+  `evidence_set.package_group` field for future package-completeness logic.
+  See `docs/fetcher_contract.md` § "Schema verification".
+
 ## [0.2.1-beta] - 2026-07-10
 
 ### Changed

@@ -203,6 +203,8 @@ def _human_upload_printer():
                 mark = "OK"
             elif outcome in ("skipped_duplicate", "skipped_failed"):
                 mark = "SKIP"
+            elif outcome == "held_validation":
+                mark = "HELD"   # failed its declared schema — expected hold, not a crash
             elif outcome == "would_upload":
                 mark = "DRY"
             else:
@@ -217,8 +219,11 @@ def _human_upload_printer():
                 f"uploaded={ev['uploaded']} "
                 f"skipped_duplicate={ev['skipped_duplicate']} "
                 f"skipped_failed={ev['skipped_failed']} "
+                f"held_validation={ev.get('held_validation', 0)} "
                 f"errors={ev['errors']}"
             )
+            for h in ev.get("held") or []:
+                typer.echo(f"  held: {h['file']} — {h['reason']}")
             if ev.get("log_path"):
                 typer.echo(f"upload_log.json → {ev['log_path']}")
     return on_event

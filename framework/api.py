@@ -33,6 +33,13 @@ from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import ConfigField, Secret, TargetField
 from framework.envelope import is_enveloped, wrap_outputs
 from framework.runner import manifest_loader
+from framework.verify import (
+    SCHEMA_VALIDATION_EXIT_CODE,
+    VALIDATOR_ID,
+    SchemaStore,
+    SchemaStoreError,
+    verify,
+)
 
 _STDERR_TAIL_CHARS = 4000
 
@@ -547,6 +554,52 @@ def _invocation_record(r) -> dict:
     return record
 
 
+def _apply_schema_verification(result, fetcher, binding, run_dir: Path, get_store) -> Optional[dict]:
+    """Runner-side glue for the verify stage: check each JSON output of one
+    invocation against the fetcher's declared schema_binding.
+
+    Returns {filename: validation metadata block} for wrap_outputs to record,
+    or None when nothing was verified. Mutates result.exit_code to the
+    schema-failure code when a collected-ok artifact fails its schema — before
+    wrap_outputs / fetcher_result / _run_metadata.json read it, so every record
+    stays consistent. verify() computes; this (the runner) records.
+    """
+    if result.exit_code != 0:
+        return None  # collection already failed; there is no artifact to certify
+
+    validations: Dict[str, dict] = {}
+    any_failed = False
+    for name in result.outputs:
+        if not name.endswith(".json"):
+            continue
+        try:
+            raw = json.loads((run_dir / name).read_text())
+        except (OSError, json.JSONDecodeError):
+            continue  # wrap_outputs skips these the same way (logged there)
+        if is_enveloped(raw):
+            continue  # already-enveloped files are left untouched, like wrapping
+        try:
+            block = verify(raw, binding, get_store()).to_metadata()
+        except SchemaStoreError as e:
+            # The gate itself couldn't run (unknown schema, pinned_version
+            # mismatch, un-vendored $ref). Hard error, never a silent pass:
+            # record it and fail the artifact like any non-conformance.
+            block = {
+                "schema_id": binding.schema_id,
+                "pinned_version": binding.pinned_version,
+                "validator": VALIDATOR_ID,
+                "ok": False,
+                "errors": [{"path": "", "message": str(e)}],
+                "error_count": 1,
+            }
+        validations[name] = block
+        any_failed = any_failed or not block["ok"]
+
+    if any_failed:
+        result.exit_code = SCHEMA_VALIDATION_EXIT_CODE
+    return validations or None
+
+
 def _manifest_id(path, root: Path) -> str:
     """Stable identity for a manifest in run metadata: its path relative to the
     repo root (so attribution survives the repo moving), absolute otherwise."""
@@ -602,6 +655,16 @@ def run(
     overall_ok = True
     started_at = _iso_now()
 
+    # Vendored schema store for fetchers that declare a schema_binding. Lazy:
+    # a run with no bound fetcher never touches it (the no-binding path must
+    # stay byte-for-byte what it was).
+    _store_cache: List[SchemaStore] = []
+
+    def _get_store() -> SchemaStore:
+        if not _store_cache:
+            _store_cache.append(SchemaStore.default(root))
+        return _store_cache[0]
+
     for entry in parsed.entries:
         if entry.use not in fetchers:
             emit({"event": "fetcher_skip", "fetcher": entry.use, "reason": "not discovered"})
@@ -634,8 +697,12 @@ def run(
             overall_ok = False
             continue
 
+        binding = fetcher.evidence_set.schema_binding if fetcher.evidence_set else None
         for r in results:
-            wrap_outputs(r, fetcher, run_id, run_dir)
+            validations = None
+            if binding is not None:
+                validations = _apply_schema_verification(r, fetcher, binding, run_dir, _get_store)
+            wrap_outputs(r, fetcher, run_id, run_dir, validations)
             if r.exit_code != 0:
                 overall_ok = False
             emit({
