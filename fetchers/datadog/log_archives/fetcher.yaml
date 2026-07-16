@@ -1,0 +1,27 @@
+name: datadog_log_archives
+version: 0.1.0
+description: Retrieves Datadog log archive configurations to prove logs are durably stored in long-term storage.
+category: datadog
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: datadog_log_archives.json
+
+secrets:
+- name: api_key
+  env: DATADOG_API_KEY
+- name: app_key
+  env: DATADOG_APP_KEY
+- name: base_url
+  env: DATADOG_BASE_URL
+
+evidence_set:
+  reference_id: EVD-DD-LOG-ARCHIVES
+  name: Datadog Log Archives
+  instructions: 'Calls GET /api/v2/logs/config/archives. Extracts archive name, destination type, state, and filter query. Writes JSON archive config list.'

@@ -1,0 +1,27 @@
+name: datadog_siem_configuration
+version: 0.1.0
+description: Retrieves Datadog SIEM operational state including suppression rules and notification integrations.
+category: datadog
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: datadog_siem_configuration.json
+
+secrets:
+- name: api_key
+  env: DATADOG_API_KEY
+- name: app_key
+  env: DATADOG_APP_KEY
+- name: base_url
+  env: DATADOG_BASE_URL
+
+evidence_set:
+  reference_id: EVD-DD-SIEM-CONFIG
+  name: Datadog SIEM Configuration
+  instructions: 'Calls GET /api/v2/security_monitoring/suppressions and GET /api/v1/integration/webhooks. Writes JSON SIEM config summary.'

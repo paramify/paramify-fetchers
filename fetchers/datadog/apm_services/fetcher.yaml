@@ -1,0 +1,27 @@
+name: datadog_apm_services
+version: 0.1.0
+description: Retrieves the Datadog APM service catalog to prove application services are registered and monitored with assigned owners.
+category: datadog
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: datadog_apm_services.json
+
+secrets:
+- name: api_key
+  env: DATADOG_API_KEY
+- name: app_key
+  env: DATADOG_APP_KEY
+- name: base_url
+  env: DATADOG_BASE_URL
+
+evidence_set:
+  reference_id: EVD-DD-APM-SERVICES
+  name: Datadog APM Services
+  instructions: 'Calls GET /api/v2/services/definitions with pagination. Extracts service name, team, tier, languages, and contact presence. Writes JSON catalog.'

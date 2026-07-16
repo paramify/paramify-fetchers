@@ -1,0 +1,27 @@
+name: datadog_siem_detection_rules
+version: 0.1.0
+description: Retrieves custom Datadog SIEM detection rules to prove active threat detection is configured.
+category: datadog
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: datadog_siem_detection_rules.json
+
+secrets:
+- name: api_key
+  env: DATADOG_API_KEY
+- name: app_key
+  env: DATADOG_APP_KEY
+- name: base_url
+  env: DATADOG_BASE_URL
+
+evidence_set:
+  reference_id: EVD-DD-SIEM-RULES
+  name: Datadog SIEM Detection Rules
+  instructions: 'Calls GET /api/v2/security_monitoring/rules with pagination, filtered to custom rules. Extracts rule name, type, severity, enabled state, and detection method. Writes JSON rules list.'

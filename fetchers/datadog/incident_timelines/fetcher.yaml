@@ -1,0 +1,28 @@
+name: datadog_incident_timelines
+version: 0.1.0
+description: Retrieves per-incident timeline entries from Datadog to support after-action reviews and incident response documentation.
+category: datadog
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: datadog_incident_timelines.json
+
+secrets:
+- name: api_key
+  env: DATADOG_API_KEY
+- name: app_key
+  env: DATADOG_APP_KEY
+- name: base_url
+  env: DATADOG_BASE_URL
+- name: incidents_lookback_days
+  env: DATADOG_INCIDENTS_LOOKBACK_DAYS
+evidence_set:
+  reference_id: EVD-DD-INCIDENT-TIMELINES
+  name: Datadog Incident Timelines
+  instructions: 'Calls GET /api/v2/incidents then GET /api/v2/incidents/{id}/timeline for each. Lookback window controlled by DATADOG_INCIDENTS_LOOKBACK_DAYS (default 90). Writes JSON timeline data.'
