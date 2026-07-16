@@ -1,0 +1,27 @@
+name: datadog_agent_hosts
+version: 0.1.0
+description: Retrieves real-time inventory of all hosts reporting via the Datadog agent, including platform, cloud provider, agent version, and up/muted status.
+category: datadog
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: datadog_agent_hosts.json
+
+secrets:
+- name: api_key
+  env: DATADOG_API_KEY
+- name: app_key
+  env: DATADOG_APP_KEY
+- name: base_url
+  env: DATADOG_BASE_URL
+
+evidence_set:
+  reference_id: EVD-DD-AGENT-HOSTS
+  name: Datadog Agent Hosts
+  instructions: 'Calls GET /api/v1/hosts with pagination (start/count). Extracts host name, platform, agent version, cloud provider, aliases, and up/muted state. Writes JSON inventory.'

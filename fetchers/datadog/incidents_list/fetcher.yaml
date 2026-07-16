@@ -1,0 +1,28 @@
+name: datadog_incidents_list
+version: 0.1.0
+description: Retrieves incident records from Datadog for after-action review and pattern analysis within a configurable lookback window.
+category: datadog
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: datadog_incidents_list.json
+
+secrets:
+- name: api_key
+  env: DATADOG_API_KEY
+- name: app_key
+  env: DATADOG_APP_KEY
+- name: base_url
+  env: DATADOG_BASE_URL
+- name: incidents_lookback_days
+  env: DATADOG_INCIDENTS_LOOKBACK_DAYS
+evidence_set:
+  reference_id: EVD-DD-INCIDENTS-LIST
+  name: Datadog Incidents List
+  instructions: 'Calls GET /api/v2/incidents with offset pagination and date filters. Lookback window controlled by DATADOG_INCIDENTS_LOOKBACK_DAYS (default 90). Writes JSON incident list.'

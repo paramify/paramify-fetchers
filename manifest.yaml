@@ -1,7 +1,71 @@
 run:
   output_dir: ./evidence
   fetchers:
-  - use: knowbe4_module_based_summary
+  - use: datadog_agent_hosts
     secrets:
-      api_key: ${env:KNOWBE4_API_KEY}
-      region: ${env:KNOWBE4_REGION}
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+  - use: datadog_apm_services
+    secrets:
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+  - use: datadog_containers
+    secrets:
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+  - use: datadog_incident_timelines
+    secrets:
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+      incidents_lookback_days: ${env:DATADOG_INCIDENTS_LOOKBACK_DAYS}
+  - use: datadog_incidents_list
+    secrets:
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+      incidents_lookback_days: ${env:DATADOG_INCIDENTS_LOOKBACK_DAYS}
+  - use: datadog_infra_agent_checks
+    secrets:
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+  - use: datadog_log_archives
+    secrets:
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+  - use: datadog_log_indexes
+    secrets:
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+  - use: datadog_log_pipelines
+    secrets:
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+  - use: datadog_monitors_list
+    secrets:
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+  - use: datadog_siem_configuration
+    secrets:
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+  - use: datadog_siem_detection_rules
+    secrets:
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+  - use: datadog_siem_signals
+    secrets:
+      api_key: ${env:DATADOG_API_KEY}
+      app_key: ${env:DATADOG_APP_KEY}
+      base_url: ${env:DATADOG_BASE_URL}
+      signals_lookback_days: ${env:DATADOG_SIGNALS_LOOKBACK_DAYS}

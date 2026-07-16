@@ -1,0 +1,27 @@
+name: datadog_log_indexes
+version: 0.1.0
+description: Retrieves Datadog log index retention configurations to prove what log data is retained and for how long.
+category: datadog
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: datadog_log_indexes.json
+
+secrets:
+- name: api_key
+  env: DATADOG_API_KEY
+- name: app_key
+  env: DATADOG_APP_KEY
+- name: base_url
+  env: DATADOG_BASE_URL
+
+evidence_set:
+  reference_id: EVD-DD-LOG-INDEXES
+  name: Datadog Log Indexes
+  instructions: 'Calls GET /api/v1/logs/config/indexes. Extracts index name, retention days, and filter query. Writes JSON index config list.'
