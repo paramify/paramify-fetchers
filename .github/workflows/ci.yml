@@ -1,0 +1,109 @@
+name: CI
+
+# The public API surface — schemas + manifest + envelope + the `paramify` CLI —
+# is the contract (CLAUDE.md). These jobs gate it:
+#   test    — every fetcher.yaml / category file validates against its JSON Schema
+#   smoke   — the CLI discovery surface works across all fetchers
+#   lint    — the framework's own code passes ruff + mypy
+#   secrets — no credentials in the tree or its full git history
+# Fetchers can't be integration-tested here (no live tenants); that signal comes
+# from recorded fixtures + the scheduled dogfood run (SEC-38).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint (ruff + mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install -e ".[dev]"
+      # Framework's own code only. Ported v0.x fetchers under fetchers/ are held
+      # to the schema contract (the test job), not lint rules. `ruff format` is
+      # intentionally not gated yet.
+      - name: ruff (lint + import order)
+        run: ruff check framework/
+      # Core framework. The TUI is suppressed via a pyproject override until it
+      # gets its own typing pass (see [tool.mypy] in pyproject.toml).
+      - name: mypy (core framework)
+        run: mypy framework/
+
+  test:
+    name: test (py ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # tui extra: the CLI/TUI parity test reads the TUI source, and importing
+      # the CLI must stay clean with textual installed.
+      - run: python -m pip install -e ".[dev,tui]"
+      # Includes tests/test_contracts.py — the schema contract gate over every
+      # fetcher.yaml and _categories/*.yaml.
+      - name: pytest
+        run: pytest -q
+
+  smoke:
+    name: smoke (CLI discovery)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install -e .
+      - name: paramify list / catalog / ksi + describe every fetcher
+        run: |
+          set -euo pipefail
+          paramify list --json > /dev/null
+          paramify catalog --json > /dev/null
+          paramify ksi --json > /dev/null
+          for f in $(paramify list --json | python -c "import sys, json; [print(x['name']) for x in json.load(sys.stdin)]"); do
+            paramify describe "$f" --json > /dev/null
+          done
+          echo "smoke ok: described all discovered fetchers"
+
+  secrets:
+    name: secrets (gitleaks full history)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history — scanning it is the whole point
+      # The OSS binary, not the marketplace action (which requires an org
+      # license). `gitleaks git` scans the full commit history and exits 1 on
+      # any finding.
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          VERSION=8.30.1
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: gitleaks (full history)
+        run: gitleaks git --verbose --redact

@@ -21,6 +21,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Static
 
 from framework import api
+from framework.tui import palette
 from framework.tui.modals import PreviewModal
 
 
@@ -35,14 +36,19 @@ class EvidencePage(Vertical):
             yield Button("Refresh", id="evidence-refresh")
         with Horizontal(id="evidence-body"):
             with Vertical(id="evidence-left", classes="panel"):
-                yield Static("runs", classes="panel-title")
                 yield DataTable(id="evidence-runs")
+                yield Static(
+                    f"no runs yet — execute the manifest on tab [bold {palette.ACCENT}]3[/]",
+                    classes="empty-hint",
+                )
             with Vertical(id="evidence-right", classes="panel"):
-                yield Static("", id="evidence-run-header", classes="panel-title")
                 yield DataTable(id="evidence-files")
+                yield Static("evidence files from the selected run appear here", classes="empty-hint")
 
     def on_mount(self) -> None:
         self._runs: List[dict] = []
+        self.query_one("#evidence-left", Vertical).border_title = "runs"
+        self.query_one("#evidence-right", Vertical).border_title = "files"
         runs = self.query_one("#evidence-runs", DataTable)
         runs.cursor_type = "row"
         runs.zebra_stripes = True
@@ -77,24 +83,25 @@ class EvidencePage(Vertical):
         dt.clear()
         for r in self._runs:
             if not r.get("complete", True):
-                when = Text("incomplete", style="yellow")  # no _run_metadata.json (aborted run)
+                when = Text("incomplete", style=palette.WARN)  # no _run_metadata.json (aborted run)
             else:
                 when = r.get("completed_at") or r.get("started_at") or ""
-            fail_style = "red" if r["fail"] else "dim"
+            fail_style = palette.FAIL if r["fail"] else "dim"
             dt.add_row(
                 r["run_id"],
                 when,
-                Text(str(r["ok"]), style="green"),
+                Text(str(r["ok"]), style=palette.OK),
                 Text(str(r["fail"]), style=fail_style),
                 key=r["dir"],
             )
 
+        self.query_one("#evidence-left", Vertical).set_class(not self._runs, "empty")
         if self._runs:
             self._show_run(self._runs[0]["dir"])
         else:
-            self.query_one("#evidence-run-header", Static).update(
-                Text(f"no runs found under {out}", style="dim")
-            )
+            right = self.query_one("#evidence-right", Vertical)
+            right.border_title = "files"
+            right.set_class(True, "empty")
             self.query_one("#evidence-files", DataTable).clear()
 
     def _show_run(self, run_dir: str) -> None:
@@ -103,9 +110,12 @@ class EvidencePage(Vertical):
         files.clear()
         if run is None:
             return
-        header = Text(f"{run['run_id']}   ", style="bold")
-        header.append(f"✓ {run['ok']}  ✗ {run['fail']}   {run.get('completed_at') or ''}", style="dim")
-        self.query_one("#evidence-run-header", Static).update(header)
+        # The run's scoreboard lives in the panel border, Posting-style.
+        right = self.query_one("#evidence-right", Vertical)
+        right.border_title = (
+            f"{run['run_id']}  [{palette.OK}]✓ {run['ok']}[/]  [{palette.FAIL}]✗ {run['fail']}[/]"
+        )
+        right.set_class(not run["files"], "empty")
         for f in run["files"]:
             tgt = f.get("target")
             tlabel = "  ".join(f"{k}={v}" for k, v in tgt.items()) if isinstance(tgt, dict) else ""
@@ -113,9 +123,9 @@ class EvidencePage(Vertical):
             if code is None:
                 ecell = Text("—", style="dim")
             elif code == 0:
-                ecell = Text("0", style="green")
+                ecell = Text("0", style=palette.OK)
             else:
-                ecell = Text(str(code), style="red")
+                ecell = palette.pill(str(code), "fail")
             files.add_row(f["name"], f.get("fetcher") or "—", tlabel or "—", ecell, key=f["path"])
 
     # -- events ----------------------------------------------------------- #

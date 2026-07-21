@@ -20,6 +20,7 @@ from textual.message import Message
 from textual.widgets import Button, Checkbox, DataTable, RichLog, Static
 
 from framework import api
+from framework.tui import palette
 from framework.tui.modals import ConfirmModal
 
 
@@ -61,11 +62,13 @@ class UploadPage(Vertical):
             yield Checkbox("reassociate", id="scripts-reassociate")
         with Horizontal(id="upload-body"):
             with Vertical(id="upload-summary-panel", classes="panel"):
-                yield Static("ready to upload", classes="panel-title")
                 yield DataTable(id="upload-summary")
             with Vertical(id="upload-log-panel", classes="panel"):
-                yield Static("activity log", classes="panel-title")
                 yield RichLog(id="upload-log", markup=False, wrap=True, highlight=False)
+                yield Static(
+                    f"upload progress streams here — [bold {palette.ACCENT}]ctrl+u[/] to upload",
+                    classes="empty-hint",
+                )
 
     def on_mount(self) -> None:
         self._uploading = False
@@ -73,6 +76,10 @@ class UploadPage(Vertical):
         self._run_dir: str | None = None
         self._preflight: dict | None = None
         self._scripts_preflight: dict | None = None
+        self.query_one("#upload-summary-panel", Vertical).border_title = "ready to upload"
+        log_panel = self.query_one("#upload-log-panel", Vertical)
+        log_panel.border_title = "log"
+        log_panel.set_class(True, "empty")
         table = self.query_one("#upload-summary", DataTable)
         table.cursor_type = "row"
         table.zebra_stripes = True
@@ -120,7 +127,8 @@ class UploadPage(Vertical):
         try:
             runs = api.list_runs(out)
         except Exception as exc:
-            table.add_row("status", Text(f"cannot list runs: {exc}", style="red"))
+            self._set_banner(Text(f"cannot list runs: {exc}", style=palette.FAIL))
+            table.add_row("status", Text(f"cannot list runs: {exc}", style=palette.FAIL))
             return
         if not runs:
             table.add_row("status", Text("no runs found — collect in the Run tab first", style="dim"))
@@ -134,17 +142,21 @@ class UploadPage(Vertical):
         try:
             preflight = api.upload_preflight(self._run_dir, self.app.root_path)
         except Exception as exc:
-            table.add_row("preflight", Text(str(exc), style="red"))
+            self._set_banner(Text(f"upload setup failed: {exc}", style=palette.FAIL))
+            table.add_row("preflight", Text(str(exc), style=palette.FAIL))
             return
 
         self._preflight = preflight
+        table.add_row("Paramify API", preflight["base_url"])
+        table.add_row("API token", palette.pill("present", "ok") if preflight["token_present"] else palette.pill("missing", "fail"))
         table.add_row("upload files", str(preflight["file_count"]))
         if preflight["ok"]:
             upload.disabled = False
-            self._set_banner(Text("ready — upload evidence, or sync scripts", style="green"))
+            self._set_banner(Text("ready — upload evidence, or sync scripts", style=palette.OK))
         else:
             for err in preflight["errors"]:
-                table.add_row("preflight error", Text(err, style="red"))
+                table.add_row("preflight error", Text(err, style=palette.FAIL))
+            self._set_banner(Text("upload preflight failed", style=palette.FAIL))
 
     def _rebuild_scripts(self, table: DataTable) -> None:
         """Scripts-sync readiness (repo-scoped). Enabled whenever there are
@@ -157,12 +169,13 @@ class UploadPage(Vertical):
         try:
             pf = api.scripts_sync_preflight(self.app.root_path, dry_run=False)
         except Exception as exc:
-            table.add_row("scripts preflight", Text(str(exc), style="red"))
+            self._set_banner(Text(f"scripts preflight failed: {exc}", style=palette.FAIL))
+            table.add_row("scripts preflight", Text(str(exc), style=palette.FAIL))
             return
 
         self._scripts_preflight = pf
         table.add_row("fetchers", str(pf["fetcher_count"]))
-        table.add_row("API token", Text("present", style="green") if pf["token_present"] else Text("missing (dry-run ok)", style="yellow"))
+        table.add_row("API token", palette.pill("present", "ok") if pf["token_present"] else palette.pill("missing (dry-run ok)", "warn"))
         table.add_row("Paramify API", pf["base_url"])
         # Enabled if there's anything to sync; a real (non-dry-run) sync still
         # checks for the token at click time.
@@ -174,10 +187,10 @@ class UploadPage(Vertical):
         ok = run.get("ok", 0)
         total = ok + fail
         if not run.get("complete", True):
-            return Text("incomplete", style="yellow")
+            return Text("incomplete", style=palette.WARN)
         if fail:
-            return Text(f"{ok}/{total} ok, {fail} failed", style="yellow")
-        return Text(f"{ok}/{total} ok", style="green")
+            return Text(f"{ok}/{total} ok, {fail} failed", style=palette.WARN)
+        return Text(f"{ok}/{total} ok", style=palette.OK)
 
     # -- actions: evidence upload ---------------------------------------- #
 
@@ -215,8 +228,9 @@ class UploadPage(Vertical):
     def _start_upload(self, run_dir: str) -> None:
         self._uploading = True
         self._disable_actions()
+        self.query_one("#upload-log-panel", Vertical).set_class(False, "empty")
         self.query_one("#upload-log", RichLog).clear()
-        self._set_banner(Text("uploading to Paramify...", style="yellow"))
+        self._set_banner(Text("uploading to Paramify...", style=palette.WARN))
         self._upload_worker(run_dir, self.app.root_path)
 
     @work(thread=True, exclusive=True)
@@ -264,8 +278,9 @@ class UploadPage(Vertical):
     def _start_scripts(self) -> None:
         self._syncing = True
         self._disable_actions()
+        self.query_one("#upload-log-panel", Vertical).set_class(False, "empty")
         self.query_one("#upload-log", RichLog).clear()
-        self._set_banner(Text("syncing scripts to Paramify...", style="yellow"))
+        self._set_banner(Text("syncing scripts to Paramify...", style=palette.WARN))
         self._scripts_worker(
             self.app.root_path,
             dry_run=self.query_one("#scripts-dry", Checkbox).value,
@@ -297,16 +312,16 @@ class UploadPage(Vertical):
 
         if etype == "upload_start":
             mode = " (dry-run)" if ev.get("dry_run") else ""
-            self._set_banner(Text(f"uploading {ev.get('files', 0)} file(s) to {ev.get('base_url', '')}{mode}", style="yellow"))
+            self._set_banner(Text(f"uploading {ev.get('files', 0)} file(s) to {ev.get('base_url', '')}{mode}", style=palette.WARN))
             log.write(Text(f"upload {ev.get('files', 0)} file(s) from {ev.get('run_dir', '')}{mode}", style="bold"))
         elif etype == "upload_file":
             outcome = ev.get("outcome")
             if outcome == "uploaded":
-                icon, style = "OK", "green"
+                icon, style = "OK", palette.OK
             elif outcome in ("skipped_duplicate", "skipped_failed", "would_upload"):
-                icon, style = "SKIP", "yellow"
+                icon, style = "SKIP", palette.WARN
             else:
-                icon, style = "FAIL", "red"
+                icon, style = "FAIL", palette.FAIL
             ref = f"  set={ev.get('reference_id')}" if ev.get("reference_id") else ""
             reason = ev.get("reason") or ev.get("error")
             suffix = f"  {reason}" if reason else ""
@@ -316,19 +331,20 @@ class UploadPage(Vertical):
         elif etype == "_upload_failed":
             self._uploading = False
             self._restore_actions()
-            log.write(Text(f"upload failed: {ev.get('error', '')}", style="bold red"))
-            self._set_banner(Text(f"upload failed: {ev.get('error', '')}", style="red"))
+            log.write(Text(f"upload failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
+            self._set_banner(Text(f"upload failed: {ev.get('error', '')}", style=palette.FAIL))
 
     def _finalize_upload(self, ev: dict) -> None:
         self._uploading = False
         self._restore_actions()
         ok = ev.get("ok")
+        style = palette.OK if ok else palette.FAIL
         msg = Text(
             "upload complete — "
             f"uploaded={ev.get('uploaded', 0)} "
             f"duplicates={ev.get('skipped_duplicate', 0)} "
             f"errors={ev.get('errors', 0)}",
-            style="green" if ok else "red",
+            style=style,
         )
         if ev.get("log_path"):
             msg.append(f"   {ev['log_path']}", style="dim")
@@ -338,10 +354,10 @@ class UploadPage(Vertical):
         self._handle_scripts_event(message.ev)
 
     _SCRIPT_MARKS = {
-        "create": ("NEW", "green"), "update": ("UPD", "green"), "noop": ("OK", "dim"),
-        "drift": ("DRIFT", "yellow"), "drift_skipped": ("DRIFT", "yellow"), "error": ("FAIL", "red"),
-        "would_create": ("NEW?", "cyan"), "would_update": ("UPD?", "cyan"),
-        "would_noop": ("OK?", "dim"), "would_drift": ("DRIFT?", "yellow"),
+        "create": ("NEW", palette.OK), "update": ("UPD", palette.OK), "noop": ("OK", "dim"),
+        "drift": ("DRIFT", palette.WARN), "drift_skipped": ("DRIFT", palette.WARN), "error": ("FAIL", palette.FAIL),
+        "would_create": ("NEW?", palette.INFO), "would_update": ("UPD?", palette.INFO),
+        "would_noop": ("OK?", "dim"), "would_drift": ("DRIFT?", palette.WARN),
     }
 
     def _handle_scripts_event(self, ev: dict) -> None:
@@ -350,7 +366,7 @@ class UploadPage(Vertical):
 
         if etype == "sync_start":
             mode = " (dry-run)" if ev.get("dry_run") else ""
-            self._set_banner(Text(f"syncing {ev.get('fetchers', 0)} script(s) to {ev.get('base_url', '')}{mode}", style="yellow"))
+            self._set_banner(Text(f"syncing {ev.get('fetchers', 0)} script(s) to {ev.get('base_url', '')}{mode}", style=palette.WARN))
             log.write(Text(f"sync {ev.get('fetchers', 0)} fetcher script(s){mode}", style="bold"))
         elif etype == "sync_item":
             icon, style = self._SCRIPT_MARKS.get(ev.get("outcome"), ("?", "white"))
@@ -364,8 +380,8 @@ class UploadPage(Vertical):
         elif etype == "_scripts_failed":
             self._syncing = False
             self._restore_actions()
-            log.write(Text(f"scripts sync failed: {ev.get('error', '')}", style="bold red"))
-            self._set_banner(Text(f"scripts sync failed: {ev.get('error', '')}", style="red"))
+            log.write(Text(f"scripts sync failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
+            self._set_banner(Text(f"scripts sync failed: {ev.get('error', '')}", style=palette.FAIL))
 
     def _finalize_scripts(self, ev: dict) -> None:
         self._syncing = False
@@ -378,7 +394,7 @@ class UploadPage(Vertical):
             f"noop={ev.get('noop', 0)} "
             f"associated={ev.get('associated', 0)} "
             f"errors={ev.get('errors', 0)}",
-            style="green" if ev.get("ok") else "red",
+            style=palette.OK if ev.get("ok") else palette.FAIL,
         )
         self._set_banner(msg)
 

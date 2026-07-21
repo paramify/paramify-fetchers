@@ -1,0 +1,5 @@
+---
+description: >
+  Datadog monitoring platform. Collects host inventory, container inventory,
+  APM service catalog, monitors, log archives/indexes/pipelines, SIEM detection
+  rules, SIEM signals, and incident records.

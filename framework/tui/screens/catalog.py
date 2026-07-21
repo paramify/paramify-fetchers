@@ -32,16 +32,16 @@ class CatalogPage(Horizontal):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="catalog-left", classes="panel"):
-            yield Static("fetchers", id="catalog-left-title", classes="panel-title")
             yield Input(placeholder="/ filter fetchers…", id="catalog-search")
             yield Tree("fetchers", id="catalog-tree")
         with VerticalScroll(id="catalog-detail-scroll", classes="panel"):
-            yield Static("contract", id="catalog-detail-title", classes="panel-title")
             yield Static(render.empty_detail(), id="catalog-detail")
 
     def on_mount(self) -> None:
         self.query_one("#catalog-tree", Tree).show_root = False
-        self.query_one("#catalog-detail-scroll", VerticalScroll).can_focus = True
+        detail = self.query_one("#catalog-detail-scroll", VerticalScroll)
+        detail.can_focus = True
+        detail.border_title = "contract"
         self.rebuild()
 
     # -- data ------------------------------------------------------------- #
@@ -50,11 +50,11 @@ class CatalogPage(Horizontal):
         """Repopulate the tree from the App's cached catalog, applying the filter."""
         data = getattr(self.app, "catalog_data", None)
         tree = self.query_one("#catalog-tree", Tree)
-        title = self.query_one("#catalog-left-title", Static)
+        panel = self.query_one("#catalog-left", Vertical)
         tree.clear()
 
         if not data:
-            title.update("fetchers (none discovered)")
+            panel.border_title = "fetchers (none discovered)"
             return
 
         flt = self._filter.strip().lower()
@@ -69,7 +69,7 @@ class CatalogPage(Horizontal):
                 total += 1
 
         tree.root.expand()
-        title.update(f"fetchers ({total})")
+        panel.border_title = f"fetchers ({total})"
 
     # -- events ----------------------------------------------------------- #
 

@@ -4,11 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paramify-fetchers"
-version = "0.1.0"
+version = "0.2.1"
 description = "Paramify evidence fetcher framework — discover, build, run, and inspect evidence fetchers."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Proprietary" }
+license = { text = "GPL-3.0-only" }
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+]
 
 # Base runtime: everything the headless `paramify` CLI and the runner need.
 # The TUI is an optional front-end — install its extra to use `paramify tui`.
@@ -23,9 +26,9 @@ dependencies = [
 [project.optional-dependencies]
 tui = ["textual>=1.0,<2.0"]
 checkov = ["checkov"]
-dev = ["pytest"]
+dev = ["pytest", "ruff", "mypy"]
 # Convenience: every front-end + dev tooling in one install.
-all = ["textual>=1.0,<2.0", "checkov", "pytest"]
+all = ["textual>=1.0,<2.0", "checkov", "pytest", "ruff", "mypy"]
 
 # The single entry point. `paramify` steers every front-end: the headless
 # commands, plus `paramify tui`. (Renaming later is a one-line change here; add
@@ -54,3 +57,28 @@ include = ["framework*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
+
+# Lint + import order for the framework's OWN code. Ported v0.x fetchers under
+# fetchers/ are held to the schema contract (tests/test_contracts.py), not lint
+# rules (CLAUDE.md); CI runs `ruff check framework/` so only that tree is gated.
+[tool.ruff]
+target-version = "py310"
+extend-exclude = ["fetchers", ".venv"]
+
+[tool.ruff.lint]
+# Default lint set (pyflakes F + the E4/E7/E9 pycodestyle slice) plus import
+# sorting (I). `ruff format` is intentionally NOT gated yet (would churn ~25
+# files) — adopt as a separate pass.
+select = ["E4", "E7", "E9", "F", "I"]
+
+# Static typing gate for the core framework. The TUI subclasses textual's App and
+# reads attributes mypy can't see on the base class — it needs its own typing
+# pass, so it's suppressed here rather than gating CI. Third-party libs ship no
+# stubs, hence ignore_missing_imports.
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "framework.tui.*"
+ignore_errors = true

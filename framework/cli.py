@@ -12,6 +12,7 @@ Read / discover:
   paramify catalog [--json]                    # categories -> fetchers -> fields
   paramify describe <fetcher> [--json]
   paramify ksi [--json]                        # FedRAMP 20x KSI coverage
+  paramify doctor [manifest] [--json]          # preflight: python, CLIs, secrets
   paramify manifests [--json]                  # discovered run manifests
   paramify runs [--output-dir DIR] [--json]    # past runs under an output dir
   paramify evidence <path> [--json]            # read one evidence file
@@ -338,6 +339,49 @@ def ksi_cmd(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
             typer.echo(f"    {u['id']:14s} {', '.join(u['fetchers'])}")
 
 
+@app.command("doctor")
+def doctor_cmd(
+    manifest: Optional[str] = typer.Argument(
+        None, help="Manifest to check secret env vars for (optional)"
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Preflight: Python version, required CLIs on PATH, and (with a manifest) secrets."""
+    root = api.find_repo_root()
+    rep = api.doctor(root, Path(manifest) if manifest else None)
+    if json_out:
+        typer.echo(json.dumps(rep, indent=2))
+        raise typer.Exit(0 if rep["ok"] else 1)
+
+    ok_mark, bad_mark = "✅", "❌"
+    p = rep["python"]
+    typer.echo(f"{ok_mark if p['ok'] else bad_mark} Python {p['version']} (need ≥ {p['required']})")
+
+    if rep["tools"]:
+        heading = "Required CLIs" if rep["tools_required"] else "CLIs for discovered categories"
+        typer.echo(f"\n{heading}:")
+        for t in rep["tools"]:
+            mark = ok_mark if t["present"] else bad_mark
+            where = t["path"] or "not found on PATH"
+            typer.echo(f"  {mark} {t['name']:8s} {where}  ({', '.join(t['categories'])})")
+        if not rep["tools_required"]:
+            typer.echo("  (informational — you only need the CLIs for categories you run)")
+
+    if rep["manifest"]:
+        m = rep["manifest"]
+        typer.echo(f"\nManifest secrets ({m['path']}):")
+        for fr in m["fetchers"]:
+            if not fr["env_refs"]:
+                typer.echo(f"  {ok_mark} {fr['use']}  (no secrets)")
+            elif fr["ok"]:
+                typer.echo(f"  {ok_mark} {fr['use']}  ({', '.join(fr['env_refs'])})")
+            else:
+                typer.echo(f"  {bad_mark} {fr['use']}  missing: {', '.join(fr['missing'])}")
+
+    typer.echo(f"\n{'All good.' if rep['ok'] else 'Issues found — see above.'}")
+    raise typer.Exit(0 if rep["ok"] else 1)
+
+
 @app.command("manifests")
 def manifests_cmd(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
     """List discovered run manifests (manifests/*.yaml + legacy manifest.yaml)."""
@@ -449,8 +493,8 @@ def validate_cmd(
         typer.echo(json.dumps({"ok": not errors, "errors": errors}, indent=2))
         raise typer.Exit(0 if not errors else 1)
     if errors:
-        for e in errors:
-            _err(f"  ERROR  {e}")
+        for err in errors:
+            _err(f"  ERROR  {err}")
         raise typer.Exit(1)
     n = len(m.get("run", {}).get("fetchers", []))
     typer.echo(f"OK  manifest valid; {n} fetcher entries")
@@ -532,8 +576,8 @@ def upload_cmd(
         if json_out:
             typer.echo(json.dumps(preflight, indent=2, default=str))
         else:
-            for e in preflight["errors"]:
-                _err(f"  ERROR  {e}")
+            for err in preflight["errors"]:
+                _err(f"  ERROR  {err}")
         raise typer.Exit(1)
 
     try:
@@ -668,8 +712,8 @@ def _save_and_report(manifest: dict, path: Path, root: Path, json_out: bool, *, 
     typer.echo(f"{verb} {path}")
     if errors:
         _err("  (manifest saved but not yet runnable):")
-        for e in errors:
-            _err(f"    {e}")
+        for err in errors:
+            _err(f"    {err}")
 
 
 @manifest_app.command("init")

@@ -48,8 +48,8 @@ def _registered():
 
 
 EXPECTED_TOP = {
-    "list", "catalog", "describe", "manifests", "runs", "evidence",
-    "validate", "run", "upload", "manifest", "scripts", "tui",
+    "list", "catalog", "describe", "ksi", "doctor", "manifests", "runs",
+    "evidence", "validate", "run", "upload", "manifest", "scripts", "tui",
 }
 EXPECTED_MANIFEST = {
     "init", "new", "add", "remove", "set-config", "set-secret",
@@ -64,6 +64,26 @@ def test_all_expected_commands_registered():
     assert EXPECTED_TOP <= top, f"missing top-level commands: {EXPECTED_TOP - top}"
     assert EXPECTED_MANIFEST <= manifest, f"missing manifest subcommands: {EXPECTED_MANIFEST - manifest}"
     assert EXPECTED_SCRIPTS <= scripts, f"missing scripts subcommands: {EXPECTED_SCRIPTS - scripts}"
+
+
+def test_doctor_json_ok_without_manifest():
+    """Without a manifest, doctor is a Python-version gate; tools are advisory."""
+    result = runner.invoke(app, ["doctor", "--json"])
+    assert result.exit_code == 0, result.output
+    rep = json.loads(result.output)
+    assert rep["python"]["ok"] is True
+    assert rep["ok"] is True
+    assert rep["tools_required"] is False
+    assert rep["manifest"] is None
+
+
+def test_doctor_with_credential_free_demo_manifest():
+    """The demo manifest has no secrets, so doctor passes with a manifest too."""
+    result = runner.invoke(app, ["doctor", "examples/demo.yaml", "--json"])
+    assert result.exit_code == 0, result.output
+    rep = json.loads(result.output)
+    assert rep["tools_required"] is True
+    assert rep["manifest"]["ok"] is True
 
 
 # --------------------------------------------------------------------------- #

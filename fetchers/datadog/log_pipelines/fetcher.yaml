@@ -1,0 +1,27 @@
+name: datadog_log_pipelines
+version: 0.1.0
+description: Retrieves Datadog log processing pipeline configurations to prove defined event types are ingested and processed.
+category: datadog
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: datadog_log_pipelines.json
+
+secrets:
+- name: api_key
+  env: DATADOG_API_KEY
+- name: app_key
+  env: DATADOG_APP_KEY
+- name: base_url
+  env: DATADOG_BASE_URL
+
+evidence_set:
+  reference_id: EVD-DD-LOG-PIPELINES
+  name: Datadog Log Pipelines
+  instructions: 'Calls GET /api/v1/logs/config/pipelines. Extracts pipeline name, type, enabled state, filter query, and processor count. Writes JSON pipeline config list.'

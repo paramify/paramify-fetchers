@@ -13,7 +13,7 @@ caller's push_screen callback maps onto framework.api mutators.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from rich.text import Text
 from textual import events, on

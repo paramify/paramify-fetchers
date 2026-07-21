@@ -446,21 +446,9 @@ What's deferred:
 
 ---
 
-## Workflow: handing off to Claude Code
-
-Implementation work is moving to Claude Code. The repo carries enough context for Claude Code to work without re-explaining the design each session:
-
-- `CLAUDE.md` at the repo root holds the operational summary (decisions, conventions, current state, what's NOT being done yet)
-- `docs/design.md` (this file) holds the full design rationale
-- `framework/schemas/fetcher_schema.json` is the enforceable part of the contract
-
-Claude Code's default behavior is to refactor as it works. For fetcher ports, scope discipline matters: ports are explicitly as-is, with refactoring deferred. The CLAUDE.md and per-task prompts should be explicit about what's out of scope.
-
----
-
 ## Near-term deployment: the containerized bundle
 
-The MVP deployment is the bundle in `deploy/` — a Docker image run on a schedule (compose/cron on a single host; a Kubernetes `CronJob` per cadence in-cluster). The collector runs collect→upload and the pod/container is transient. Secrets are hydrated at startup from the environment (or AWS Secrets Manager when `PARAMIFY_SECRETS_ID` is set); AWS auth uses the ambient credential chain (IRSA / instance role in-cluster, a named profile locally), with optional multi-account assume-role fanout. See [`deploy/README.md`](../deploy/README.md) and [`deploy/k8s/`](../deploy/k8s/).
+The MVP deployment is the bundle in `deploy/` — a Docker image run on a schedule (compose/cron on a single host). The collector runs collect→upload and the container is transient. Secrets are hydrated at startup from the environment (or AWS Secrets Manager when `PARAMIFY_SECRETS_ID` is set); AWS auth uses the ambient credential chain (an instance role / IRSA in cloud, a named profile locally). See [`deploy/README.md`](../deploy/README.md).
 
 Two principles this honors, so the deployment doesn't constrain the eventual framework:
 

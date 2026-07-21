@@ -11,6 +11,8 @@ from rich.console import Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 
+from framework.tui import palette
+
 
 def _fmt_default(value: Any) -> str:
     if value is None:
@@ -27,16 +29,16 @@ def _field_table(title: str, fields: List[dict]) -> RenderableType:
         return Group(heading, Text("  (none)", style="dim"))
 
     table = Table(box=None, pad_edge=False, expand=True, show_edge=False)
-    table.add_column("name", style="cyan", no_wrap=True)
+    table.add_column("name", style=palette.INFO, no_wrap=True)
     table.add_column("type", style="dim")
     table.add_column("req", justify="center")
     table.add_column("default")
-    table.add_column("env var", style="green")
+    table.add_column("env var", style=palette.OK)
     table.add_column("description", style="dim", overflow="fold")
 
     for f in fields:
         required = f.get("required")
-        req_cell = Text("yes", style="yellow") if required else Text("no", style="dim")
+        req_cell = Text("yes", style=palette.WARN) if required else Text("no", style="dim")
         per_target = " ·per-target" if f.get("per_target") else ""
         table.add_row(
             f.get("name", ""),
@@ -52,15 +54,15 @@ def _field_table(title: str, fields: List[dict]) -> RenderableType:
 def fetcher_detail(f: dict) -> RenderableType:
     """Full detail view for one fetcher descriptor."""
     title = Text()
-    title.append(f.get("name", ""), style="bold white")
+    title.append(f.get("name", ""), style=f"bold {palette.FG}")
     if f.get("version"):
         title.append(f"  v{f['version']}", style="dim")
 
     meta = Text()
     meta.append("category: ", style="dim")
-    meta.append(f.get("category") or "—", style="white")
+    meta.append(f.get("category") or "—", style=palette.FG)
     meta.append("    targets: ", style="dim")
-    meta.append("yes" if f.get("supports_targets") else "no", style="white")
+    meta.append("yes" if f.get("supports_targets") else "no", style=palette.FG)
 
     description = Text(f.get("description") or "(no description)", style="italic")
 
@@ -96,7 +98,7 @@ def _env_name(ref: Any) -> str:
 
 def _kv_table(rows: List[tuple]) -> Table:
     table = Table(box=None, pad_edge=False, expand=True, show_edge=False, show_header=False)
-    table.add_column(style="cyan", no_wrap=True)
+    table.add_column(style=palette.INFO, no_wrap=True)
     table.add_column()
     for name, value in rows:
         table.add_row(name, value)
@@ -105,8 +107,8 @@ def _kv_table(rows: List[tuple]) -> Table:
 
 def _status(set_: bool, required: bool) -> Text:
     if set_:
-        return Text("set", style="green")
-    return Text("required — unset", style="yellow") if required else Text("unset", style="dim")
+        return Text("set", style=palette.OK)
+    return Text("required — unset", style=palette.WARN) if required else Text("unset", style="dim")
 
 
 def entry_detail(descriptor: Optional[dict], entry: dict, errors: Optional[List[str]] = None) -> RenderableType:
@@ -114,13 +116,13 @@ def entry_detail(descriptor: Optional[dict], entry: dict, errors: Optional[List[
     use = entry.get("use", "?")
     if descriptor is None:
         return Group(
-            Text(use, style="bold white"),
-            Text("unknown fetcher — not discovered in the catalog", style="yellow"),
+            Text(use, style=f"bold {palette.FG}"),
+            Text("unknown fetcher — not discovered in the catalog", style=palette.WARN),
         )
 
     fanout = descriptor.get("supports_targets")
     header = Text()
-    header.append(use, style="bold white")
+    header.append(use, style=f"bold {palette.FG}")
     header.append("  [fanout]" if fanout else "  [single]", style="dim")
 
     cfg = entry.get("config") or {}
@@ -133,7 +135,7 @@ def entry_detail(descriptor: Optional[dict], entry: dict, errors: Optional[List[
         rows = []
         for s in top_secrets:
             current = _env_name(secs.get(s["name"]))
-            value = Text(f"${{env:{current}}}", style="green") if current else _status(False, True)
+            value = Text(f"${{env:{current}}}", style=palette.OK) if current else _status(False, True)
             rows.append((s["name"], value))
         parts += [Text("secrets", style="bold"), _kv_table(rows), Text()]
 
@@ -143,7 +145,7 @@ def entry_detail(descriptor: Optional[dict], entry: dict, errors: Optional[List[
         rows = []
         for c in config_fields:
             if c["name"] in cfg:
-                rows.append((c["name"], Text(str(cfg[c["name"]]), style="white")))
+                rows.append((c["name"], Text(str(cfg[c["name"]]), style=palette.FG)))
             elif c.get("default") is not None:
                 rows.append((c["name"], Text(f"{c['default']}  (default)", style="dim")))
             else:
@@ -155,21 +157,21 @@ def entry_detail(descriptor: Optional[dict], entry: dict, errors: Optional[List[
         targets = entry.get("targets") or []
         parts.append(Text(f"targets ({len(targets)})", style="bold"))
         if not targets:
-            parts.append(Text("  none — press 't' to add", style="yellow"))
+            parts.append(Text("  none — press 't' to add", style=palette.WARN))
         for i, t in enumerate(targets):
             values = {k: v for k, v in t.items() if k != "secrets"}
             summary = "  ".join(f"{k}={v}" for k, v in values.items()) or "(empty)"
             line = Text(f"  [{i}] ", style="dim")
-            line.append(summary, style="white")
+            line.append(summary, style=palette.FG)
             tsec = t.get("secrets") or {}
             if tsec:
-                line.append("  " + ", ".join(f"{k}→{_env_name(v)}" for k, v in tsec.items()), style="green")
+                line.append("  " + ", ".join(f"{k}→{_env_name(v)}" for k, v in tsec.items()), style=palette.OK)
             parts.append(line)
         parts.append(Text())
 
     if errors:
-        parts.append(Text("issues", style="bold red"))
+        parts.append(Text("issues", style=f"bold {palette.FAIL}"))
         for e in errors:
-            parts.append(Text(f"  ✗ {e}", style="yellow"))
+            parts.append(Text(f"  ✗ {e}", style=palette.WARN))
 
     return Group(*parts)

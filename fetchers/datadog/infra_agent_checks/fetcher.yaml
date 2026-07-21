@@ -1,0 +1,27 @@
+name: datadog_infra_agent_checks
+version: 0.1.0
+description: Retrieves per-host Datadog agent check results to prove configuration evaluation is actively running and passing across the fleet.
+category: datadog
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: datadog_infra_agent_checks.json
+
+secrets:
+- name: api_key
+  env: DATADOG_API_KEY
+- name: app_key
+  env: DATADOG_APP_KEY
+- name: base_url
+  env: DATADOG_BASE_URL
+
+evidence_set:
+  reference_id: EVD-DD-INFRA-CHECKS
+  name: Datadog Infrastructure Agent Checks
+  instructions: 'Calls GET /api/v1/hosts with pagination; extracts meta.agent_checks from each host. Reports check status (ok/warning/critical/unknown) per host. Writes JSON check results.'

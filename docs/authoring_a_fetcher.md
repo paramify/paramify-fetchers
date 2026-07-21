@@ -1,6 +1,6 @@
 # Authoring a Fetcher
 
-**Status:** v0.x — this doc covers writing a *new* fetcher from scratch. For porting an existing script from `paramify/evidence-fetchers`, see [`porting_playbook.md`](porting_playbook.md) instead.
+**Status:** v0.x — this doc covers writing a *new* fetcher from scratch. If you already have a working script you want to port into this repo's contract, see [`porting_playbook.md`](porting_playbook.md) instead.
 
 **See also:** [`design.md`](design.md) for rationale, [`fetcher_contract.md`](fetcher_contract.md) for the contract this fetcher must satisfy, [`framework/schemas/fetcher_schema.json`](../framework/schemas/fetcher_schema.json) for the enforced schema.
 
@@ -8,8 +8,8 @@
 
 ## When to write new vs. port
 
-- **Port** if a working script exists for the data source in `paramify/evidence-fetchers` (see porting playbook).
-- **Write new** if you're building an integration for a tool that isn't in the upstream repo, or if the existing script is fundamentally the wrong shape.
+- **Port** if you already have a working script that collects this evidence (see [`porting_playbook.md`](porting_playbook.md)).
+- **Write new** if you're building an integration from scratch, or if an existing script is fundamentally the wrong shape.
 
 A "new" fetcher follows the same contract as a ported one, but you don't carry forward as-is plumbing — you build to the v0.x pattern from day one.
 

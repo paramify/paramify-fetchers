@@ -1,0 +1,52 @@
+name: aws_guard_duty_findings
+version: 0.1.0
+description: >
+  Lists AWS GuardDuty findings updated within a configurable lookback window
+  (list-findings + get-findings per detector) for downstream vulnerability
+  assessment / issues intake. Complements aws_guard_duty (detector
+  configuration only, no per-finding detail). No detectors, or no findings in
+  the window, is valid evidence — not a failure. Stateless: each run is a
+  fresh windowed snapshot; no local state file is kept between runs.
+category: aws
+
+supports_targets: true
+
+runtime:
+  type: bash
+  entry: fetcher.sh
+
+output:
+  type: json
+  path: aws_guard_duty_findings.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: AWS_DEFAULT_REGION
+    description: Optional. AWS region to collect from; falls back to the ambient region (AWS_REGION / instance) when omitted.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: Optional. AWS named profile for multi-account fanout; falls back to the ambient identity (IRSA / instance role / SSO / env) when omitted.
+
+secrets: []
+
+config_schema:
+  lookback_days:
+    type: integer
+    default: 7
+    env: GUARD_DUTY_FINDINGS_LOOKBACK_DAYS
+    description: Only include findings whose updatedAt falls within this many days of now. Keeps evidence "recent" without a local state file.
+
+evidence_set:
+  reference_id: EVD-GUARD-DUTY-FINDINGS
+  name: GuardDuty Findings
+  instructions: >
+    Script: fetcher.sh. Commands executed: aws guardduty list-detectors, aws
+    guardduty list-findings (with a finding-criteria updatedAt >= now-lookback_days
+    filter), aws guardduty get-findings (expands full finding detail: id,
+    severity, type, title, description, createdAt, updatedAt, resource,
+    region, accountId, service.archived).

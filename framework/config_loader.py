@@ -6,7 +6,7 @@ that starts with `_` (e.g. _shared, _categories, _template).
 
 import json
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import yaml
 from jsonschema import Draft202012Validator
@@ -25,7 +25,7 @@ def _load_schema(repo_root: Path, name: str = "fetcher_schema.json") -> dict:
     return json.loads((repo_root / "framework" / "schemas" / name).read_text())
 
 
-def _parse_config_schema(raw: dict) -> dict:
+def _parse_config_schema(raw: Optional[dict]) -> dict:
     """Parse a config_schema mapping (shared by fetcher + category files)."""
     out = {}
     for field_name, spec in (raw or {}).items():

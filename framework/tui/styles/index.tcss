@@ -1,5 +1,73 @@
 /* TUI styles. Layout + chrome; colors come from the tokyo-night theme. */
 
+/* ---- global widget language (Posting-style) ----
+   Thin $primary-tinted scrollbars; dense one-row inputs and buttons whose
+   focus is an accent left edge (padding swaps for the border so text never
+   shifts); muted-bold table headers. */
+* {
+    scrollbar-color: $primary 10%;
+    scrollbar-color-hover: $primary 80%;
+    scrollbar-color-active: $primary;
+    scrollbar-background: $surface-darken-1;
+    scrollbar-size-vertical: 1;
+}
+*:focus {
+    scrollbar-color: $primary 50%;
+}
+
+Input {
+    height: 1;
+    border: none;
+    padding: 0 1;
+    background: $surface;
+}
+Input:focus {
+    border: none;
+    border-left: wide $primary;
+    padding-left: 0;
+    background: $surface;
+}
+
+/* Flatten Button's tall top/bottom borders in every state (base, hover,
+   active, variants) so buttons sit on one row like the inputs. */
+Button, Button:hover, Button.-active,
+Button.-primary, Button.-primary:hover, Button.-primary.-active,
+Button.-error, Button.-error:hover, Button.-error.-active {
+    border: none;
+}
+Button {
+    height: 1;
+    min-width: 12;
+    padding: 0 2;
+    background: $panel;
+}
+Button.-primary {
+    background: $primary-muted;
+    color: $text-primary;
+}
+Button.-primary:hover {
+    background: $primary-darken-2;
+}
+Button.-error {
+    background: $error-muted;
+    color: $text-error;
+}
+
+DataTable > .datatable--header {
+    background: transparent;
+    color: $text-muted;
+    text-style: bold;
+}
+
+RichLog {
+    background: transparent;
+    padding: 0 1;
+}
+RichLog:focus {
+    border-left: wide $primary;
+    padding-left: 0;
+}
+
 /* ---- shared chrome: header bar, footer hint bar, focus-aware panels ---- */
 #app-header {
     height: auto;
@@ -20,17 +88,42 @@ TabbedContent {
     height: 1fr;
 }
 
-/* A titled box whose border highlights when it (or a child) holds focus. */
+/* A titled box whose border highlights when it (or a child) holds focus.
+   Titles live in the border (border_title, set by each screen) — dim border
+   at rest, full accent + bold title when focused, the Posting .section look. */
 .panel {
-    border: round $panel;
+    border: round $primary 40%;
+    border-title-color: $text-muted;
+    border-title-align: right;
     padding: 0 1;
 }
 .panel:focus-within {
     border: round $primary;
+    border-title-color: $text;
+    border-title-style: bold;
 }
+/* In-content section label (modal right column etc.). */
 .panel-title {
     color: $text-muted;
     text-style: bold;
+}
+
+/* Hatched empty states: tag a .panel with .empty to swap its table/log for
+   the instructional .empty-hint placeholder (Posting's empty-state idiom). */
+.empty-hint {
+    display: none;
+    height: 1fr;
+    color: $text-muted;
+    hatch: right $surface-lighten-1 50%;
+    content-align: center middle;
+    text-align: center;
+    padding: 1 4;
+}
+.panel.empty > .empty-hint {
+    display: block;
+}
+.panel.empty > DataTable, .panel.empty > RichLog {
+    display: none;
 }
 
 /* ---- Catalog ---- */
@@ -60,7 +153,7 @@ ManifestPage {
 
 #manifest-top .inline-label {
     width: auto;
-    padding: 1 1 0 0;
+    padding: 0 1 0 0;
 }
 
 #manifest-output-dir {
@@ -103,7 +196,7 @@ RunPage {
 
 #run-banner {
     width: 1fr;
-    padding: 1 0 0 2;
+    padding: 0 0 0 2;
 }
 
 #run-body {
@@ -134,7 +227,6 @@ EvidencePage {
 
 #evidence-dir {
     width: 1fr;
-    padding-top: 1;
 }
 
 #evidence-body {
@@ -175,7 +267,7 @@ UploadPage {
 
 #upload-banner {
     width: 1fr;
-    padding: 1 0 0 1;
+    padding: 0 0 0 1;
 }
 
 #upload-body {

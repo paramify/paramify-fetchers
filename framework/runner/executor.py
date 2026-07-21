@@ -27,8 +27,7 @@ from framework.contract import (
     PlatformSpec,
     TargetInstance,
 )
-from framework.secret_resolver import resolve, SecretResolutionError
-
+from framework.secret_resolver import SecretResolutionError, resolve
 
 _INHERITED_ENV_VARS = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "USER", "TZ")
 

@@ -2,7 +2,7 @@
 name: create-fetcher
 description: >
   Create a new Paramify evidence fetcher, or port an existing one from
-  paramify/evidence-fetchers. Use when the user wants to add a fetcher,
+  another source. Use when the user wants to add a fetcher,
   integrate a new tool or data source (aws, azure, okta, gitlab, k8s, …),
   or scaffold a fetcher for a category. Runs a short interview, scaffolds to
   the v0.x contract, and verifies the wiring via the runner.
@@ -38,16 +38,11 @@ restate them here.
    test -d fetchers/<category>/<short_name> && echo "EXISTS — ask user" || echo "free"
    ```
 
-3. **Decide port vs new.** Ask: "Is there a working script for this tool in
-   `paramify/evidence-fetchers`?" If the user is unsure and `gh` is available,
-   probe (best-effort — skip silently if `gh` is missing/unauthed):
-   ```bash
-   gh api repos/paramify/evidence-fetchers/contents/fetchers/<category> 2>/dev/null \
-     | grep -i '<short_name>' || echo "no upstream match"
-   ```
-   - **Found upstream → PORT.** Follow `docs/porting_playbook.md` step by step
+3. **Decide port vs new.** Ask: "Do you already have a working script that
+   collects this evidence (in another repo, a local file, etc.)?"
+   - **Yes → PORT.** Follow `docs/porting_playbook.md` step by step
      (it has its own verify gates and anti-patterns). Stop using this file.
-   - **Not found → NET-NEW.** Continue below.
+   - **No → NET-NEW.** Continue below.
 
 ---
 

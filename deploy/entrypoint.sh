@@ -10,7 +10,7 @@ cd /app
 
 # Default upload host if the caller didn't set one. Must be https (the uploader
 # refuses to send the bearer token over cleartext to a non-loopback host).
-export PARAMIFY_API_BASE_URL="${PARAMIFY_API_BASE_URL:-https://stage.paramify.com/api/v0}"
+export PARAMIFY_API_BASE_URL="${PARAMIFY_API_BASE_URL:-https://app.paramify.com/api/v0}"
 
 # Read-only `paramify` subcommands only inspect the local fetcher catalog, so
 # they need no secrets. Skip hydration for them (and for help/empty, which falls

@@ -1,0 +1,29 @@
+# Canonical copy of the "file intake" preset for AWS GuardDuty findings ->
+# Paramify vulnerability assessment (Slack thread w/ Isaac, 2026-07-07):
+# collect recent GuardDuty findings and feed them into Paramify's vuln
+# assessment/issues intake, the same shape as the Wiz-style flow.
+#
+# Copy this to manifests/aws_guard_duty_findings.yaml (gitignored working
+# copy — see .gitignore) to run it, or point `paramify run` at this file
+# directly.
+#
+# Collection only. Ambient AWS credentials (test AWS account, or LocalStack if
+# it turns out to support GuardDuty) — no targets needed for a single-account
+# run; the fetcher picks up whatever AWS_PROFILE/AWS_DEFAULT_REGION/credential
+# chain is active in the shell. For multi-account/region fanout, add explicit
+# targets (see multi_region_aws.yaml in this directory).
+#
+# Run:
+#   .venv/bin/paramify run examples/aws_guard_duty_findings_intake.yaml
+# Then intake into the assessment (separate stage, see
+# uploaders/paramify_issues/README.md — UNVERIFIED endpoint contract, --dry-run
+# first):
+#   .venv/bin/python uploaders/paramify_issues/uploader.py --config examples/issues_intake.yaml --dry-run
+
+run:
+  output_dir: ./evidence
+
+  fetchers:
+    - use: aws_guard_duty_findings
+      config:
+        lookback_days: 7

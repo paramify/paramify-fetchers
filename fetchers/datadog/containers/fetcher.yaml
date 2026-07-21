@@ -1,0 +1,27 @@
+name: datadog_containers
+version: 0.1.0
+description: Retrieves real-time inventory of all running containers across the organization, including image, state, host, and Kubernetes metadata.
+category: datadog
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: datadog_containers.json
+
+secrets:
+- name: api_key
+  env: DATADOG_API_KEY
+- name: app_key
+  env: DATADOG_APP_KEY
+- name: base_url
+  env: DATADOG_BASE_URL
+
+evidence_set:
+  reference_id: EVD-DD-CONTAINERS
+  name: Datadog Containers
+  instructions: 'Calls GET /api/v2/containers with cursor-based pagination. Extracts container name, image, state, host, tags. Writes JSON inventory.'

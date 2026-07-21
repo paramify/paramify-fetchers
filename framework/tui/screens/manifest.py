@@ -19,7 +19,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, DataTable, Input, Static
 
 from framework import api
-from framework.tui import render
+from framework.tui import palette, render
 from framework.tui.components.forms import env_name_from_ref
 from framework.tui.modals import (
     ConfirmModal,
@@ -55,16 +55,17 @@ class ManifestPage(Vertical):
             yield Button("Save", id="btn-save")
         with Horizontal(id="manifest-body"):
             with Vertical(id="manifest-entries-panel", classes="panel"):
-                yield Static("fetchers", classes="panel-title")
                 yield DataTable(id="manifest-entries")
+                yield Static("", id="manifest-empty-hint", classes="empty-hint")
             with VerticalScroll(id="manifest-detail-scroll", classes="panel"):
-                yield Static("detail", classes="panel-title")
                 yield Static(render.empty_detail("No fetcher selected."), id="manifest-detail")
         yield Static(id="manifest-issues")
 
     def on_mount(self) -> None:
         self._selected: Optional[str] = None
         self._errors: List[str] = []
+        self.query_one("#manifest-entries-panel", Vertical).border_title = "fetchers"
+        self.query_one("#manifest-detail-scroll", VerticalScroll).border_title = "detail"
         dt = self.query_one("#manifest-entries", DataTable)
         dt.cursor_type = "row"
         dt.zebra_stripes = True
@@ -101,6 +102,7 @@ class ManifestPage(Vertical):
         dt = self.query_one("#manifest-entries", DataTable)
         if self._manifest is None:
             dt.clear()
+            self._set_empty(f"no manifest loaded — press [bold {palette.ACCENT}]m[/] to pick one")
             self._set_issues(["(no manifest loaded)"])
             return
 
@@ -127,7 +129,7 @@ class ManifestPage(Vertical):
             cset, ctot = self._config_counts(d, e)
             ntargets = len(e.get("targets") or [])
             errs = by_use.get(use, [])
-            status = Text("✓", style="green") if not errs else Text(f"⚠ {len(errs)}", style="yellow")
+            status = palette.pill("✓", "ok") if not errs else palette.pill(f"⚠ {len(errs)}", "warn")
             dt.add_row(
                 use,
                 "fanout" if fanout else "single",
@@ -138,6 +140,12 @@ class ManifestPage(Vertical):
                 key=use,
             )
             row_keys.append(use)
+
+        self._set_empty(
+            None
+            if entries
+            else f"manifest is empty — press [bold {palette.ACCENT}]a[/] to add fetchers"
+        )
 
         # preserve selection across rebuilds
         if row_keys:
@@ -152,6 +160,13 @@ class ManifestPage(Vertical):
 
         self._refresh_detail()
         self._set_issues(self._errors)
+
+    def _set_empty(self, hint: Optional[str]) -> None:
+        """Show the hatched placeholder (with the given message) instead of the
+        entries table, or the table again when hint is None."""
+        if hint:
+            self.query_one("#manifest-empty-hint", Static).update(hint)
+        self.query_one("#manifest-entries-panel", Vertical).set_class(bool(hint), "empty")
 
     def _refresh_detail(self) -> None:
         detail = self.query_one("#manifest-detail", Static)
@@ -169,9 +184,9 @@ class ManifestPage(Vertical):
     def _set_issues(self, errors: List[str]) -> None:
         issues = self.query_one("#manifest-issues", Static)
         if not errors:
-            issues.update(Text("✓ manifest is runnable", style="green"))
+            issues.update(Text("✓ manifest is runnable", style=palette.OK))
             return
-        head = Text(f"{len(errors)} issue(s):  ", style="yellow")
+        head = Text(f"{len(errors)} issue(s):  ", style=palette.WARN)
         head.append("   ·   ".join(errors[:3]), style="dim")
         if len(errors) > 3:
             head.append(f"   (+{len(errors) - 3} more — press p to preview)", style="dim")

@@ -18,9 +18,9 @@ A traced, inspected run. You'll install the CLI from this repo, build a scratch 
 - **No credentials.** Deliberately. Everything in this part runs with `RIPPLING_API_TOKEN=fake`.
 - Comfort reading Python and YAML.
 
-## Four pieces that refuse to know each other
+## The four pieces
 
-The architecture is four pieces, kept deliberately ignorant of one another (`README.md`, "How it runs"):
+The architecture is four pieces kept deliberately separate:
 
 - A **fetcher** — a small script (`fetcher.py` or `fetcher.sh`) that collects from *one* source and writes JSON. It reads everything it needs from environment variables and writes only to `EVIDENCE_DIR`.
 - **`fetcher.yaml`** — the fetcher's self-description: what it's called, what secrets and config it needs, what file it outputs. Ships with the code; customers never edit it.
@@ -41,7 +41,8 @@ flowchart LR
   UP --> PA[Paramify]
 ```
 
-Why so strict? The previous generation of fetchers were freeform scripts, each inventing its own conventions for config, secrets, and output — which is why none of them composed and the central catalog was maintained by hand (`README.md`, "Why the design is strict"; rationale in `docs/design.md`). The fix was one contract, enforced by JSON Schema at discovery time: anything not in the schema is not a thing a fetcher can do. That rigidity is what lets the runner treat all 107 identically.
+> [!ASIDE]
+> For an interactive step-through of this pipeline — each stage highlighted with what it reads, does, and produces — open [`docs/diagrams/run-pipeline.html`](../../diagrams/run-pipeline.html) in your browser.
 
 The contract is abstract until you've watched it execute. Install the CLI and let's count what it discovers.
 
@@ -341,9 +342,8 @@ This part was researched directly from the repository working tree (branch `main
 
 **Repository docs**
 
-1. `README.md` — the four-piece architecture, the strictness rationale, the new-fetcher path, and the smoke-test pattern.
-2. `CLAUDE.md` — current v0.x state, per-category fetcher counts, accepted interim violations, and the not-built-yet list.
-3. `docs/design.md` / `docs/config_injection_design.md` — design rationale and the config/auth flow (referenced; read the originals for depth).
+1. `README.md` — the four-piece architecture, the strictness rationale, and the smoke-test pattern.
+2. `docs/design.md` / `docs/config_injection_design.md` — design rationale and the config/auth flow (referenced; read the originals for depth).
 
 **Code read directly**
 

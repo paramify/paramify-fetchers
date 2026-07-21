@@ -1,0 +1,44 @@
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1272 1589" width="1272" height="1589">
+	<title>header-logo-dark-svg</title>
+	<defs>
+		<clipPath clipPathUnits="userSpaceOnUse" id="cp1">
+			<path d="m-10.44 0h8396.73v1588.67h-8396.73z"/>
+		</clipPath>
+		<linearGradient id="g1" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(-631.364,-316.068,105.623,-210.989,1266.698,474.952)">
+			<stop offset="0" stop-color="#4500b6"/>
+			<stop offset="1" stop-color="#6100ff"/>
+		</linearGradient>
+		<linearGradient id="g2" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(-631.364,316.07,-105.622,-210.984,1266.698,1113.717)">
+			<stop offset="0" stop-color="#4500b6"/>
+			<stop offset="1" stop-color="#6100ff"/>
+		</linearGradient>
+		<linearGradient id="g3" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(631.363,-316.068,105.624,210.989,4.565,474.952)">
+			<stop offset="0" stop-color="#6100ff"/>
+			<stop offset="1" stop-color="#4500b6"/>
+		</linearGradient>
+		<linearGradient id="g4" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(631.363,316.07,-105.622,210.984,4.565,1113.717)">
+			<stop offset="0" stop-color="#6100ff"/>
+			<stop offset="1" stop-color="#4500b6"/>
+		</linearGradient>
+		<linearGradient id="g5" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(-683.229,-342.062,105.672,-211.068,974.59,964.002)">
+			<stop offset="0" stop-color="#6100ff"/>
+			<stop offset="1" stop-color="#4500b6"/>
+		</linearGradient>
+	</defs>
+	<style>
+		.s0 { fill: url(#g1) } 
+		.s1 { fill: url(#g2) } 
+		.s2 { fill: url(#g3) } 
+		.s3 { fill: url(#g4) } 
+		.s4 { fill: url(#g5) } 
+	</style>
+	<g id="Clip-Path" clip-path="url(#cp1)">
+		<g id="Layer">
+			<path id="Layer" class="s0" d="m635.6 318.4l635.6 317.8v-318.4l-635.6-317.8z"/>
+			<path id="Layer" class="s1" d="m635.6 1270.2l635.6-317.7v318.4l-635.6 317.8z"/>
+			<path id="Layer" class="s2" d="m635.6 318.4l-635.5 317.8v-318.4l635.5-317.8z"/>
+			<path id="Layer" class="s3" d="m635.6 1270.2l-635.5-317.7v318.4l635.5 317.8z"/>
+			<path id="Layer" class="s4" d="m158.9 715.1l635 317.6 318.3-159.3-634.8-317.3z"/>
+		</g>
+	</g>
+</svg>

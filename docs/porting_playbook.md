@@ -3,6 +3,8 @@
 **Status:** Active procedure for v0.x ports from `paramify/evidence-fetchers`
 **Last updated:** 2026-06-01
 
+> **Internal note:** This is the Paramify team's guide for migrating fetchers from the original `paramify/evidence-fetchers` repository. The pre-flight commands in the first section require access to that private repo. External contributors writing a new fetcher from scratch should start with [`authoring_a_fetcher.md`](authoring_a_fetcher.md) instead — the exit-code conventions, code skeletons, and AWS fanout patterns in this guide are still useful reference for anyone porting any existing script into the new format.
+
 This is the step-by-step procedure for porting an existing fetcher from the old
 `paramify/evidence-fetchers` repo into this repo's new layout. The intent is
 **port-as-is**: change as little as possible about how each fetcher *behaves*,
