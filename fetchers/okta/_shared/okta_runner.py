@@ -52,7 +52,13 @@ def run(collect: CollectFn, *, output_filename: str, logger_name: str) -> int:
     if "--skip-check" not in sys.argv:
         client.run_compatibility_check()
 
-    evidence = collect(client)
+    # A hard failure mid-collection (e.g. a 401 raised by the client) should exit
+    # non-zero with a logged reason, not crash with an unhandled traceback.
+    try:
+        evidence = collect(client)
+    except Exception:
+        logger.exception("Evidence collection failed")
+        return 1
 
     output_path = output_dir / output_filename
     with open(output_path, "w") as fh:

@@ -33,16 +33,23 @@ ADMIN_ACTIVITY_LOOKBACK_DAYS = int(os.environ.get("OKTA_ADMIN_ACTIVITY_LOOKBACK_
 # role-assignment check below. No org-specific data — override per org if needed.
 _DEFAULT_ADMIN_GROUP_NAMES = ["Okta Administrators", "Administrators", "Super Admin", "Org Admin", "Admin"]
 
-# Okta system-log events that only an administrator can generate.
+# Okta system-log events that only an administrator can generate. Kept broad so
+# the log scan corroborates admins whose privilege isn't currently role-assigned
+# (e.g. granted-then-revoked, or acting via a service integration).
 _ADMIN_EVENT_TYPES = [
     "user.admin.privilege.grant",
     "user.admin.privilege.revoke",
     "user.admin.role.assign",
     "user.admin.role.unassign",
+    "system.config.create",
     "system.config.update",
+    "system.config.delete",
     "policy.rule.create",
     "policy.rule.update",
     "policy.rule.delete",
+    "policy.lifecycle.create",
+    "user.lifecycle.create",
+    "group.lifecycle.create",
 ]
 
 
@@ -88,34 +95,76 @@ def collect(client: OktaAPIClient) -> Dict:
     admins: List[Dict] = []
     admin_user_ids: set = set()
 
-    # --- Method 1 (authoritative): assigned admin roles ---------------------
-    # Okta's roles API is the source of truth for who holds admin privilege and
-    # what kind. This replaces the previous hard-coded email/name allowlists.
-    logger.info("Checking assigned admin roles for %d active users...", len(all_users))
+    # --- Methods 1-2 (authoritative): admin ROLE assignments ----------------
+    # Okta's role API is the source of truth for who holds admin privilege, and
+    # roles are assigned two non-overlapping ways — the endpoints must be unioned
+    # or group-assigned admins are missed entirely:
+    #   * directly to a user          -> GET /users/{id}/roles
+    #   * to a group (members inherit) -> GET /groups/{id}/roles
+    # This replaces the previous hard-coded email/name allowlists.
+    role_map: Dict[str, Dict] = {}  # user_id -> {"roles": [...], "sources": [...]}
+
+    def _record_roles(user_id: str, roles: List[Dict], source: str) -> None:
+        slot = role_map.setdefault(user_id, {"roles": [], "sources": []})
+        slot["roles"].extend(roles)
+        slot["sources"].append(source)
+
+    logger.info("Checking directly-assigned admin roles for %d active users...", len(all_users))
     for user in all_users:
         try:
             roles = client.list_user_roles(user["id"])
         except Exception as exc:
             logger.warning("Could not read roles for %s: %s", _profile(user).get("login"), exc)
             continue
-        if not roles:
+        if roles:
+            _record_roles(user["id"], roles, "direct")
+
+    logger.info("Checking group-assigned admin roles...")
+    groups = client.list_groups()
+    for group in groups:
+        try:
+            group_roles = client.list_group_roles(group["id"])
+        except Exception as exc:
+            logger.warning("Could not read roles for group %s: %s", _profile(group).get("name"), exc)
             continue
-        role_types = [r.get("type") for r in roles if r.get("type")]
+        if not group_roles:
+            continue
+        group_name = _profile(group).get("name", "")
+        try:
+            members = client.list_group_members(group["id"])
+        except Exception as exc:
+            logger.warning("Could not read members of %s: %s", group_name, exc)
+            continue
+        for member in members:
+            _record_roles(member["id"], group_roles, f"group:{group_name}")
+
+    # One admin entry per user holding any admin role (direct or group-inherited).
+    users_by_id = {u["id"]: u for u in all_users}
+    for user_id, info in role_map.items():
+        user = users_by_id.get(user_id)
+        if user is None:  # group member who isn't in the active-user list
+            try:
+                user = client.get_user(user_id)
+            except Exception:
+                user = {"id": user_id, "profile": {}}
+        role_types = [r.get("type") for r in info["roles"] if r.get("type")]
         is_super = "SUPER_ADMIN" in role_types
         admin_type = "SUPER_ADMIN" if is_super else (role_types[0] if role_types else "ADMIN")
-        admin_user_ids.add(user["id"])
+        admin_user_ids.add(user_id)
         admins.append(_admin_entry(
             user,
             "assigned_admin_role",
-            roles=[{"type": r.get("type"), "label": r.get("label"), "status": r.get("status")} for r in roles],
+            roles=[{"type": r.get("type"), "label": r.get("label"), "status": r.get("status")} for r in info["roles"]],
+            role_sources=info["sources"],
             is_super_admin=is_super,
             admin_type=admin_type,
         ))
 
-    # --- Method 2 (fallback): membership in admin-named groups --------------
+    # --- Method 3 (fallback): membership in admin-named groups --------------
+    # Weaker heuristic; still catches admin groups when the role API is
+    # restricted for this token. Reuses the groups already fetched above.
     logger.info("Checking admin-named groups (fallback)...")
     admin_group_names = _admin_group_names()
-    groups = client.list_groups()
     for group in groups:
         group_name = _profile(group).get("name", "")
         group_type = group.get("type", "")

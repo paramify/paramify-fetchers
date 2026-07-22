@@ -337,6 +337,15 @@ class OktaAPIClient:
         """List group rules (dynamic membership)."""
         return self._paginated_get("/groups/rules")
 
+    def list_group_roles(self, group_id: str) -> List[Dict]:
+        """List admin roles assigned to a group.
+
+        Distinct from ``list_user_roles``: the per-user endpoint returns only
+        directly-assigned roles, so group-inherited admin privilege is only
+        visible here.
+        """
+        return self._paginated_get(f"/groups/{group_id}/roles")
+
     # --- Applications ---
     def list_applications(self) -> List[Dict]:
         """List all applications."""

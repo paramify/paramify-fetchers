@@ -107,6 +107,47 @@ def _okta_python_sources():
     return list(OKTA_ROOT.rglob("*.py"))
 
 
+class _GroupRoleStub(_StubOktaClient):
+    """Stub org: one active user who is Super Admin ONLY via a group role
+    assignment (no directly-assigned role, group not named 'admin')."""
+
+    _USER = {"id": "u1", "status": "ACTIVE", "profile": {"login": "a@example.com", "email": "a@example.com", "firstName": "A", "lastName": "B"}}
+    _GROUP = {"id": "g1", "type": "OKTA_GROUP", "profile": {"name": "Platform Team"}}
+
+    def list_users(self, *a, **k):
+        return [self._USER]
+
+    def list_user_roles(self, *a, **k):
+        return []  # no DIRECT role — the whole point
+
+    def list_groups(self, *a, **k):
+        return [self._GROUP]
+
+    def list_group_roles(self, group_id, *a, **k):
+        return [{"type": "SUPER_ADMIN", "label": "Super Administrator", "status": "ACTIVE"}] if group_id == "g1" else []
+
+    def list_group_members(self, group_id, *a, **k):
+        return [self._USER] if group_id == "g1" else []
+
+    def get_user(self, user_id, *a, **k):
+        return self._USER
+
+
+def test_least_privilege_detects_group_assigned_super_admin():
+    """Regression guard: a super admin assigned via GROUP role (invisible to
+    the per-user /roles endpoint) must still be detected and bucketed."""
+    module = _load_fetcher_module("least_privilege")
+    evidence = module.collect(_GroupRoleStub())
+
+    admins = evidence["data"]["admin_users"]
+    assert any(a["id"] == "u1" for a in admins), "group-assigned super admin was not detected"
+    u1 = next(a for a in admins if a["id"] == "u1")
+    assert u1["is_super_admin"] is True and u1["admin_type"] == "SUPER_ADMIN"
+    assert u1["detection_method"] == "assigned_admin_role"
+    assert any(s.startswith("group:") for s in u1["role_sources"])
+    assert evidence["summary"]["super_admin_count"] >= 1
+
+
 def test_no_hardcoded_pii_in_okta_sources():
     offenders = []
     for py in _okta_python_sources():
