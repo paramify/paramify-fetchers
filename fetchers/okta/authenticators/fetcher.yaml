@@ -6,8 +6,8 @@ category: okta
 supports_targets: false
 
 runtime:
-  type: bash
-  entry: fetcher.sh
+  type: python
+  entry: fetcher.py
 
 output:
   type: json
