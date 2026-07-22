@@ -24,7 +24,6 @@ issues and deviations.
 
 | Env var | Required | Purpose |
 |---|---|---|
-| `PARAMIFY_API_TOKEN` | yes | API token (read scope). Falls back to `PARAMIFY_UPLOAD_API_TOKEN`. |
 | `PARAMIFY_PROJECT_ID` | yes | Project UUID to scope the report. |
 | `PARAMIFY_CERT_PACKAGE_URI` | yes | Certification Package Overview URI written into each report. |
 | `PARAMIFY_REPORT_FROM` | yes | ISO start of the report period. |
