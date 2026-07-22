@@ -10,6 +10,27 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Added
+
+- Central `validators/` registry: validators are now first-class, deduplicated
+  objects (`validators/<category>/<key>.yaml`, one file each), validated against
+  the new `framework/schemas/validator_schema.json`. Each validator carries the
+  Paramify fields as native YAML and owns its fetcher link via an
+  `evidence_sets` list of `reference_id`s, so a validator shared across fetchers
+  is one file — never a copy. See [`docs/validators_design.md`](docs/validators_design.md).
+- Validator sync (`uploaders/paramify_validators/`, `paramify validators sync`,
+  and `paramify upload --with-validators`): pushes registry validators to
+  Paramify (`POST /validators`) and CONNECTs them to evidence sets. **Create-or-skip
+  by default** — a customer's tuned validator is never overwritten unless
+  `--update` is passed; `--dry-run` previews. Per-instance ids live in a
+  gitignored lock, not the shared registry.
+
+### Removed
+
+- The inline `validators` block on `fetcher.yaml` (shipped optional in
+  0.2.0-beta, populated by no fetcher). Validators moved to the registry above;
+  `fetcher.yaml` keeps its `evidence_set` identity and `ksis`.
+
 ## [0.2.1-beta] - 2026-07-10
 
 ### Changed

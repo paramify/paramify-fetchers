@@ -41,6 +41,29 @@ class EvidenceSet:
 
 
 @dataclass
+class Validator:
+    """A validator from the central validators/ registry (validators/<cat>/<key>.yaml).
+
+    A first-class, deduplicated object: defined once, it names every evidence set
+    it applies to via `evidence_sets` (reference_ids). `key` is the stable
+    repo-side identity; the Paramify id is resolved per instance at sync time and
+    never stored here. See framework/schemas/validator_schema.json and
+    docs/validators_design.md.
+    """
+    key: str
+    name: str
+    type: str
+    statement: str
+    evidence_sets: List[str]
+    regex: Optional[str] = None
+    rules_summary: Optional[str] = None
+    role: Optional[str] = None
+    validation_rules: List[Any] = field(default_factory=list)
+    attestation_rules: List[Any] = field(default_factory=list)
+    path: Optional[Path] = None
+
+
+@dataclass
 class ConfigField:
     """A non-secret config knob a fetcher (or platform) accepts.
 

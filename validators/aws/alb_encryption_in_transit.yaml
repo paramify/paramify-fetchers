@@ -1,0 +1,19 @@
+key: alb_encryption_in_transit
+name: ALB Encryption In Transit
+type: AUTOMATED
+role: configuration
+statement: Ensures that all application load balancers are encrypting data in transit.
+
+regex: '"alb_total":\s*(\d+)[\s\S]*?"alb_encrypted":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+
+# Applies to the automated Load Balancer Encryption Status set (the
+# aws_load_balancer_encryption_status fetcher). In Paramify this validator is
+# also attached to the "Non-automated Load Balancer Encryption Status" sibling
+# set; add its reference_id here once that manual set exists.
+evidence_sets:
+  - EVD-LB-ENC-STATUS
