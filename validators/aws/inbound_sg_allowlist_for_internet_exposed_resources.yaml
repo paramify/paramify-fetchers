@@ -1,0 +1,15 @@
+key: inbound_sg_allowlist_for_internet_exposed_resources
+name: Inbound SG Allowlist for Internet-Exposed Resources
+type: AUTOMATED
+statement: Only approved security groups permit inbound access from the internet (0.0.0.0/0).
+regex: '"GroupId":\s*"(sg-(?!0f649e71f59493c0b|0a1cf74d01b9905cc|05d1ce4f553cabea6|0380f6ce164b81144|040ba67f2c17b696e)[^"]*)"[^}]*"Rules":\s*\[[^\]]*"Direction":\s*"INBOUND RULES"[^}]*"CIDRs":\s*"([^"]*0\.0\.0\.0\/0[^"]*)"'
+rules_summary: MATCH_COUNT EQUALS '0'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-SECURITY-GROUPS

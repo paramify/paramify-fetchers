@@ -1,0 +1,15 @@
+key: rds_backups_enabled
+name: RDS Backups Enabled
+type: AUTOMATED
+statement: RDS instances have automated backups enabled.
+regex: '"Type":\s*"RDS_Backup"[\s\S]*?"BackupEnabled":\s*(true)'
+rules_summary: MATCH_COUNT EQUALS '3'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '3'
+evidence_sets:
+- EVD-BACKUP-VALIDATION

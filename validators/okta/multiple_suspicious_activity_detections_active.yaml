@@ -1,0 +1,44 @@
+key: multiple_suspicious_activity_detections_active
+name: Multiple suspicious-activity detections active
+type: AUTOMATED
+statement: Multiple automated detection mechanisms are active, including Behavior Detection with at least one active rule.
+regex: '"summary"\s*:\s*\{(?=[\s\S]*?"security_events_last_30_days"\s*:\s*(\d+))(?=[\s\S]*?"failed_auth_attempts"\s*:\s*(\d+))(?=[\s\S]*?"active_rules"\s*:\s*(\d+))(?=[\s\S]*?"mechanisms_configured"\s*:\s*(\d+))(?=[\s\S]*?"mechanisms"\s*:\s*\[[\s\S]*?"(Behavior Detection)"[\s\S]*?\])[\s\S]*?\}'
+rules_summary: MATCH_GROUP[4] GREATER_THAN_OR_EQUAL_TO '2' ; MATCH_GROUP[3] GREATER_THAN_OR_EQUAL_TO '1' ; MATCH_GROUP[5] EQUALS 'Behavior Detection' ; MATCH_GROUP[1] GREATER_THAN_OR_EQUAL_TO '0' ; MATCH_GROUP[2] GREATER_THAN_OR_EQUAL_TO '0'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 4
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '2'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 3
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 5
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: Behavior Detection
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-OKTA-KSI-IAM-06

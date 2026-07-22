@@ -1,0 +1,23 @@
+key: ebs_snapshots_completed_successfully
+name: EBS Snapshots Completed Successfully
+type: AUTOMATED
+statement: EBS snapshots complete successfully.
+regex: '"State":\s*"(completed)"[\s\S]*?"Progress":\s*"(100%)"'
+rules_summary: MATCH_GROUP[1] EQUALS 'completed' ; MATCH_GROUP[2] EQUALS '100%'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: completed
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: 100%
+evidence_sets:
+- EVD-EBS-SNAPSHOT

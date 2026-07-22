@@ -1,0 +1,23 @@
+key: load_balancers_using_fips_tls_1_3
+name: Load Balancers using FIPS & TLS 1.3
+type: AUTOMATED
+statement: Ensures that all load balancers are using TLS 1.3 for encryption
+regex: \s*"ssl_policy":\s*"([\s\S]*?)"
+rules_summary: MATCH_GROUP[1] CONTAINS 'TLS13' ; MATCH_GROUP[1] CONTAINS 'FIPS'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: TLS13
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: FIPS
+evidence_sets:
+- EVD-LB-ENC-STATUS

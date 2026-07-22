@@ -29,7 +29,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-TPR-04
+  - KSI-CMT-VTD
+  - KSI-PIY-RSD
 
 evidence_set:
   reference_id: EVD-ECR-IMAGE-SCANNING

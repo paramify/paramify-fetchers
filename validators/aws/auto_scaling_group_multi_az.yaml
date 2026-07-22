@@ -1,0 +1,16 @@
+key: auto_scaling_group_multi_az
+name: Auto Scaling Group Multi-AZ
+type: AUTOMATED
+statement: Auto Scaling groups span multiple availability zones.
+regex: AvailabilityZones":\s*\[[\s\S]*?"us-gov-west-1([a-c])",[\s]*"us-gov-west-1([a-c])"
+rules_summary: MATCH_GROUP[1] NOT_EQUALS MATCH_GROUP[2]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: NOT_EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+evidence_sets:
+- EVD-AUTO-SCALING-HA

@@ -1,0 +1,16 @@
+key: all_console_users_have_mfa
+name: All console users have MFA
+type: AUTOMATED
+statement: Every SentinelOne console user has two-factor authentication enabled.
+regex: '"total_user_count":\s*(\d+)[\s\S]*?"two_factor_authentication_enabled_count":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+evidence_sets:
+- EVD-S1-USER

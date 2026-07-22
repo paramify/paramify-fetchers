@@ -1,0 +1,11 @@
+key: annual_pen_test_completed
+name: Annual Pen Test Completed
+type: ATTESTATION
+statement: Has an annual pen test been completed?
+attestation_rules:
+- question: Has an annual pen test been completed?
+  yesDisposition: PASS
+  noDisposition: FAIL
+  nestedRules: []
+evidence_sets:
+- EVD-PEN-TEST-MANUAL

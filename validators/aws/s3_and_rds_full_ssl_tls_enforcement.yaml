@@ -1,0 +1,37 @@
+key: s3_and_rds_full_ssl_tls_enforcement
+name: S3 and RDS Full SSL/TLS Enforcement
+type: AUTOMATED
+statement: Every evaluated S3 bucket and RDS instance fully enforces encrypted SSL/TLS client connections, rejecting non-TLS traffic across all evaluated resources.
+regex: '"summary"\s*:\s*\{[\s\S]*?"s3_total"\s*:\s*(\d+)[\s\S]*?"s3_ssl_enforced"\s*:\s*(\d+)[\s\S]*?"rds_total"\s*:\s*(\d+)[\s\S]*?"rds_ssl_enforced"\s*:\s*(\d+)[\s\S]*?\}'
+rules_summary: MATCH_GROUP[1] GREATER_THAN '0' ; MATCH_GROUP[2] EQUALS MATCH_GROUP[1] ; MATCH_GROUP[3] GREATER_THAN '0' ; MATCH_GROUP[4] EQUALS MATCH_GROUP[3]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 1
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 3
+  criteria: GREATER_THAN
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 4
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 3
+evidence_sets:
+- EVD-AWS-SSL-ENFORCEMENT

@@ -1,0 +1,7 @@
+key: authorization_letter_currency
+name: Authorization Letter Currency
+type: ATTESTATION
+statement: Confirms the uploaded authorization letter is current (not expired), matches the CSO name and impact level in the program, and that any ongoing requirements or conditions stated in the letter are being tracked as issues.
+attestation_rules: []
+evidence_sets:
+- EVD-FEDRAMP-ATO-LETTER-MANUAL

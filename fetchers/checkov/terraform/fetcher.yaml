@@ -103,6 +103,15 @@ config_schema:
     env: CHECKOV_DEEP_ANALYSIS
     description: Plan-mode only — combine plan-file graph with the source files.
 
+ksis:
+  - KSI-CMT-RMV
+  - KSI-CMT-VTD
+  - KSI-CNA-DFP
+  - KSI-CNA-IBP
+  - KSI-MLA-EVC
+  - KSI-PIY-RSD
+  - KSI-SVC-EIS
+
 evidence_set:
   reference_id: EVD-CHECKOV-TERRAFORM
   name: Checkov Terraform IaC Scan

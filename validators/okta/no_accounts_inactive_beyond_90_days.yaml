@@ -1,0 +1,30 @@
+key: no_accounts_inactive_beyond_90_days
+name: No accounts inactive beyond 90 days
+type: AUTOMATED
+statement: Every active account has signed in within the last 90 days (no account inactive 90+ days), at 100% account health.
+regex: '"summary"\s*:\s*\{(?=[\s\S]*?"active_accounts"\s*:\s*(\d+))(?=[\s\S]*?"account_health_percentage"\s*:\s*([0-9]+(?:\.[0-9]+)?))(?=[\s\S]*?"inactive_90_plus_days"\s*:\s*(\d+))[\s\S]*?\}'
+rules_summary: MATCH_GROUP[1] GREATER_THAN '0' ; MATCH_GROUP[2] EQUALS '100.0' ; MATCH_GROUP[3] EQUALS '0'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '100.0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 3
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-OKTA-KSI-IAM-07

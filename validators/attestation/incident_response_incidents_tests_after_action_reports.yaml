@@ -1,0 +1,27 @@
+key: incident_response_incidents_tests_after_action_reports
+name: Incident Response (Incidents, Tests, & After Action Reports)
+type: ATTESTATION
+statement: This validator confirms that the organization conducts annual IR tests, documenting specific scenarios (e.g., SentinelOne malware simulation) and tracking "After Action Items" (e.g., Slack alert customization) for remediation. It also verifies the Incident Response Plan is aligned with NIST SP 800-61 Rev. 2 and reviewed annually.
+attestation_rules:
+- question: Does the organization conduct a formal Incident Response Test at least annually and document the results in an After Action Report (AAR)?
+  yesDisposition: BASED_ON_NESTED
+  noDisposition: FAIL
+  nestedRules:
+  - question: Was the most recent "GovCloud Incident Response Test" conducted within the last 12 months to assess coordination and notification processes?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+  - question: Did the test utilize a specific security scenario (e.g., malware identification via SentinelOne) to validate the "Detection" and "Analysis" phases of the IR Plan?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+  - question: Were specific "Learnings" and "After Action Items" (e.g., customizing Slack alerts, updating notification emails) documented and assigned to owners?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+  - question: Is the Incident Response Plan (IRP) reviewed annually (e.g., Sept 2024) and aligned with NIST SP 800-61 Rev. 2 guidelines?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+evidence_sets:
+- EVD-INCIDENT-RESPONSE-MANUAL

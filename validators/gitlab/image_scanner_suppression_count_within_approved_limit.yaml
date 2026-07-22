@@ -1,0 +1,15 @@
+key: image_scanner_suppression_count_within_approved_limit
+name: Image Scanner Suppression Count Within Approved Limit
+type: AUTOMATED
+statement: The number of suppressed vulnerabilities in the image scanner ignore list does not exceed the approved total.
+regex: '\\n- vulnerability: ((?:CVE|GHSA)-[\w-]+)'
+rules_summary: MATCH_COUNT LESS_THAN_OR_EQUAL_TO '115'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: LESS_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '115'
+evidence_sets:
+- EVD-GITLAB-CICD-CONFIG

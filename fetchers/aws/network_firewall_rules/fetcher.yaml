@@ -29,8 +29,9 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-CNA-01
-  - KSI-CNA-03
+  - KSI-CNA-MAT
+  - KSI-CNA-RNT
+  - KSI-CNA-ULN
 
 evidence_set:
   reference_id: EVD-NETWORK-FIREWALL

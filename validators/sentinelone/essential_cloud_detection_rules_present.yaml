@@ -1,0 +1,15 @@
+key: essential_cloud_detection_rules_present
+name: Essential cloud detection rules present
+type: AUTOMATED
+statement: Custom detection rules exist for essential high-risk cloud events (root login, disabling logging, RDS modification, S3 encryption deletion).
+regex: '"s1ql":\s*"dataSource\.name = ''CloudTrail'' and (?:activity_source = ''signin\.amazonaws\.com'' and activity_name = ''ConsoleLogin'' and actor\.user\.type = ''Root'' and unmapped\.responseElements\.ConsoleLogin = ''(?:Failure|Success)''|activity_source = ''cloudtrail\.amazonaws\.com'' and activity_name = ''StopLogging''|activity_source = ''iam\.amazonaws\.com'' and activity_name = ''CreateAccessKey''|activity_source = ''rds\.amazonaws\.com'' and activity_name = ''ModifyDBInstance''|activity_source = ''s3\.amazonaws\.com'' and activity_name = ''DeleteBucketEncryption''|activity_source = ''iam\.amazonaws\.com'' and activity_name in \(''CreateLoginProfile'', ''UpdateLoginProfile''\) and unmapped\.requestParameters\.passwordResetRequired = false)"'
+rules_summary: MATCH_COUNT EQUALS '7'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '7'
+evidence_sets:
+- EVD-S1-CLOUD-RULE

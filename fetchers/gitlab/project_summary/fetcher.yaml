@@ -37,7 +37,7 @@ secrets:
   per_target: true
 
 ksis:
-  - KSI-PIY-01
+  - KSI-CMT-RMV
 
 evidence_set:
   reference_id: EVD-GITLAB-PROJECT-SUMMARY

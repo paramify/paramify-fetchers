@@ -1,0 +1,16 @@
+key: rds_ssl_enforcement_status
+name: RDS SSL Enforcement Status
+type: AUTOMATED
+statement: Validator to ensure RDS databases are enforcing SSL
+regex: '"rds_total":\s*(\d+)[\s\S]*?"rds_ssl_enforced":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+evidence_sets:
+- EVD-AWS-SSL-ENFORCEMENT

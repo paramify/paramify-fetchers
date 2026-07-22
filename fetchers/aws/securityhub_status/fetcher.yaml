@@ -29,8 +29,11 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-MLA-01
-  - KSI-MLA-06
+  - KSI-CNA-IBP
+  - KSI-MLA-EVC
+  - KSI-MLA-OSM
+  - KSI-MLA-RVL
+  - KSI-SVC-EIS
 
 evidence_set:
   reference_id: EVD-SECURITYHUB

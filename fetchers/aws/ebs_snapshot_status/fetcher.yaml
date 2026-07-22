@@ -29,7 +29,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-RPL-03
+  - KSI-RPL-ABO
+  - KSI-SVC-SIN
 
 evidence_set:
   reference_id: EVD-EBS-SNAPSHOT

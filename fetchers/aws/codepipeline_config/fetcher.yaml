@@ -29,7 +29,9 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-CMT-03
+  - KSI-CMT-RMV
+  - KSI-CMT-VTD
+  - KSI-PIY-RSD
 
 evidence_set:
   reference_id: EVD-CODEPIPELINE-CONFIG

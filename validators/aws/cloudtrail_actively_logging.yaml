@@ -1,0 +1,15 @@
+key: cloudtrail_actively_logging
+name: CloudTrail Actively Logging
+type: AUTOMATED
+statement: At least one CloudTrail trail exists and is actively logging.
+regex: '"IsLogging":\s*(true)'
+rules_summary: MATCH_COUNT GREATER_THAN_OR_EQUAL_TO '1'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+evidence_sets:
+- EVD-CLOUDTRAIL-CONFIG

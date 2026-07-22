@@ -1,0 +1,15 @@
+key: required_cloud_log_sources_ingested
+name: Required cloud log sources ingested
+type: AUTOMATED
+statement: Detection ingests logs from all required cloud sources (K8s agents, VPC Flow, load balancer, S3 access, CloudTrail).
+regex: '"(SentinelOne|AWS VPC Flow|AWS Load Balancer|S3|asset|CloudTrail)"\s*,\s*(\d+)'
+rules_summary: MATCH_COUNT EQUALS '6'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '6'
+evidence_sets:
+- EVD-S1-CLOUD-RULE

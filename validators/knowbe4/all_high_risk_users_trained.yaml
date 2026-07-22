@@ -1,0 +1,16 @@
+key: all_high_risk_users_trained
+name: All high-risk users trained
+type: AUTOMATED
+statement: Every high-risk-role user has completed their required role-specific training.
+regex: '"total_high_risk_users":\s*(\d+)[\s\S]*?"completed_training":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+evidence_sets:
+- EVD-HIGH-RISK-TRAINING

@@ -1,0 +1,37 @@
+key: all_users_enrolled_in_security_key_mfa
+name: All users enrolled in security-key MFA
+type: AUTOMATED
+statement: All users are enrolled in phishing-resistant MFA, with security keys among the permitted authenticators.
+regex: '"summary"\s*:\s*\{(?=[\s\S]*?"phishing_resistant_authenticator_types_count"\s*:\s*(\d+))(?=[\s\S]*?"users_with_phishing_resistant_mfa"\s*:\s*(\d+))(?=[\s\S]*?"total_users"\s*:\s*(\d+))(?=[\s\S]*?"phishing_resistant_mfa_percentage"\s*:\s*([0-9]+(?:\.[0-9]+)?))(?=[\s\S]*?"phishing_resistant_types"\s*:\s*\[[^\]]*?"(security_key)"[^\]]*\])[\s\S]*?\}'
+rules_summary: MATCH_GROUP[1] GREATER_THAN_OR_EQUAL_TO '1' ; MATCH_GROUP[2] EQUALS MATCH_GROUP[3] ; MATCH_GROUP[4] GREATER_THAN_OR_EQUAL_TO '100' ; MATCH_GROUP[5] EQUALS 'security_key'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 3
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 4
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '100'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 5
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: security_key
+evidence_sets:
+- EVD-OKTA-KSI-IAM-01

@@ -1,0 +1,11 @@
+key: rar_3pao_attestation_review
+name: RAR 3PAO Attestation Review
+type: ATTESTATION
+statement: Confirms the Readiness Assessment Report includes a signed 3PAO attestation with assessor name, organization, and date, and that the report is within its one-year validity period from FedRAMP Ready designation.
+attestation_rules:
+- question: Does the Readiness Assessment Report include a signed 3PAO attestation with assessor name, organization, and date, and is the report within the one-year validity period?
+  yesDisposition: PASS
+  noDisposition: FAIL
+  nestedRules: []
+evidence_sets:
+- EVD-FEDRAMP-RAR-MANUAL

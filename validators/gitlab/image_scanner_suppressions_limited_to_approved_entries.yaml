@@ -1,0 +1,15 @@
+key: image_scanner_suppressions_limited_to_approved_entries
+name: Image Scanner Suppressions Limited to Approved Entries
+type: AUTOMATED
+statement: Every suppressed vulnerability in the image scanner ignore list is on the approved exception list.
+regex: 'vulnerability: (?!(?:CVE-2023-6237|CVE-2024-4603|CVE-2024-13176|CVE-2026-28386|CVE-2026-31790|CVE-2026-42770|CVE-2023-5363|CVE-2023-5678|CVE-2024-0727|CVE-2024-2511|CVE-2024-4741|CVE-2024-5535|CVE-2024-6119|CVE-2024-9143|CVE-2024-12797|CVE-2025-4575|CVE-2025-9230|CVE-2025-9231|CVE-2025-9232|CVE-2025-11187|CVE-2025-15467|CVE-2025-15468|CVE-2025-15469|CVE-2025-66199|CVE-2025-68160|CVE-2025-69418|CVE-2025-69419|CVE-2025-69420|CVE-2025-69421|CVE-2026-2673|CVE-2026-7383|CVE-2026-9076|CVE-2026-22795|CVE-2026-22796|CVE-2026-28387|CVE-2026-28388|CVE-2026-28389|CVE-2026-28390|CVE-2026-31789|CVE-2026-34180|CVE-2026-34181|CVE-2026-34182|CVE-2026-34183|CVE-2026-35188|CVE-2026-42764|CVE-2026-42765|CVE-2026-42766|CVE-2026-42767|CVE-2026-42768|CVE-2026-42769|CVE-2026-45445|CVE-2026-45446|CVE-2026-45447|GHSA-299c-jvhc-gxj8|GHSA-2cj7-mg3x-9mhq|GHSA-3c8f-qq7h-7qv6|GHSA-3cxm-476w-ghm2|GHSA-3vqq-45qg-2xf6|GHSA-4fc7-mvrr-wv2c|GHSA-4jgc-cj59-f9mm|GHSA-5888-36j9-c92p|GHSA-58mv-qqmv-gqgv|GHSA-5m8f-m8jv-3rp3|GHSA-5pg7-f6xv-j6m4|GHSA-6vgq-8qjq-h578|GHSA-76r2-c3cg-f5r9|GHSA-78qr-24v5-7q73|GHSA-79v4-65xg-pq4g|GHSA-7m4m-pwhv-49c5|GHSA-7phf-qpm5-q6p3|GHSA-7x88-9hgc-69gf|GHSA-85xr-ghj6-6m46|GHSA-9mrx-mqmg-gwj9|GHSA-9v9h-cgj8-h64p|GHSA-f5vx-f6jp-89j6|GHSA-f684-cpcq-j565|GHSA-f9v2-4w9p-2cwc|GHSA-fgpp-q3px-3xhc|GHSA-g78j-46j5-97cr|GHSA-gxhg-7jx8-m22j|GHSA-h2cc-wx97-xp8v|GHSA-hpc7-gcqm-58fv|GHSA-hvc4-mjv4-5mw6|GHSA-j79m-9jxq-788r|GHSA-q457-vx59-3fqg|GHSA-q764-r57m-9wp9|GHSA-q98x-73c3-57gj|GHSA-r9fv-h47r-823f|GHSA-r9hf-rxjm-gv2f|GHSA-rhx3-fg8p-f9m4|GHSA-rpg5-467j-c25q|GHSA-rpj2-p5pj-r33v|GHSA-v2vr-926q-29fr|GHSA-v446-xwfm-x7mr|GHSA-v8qh-5c5w-48pp|GHSA-vc8w-w49c-4jgj|GHSA-vgxx-5xj5-q97x|GHSA-vm8w-j6fw-jc7r|GHSA-w42r-ph9f-9x66|GHSA-w853-v86g-gv7j|GHSA-w9rv-xc8m-cmqp|GHSA-wj64-gh9j-xm82|GHSA-wvhq-3h88-rf6g|GHSA-x77r-97gw-wh89|GHSA-xw78-pcr6-wrg8|GHSA-w5hq-g745-h8pq|CVE-2023-39327|CVE-2023-39328|CVE-2023-39329|GHSA-8fgx-wgvr-pcx8)(?![\w-]))((?:CVE|GHSA)-[\w-]+)'
+rules_summary: MATCH_COUNT EQUALS '0'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITLAB-CICD-CONFIG

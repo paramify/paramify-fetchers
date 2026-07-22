@@ -29,8 +29,9 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-CNA-03
-  - KSI-MLA-01
+  - KSI-CNA-RNT
+  - KSI-CNA-ULN
+  - KSI-MLA-LET
 
 evidence_set:
   reference_id: EVD-VPC-FLOW-LOGS

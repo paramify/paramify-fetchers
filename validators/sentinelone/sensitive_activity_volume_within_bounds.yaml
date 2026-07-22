@@ -1,0 +1,16 @@
+key: sensitive_activity_volume_within_bounds
+name: Sensitive activity volume within bounds
+type: AUTOMATED
+statement: The volume of monitored sensitive activities stays within expected operating bounds.
+regex: '"total_activities_collected":\s*(\d+)[\s\S]*?'
+rules_summary: MATCH_GROUP[1] LESS_THAN '10'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: LESS_THAN
+  value:
+    type: CUSTOM_TEXT
+    customText: '10'
+evidence_sets:
+- EVD-S1-ACTIVITY

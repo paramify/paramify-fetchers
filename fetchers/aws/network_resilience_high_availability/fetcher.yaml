@@ -29,7 +29,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-CNA-06
+  - KSI-CNA-OFA
+  - KSI-CNA-ULN
 
 evidence_set:
   reference_id: EVD-NETWORK-RESILIENCE-HA

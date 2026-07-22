@@ -1,0 +1,16 @@
+key: 80_completed_security_awareness_training
+name: ≥80% completed security awareness training
+type: AUTOMATED
+statement: At least 80% of staff have completed the annual security awareness training.
+regex: completion_rate"\s*:\s*(\d+)
+rules_summary: MATCH_GROUP[1] GREATER_THAN_OR_EQUAL_TO '80'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '80'
+evidence_sets:
+- EVD-SECURITY-AWARENESS-TRAINING

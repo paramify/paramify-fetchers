@@ -19,6 +19,11 @@ secrets:
 - name: api_url
   env: SENTINELONE_API_URL
 
+ksis:
+  - KSI-IAM-AAM
+  - KSI-IAM-APM
+  - KSI-IAM-ELP
+
 evidence_set:
   reference_id: EVD-S1-USER
   name: SentinelOne User Config

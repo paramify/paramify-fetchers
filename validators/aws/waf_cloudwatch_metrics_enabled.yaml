@@ -1,0 +1,16 @@
+key: waf_cloudwatch_metrics_enabled
+name: WAF CloudWatch Metrics Enabled
+type: AUTOMATED
+statement: AWS WAF Web ACLs have CloudWatch metrics enabled for attack-pattern visibility.
+regex: '"CloudWatchMetricsEnabled":\s*(true)'
+rules_summary: MATCH_GROUP[1] EQUALS 'true'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: 'true'
+evidence_sets:
+- EVD-WAF-ALL-RULES

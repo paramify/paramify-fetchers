@@ -1,0 +1,16 @@
+key: ebs_snapshots_kms_encrypted
+name: EBS Snapshots KMS Encrypted
+type: AUTOMATED
+statement: EBS snapshots are encrypted with KMS keys homed in the required region.
+regex: '"KmsKeyId":\s*"(arn:aws-us-gov:kms:[^"]+)"'
+rules_summary: MATCH_GROUP[1] CONTAINS 'us-gov'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: us-gov
+evidence_sets:
+- EVD-EBS-SNAPSHOT

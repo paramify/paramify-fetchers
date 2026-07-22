@@ -29,8 +29,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-RPL-03
-  - KSI-CNA-06
+  - KSI-CNA-OFA
+  - KSI-RPL-ABO
 
 evidence_set:
   reference_id: EVD-BACKUP-RECOVERY-HA

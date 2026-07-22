@@ -1,0 +1,22 @@
+key: disaster_recovery_attestation
+name: Disaster Recovery Attestation
+type: ATTESTATION
+statement: Verify the capability to recover from incidents within recovery objectives.
+attestation_rules:
+- question: Are you viewing the Disaster Recovery Test Results?
+  yesDisposition: BASED_ON_NESTED
+  noDisposition: FAIL
+  nestedRules:
+  - question: Is the documented test date within the required annual testing period (≤ 12 months from the assessment date)?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+  - question: Does the report document the actual time required to restore system functionality?
+    yesDisposition: BASED_ON_NESTED
+    noDisposition: FAIL
+    nestedRules:
+    - question: Does the reported time meet the recovery objectives?
+      yesDisposition: PASS
+      noDisposition: FAIL
+evidence_sets:
+- EVD-DR-TEST-MANUAL

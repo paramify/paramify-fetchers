@@ -29,7 +29,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-IAM-04
+  - KSI-IAM-ELP
+  - KSI-IAM-JIT
 
 evidence_set:
   reference_id: EVD-IAM-POLICIES

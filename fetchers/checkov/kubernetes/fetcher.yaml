@@ -75,6 +75,15 @@ config_schema:
     env: CHECKOV_GIT_USERNAME
     description: Basic-auth username paired with GIT_CLONE_TOKEN (oauth2 works for GitLab/GitHub).
 
+ksis:
+  - KSI-CMT-RMV
+  - KSI-CMT-VTD
+  - KSI-CNA-DFP
+  - KSI-CNA-IBP
+  - KSI-MLA-EVC
+  - KSI-PIY-RSD
+  - KSI-SVC-EIS
+
 evidence_set:
   reference_id: EVD-CHECKOV-KUBERNETES
   name: Checkov Kubernetes IaC Scan

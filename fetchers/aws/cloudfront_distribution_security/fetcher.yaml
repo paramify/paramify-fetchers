@@ -29,8 +29,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-CNA-05
-  - KSI-SVC-02
+  - KSI-CNA-RVP
+  - KSI-SVC-SIN
 
 evidence_set:
   reference_id: EVD-CLOUDFRONT-SECURITY

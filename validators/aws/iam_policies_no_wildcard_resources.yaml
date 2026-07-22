@@ -1,0 +1,16 @@
+key: iam_policies_no_wildcard_resources
+name: IAM Policies No Wildcard Resources
+type: AUTOMATED
+statement: IAM policies do not grant permissions on all resources via a wildcard resource.
+regex: '"PolicyName":\s*"(?!Wiz)[^"]*"(?:(?!"PolicyName")[\s\S])*?"Effect":\s*"Allow"[^}]*"Resource":\s*"\*"'
+rules_summary: MATCH_COUNT EQUALS '0'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-IAM-POLICIES
+- EVD-IAM-ROLES

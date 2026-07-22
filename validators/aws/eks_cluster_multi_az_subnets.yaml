@@ -1,0 +1,16 @@
+key: eks_cluster_multi_az_subnets
+name: EKS Cluster Multi-AZ Subnets
+type: AUTOMATED
+statement: EKS clusters have subnets in multiple availability zones.
+regex: '"SubnetDetails":\s*\[[\s\S]*?"(us-gov-west-1[a-c])"[\s\S]*?"(us-gov-west-1[a-c])"'
+rules_summary: MATCH_GROUP[1] NOT_EQUALS MATCH_GROUP[2]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: NOT_EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+evidence_sets:
+- EVD-EKS-HA

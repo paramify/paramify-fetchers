@@ -29,7 +29,7 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-IAM-02
+  - KSI-IAM-APM
 
 evidence_set:
   reference_id: EVD-IAM-PASSWORD-POLICY

@@ -1,0 +1,23 @@
+key: review_reported_bug_incidents_in_zendesk
+name: Review reported bug/incidents in Zendesk
+type: ATTESTATION
+statement: Review of the reported bug/incidents CSV in Zendesk to ensure all new bug/incidents are actively being addressed and tracked in Linear.
+attestation_rules:
+- question: Are you looking at the latest Bug/Incidents CSV from Zendesk?
+  yesDisposition: PASS
+  noDisposition: FAIL
+  nestedRules: []
+- question: Are there any new Bug/Incidents?
+  yesDisposition: BASED_ON_NESTED
+  noDisposition: PASS
+  nestedRules:
+  - question: Are the new Bug/Incidents actively being addressed?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+  - question: Have they been linked to Linear tickets?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+evidence_sets:
+- EVD-VULN-DISCLOSURE-MANUAL

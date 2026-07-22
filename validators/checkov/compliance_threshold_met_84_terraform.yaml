@@ -1,0 +1,16 @@
+key: compliance_threshold_met_84_terraform
+name: Compliance Threshold Met (≥ 84%) (Terraform)
+type: AUTOMATED
+statement: The Terraform scan's aggregate policy pass rate meets the required threshold.
+regex: '"aggregate_percentage"\s*:\s*(\d+.\d+)?'
+rules_summary: MATCH_GROUP[1] GREATER_THAN_OR_EQUAL_TO '84'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '84'
+evidence_sets:
+- EVD-CHECKOV-TERRAFORM

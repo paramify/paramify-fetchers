@@ -1,0 +1,15 @@
+key: ci_cd_pipeline_configuration_exists
+name: CI/CD Pipeline Configuration Exists
+type: AUTOMATED
+statement: Confirms that a GitLab CI/CD pipeline configuration is defined for the repository.
+regex: '"file_name"\s*:\s*"\.gitlab-ci\.yml"'
+rules_summary: MATCH_COUNT GREATER_THAN_OR_EQUAL_TO '1'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+evidence_sets:
+- EVD-GITLAB-CICD-CONFIG

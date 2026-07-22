@@ -29,7 +29,7 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-SVC-06
+  - KSI-SVC-ASM
 
 evidence_set:
   reference_id: EVD-KMS-ROT

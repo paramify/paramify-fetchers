@@ -1,0 +1,15 @@
+key: container_images_built_with_kaniko_daemonless
+name: Container Images Built with Kaniko (Daemonless)
+type: AUTOMATED
+statement: Container images are built with Kaniko, avoiding a privileged Docker daemon.
+regex: /kaniko/executor
+rules_summary: MATCH_COUNT GREATER_THAN_OR_EQUAL_TO '1'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+evidence_sets:
+- EVD-GITLAB-CICD-CONFIG

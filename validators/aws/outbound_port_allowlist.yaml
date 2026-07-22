@@ -1,0 +1,15 @@
+key: outbound_port_allowlist
+name: Outbound Port Allowlist
+type: AUTOMATED
+statement: Outbound to 0.0.0.0/0 only on approved ports HTTP (80), HTTPS (443), Email (25, 465)
+regex: '"Direction":\s*"OUTBOUND RULES"[^}]*"FromPort":\s*(?!80|443|25|465\b)(\d+)[^}]*"CIDRs":\s*"[^"]*0\.0\.0\.0\/0"'
+rules_summary: MATCH_COUNT EQUALS '0'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-SECURITY-GROUPS

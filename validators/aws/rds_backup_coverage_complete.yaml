@@ -1,0 +1,16 @@
+key: rds_backup_coverage_complete
+name: RDS Backup Coverage Complete
+type: AUTOMATED
+statement: Every RDS instance has automated backups configured.
+regex: '"rds_backup_coverage":\s*\{[^}]*"with_backups":\s*(\d+)[^}]*"total":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+evidence_sets:
+- EVD-BACKUP-VALIDATION

@@ -1,0 +1,44 @@
+key: privileged_roles_categorized_no_uncategorized_admins
+name: Privileged roles categorized; no uncategorized admins
+type: AUTOMATED
+statement: Privileged access is scoped into defined roles — at least one super admin and one read-only admin exist, with no uncategorized admin accounts.
+regex: '"summary"\s*:\s*\{(?=[\s\S]*?"total_active_users"\s*:\s*(\d+))(?=[\s\S]*?"admin_users_count"\s*:\s*(\d+))(?=[\s\S]*?"super_admin_count"\s*:\s*(\d+))(?=[\s\S]*?"read_only_admin_count"\s*:\s*(\d+))(?=[\s\S]*?"other_admin_count"\s*:\s*(\d+))[\s\S]*?\}'
+rules_summary: MATCH_GROUP[1] GREATER_THAN '0' ; MATCH_GROUP[3] GREATER_THAN_OR_EQUAL_TO '1' ; MATCH_GROUP[4] GREATER_THAN_OR_EQUAL_TO '1' ; MATCH_GROUP[5] EQUALS '0' ; MATCH_GROUP[2] LESS_THAN_OR_EQUAL_TO MATCH_GROUP[1]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 3
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 4
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 5
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: LESS_THAN_OR_EQUAL_TO
+  value:
+    type: MATCH_GROUP
+    groupNumber: 1
+evidence_sets:
+- EVD-OKTA-KSI-IAM-05

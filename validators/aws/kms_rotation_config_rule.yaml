@@ -1,0 +1,16 @@
+key: kms_rotation_config_rule
+name: KMS Rotation Config Rule
+type: AUTOMATED
+statement: Checks if the AWS Config rule for key rotation is passing (from cmk-backing-key-rotation-enabled-conformance-pack https://docs.aws.amazon.com/config/latest/developerguide/cmk-backing-key-rotation-enabled.html)
+regex: '"ConfigRuleName": "cmk-backing-key-rotation-enabled-conformance-pack[^]*"ComplianceType": "([^]*)"\n'
+rules_summary: MATCH_GROUP[1] EQUALS 'COMPLIANT'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: COMPLIANT
+evidence_sets:
+- EVD-KMS-ROT

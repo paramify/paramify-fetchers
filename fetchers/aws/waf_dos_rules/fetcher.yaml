@@ -29,7 +29,7 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-CNA-05
+  - KSI-CNA-RVP
 
 evidence_set:
   reference_id: EVD-WAF-DOS-RULES

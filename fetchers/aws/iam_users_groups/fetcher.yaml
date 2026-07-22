@@ -29,9 +29,10 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-IAM-01
-  - KSI-IAM-02
-  - KSI-IAM-04
+  - KSI-IAM-AAM
+  - KSI-IAM-APM
+  - KSI-IAM-ELP
+  - KSI-IAM-SNU
 
 evidence_set:
   reference_id: EVD-IAM-USERS-GROUPS

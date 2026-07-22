@@ -20,7 +20,7 @@ secrets:
   env: OKTA_ORG_URL
 
 ksis:
-  - KSI-IAM-03
+  - KSI-IAM-SNU
 
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-03

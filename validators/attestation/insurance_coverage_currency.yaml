@@ -1,0 +1,7 @@
+key: insurance_coverage_currency
+name: Insurance Coverage Currency
+type: ATTESTATION
+statement: Confirms all listed insurance policies have expiration dates in the future and that coverage types include at minimum commercial general liability and cyber liability or errors and omissions.
+attestation_rules: []
+evidence_sets:
+- EVD-COI-MANUAL

@@ -1,0 +1,16 @@
+key: s3_ssl_enforcement_status
+name: S3 SSL Enforcement Status
+type: AUTOMATED
+statement: Validator to ensure S3 bucket are enforcing SSL
+regex: '"s3_total":\s*(\d+)[\s\S]*?"s3_ssl_enforced":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+evidence_sets:
+- EVD-AWS-SSL-ENFORCEMENT

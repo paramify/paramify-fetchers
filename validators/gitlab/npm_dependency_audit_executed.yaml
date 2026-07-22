@@ -1,0 +1,16 @@
+key: npm_dependency_audit_executed
+name: NPM Dependency Audit Executed
+type: AUTOMATED
+statement: The pipeline audits Node.js dependencies for known vulnerabilities at a high severity threshold.
+regex: paramify/paramify[\s\S]*(npm audit --audit-level[\w\s]*)
+rules_summary: MATCH_GROUP[1] CONTAINS 'audit --audit-level'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: audit --audit-level
+evidence_sets:
+- EVD-GITLAB-CICD-CONFIG

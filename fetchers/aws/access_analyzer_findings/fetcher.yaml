@@ -29,7 +29,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-IAM-04
+  - KSI-CNA-MAT
+  - KSI-IAM-ELP
 
 evidence_set:
   reference_id: EVD-ACCESS-ANALYZER

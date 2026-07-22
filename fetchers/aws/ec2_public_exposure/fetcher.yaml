@@ -29,7 +29,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-CNA-02
+  - KSI-CNA-MAT
+  - KSI-CNA-RNT
 
 evidence_set:
   reference_id: EVD-EC2-PUBLIC-EXPOSURE

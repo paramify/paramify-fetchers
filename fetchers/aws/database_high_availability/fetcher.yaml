@@ -29,7 +29,7 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-CNA-06
+  - KSI-CNA-OFA
 
 evidence_set:
   reference_id: EVD-DATABASE-HA

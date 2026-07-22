@@ -1,0 +1,35 @@
+key: interconnections_review_monthly_manual_attestation
+name: Interconnections Review (Monthly, Manual Attestation)
+type: ATTESTATION
+statement: "Monthly, Manual Attestation review of the system interconnections. \n\nSee: https://app.paramify.com/programs/366a1c41-78b7-4bac-97e8-8811341b8a77/program-overview/d36713dd-bbc5-46db-b5e2-0be9dd428111"
+attestation_rules:
+- question: "Is GitLab SaaS still an approved interconnection?\n\nGitLab SaaS\tGitLab/ dynamic\tdynamic\t-\tTLS 1.2\tOutgoing\tPull ECR Images after CI/CD and Approval\t443"
+  yesDisposition: PASS
+  noDisposition: FAIL
+  nestedRules: []
+- question: "Is Google Workspace still an approved interconnection?\n\nGoogle WorkSpace\tGoogle/ dynamic\tdynamic\t-\tTLS 1.2\tIncoming & Outgoing\tUser Directory Authentication\t443"
+  yesDisposition: PASS
+  noDisposition: FAIL
+  nestedRules: []
+- question: "Is Replicated still an approved interconnection?\n\nReplicated\tReplicated, Inc./ dynamic\tdynamic\t-\tTLS\tIncoming & Outgoing\tRepository for pulling stable releases for Paramify Cloud. Replicated also receives updates of the status of deployment and the application version from EKS.\t443"
+  yesDisposition: PASS
+  noDisposition: FAIL
+  nestedRules: []
+- question: "Is AWS Route 53 still an approved interconnection?\n\nRoute 53\tAmazon/ dynamic\tdynamic\t-\tDNSSEC\tIncoming & Outgoing\tRoute 53 DNS\t53"
+  yesDisposition: PASS
+  noDisposition: FAIL
+  nestedRules: []
+- question: "Is Slack still an approved interconnection?\n\nSlack\tSalesforce, Inc./ dynamic\tdynamic\t-\tTLS 1.2\tOutgoing\tSystem Event Notifications (obfuscated)\t443"
+  yesDisposition: PASS
+  noDisposition: FAIL
+  nestedRules: []
+- question: "Is SentinelOne still an approved interconnection?\n\nS1 Platform\tSentinelOne/ dynamic\tdynamic\t-\tTLS 1.2\tOutgoing\tSecurity Logging and Monitoring\t443"
+  yesDisposition: PASS
+  noDisposition: FAIL
+  nestedRules: []
+- question: 'Final Review: Are all the system interconnections approved?'
+  yesDisposition: PASS
+  noDisposition: FAIL
+  nestedRules: []
+evidence_sets:
+- EVD-INTERCONNECTIONS-MANUAL

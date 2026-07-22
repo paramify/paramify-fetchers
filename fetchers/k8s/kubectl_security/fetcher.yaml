@@ -18,6 +18,15 @@ output:
 # category's passthrough_env. They are selectors, not secrets.
 secrets: []
 
+ksis:
+  - KSI-CNA-DFP
+  - KSI-CNA-EIS
+  - KSI-CNA-IBP
+  - KSI-CNA-MAT
+  - KSI-CNA-ULN
+  - KSI-IAM-ELP
+  - KSI-MLA-EVC
+
 evidence_set:
   reference_id: EVD-KUBECTL-SECURITY
   name: Kubectl Security

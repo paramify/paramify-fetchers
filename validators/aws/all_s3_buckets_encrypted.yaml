@@ -1,0 +1,16 @@
+key: all_s3_buckets_encrypted
+name: All S3 Buckets Encrypted
+type: AUTOMATED
+statement: All S3 buckets are encrypted at rest.
+regex: '"summary":\s*\{[\s\S]*?"encryption_percentage":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] EQUALS '100'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '100'
+evidence_sets:
+- EVD-S3-ENC

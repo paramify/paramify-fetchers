@@ -1,0 +1,15 @@
+key: waf_common_rule_set_enabled
+name: WAF Common Rule Set Enabled
+type: AUTOMATED
+statement: A WAF web ACL includes the AWS Common Rule Set managed rule group.
+regex: '"Name":\s*"(AWSManagedRulesCommonRuleSet)"'
+rules_summary: MATCH_COUNT GREATER_THAN_OR_EQUAL_TO '1'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+evidence_sets:
+- EVD-WAF-ALL-RULES

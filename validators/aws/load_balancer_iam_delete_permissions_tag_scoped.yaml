@@ -1,0 +1,23 @@
+key: load_balancer_iam_delete_permissions_tag_scoped
+name: Load Balancer IAM Delete Permissions Tag-Scoped
+type: AUTOMATED
+statement: IAM permissions to delete load balancers are constrained by tag-based conditions.
+regex: '"Effect": "Allow"[\s\S]*?"Action":[\s\S]*?(DeleteLoadBalancer|DeleteTargetGroup")[\s\S]*?Condition[\s\S]*?([\s\S]*?)}'
+rules_summary: MATCH_GROUP[2] CONTAINS 'Null' ; MATCH_GROUP[2] CONTAINS 'false'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: 'Null'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: 'false'
+evidence_sets:
+- EVD-IAM-POLICIES

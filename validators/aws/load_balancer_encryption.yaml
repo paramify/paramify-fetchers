@@ -1,0 +1,23 @@
+key: load_balancer_encryption
+name: Load Balancer Encryption
+type: AUTOMATED
+statement: All application and network load balancer listeners have encryption enabled.
+regex: '"alb_total":\s*(\d+)[\s\S]*?"alb_encrypted":\s*(\d+)[\s\S]*?"nlb_total":\s*(\d+)[\s\S]*?"nlb_encrypted":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] EQUALS MATCH_GROUP[2] ; MATCH_GROUP[3] EQUALS MATCH_GROUP[4]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 3
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 4
+evidence_sets:
+- EVD-LB-ENC-STATUS

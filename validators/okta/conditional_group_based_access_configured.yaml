@@ -1,0 +1,37 @@
+key: conditional_group_based_access_configured
+name: Conditional & group-based access configured
+type: AUTOMATED
+statement: Context-aware access controls — conditional access policies, group-based assignment, and dynamic group rules — are configured.
+regex: '"summary"\s*:\s*\{(?=[\s\S]*?"group_based_access_percentage"\s*:\s*([\d.]+))(?=[\s\S]*?"policies_with_conditional_rules"\s*:\s*(\d+))(?=[\s\S]*?"policies_with_conditions"\s*:\s*(\d+))(?=[\s\S]*?"access_events_last_7_days"\s*:\s*(\d+))[\s\S]*?\}'
+rules_summary: MATCH_GROUP[1] GREATER_THAN_OR_EQUAL_TO '0' ; MATCH_GROUP[2] GREATER_THAN_OR_EQUAL_TO '0' ; MATCH_GROUP[3] GREATER_THAN_OR_EQUAL_TO '0' ; MATCH_GROUP[4] GREATER_THAN_OR_EQUAL_TO '0'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 3
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 4
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-OKTA-KSI-IAM-04

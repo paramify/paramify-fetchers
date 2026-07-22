@@ -1,0 +1,23 @@
+key: all_assets_healthy_and_active
+name: All assets healthy and active
+type: AUTOMATED
+statement: Every inventoried XDR asset is in a healthy infection status and active state.
+regex: '"total_asset_count":\s*(\d+)[\s\S]*?"healthy_infection_status_count":\s*(\d+)[\s\S]*?"active_asset_status_count":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] EQUALS MATCH_GROUP[2] ; MATCH_GROUP[1] EQUALS MATCH_GROUP[3]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 3
+evidence_sets:
+- EVD-S1-XDR-ASSET

@@ -1,0 +1,15 @@
+key: rds_cross_region_replication
+name: RDS Cross-Region Replication
+type: AUTOMATED
+statement: RDS instances replicate backups to the secondary region us-gov-east-1.
+regex: '"Type":\s*"RDS_Backup"[\s\S]*?"CrossRegionReplication":\s*(true)'
+rules_summary: MATCH_COUNT EQUALS '3'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '3'
+evidence_sets:
+- EVD-BACKUP-VALIDATION

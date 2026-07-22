@@ -1,0 +1,16 @@
+key: container_image_scanning_enforces_medium_severity_threshold
+name: Container Image Scanning Enforces Medium+ Severity Threshold
+type: AUTOMATED
+statement: Container image scanning fails the pipeline on medium or higher severity vulnerabilities.
+regex: grype --fail-on (medium|high|critical|low)
+rules_summary: MATCH_GROUP[1] CONTAINS 'medium'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: medium
+evidence_sets:
+- EVD-GITLAB-CICD-CONFIG

@@ -1,0 +1,54 @@
+key: minimum_assessment_scope_aws
+name: Minimum Assessment Scope AWS
+type: AUTOMATED
+statement: Validates that all regions are within scope of the authorization and that no data is in a different region and therefore not being audited
+regex: '"metadata":\s*\{[\s\S]*?"region":\s*"([^"]+)"[\s\S]*?"account_id":\s*"(\d+)"[\s\S]*?"arn":\s*"([^"]+)"'
+rules_summary: MATCH_GROUP[1] EQUALS 'us-gov-west-1' ; MATCH_GROUP[2] EQUALS '214149890209' ; MATCH_GROUP[3] CONTAINS '214149890209:assumed-role/AWSReservedSSO'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: us-gov-west-1
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '214149890209'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 3
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: 214149890209:assumed-role/AWSReservedSSO
+evidence_sets:
+- EVD-AWS-SSL-ENFORCEMENT
+- EVD-CONFIG-PACKS
+- EVD-AUTO-SCALING-HA
+- EVD-BACKUP-VALIDATION
+- EVD-BLOCK-ENC
+- EVD-CLOUDTRAIL-CONFIG
+- EVD-CLOUDWATCH-HA
+- EVD-DETECT-NEW-RESOURCE
+- EVD-EBS-SNAPSHOT
+- EVD-EFS-HA
+- EVD-EKS-HA
+- EVD-GUARD-DUTY
+- EVD-IAM-IDENTITY-CENTER
+- EVD-IAM-POLICIES
+- EVD-IAM-ROLES
+- EVD-IAM-USERS-GROUPS
+- EVD-LB-ENC-STATUS
+- EVD-LB-HA
+- EVD-NETWORK-RESILIENCE-HA
+- EVD-DATABASE-HA
+- EVD-RDS-ENC
+- EVD-ROUTE53-HA
+- EVD-S3-ENC
+- EVD-SECURITY-GROUPS
+- EVD-WAF-ALL-RULES

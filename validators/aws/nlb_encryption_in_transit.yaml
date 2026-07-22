@@ -1,0 +1,16 @@
+key: nlb_encryption_in_transit
+name: NLB Encryption In Transit
+type: AUTOMATED
+statement: Ensures that all network load balancers are encrypting data in transit.
+regex: '"nlb_total":\s*(\d+)[\s\S]*?"nlb_encrypted":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+evidence_sets:
+- EVD-LB-ENC-STATUS

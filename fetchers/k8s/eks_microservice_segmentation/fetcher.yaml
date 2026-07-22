@@ -18,6 +18,11 @@ output:
 # category's passthrough_env. They are selectors, not secrets.
 secrets: []
 
+ksis:
+  - KSI-CNA-MAT
+  - KSI-CNA-RNT
+  - KSI-CNA-ULN
+
 evidence_set:
   reference_id: EVD-EKS-MICROSERVICE-SEG
   name: EKS Microservice Segmentation

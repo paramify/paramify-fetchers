@@ -1,0 +1,23 @@
+key: independent_audit_3pao_security_assessment
+name: Independent Audit 3PAO Security Assessment
+type: ATTESTATION
+statement: This validator confirms that the Auditor conducts an annual security assessment (SAR) and that the GRC Admin addresses all confirmed findings through the formal Risk Remediation Process.
+attestation_rules:
+- question: Does the organization conduct an annual independent security assessment of the system?
+  yesDisposition: BASED_ON_NESTED
+  noDisposition: FAIL
+  nestedRules:
+  - question: Does the Auditor formally document the results of the assessment in a Security Assessment Report (SAR) annually?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+  - question: Are confirmed findings from the SAR formally transferred to the Risk Remediation Process for tracking and resolution?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+  - question: Does the GRC Admin oversee the remediation of these findings to ensure compliance with the system's security requirements?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+evidence_sets:
+- EVD-3PAO-ASSESSMENT-MANUAL

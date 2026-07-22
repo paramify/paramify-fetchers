@@ -51,9 +51,11 @@ def test_reference_ids_from_missing_dir():
 def test_collect_validators_scoped_by_reference_ids():
     syncer = _load_syncer()
     hit = syncer.collect_validators(REPO_ROOT, reference_ids=["EVD-LB-ENC-STATUS"])
-    assert [v["key"] for v in hit] == ["alb_encryption_in_transit"]
+    keys = [v["key"] for v in hit]
+    assert "alb_encryption_in_transit" in keys
     # payload-facing dict maps validation_rules through unchanged
-    assert hit[0]["validation_rules"] and hit[0]["type"] == "AUTOMATED"
+    alb = next(v for v in hit if v["key"] == "alb_encryption_in_transit")
+    assert alb["validation_rules"] and alb["type"] == "AUTOMATED"
 
     miss = syncer.collect_validators(REPO_ROOT, reference_ids=["EVD-NOPE"])
     assert miss == []

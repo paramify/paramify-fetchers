@@ -29,7 +29,9 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-IAM-04
+  - KSI-CNA-DFP
+  - KSI-IAM-ELP
+  - KSI-IAM-JIT
 
 evidence_set:
   reference_id: EVD-ORGANIZATIONS-SCP

@@ -29,7 +29,9 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-CNA-05
+  - KSI-CNA-MAT
+  - KSI-CNA-RNT
+  - KSI-CNA-RVP
 
 evidence_set:
   reference_id: EVD-WAF-ALL-RULES

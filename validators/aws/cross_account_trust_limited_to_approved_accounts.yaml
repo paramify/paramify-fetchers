@@ -1,0 +1,15 @@
+key: cross_account_trust_limited_to_approved_accounts
+name: Cross-account trust limited to approved accounts
+type: AUTOMATED
+statement: No IAM role trusts an external AWS account outside the approved allowlist.
+regex: '"AWS":\s*"arn:aws[^"]*:iam::(?!214149890209|773463581296|622857298631)(\d+)'
+rules_summary: MATCH_COUNT EQUALS '0'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-IAM-ROLES

@@ -1,0 +1,16 @@
+key: kms_key_rotation_enabled
+name: KMS Key Rotation Enabled
+type: AUTOMATED
+statement: Automatic annual rotation is enabled for customer-managed KMS keys.
+regex: '"rotation_percentage"\s*:\s*(\d+)'
+rules_summary: MATCH_GROUP[1] GREATER_THAN_OR_EQUAL_TO '90'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '90'
+evidence_sets:
+- EVD-KMS-ROT

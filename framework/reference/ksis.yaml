@@ -1,103 +1,78 @@
 # FedRAMP 20x Key Security Indicators — the coverage denominator.
 #
-# This is the canonical list of KSIs the framework measures fetcher coverage
-# against. Each fetcher declares the KSIs its evidence speaks to via `ksis:` in
-# its fetcher.yaml; api.ksi_coverage() joins the two.
+# Canonical mnemonic KSI list (release 25.05C Phase One). Each fetcher declares
+# the KSIs its evidence speaks to via `ksis:` in fetcher.yaml; api.ksi_coverage()
+# joins the two. Migrated from the provisional numeric scheme 2026-07-22.
 #
-# PROVISIONAL (release 25.05C, Phase One). Statements are paraphrased from
-# docs/ksi_prowler_mapping.md — reconcile against the official FedRAMP 20x KSI
-# doc when remapping to the newer release:
-#   https://github.com/FedRAMP/docs/blob/main/tools/site/content/20x/phase1/key-security-indicators.md
-#
-# `evidenceable: true`  = obtainable from tool/cloud configuration (a fetcher can
-#                         produce it; if none does yet it shows as a GAP).
-# `evidenceable: false` = organizational (training, policy, plans, incident docs,
-#                         vendor vetting). Not a config gap; evidenced by HR/
-#                         training tools (KnowBe4, Rippling) or manual evidence.
+# `evidenceable: true`  = a fetcher produces automated evidence for it today.
+# `evidenceable: false` = organizational / attestation (training, plans, reviews).
 
-release: "FedRAMP 20x KSI — release 25.05C Phase One (provisional)"
+release: "FedRAMP 20x KSI — release 25.05C Phase One (mnemonic)"
 
 families:
-  CNA: Cloud Native Architecture
-  SVC: Service Configuration
-  MLA: Monitoring, Logging & Auditing
-  IAM: Identity & Access Management
-  CMT: Change Management
-  RPL: Recovery Planning
-  PIY: Policy & Inventory
-  TPR: Third-Party Information Resources
   CED: Cybersecurity Education
+  CMT: Change Management
+  CNA: Cloud Native Architecture
+  IAM: Identity & Access Management
   INR: Incident Reporting
+  MLA: Monitoring, Logging & Auditing
+  PIY: Policy & Inventory
+  RPL: Recovery Planning
+  SCR: Supply Chain Risk
+  SVC: Service Configuration
 
 ksis:
-  # --- CNA: Cloud Native Architecture (config) ---
-  - {id: KSI-CNA-01, family: CNA, evidenceable: true,  statement: Limit and control inbound and outbound network traffic.}
-  - {id: KSI-CNA-02, family: CNA, evidenceable: true,  statement: Minimize the attack surface and lateral movement.}
-  - {id: KSI-CNA-03, family: CNA, evidenceable: true,  statement: Enforce logical traffic-flow controls and network segmentation.}
-  - {id: KSI-CNA-04, family: CNA, evidenceable: true,  statement: Use immutable infrastructure.}
-  - {id: KSI-CNA-05, family: CNA, evidenceable: true,  statement: Protect against denial-of-service attacks.}
-  - {id: KSI-CNA-06, family: CNA, evidenceable: true,  statement: Ensure high availability and rapid recovery.}
-  - {id: KSI-CNA-07, family: CNA, evidenceable: true,  statement: Enforce security best practices on hosts and containers.}
-
-  # --- SVC: Service Configuration (config) ---
-  - {id: KSI-SVC-01, family: SVC, evidenceable: true,  statement: Harden and consistently configure services.}
-  - {id: KSI-SVC-02, family: SVC, evidenceable: true,  statement: Encrypt network traffic in transit (TLS).}
-  - {id: KSI-SVC-03, family: SVC, evidenceable: true,  statement: Encrypt data at rest.}
-  - {id: KSI-SVC-04, family: SVC, evidenceable: true,  statement: Centrally manage and enforce configuration.}
-  - {id: KSI-SVC-05, family: SVC, evidenceable: true,  statement: Enforce data integrity using cryptography.}
-  - {id: KSI-SVC-06, family: SVC, evidenceable: true,  statement: Automate key management and rotation.}
-  - {id: KSI-SVC-07, family: SVC, evidenceable: true,  statement: Apply risk-informed patching.}
-
-  # --- MLA: Monitoring, Logging & Auditing (config) ---
-  - {id: KSI-MLA-01, family: MLA, evidenceable: true,  statement: "Centralized, tamper-resistant logging / SIEM."}
-  - {id: KSI-MLA-02, family: MLA, evidenceable: true,  statement: Regularly review and audit logs.}
-  - {id: KSI-MLA-03, family: MLA, evidenceable: true,  statement: Detect and remediate vulnerabilities.}
-  - {id: KSI-MLA-04, family: MLA, evidenceable: true,  statement: Perform authenticated vulnerability scanning.}
-  - {id: KSI-MLA-05, family: MLA, evidenceable: true,  statement: Evaluate infrastructure-as-code and configuration.}
-  - {id: KSI-MLA-06, family: MLA, evidenceable: true,  statement: Centrally track vulnerabilities.}
-
-  # --- IAM: Identity & Access Management (config) ---
-  - {id: KSI-IAM-01, family: IAM, evidenceable: true,  statement: Enforce phishing-resistant MFA.}
-  - {id: KSI-IAM-02, family: IAM, evidenceable: true,  statement: Enforce passwordless or strong-password + MFA authentication.}
-  - {id: KSI-IAM-03, family: IAM, evidenceable: true,  statement: Securely authenticate non-user / service accounts.}
-  - {id: KSI-IAM-04, family: IAM, evidenceable: true,  statement: Enforce least-privilege access (RBAC/ABAC/JIT).}
-  - {id: KSI-IAM-05, family: IAM, evidenceable: true,  statement: Apply zero-trust design principles.}
-  - {id: KSI-IAM-06, family: IAM, evidenceable: true,  statement: Detect and respond to suspicious privileged-account activity.}
-  - {id: KSI-IAM-07, family: IAM, evidenceable: true,  statement: Automate account lifecycle management.}
-
-  # --- CMT: Change Management (partial) ---
-  - {id: KSI-CMT-01, family: CMT, evidenceable: true,  statement: Log and monitor system modifications.}
-  - {id: KSI-CMT-02, family: CMT, evidenceable: true,  statement: Detect and control configuration drift.}
-  - {id: KSI-CMT-03, family: CMT, evidenceable: true,  statement: Automatically test and validate changes.}
-  - {id: KSI-CMT-04, family: CMT, evidenceable: true,  statement: Review and approve changes before release.}
-  - {id: KSI-CMT-05, family: CMT, evidenceable: false, statement: Maintain a formal change-management policy.}
-
-  # --- RPL: Recovery Planning (only backups are config-evidenceable) ---
-  - {id: KSI-RPL-01, family: RPL, evidenceable: false, statement: Define recovery objectives (RTO/RPO).}
-  - {id: KSI-RPL-02, family: RPL, evidenceable: false, statement: Maintain a documented recovery plan.}
-  - {id: KSI-RPL-03, family: RPL, evidenceable: true,  statement: Perform and validate system backups.}
-  - {id: KSI-RPL-04, family: RPL, evidenceable: false, statement: Regularly test the recovery plan.}
-
-  # --- PIY: Policy & Inventory (only inventory is config-evidenceable) ---
-  - {id: KSI-PIY-01, family: PIY, evidenceable: true,  statement: Maintain an up-to-date asset inventory.}
-  - {id: KSI-PIY-02, family: PIY, evidenceable: false, statement: Operate a vulnerability disclosure program.}
-  - {id: KSI-PIY-03, family: PIY, evidenceable: false, statement: Follow a secure software development lifecycle.}
-  - {id: KSI-PIY-04, family: PIY, evidenceable: false, statement: Document security and privacy roles and responsibilities.}
-  - {id: KSI-PIY-05, family: PIY, evidenceable: false, statement: Maintain adequate security staffing and budget.}
-  - {id: KSI-PIY-06, family: PIY, evidenceable: false, statement: Manage supply-chain risk (SBOM / dependency policy).}
-  - {id: KSI-PIY-07, family: PIY, evidenceable: false, statement: Maintain required security and privacy policies.}
-
-  # --- TPR: Third-Party Information Resources (only upstream-vuln monitoring is config) ---
-  - {id: KSI-TPR-01, family: TPR, evidenceable: false, statement: Identify third-party information resources.}
-  - {id: KSI-TPR-02, family: TPR, evidenceable: false, statement: Vet third-party providers.}
-  - {id: KSI-TPR-03, family: TPR, evidenceable: false, statement: Monitor third-party compliance.}
-  - {id: KSI-TPR-04, family: TPR, evidenceable: true,  statement: Monitor third-party software for upstream vulnerabilities.}
-
-  # --- CED: Cybersecurity Education (organizational — KnowBe4 / training records) ---
-  - {id: KSI-CED-01, family: CED, evidenceable: false, statement: Provide security-awareness training.}
-  - {id: KSI-CED-02, family: CED, evidenceable: false, statement: Provide role-based / specialized security training.}
-
-  # --- INR: Incident Reporting (organizational — incident docs / process) ---
-  - {id: KSI-INR-01, family: INR, evidenceable: false, statement: Report incidents to required stakeholders.}
-  - {id: KSI-INR-02, family: INR, evidenceable: false, statement: Maintain incident logs and after-action reports.}
-  - {id: KSI-INR-03, family: INR, evidenceable: false, statement: Maintain an incident-response process.}
+  # --- CED: Cybersecurity Education ---
+  - {id: KSI-CED-RAT, family: CED, evidenceable: true , statement: "Reviewing All Training"}
+  # --- CMT: Change Management ---
+  - {id: KSI-CMT-LMC, family: CMT, evidenceable: true , statement: "Logging Changes"}
+  - {id: KSI-CMT-RMV, family: CMT, evidenceable: true , statement: "Redeploying vs Modifying"}
+  - {id: KSI-CMT-RVP, family: CMT, evidenceable: true , statement: "Reviewing Change Procedures"}
+  - {id: KSI-CMT-VTD, family: CMT, evidenceable: true , statement: "Validating Throughout Deployment"}
+  # --- CNA: Cloud Native Architecture ---
+  - {id: KSI-CNA-DFP, family: CNA, evidenceable: true , statement: "Defining Functionality and Privileges"}
+  - {id: KSI-CNA-EIS, family: CNA, evidenceable: true , statement: "Enforcing Intended State"}
+  - {id: KSI-CNA-IBP, family: CNA, evidenceable: true , statement: "Implementing Best Practices"}
+  - {id: KSI-CNA-MAT, family: CNA, evidenceable: true , statement: "Minimizing Attack Surface"}
+  - {id: KSI-CNA-OFA, family: CNA, evidenceable: true , statement: "Optimizing for Availability"}
+  - {id: KSI-CNA-RNT, family: CNA, evidenceable: true , statement: "Restricting Network Traffic"}
+  - {id: KSI-CNA-RVP, family: CNA, evidenceable: true , statement: "Reviewing Protections"}
+  - {id: KSI-CNA-ULN, family: CNA, evidenceable: true , statement: "Using Logical Networking"}
+  # --- IAM: Identity & Access Management ---
+  - {id: KSI-IAM-AAM, family: IAM, evidenceable: true , statement: "Automating Account Management"}
+  - {id: KSI-IAM-APM, family: IAM, evidenceable: true , statement: "Adopting Passwordless Methods"}
+  - {id: KSI-IAM-ELP, family: IAM, evidenceable: true , statement: "Ensuring Least Privilege"}
+  - {id: KSI-IAM-JIT, family: IAM, evidenceable: true , statement: "Authorizing Just-in-Time"}
+  - {id: KSI-IAM-SNU, family: IAM, evidenceable: true , statement: "Securing Non-User Authentication"}
+  - {id: KSI-IAM-SUS, family: IAM, evidenceable: true , statement: "Responding to Suspicious Activity"}
+  # --- INR: Incident Reporting ---
+  - {id: KSI-INR-AAR, family: INR, evidenceable: false, statement: "Generating After Action Reports"}
+  - {id: KSI-INR-RIR, family: INR, evidenceable: true , statement: "Reviewing Incident Response Procedures"}
+  - {id: KSI-INR-RPI, family: INR, evidenceable: true , statement: "Reviewing Past Incidents"}
+  # --- MLA: Monitoring, Logging & Auditing ---
+  - {id: KSI-MLA-EVC, family: MLA, evidenceable: true , statement: "Evaluating Configurations"}
+  - {id: KSI-MLA-LET, family: MLA, evidenceable: true , statement: "Logging Event Types"}
+  - {id: KSI-MLA-OSM, family: MLA, evidenceable: true , statement: "Operating SIEM Capability"}
+  - {id: KSI-MLA-RVL, family: MLA, evidenceable: true , statement: "Reviewing Logs"}
+  # --- PIY: Policy & Inventory ---
+  - {id: KSI-PIY-GIV, family: PIY, evidenceable: true , statement: "Generating Inventories"}
+  - {id: KSI-PIY-RES, family: PIY, evidenceable: false, statement: "Reviewing Executive Support"}
+  - {id: KSI-PIY-RIS, family: PIY, evidenceable: false, statement: "Reviewing Investments in Security"}
+  - {id: KSI-PIY-RSD, family: PIY, evidenceable: true , statement: "Reviewing Security in the SDLC"}
+  - {id: KSI-PIY-RVD, family: PIY, evidenceable: false, statement: "Reviewing Vulnerability Disclosures"}
+  # --- RPL: Recovery Planning ---
+  - {id: KSI-RPL-ABO, family: RPL, evidenceable: true , statement: "Aligning Backups with Objectives"}
+  - {id: KSI-RPL-ARP, family: RPL, evidenceable: true , statement: "Aligning Recovery Plan"}
+  - {id: KSI-RPL-RRO, family: RPL, evidenceable: true , statement: "Reviewing Recovery Objectives"}
+  - {id: KSI-RPL-TRC, family: RPL, evidenceable: true , statement: "Testing Recovery Capabilities"}
+  # --- SCR: Supply Chain Risk ---
+  - {id: KSI-SCR-MIT, family: SCR, evidenceable: false, statement: "Mitigating Supply Chain Risk"}
+  - {id: KSI-SCR-MON, family: SCR, evidenceable: false, statement: "Monitoring Supply Chain Risk"}
+  # --- SVC: Service Configuration ---
+  - {id: KSI-SVC-ACM, family: SVC, evidenceable: true , statement: "Automating Configuration Management"}
+  - {id: KSI-SVC-ASM, family: SVC, evidenceable: true , statement: "Automating Secret Management"}
+  - {id: KSI-SVC-EIS, family: SVC, evidenceable: true , statement: "Evaluating and Improving Security"}
+  - {id: KSI-SVC-RUD, family: SVC, evidenceable: false, statement: "Removing Unwanted Data"}
+  - {id: KSI-SVC-SIN, family: SVC, evidenceable: true , statement: "Securing Information"}
+  - {id: KSI-SVC-VCM, family: SVC, evidenceable: true , statement: "Validating Communications"}
+  - {id: KSI-SVC-VRI, family: SVC, evidenceable: false, statement: "Validating Resource Integrity"}

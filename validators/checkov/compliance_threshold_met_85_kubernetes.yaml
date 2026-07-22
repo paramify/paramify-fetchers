@@ -1,0 +1,16 @@
+key: compliance_threshold_met_85_kubernetes
+name: Compliance Threshold Met (≥ 85%) (Kubernetes)
+type: AUTOMATED
+statement: The Kubernetes scan's aggregate policy pass rate meets the required threshold.
+regex: '"passed_percentage"\s*:\s*(\d+.\d+)?'
+rules_summary: MATCH_GROUP[1] GREATER_THAN_OR_EQUAL_TO '85'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '85'
+evidence_sets:
+- EVD-CHECKOV-KUBERNETES

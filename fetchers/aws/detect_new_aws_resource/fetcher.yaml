@@ -29,8 +29,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-CMT-01
-  - KSI-PIY-01
+  - KSI-CMT-LMC
+  - KSI-CNA-EIS
 
 evidence_set:
   reference_id: EVD-DETECT-NEW-RESOURCE

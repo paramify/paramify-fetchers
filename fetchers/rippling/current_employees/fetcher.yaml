@@ -17,6 +17,9 @@ secrets:
 - name: api_token
   env: RIPPLING_API_TOKEN
 
+ksis:
+  - KSI-IAM-AAM
+
 evidence_set:
   reference_id: EVD-RIPPLING-CURRENT-EMPLOYEES
   name: Rippling Current Employees

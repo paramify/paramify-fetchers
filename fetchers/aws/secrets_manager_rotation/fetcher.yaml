@@ -29,8 +29,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-SVC-06
-  - KSI-IAM-03
+  - KSI-IAM-SNU
+  - KSI-SVC-ASM
 
 evidence_set:
   reference_id: EVD-SECRETS-ROTATION

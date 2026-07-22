@@ -19,6 +19,9 @@ secrets:
 - name: org_url
   env: OKTA_ORG_URL
 
+ksis:
+  - KSI-IAM-APM
+
 evidence_set:
   reference_id: EVD-OKTA-AUTHENTICATORS
   name: Okta Authenticators

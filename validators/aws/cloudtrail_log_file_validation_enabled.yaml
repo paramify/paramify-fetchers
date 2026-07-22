@@ -1,0 +1,15 @@
+key: cloudtrail_log_file_validation_enabled
+name: CloudTrail Log File Validation Enabled
+type: AUTOMATED
+statement: CloudTrail log file validation is enabled so log tampering can be detected.
+regex: '"LogFileValidationEnabled":\s*(true)'
+rules_summary: MATCH_COUNT GREATER_THAN_OR_EQUAL_TO '1'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+evidence_sets:
+- EVD-CLOUDTRAIL-CONFIG

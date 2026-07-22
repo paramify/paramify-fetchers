@@ -1,0 +1,16 @@
+key: s3_replication_kms_encryption
+name: S3 Replication KMS Encryption
+type: AUTOMATED
+statement: S3 cross-region replication uses KMS encryption in the destination region.
+regex: '"ReplicaKmsKeyID":\s*"(arn:aws-us-gov:kms:us-gov-east-1[^"]+)"'
+rules_summary: MATCH_GROUP[1] CONTAINS 'us-gov-east-1'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: us-gov-east-1
+evidence_sets:
+- EVD-BACKUP-VALIDATION

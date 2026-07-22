@@ -1,0 +1,16 @@
+key: load_balancer_multi_az
+name: Load Balancer Multi-AZ
+type: AUTOMATED
+statement: Load balancers are deployed across multiple availability zones.
+regex: '"AvailabilityZones":\s*\[[\s\S]*?"ZoneName":\s*"(us-gov-west-1[a-c])"[\s\S]*?"ZoneName":\s*"(us-gov-west-1[a-c])"'
+rules_summary: MATCH_GROUP[1] NOT_EQUALS MATCH_GROUP[2]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: NOT_EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+evidence_sets:
+- EVD-LB-HA

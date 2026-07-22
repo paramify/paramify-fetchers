@@ -29,10 +29,10 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-SVC-04
-  - KSI-MLA-01
-  - KSI-MLA-05
-  - KSI-CMT-01
+  - KSI-CMT-LMC
+  - KSI-CNA-EIS
+  - KSI-MLA-EVC
+  - KSI-MLA-OSM
 
 evidence_set:
   reference_id: EVD-CONFIG-MONITORING

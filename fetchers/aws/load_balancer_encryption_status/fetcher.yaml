@@ -29,7 +29,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-SVC-02
+  - KSI-SVC-SIN
+  - KSI-SVC-VCM
 
 evidence_set:
   reference_id: EVD-LB-ENC-STATUS

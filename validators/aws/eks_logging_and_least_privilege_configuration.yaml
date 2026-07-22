@@ -1,0 +1,30 @@
+key: eks_logging_and_least_privilege_configuration
+name: EKS Logging and Least-Privilege Configuration
+type: AUTOMATED
+statement: EKS clusters have control-plane logging enabled, reviewable pod identity associations, and required add-ons installed.
+regex: '"summary"\s*:\s*\{[\s\S]*?"clusters"\s*:\s*\{[\s\S]*?"total"\s*:\s*(\d+)[\s\S]*?"logging_enabled"\s*:\s*(\d+)[\s\S]*?"pod_identities"\s*:\s*(\d+)'
+rules_summary: MATCH_GROUP[1] GREATER_THAN '1' ; MATCH_GROUP[2] EQUALS MATCH_GROUP[1] ; MATCH_GROUP[3] GREATER_THAN_OR_EQUAL_TO '0'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 1
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 3
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-EKS-PRIV

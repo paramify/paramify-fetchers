@@ -1,0 +1,7 @@
+key: il5_gap_remediation_tracking
+name: IL5 Gap Remediation Tracking
+type: ATTESTATION
+statement: Confirms each gap identified in the DoD IL5 Gap Assessment Memo has an assigned owner, documented remediation path, and target completion date, and that progress is reviewed at least quarterly.
+attestation_rules: []
+evidence_sets:
+- EVD-IL5-GAP-MANUAL

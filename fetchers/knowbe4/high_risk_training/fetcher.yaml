@@ -19,6 +19,9 @@ secrets:
 - name: region
   env: KNOWBE4_REGION
 
+ksis:
+  - KSI-CED-RAT
+
 evidence_set:
   reference_id: EVD-HIGH-RISK-TRAINING
   name: KnowBe4 Role Specific Training for High Risk Users

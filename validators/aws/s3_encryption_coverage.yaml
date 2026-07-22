@@ -1,0 +1,16 @@
+key: s3_encryption_coverage
+name: S3 Encryption Coverage
+type: AUTOMATED
+statement: All S3 buckets are encrypted at rest.
+regex: '"total_storage":\s*(\d+)[\s\S]*?"encrypted_storage":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+evidence_sets:
+- EVD-BACKUP-VALIDATION

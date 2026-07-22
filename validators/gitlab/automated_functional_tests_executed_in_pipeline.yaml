@@ -1,0 +1,15 @@
+key: automated_functional_tests_executed_in_pipeline
+name: Automated Functional Tests Executed in Pipeline
+type: AUTOMATED
+statement: Automated tests run in the CI/CD pipeline before deployment.
+regex: npm run test:build:unit|npm test|dotnet test|"project_name":\s*"admission"
+rules_summary: MATCH_COUNT GREATER_THAN_OR_EQUAL_TO '1'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+evidence_sets:
+- EVD-GITLAB-CICD-CONFIG

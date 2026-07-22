@@ -1,0 +1,15 @@
+key: iam_users_and_groups_compliant
+name: IAM Users and Groups Compliant
+type: AUTOMATED
+statement: IAM users conform to the account's user-minimization policy.
+regex: '"GroupName":\s*"(?!Administrators")([^"]+)"'
+rules_summary: MATCH_COUNT EQUALS '0'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-IAM-USERS-GROUPS

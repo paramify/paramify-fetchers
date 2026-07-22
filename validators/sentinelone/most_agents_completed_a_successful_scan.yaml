@@ -1,0 +1,16 @@
+key: most_agents_completed_a_successful_scan
+name: Most agents completed a successful scan
+type: AUTOMATED
+statement: At least 80% of managed SentinelOne agents have completed a successful full scan.
+regex: '"last_successful_scan_percentage":\s*(\d+\.?\d*)[\s\S]*?'
+rules_summary: MATCH_GROUP[1] GREATER_THAN_OR_EQUAL_TO '.8'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '.8'
+evidence_sets:
+- EVD-S1-AGENT

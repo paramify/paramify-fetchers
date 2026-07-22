@@ -1,0 +1,7 @@
+key: service_overview_currency
+name: Service Overview Currency
+type: ATTESTATION
+statement: Confirms the FedRAMP Service Overview document reflects the current FedRAMP Marketplace listing status, lists the correct independent assessor, and that all customer responsibility documentation links are accessible and current.
+attestation_rules: []
+evidence_sets:
+- EVD-FEDRAMP-SVC-OVERVIEW-MANUAL

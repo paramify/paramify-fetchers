@@ -1,0 +1,44 @@
+key: conditional_access_enforced_with_group_assignment
+name: Conditional access enforced with group assignment
+type: AUTOMATED
+statement: Access requires conditional-rule policies and group-based application assignment, with verification set to REQUIRED.
+regex: '"summary"\s*:\s*\{(?=[\s\S]*?"policies_with_conditional_rules"\s*:\s*(\d+))(?=[\s\S]*?"applications_with_group_assignments"\s*:\s*(\d+))(?=[\s\S]*?"total_applications"\s*:\s*(\d+))(?=[\s\S]*?"access_events_last_7_days"\s*:\s*(\d+))(?=[\s\S]*?"phishingResistant"\s*:\s*"(REQUIRED)")[\s\S]*?\}'
+rules_summary: MATCH_GROUP[1] GREATER_THAN '0' ; MATCH_GROUP[2] GREATER_THAN_OR_EQUAL_TO '1' ; MATCH_GROUP[2] LESS_THAN_OR_EQUAL_TO MATCH_GROUP[3] ; MATCH_GROUP[4] GREATER_THAN '0' ; MATCH_GROUP[5] EQUALS 'REQUIRED'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: LESS_THAN_OR_EQUAL_TO
+  value:
+    type: MATCH_GROUP
+    groupNumber: 3
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 4
+  criteria: GREATER_THAN
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 5
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: REQUIRED
+evidence_sets:
+- EVD-OKTA-KSI-IAM-04

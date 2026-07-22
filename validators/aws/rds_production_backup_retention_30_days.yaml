@@ -1,0 +1,30 @@
+key: rds_production_backup_retention_30_days
+name: RDS Production Backup Retention (30 days)
+type: AUTOMATED
+statement: Production RDS instances retain automated backups for at least 30 days.
+regex: '"DBInstanceIdentifier":\s*"([^"]*-prod-[^"]*)"[\s\S]*?"Address":\s*"([^"]*-prod-[^"]*)"[\s\S]*?"BackupRetentionPeriod":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] CONTAINS 'prod' ; MATCH_GROUP[2] CONTAINS 'prod' ; MATCH_GROUP[3] GREATER_THAN_OR_EQUAL_TO '30'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: prod
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: prod
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 3
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '30'
+evidence_sets:
+- EVD-DATABASE-HA

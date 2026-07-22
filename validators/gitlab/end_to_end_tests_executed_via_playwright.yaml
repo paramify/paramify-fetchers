@@ -1,0 +1,16 @@
+key: end_to_end_tests_executed_via_playwright
+name: End-to-End Tests Executed via Playwright
+type: AUTOMATED
+statement: End-to-end browser tests run in the CI/CD pipeline against the composed service stack.
+regex: paramify/paramify[\s\S]*(playwright\.config\.ts)
+rules_summary: MATCH_GROUP[1] CONTAINS 'playwright.config.ts'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: playwright.config.ts
+evidence_sets:
+- EVD-GITLAB-CICD-CONFIG

@@ -1,0 +1,15 @@
+key: s3_primary_buckets_cross_region_replication
+name: S3 Primary Buckets Cross-Region Replication
+type: AUTOMATED
+statement: Primary S3 buckets replicate to backup buckets.
+regex: '"BucketName":\s*"(paramify-gov-(?:pre|prod)-(?:s3|gitlab-backups))"[\s\S]*?"ReplicationEnabled":\s*(true)'
+rules_summary: MATCH_COUNT GREATER_THAN_OR_EQUAL_TO '3'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '3'
+evidence_sets:
+- EVD-BACKUP-VALIDATION

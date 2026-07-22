@@ -1,0 +1,16 @@
+key: 80_of_developers_trained
+name: ≥80% of developers trained
+type: AUTOMATED
+statement: At least 80% of developers have completed developer-specific secure-development training.
+regex: completion_rate"\s*:\s*(\d+)
+rules_summary: MATCH_GROUP[1] GREATER_THAN_OR_EQUAL_TO '80'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '80'
+evidence_sets:
+- EVD-DEVELOPER-SPECIFIC-TRAINING

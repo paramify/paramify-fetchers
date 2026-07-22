@@ -1,0 +1,15 @@
+key: s3_bucket_storage_encrypted
+name: S3 Bucket Storage Encrypted
+type: AUTOMATED
+statement: S3 buckets have server-side encryption enabled.
+regex: '"Type":\s*"S3_Backup"[\s\S]*?"EncryptionEnabled":\s*(true)'
+rules_summary: MATCH_COUNT EQUALS '6'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '6'
+evidence_sets:
+- EVD-BACKUP-VALIDATION

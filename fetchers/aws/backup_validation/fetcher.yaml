@@ -36,7 +36,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-RPL-03
+  - KSI-RPL-ABO
+  - KSI-RPL-ARP
 
 evidence_set:
   reference_id: EVD-BACKUP-VALIDATION

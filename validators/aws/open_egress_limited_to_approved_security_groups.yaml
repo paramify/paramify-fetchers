@@ -1,0 +1,15 @@
+key: open_egress_limited_to_approved_security_groups
+name: Open egress limited to approved security groups
+type: AUTOMATED
+statement: No security group outside the approved allowlist permits outbound traffic to 0.0.0.0/0.
+regex: '"GroupId":\s*"(sg-(?!083f71084f584b1bd|09c5ac651df806a6a|03773c51d003b2c8d)[^"]+)"[^{]*"Rules":\s*\[[^\]]*"Direction":\s*"OUTBOUND RULES"[^}]*"CIDRs":\s*"[^"]*0\.0\.0\.0\/0"'
+rules_summary: MATCH_COUNT EQUALS '0'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-SECURITY-GROUPS

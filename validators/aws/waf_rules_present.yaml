@@ -1,0 +1,16 @@
+key: waf_rules_present
+name: WAF Rules Present
+type: AUTOMATED
+statement: At least one WAF Web ACL has a rules set present for DoS-protection review.
+regex: '"Rules"\s*:\s*\['
+rules_summary: MATCH_COUNT GREATER_THAN '0'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: GREATER_THAN
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-WAF-ALL-RULES
+- EVD-WAF-DOS-RULES

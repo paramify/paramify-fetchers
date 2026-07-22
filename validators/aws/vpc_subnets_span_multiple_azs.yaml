@@ -1,0 +1,16 @@
+key: vpc_subnets_span_multiple_azs
+name: VPC Subnets Span Multiple AZs
+type: AUTOMATED
+statement: VPC subnets are distributed across more than one availability zone.
+regex: '"AvailabilityZoneId":\s*"(usgw1-az1)"[\s\S]*?"AvailabilityZoneId":\s*"(usgw1-az2)"'
+rules_summary: MATCH_GROUP[1] NOT_EQUALS MATCH_GROUP[2]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: NOT_EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+evidence_sets:
+- EVD-NETWORK-RESILIENCE-HA

@@ -1,0 +1,23 @@
+key: significant_change_tracking
+name: Significant Change Tracking
+type: ATTESTATION
+statement: This validator confirms that significant system changes are documented in human/machine-readable formats, and that the Change Control Board populates these records with relevant details to support review and assessment.
+attestation_rules:
+- question: Does the organization formally document and track significant system changes in a central repository accessible for assessment?
+  yesDisposition: BASED_ON_NESTED
+  noDisposition: FAIL
+  nestedRules:
+  - question: Are significant changes documented and make accessible in both human-readable and machine-readable formats?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+  - question: Does the Change Control Board ensure that the documentation for these changes includes all "relevant details" (e.g., impact, justification, security implications)?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+  - question: Are these records maintained to facilitate external review and assessment of the system's security posture over time?
+    yesDisposition: PASS
+    noDisposition: FAIL
+    nestedRules: []
+evidence_sets:
+- EVD-SIGNIFICANT-CHANGE-MANUAL

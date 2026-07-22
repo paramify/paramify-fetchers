@@ -1,0 +1,17 @@
+key: rds_multi_az_enabled
+name: RDS Multi-AZ Enabled
+type: AUTOMATED
+statement: RDS deployments span multiple availability zones for failover.
+regex: '"SubnetAvailabilityZone":\s*\{\s*"Name":\s*"us-gov-west-1([a-c])"[\s\S]*?"SubnetAvailabilityZone":\s*\{\s*"Name":\s*"us-gov-west-1([a-c])"'
+rules_summary: MATCH_GROUP[1] NOT_EQUALS MATCH_GROUP[2]
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: NOT_EQUALS
+  value:
+    type: MATCH_GROUP
+    groupNumber: 2
+evidence_sets:
+- EVD-EBS-SNAPSHOT
+- EVD-DATABASE-HA

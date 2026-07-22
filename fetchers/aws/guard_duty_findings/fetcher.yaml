@@ -41,6 +41,10 @@ config_schema:
     env: GUARD_DUTY_FINDINGS_LOOKBACK_DAYS
     description: Only include findings whose updatedAt falls within this many days of now. Keeps evidence "recent" without a local state file.
 
+ksis:
+  - KSI-IAM-SUS
+  - KSI-MLA-RVL
+
 evidence_set:
   reference_id: EVD-GUARD-DUTY-FINDINGS
   name: GuardDuty Findings

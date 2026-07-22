@@ -1,0 +1,30 @@
+key: rds_pre_dev_backup_retention_7_days
+name: RDS Pre/Dev Backup Retention (7 days)
+type: AUTOMATED
+statement: Pre-production RDS instances retain automated backups for at least 7 days.
+regex: '"DBInstanceIdentifier":\s*"([^"]*-pre-[^"]*)"[\s\S]*?"Address":\s*"([^"]*-pre-[^"]*)"[\s\S]*?"BackupRetentionPeriod":\s*(\d+)'
+rules_summary: MATCH_GROUP[1] CONTAINS 'pre' ; MATCH_GROUP[2] CONTAINS 'pre' ; MATCH_GROUP[3] GREATER_THAN_OR_EQUAL_TO '7'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: pre
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: pre
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 3
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '7'
+evidence_sets:
+- EVD-DATABASE-HA

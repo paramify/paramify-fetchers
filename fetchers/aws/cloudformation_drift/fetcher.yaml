@@ -29,8 +29,12 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-CMT-02
-  - KSI-MLA-05
+  - KSI-CMT-LMC
+  - KSI-CMT-RMV
+  - KSI-CMT-RVP
+  - KSI-CNA-DFP
+  - KSI-CNA-EIS
+  - KSI-MLA-EVC
 
 evidence_set:
   reference_id: EVD-CLOUDFORMATION-DRIFT

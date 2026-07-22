@@ -29,8 +29,9 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-SVC-01
-  - KSI-SVC-07
+  - KSI-CNA-EIS
+  - KSI-MLA-EVC
+  - KSI-SVC-EIS
 
 evidence_set:
   reference_id: EVD-SSM-PATCH

@@ -1,0 +1,15 @@
+key: kubernetes_iac_compliance_scan_performed
+name: Kubernetes IaC compliance scan performed
+type: AUTOMATED
+statement: A Checkov scan ran against the Kubernetes manifests.
+regex: '"check_type"\s*:\s*"kubernetes"'
+rules_summary: MATCH_COUNT GREATER_THAN_OR_EQUAL_TO '1'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+evidence_sets:
+- EVD-CHECKOV-KUBERNETES

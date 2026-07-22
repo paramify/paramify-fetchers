@@ -1,0 +1,23 @@
+key: phishing_resistant_mfa_in_use
+name: Phishing-resistant MFA in use
+type: AUTOMATED
+statement: Phishing-resistant MFA is configured and used by at least one user.
+regex: '"summary"\s*:\s*\{(?=[\s\S]*?"phishing_resistant_authenticator_types_count"\s*:\s*(\d+))(?=[\s\S]*?"users_with_phishing_resistant_mfa"\s*:\s*(\d+))[\s\S]*?\}'
+rules_summary: MATCH_GROUP[2] GREATER_THAN '0' ; MATCH_GROUP[1] GREATER_THAN_OR_EQUAL_TO '1'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 2
+  criteria: GREATER_THAN
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+evidence_sets:
+- EVD-OKTA-KSI-IAM-01

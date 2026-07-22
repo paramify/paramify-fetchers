@@ -1,0 +1,15 @@
+key: deployment_health_verified_via_rollout_status_check
+name: Deployment Health Verified via Rollout Status Check
+type: AUTOMATED
+statement: The pipeline checks Kubernetes rollout status after deployment and fails if pods do not become healthy.
+regex: rollout status
+rules_summary: MATCH_COUNT GREATER_THAN_OR_EQUAL_TO '1'
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: GREATER_THAN_OR_EQUAL_TO
+  value:
+    type: CUSTOM_TEXT
+    customText: '1'
+evidence_sets:
+- EVD-GITLAB-CICD-CONFIG

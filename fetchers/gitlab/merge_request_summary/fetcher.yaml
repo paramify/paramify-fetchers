@@ -50,7 +50,9 @@ secrets:
   per_target: true
 
 ksis:
-  - KSI-CMT-04
+  - KSI-CMT-LMC
+  - KSI-CMT-RVP
+  - KSI-PIY-RSD
 
 evidence_set:
   reference_id: EVD-GITLAB-MR-SUMMARY

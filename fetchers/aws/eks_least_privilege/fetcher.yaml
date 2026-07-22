@@ -29,7 +29,11 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-IAM-04
+  - KSI-CNA-DFP
+  - KSI-IAM-ELP
+  - KSI-IAM-JIT
+  - KSI-IAM-SNU
+  - KSI-MLA-LET
 
 evidence_set:
   reference_id: EVD-EKS-PRIV

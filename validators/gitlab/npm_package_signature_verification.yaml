@@ -1,0 +1,16 @@
+key: npm_package_signature_verification
+name: NPM Package Signature Verification
+type: AUTOMATED
+statement: The pipeline verifies cryptographic signatures of installed npm packages.
+regex: paramify/paramify[\s\S]*(npm audit signatures)
+rules_summary: MATCH_GROUP[1] CONTAINS 'audit signatures'
+validation_rules:
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: CONTAINS
+  value:
+    type: CUSTOM_TEXT
+    customText: audit signatures
+evidence_sets:
+- EVD-GITLAB-CICD-CONFIG

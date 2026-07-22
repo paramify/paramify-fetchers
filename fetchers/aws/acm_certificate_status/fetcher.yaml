@@ -29,7 +29,8 @@ target_schema:
 secrets: []
 
 ksis:
-  - KSI-SVC-06
+  - KSI-SVC-ASM
+  - KSI-SVC-VCM
 
 evidence_set:
   reference_id: EVD-ACM-CERT

@@ -19,6 +19,10 @@ secrets:
 - name: api_url
   env: SENTINELONE_API_URL
 
+ksis:
+  - KSI-IAM-SUS
+  - KSI-MLA-LET
+
 evidence_set:
   reference_id: EVD-S1-ACTIVITY
   name: SentinelOne Activities
