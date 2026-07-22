@@ -1,0 +1,46 @@
+name: paramify_historical_ver_activity
+version: 0.1.0
+description: >-
+  Generates the FedRAMP 20x Historical VER Activity (VER-TFR-MRH) snapshot from
+  Paramify issues: a point-in-time document containing both active (non-accepted)
+  and accepted vulnerabilities, partitioned by the shared accepted definition so
+  the two arrays are consistent by construction.
+category: paramify
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 600
+
+output:
+  type: json
+  path: paramify_historical_ver_activity.json
+
+secrets:
+  - name: api_token
+    env: PARAMIFY_API_TOKEN
+  - name: project_id
+    env: PARAMIFY_PROJECT_ID
+  - name: cert_package_uri
+    env: PARAMIFY_CERT_PACKAGE_URI
+  - name: report_from
+    env: PARAMIFY_REPORT_FROM
+  - name: api_base_url
+    env: PARAMIFY_API_BASE_URL
+  - name: http_timeout
+    env: PARAMIFY_HTTP_TIMEOUT
+
+evidence_set:
+  reference_id: EVD-PARAMIFY-VER-TFR-MRH
+  name: Paramify Historical VER Activity (VER-TFR-MRH)
+  instructions: >-
+    Script: fetcher.py. Reads all project issues for PARAMIFY_PROJECT_ID from the
+    Paramify REST API (GET /issues) once, partitions into active (non-accepted)
+    and accepted vulnerabilities using the shared accepted definition, and writes
+    the FedRAMP Historical VER Activity snapshot JSON. Per VER-TFR-MRH, Class C
+    providers should refresh this at least every 14 days (scheduling is
+    operational, outside the fetcher).
+
+ksis:
+  - KSI-MLA-06
+  - KSI-MLA-03

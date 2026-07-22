@@ -1,0 +1,23 @@
+# Category-level metadata for the Paramify FedRAMP report fetchers.
+#
+# Unlike most categories (which pull evidence FROM a third-party system INTO
+# Paramify), these fetchers read FROM Paramify's own REST API and produce the
+# FedRAMP Consolidated Rules 2026 vulnerability-reporting artifacts
+# (VER-RPT-AVI, VER-RPT-VDT, VER-TFR-MRH).
+#
+# Access: Paramify REST API v0 with a Bearer token that has read scope on the
+# target project's issues and deviations.
+
+name: paramify
+description: >-
+  FedRAMP 20x vulnerability-reporting artifacts generated from Paramify issue
+  data (accepted vulnerabilities, vulnerability detail report, and the
+  historical VER-activity snapshot).
+
+auth:
+  # The fetchers read the token from PARAMIFY_API_TOKEN (falling back to
+  # PARAMIFY_UPLOAD_API_TOKEN). Base URL defaults to app.paramify.com and can
+  # be overridden per environment.
+  description: >-
+    Paramify REST API Bearer token with read scope on the project's issues and
+    deviations. See fetchers/paramify/README.md.

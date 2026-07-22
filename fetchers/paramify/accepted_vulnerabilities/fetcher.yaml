@@ -1,0 +1,44 @@
+name: paramify_accepted_vulnerabilities
+version: 0.1.0
+description: >-
+  Generates the FedRAMP 20x Accepted Vulnerability Info (VER-RPT-AVI) report
+  from Paramify issues: vulnerabilities with an accepted deviation
+  (OPERATIONAL_REQUIREMENT / VENDOR_DEPENDENCY / RISK_ADJUSTMENT) or that are
+  open 192+ days past a real completed evaluation (VER-TFR-MAV).
+category: paramify
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 600
+
+output:
+  type: json
+  path: paramify_accepted_vulnerabilities.json
+
+secrets:
+  - name: api_token
+    env: PARAMIFY_API_TOKEN
+  - name: project_id
+    env: PARAMIFY_PROJECT_ID
+  - name: cert_package_uri
+    env: PARAMIFY_CERT_PACKAGE_URI
+  - name: report_from
+    env: PARAMIFY_REPORT_FROM
+  - name: api_base_url
+    env: PARAMIFY_API_BASE_URL
+  - name: http_timeout
+    env: PARAMIFY_HTTP_TIMEOUT
+
+evidence_set:
+  reference_id: EVD-PARAMIFY-VER-RPT-AVI
+  name: Paramify Accepted Vulnerability Info (VER-RPT-AVI)
+  instructions: >-
+    Script: fetcher.py. Reads issues and deviations for PARAMIFY_PROJECT_ID from
+    the Paramify REST API (GET /issues), applies the shared accepted-vulnerability
+    definition (accepted deviation or 192-day-open per VER-TFR-MAV), and writes
+    the FedRAMP Accepted Vulnerability Info JSON.
+
+ksis:
+  - KSI-MLA-06
+  - KSI-MLA-03
