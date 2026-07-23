@@ -1,0 +1,32 @@
+# gitleaks configuration for paramify-fetchers.
+#
+# CI runs `gitleaks git` over the full repo history (see .github/workflows/ci.yml,
+# the `secrets` job). gitleaks auto-detects this file at the repo root.
+#
+# We keep gitleaks' full default ruleset and add narrowly-scoped allowlists for
+# known false positives only. Each allowlist below documents *why* the match is
+# not a secret; prefer adding a tightly-scoped entry over broadening an existing
+# one.
+
+[extend]
+useDefault = true
+
+# --- False positive: validator registry `key:` field ------------------------ #
+# Every validator lives in validators/<category>/<id>.yaml and begins with
+#   key: <validator-id>        e.g. `key: s3_replication_kms_encryption`
+# gitleaks' generic-api-key rule reads that YAML field name as a credential
+# assignment (`key: <value>`) and, when the identifier is long enough to clear
+# its entropy threshold, reports it as a leak. The value is a declarative
+# validator identifier, not a secret.
+#
+# Scoped with condition = "AND" so it suppresses a finding ONLY when all three
+# hold: the generic-api-key rule, a file under validators/, and the leading
+# `key: <snake_id>` line. A real credential elsewhere in a validator file — or a
+# different rule — is still reported.
+[[allowlists]]
+description = "Validator registry `key: <id>` field is an identifier, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''validators/.*\.ya?ml$''']
+regexes = ['''^key:\s+[a-z0-9_]+\s*$''']
+regexTarget = "line"
