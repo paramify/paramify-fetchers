@@ -782,8 +782,13 @@ def scripts_sync_preflight(
     config_path: Optional[Path] = None,
     *,
     dry_run: bool = False,
+    include: Optional[set] = None,
 ) -> dict:
-    """Inspect scripts-sync readiness without making Paramify API calls."""
+    """Inspect scripts-sync readiness without making Paramify API calls.
+
+    ``include`` restricts the fetcher count to those names (a manifest's
+    fetchers); ``None`` counts every discovered fetcher.
+    """
     uploader = _load_paramify_scripts_uploader(root)
     uploader.load_dotenv()
     config = uploader.load_config(str(config_path)) if config_path else {}
@@ -797,10 +802,13 @@ def scripts_sync_preflight(
     errors: List[str] = []
     fetcher_count = 0
     for f in discover_fetchers(root).values():
+        if include is not None and f.name not in include:
+            continue
         if f.evidence_set and f.entry_path.exists():
             fetcher_count += 1
     if fetcher_count == 0:
-        errors.append("No fetchers with an evidence_set and a readable entry file to sync")
+        scope = "in the manifest " if include is not None else ""
+        errors.append(f"No fetchers {scope}with an evidence_set and a readable entry file to sync")
 
     url_error = uploader._base_url_error(base_url)
     if url_error:
@@ -829,12 +837,16 @@ def scripts_sync(
     dry_run: bool = False,
     force: bool = False,
     reassociate: bool = False,
+    include: Optional[set] = None,
     on_event: Optional[Callable[[dict], None]] = None,
 ) -> dict:
     """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
 
     Fires sync_start / sync_item / sync_complete so front-ends can render
     progress. Raises ValueError for setup errors; returns the uploader summary.
+
+    ``include`` restricts the sweep to those fetcher names (a manifest's
+    fetchers); ``None`` syncs every discovered fetcher.
     """
     uploader = _load_paramify_scripts_uploader(root)
     config = uploader.load_config(str(config_path)) if config_path else {}
@@ -844,6 +856,7 @@ def scripts_sync(
         dry_run=dry_run,
         force=force,
         reassociate=reassociate,
+        include=include,
         on_event=on_event,
     )
 

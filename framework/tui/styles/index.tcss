@@ -244,40 +244,40 @@ UploadPage {
     height: 1fr;
 }
 
-#upload-top {
-    height: auto;
-    padding: 1 1 0 1;
-    align: left middle;
-}
+/* Paramify tab: evidence + scripts panels stacked over a shared log. */
+#evidence-panel { height: auto; margin: 1 1 0 1; }
+#evidence-summary { height: auto; }
+#evidence-actions { height: auto; align: left middle; padding-top: 1; }
 
-#upload-top Button {
+#scripts-panel { height: 1fr; margin: 1 1 0 1; }
+#scripts-header { height: auto; }
+#scripts-plan-summary { height: auto; color: $text-muted; }
+#scripts-plan { height: 1fr; }
+#scripts-actions { height: auto; align: left middle; padding-top: 1; }
+/* Uniform SIZE across the whole action row. Buttons and checkboxes size to their
+   text by default (mismatched widths), and Checkbox keeps its 3-row bordered box
+   while Button is flattened to 1 row (mismatched heights). Pin both to one width
+   (fits the longest label, "reassociate") and flatten the checkbox to 1 row so
+   the row reads as a single band of equal controls. */
+#scripts-actions Button { margin-right: 1; width: 20; }
+#scripts-actions Checkbox,
+#scripts-actions Checkbox:focus,
+#scripts-actions Checkbox:hover {
     margin-right: 1;
+    width: 20;
+    height: 1;
+    border: none;
+    padding: 0 1;
+    background: $panel;
 }
 
-#upload-options {
-    height: auto;
-    padding: 0 1 0 1;
-    align: left middle;
-}
-
-#upload-options .options-label {
-    padding: 1 1 0 0;
-    color: $text-muted;
-}
+#upload-log-panel { height: 40%; margin: 1 1 0 1; }
+#upload-log { height: 1fr; }
 
 #upload-banner {
-    width: 1fr;
-    padding: 0 0 0 1;
+    height: auto;
+    padding: 0 1;
 }
-
-#upload-body {
-    height: 1fr;
-    padding: 1 1 0 1;
-}
-
-#upload-summary-panel { width: 42%; }
-#upload-log-panel { width: 1fr; margin-left: 1; }
-#upload-summary, #upload-log { height: 1fr; }
 
 /* Modals */
 ModalScreen {

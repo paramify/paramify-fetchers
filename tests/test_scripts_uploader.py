@@ -99,7 +99,7 @@ def _existing_for_specs():
 @pytest.fixture
 def wired(monkeypatch):
     monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
-    monkeypatch.setattr(uploader, "_discover_specs", lambda root: list(SPECS))
+    monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: list(SPECS))
     fake = FakeClient(_existing_for_specs())
     monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: fake)
     return fake
@@ -150,7 +150,7 @@ def test_https_guard_rejects_http():
 
 def test_error_isolation(monkeypatch):
     monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
-    monkeypatch.setattr(uploader, "_discover_specs", lambda root: list(SPECS))
+    monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: list(SPECS))
     fake = FakeClient(_existing_for_specs())
 
     def boom(name, description, code):
@@ -167,3 +167,37 @@ def test_error_isolation(monkeypatch):
     # the other fetchers still processed
     assert r["f_bump"]["outcome"] == "update"
     assert r["f_noop"]["outcome"] == "noop"
+
+
+# --------------------------------------------------------------------------- #
+# Manifest scoping: discovery restricts to the `include` set (the manifest's
+# fetchers), so a sync never provisions scripts for fetchers you don't collect.
+# --------------------------------------------------------------------------- #
+
+def test_include_scopes_discovery_to_named_fetchers():
+    # demo_hello is credential-free and declares an evidence_set, so it always
+    # discovers; scoping to it must yield exactly it.
+    only = uploader._discover_specs(REPO_ROOT, include={"demo_hello"})
+    assert {s["fetcher_name"] for s in only} == {"demo_hello"}
+
+    # None = the whole catalog (many more than one).
+    everything = uploader._discover_specs(REPO_ROOT, include=None)
+    names = {s["fetcher_name"] for s in everything}
+    assert "demo_hello" in names and len(names) > 1
+
+    # A name that isn't a real fetcher scopes to nothing.
+    assert uploader._discover_specs(REPO_ROOT, include={"not_a_fetcher"}) == []
+
+
+def test_sync_forwards_include_to_discovery(monkeypatch):
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
+    seen = {}
+
+    def fake_discover(root, include=None):
+        seen["include"] = include
+        return list(SPECS)
+
+    monkeypatch.setattr(uploader, "_discover_specs", fake_discover)
+    monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: FakeClient(_existing_for_specs()))
+    uploader.sync_scripts(".", include={"f_bump"})
+    assert seen["include"] == {"f_bump"}
