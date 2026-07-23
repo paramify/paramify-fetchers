@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paramify-fetchers"
-version = "0.2.1"
+version = "0.3.0"
 description = "Paramify evidence fetcher framework — discover, build, run, and inspect evidence fetchers."
 readme = "README.md"
 requires-python = ">=3.10"

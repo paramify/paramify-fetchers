@@ -77,7 +77,7 @@ fetcher writes it. Fetchers do not change.**
 Rationale:
 - The runner already knows every metadata field — it computes the same values for
   `_run_metadata.json` (name, version, target, run_id, timestamps, exit_code).
-- **Zero fetcher changes.** Wrapping in each of the 107 fetchers would be 107 edits
+- **Zero fetcher changes.** Wrapping in each of the 122 fetchers would be 122 edits
   and would grow with every new port. One implementation point instead.
 - Keeps the v0.x interim clause true: fetchers still write raw evidence dicts;
   the framework adds the envelope. A fetcher can later emit its own envelope and

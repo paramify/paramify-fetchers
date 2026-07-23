@@ -283,7 +283,7 @@ Benefits of separation:
 - The Wiz-style case (writing issues back to Paramify, not just evidence) becomes a different uploader, not a hack inside the fetcher
 
 The evidence uploader is built (and exposed as `paramify upload`):
-`uploaders/paramify_evidence/` reads an enveloped run directory, gets-or-creates an evidence set by `reference_id` (Paramify REST v0), multipart-uploads the artifact, and is idempotent within a run. It supports `--dry-run`, `--config`, an https-only token guard, customer `reference_id` overrides, and auth via `PARAMIFY_UPLOAD_API_TOKEN` (+ optional `PARAMIFY_API_BASE_URL` / `--config base_url`). The Wiz-style issues uploader (`uploaders/paramify_issues/`) is still an empty stub.
+`uploaders/paramify_evidence/` reads an enveloped run directory, gets-or-creates an evidence set by `reference_id` (Paramify REST v0), multipart-uploads the artifact, and is idempotent within a run. It supports `--dry-run`, `--config`, an https-only token guard, customer `reference_id` overrides, and auth via `PARAMIFY_UPLOAD_API_TOKEN` (+ optional `PARAMIFY_API_BASE_URL` / `--config base_url`). A second uploader, `uploaders/paramify_scripts/` (exposed as `paramify scripts sync`), is also built — a provisioning step that pushes each fetcher's entry script to Paramify and CONNECTs it to that fetcher's evidence set, manifest-scoped by default (`--all` for the whole catalog). See [`uploader_design.md`](uploader_design.md) for both. The Wiz-style issues uploader (`uploaders/paramify_issues/`) is still an empty stub.
 
 Orchestration that chains collect → upload is customer-owned, not built into the runner. `run_and_upload.sh` at the repo root is example glue.
 
@@ -323,25 +323,28 @@ paramify-fetchers/
 │       ├── run_manifest_schema.json
 │       └── envelope_schema.json
 │
-├── fetchers/                         # 107 fetchers across 8 categories
+├── fetchers/                         # 122 fetchers across 10 categories
 │   ├── _categories/                  # platform-wide config + auth per category
 │   │   ├── okta.yaml
 │   │   ├── aws.yaml
 │   │   └── ...                       # (+ azure/ssllabs/wiz stubs — no ported fetchers)
 │   ├── _template/                    # starter directory for new fetchers
+│   ├── aws/                          # 80 bash (largest category; fanout per region/profile)
+│   ├── datadog/                      # 13 Python (SIEM, logs, infra, APM, incidents)
 │   ├── okta/                         # 8 (7 Python KSI wrappers + 1 bash); _shared/okta_iam_core.py
-│   ├── aws/                          # 79 bash (largest category; fanout per region/profile)
 │   ├── sentinelone/                  # 5 single-target Python
 │   ├── knowbe4/                      # 4 bash
 │   ├── k8s/                          # 3 bash (aws-cli + kubectl)
 │   ├── rippling/                     # 3 single-target Python
 │   ├── gitlab/                       # 3 fanout-capable Python (e.g. ci_cd_pipeline_config)
-│   └── checkov/                      # 2 bash IaC scanners (terraform + kubernetes)
+│   ├── checkov/                      # 2 bash IaC scanners (terraform + kubernetes)
+│   └── demo/                         # 1 credential-free synthetic demo (demo_hello)
 │
 ├── comparators/                      # scaffold only (_template/); no comparator ported, runner doesn't honor depends_on
 │
 ├── uploaders/
 │   ├── paramify_evidence/            # BUILT — get-or-create evidence set + multipart upload
+│   ├── paramify_scripts/             # BUILT — sync entry scripts + associate to evidence sets
 │   └── paramify_issues/              # empty stub (Wiz-style issues; not built)
 │
 ├── deploy/                           # containerized bundle — the MVP deployment
@@ -411,10 +414,10 @@ The current approach parses JSON output with regex to determine pass/fail. Most 
 
 ## Current state of the work
 
-**This section, together with `CLAUDE.md`, is the kept-current account of
-what's ported and what's in progress.** Snapshot: 107 fetchers across
-8 categories (okta, aws, sentinelone, knowbe4, gitlab, k8s, rippling, checkov); the
-AWS port is complete (79/79). The pieces that make this run:
+**This section is the kept-current account of what's ported and what's in
+progress.** Snapshot: 122 fetchers across 10 categories (aws, datadog, okta,
+sentinelone, knowbe4, gitlab, k8s, rippling, checkov, demo); the AWS port is
+complete (80/80). The pieces that make this run:
 
 - **Facade + three front-ends** (`framework/api.py`) — all discovery, manifest editing, validate, and run go through one facade; the human CLI, the `--json` AI CLI, and the Textual TUI (`paramify tui`) all call only the facade
 - **Fetcher schema** (`framework/schemas/fetcher_schema.json`) — supports fanout: `supports_targets`, `target_schema`, `per_target` secrets, `output.aggregation`. Extended additively from the original minimal version.
@@ -433,6 +436,7 @@ Done since the last revision:
 - ~~**Config injection**~~ — DONE. Category defaults ← platform config ← per-fetcher config, injected as env vars via `config_schema` `env` mappings; `auth.passthrough_env` opens the whitelist for ambient cloud vars.
 - ~~**Evidence-set identity**~~ — DONE. Every `fetcher.yaml` carries an `evidence_set` block (reference_id / name / instructions), backfilled from the upstream catalog; it flows into the envelope and drives uploader get-or-create.
 - ~~**Evidence uploader**~~ — DONE. `uploaders/paramify_evidence/` ships (get-or-create by reference_id, multipart upload, idempotent, `--dry-run`, https-only token guard).
+- ~~**Scripts uploader**~~ — DONE. `uploaders/paramify_scripts/` (`paramify scripts sync`) provisions each fetcher's entry script and associates it to the fetcher's evidence set — GitOps reconcile (marker identity, version signal, sha256 drift guard), manifest-scoped by default with `--all`. See [`uploader_design.md`](uploader_design.md).
 
 What's deferred:
 
