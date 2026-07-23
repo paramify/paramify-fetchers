@@ -654,8 +654,8 @@ def scripts_sync_cmd(
         if json_out:
             typer.echo(json.dumps(preflight, indent=2, default=str))
         else:
-            for e in preflight["errors"]:
-                _err(f"  ERROR  {e}")
+            for err in preflight["errors"]:
+                _err(f"  ERROR  {err}")
         raise typer.Exit(1)
 
     try:
