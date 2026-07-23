@@ -232,6 +232,27 @@ for how to create a Paramify API key with the required permissions. Chaining the
 customer's job, not the runner's; `run_and_upload.sh` at the repo root is
 example glue.
 
+### Show how evidence is generated (optional)
+
+Beyond the evidence itself, you can push each fetcher's **entry script** to
+Paramify and link it to that fetcher's evidence set — so the tenant shows *how*
+each piece of evidence was collected. This is a **provisioning** step, separate
+from upload: run it when `fetchers/**` change, not on every collection.
+
+```bash
+paramify scripts sync --dry-run     # preview the plan (read-only)
+paramify scripts sync               # push entry scripts + associate to evidence sets
+```
+
+It reconciles the tenant to the repo GitOps-style — keyed off a marker in each
+script's `description` and the `fetcher.yaml` `version`, with a sha256 drift guard
+(warn/skip unless `--force`) — and supports `--reassociate` and `--json`. Like the
+uploader it talks Paramify REST v0 over HTTPS only and reads
+`PARAMIFY_UPLOAD_API_TOKEN`. See
+[`uploaders/paramify_scripts/README.md`](uploaders/paramify_scripts/README.md) for
+the full model, or [`docs/uploader_design.md`](docs/uploader_design.md) for how it
+fits alongside evidence upload.
+
 ---
 
 ## How it runs
@@ -348,6 +369,7 @@ fetchers/
 comparators/                    # cross-source comparators (template only so far)
 uploaders/
   paramify_evidence/            # push evidence to Paramify (built)
+  paramify_scripts/             # push fetcher entry scripts + associate to evidence sets (built)
   paramify_issues/              # stub, not built yet
 examples/                       # sample run manifests
 tests/                          # framework test suite (pytest)
@@ -379,6 +401,8 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`fetchers/k8s/README.md`](fetchers/k8s/README.md) | Kubernetes / EKS credential setup |
 | [`fetchers/checkov/README.md`](fetchers/checkov/README.md) | Checkov setup + git token for IaC scanning |
 | [`uploaders/paramify_evidence/README.md`](uploaders/paramify_evidence/README.md) | Paramify API key setup + upload options |
+| [`uploaders/paramify_scripts/README.md`](uploaders/paramify_scripts/README.md) | Syncing fetcher entry scripts to Paramify + the association model |
+| [`docs/uploader_design.md`](docs/uploader_design.md) | How both uploaders work + the shared evidence-set identity model |
 | [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md) | Writing a new fetcher from scratch |
 | [`docs/fetcher_contract.md`](docs/fetcher_contract.md) | The binding runner↔fetcher contract |
 | [`docs/run_manifest_reference.md`](docs/run_manifest_reference.md) | Manifest format reference |

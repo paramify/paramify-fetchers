@@ -10,6 +10,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Added
+
+- `paramify scripts sync` — push each fetcher's entry script (`fetcher.py` /
+  `fetcher.sh`) to Paramify and CONNECT it to that fetcher's evidence set, so the
+  tenant records *how* each piece of evidence is generated. A provisioning step
+  separate from `paramify upload`: it reconciles the tenant to the repo GitOps-style
+  (marker-keyed identity in the script description, `fetcher.yaml` `version` as the
+  update signal, a sha256 drift guard), with `--dry-run` / `--force` /
+  `--reassociate` / `--json`. Backed by the new `uploaders/paramify_scripts/`
+  uploader and surfaced in the TUI's Paramify tab. Only `SCRIPT` associations are
+  automated; control / solution-capability / validator linkage stays Paramify-side.
+- [`docs/uploader_design.md`](docs/uploader_design.md) — a dedicated uploader design
+  doc covering both built uploaders and the shared evidence-set identity model, and
+  a README section + docs-table entries pointing to it.
+
 ## [0.2.1-beta] - 2026-07-10
 
 ### Changed
