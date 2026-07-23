@@ -10,8 +10,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+## [0.3.0-beta] - 2026-07-23
+
 ### Added
 
+- 13 Datadog fetchers (new category): Cloud SIEM detection rules & signals, SIEM
+  operational configuration, log pipelines / indexes / archives, host & container
+  inventory, agent check results, the APM service catalog, and incident records with
+  timelines. Credential setup in [`fetchers/datadog/README.md`](fetchers/datadog/README.md).
 - `paramify scripts sync` — push each fetcher's entry script (`fetcher.py` /
   `fetcher.sh`) to Paramify and CONNECT it to that fetcher's evidence set, so the
   tenant records *how* each piece of evidence is generated. A provisioning step
@@ -108,6 +114,7 @@ change before 1.0 (see [`docs/versioning.md`](docs/versioning.md)).
 - TUI restyled — border titles, status pills, denser controls, and hatched empty
   states.
 
-[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.2.1-beta...HEAD
+[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.3.0-beta...HEAD
+[0.3.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.2.1-beta...v0.3.0-beta
 [0.2.1-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.2.0-beta...v0.2.1-beta
 [0.2.0-beta]: https://github.com/paramify/paramify-fetchers/releases/tag/v0.2.0-beta
