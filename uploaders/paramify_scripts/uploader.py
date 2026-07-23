@@ -195,14 +195,20 @@ def _resolve_reference(fetcher_name: str, es: Dict, overrides: Dict) -> Dict:
     }
 
 
-def _discover_specs(root: Path) -> List[Dict]:
+def _discover_specs(root: Path, include: Optional[set] = None) -> List[Dict]:
     """Build one script spec per fetcher that declares an evidence set and has a
     readable entry file. Discovery lives here (not the client) so the client stays
-    pure API I/O."""
+    pure API I/O.
+
+    ``include`` restricts the sweep to fetchers whose name is in the set (the
+    fetchers a manifest actually uses); ``None`` means every discovered fetcher.
+    """
     from framework.config_loader import discover_fetchers  # lazy: repo-side only
 
     specs: List[Dict] = []
     for f in sorted(discover_fetchers(root).values(), key=lambda x: x.name):
+        if include is not None and f.name not in include:
+            continue
         if not f.evidence_set:
             logger.warning("%s: no evidence_set; skipping (nothing to associate a script to)", f.name)
             continue
@@ -237,6 +243,7 @@ def sync_scripts(
     dry_run: bool = False,
     force: bool = False,
     reassociate: bool = False,
+    include: Optional[set] = None,
     on_event: Optional[Callable[[dict], None]] = None,
 ) -> Dict:
     """Reconcile every fetcher's entry script into Paramify and associate it.
@@ -265,7 +272,7 @@ def sync_scripts(
         raise ValueError(msg)
 
     root = Path(root)
-    specs = _discover_specs(root)
+    specs = _discover_specs(root, include)
 
     logger.info("Syncing %d fetcher script(s) → %s%s", len(specs), base_url, " (dry-run)" if dry_run else "")
     _emit(on_event, {"event": "sync_start", "base_url": base_url, "dry_run": dry_run, "fetchers": len(specs)})
@@ -389,6 +396,8 @@ def main(argv=None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Report the plan; read-only (no writes)")
     parser.add_argument("--force", action="store_true", help="Push scripts whose code drifted without a version bump")
     parser.add_argument("--reassociate", action="store_true", help="Ensure the script↔evidence-set association for every fetcher, not just changed ones")
+    parser.add_argument("--manifest", help="Sync only the fetchers this manifest uses (default: manifest.yaml at the repo root)")
+    parser.add_argument("--all", dest="all_fetchers", action="store_true", help="Sync every fetcher in the repo, not just the manifest's")
     args = parser.parse_args(argv)
 
     if args.root:
@@ -397,6 +406,15 @@ def main(argv=None) -> int:
         from framework.api import find_repo_root
         root = find_repo_root()
 
+    # Default to the manifest's fetchers; --all provisions the whole catalog.
+    include = None
+    if not args.all_fetchers:
+        from framework.api import read_manifest
+        mpath = Path(args.manifest) if args.manifest else (root / "manifest.yaml")
+        manifest = read_manifest(mpath)
+        entries = (manifest.get("run") or {}).get("fetchers") or []
+        include = {e.get("use") for e in entries if e.get("use")}
+
     try:
         summary = sync_scripts(
             root,
@@ -404,6 +422,7 @@ def main(argv=None) -> int:
             dry_run=args.dry_run,
             force=args.force,
             reassociate=args.reassociate,
+            include=include,
         )
     except ValueError:
         return 1

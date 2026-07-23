@@ -288,11 +288,14 @@ class ManifestPage(Vertical):
         groups = []
         if cat:
             for c in cat["categories"]:
-                names = [f["name"] for f in c["fetchers"] if f["name"] not in existing]
+                # Pass every fetcher (not just addable ones): the picker shows the
+                # already-added ones greyed out so a fully-added category — e.g.
+                # datadog once all 13 are in — still appears instead of vanishing.
+                names = [f["name"] for f in c["fetchers"]]
                 if names:
                     groups.append((c["name"], names))
         if not groups:
-            self.notify("Every discovered fetcher is already in the manifest.")
+            self.notify("No fetchers discovered.")
             return
 
         def done(names: Optional[List[str]]) -> None:
@@ -325,7 +328,8 @@ class ManifestPage(Vertical):
             MultiPickerModal(
                 "Add fetchers",
                 groups,
-                subtitle="enter/space opens a platform or toggles a fetcher · type to filter",
+                subtitle="enter/space opens a platform or toggles a fetcher · ✓ = already in manifest · type to filter",
+                disabled=existing,
             ),
             done,
         )

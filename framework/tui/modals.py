@@ -164,14 +164,18 @@ class MultiPickerModal(ModalScreen[list]):
     ]
 
     def __init__(
-        self, title: str, groups: List[Tuple[str, List[str]]], subtitle: str = ""
+        self, title: str, groups: List[Tuple[str, List[str]]], subtitle: str = "",
+        disabled: set[str] | None = None,
     ) -> None:
-        # groups: ordered [(platform, [fetcher_name, ...]), ...] — categories as
-        # the catalog sorts them; only non-already-added fetchers.
+        # groups: ordered [(platform, [fetcher_name, ...]), ...] — every discovered
+        # fetcher, in the catalog's order. `disabled` names are already in the
+        # manifest: shown for context (so a fully-added category still appears)
+        # but not selectable.
         super().__init__()
         self._title = title
         self._subtitle = subtitle
         self._groups = groups
+        self._disabled = set(disabled or ())
         self._cat_of = {name: cat for cat, names in groups for name in names}
         self._all_ids = [name for _, names in groups for name in names]
         self._chosen: set = set()
@@ -203,6 +207,13 @@ class MultiPickerModal(ModalScreen[list]):
     def _leaf_label(self, name: str) -> Text:
         # A Rich Text (not a markup string) — "[x]" would otherwise be parsed as
         # a console-markup tag and vanish. Lets us tint the checked marker too.
+        if name in self._disabled:
+            # Already in the manifest: shown for context, not selectable.
+            label = Text()
+            label.append("✓ ", style="green")
+            label.append(name, style="dim")
+            label.append("  in manifest", style="dim italic")
+            return label
         checked = name in self._chosen
         label = Text()
         label.append("[x] " if checked else "[ ] ", style="green" if checked else "dim")
@@ -217,9 +228,13 @@ class MultiPickerModal(ModalScreen[list]):
             matches = [n for n in names if not flt or flt in n.lower()]
             if not matches:
                 continue
+            # Count what's actually addable; a fully-added platform still shows
+            # (labelled "all added") so the category never silently disappears.
+            addable = sum(1 for n in matches if n not in self._disabled)
+            count = f"({addable})" if addable else "(all added)"
             # Filtering opens the platforms with hits; otherwise stay collapsed
             # so a long catalog reads as a tidy list of platforms to open.
-            node = tree.root.add(f"{cat}  ({len(matches)})", expand=bool(flt))
+            node = tree.root.add(f"{cat}  {count}", expand=bool(flt))
             for name in matches:
                 node.add_leaf(self._leaf_label(name), data=name)
 
@@ -234,6 +249,8 @@ class MultiPickerModal(ModalScreen[list]):
         if name is None:  # a platform row → open/close the dropdown
             node.toggle()
             return
+        if name in self._disabled:
+            return  # already in the manifest — shown for context, not selectable
         if name in self._chosen:
             self._chosen.discard(name)
         else:

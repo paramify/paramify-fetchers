@@ -24,6 +24,11 @@ from framework.tui.screens.upload import UploadPage
 class WorkspaceScreen(Screen):
     TAB_IDS = ["tab-catalog", "tab-manifest", "tab-run", "tab-evidence", "tab-upload"]
 
+    # A one-shot callable that overrides the default focus for the next pane
+    # activation (used by the search shortcut to land on the filter box instead
+    # of the pane default). Consumed by _focus_active_pane.
+    _focus_override = None
+
     # Screen-level bindings shown on every tab's footer (after the page-specific
     # hints). Keep in sync with BINDINGS below.
     WORKSPACE_HINTS = [("1-5", "tabs"), ("m", "manifest"), ("q", "quit")]
@@ -59,6 +64,9 @@ class WorkspaceScreen(Screen):
     def on_mount(self) -> None:
         self.query_one(CatalogPage).rebuild()
         self.reload()
+        # Land focus inside the opening pane so its key bindings are live from
+        # the first keystroke (not only after the user clicks into it).
+        self.call_after_refresh(self._focus_active_pane)
 
     def reload(self) -> None:
         """Refresh the manifest-dependent pages + chrome (after load / switch)."""
@@ -78,6 +86,9 @@ class WorkspaceScreen(Screen):
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         self._update_chrome()
+        # Focus the pane's default on every activation — keyboard *and* mouse —
+        # so page-level bindings (ctrl+r, etc.) fire however the tab was entered.
+        self.call_after_refresh(self._focus_active_pane)
 
     def _update_chrome(self) -> None:
         tabs = self.query_one(TabbedContent)
@@ -93,19 +104,27 @@ class WorkspaceScreen(Screen):
                     break
         self.query_one(HintFooter).set_hints(page_hints + self.WORKSPACE_HINTS)
 
-    def _go_to_tab(self, tab_id: str, focus_default: bool = True) -> None:
+    def _go_to_tab(self, tab_id: str) -> None:
         self.set_focus(None)  # Textual reverts an active-change while focus is in the outgoing pane
         self.query_one(TabbedContent).active = tab_id
-        if focus_default:
-            self.call_after_refresh(self._focus_active_pane)
+        # Focus follows via on_tabbed_content_tab_activated (fires for programmatic
+        # changes too), so this is the single place pane focus is decided.
 
     def _focus_active_pane(self) -> None:
+        # A pending one-shot override (e.g. the search box) wins once, then clears.
+        override, self._focus_override = self._focus_override, None
+        if override is not None:
+            override()
+            return
         pane = self.query_one(TabbedContent).active_pane
         if pane is None:
             return
         for child in pane.walk_children():
             if hasattr(child, "focus_default"):
-                child.focus_default()
+                try:
+                    child.focus_default()
+                except Exception:
+                    pass  # a not-yet-ready pane will be refocused on the next activation
                 return
 
     # -- actions ---------------------------------------------------------- #
@@ -115,15 +134,23 @@ class WorkspaceScreen(Screen):
             self._go_to_tab(self.TAB_IDS[index])
 
     def action_unfocus(self) -> None:
-        self.set_focus(None)
+        # Escape returns to the pane default rather than clearing focus entirely,
+        # so global + page bindings both stay live (and a captured Input releases).
+        self._focus_active_pane()
 
     def action_refresh(self) -> None:
         self.app.refresh_catalog()
         self.query_one(CatalogPage).rebuild()
 
     def action_focus_search(self) -> None:
-        self._go_to_tab("tab-catalog", focus_default=False)
-        self.call_after_refresh(lambda: self.query_one(CatalogPage).focus_search())
+        self._focus_override = lambda: self.query_one(CatalogPage).focus_search()
+        tabs = self.query_one(TabbedContent)
+        if tabs.active == "tab-catalog":
+            # No TabActivated fires when already here; run the override directly.
+            self.call_after_refresh(self._focus_active_pane)
+        else:
+            self.set_focus(None)
+            tabs.active = "tab-catalog"  # TabActivated → _focus_active_pane consumes the override
 
     def action_switch_manifest(self) -> None:
         self.app.open_manifest_picker()

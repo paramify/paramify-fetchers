@@ -17,13 +17,34 @@ schemas and the `paramify` CLI — not the internal code.
   tenant records *how* each piece of evidence is generated. A provisioning step
   separate from `paramify upload`: it reconciles the tenant to the repo GitOps-style
   (marker-keyed identity in the script description, `fetcher.yaml` `version` as the
-  update signal, a sha256 drift guard), with `--dry-run` / `--force` /
-  `--reassociate` / `--json`. Backed by the new `uploaders/paramify_scripts/`
-  uploader and surfaced in the TUI's Paramify tab. Only `SCRIPT` associations are
-  automated; control / solution-capability / validator linkage stays Paramify-side.
+  update signal, a sha256 drift guard). **Scoped to a manifest by default** — it
+  provisions scripts only for the fetchers you collect, mirroring how `upload` is
+  run-scoped — with `--all` to push the whole catalog, plus `--dry-run` / `--force` /
+  `--reassociate` / `--json`. Backed by the `uploaders/paramify_scripts/` uploader.
+  Only `SCRIPT` associations are automated; control / solution-capability / validator
+  linkage stays Paramify-side.
 - [`docs/uploader_design.md`](docs/uploader_design.md) — a dedicated uploader design
   doc covering both built uploaders and the shared evidence-set identity model, and
   a README section + docs-table entries pointing to it.
+
+### Changed
+
+- **TUI Paramify tab redesigned** into stacked *evidence upload* and *scripts sync*
+  panels. Scripts sync gained a **Preview** action that runs a read-only dry-run and
+  surfaces the per-fetcher plan (create / update / drift / noop) in a table — flagging
+  which drifted scripts `--force` would push — and syncs the active manifest's fetchers.
+
+### Fixed
+
+- TUI: page keyboard shortcuts (`ctrl+r` / `ctrl+u` / `ctrl+s`) now fire regardless of
+  which control is focused, and default focus lands in the active pane on mount, on tab
+  switches (mouse clicks included), and after `escape` — previously they worked only
+  right after a number-key tab switch.
+- TUI: the *Add fetchers* picker no longer drops a category once all its fetchers are in
+  the manifest; already-added fetchers show greyed-out and non-selectable, so a
+  fully-added category (e.g. `datadog`) stays visible.
+- TUI: the Paramify action row (Preview / Sync Scripts / force / reassociate) now uses
+  uniform control sizes instead of content-sized widths and mismatched heights.
 
 ## [0.2.1-beta] - 2026-07-10
 

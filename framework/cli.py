@@ -633,17 +633,30 @@ def _human_scripts_printer():
 
 @scripts_app.command("sync")
 def scripts_sync_cmd(
+    manifest: Optional[str] = typer.Argument(None, help=f"Sync only the fetchers this manifest uses (default: {_DEFAULT_MANIFEST}). Ignored with --all."),
     config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML (base_url, overrides)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Report the plan; read-only (no writes)"),
     force: bool = typer.Option(False, "--force", help="Push scripts whose code drifted without a version bump"),
     reassociate: bool = typer.Option(False, "--reassociate", help="Ensure the association for every fetcher, not just changed ones"),
+    all_fetchers: bool = typer.Option(False, "--all", help="Sync every fetcher in the repo, not just the manifest's"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
-    """Sync fetcher entry scripts to Paramify and associate them to evidence sets."""
+    """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
+
+    Scoped to a manifest by default — it provisions scripts for the fetchers you
+    actually collect, mirroring how `upload` is run-scoped. Use --all to push the
+    whole catalog.
+    """
     root = api.find_repo_root()
     config_path = Path(config).resolve() if config else None
+    include = None
+    if not all_fetchers:
+        mpath = Path(manifest).resolve() if manifest else (root / _DEFAULT_MANIFEST)
+        m = api.read_manifest(mpath)
+        entries = (m.get("run") or {}).get("fetchers") or []
+        include = {e.get("use") for e in entries if e.get("use")}
     try:
-        preflight = api.scripts_sync_preflight(root, config_path, dry_run=dry_run)
+        preflight = api.scripts_sync_preflight(root, config_path, dry_run=dry_run, include=include)
     except Exception as e:  # noqa: BLE001 — surface setup errors to CLI users
         if json_out:
             typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
@@ -665,6 +678,7 @@ def scripts_sync_cmd(
             dry_run=dry_run,
             force=force,
             reassociate=reassociate,
+            include=include,
             on_event=None if json_out else _human_scripts_printer(),
         )
     except Exception as e:  # noqa: BLE001
