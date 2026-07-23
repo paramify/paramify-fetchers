@@ -254,6 +254,17 @@ UploadPage {
     margin-right: 1;
 }
 
+#upload-options {
+    height: auto;
+    padding: 0 1 0 1;
+    align: left middle;
+}
+
+#upload-options .options-label {
+    padding: 1 1 0 0;
+    color: $text-muted;
+}
+
 #upload-banner {
     width: 1fr;
     padding: 0 0 0 1;

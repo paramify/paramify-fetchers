@@ -1,7 +1,7 @@
 """WorkspaceScreen — the five-tab fetcher workspace.
 
 Hosts the shared chrome (AppHeader + HintFooter) and the Catalog / Manifest /
-Run / Evidence / Upload tabs. The App pushes this once a manifest is chosen
+Run / Evidence / Paramify tabs. The App pushes this once a manifest is chosen
 (from the welcome front door, or directly via --manifest). The active manifest can be
 swapped in place with the quick-picker (`m`), which reloads the pages.
 """
@@ -33,7 +33,7 @@ class WorkspaceScreen(Screen):
         Binding("2", "go_tab(1)", "Manifest"),
         Binding("3", "go_tab(2)", "Run"),
         Binding("4", "go_tab(3)", "Evidence"),
-        Binding("5", "go_tab(4)", "Upload"),
+        Binding("5", "go_tab(4)", "Paramify"),
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "unfocus", "Unfocus", show=False),
         Binding("m", "switch_manifest", "Manifest…"),
@@ -52,7 +52,7 @@ class WorkspaceScreen(Screen):
                 yield RunPage(id="run-page")
             with TabPane("Evidence", id="tab-evidence"):
                 yield EvidencePage(id="evidence-page")
-            with TabPane("Upload", id="tab-upload"):
+            with TabPane("Paramify", id="tab-upload"):
                 yield UploadPage(id="upload-page")
         yield HintFooter()
 

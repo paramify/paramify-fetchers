@@ -761,6 +761,94 @@ def upload_run(
 
 
 # --------------------------------------------------------------------------- #
+# Scripts — Paramify scripts sync facade (powers CLI; provisioning, not per-run)
+# --------------------------------------------------------------------------- #
+
+def _load_paramify_scripts_uploader(root: Path):
+    """Load the source-tree scripts uploader without packaging uploaders/."""
+    path = Path(root) / "uploaders" / "paramify_scripts" / "uploader.py"
+    if not path.exists():
+        raise RuntimeError(f"Paramify scripts uploader not found at {path}")
+    spec = importlib.util.spec_from_file_location("paramify_scripts_uploader", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load Paramify scripts uploader from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def scripts_sync_preflight(
+    root: Path,
+    config_path: Optional[Path] = None,
+    *,
+    dry_run: bool = False,
+) -> dict:
+    """Inspect scripts-sync readiness without making Paramify API calls."""
+    uploader = _load_paramify_scripts_uploader(root)
+    uploader.load_dotenv()
+    config = uploader.load_config(str(config_path)) if config_path else {}
+    paramify_cfg = config.get("paramify") or {}
+    base_url = (
+        paramify_cfg.get("base_url")
+        or os.environ.get("PARAMIFY_API_BASE_URL")
+        or uploader.DEFAULT_BASE_URL
+    )
+
+    errors: List[str] = []
+    fetcher_count = 0
+    for f in discover_fetchers(root).values():
+        if f.evidence_set and f.entry_path.exists():
+            fetcher_count += 1
+    if fetcher_count == 0:
+        errors.append("No fetchers with an evidence_set and a readable entry file to sync")
+
+    url_error = uploader._base_url_error(base_url)
+    if url_error:
+        errors.append(url_error)
+
+    token_present = bool(os.environ.get("PARAMIFY_UPLOAD_API_TOKEN"))
+    # A token is required to write; dry-run still wants one to diff the tenant,
+    # but tolerates its absence (it then reports every fetcher as a create).
+    if not token_present and not dry_run:
+        errors.append("PARAMIFY_UPLOAD_API_TOKEN is not set")
+
+    return {
+        "ok": not errors,
+        "base_url": base_url,
+        "fetcher_count": fetcher_count,
+        "token_present": token_present,
+        "dry_run": dry_run,
+        "errors": errors,
+    }
+
+
+def scripts_sync(
+    root: Path,
+    config_path: Optional[Path] = None,
+    *,
+    dry_run: bool = False,
+    force: bool = False,
+    reassociate: bool = False,
+    on_event: Optional[Callable[[dict], None]] = None,
+) -> dict:
+    """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
+
+    Fires sync_start / sync_item / sync_complete so front-ends can render
+    progress. Raises ValueError for setup errors; returns the uploader summary.
+    """
+    uploader = _load_paramify_scripts_uploader(root)
+    config = uploader.load_config(str(config_path)) if config_path else {}
+    return uploader.sync_scripts(
+        root,
+        config=config,
+        dry_run=dry_run,
+        force=force,
+        reassociate=reassociate,
+        on_event=on_event,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Evidence — read produced run outputs (powers the TUI evidence browser)
 # --------------------------------------------------------------------------- #
 

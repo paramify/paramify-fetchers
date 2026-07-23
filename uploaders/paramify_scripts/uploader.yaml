@@ -1,0 +1,25 @@
+name: paramify_scripts
+version: 0.1.0
+description: >
+  Syncs each fetcher's entry script (fetcher.py / fetcher.sh) to Paramify and
+  CONNECTs it to that fetcher's evidence set, so the tenant shows how the
+  evidence was generated. A provisioning step, separate from evidence upload:
+  run it when fetchers/** change, not on every collection. Reconciles the tenant
+  to the repo (create / update / no-op) keyed on a marker in the script
+  description; the fetcher.yaml version is the update signal.
+
+runtime:
+  type: python
+  entry: uploader.py
+
+# Source-agnostic: the token can come from .env, a secret manager, CI vars, etc.
+secrets:
+  - name: api_token
+    env: PARAMIFY_UPLOAD_API_TOKEN
+
+config_schema:
+  base_url:
+    type: string
+    default: https://app.paramify.com/api/v0
+    env: PARAMIFY_API_BASE_URL
+    description: Paramify REST API v0 base URL.

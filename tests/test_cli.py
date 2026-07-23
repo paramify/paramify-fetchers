@@ -39,28 +39,31 @@ runner = CliRunner()
 # --------------------------------------------------------------------------- #
 
 def _registered():
-    """Return (top_level_command_names, manifest_subcommand_names)."""
+    """Return (top_level, manifest_subcommand, scripts_subcommand) names."""
     cmd = get_command(app)
     top = set(cmd.commands.keys())
     manifest = set(cmd.commands["manifest"].commands.keys())
-    return top, manifest
+    scripts = set(cmd.commands["scripts"].commands.keys())
+    return top, manifest, scripts
 
 
 EXPECTED_TOP = {
     "list", "catalog", "describe", "ksi", "doctor", "manifests", "runs",
-    "evidence", "validate", "run", "upload", "manifest", "tui",
+    "evidence", "validate", "run", "upload", "manifest", "scripts", "tui",
 }
 EXPECTED_MANIFEST = {
     "init", "new", "add", "remove", "set-config", "set-secret",
     "add-target", "remove-target", "set-platform-config",
     "set-passthrough", "set-output-dir", "show",
 }
+EXPECTED_SCRIPTS = {"sync"}
 
 
 def test_all_expected_commands_registered():
-    top, manifest = _registered()
+    top, manifest, scripts = _registered()
     assert EXPECTED_TOP <= top, f"missing top-level commands: {EXPECTED_TOP - top}"
     assert EXPECTED_MANIFEST <= manifest, f"missing manifest subcommands: {EXPECTED_MANIFEST - manifest}"
+    assert EXPECTED_SCRIPTS <= scripts, f"missing scripts subcommands: {EXPECTED_SCRIPTS - scripts}"
 
 
 def test_doctor_json_ok_without_manifest():
@@ -126,6 +129,8 @@ API_TO_CLI = {
     "run": "run",
     "upload_preflight": "upload",
     "upload_run": "upload",
+    "scripts_sync_preflight": "scripts sync",
+    "scripts_sync": "scripts sync",
     "list_runs": "runs",
     "read_evidence": "evidence",
 }
@@ -151,14 +156,15 @@ def test_parity_every_tui_api_call_has_a_cli_home():
 
 def test_parity_mapped_commands_actually_exist():
     """Every concrete command named in API_TO_CLI is really registered."""
-    top, manifest = _registered()
+    top, manifest, scripts = _registered()
+    groups = {"manifest": manifest, "scripts": scripts}
     for api_fn, where in API_TO_CLI.items():
         if where.startswith("<implicit"):
             continue
         for token in (t.strip() for t in where.split(" / ")):
-            if token.startswith("manifest "):
-                sub = token.split(" ", 1)[1]
-                assert sub in manifest, f"{api_fn}: manifest subcommand '{sub}' not registered"
+            group, _, sub = token.partition(" ")
+            if sub and group in groups:
+                assert sub in groups[group], f"{api_fn}: {group} subcommand '{sub}' not registered"
             else:
                 assert token in top, f"{api_fn}: command '{token}' not registered"
 

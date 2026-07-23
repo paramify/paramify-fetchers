@@ -74,6 +74,13 @@ manifest_app = typer.Typer(
 )
 app.add_typer(manifest_app, name="manifest")
 
+scripts_app = typer.Typer(
+    no_args_is_help=True,
+    context_settings=_HELP_OPTS,
+    help="Sync fetcher entry scripts to Paramify and associate them to evidence sets.",
+)
+app.add_typer(scripts_app, name="scripts")
+
 
 # --------------------------------------------------------------------------- #
 # Small shared helpers (ported verbatim from the previous argparse CLI)
@@ -593,6 +600,85 @@ def upload_cmd(
 
 
 # --------------------------------------------------------------------------- #
+# Scripts — sync fetcher entry scripts to Paramify + associate to evidence sets
+# --------------------------------------------------------------------------- #
+
+def _human_scripts_printer():
+    """Return an on_event callback for Paramify scripts-sync progress."""
+    _marks = {
+        "create": "NEW", "update": "UPD", "noop": "OK", "drift_skipped": "DRIFT",
+        "would_create": "DRY+", "would_update": "DRY~", "would_noop": "DRY=",
+        "would_drift": "DRY!", "error": "FAIL",
+    }
+
+    def on_event(ev: dict) -> None:
+        kind = ev["event"]
+        if kind == "sync_start":
+            mode = " (dry-run)" if ev.get("dry_run") else ""
+            typer.echo(f"Sync {ev['fetchers']} fetcher script(s) → {ev['base_url']}{mode}\n")
+        elif kind == "sync_item":
+            mark = _marks.get(ev.get("outcome"), "?")
+            assoc = " +assoc" if ev.get("associated") else ""
+            reason = ev.get("reason") or ev.get("error")
+            suffix = f"  {reason}" if reason else ""
+            typer.echo(f"        [{mark}] {ev.get('fetcher', '?')}  set={ev.get('reference_id')}{assoc}{suffix}")
+        elif kind == "sync_complete":
+            typer.echo(
+                "\nDone: "
+                f"created={ev['created']} updated={ev['updated']} drift={ev['drift']} "
+                f"noop={ev['noop']} associated={ev['associated']} errors={ev['errors']}"
+            )
+    return on_event
+
+
+@scripts_app.command("sync")
+def scripts_sync_cmd(
+    config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML (base_url, overrides)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report the plan; read-only (no writes)"),
+    force: bool = typer.Option(False, "--force", help="Push scripts whose code drifted without a version bump"),
+    reassociate: bool = typer.Option(False, "--reassociate", help="Ensure the association for every fetcher, not just changed ones"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
+):
+    """Sync fetcher entry scripts to Paramify and associate them to evidence sets."""
+    root = api.find_repo_root()
+    config_path = Path(config).resolve() if config else None
+    try:
+        preflight = api.scripts_sync_preflight(root, config_path, dry_run=dry_run)
+    except Exception as e:  # noqa: BLE001 — surface setup errors to CLI users
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
+        else:
+            _err(f"Scripts sync setup failed: {e}")
+        raise typer.Exit(1)
+    if not preflight["ok"]:
+        if json_out:
+            typer.echo(json.dumps(preflight, indent=2, default=str))
+        else:
+            for err in preflight["errors"]:
+                _err(f"  ERROR  {err}")
+        raise typer.Exit(1)
+
+    try:
+        summary = api.scripts_sync(
+            root,
+            config_path,
+            dry_run=dry_run,
+            force=force,
+            reassociate=reassociate,
+            on_event=None if json_out else _human_scripts_printer(),
+        )
+    except Exception as e:  # noqa: BLE001
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
+        else:
+            _err(f"Scripts sync failed: {e}")
+        raise typer.Exit(1)
+    if json_out:
+        typer.echo(json.dumps(summary, indent=2, default=str))
+    raise typer.Exit(0 if summary["ok"] else 1)
+
+
+# --------------------------------------------------------------------------- #
 # Manifest editing — every mutator emits {"ok", "path", "errors"} under --json
 # --------------------------------------------------------------------------- #
 
@@ -845,7 +931,13 @@ def tui_cmd(
     try:
         from framework.tui.__main__ import launch
     except ImportError as e:
-        _err(f"The TUI requires the 'tui' extra (textual). Install it:  pip install 'paramify[tui]'\n  ({e})")
+        _err(
+            "The TUI requires the 'tui' extra (textual). Install it from the repo "
+            "root:  pip install -e '.[tui]'\n"
+            "  (do NOT run `pip install 'paramify[tui]'` — this project isn't on "
+            "PyPI, and that name resolves to an unrelated package.)\n"
+            f"  ({e})"
+        )
         raise typer.Exit(1)
     launch(manifest, at)
 
