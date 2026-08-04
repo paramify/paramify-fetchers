@@ -215,20 +215,59 @@ def test_upload_and_programs_resolve_the_same_base_url(tmp_path, clean_env):
     ) == from_config
 
 
-def test_write_path_does_not_accept_a_read_only_token(clean_env):
-    """Upload must not silently use PARAMIFY_API_TOKEN: different scope, and a
-    403 from the API is a worse error than 'token is not set'."""
-    os.environ.pop(paramify_conn.WRITE_TOKEN_ENV, None)
-    os.environ[paramify_conn.READ_TOKEN_ENV] = "read-only-token"
-
-    assert paramify_conn.resolve_write_token() is None
-    assert paramify_conn.resolve_read_token() == "read-only-token"
+def test_one_token_serves_read_and_write(clean_env):
+    """A single PARAMIFY_API_TOKEN reaches Paramify for every operation — the
+    caller no longer has to know whether an operation reads or writes."""
+    os.environ.pop(paramify_conn.LEGACY_TOKEN_ENV, None)
+    os.environ[paramify_conn.TOKEN_ENV] = "one-token"
+    assert paramify_conn.resolve_token() == "one-token"
 
 
-def test_read_path_falls_back_to_the_write_token(clean_env):
-    os.environ.pop(paramify_conn.READ_TOKEN_ENV, None)
-    os.environ[paramify_conn.WRITE_TOKEN_ENV] = "write-token"
-    assert paramify_conn.resolve_read_token() == "write-token"
+def test_legacy_upload_token_still_accepted(clean_env):
+    """Existing deployments, CI secret blocks, and compose env_files set only
+    PARAMIFY_UPLOAD_API_TOKEN; they must keep working."""
+    os.environ.pop(paramify_conn.TOKEN_ENV, None)
+    os.environ[paramify_conn.LEGACY_TOKEN_ENV] = "legacy-token"
+    assert paramify_conn.resolve_token() == "legacy-token"
+
+
+def test_canonical_token_wins_over_the_legacy_alias(clean_env):
+    os.environ[paramify_conn.TOKEN_ENV] = "canonical"
+    os.environ[paramify_conn.LEGACY_TOKEN_ENV] = "legacy"
+    assert paramify_conn.resolve_token() == "canonical"
+
+
+def test_no_token_resolves_to_none(clean_env):
+    os.environ.pop(paramify_conn.TOKEN_ENV, None)
+    os.environ.pop(paramify_conn.LEGACY_TOKEN_ENV, None)
+    assert paramify_conn.resolve_token() is None
+
+
+def test_uploaders_accept_the_canonical_token_standalone(clean_env):
+    """The uploaders resolve the token themselves when run as standalone scripts,
+    so they must honor the canonical name too — otherwise `paramify upload` and
+    `python uploaders/.../uploader.py` would disagree about one credential."""
+    for rel in (
+        "uploaders/paramify_evidence/uploader.py",
+        "uploaders/paramify_scripts/uploader.py",
+    ):
+        src = (REPO_ROOT / rel).read_text()
+        assert f'os.environ.get("{paramify_conn.TOKEN_ENV}")' in src, (
+            f"{rel} does not accept {paramify_conn.TOKEN_ENV}"
+        )
+        assert f'os.environ.get("{paramify_conn.LEGACY_TOKEN_ENV}")' in src, (
+            f"{rel} dropped the deprecated {paramify_conn.LEGACY_TOKEN_ENV} alias"
+        )
+
+
+def test_api_passes_a_resolved_token_to_both_uploaders():
+    """A preflight and the operation it clears must never resolve the credential
+    separately — api.py owns the policy and hands the result down."""
+    src = (REPO_ROOT / "framework" / "api.py").read_text()
+    assert src.count("token=paramify_conn.resolve_token()") == 2, (
+        "upload_run() and scripts_sync() must each pass the resolved token to "
+        "their uploader, or the uploader re-resolves it independently."
+    )
 
 
 def test_load_config_tolerates_absent_and_empty(tmp_path):
@@ -255,8 +294,8 @@ def test_api_does_not_reimplement_the_connection():
     the host, the token names, or the https rule inline."""
     src = (REPO_ROOT / "framework" / "api.py").read_text()
     assert paramify_conn.BASE_URL_ENV not in src, "api.py reads the base-url env directly again"
-    assert paramify_conn.WRITE_TOKEN_ENV not in src, "api.py reads the write token directly again"
-    assert paramify_conn.READ_TOKEN_ENV not in src, "api.py reads the read token directly again"
+    assert paramify_conn.TOKEN_ENV not in src, "api.py reads the token env directly again"
+    assert paramify_conn.LEGACY_TOKEN_ENV not in src, "api.py reads the legacy token env directly again"
     assert "_base_url_error" not in src, "api.py reaches into an uploader's private https check"
     assert "urlparse" not in src, "api.py parses an API URL inline again"
 

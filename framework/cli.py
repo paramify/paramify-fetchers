@@ -18,7 +18,7 @@ Read / discover:
   paramify evidence <path> [--json]            # read one evidence file
   paramify upload [run-dir] [--dry-run] [--json]
 
-Paramify workspace (live lookups; needs PARAMIFY_API_TOKEN with read scope):
+Paramify workspace (live lookups; needs PARAMIFY_API_TOKEN):
   paramify programs list [--json]              # programs in the workspace: name + id
   paramify programs target [fetcher ...] [--program NAME|ID ...] [--all]
                            [--cert-uri URI] [--report-from DATE] [-f FILE] [--json]

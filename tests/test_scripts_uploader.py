@@ -98,7 +98,10 @@ def _existing_for_specs():
 
 @pytest.fixture
 def wired(monkeypatch):
-    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
+    # The canonical single credential. test_error_isolation deliberately uses the
+    # deprecated PARAMIFY_UPLOAD_API_TOKEN instead, so both names stay covered
+    # through the real uploader rather than only through paramify_conn.
+    monkeypatch.setenv("PARAMIFY_API_TOKEN", "test-token")
     monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: list(SPECS))
     fake = FakeClient(_existing_for_specs())
     monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: fake)

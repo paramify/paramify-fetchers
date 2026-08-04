@@ -10,6 +10,22 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Changed
+
+- **One Paramify credential, `PARAMIFY_API_TOKEN`, for everything** — evidence
+  upload, `scripts sync`, `paramify programs`, and the Paramify VER fetchers. The
+  VER fetchers and `programs` already read this name; the two uploaders were the
+  last holdouts demanding `PARAMIFY_UPLOAD_API_TOKEN`, so one workspace credential
+  had to be exported twice under two names to make a collect-then-upload run work.
+  `PARAMIFY_UPLOAD_API_TOKEN` is still accepted as a deprecated alias, so existing
+  deployments, CI secret blocks, and compose `env_file`s keep working unchanged —
+  set only the new name in anything new. `framework.api` now resolves the token
+  once and passes it to the uploaders rather than letting each re-read the
+  environment, so a preflight and the operation it clears cannot disagree about
+  which credential is in play. Templates and docs (`.env.example`,
+  `deploy/.env.example`, `deploy/README.md`, the uploader READMEs) name the new
+  variable.
+
 ### Added
 
 - `paramify programs` — a new command group over the Paramify workspace.
@@ -86,9 +102,7 @@ schemas and the `paramify` CLI — not the internal code.
   programs to production. Base URL, credentials, and the https rule now have one
   definition (`framework/paramify_conn.py`) instead of five implementations with
   three different precedence chains, and `programs list|target` accept the
-  `--config` flag that `upload` and `scripts sync` already had. No user-visible
-  message changed, and the write path still refuses a read-scope token rather than
-  turning "token is not set" into a 403.
+  `--config` flag that `upload` and `scripts sync` already had.
 - **TUI**: pressing the number of the tab you are already on no longer clears
   focus. Assigning `TabbedContent.active` the value it already holds fires no
   `TabActivated`, so nothing re-homed focus after it was cleared — and because a

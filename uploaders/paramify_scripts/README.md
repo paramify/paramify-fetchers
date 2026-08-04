@@ -45,7 +45,7 @@ validator linkage stays Paramify-side and is out of scope here.
 ## Usage
 
 ```bash
-export PARAMIFY_UPLOAD_API_TOKEN=...   # any source: .env, secret manager, CI
+export PARAMIFY_API_TOKEN=...   # any source: .env, secret manager, CI
 
 # Preview the plan — read-only, makes no writes (needs a token to diff the tenant):
 paramify scripts sync --dry-run

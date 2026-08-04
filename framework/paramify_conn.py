@@ -14,12 +14,16 @@ trade a small duplication for a real boundary violation. tests/test_api.py
 asserts the two definitions of the default URL agree, so they cannot drift
 silently.
 
-Token policy is deliberately NOT collapsed into one "the token".
-PARAMIFY_UPLOAD_API_TOKEN is the write credential; PARAMIFY_API_TOKEN is a
-read-scope one. They can be different tokens with different scopes, so a write
-path must not silently accept a read-only token — unifying them would have turned
-a clear "token is not set" into a confusing 403 from the API. Both policies are
-defined here instead, which is the part that was actually duplicated.
+One credential reaches Paramify, for reading and writing alike:
+PARAMIFY_API_TOKEN. PARAMIFY_UPLOAD_API_TOKEN is accepted as a deprecated alias so
+existing deployments, CI secret blocks, and compose env_files keep working.
+
+The canonical name is not a new invention — the Paramify VER fetchers and
+`paramify programs` already read PARAMIFY_API_TOKEN with the upload name as a
+fallback (fetchers/paramify/_shared/ver_common.py, fetchers/_categories/
+paramify.yaml). The uploaders were the last holdouts still demanding the
+upload-specific name, which meant one workspace credential had to be exported
+twice under two names. Everything now resolves through resolve_token().
 """
 
 import os
@@ -32,8 +36,10 @@ import yaml
 DEFAULT_BASE_URL = "https://app.paramify.com/api/v0"
 
 BASE_URL_ENV = "PARAMIFY_API_BASE_URL"
-WRITE_TOKEN_ENV = "PARAMIFY_UPLOAD_API_TOKEN"
-READ_TOKEN_ENV = "PARAMIFY_API_TOKEN"
+# The one workspace credential — read and write.
+TOKEN_ENV = "PARAMIFY_API_TOKEN"
+# Deprecated alias, still honored so existing deployments keep working.
+LEGACY_TOKEN_ENV = "PARAMIFY_UPLOAD_API_TOKEN"
 
 # Exempt from the https rule so a local API stub can be developed against.
 _LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
@@ -79,28 +85,20 @@ def base_url_error(base_url: str) -> Optional[str]:
     return None
 
 
-def resolve_write_token() -> Optional[str]:
-    """The credential for writing — evidence upload and scripts sync."""
-    return os.environ.get(WRITE_TOKEN_ENV) or None
+def resolve_token() -> Optional[str]:
+    """The Paramify workspace credential — reads and writes both go through this.
 
-
-def resolve_read_token() -> Optional[str]:
-    """The credential for reading the workspace (`paramify programs`).
-
-    Falls back to the write token, which also carries read scope, so a user with
-    only the upload token set can still list programs.
+    $PARAMIFY_API_TOKEN, falling back to the deprecated
+    $PARAMIFY_UPLOAD_API_TOKEN. Every caller resolves the token here so that a
+    preflight and the operation it clears can never disagree about which
+    credential is in play.
     """
-    return os.environ.get(READ_TOKEN_ENV) or os.environ.get(WRITE_TOKEN_ENV) or None
+    return os.environ.get(TOKEN_ENV) or os.environ.get(LEGACY_TOKEN_ENV) or None
 
 
-def missing_write_token_error() -> str:
-    """The one wording for an absent write credential."""
-    return f"{WRITE_TOKEN_ENV} is not set"
-
-
-def missing_read_token_error() -> str:
-    """The one wording for an absent read credential."""
+def missing_token_error() -> str:
+    """The one wording for an absent credential."""
     return (
-        f"No Paramify API token: set {READ_TOKEN_ENV} (or {WRITE_TOKEN_ENV}) "
-        "to a token with read scope on the workspace"
+        f"No Paramify API token: set {TOKEN_ENV} to a token with read and write "
+        f"scope on the workspace (the older {LEGACY_TOKEN_ENV} is still accepted)"
     )

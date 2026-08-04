@@ -29,7 +29,7 @@ esac
 # --- Optional: hydrate env from AWS Secrets Manager (source-agnostic) ---------
 # Set PARAMIFY_SECRETS_ID to one secret ID/ARN (or a comma-separated list), each
 # holding a JSON object of VAR->value, e.g.
-#   {"OKTA_API_TOKEN":"...","GITLAB_TOKEN_1":"...","PARAMIFY_UPLOAD_API_TOKEN":"..."}
+#   {"OKTA_API_TOKEN":"...","GITLAB_TOKEN_1":"...","PARAMIFY_API_TOKEN":"..."}
 # Inert unless set. Auth uses the container's AWS role (IRSA / ECS task role /
 # EC2 instance role) — never static keys; requires AWS_REGION. Uses the aws + jq
 # already in the image. (On ECS/EKS, prefer the orchestrator's native secret

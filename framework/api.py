@@ -765,9 +765,9 @@ def upload_preflight(
     if url_error:
         errors.append(url_error)
 
-    token_present = bool(paramify_conn.resolve_write_token())
+    token_present = bool(paramify_conn.resolve_token())
     if not token_present and not dry_run:
-        errors.append(paramify_conn.missing_write_token_error())
+        errors.append(paramify_conn.missing_token_error())
 
     return {
         "ok": not errors,
@@ -799,6 +799,10 @@ def upload_run(
     return uploader.upload_run(
         Path(run_dir),
         config=config,
+        # Resolved here, not left to the uploader: the framework owns the token
+        # policy, so upload_preflight() and the upload it clears can never
+        # disagree about which credential is in play.
+        token=paramify_conn.resolve_token(),
         dry_run=dry_run,
         on_event=on_event,
     )
@@ -852,11 +856,11 @@ def scripts_sync_preflight(
     if url_error:
         errors.append(url_error)
 
-    token_present = bool(paramify_conn.resolve_write_token())
+    token_present = bool(paramify_conn.resolve_token())
     # A token is required to write; dry-run still wants one to diff the tenant,
     # but tolerates its absence (it then reports every fetcher as a create).
     if not token_present and not dry_run:
-        errors.append(paramify_conn.missing_write_token_error())
+        errors.append(paramify_conn.missing_token_error())
 
     return {
         "ok": not errors,
@@ -891,6 +895,7 @@ def scripts_sync(
     return uploader.sync_scripts(
         root,
         config=config,
+        token=paramify_conn.resolve_token(),  # see upload_run: one resolver
         dry_run=dry_run,
         force=force,
         reassociate=reassociate,
@@ -1130,9 +1135,9 @@ def list_programs(config_path: Optional[Path] = None) -> List[dict]:
     """
     import requests  # local: keeps `paramify list`/`tui` startup free of it
 
-    token = paramify_conn.resolve_read_token()
+    token = paramify_conn.resolve_token()
     if not token:
-        raise RuntimeError(paramify_conn.missing_read_token_error())
+        raise RuntimeError(paramify_conn.missing_token_error())
     base_url = paramify_conn.resolve_base_url(paramify_conn.load_config(config_path))
     url_error = paramify_conn.base_url_error(base_url)
     if url_error:

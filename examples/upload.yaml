@@ -4,8 +4,8 @@
 # evidence_set block. Use it to point at a different Paramify host, override a
 # referenceId for your program, or change upload behavior.
 #
-# Token comes from the PARAMIFY_UPLOAD_API_TOKEN env var (any source: .env,
-# secret manager, CI). It is never put in this file.
+# Token comes from the PARAMIFY_API_TOKEN env var (any source: .env, secret
+# manager, CI). It is never put in this file.
 
 paramify:
   base_url: https://app.paramify.com/api/v0   # optional; default shown

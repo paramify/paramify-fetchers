@@ -31,7 +31,7 @@ at the repo root is example glue.
 
 Both built uploaders share the same operational contract:
 
-- **Auth** — `PARAMIFY_UPLOAD_API_TOKEN`, read source-agnostically (env, `.env`,
+- **Auth** — `PARAMIFY_API_TOKEN`, read source-agnostically (env, `.env`,
   secret manager, CI). No token is privileged over another.
 - **Base URL** — Paramify REST v0, default `https://app.paramify.com/api/v0`;
   override with `PARAMIFY_API_BASE_URL` or `--config base_url`.

@@ -142,7 +142,7 @@ paramify validate manifest.yaml
 paramify run     manifest.yaml         # evidence → ./evidence/run-<timestamp>/
 
 # 4. Upload to Paramify
-export PARAMIFY_UPLOAD_API_TOKEN=<your token>   # see uploaders/paramify_evidence/README.md for setup
+export PARAMIFY_API_TOKEN=<your token>   # see uploaders/paramify_evidence/README.md for setup
 paramify upload                                  # push the latest run
 ```
 
@@ -271,7 +271,7 @@ paramify upload                     # upload the latest run (get-or-create evide
 `--output-dir`) and supports `--dry-run`, `--config`, and `--json`; the same
 uploader can also be invoked directly as
 `python -m uploaders.paramify_evidence <run-dir>`. It is idempotent within a run,
-talks Paramify REST v0 over HTTPS only, and reads `PARAMIFY_UPLOAD_API_TOKEN`
+talks Paramify REST v0 over HTTPS only, and reads `PARAMIFY_API_TOKEN`
 (with optional `PARAMIFY_API_BASE_URL`). See
 [`uploaders/paramify_evidence/README.md`](uploaders/paramify_evidence/README.md)
 for how to create a Paramify API key with the required permissions. Chaining the two stages is the
@@ -294,7 +294,7 @@ It reconciles the tenant to the repo GitOps-style — keyed off a marker in each
 script's `description` and the `fetcher.yaml` `version`, with a sha256 drift guard
 (warn/skip unless `--force`) — and supports `--reassociate` and `--json`. Like the
 uploader it talks Paramify REST v0 over HTTPS only and reads
-`PARAMIFY_UPLOAD_API_TOKEN`. See
+`PARAMIFY_API_TOKEN`. See
 [`uploaders/paramify_scripts/README.md`](uploaders/paramify_scripts/README.md) for
 the full model, or [`docs/uploader_design.md`](docs/uploader_design.md) for how it
 fits alongside evidence upload.

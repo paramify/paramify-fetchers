@@ -11,7 +11,7 @@
 # what the TUI builds); name them however makes sense for your schedule.
 #
 # Secrets must already be in the environment (the manifest references them as
-# ${env:VAR}); PARAMIFY_UPLOAD_API_TOKEN is required for the upload step.
+# ${env:VAR}); PARAMIFY_API_TOKEN is required for the upload step.
 set -uo pipefail
 cd "$(dirname "$0")/.."   # repo root (/app in the image)
 

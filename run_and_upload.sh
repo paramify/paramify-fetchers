@@ -6,7 +6,7 @@
 #
 # Secrets must already be in the environment before running (never put values here):
 #   KNOWBE4_API_KEY, KNOWBE4_REGION   — for collection
-#   PARAMIFY_UPLOAD_API_TOKEN         — for upload
+#   PARAMIFY_API_TOKEN                — for upload
 #
 # Config (non-secret) is set here / overridable via env:
 #   MANIFEST                 (default: manifest.yaml)

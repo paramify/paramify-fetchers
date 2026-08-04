@@ -23,7 +23,8 @@ Per fetcher (one that declares an `evidence_set`):
 Only SCRIPT associations are automated; solution-capability / control /
 validator linkage stays Paramify-side.
 
-Auth: PARAMIFY_UPLOAD_API_TOKEN (source-agnostic env — .env, secret manager, CI).
+Auth: PARAMIFY_API_TOKEN (source-agnostic env — .env, secret manager, CI).
+The older PARAMIFY_UPLOAD_API_TOKEN is still accepted as a deprecated alias.
 """
 
 from __future__ import annotations
@@ -265,9 +266,11 @@ def sync_scripts(
         raise ValueError(url_error)
 
     overrides = config.get("overrides") or {}
-    token = token or os.environ.get("PARAMIFY_UPLOAD_API_TOKEN")
+    # See paramify_evidence/uploader.py: one credential, the upload-specific name
+    # kept as a deprecated alias, and framework.api passes it in pre-resolved.
+    token = token or os.environ.get("PARAMIFY_API_TOKEN") or os.environ.get("PARAMIFY_UPLOAD_API_TOKEN")
     if not token and not dry_run:
-        msg = "PARAMIFY_UPLOAD_API_TOKEN is not set"
+        msg = "PARAMIFY_API_TOKEN is not set"
         logger.error(msg)
         raise ValueError(msg)
 

@@ -36,7 +36,7 @@ that every command below uses, so the bundle works before you've built your own.
 
 ```bash
 cp deploy/.env.example deploy/.env
-# edit deploy/.env — at minimum PARAMIFY_UPLOAD_API_TOKEN
+# edit deploy/.env — at minimum PARAMIFY_API_TOKEN
 ```
 
 Secrets are injected at run time and **never baked into the image**. To see the
@@ -54,7 +54,7 @@ Three options, in order of preference:
    the container's **AWS role** — IRSA on EKS, the task role on ECS, the instance
    role on EC2 — *never* static keys. Example secret value:
    ```json
-   {"PARAMIFY_UPLOAD_API_TOKEN":"…","OKTA_API_TOKEN":"…","GITLAB_TOKEN_1":"…"}
+   {"PARAMIFY_API_TOKEN":"…","OKTA_API_TOKEN":"…","GITLAB_TOKEN_1":"…"}
    ```
    ```bash
    PARAMIFY_SECRETS_ID=paramify/fetchers/beta
@@ -137,7 +137,7 @@ the **test** account (`aws sso login` or a configured profile — confirm with
 `aws sts get-caller-identity`); your identity has `secretsmanager:GetSecretValue`
 on the test secret; the secret stores a flat **JSON object** of `VAR -> value`
 (use the var names the manifest you'll run references), e.g.
-`{ "PARAMIFY_UPLOAD_API_TOKEN": "…", "OKTA_API_TOKEN": "…", "OKTA_ORG_URL": "…" }`.
+`{ "PARAMIFY_API_TOKEN": "…", "OKTA_API_TOKEN": "…", "OKTA_ORG_URL": "…" }`.
 
 ```bash
 # 1. Host-side sanity check — prove you can read the secret. If this prints your
@@ -160,7 +160,7 @@ aws configure export-credentials --format env-no-export >> deploy/.env
 pf build
 
 # 4. Verify secret hydration BEFORE running anything real (prints presence, not the value).
-pf run --rm collector bash -lc '[ -n "$PARAMIFY_UPLOAD_API_TOKEN" ] && echo "secret loaded ✅" || echo "MISSING ❌"'
+pf run --rm collector bash -lc '[ -n "$PARAMIFY_API_TOKEN" ] && echo "secret loaded ✅" || echo "MISSING ❌"'
 
 # 5. Run a collection and look at the evidence (appears on your host).
 pf run --rm collector paramify list
@@ -168,7 +168,7 @@ pf run --rm collector paramify run examples/minimal_run.yaml
 ls -R evidence/
 
 # 6. (Optional) Full chain — collect AND upload. Hits real Paramify; uses
-#    PARAMIFY_UPLOAD_API_TOKEN from the secret (PARAMIFY_API_BASE_URL defaults to production).
+#    PARAMIFY_API_TOKEN from the secret (PARAMIFY_API_BASE_URL defaults to production).
 pf run --rm collector ./deploy/run-and-upload.sh examples/minimal_run.yaml
 
 # 7. Confirm no secrets are baked into the image (prints nothing = good).

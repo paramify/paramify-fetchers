@@ -8,11 +8,11 @@ to re-upload.
 
 ## Paramify API key
 
-The uploader authenticates with `PARAMIFY_UPLOAD_API_TOKEN`. To create one:
+The uploader authenticates with `PARAMIFY_API_TOKEN`. To create one:
 
 1. Log into [Paramify](https://app.paramify.com) and go to **Settings** (gear icon, top right) → **API Keys** (see [Create a Paramify API Key](https://support.paramify.com/hc/en-us/articles/43292803890451-Create-a-Paramify-API-Key) for step-by-step guidance).
 2. Click **+ API Key** and configure it:
-   - **Name:** `PARAMIFY_UPLOAD_API_TOKEN` (or any recognizable label)
+   - **Name:** `PARAMIFY_API_TOKEN` (or any recognizable label)
    - **Expiration:** 6 months to 1 year recommended
    - **Permissions:** check all eight —
      View Evidences, Write Evidences,
@@ -22,7 +22,7 @@ The uploader authenticates with `PARAMIFY_UPLOAD_API_TOKEN`. To create one:
 3. Copy the key immediately — it is not shown again.
 
 ```bash
-export PARAMIFY_UPLOAD_API_TOKEN=<paste key here>
+export PARAMIFY_API_TOKEN=<paste key here>
 
 # Optional — only needed if not using app.paramify.com:
 # export PARAMIFY_API_BASE_URL=https://your-instance.paramify.com/api/v0
@@ -50,7 +50,7 @@ today) and is out of scope here.
 ## Usage
 
 ```bash
-export PARAMIFY_UPLOAD_API_TOKEN=...   # any source: .env, secret manager, CI
+export PARAMIFY_API_TOKEN=...   # any source: .env, secret manager, CI
 
 # Upload the latest run under ./evidence:
 python uploaders/paramify_evidence/uploader.py

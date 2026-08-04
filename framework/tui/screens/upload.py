@@ -302,7 +302,7 @@ class UploadPage(Vertical):
             self.notify("No fetcher scripts to sync.")
             return
         if not pf.get("token_present"):
-            self.notify("API token missing — set PARAMIFY_UPLOAD_API_TOKEN (Preview still works).")
+            self.notify("API token missing — set PARAMIFY_API_TOKEN (Preview still works).")
             return
 
         force = self.query_one("#scripts-force", Checkbox).value

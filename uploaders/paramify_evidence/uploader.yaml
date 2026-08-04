@@ -12,7 +12,7 @@ runtime:
 # Source-agnostic: the token can come from .env, a secret manager, CI vars, etc.
 secrets:
   - name: api_token
-    env: PARAMIFY_UPLOAD_API_TOKEN
+    env: PARAMIFY_API_TOKEN
 
 config_schema:
   base_url:

@@ -14,7 +14,8 @@ Per evidence file the uploader:
   4. attaches the evidence as an artifact (idempotent: skips if an artifact with
      the same filename + run_id already exists on the set).
 
-Auth: PARAMIFY_UPLOAD_API_TOKEN (source-agnostic env — .env, secret manager, CI).
+Auth: PARAMIFY_API_TOKEN (source-agnostic env — .env, secret manager, CI).
+The older PARAMIFY_UPLOAD_API_TOKEN is still accepted as a deprecated alias.
 """
 
 import argparse
@@ -265,9 +266,13 @@ def upload_run(
         logger.error(msg)
         raise ValueError(msg)
 
-    token = token or os.environ.get("PARAMIFY_UPLOAD_API_TOKEN")
+    # One workspace credential, read and write. PARAMIFY_UPLOAD_API_TOKEN is a
+    # deprecated alias kept so existing deployments keep working. When called
+    # through framework.api the token is already resolved and passed in; these
+    # lookups serve a standalone `python uploaders/paramify_evidence/uploader.py`.
+    token = token or os.environ.get("PARAMIFY_API_TOKEN") or os.environ.get("PARAMIFY_UPLOAD_API_TOKEN")
     if not token and not dry_run:
-        msg = "PARAMIFY_UPLOAD_API_TOKEN is not set"
+        msg = "PARAMIFY_API_TOKEN is not set"
         logger.error(msg)
         raise ValueError(msg)
 
