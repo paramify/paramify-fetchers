@@ -11,8 +11,9 @@ __pycache__/
 venv/
 
 # --- Secrets: NEVER commit ---
-# The framework resolves ${env:VAR} from the environment; .env is one source
-# among many and must stay local.
+# The framework resolves ${env:VAR} from the environment. A .env at the repo root
+# is read once at startup by api.load_environment(); real env vars win over it.
+# See .env.example for the template, deploy/.env.example for the container path.
 .env
 .env.*
 !.env.example

@@ -4,9 +4,16 @@ v0.x supports a single reference form: ${env:VAR_NAME} — read VAR_NAME from th
 runner's own environment. The shape leaves room for future backends like
 ${aws-secret:...}, ${vault:...}, but v0.x doesn't implement them.
 
-Customers populate the runner's env via any mechanism (.env, shell export,
-secret manager → env, K8s secret env mounts, CI provider secret blocks, etc.).
-The framework is secret-source-agnostic; .env is one path among many.
+Customers populate the runner's env via any mechanism (shell export, secret
+manager → env, K8s secret env mounts, CI provider secret blocks, compose's
+env_file, etc.). This module is secret-source-agnostic: it reads os.environ and
+asks no questions about how a value got there.
+
+Every source in that list populates the environment before Python starts, which
+is exactly why an agnostic reader gets them for free. A `.env` file is the one
+exception — it is a file on disk, so someone inside the process has to read it.
+That happens once, at the entry point, in api.load_environment(); it is not this
+module's job and must not become any other function's job either.
 """
 
 import os

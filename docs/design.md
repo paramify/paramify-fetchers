@@ -178,6 +178,12 @@ All operations against the framework — discover fetchers, build/edit a manifes
 
 Keeping the surface in one facade means a new capability lands once and shows up in all three front-ends, and there's no risk of the CLI and UI drifting. (`python -m framework.runner|tui` still work and equal the matching `paramify` subcommands.)
 
+**Facade functions must be order-independent.** Calling only the facade is not on its own enough to make two front-ends behave alike: they call *different sets* of facade functions, in different orders. `paramify run` makes three api calls; the TUI's workspace mount makes a dozen, because it builds every tab. So no facade function may depend on another having run first in the same process, and none may quietly mutate process-global state that others read.
+
+This was violated once, and it is worth keeping as a worked example. `.env` loading lived inside `upload_preflight()` and `scripts_sync_preflight()`, both of which write to `os.environ`. `run()`, `doctor()`, and `list_programs()` read `os.environ` and loaded nothing. The result: `.env` worked in the TUI (whose mount refreshes the Paramify panel, tripping the side effect before you reach the Run tab) and was silently ignored by `paramify run`. Every front-end was a faithful facade client; the facade was not consistent with itself. Process-level setup — reading a file into the environment — belongs at the entry point, and now lives in `api.load_environment()`, called once by the CLI's top-level callback and once by `FetcherApp.__init__`.
+
+The corollary for shared concerns: when several facade functions need the same derived value, give it one definition rather than one per call site. `framework/paramify_conn.py` exists for that reason — base URL, credentials, and the https rule had five implementations with three different precedence chains, and the odd one out sent `paramify programs` to a different host than `paramify upload`. `tests/test_api.py` pins both rules structurally.
+
 ### CLI command surface
 
 ```
@@ -306,6 +312,7 @@ paramify-fetchers/
 │   ├── cli.py                        # the `paramify` CLI (Typer) — steers every front-end
 │   ├── contract.py                   # dataclasses (Fetcher, Manifest, RunResult, ...)
 │   ├── config_loader.py              # discover fetchers; validate against schema
+│   ├── paramify_conn.py              # how we reach Paramify — base URL, tokens, https rule
 │   ├── secret_resolver.py            # ${env:VAR_NAME} resolution
 │   ├── envelope.py                   # wraps each output in {schema_version, metadata, payload}
 │   ├── runner/

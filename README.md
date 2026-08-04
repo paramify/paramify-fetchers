@@ -146,6 +146,13 @@ export PARAMIFY_UPLOAD_API_TOKEN=<your token>   # see uploaders/paramify_evidenc
 paramify upload                                  # push the latest run
 ```
 
+For local development, `cp .env.example .env` and fill it in once instead of
+re-exporting every session — the `paramify` entry point reads a repo-root `.env`
+at startup, and a real environment variable always wins over it, so CI and
+containers are unaffected. `paramify doctor <manifest>` reports which variables
+are still missing. `.env` is gitignored; for containers use `deploy/.env.example`
+instead, which compose injects as real environment variables at run time.
+
 Each service has a credential setup guide in its fetcher directory — for example, [`fetchers/okta/README.md`](fetchers/okta/README.md) covers creating an Okta API token and the required admin role. See [`examples/`](examples/) for complete worked manifests (multi-region AWS, GitLab fanout, etc.) and [`deploy/README.md`](deploy/README.md) for running on a schedule in Docker.
 
 The full command surface:

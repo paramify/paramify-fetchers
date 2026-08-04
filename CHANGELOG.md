@@ -68,6 +68,27 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **A repo-root `.env` is now honored by every command, not just uploads.** It was
+  read inside `upload_preflight()` and `scripts_sync_preflight()` only, so whether
+  any other operation saw it depended on call order: `paramify run` ignored it (and
+  failed to resolve secrets that were sitting in it), `paramify doctor` reported
+  those secrets as missing, and `paramify programs` ignored it too — while the TUI
+  worked, because its workspace mount refreshes the Paramify panel and tripped the
+  side effect before you could reach the Run tab. `.env` is now read once at the
+  entry point (`api.load_environment()`), called by the CLI's top-level callback
+  and by `FetcherApp.__init__`. Real environment variables still win, so CI,
+  containers, and `export` are unaffected. Adds the root `.env.example` that
+  `.gitignore` has always whitelisted but which never existed.
+- **`paramify programs` and `paramify upload` no longer disagree about which host
+  to talk to.** `list_programs()` took no arguments, so it could not read an
+  uploader config at all and re-literalled the default URL; a config setting
+  `paramify.base_url` to a stage tenant therefore sent uploads to stage and
+  programs to production. Base URL, credentials, and the https rule now have one
+  definition (`framework/paramify_conn.py`) instead of five implementations with
+  three different precedence chains, and `programs list|target` accept the
+  `--config` flag that `upload` and `scripts sync` already had. No user-visible
+  message changed, and the write path still refuses a read-scope token rather than
+  turning "token is not set" into a 403.
 - **TUI**: pressing the number of the tab you are already on no longer clears
   focus. Assigning `TabbedContent.active` the value it already holds fires no
   `TabActivated`, so nothing re-homed focus after it was cleared — and because a
