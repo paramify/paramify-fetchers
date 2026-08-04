@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
 import yaml
+from dotenv import load_dotenv
 
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import ConfigField, Secret, TargetField
@@ -51,6 +52,42 @@ def find_repo_root(start: Optional[Path] = None) -> Path:
     raise RuntimeError(
         "Could not locate repo root (looking for sibling fetchers/ and framework/ dirs)"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Environment — the one place a file is read into os.environ
+# --------------------------------------------------------------------------- #
+
+def load_environment(root: Optional[Path] = None) -> Optional[Path]:
+    """Populate os.environ from the repo-root .env. Front-ends call this at startup.
+
+    Every other secret source (shell export, K8s env mount, CI secret block, a
+    secret manager wrapper, docker-compose env_file) has already populated the
+    environment before Python starts, which is what lets secret_resolver stay
+    source-agnostic. A .env file is the one source that needs someone inside the
+    process to read it — so it is read HERE, once, at the entry point, and
+    nowhere else.
+
+    That placement is the invariant, not an implementation detail: a facade
+    function must never depend on another facade function having run first. This
+    used to live inside upload_preflight()/scripts_sync_preflight(), which made
+    run()/doctor()/list_programs() see .env only if an upload panel happened to
+    refresh earlier in the same process.
+
+    Real environment variables always win (override=False), so containers, CI,
+    and `export` are unaffected by a stray .env. Safe to call more than once.
+    Returns the .env path that was loaded, or None if there was none.
+    """
+    if root is None:
+        try:
+            root = find_repo_root()
+        except RuntimeError:
+            return None  # not in a repo (e.g. --help); nothing to load, never fatal
+    env_path = Path(root) / ".env"
+    if not env_path.is_file():
+        return None
+    load_dotenv(env_path, override=False)
+    return env_path
 
 
 # --------------------------------------------------------------------------- #
@@ -711,7 +748,6 @@ def upload_preflight(
 ) -> dict:
     """Inspect upload readiness without making Paramify API calls."""
     uploader = _load_paramify_uploader(root)
-    uploader.load_dotenv()
     config = uploader.load_config(str(config_path)) if config_path else {}
     paramify_cfg = config.get("paramify") or {}
     base_url = (
@@ -803,7 +839,6 @@ def scripts_sync_preflight(
     fetchers); ``None`` counts every discovered fetcher.
     """
     uploader = _load_paramify_scripts_uploader(root)
-    uploader.load_dotenv()
     config = uploader.load_config(str(config_path)) if config_path else {}
     paramify_cfg = config.get("paramify") or {}
     base_url = (

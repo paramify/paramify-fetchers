@@ -128,6 +128,11 @@ API_TO_CLI = {
     "catalog": "list / catalog / describe",
     "list_manifests": "manifests",
     "read_manifest": "manifest show",
+    # Entry-point env bootstrap, not a command: the CLI runs it in the top-level
+    # @app.callback() (so it covers every command) and the TUI in FetcherApp
+    # .__init__. Both front-ends populate the environment once, before any other
+    # facade call, which is what keeps facade functions order-independent.
+    "load_environment": "<implicit: entry-point bootstrap, every command>",
     # Read-only render helper: the runner's merged config view (platform <- entry)
     # behind what the manifest screen displays. No command of its own — the CLI
     # surfaces the same facts through `manifest show` + `validate`.

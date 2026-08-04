@@ -39,6 +39,10 @@ class FetcherApp(App):
         super().__init__()
         self._initial_manifest = manifest_path  # None -> show the welcome front door
         self._root_override = Path(root_override) if root_override else None
+        # Entry-point env load, same as the CLI's callback. Before any screen
+        # mounts, so every api call this session sees one environment regardless
+        # of which tab refreshes first (see api.load_environment).
+        api.load_environment(self._root_override)
         # Shared state read by the screens/pages:
         self.root_path: Optional[Path] = None
         self.catalog_data: Optional[dict] = None

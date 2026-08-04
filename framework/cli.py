@@ -97,6 +97,16 @@ programs_app = typer.Typer(
 app.add_typer(programs_app, name="programs")
 
 
+# Runs before every command, including the manifest/scripts/programs sub-groups.
+# The entry point is the only place the environment is populated from a file, so
+# that run/doctor/upload/programs all see the same environment (see
+# api.load_environment). No docstring: Typer would use it as the group help and
+# override the `help=` above.
+@app.callback()
+def _bootstrap() -> None:
+    api.load_environment()
+
+
 # --------------------------------------------------------------------------- #
 # Small shared helpers (ported verbatim from the previous argparse CLI)
 # --------------------------------------------------------------------------- #
