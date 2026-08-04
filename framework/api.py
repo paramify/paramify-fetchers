@@ -26,11 +26,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urlparse
 
 import yaml
 from dotenv import load_dotenv
 
+from framework import paramify_conn
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import ConfigField, Secret, TargetField
 from framework.envelope import is_enveloped, wrap_outputs
@@ -749,12 +749,7 @@ def upload_preflight(
     """Inspect upload readiness without making Paramify API calls."""
     uploader = _load_paramify_uploader(root)
     config = uploader.load_config(str(config_path)) if config_path else {}
-    paramify_cfg = config.get("paramify") or {}
-    base_url = (
-        paramify_cfg.get("base_url")
-        or os.environ.get("PARAMIFY_API_BASE_URL")
-        or uploader.DEFAULT_BASE_URL
-    )
+    base_url = paramify_conn.resolve_base_url(config)
 
     run_path = Path(run_dir)
     errors: List[str] = []
@@ -766,13 +761,13 @@ def upload_preflight(
         if file_count == 0:
             errors.append(f"No evidence files found in {run_path}")
 
-    url_error = uploader._base_url_error(base_url)
+    url_error = paramify_conn.base_url_error(base_url)
     if url_error:
         errors.append(url_error)
 
-    token_present = bool(os.environ.get("PARAMIFY_UPLOAD_API_TOKEN"))
+    token_present = bool(paramify_conn.resolve_write_token())
     if not token_present and not dry_run:
-        errors.append("PARAMIFY_UPLOAD_API_TOKEN is not set")
+        errors.append(paramify_conn.missing_write_token_error())
 
     return {
         "ok": not errors,
@@ -840,12 +835,7 @@ def scripts_sync_preflight(
     """
     uploader = _load_paramify_scripts_uploader(root)
     config = uploader.load_config(str(config_path)) if config_path else {}
-    paramify_cfg = config.get("paramify") or {}
-    base_url = (
-        paramify_cfg.get("base_url")
-        or os.environ.get("PARAMIFY_API_BASE_URL")
-        or uploader.DEFAULT_BASE_URL
-    )
+    base_url = paramify_conn.resolve_base_url(config)
 
     errors: List[str] = []
     fetcher_count = 0
@@ -858,15 +848,15 @@ def scripts_sync_preflight(
         scope = "in the manifest " if include is not None else ""
         errors.append(f"No fetchers {scope}with an evidence_set and a readable entry file to sync")
 
-    url_error = uploader._base_url_error(base_url)
+    url_error = paramify_conn.base_url_error(base_url)
     if url_error:
         errors.append(url_error)
 
-    token_present = bool(os.environ.get("PARAMIFY_UPLOAD_API_TOKEN"))
+    token_present = bool(paramify_conn.resolve_write_token())
     # A token is required to write; dry-run still wants one to diff the tenant,
     # but tolerates its absence (it then reports every fetcher as a create).
     if not token_present and not dry_run:
-        errors.append("PARAMIFY_UPLOAD_API_TOKEN is not set")
+        errors.append(paramify_conn.missing_write_token_error())
 
     return {
         "ok": not errors,
@@ -1125,31 +1115,28 @@ def program_display_name(program: dict) -> str:
     )
 
 
-def list_programs() -> List[dict]:
+def list_programs(config_path: Optional[Path] = None) -> List[dict]:
     """Fetch the workspace's programs via GET /projects.
 
     Returns [{"id", "name", "system_name", "short_name"}] sorted by display name.
     Raises RuntimeError with an actionable message on missing credentials, a
     non-https endpoint, or a transport/HTTP failure — the CLI turns that into
     {"ok": false, "errors": [...]}.
+
+    ``config_path`` is an uploader config YAML; its `paramify.base_url` outranks
+    the environment, exactly as it does for upload and scripts sync. This function
+    used to resolve the host on its own with no way to see a config at all, so a
+    config pointing at a stage tenant sent uploads to stage and programs to prod.
     """
     import requests  # local: keeps `paramify list`/`tui` startup free of it
 
-    token = os.environ.get("PARAMIFY_API_TOKEN") or os.environ.get("PARAMIFY_UPLOAD_API_TOKEN")
+    token = paramify_conn.resolve_read_token()
     if not token:
-        raise RuntimeError(
-            "No Paramify API token: set PARAMIFY_API_TOKEN (or "
-            "PARAMIFY_UPLOAD_API_TOKEN) to a token with read scope on the workspace"
-        )
-    base_url = os.environ.get("PARAMIFY_API_BASE_URL") or "https://app.paramify.com/api/v0"
-    # Same rule the uploader enforces (uploader._base_url_error): a Bearer token
-    # must not go out over plaintext. Localhost is exempt so a local stub works.
-    host = urlparse(base_url).hostname or ""
-    if urlparse(base_url).scheme != "https" and host not in ("localhost", "127.0.0.1", "::1"):
-        raise RuntimeError(
-            f"PARAMIFY_API_BASE_URL must be https to protect the API token (got {base_url!r}); "
-            "only localhost may use http"
-        )
+        raise RuntimeError(paramify_conn.missing_read_token_error())
+    base_url = paramify_conn.resolve_base_url(paramify_conn.load_config(config_path))
+    url_error = paramify_conn.base_url_error(base_url)
+    if url_error:
+        raise RuntimeError(url_error)
     url = f"{base_url.rstrip('/')}{_PROGRAMS_PATH}"
     try:
         resp = requests.get(

@@ -1021,9 +1021,9 @@ def _config_origin(state: dict) -> str:
     return f"set in {labels}" if labels else "not set yet"
 
 
-def _programs_or_exit(json_out: bool) -> List[dict]:
+def _programs_or_exit(json_out: bool, config: Optional[str] = None) -> List[dict]:
     try:
-        return api.list_programs()
+        return api.list_programs(Path(config).resolve() if config else None)
     except RuntimeError as e:
         _fail(None, str(e), json_out)
 
@@ -1053,9 +1053,14 @@ def _parse_selection(raw: str, count: int) -> List[int]:
 
 
 @programs_app.command("list")
-def programs_list(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
+def programs_list(
+    config: Optional[str] = typer.Option(
+        None, "--config", help="Uploader config YAML (base_url) — same file `upload` takes"
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
     """List the programs in the Paramify workspace (name + id)."""
-    programs = _programs_or_exit(json_out)
+    programs = _programs_or_exit(json_out, config)
     if json_out:
         typer.echo(json.dumps({"ok": True, "programs": programs}, indent=2))
         return
@@ -1088,6 +1093,9 @@ def programs_target(
         help="Report period start (ISO date, e.g. 2026-01-01). Set once as category "
              "config; shown for confirmation on every interactive run.",
     ),
+    config: Optional[str] = typer.Option(
+        None, "--config", help="Uploader config YAML (base_url) — same file `upload` takes"
+    ),
     file: str = typer.Option(_DEFAULT_MANIFEST, "-f", "--file", help="Manifest path"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
@@ -1112,7 +1120,7 @@ def programs_target(
                 json_out,
             )
 
-    programs = _programs_or_exit(json_out)
+    programs = _programs_or_exit(json_out, config)
     if not programs:
         _fail(path, "No programs found in this workspace.", json_out)
 

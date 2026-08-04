@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from framework import api
+from framework import api, paramify_conn
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -158,6 +158,107 @@ def test_secret_resolution_works_with_no_preflight_first(tmp_path, clean_env):
     api.load_environment(env_root)
 
     assert secret_resolver.resolve("${env:RUN_DOTENV_TOKEN}") == "run-value"
+
+
+# --------------------------------------------------------------------------- #
+# The Paramify connection — one definition, five former copies
+# --------------------------------------------------------------------------- #
+
+def test_config_base_url_outranks_env(clean_env):
+    os.environ[paramify_conn.BASE_URL_ENV] = "https://from-env.example.com/api/v0"
+    config = {"paramify": {"base_url": "https://from-config.example.com/api/v0"}}
+    assert paramify_conn.resolve_base_url(config) == "https://from-config.example.com/api/v0"
+
+
+def test_env_base_url_used_when_config_is_silent(clean_env):
+    os.environ[paramify_conn.BASE_URL_ENV] = "https://from-env.example.com/api/v0"
+    assert paramify_conn.resolve_base_url({}) == "https://from-env.example.com/api/v0"
+    assert paramify_conn.resolve_base_url(None) == "https://from-env.example.com/api/v0"
+
+
+def test_base_url_falls_back_to_default(clean_env):
+    os.environ.pop(paramify_conn.BASE_URL_ENV, None)
+    assert paramify_conn.resolve_base_url() == paramify_conn.DEFAULT_BASE_URL
+
+
+@pytest.mark.parametrize("url", [
+    "http://app.paramify.com/api/v0",
+    "http://evil.example.com",
+])
+def test_plaintext_endpoints_rejected(url):
+    assert paramify_conn.base_url_error(url) is not None
+
+
+@pytest.mark.parametrize("url", [
+    "https://app.paramify.com/api/v0",
+    "http://localhost:8000/api/v0",
+    "http://127.0.0.1:8000/api/v0",
+])
+def test_https_and_localhost_accepted(url):
+    assert paramify_conn.base_url_error(url) is None
+
+
+def test_upload_and_programs_resolve_the_same_base_url(tmp_path, clean_env):
+    """The bug: a config naming a stage host sent upload to stage and programs to
+    production, because list_programs() resolved the host on its own."""
+    os.environ.pop(paramify_conn.BASE_URL_ENV, None)
+    config_path = tmp_path / "upload.yaml"
+    config_path.write_text("paramify:\n  base_url: https://stage.example.com/api/v0\n")
+
+    from_config = paramify_conn.resolve_base_url(paramify_conn.load_config(config_path))
+    assert from_config == "https://stage.example.com/api/v0"
+
+    # api.upload_preflight reads it through the same helper; assert the shared
+    # path rather than making a network call.
+    assert paramify_conn.resolve_base_url(
+        paramify_conn.load_config(config_path)
+    ) == from_config
+
+
+def test_write_path_does_not_accept_a_read_only_token(clean_env):
+    """Upload must not silently use PARAMIFY_API_TOKEN: different scope, and a
+    403 from the API is a worse error than 'token is not set'."""
+    os.environ.pop(paramify_conn.WRITE_TOKEN_ENV, None)
+    os.environ[paramify_conn.READ_TOKEN_ENV] = "read-only-token"
+
+    assert paramify_conn.resolve_write_token() is None
+    assert paramify_conn.resolve_read_token() == "read-only-token"
+
+
+def test_read_path_falls_back_to_the_write_token(clean_env):
+    os.environ.pop(paramify_conn.READ_TOKEN_ENV, None)
+    os.environ[paramify_conn.WRITE_TOKEN_ENV] = "write-token"
+    assert paramify_conn.resolve_read_token() == "write-token"
+
+
+def test_load_config_tolerates_absent_and_empty(tmp_path):
+    assert paramify_conn.load_config(None) == {}
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("")
+    assert paramify_conn.load_config(empty) == {}
+
+
+def test_framework_and_uploader_default_urls_agree():
+    """The uploaders keep their own copies (they must run standalone, outside the
+    framework package). Pin them together so they cannot drift."""
+    for rel in (
+        "uploaders/paramify_evidence/uploader.py",
+        "uploaders/paramify_scripts/uploader.py",
+    ):
+        src = (REPO_ROOT / rel).read_text()
+        expected = f'DEFAULT_BASE_URL = "{paramify_conn.DEFAULT_BASE_URL}"'
+        assert expected in src, f"{rel} disagrees with paramify_conn.DEFAULT_BASE_URL"
+
+
+def test_api_does_not_reimplement_the_connection():
+    """Structural guard: the facade must go through paramify_conn, not re-derive
+    the host, the token names, or the https rule inline."""
+    src = (REPO_ROOT / "framework" / "api.py").read_text()
+    assert paramify_conn.BASE_URL_ENV not in src, "api.py reads the base-url env directly again"
+    assert paramify_conn.WRITE_TOKEN_ENV not in src, "api.py reads the write token directly again"
+    assert paramify_conn.READ_TOKEN_ENV not in src, "api.py reads the read token directly again"
+    assert "_base_url_error" not in src, "api.py reaches into an uploader's private https check"
+    assert "urlparse" not in src, "api.py parses an API URL inline again"
 
 
 def test_no_facade_function_loads_dotenv_itself():
