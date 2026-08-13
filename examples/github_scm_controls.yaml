@@ -1,0 +1,80 @@
+# GitHub source-control and CI/CD controls — a runnable manifest for all three
+# GitHub fetchers against one organization.
+#
+# Set before running:
+#   export GITHUB_TOKEN=<read-only fine-grained PAT, or a GitHub App installation token>
+#
+# Then replace `my-org` below with your organization login (the owner part of
+# owner/repo) and run:
+#
+#   paramify validate examples/github_scm_controls.yaml
+#   paramify run      examples/github_scm_controls.yaml
+#
+# `organization` is REQUIRED on every target. Unlike the aws/azure/gcp fetchers
+# there is no ambient identity to fall back on: a GitHub token can see several
+# organizations plus personal repositories and the API resolves no default, so the
+# manifest has to say which organization the evidence describes.
+#
+# Token permissions (all READ-ONLY):
+#   Repository   — Metadata:Read, Administration:Read, Secrets:Read,
+#                  Dependabot alerts:Read
+#   Organization — Administration:Read, Members:Read,
+#                  Self-hosted runners:Read, Secrets:Read
+# A missing permission is reported as an API failure and exits non-zero, with the
+# reason in the run's metadata.error — it is never silently reported as
+# "disabled". See fetchers/github/README.md for the mapping from permission to
+# endpoint.
+
+run:
+  output_dir: ./evidence
+
+  # GitHub Enterprise Server / GHE.com: uncomment and point GITHUB_API_URL at the
+  # instance's v3 API root (e.g. https://ghe.example.com/api/v3), then let it
+  # through the runner's env whitelist. Unset means api.github.com.
+  # platforms:
+  #   github:
+  #     auth:
+  #       passthrough_env:
+  #         - GITHUB_API_URL
+
+  fetchers:
+    # Default-branch protection posture for every repository in the org.
+    # Coverage is reported over NON-ARCHIVED repositories.
+    - use: github_repository_branch_protection
+      secrets:
+        github_token: ${env:GITHUB_TOKEN}
+      targets:
+        - organization: my-org
+      # Bound a very large org (0 = all). When it truncates,
+      # summary.repositories_truncated is true.
+      # config:
+      #   max_repositories: 200
+
+    # Org-level posture every repository inherits: 2FA requirement, base
+    # repository permission, member counts, repo creation/fork policy, SAML SSO
+    # state, and the code-security defaults for new repositories.
+    - use: github_organization_security_settings
+      secrets:
+        github_token: ${env:GITHUB_TOKEN}
+      targets:
+        - organization: my-org
+
+    # Actions supply-chain posture: allowed-actions policy, workflow PR approval,
+    # default GITHUB_TOKEN permission, self-hosted runners, secret NAMES only.
+    - use: github_actions_workflow_config
+      secrets:
+        github_token: ${env:GITHUB_TOKEN}
+      targets:
+        - organization: my-org
+      # Org-level only — much cheaper on a large org, and the way to run when the
+      # token has no repository Secrets:Read.
+      # config:
+      #   include_repository_settings: false
+
+    # Multi-org fanout: add another target to any entry above. Note that the
+    # token is declared once per fetcher (not per target), so every organization
+    # in one entry is read with the SAME token — it must be scoped to all of
+    # them. For orgs with separate credentials, use one manifest per org.
+    #   targets:
+    #     - organization: my-org
+    #     - organization: my-other-org

@@ -1,0 +1,55 @@
+---
+description: >
+  GitHub source-control and CI/CD evidence fetchers (python, `requests` against
+  the GitHub REST API — no SDK, no new dependency). Collects default-branch
+  protection posture per repository, organization-level security settings, and
+  GitHub Actions supply-chain configuration. A manifest target scopes a run to
+  one GitHub **organization** (multi-org fanout); the organization is required —
+  unlike a cloud subscription there is no ambient "current org" a token resolves
+  to.
+
+# Auth: a REAL declared secret, not an ambient credential.
+#
+# This is the deliberate difference from the aws/azure/gcp categories. Those are
+# ambient-identity (`secrets: []`) because the cloud SDKs resolve an instance
+# role / Workload Identity / ADC from the environment. GitHub has no equivalent:
+# every REST call carries an `Authorization: Bearer <token>` header, so the
+# credential is a value the runner must resolve and hand over. Each fetcher
+# therefore declares:
+#
+#     secrets:
+#       - name: github_token
+#         env: GITHUB_TOKEN
+#
+# The runner resolves it from wherever the operator keeps it (env, .env, Secrets
+# Manager, Vault, K8s — source-agnostic) and sets it on GITHUB_TOKEN for the
+# child process only; it is redacted from captured output automatically. The
+# fetchers additionally register the resolved value with their own redaction
+# filter so it can never reach an evidence file or a recorded error message.
+#
+# Two token types are supported, both read-only:
+#   1. Fine-grained PAT scoped to the organization (preferred). Repository
+#      permissions: Metadata:Read, Administration:Read, Contents:Read,
+#      Secrets:Read, Dependabot alerts:Read, Code scanning alerts:Read.
+#      Organization permissions: Administration:Read, Members:Read,
+#      Self-hosted runners:Read, Secrets:Read.
+#   2. GitHub App installation token (`Bearer ghs_…`) with the same read-only
+#      permission set. The fetchers never mint the token themselves — minting an
+#      installation token needs the App private key, which stays outside this
+#      repo; hand over the already-exchanged installation token.
+# Classic PATs work too (`read:org`, `repo`) but grant far more than is needed.
+#
+# GITHUB_TOKEN is deliberately NOT in passthrough_env: a secret must arrive
+# through the declared secrets[] channel so the runner can resolve and redact
+# it, never by leaking in from the ambient environment.
+auth:
+  passthrough_env:
+    # GitHub Enterprise Server / GHE.com reachability. Defaults to
+    # https://api.github.com when unset. GHES installs serve the v3 REST API
+    # under a per-instance host, e.g. https://ghe.example.com/api/v3 — set this
+    # and every fetcher in the category targets that instance instead. It is a
+    # non-sensitive endpoint selector, not a credential.
+    - GITHUB_API_URL
+    # Per-request HTTP timeout in seconds (default 30). Non-sensitive knob;
+    # raise it for a slow GHES instance behind a proxy.
+    - GITHUB_HTTP_TIMEOUT

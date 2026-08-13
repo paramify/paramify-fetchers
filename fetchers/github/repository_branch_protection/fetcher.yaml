@@ -1,0 +1,79 @@
+name: github_repository_branch_protection
+version: 0.1.0
+description: >
+  FedRAMP 20x KSI-CMT-03/CMT-04/SVC-05/MLA-03 evidence. For every repository in
+  one GitHub organization, reports the default branch's protection posture
+  (required PR reviews and approving review count, required status checks,
+  enforce-admins, signed commits, force-push/deletion restrictions, linear
+  history, conversation resolution) plus repository private/archived state and
+  secret-scanning, push-protection and Dependabot alert status. Summary expresses
+  protected-branch coverage as a percentage of non-archived repositories.
+  Single-organization per invocation; the runner does fanout.
+category: github
+
+supports_targets: true
+
+target_schema:
+  organization:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: >
+      GitHub organization login (e.g. "acme-inc"), the org part of a repository's
+      owner/name. REQUIRED — a token can see several organizations and the API
+      resolves no default, so there is nothing ambient to fall back to.
+
+config_schema:
+  max_repositories:
+    type: integer
+    required: false
+    default: 0
+    env: GITHUB_MAX_REPOSITORIES
+    description: >
+      Cap on repositories examined (0 = all). A bound for very large orgs; when it
+      truncates, summary.repositories_truncated is true so the evidence never
+      looks complete when it is a subset.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  # Up to three requests per non-archived repository (protection, security
+  # settings when the list response omits them, Dependabot probe). A 500-repo org
+  # exceeds the 600s default.
+  timeout: 1800
+
+output:
+  type: json
+  path: github_repository_branch_protection.json
+  aggregation: per_target
+
+secrets:
+  - name: github_token
+    env: GITHUB_TOKEN
+
+ksis:
+  - KSI-CMT-03
+  - KSI-CMT-04
+  - KSI-SVC-05
+  - KSI-MLA-03
+
+evidence_set:
+  reference_id: EVD-GITHUB-BRANCH-PROTECTION
+  name: GitHub Default-Branch Protection Posture
+  instructions: >
+    Collected by the github_repository_branch_protection fetcher over the GitHub
+    REST API (api.github.com, or GITHUB_API_URL for GitHub Enterprise Server),
+    authenticated with a read-only fine-grained PAT or GitHub App installation
+    token. Endpoints called, per organization:
+    GET /orgs/{org}/repos (paginated via the Link rel="next" header);
+    then per non-archived repository:
+    GET /repos/{owner}/{repo} (only when the list response omits the
+    security_and_analysis block),
+    GET /repos/{owner}/{repo}/branches/{default_branch}/protection
+    (404 = the branch carries no protection rule),
+    GET /repos/{owner}/{repo}/branches/{default_branch}/protection/required_signatures
+    (only when the protection payload omits required_signatures), and
+    GET /repos/{owner}/{repo}/dependabot/alerts?per_page=1 (a 200 means Dependabot
+    alerts are enabled; GitHub's 403 "Dependabot alerts are disabled for this
+    repository" means they are not). Required read-only permissions: repository
+    Metadata:Read, Administration:Read, Dependabot alerts:Read.

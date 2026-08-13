@@ -1,0 +1,65 @@
+name: github_organization_security_settings
+version: 0.1.0
+description: >
+  FedRAMP 20x KSI-IAM-02/IAM-04/SVC-04 evidence. Reports one GitHub
+  organization's security posture: two-factor requirement for all members,
+  default (base) repository permission, member and outside-collaborator counts,
+  repository creation/deletion and private-fork policy, SAML SSO state where the
+  token can see it, and the code-security defaults applied to new repositories
+  (Advanced Security, secret scanning, push protection, Dependabot).
+  Single-organization per invocation; the runner does fanout.
+category: github
+
+supports_targets: true
+
+target_schema:
+  organization:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: >
+      GitHub organization login (e.g. "acme-inc"). REQUIRED — this fetcher
+      reports one organization's settings, and a token can see several with no
+      API-resolved default.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  # Member and outside-collaborator lists are paginated 100 at a time; a
+  # multi-thousand-member org needs more than a moment but far less than this.
+  timeout: 900
+
+output:
+  type: json
+  path: github_organization_security_settings.json
+  aggregation: per_target
+
+secrets:
+  - name: github_token
+    env: GITHUB_TOKEN
+
+ksis:
+  - KSI-IAM-02
+  - KSI-IAM-04
+  - KSI-SVC-04
+
+evidence_set:
+  reference_id: EVD-GITHUB-ORG-SECURITY
+  name: GitHub Organization Security Settings
+  instructions: >
+    Collected by the github_organization_security_settings fetcher over the
+    GitHub REST API (api.github.com, or GITHUB_API_URL for GitHub Enterprise
+    Server), authenticated with a read-only fine-grained PAT or GitHub App
+    installation token. Endpoints called, per organization:
+    GET /orgs/{org} (2FA requirement, default repository permission, member
+    repository-creation and deletion policy, private-fork policy, new-repository
+    code-security defaults, verified badge, plan);
+    GET /orgs/{org}/members (counted only — member logins are deliberately not
+    written into evidence);
+    GET /orgs/{org}/outside_collaborators (counted only);
+    GET /orgs/{org}/members?filter=2fa_disabled (owner-only visibility; reported
+    as null when the token cannot see it);
+    GET /orgs/{org}/credential-authorizations (SAML SSO state: 200 = configured,
+    404 = not configured, 403 = not visible to this token). All list endpoints
+    paginate via the Link rel="next" header. Required read-only permissions:
+    organization Administration:Read and Members:Read.

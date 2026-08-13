@@ -1,0 +1,90 @@
+name: github_actions_workflow_config
+version: 0.1.0
+description: >
+  FedRAMP 20x KSI-CMT-03/IAM-03/IAM-04 evidence. Reports GitHub Actions
+  CI/CD supply-chain configuration for one organization and its repositories:
+  allowed-actions policy, whether workflows may approve pull requests, the
+  default GITHUB_TOKEN workflow permission (read vs write), self-hosted runner
+  presence and runner-group exposure, and Actions secret NAMES and counts only —
+  never secret values. Single-organization per invocation; the runner does fanout.
+category: github
+
+supports_targets: true
+
+target_schema:
+  organization:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: >
+      GitHub organization login (e.g. "acme-inc"). REQUIRED — Actions policy is
+      an organization-scoped setting and a token can see several organizations
+      with no API-resolved default.
+
+config_schema:
+  include_repository_settings:
+    type: boolean
+    required: false
+    default: true
+    env: GITHUB_INCLUDE_REPOSITORY_SETTINGS
+    description: >
+      Collect per-repository Actions settings as well as the organization policy.
+      Set false for an org-only run — much cheaper on a large org, and the way to
+      run when the token has no repository Secrets:Read.
+  max_repositories:
+    type: integer
+    required: false
+    default: 0
+    env: GITHUB_MAX_REPOSITORIES
+    description: >
+      Cap on repositories examined (0 = all). When it truncates,
+      summary.repositories_truncated is true so a subset never reads as complete.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  # Up to four requests per non-archived repository (permissions, workflow
+  # permissions, runners, secrets).
+  timeout: 1800
+
+output:
+  type: json
+  path: github_actions_workflow_config.json
+  aggregation: per_target
+
+secrets:
+  - name: github_token
+    env: GITHUB_TOKEN
+
+ksis:
+  - KSI-CMT-03
+  - KSI-IAM-03
+  - KSI-IAM-04
+
+evidence_set:
+  reference_id: EVD-GITHUB-ACTIONS-CONFIG
+  name: GitHub Actions Workflow and Supply-Chain Configuration
+  instructions: >
+    Collected by the github_actions_workflow_config fetcher over the GitHub REST
+    API (api.github.com, or GITHUB_API_URL for GitHub Enterprise Server),
+    authenticated with a read-only fine-grained PAT or GitHub App installation
+    token. Endpoints called, per organization:
+    GET /orgs/{org}/actions/permissions,
+    GET /orgs/{org}/actions/permissions/selected-actions (only when
+    allowed_actions is "selected"),
+    GET /orgs/{org}/actions/permissions/workflow,
+    GET /orgs/{org}/actions/runners,
+    GET /orgs/{org}/actions/runner-groups,
+    GET /orgs/{org}/actions/secrets,
+    GET /orgs/{org}/repos; then per non-archived repository (unless
+    include_repository_settings is false):
+    GET /repos/{owner}/{repo}/actions/permissions,
+    GET /repos/{owner}/{repo}/actions/permissions/workflow,
+    GET /repos/{owner}/{repo}/actions/runners,
+    GET /repos/{owner}/{repo}/actions/secrets. All list endpoints paginate via
+    the Link rel="next" header. The secrets endpoints return secret names and
+    timestamps only — GitHub exposes no API that returns a secret value, and this
+    fetcher additionally projects only name, created_at, updated_at and
+    visibility. Required read-only permissions: organization Administration:Read,
+    Self-hosted runners:Read and Secrets:Read; repository Metadata:Read,
+    Administration:Read and Secrets:Read.
