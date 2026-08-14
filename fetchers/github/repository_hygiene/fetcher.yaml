@@ -1,0 +1,108 @@
+name: github_repository_hygiene
+version: 0.1.0
+description: >
+  Repository hygiene and lifecycle posture for one GitHub organization — the
+  repository-level controls that sit around the branch rule rather than inside
+  it. Per non-archived repository, reports whether a CODEOWNERS file exists (in
+  any of GitHub's three recognized locations), where it lives and whether GitHub
+  can parse it; whether a SECURITY.md policy is published, with the repository's
+  visibility so the assertion can be scoped to public repositories; the
+  immutable-releases setting; delete-branch-on-merge; archived state; and last
+  activity with a derived days-since-activity against a configurable inactivity
+  threshold. Also records fork and is_template so repositories the organization
+  does not author can be excluded from findings. Summary expresses coverage as
+  percentages of the non-archived, non-fork population and counts
+  inactive-but-unarchived repositories. Single-organization per invocation; the
+  runner does fanout.
+category: github
+
+supports_targets: true
+
+target_schema:
+  organization:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: >
+      GitHub organization login (e.g. "acme-inc"), the org part of a repository's
+      owner/name. REQUIRED — a token can see several organizations and the API
+      resolves no default, so there is nothing ambient to fall back on.
+
+config_schema:
+  inactive_days_threshold:
+    type: integer
+    required: false
+    default: 180
+    env: GITHUB_INACTIVE_DAYS_THRESHOLD
+    description: >
+      Days without a push after which an unarchived repository is reported as
+      inactive. This is a policy judgment, not a GitHub setting, so it is
+      configurable rather than hardcoded. The default of 180 days is Prowler's
+      (`inactive_not_archived_days_threshold`): long enough that a live
+      repository is not swept up by one quiet quarter, short enough that an
+      abandoned one is caught inside an annual assessment window. Tighten it to
+      90 if your lifecycle policy is stricter. A non-positive value would make
+      every repository a finding, so it degrades to 180 with a warning. The value
+      in force is echoed as summary.inactivity_threshold_days and on every
+      record, so evidence is never ambiguous about which threshold produced it.
+  max_repositories:
+    type: integer
+    required: false
+    default: 0
+    env: GITHUB_MAX_REPOSITORIES
+    description: >
+      Cap on repositories examined (0 = all). A bound for very large orgs; when it
+      truncates, summary.repositories_truncated is true so the evidence never
+      looks complete when it is a subset.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  # Up to eight requests per non-archived repository: three CODEOWNERS location
+  # probes (first hit wins), three SECURITY.md probes, the immutable-releases
+  # switch, and the CODEOWNERS syntax check when a file was found. Archived
+  # repositories cost nothing extra. A few-hundred-repo org exceeds the 600s
+  # default by a wide margin.
+  timeout: 3600
+
+output:
+  type: json
+  path: github_repository_hygiene.json
+  aggregation: per_target
+
+secrets:
+  - name: github_token
+    env: GITHUB_TOKEN
+
+evidence_set:
+  reference_id: EVD-GITHUB-REPO-HYGIENE
+  name: GitHub Repository Hygiene and Lifecycle
+  instructions: >
+    Collected by the github_repository_hygiene fetcher over the GitHub REST API
+    (api.github.com, or GITHUB_API_URL for GitHub Enterprise Server),
+    authenticated with a read-only fine-grained PAT or GitHub App installation
+    token. Endpoints called, per organization:
+    GET /orgs/{org}/repos?type=all&sort=full_name (paginated via the Link
+    rel="next" header; supplies archived, fork, is_template, private, visibility,
+    default_branch, delete_branch_on_merge, pushed_at, updated_at, created_at);
+    then per non-archived repository:
+    GET /repos/{owner}/{repo}/contents/.github/CODEOWNERS,
+    GET /repos/{owner}/{repo}/contents/CODEOWNERS and
+    GET /repos/{owner}/{repo}/contents/docs/CODEOWNERS (GitHub's three
+    recognized CODEOWNERS locations, probed in that order and stopped at the
+    first hit; a 404 means the file is absent and is a result, not an error);
+    GET /repos/{owner}/{repo}/codeowners/errors (only when a CODEOWNERS file was
+    found — error kinds and a count only, never file content);
+    GET /repos/{owner}/{repo}/contents/SECURITY.md,
+    GET /repos/{owner}/{repo}/contents/.github/SECURITY.md and
+    GET /repos/{owner}/{repo}/contents/docs/SECURITY.md (the three locations
+    GitHub serves a security policy from, root first); and
+    GET /repos/{owner}/{repo}/immutable-releases (returns
+    {"enabled", "enforced_by_owner"}; a 404 or 403 is reported as
+    immutable_releases_visible: false rather than as "disabled"). Days since last
+    activity is derived from pushed_at at collection time against the
+    inactive_days_threshold config value (default 180 days). Required read-only
+    permissions: repository Metadata:Read, Contents:Read and Administration:Read
+    (delete_branch_on_merge and the immutable-releases switch are omitted or
+    refused without Administration:Read, and are then reported as null with a
+    *_visible: false flag beside them, never as false).

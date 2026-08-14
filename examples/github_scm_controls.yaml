@@ -1,4 +1,4 @@
-# GitHub source-control and CI/CD controls — a runnable manifest for all three
+# GitHub source-control and CI/CD controls — a runnable manifest for all four
 # GitHub fetchers against one organization.
 #
 # Set before running:
@@ -16,8 +16,8 @@
 # manifest has to say which organization the evidence describes.
 #
 # Token permissions (all READ-ONLY):
-#   Repository   — Metadata:Read, Administration:Read, Secrets:Read,
-#                  Dependabot alerts:Read
+#   Repository   — Metadata:Read, Administration:Read, Contents:Read,
+#                  Secrets:Read, Dependabot alerts:Read
 #   Organization — Administration:Read, Members:Read,
 #                  Self-hosted runners:Read, Secrets:Read
 # A missing permission is reported as an API failure and exits non-zero, with the
@@ -70,6 +70,24 @@ run:
       # token has no repository Secrets:Read.
       # config:
       #   include_repository_settings: false
+
+    # Repository hygiene: CODEOWNERS (and whether it parses), SECURITY.md on
+    # public repos, immutable releases, delete-branch-on-merge, and repositories
+    # that have gone quiet but are still unarchived. Coverage is reported over
+    # NON-ARCHIVED, NON-FORK repositories.
+    - use: github_repository_hygiene
+      secrets:
+        github_token: ${env:GITHUB_TOKEN}
+      targets:
+        - organization: my-org
+      # inactive_days_threshold is a POLICY judgment, not a GitHub setting: how
+      # long a repository may sit without a push before it should have been
+      # archived. Default 180 days (Prowler's). Tighten it to 90 if your
+      # lifecycle policy is stricter — whichever value runs is echoed as
+      # summary.inactivity_threshold_days.
+      # config:
+      #   inactive_days_threshold: 90
+      #   max_repositories: 200
 
     # Multi-org fanout: add another target to any entry above. Note that the
     # token is declared once per fetcher (not per target), so every organization

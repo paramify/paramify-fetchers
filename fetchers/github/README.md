@@ -1,7 +1,7 @@
 # GitHub
 
 GitHub fetchers pull source-control and CI/CD configuration evidence from the
-GitHub REST API. All three are **read-only** and run once per **organization** —
+GitHub REST API. All four are **read-only** and run once per **organization** —
 the runner fans out across the organizations listed as targets in the manifest.
 
 Transport is `requests` against `api.github.com` (or your GitHub Enterprise
@@ -13,6 +13,43 @@ Server). **No new dependency:** `requests` is already in the top-level
 | `github_repository_branch_protection` | Per-repo default-branch protection: required PR reviews + approval count, status checks, enforce-admins, signed commits, force-push/deletion, linear history, conversation resolution; plus private/archived, secret scanning, push protection, Dependabot alerts | `/orgs/{org}/repos`, `/repos/{o}/{r}`, `/repos/{o}/{r}/branches/{b}/protection`, `…/protection/required_signatures`, `/repos/{o}/{r}/dependabot/alerts` |
 | `github_organization_security_settings` | Org posture: 2FA requirement, default (base) repository permission, member + outside-collaborator counts, repo creation/deletion + private-fork policy, SAML SSO state, code-security defaults for new repos | `/orgs/{org}`, `/orgs/{org}/members`, `/orgs/{org}/outside_collaborators`, `/orgs/{org}/credential-authorizations` |
 | `github_actions_workflow_config` | Actions supply chain: allowed-actions policy, workflow PR approval, default `GITHUB_TOKEN` permission (read vs write), self-hosted runners + runner groups, Actions secret **names and counts only** | `/orgs/{org}/actions/permissions[/selected-actions|/workflow]`, `/orgs/{org}/actions/{runners,runner-groups,secrets}`, and the `/repos/{o}/{r}/actions/…` equivalents |
+| `github_repository_hygiene` | Per-repo lifecycle hygiene: CODEOWNERS presence + location + whether it parses, SECURITY.md presence + location (with visibility, so the assertion can be scoped to public repos), immutable releases, `delete_branch_on_merge`, archived, days since last push, `fork`/`is_template` | `/orgs/{org}/repos`, `/repos/{o}/{r}/contents/{CODEOWNERS,SECURITY.md × 3 locations}`, `/repos/{o}/{r}/codeowners/errors`, `/repos/{o}/{r}/immutable-releases` |
+
+## Repository hygiene: what "missing" means
+
+`github_repository_hygiene` is the only fetcher here whose central question is
+answered by a **404**. "This repository has no CODEOWNERS file" is a 404 from the
+contents API, and that is a *result*, not a collection failure — it never lands in
+`api_failures` and never flips the exit code, exactly as a 404 from the
+branch-protection endpoint means "unprotected". Any *other* error on the same
+probe is a real failure, and it leaves the field `null` rather than `false`.
+
+Three judgment calls worth knowing about:
+
+- **The inactivity threshold is policy, not a GitHub setting.** `GET /orgs/{org}/repos`
+  reports `pushed_at`; how stale is too stale is yours. `inactive_days_threshold`
+  defaults to **180 days** (Prowler's `inactive_not_archived_days_threshold`) and
+  the value that ran is echoed as `summary.inactivity_threshold_days` and on every
+  record, so evidence is never ambiguous about which threshold produced it.
+- **Age is measured from `pushed_at`, not `updated_at`.** `updated_at` moves when
+  someone renames a repository or edits its description, so an `updated_at`-based
+  age calls a dead repository live. Both are recorded; only `pushed_at` drives
+  `inactive`.
+- **Archived and forked repositories are out of the coverage denominator.** An
+  archived repo is read-only, so none of these settings can be changed; a fork
+  carries the upstream project's files, so "missing CODEOWNERS" there is a finding
+  against a project the org does not own. Both stay in the inventory
+  (`archived_repositories`, `fork_repositories`). Templates are counted but *not*
+  excluded — a template is authored by the org and its CODEOWNERS is inherited by
+  everything generated from it. `is_template` is on each record if you disagree.
+
+Two places this fetcher deliberately differs from Prowler, in both cases recording
+the fact rather than assuming it:
+
+| | Prowler | Here | Why |
+|---|---|---|---|
+| SECURITY.md locations | root only | root, `.github/`, `docs/` | GitHub serves a policy from all three; root-only reports a live policy as missing. `security_policy_path` is recorded, so a root-only validator is still writable. |
+| 403 on `/immutable-releases` | not visible | not visible | Same behavior, kept deliberately: the endpoint is feature-gated and its 403 does not distinguish "token lacks the read" from "feature unavailable here", so raising would make an unfixable finding out of an ambiguity. A **rate-limit** 403 is not swallowed — `github_common` classifies those separately. |
 
 ## The one thing to get right
 
@@ -58,7 +95,8 @@ organization is preferred.
    | Permission | Level | Needed for |
    |---|---|---|
    | Repository → Metadata | Read | repo list, default branch |
-   | Repository → Administration | Read | branch protection, `security_and_analysis`, repo Actions settings |
+   | Repository → Contents | Read | CODEOWNERS / SECURITY.md existence probes |
+   | Repository → Administration | Read | branch protection, `security_and_analysis`, repo Actions settings, `delete_branch_on_merge`, immutable releases |
    | Repository → Secrets | Read | repo Actions secret names |
    | Repository → Dependabot alerts | Read | Dependabot alert status |
    | Organization → Administration | Read | org settings, 2FA requirement, Actions policy |
@@ -92,7 +130,7 @@ paramify validate manifest.yaml
 paramify run manifest.yaml
 ```
 
-A ready-to-edit manifest for all three fetchers is at
+A ready-to-edit manifest for all four fetchers is at
 [`examples/github_scm_controls.yaml`](../../examples/github_scm_controls.yaml).
 
 ## Environment variables
@@ -105,6 +143,7 @@ A ready-to-edit manifest for all three fetchers is at
 | `GITHUB_HTTP_TIMEOUT` | No | Per-request timeout in seconds (default 30) | category `passthrough_env` |
 | `GITHUB_MAX_REPOSITORIES` | No | Cap repositories examined (0 = all) | `config_schema.max_repositories` |
 | `GITHUB_INCLUDE_REPOSITORY_SETTINGS` | No | Actions fetcher: collect per-repo settings too (default true) | `config_schema.include_repository_settings` |
+| `GITHUB_INACTIVE_DAYS_THRESHOLD` | No | Hygiene fetcher: days without a push before an unarchived repo is reported inactive (default 180) | `config_schema.inactive_days_threshold` |
 | `EVIDENCE_DIR` | — | Output directory (defaults to `./evidence`) | runner-set |
 | `FETCHER_STATUS_FILE` | — | Where a failing run writes its reason | runner-set |
 
@@ -161,7 +200,7 @@ status file.
 
 ## Request volume
 
-The org-level fetchers are a handful of calls. The two repository-walking
+The org-level fetchers are a handful of calls. The three repository-walking
 fetchers scale with repository count:
 
 | Fetcher | Requests |
@@ -169,6 +208,13 @@ fetchers scale with repository count:
 | `github_organization_security_settings` | ~5 + member/collaborator pagination |
 | `github_repository_branch_protection` | 1 + up to 3 per non-archived repo |
 | `github_actions_workflow_config` | ~6 + up to 4 per non-archived repo |
+| `github_repository_hygiene` | 1 + up to 8 per non-archived repo |
+
+`github_repository_hygiene` is the most expensive of the four: three CODEOWNERS
+location probes (stopped at the first hit), three SECURITY.md probes, the
+immutable-releases switch, and the CODEOWNERS syntax check only when a file was
+found. A repo with CODEOWNERS in `.github/` and SECURITY.md in the root costs 4,
+not 8.
 
 Archived repositories are skipped (read-only, and out of the coverage
 denominator). For a very large org, bound the run with `max_repositories` — when
@@ -181,10 +227,24 @@ run. A fine-grained PAT gets 5,000 requests/hour.
 Field projections for the repository and organization fetchers are ported from
 [Prowler](https://github.com/prowler-cloud/prowler) (Apache-2.0, `master`):
 `providers/github/services/repository/repository_service.py` (the `Repo` /
-`Branch` models and its 18 checks) and
+`Branch` models and its 19 repository checks) and
 `providers/github/services/organization/organization_service.py` (the `Org` model
 and its 5 checks). The "404 means unprotected / any other error means unknown"
-split is Prowler's, kept so the two tools agree on what "unprotected" means.
+split is Prowler's, kept so the two tools agree on what "unprotected" means; the
+same rule drives the hygiene fetcher's file-existence probes, whose reduction
+("any hit means present, *every* probe unknown means unknown, anything else means
+absent") is `repository_service._file_exists()`.
+
+Prowler's 24 GitHub checks map onto these four fetchers as follows — the five
+repository-hygiene ones are the coverage this fetcher closes:
+
+| Prowler check | Field |
+|---|---|
+| `repository_has_codeowners_file` | `codeowners_exists`, `codeowners_path`, `codeowners_valid` |
+| `repository_public_has_securitymd_file` | `security_policy_exists`, `security_policy_path` + `private`/`visibility` |
+| `repository_immutable_releases_enabled` | `immutable_releases_enabled`, `immutable_releases_enforced_by_owner` |
+| `repository_inactive_not_archived` | `days_since_activity`, `inactive`, `inactive_not_archived` |
+| `repository_branch_delete_on_merge_enabled` | `delete_branch_on_merge` (+ `_visible`) |
 
 Prowler's third GitHub service, `githubactions_service.py`, is **not** a
 configuration model: it shells out to the `zizmor` binary and wraps per-workflow-
@@ -197,8 +257,14 @@ projection from GitHub's Actions REST API.
 
 - No validators ship with these fetchers yet — the validator registry is
   unmerged. `summary.protected_default_branch_percentage`,
-  `summary.two_factor_required_for_all_members` and
-  `summary.default_workflow_permissions` are the fields to write them against.
+  `summary.two_factor_required_for_all_members`,
+  `summary.default_workflow_permissions`, `summary.codeowners_percentage` and
+  `summary.inactive_repositories_not_archived` are the fields to write them
+  against.
+- `days_since_activity` is computed against the wall clock, so the hygiene
+  fetcher's output is **not** byte-stable across days even when nothing in GitHub
+  changed. That is inherent to an age-based check; every other field in the
+  category is deterministic.
 - SAML SSO **enforcement** (as opposed to "configured") is only visible via
   GraphQL; the REST-only signal is reported as `configured` / `not_configured` /
   `not_visible` rather than guessed at.
