@@ -109,21 +109,6 @@
       "type": "array",
       "description": "FedRAMP 20x Key Security Indicators this fetcher's evidence speaks to (1 or more). Intrinsic to the fetcher, not a per-customer control mapping (those stay Paramify-side).",
       "items": { "type": "string" }
-    },
-
-    "validators": {
-      "type": "array",
-      "description": "Regex checks over this fetcher's evidence that show the control is being implemented (collection-side assertions, not per-customer compliance judgment). Each regex is matched against the fetcher's evidence payload.",
-      "items": {
-        "type": "object",
-        "required": ["id", "regex"],
-        "properties": {
-          "id":     { "type": "string" },
-          "regex":  { "type": "string" },
-          "proves": { "type": "string", "description": "What passing this validator demonstrates." },
-          "failure_modes": { "type": "array", "items": { "type": "string" } }
-        }
-      }
     }
   }
 }

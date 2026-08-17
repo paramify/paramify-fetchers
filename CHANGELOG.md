@@ -12,198 +12,24 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- `paramify programs` — a new command group over the Paramify workspace.
-  `programs list` shows each program's readable name next to its project UUID;
-  `programs target` selects programs (interactively, by name/id, or `--all`) and
-  writes them as fanout targets, filling in the shared config they need. The API
-  identifies programs by UUID while people know them by name; this closes that
-  gap without anyone copying a UUID by hand. The shared values (`--cert-uri`,
-  `--report-from`) are shown on every interactive run with what the manifest
-  holds today as the prompt default and a note of where it comes from: enter
-  keeps it and writes nothing, typing over it updates the category value. So the
-  same command adds a program and rolls the report window forward, and neither
-  requires opening the manifest to see what the next run will carry. Entries that
-  resolve to different values get no default — either one offered as *the* answer
-  would misreport the other.
-- `program_name` — an optional target field on the Paramify VER fetchers. The
-  fetcher uses it for its evidence filename and the uploader for the artifact
-  title, so per-program artifacts read as `… - Alpha Cloud Services` rather than
-  a bare UUID. A UUID prefix stays in the filename because program names are not
-  guaranteed unique.
+- Central `validators/` registry: validators are now first-class, deduplicated
+  objects (`validators/<category>/<key>.yaml`, one file each), validated against
+  the new `framework/schemas/validator_schema.json`. Each validator carries the
+  Paramify fields as native YAML and owns its fetcher link via an
+  `evidence_sets` list of `reference_id`s, so a validator shared across fetchers
+  is one file — never a copy. See [`docs/validators_design.md`](docs/validators_design.md).
+- Validator sync (`uploaders/paramify_validators/`, `paramify validators sync`,
+  and `paramify upload --with-validators`): pushes registry validators to
+  Paramify (`POST /validators`) and CONNECTs them to evidence sets. **Create-or-skip
+  by default** — a customer's tuned validator is never overwritten unless
+  `--update` is passed; `--dry-run` previews. Per-instance ids live in a
+  gitignored lock, not the shared registry.
 
-### Changed
+### Removed
 
-- The `tui` extra pins `textual>=8,<9` (was `>=1.0,<2.0`). The old range was not
-  what anyone ran, and focus / `Input` behaviour differs enough across those lines
-  that the TUI is not the same app on 1.x. `tests/test_tui_keys.py` (new) drives
-  the real app through Textual's pilot to hold the key-and-focus contract: what
-  each tab focuses, that the globals survive a repeat tab press, and that enter
-  reaches an action wherever the footer says it does.
-- **TUI**: the footer hint bar lists `esc` (the only way out of a focused text
-  field back to the shortcut keys — an `Input` consumes every printable key) and
-  the Run tab shows `enter/ctrl+r`, since focus opens on the ▶ Run button and
-  `enter` presses it.
-- **Paramify VER fetchers**: `report_from` / `report_to` / `api_base_url` /
-  `http_timeout` moved out of `secrets[]`. Every declared secret is mandatory, so
-  declaring optional knobs there made them required, contradicting their
-  documented defaults. `cert_package_uri`, `api_base_url` and `http_timeout` are
-  now category config (`fetchers/_categories/paramify.yaml`) — one value per
-  workspace, set once under `platforms.paramify.config` instead of copied onto
-  every target.
-- Each VER report's `_summary` now carries a `collection` block (status + the
-  API-failure ledger). `/issues` is the only call these fetchers make, so a
-  failure yields empty report arrays; without this a failed report was
-  indistinguishable from a genuinely clean one to anything reading the payload.
-- The uploader prefers a target's `program_name` over its opaque id when titling
-  an artifact. Fetchers whose id is already readable are unaffected.
-- **Every timestamp in a VER report is now emitted in one format** — UTC, second
-  precision, literal `Z` (`2026-07-30T09:00:00Z`). Values from the Paramify API
-  (`detectedAt`, `evaluationCompletedAt`, the `dueDate` quoted in an overdue
-  explanation) were previously passed through with the API's millisecond
-  precision, so a single document mixed notations; they are normalized on the way
-  in, and non-UTC offsets are converted rather than preserved. A `report_from` /
-  `report_to` given as a bare date is expanded, with a date-only end reported as
-  that day's last second (`2026-06-30` → `2026-06-30T23:59:59Z`) to match the
-  window actually collected.
-
-### Fixed
-
-- **KnowBe4**: the three group- and campaign-scoped fetchers no longer report an
-  unresolved config as a failing control. The group and campaign titles they match
-  on were hardcoded to one tenant, so pointed anywhere else they emitted
-  `completion_rate: 0` and exited 0 — byte-identical to a tenant where the campaign
-  resolved and genuinely nobody had trained. Two very different states, one output,
-  and no assertion could tell them apart. The names now come from `config_schema`
-  (`high_risk_groups`, `role_specific_campaigns`, `developer_groups`,
-  `developer_campaigns`, `security_awareness_campaigns`, plus
-  `retraining_interval_days`), and a name that matches nothing in the tenant is
-  **not** a fetcher failure — one typo must not turn a whole nightly run red. The
-  fetcher exits 0 and reports every metric it could not measure as `null`, never
-  `0`, alongside a `results.config_resolution` block naming what was requested,
-  what matched, and what the tenant actually has. `null` means "not measured"; `0`
-  still means "measured, and it is zero", so a genuine 0% remains a real finding.
-  A config key that is never wired at all is caught pre-flight by
-  `paramify validate`, since these are `required`.
-- **KnowBe4**: names are matched exactly rather than as substrings. A group
-  configured as `IT` previously also swept in `AUDIT` and `Legal-IT`, inflating the
-  high-risk population.
-- **KnowBe4**: config values reach `jq` as data (`--args` / `$ARGS.positional`)
-  instead of being spliced into the filter text. A campaign title containing a
-  quote or backslash produced a jq compile error before; making the titles
-  customer-supplied would have turned that into a routine failure.
-- **KnowBe4**: all four fetchers assemble their evidence in one `jq` pass. Each
-  record was previously appended by re-running `jq` over the growing output file,
-  which was quadratic — 1500 enrollments took 69s and 3000 took over 120s, so a
-  mid-size tenant blew the runner's 600s cap. 3000 enrollments now completes in
-  about 3s. `training_module_summary` for an empty tenant is `{}` rather than
-  `null`.
-- **KnowBe4**: a response that is not a JSON array (an error body returned with
-  HTTP 200) is recorded as a failure instead of being treated as a page. Pagination
-  previously looped forever on such a body, bounded only by the runner's timeout.
-  Pagination also stops at a 1000-page cap, and `printf '%s'` replaces `echo` on
-  every API response so a backslash in a title survives a non-bash shell.
-- **TUI**: pressing the number of the tab you are already on no longer clears
-  focus. Assigning `TabbedContent.active` the value it already holds fires no
-  `TabActivated`, so nothing re-homed focus after it was cleared — and because a
-  page's bindings only resolve while focus is inside that page, every page
-  shortcut (`a`/`e`/`x`, `ctrl+r`, `j`/`k`, the arrows) silently went dead until
-  you pressed escape or a different tab.
-- **TUI**: `ctrl+p` on the Paramify tab runs Preview instead of opening Textual's
-  command palette, which claims that key as a *priority* binding — checked ahead
-  of the focused widget, so the page's own binding could never fire. `p` now does
-  it too, mirroring the Manifest tab's preview key.
-- **TUI**: `enter` does what the footer promises on the two tables where it did
-  nothing at all — on a run it drills into that run's evidence files (where enter
-  opens one), and on a manifest row it opens the entry editor.
-- **TUI**: editing the manifest's output dir no longer loses the path. Textual
-  selects an `Input`'s value on focus, so the first keystroke replaced the whole
-  path; and an edit never submitted with `enter` was silently reverted by the next
-  rebuild. Focus no longer selects the value, and leaving the field commits it.
-- **TUI**: `enter` in a confirmation dialog now means No. Yes is composed first,
-  so it took the default focus — on the dialogs that delete a manifest file,
-  remove an entry, and upload to Paramify. `y` still confirms.
-- **TUI**: config set at the category level showed as unset on every entry that
-  inherited it — the manifest screen read only the entry's own `config` block and
-  had no notion of `platforms.<category>.config`. Both the detail pane and the
-  summary count now render `api.effective_config()`, the same merge the runner
-  performs, and show which layer each value came from.
-- **Paramify VER fetchers**: a pending or rejected `RISK_ADJUSTMENT` no longer
-  reports `finalDisposition: "Partially Mitigated"` — mitigation now requires an
-  accepted deviation, not an unapproved request.
-- An issue carrying neither `poamId` nor `id` no longer raises `KeyError` and
-  kills the whole report.
-- `PARAMIFY_HTTP_TIMEOUT` is parsed at call time and falls back to the default on
-  a malformed value, instead of aborting the run with a bare `ValueError` at
-  import.
-- A timestamped `report_to` no longer over-includes up to a day beyond the
-  declared reporting period.
-- `PARAMIFY_REPORT_TO` is now declared, so it can actually be set through a
-  manifest (the runner passes only declared env vars).
-
-## [0.3.1-beta] - 2026-07-28
-
-### Changed
-
-- Run manifests are no longer gitignored, and the repo no longer tracks a file at
-  `./manifest.yaml`. The manifest that used to sit there ships as
-  `example_manifest.yaml` instead. Manifests describe which evidence you collect,
-  so teams under a compliance program generally want them in version control —
-  they hold no secret values, since `${env:VAR}` resolves from the environment at
-  run time. Previously `/manifest.yaml` and `/manifests/` were listed in
-  `.gitignore` *and* a `manifest.yaml` was tracked; because ignore rules don't
-  apply to already-tracked files, that entry had no effect and edits to the
-  shipped manifest were staged by default, conflicting on every upgrade.
-  **If you were relying on the tracked `manifest.yaml`,** copy
-  `example_manifest.yaml` to `manifest.yaml`, or pass `--manifest` explicitly.
-  `paramify manifest init` and the `manifests/` picker convention are unchanged.
-
-### Added
-
-- [`docs/private_mirror_workflow.md`](docs/private_mirror_workflow.md) — keeping a
-  private copy of this repo that still receives upstream releases, for teams whose
-  fetcher work can't be public.
-
-## [0.3.0-beta] - 2026-07-23
-
-### Added
-
-- 13 Datadog fetchers (new category): Cloud SIEM detection rules & signals, SIEM
-  operational configuration, log pipelines / indexes / archives, host & container
-  inventory, agent check results, the APM service catalog, and incident records with
-  timelines. Credential setup in [`fetchers/datadog/README.md`](fetchers/datadog/README.md).
-- `paramify scripts sync` — push each fetcher's entry script (`fetcher.py` /
-  `fetcher.sh`) to Paramify and CONNECT it to that fetcher's evidence set, so the
-  tenant records *how* each piece of evidence is generated. A provisioning step
-  separate from `paramify upload`: it reconciles the tenant to the repo GitOps-style
-  (marker-keyed identity in the script description, `fetcher.yaml` `version` as the
-  update signal, a sha256 drift guard). **Scoped to a manifest by default** — it
-  provisions scripts only for the fetchers you collect, mirroring how `upload` is
-  run-scoped — with `--all` to push the whole catalog, plus `--dry-run` / `--force` /
-  `--reassociate` / `--json`. Backed by the `uploaders/paramify_scripts/` uploader.
-  Only `SCRIPT` associations are automated; control / solution-capability / validator
-  linkage stays Paramify-side.
-- [`docs/uploader_design.md`](docs/uploader_design.md) — a dedicated uploader design
-  doc covering both built uploaders and the shared evidence-set identity model, and
-  a README section + docs-table entries pointing to it.
-
-### Changed
-
-- **TUI Paramify tab redesigned** into stacked *evidence upload* and *scripts sync*
-  panels. Scripts sync gained a **Preview** action that runs a read-only dry-run and
-  surfaces the per-fetcher plan (create / update / drift / noop) in a table — flagging
-  which drifted scripts `--force` would push — and syncs the active manifest's fetchers.
-
-### Fixed
-
-- TUI: page keyboard shortcuts (`ctrl+r` / `ctrl+u` / `ctrl+s`) now fire regardless of
-  which control is focused, and default focus lands in the active pane on mount, on tab
-  switches (mouse clicks included), and after `escape` — previously they worked only
-  right after a number-key tab switch.
-- TUI: the *Add fetchers* picker no longer drops a category once all its fetchers are in
-  the manifest; already-added fetchers show greyed-out and non-selectable, so a
-  fully-added category (e.g. `datadog`) stays visible.
-- TUI: the Paramify action row (Preview / Sync Scripts / force / reassociate) now uses
-  uniform control sizes instead of content-sized widths and mismatched heights.
+- The inline `validators` block on `fetcher.yaml` (shipped optional in
+  0.2.0-beta, populated by no fetcher). Validators moved to the registry above;
+  `fetcher.yaml` keeps its `evidence_set` identity and `ksis`.
 
 ## [0.2.1-beta] - 2026-07-10
 
