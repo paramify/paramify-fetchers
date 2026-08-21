@@ -37,6 +37,28 @@ The runner walks `run.fetchers[]` and invokes each in order. v0.x is serial — 
 | `secrets` | fetcher has non-`per_target` secrets | Map of `<secret_name>: <reference>` |
 | `targets` | fetcher has at least one **required** target field | Array of target entries. A `supports_targets` fetcher whose target fields are ALL optional may omit `targets[]` — the runner then does a single ambient invocation ("collect where deployed"). All 79 AWS fetchers are this all-optional case. |
 
+### `config.assessment_id` (issue-report fetchers)
+
+A `kind: issue_report` fetcher accepts two config keys the framework adds to every
+one of them, rather than each `fetcher.yaml` declaring them:
+
+| Key | Description |
+|---|---|
+| `assessment_id` | UUID of the Paramify assessment its report is intaken into |
+| `assessment_name` | The readable name, written alongside so the manifest stays legible and a stale UUID is recognisable. Not used to resolve anything. |
+
+Set them by name rather than by hand:
+
+```bash
+paramify assessments select <fetcher>      # picks from the workspace, writes both keys
+```
+
+Unlike most required wiring, a missing `assessment_id` does not stop a run —
+collecting with no Paramify connection at all is a property the framework keeps
+(see [`design.md`](design.md)). `paramify validate` reports it and
+`paramify issues upload` refuses the report, which are the two points where it
+matters. Details: [`issue_report_fetchers.md`](issue_report_fetchers.md).
+
 ---
 
 ## Platform block (`run.platforms`)
@@ -150,6 +172,9 @@ The runner creates a per-run subdirectory:
     <fetcher>.json                          # single-target output (envelope-wrapped)
     <fetcher>_<target_identifier>.json      # one file per fanout target (envelope-wrapped)
     _run_metadata.json                      # per-run index (NOT enveloped)
+    issue-reports/                          # only when the run had issue-report fetchers
+      <tool's own filename>.csv             # raw, unmodified (NOT enveloped)
+      _issue_reports.json                   # sidecar index for the intake uploader
 ```
 
 The timestamp is ISO-8601 in UTC with `:` replaced by `-` for filesystem safety: e.g. `run-2026-05-27T14-36-46Z`.
@@ -161,6 +186,15 @@ Each evidence file is wrapped by the runner in the standard envelope —
 when present) and `payload` is the fetcher's raw output. Failed invocations also
 carry an `error` in the metadata. `_run_metadata.json` is the run-level
 index and is not itself enveloped. See [`envelope_design.md`](envelope_design.md).
+
+Files under `issue-reports/` are the exception: they are the source tool's own
+bytes, unmodified, because Paramify's assessment intake parses the vendor format.
+The attribution an envelope would have carried lives in `_issue_reports.json`
+beside them — one record per report, naming the fetcher, the run, the assessment
+it is destined for, and the file's sha256. The subdirectory is also what keeps the
+two uploaders from stepping on each other: `paramify upload` globs the run dir's
+top level, so it never sees a report, and `paramify issues upload` reads only the
+sidecar. See [`issue_report_fetchers.md`](issue_report_fetchers.md).
 
 ---
 
@@ -234,6 +268,7 @@ paramify run <manifest.yaml> [--json]        # run the manifest
 paramify runs [--json]                       # past runs under an output dir (newest first)
 paramify evidence <file> [--json]            # read one evidence file (normalizing the envelope)
 paramify upload [run-dir] [--json]           # push one run's evidence to Paramify (default: latest run)
+paramify issues upload [run-dir] [--json]    # push one run's issue reports to assessment intake
 ```
 
 `--json` is available on every command and emits machine-readable output for
@@ -286,6 +321,26 @@ the other. Supplying the flag skips the prompt and overwrites an existing value.
 Needs `PARAMIFY_API_TOKEN` with read scope; under `--json` nothing prompts, so
 pass `--program`/`--all` plus whichever shared values are still missing.
 
+### Assessments for issue-report fetchers
+
+The same problem in a different place: an issue report goes to an assessment
+identified by UUID, and the operator knows it by name.
+
+```bash
+paramify assessments list                    # readable name + UUID + type
+paramify assessments select                  # pick interactively, write into config
+paramify assessments select <fetcher> --assessment "Q3 Nessus scan"
+```
+
+With no fetcher argument it offers every `kind: issue_report` entry in the
+manifest. The picker is filtered to the assessment type the fetcher declares, so a
+CSPM report is never offered a vulnerability assessment. It writes
+`config.assessment_id` and `config.assessment_name` via the ordinary
+`set-config` path, so the result is a manifest you could have typed by hand.
+
+Needs `PARAMIFY_API_TOKEN` with read scope. Under `--json` nothing prompts, so
+pass `--assessment`.
+
 The same split applies generally: values that vary per fanout iteration belong in
 `targets[]`, and values shared across a category belong under `platforms.<category>.config`
 — which the runner merges as *platform defaults ← platform values ← per-fetcher
@@ -324,8 +379,9 @@ resolves it from its own environment at run time.
 - Every `use:` matches a discovered fetcher
 - `targets[]` is supplied only when the fetcher has at least one required target field; a `supports_targets` fetcher whose target fields are all optional may omit `targets[]` (the runner does a single ambient invocation)
 - Every declared secret (per fetcher + per target) has a corresponding entry in the manifest
+- Every `kind: issue_report` entry has a `config.assessment_id` — reported as an error here rather than refused at run time, because a report collected with nowhere to go is still a report worth having on disk
 
-`validate` does NOT check whether `${env:...}` references resolve at runtime — that's discovered only at `run` time, with a structured error per failing invocation.
+`validate` does NOT check whether `${env:...}` references resolve at runtime — that's discovered only at `run` time, with a structured error per failing invocation. It also doesn't check that an `assessment_id` still exists in the workspace; a deleted assessment surfaces at intake.
 
 ### `run` exit codes
 

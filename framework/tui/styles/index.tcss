@@ -244,10 +244,17 @@ UploadPage {
     height: 1fr;
 }
 
-/* Paramify tab: evidence + scripts panels stacked over a shared log. */
+/* Paramify tab: evidence + issue-report + scripts panels over a shared log. */
 #evidence-panel { height: auto; margin: 1 1 0 1; }
 #evidence-summary { height: auto; }
 #evidence-actions { height: auto; align: left middle; padding-top: 1; }
+
+/* Sized to content like the evidence panel: for a run with no issue reports it
+   collapses to a single "collected none" line instead of holding open space. */
+#issues-panel { height: auto; margin: 1 1 0 1; }
+#issues-summary { height: auto; }
+#issues-actions { height: auto; align: left middle; padding-top: 1; }
+#issues-actions Button { width: 24; }
 
 #scripts-panel { height: 1fr; margin: 1 1 0 1; }
 #scripts-header { height: auto; }

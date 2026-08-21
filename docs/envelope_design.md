@@ -185,9 +185,11 @@ validates on read. The wrapping itself lives in `framework/envelope.py`.
 - **Uploader** — one shape to read; `metadata` (incl. `evidence_set`) says
   what/where to push, `payload` is the evidence. The `paramify_evidence`
   uploader now consumes enveloped run dirs directly.
-- **Wiz fetcher** — still blocked on the issues-upload stage
-  (`uploaders/paramify_issues/` is an empty stub), but the evidence-envelope
-  prerequisite is in place.
+- **Issue-report fetchers** — a scan report cannot be enveloped (Paramify's
+  intake parses the vendor's own structure), so that kind lives beside the
+  envelope rather than inside it: identity is a sidecar index, and
+  `uploaders/paramify_issues/` posts the file byte-for-byte. See
+  [`issue_report_fetchers.md`](issue_report_fetchers.md).
 - **Portable evidence** — any file is self-attributing outside its run dir (audit,
   re-upload, hand-off).
 

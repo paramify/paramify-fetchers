@@ -66,7 +66,16 @@ def wrap_outputs(
 
     Non-JSON files and already-enveloped files are left untouched. A failure to
     wrap a single file is logged and skipped — it never aborts the run.
+
+    An issue-report fetcher is skipped entirely. Its output is the source tool's
+    own file, which Paramify's assessment intake parses directly, so wrapping it
+    would break the parse. The guard is on `kind` rather than the file extension
+    because a JSON scan report is still a scan report — its identity lives in the
+    sidecar index instead (see framework/issue_reports.py).
     """
+    if fetcher.is_issue_report:
+        return
+
     meta = build_metadata(result, fetcher, run_id)
     for name in result.outputs:
         if not name.endswith(".json"):

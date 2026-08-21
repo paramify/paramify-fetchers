@@ -1,19 +1,24 @@
 ---
 name: create-fetcher
 description: >
-  Create a new Paramify evidence fetcher, or port an existing one from
-  another source. Use when the user wants to add a fetcher,
-  integrate a new tool or data source (aws, azure, okta, gitlab, k8s, …),
-  or scaffold a fetcher for a category. Runs a short interview, scaffolds to
-  the v0.x contract, and verifies the wiring via the runner.
+  Create a new Paramify fetcher — evidence or issue report — or port an existing
+  one from another source. Use when the user wants to add a fetcher,
+  integrate a new tool or data source (aws, azure, okta, gitlab, k8s, a
+  vulnerability scanner, …), or scaffold a fetcher for a category. Runs a short
+  interview, routes to the right kind, scaffolds to the v0.x contract, and
+  verifies the wiring via the runner.
 ---
 
 # Create a Fetcher
 
-This skill walks you through building one Paramify evidence fetcher end to end:
-route (port vs new) → orient → interview → build → verify. It is the
+This skill walks you through building one Paramify fetcher end to end:
+route (which kind; port vs new) → orient → interview → build → verify. It is the
 interactive layer over the canonical docs — read those for detail, don't
 restate them here.
+
+The golden rules below are for an **evidence** fetcher, the default and the
+common case. Phase 0 checks whether you're actually writing an issue report,
+which has its own contract in `docs/issue_report_fetchers.md`.
 
 **Golden rules**
 - One fetcher = one evidence set. Directory is `fetchers/<category>/<short_name>/`;
@@ -38,7 +43,24 @@ restate them here.
    test -d fetchers/<category>/<short_name> && echo "EXISTS — ask user" || echo "free"
    ```
 
-3. **Decide port vs new.** Ask: "Do you already have a working script that
+3. **Decide the kind.** Does the source tool already compute the findings — is
+   this a vulnerability scan, a CSPM export, a Nessus file — or is the fetcher
+   asserting a state (MFA on, buckets encrypted)?
+   - **Tool computes findings → ISSUE REPORT.** Copy
+     `fetchers/_template_issue_report/` (not `_template/`) and follow
+     `docs/issue_report_fetchers.md` for the rest of the build. Shared parts
+     (secrets, categories, fanout, `$FETCHER_STATUS_FILE`) still apply from
+     below. Do not write an `evidence_set`, do not emit a JSON payload, do not
+     run `suggest-validator`. The Phase 4 smoke test below expects a JSON
+     evidence file — skip it. The check for this kind is: after a real run, the
+     file in `<run>/issue-reports/` is byte-identical to the tool's own export.
+   - **Fetcher asserts a state → EVIDENCE.** Continue below.
+
+   Don't ask this as a question if the tool makes it obvious; a scanner is an
+   issue report, an identity provider is evidence. Ask only when the same tool
+   could plausibly be either.
+
+4. **Decide port vs new.** Ask: "Do you already have a working script that
    collects this evidence (in another repo, a local file, etc.)?"
    - **Yes → PORT.** Follow `docs/porting_playbook.md` step by step
      (it has its own verify gates and anti-patterns). Stop using this file.

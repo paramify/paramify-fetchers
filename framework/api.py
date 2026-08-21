@@ -38,6 +38,13 @@ from packaging.utils import canonicalize_name
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import ConfigField, Secret, TargetField, effective_secrets
 from framework.envelope import is_enveloped, wrap_outputs
+from framework.issue_reports import (
+    ASSESSMENT_ID_FIELD,
+    ASSESSMENT_NAME_FIELD,
+    ISSUE_REPORTS_DIR,
+)
+from framework.issue_reports import read_index as read_issue_report_index
+from framework.issue_reports import record_outputs as record_issue_reports
 from framework.paramify_auth import (
     BASE_URL_ENV,
     READ_TOKEN_ENV,
@@ -118,11 +125,12 @@ def _target_descriptor(f: TargetField) -> dict:
 
 
 def _fetcher_descriptor(f, platform_spec=None) -> dict:
-    return {
+    d = {
         "name": f.name,
         "version": f.version,
         "description": f.description,
         "category": f.category,
+        "kind": f.kind,
         "supports_targets": f.supports_targets,
         "config": [_config_descriptor(c) for c in f.config_schema.values()],
         # Category-declared secrets are part of what this fetcher takes, so the
@@ -130,6 +138,14 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
         "secrets": [_secret_descriptor(s) for s in effective_secrets(f, platform_spec)],
         "target_schema": [_target_descriptor(t) for t in f.target_schema.values()],
     }
+    if f.issue_report is not None:
+        # What kind of assessment this report can go to, so a front-end can
+        # filter the assessment picker without re-reading fetcher.yaml.
+        d["issue_report"] = {
+            "assessment_type": f.issue_report.assessment_type,
+            "title": f.issue_report.title,
+        }
+    return d
 
 
 def discover(root: Path) -> Dict[str, dict]:
@@ -789,6 +805,19 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
                     f"(platforms.{fetcher.category}.config or fetcher config)"
                 )
 
+        # An issue report with no assessment collects fine but can never be
+        # intaken, so the gap is reported here rather than at upload time — after
+        # someone has already paid for a scan. It is deliberately NOT a required
+        # config field: making it one would block collecting without a Paramify
+        # connection, which the framework is supposed to allow (docs/design.md).
+        if fetcher.is_issue_report:
+            in_platform = platform_cfg and ASSESSMENT_ID_FIELD in platform_cfg.config
+            if not (ASSESSMENT_ID_FIELD in entry.config or in_platform):
+                errors.append(
+                    f"{entry.use}: no {ASSESSMENT_ID_FIELD} set, so its report cannot be "
+                    f"intaken (fix: paramify assessments select {entry.use})"
+                )
+
         # effective_secrets, and skip the optional ones: the runner resolves a
         # category-declared credential exactly like a fetcher-declared one, and it
         # skips an optional secret the manifest omits. Demanding one here failed a
@@ -860,7 +889,10 @@ def run(
 
     Returns a summary dict. Raises ValueError if the manifest is schema-invalid.
     """
-    from framework.runner.executor import run_entry  # lazy: avoid import cycle
+    from framework.runner.executor import (  # lazy: avoid import cycle
+        merged_config,
+        run_entry,
+    )
 
     errs = manifest_loader.schema_errors(manifest, root)
     if errs:
@@ -921,8 +953,30 @@ def run(
             overall_ok = False
             continue
 
+        # Which assessment an issue report is destined for is resolved from the
+        # manifest but injected into no env var — the fetcher has no use for it,
+        # only the uploader does. Read it off the same merged config the runner
+        # built so the ladder can't drift.
+        assessment = None
+        if fetcher.is_issue_report:
+            _, values = merged_config(
+                fetcher,
+                platforms.get(fetcher.category or ""),
+                parsed.platforms.get(fetcher.category or ""),
+                entry,
+            )
+            assessment = {
+                ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
+                ASSESSMENT_NAME_FIELD: values.get(ASSESSMENT_NAME_FIELD),
+            }
+
         for r in results:
+            # Exactly one of these applies: an issue report is never enveloped
+            # (wrap_outputs returns early on kind), and only an issue report gets
+            # a sidecar record.
             wrap_outputs(r, fetcher, run_id, run_dir)
+            if fetcher.is_issue_report:
+                record_issue_reports(r, fetcher, run_id, run_dir, assessment)
             if r.exit_code != 0:
                 overall_ok = False
             emit({
@@ -1043,6 +1097,123 @@ def upload_run(
         Path(run_dir),
         config=config,
         dry_run=dry_run,
+        on_event=on_event,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Issue reports — assessment-intake facade. Same three functions as the evidence
+# uploader above, against the other endpoint; see uploaders/paramify_issues/.
+# --------------------------------------------------------------------------- #
+
+def _load_paramify_issues_uploader(root: Path):
+    """Load the source-tree issues uploader without packaging uploaders/."""
+    path = Path(root) / "uploaders" / "paramify_issues" / "uploader.py"
+    if not path.exists():
+        raise RuntimeError(f"Paramify issues uploader not found at {path}")
+    spec = importlib.util.spec_from_file_location("paramify_issues_uploader", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load Paramify issues uploader from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def issues_upload_preflight(
+    run_dir,
+    root: Path,
+    config_path: Optional[Path] = None,
+    *,
+    dry_run: bool = False,
+) -> dict:
+    """Inspect issue-report upload readiness without making Paramify API calls.
+
+    Beyond the evidence preflight's checks this reports how many reports have no
+    assessment to go to — the one failure worth surfacing before a batch starts,
+    since it is fixed in the manifest rather than by retrying.
+    """
+    uploader = _load_paramify_issues_uploader(root)
+    uploader.load_dotenv()
+    config = uploader.load_config(str(config_path)) if config_path else {}
+    paramify_cfg = config.get("paramify") or {}
+    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
+
+    run_path = Path(run_dir)
+    errors: List[str] = []
+    file_count = 0
+    missing_assessment: List[str] = []
+    if not run_path.is_dir():
+        errors.append(f"No run directory to upload: {run_path}")
+    else:
+        try:
+            index = read_issue_report_index(run_path)
+        except ValueError as e:
+            index = None
+            errors.append(str(e))
+        if index is None and not errors:
+            errors.append(
+                f"{run_path} collected no issue reports "
+                f"(no {ISSUE_REPORTS_DIR}/_issue_reports.json)"
+            )
+        elif index is not None:
+            reports = index.get("reports") or []
+            file_count = len(reports)
+            if file_count == 0:
+                errors.append(f"No issue reports listed in {run_path}")
+            missing_assessment = sorted({
+                r.get("fetcher_name") or "?" for r in reports if not r.get("assessment_id")
+            })
+            for name in missing_assessment:
+                errors.append(
+                    f"{name}: no assessment_id, so its report cannot be intaken "
+                    f"(fix: paramify assessments select {name})"
+                )
+
+    url_error = uploader._base_url_error(base_url)
+    if url_error:
+        errors.append(url_error)
+
+    token, token_source = resolve_upload_token()
+    token_present = bool(token)
+    if not token_present and not dry_run:
+        errors.append(_missing_token_error())
+
+    return {
+        "ok": not errors,
+        "run_dir": str(run_path),
+        "base_url": base_url,
+        "base_url_source": base_url_source,
+        "base_url_label": describe_base_url(base_url),
+        "file_count": file_count,
+        "missing_assessment": missing_assessment,
+        "token_present": token_present,
+        "token_source": token_source,
+        "dry_run": dry_run,
+        "errors": errors,
+    }
+
+
+def issues_upload_run(
+    run_dir,
+    root: Path,
+    config_path: Optional[Path] = None,
+    *,
+    dry_run: bool = False,
+    force: bool = False,
+    on_event: Optional[Callable[[dict], None]] = None,
+) -> dict:
+    """Intake one run directory's issue reports into Paramify assessments.
+
+    Fires the same upload_start / upload_file / upload_complete events as
+    upload_run, so a front-end renders both with one code path.
+    """
+    uploader = _load_paramify_issues_uploader(root)
+    config = uploader.load_config(str(config_path)) if config_path else {}
+    return uploader.upload_run(
+        Path(run_dir),
+        config=config,
+        dry_run=dry_run,
+        force=force,
         on_event=on_event,
     )
 
@@ -1170,6 +1341,7 @@ def _run_summary(run_dir: Path) -> dict:
 
     files: list = []
     seen = set()
+    report_prefix = f"{ISSUE_REPORTS_DIR}/"
     for inv in invocations:
         for name in inv.get("outputs") or []:
             seen.add(name)
@@ -1179,12 +1351,27 @@ def _run_summary(run_dir: Path) -> dict:
                 "fetcher": inv.get("fetcher_name"),
                 "target": inv.get("target"),
                 "exit_code": inv.get("exit_code"),
+                # An issue report is a raw vendor file, so a viewer must not try
+                # to read it as an envelope — a .nessus or .csv is not JSON at all.
+                "kind": "issue_report" if name.startswith(report_prefix) else "evidence",
             })
     # Any JSON outputs not recorded in the metadata (e.g. legacy/direct runs).
     for p in sorted(run_dir.glob("*.json")):
         if p.name == "_run_metadata.json" or p.name in seen:
             continue
-        files.append({"name": p.name, "path": str(p), "fetcher": None, "target": None, "exit_code": None})
+        files.append({"name": p.name, "path": str(p), "fetcher": None, "target": None,
+                      "exit_code": None, "kind": "evidence"})
+    # Same fallback for reports, so a run dir with no metadata is not treated as
+    # empty and skipped by list_runs while holding uploadable reports. Any
+    # extension, since the format is the vendor's.
+    reports_dir = run_dir / ISSUE_REPORTS_DIR
+    if reports_dir.is_dir():
+        for p in sorted(reports_dir.iterdir()):
+            name = f"{ISSUE_REPORTS_DIR}/{p.name}"
+            if not p.is_file() or p.name.startswith("_") or name in seen:
+                continue
+            files.append({"name": name, "path": str(p), "fetcher": None, "target": None,
+                          "exit_code": None, "kind": "issue_report"})
     files.sort(key=lambda f: f["name"])
 
     name = run_dir.name
@@ -1198,6 +1385,10 @@ def _run_summary(run_dir: Path) -> dict:
         "ok": sum(1 for i in invocations if i.get("exit_code") == 0),
         "fail": sum(1 for i in invocations if i.get("exit_code") not in (0, None)),
         "files": files,
+        # Counted separately because the two kinds go to different endpoints: a
+        # front-end needs to know whether this run has anything to intake, and
+        # `paramify upload` alone would leave those reports unsent.
+        "issue_reports": sum(1 for f in files if f["kind"] == "issue_report"),
     }
 
 
@@ -1243,6 +1434,59 @@ def read_evidence(path) -> dict:
             "payload": raw.get("payload"),
         }
     return {"enveloped": False, "schema_version": None, "metadata": {}, "payload": raw}
+
+
+def read_issue_report(path) -> dict:
+    """Return the sidecar record for one issue-report file.
+
+    Issue reports are the vendor's own bytes and are not JSON, so `read_evidence`
+    cannot open them. The sidecar carries the facts a viewer needs (fetcher,
+    assessment, sha256, size). Raises ValueError if the sidecar is missing or
+    the file is not listed.
+    """
+    p = Path(path)
+    if not p.is_file():
+        raise ValueError(f"no such issue-report file: {p}")
+    # The report lives in <run>/issue-reports/<file>; the sidecar is beside it.
+    run_dir = p.parent.parent if p.parent.name == ISSUE_REPORTS_DIR else p.parent
+    index = read_issue_report_index(run_dir)
+    if index is None:
+        raise ValueError(f"no issue-report index next to {p.name}")
+    rec = next((r for r in index.get("reports") or [] if r.get("file") == p.name), None)
+    if rec is None:
+        raise ValueError(f"{p.name} is not listed in the issue-report index")
+    return rec
+
+
+def preview_issue_report(path) -> str:
+    """Human-readable sidecar record for one issue-report file."""
+    p = Path(path)
+    rec = read_issue_report(p)
+    lines = [
+        f"{p.name}   (issue report — raw, never enveloped)",
+        f"fetcher: {rec.get('fetcher_name', '?')}  v{rec.get('fetcher_version', '?')}  [{rec.get('category', '?')}]",
+        f"status: {rec.get('status', '?')}   exit {rec.get('exit_code', '?')}   collected {rec.get('collected_at', '?')}",
+        f"format: {rec.get('format', '?')}   {rec.get('bytes', '?')} bytes",
+    ]
+    tgt = rec.get("target")
+    if isinstance(tgt, dict) and tgt:
+        lines.append("target: " + "  ".join(f"{k}={v}" for k, v in tgt.items()))
+    if rec.get("assessment_name") or rec.get("assessment_id"):
+        lines.append(
+            f"assessment: {rec.get('assessment_name') or ''} ({rec.get('assessment_id') or ''})  "
+            f"[{rec.get('assessment_type') or ''}]"
+        )
+    if rec.get("sha256"):
+        lines.append(f"sha256: {rec['sha256']}")
+    if rec.get("error"):
+        lines.append(f"error: {rec['error']}")
+    lines += [
+        "",
+        "This file is the vendor's own bytes. Open it in the source tool (or a CSV/XML",
+        "reader) rather than here — re-serializing it would be the thing this kind of",
+        "fetcher exists to avoid.",
+    ]
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- #
@@ -1351,7 +1595,66 @@ def new_manifest_path(root, name: str, output_dir: str = "./evidence") -> Path:
 # --------------------------------------------------------------------------- #
 
 _PROGRAMS_PATH = "/projects"  # the UI's "programs" are the API's projects
-_PROGRAMS_TIMEOUT = 30
+_ASSESSMENTS_PATH = "/assessment"
+_WORKSPACE_READ_TIMEOUT = 30
+
+
+def _workspace_get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+    """GET a read-only workspace endpoint and return the decoded body.
+
+    The one place the read path resolves a token, enforces https, and turns a
+    transport or HTTP failure into a single actionable message. Shared by every
+    `api` function that reads live workspace state (programs, assessments) —
+    duplicating it is exactly the drift framework/paramify_auth.py exists to
+    prevent.
+
+    Raises RuntimeError with a message a CLI can print verbatim.
+    """
+    import requests  # local: keeps `paramify list`/`tui` startup free of it
+    from dotenv import load_dotenv
+
+    # Same as the uploaders: a token in `.env` is a first-class source, not
+    # something you have to `export` first. Without this, `paramify upload`
+    # works from `.env` while `paramify assessments list` / `programs list`
+    # report the token as missing. override=False so a real shell export wins.
+    load_dotenv()
+
+    token = os.environ.get(READ_TOKEN_ENV) or os.environ.get(UPLOAD_TOKEN_ENV)
+    if not token:
+        raise RuntimeError(
+            f"No Paramify API token: set {READ_TOKEN_ENV} (or "
+            f"{UPLOAD_TOKEN_ENV}) to a token with read scope on the workspace"
+        )
+    base_url, _ = resolve_base_url()
+    # Same rule the uploader enforces (uploader._base_url_error): a Bearer token
+    # must not go out over plaintext. Localhost is exempt so a local stub works.
+    host = urlparse(base_url).hostname or ""
+    if urlparse(base_url).scheme != "https" and host not in ("localhost", "127.0.0.1", "::1"):
+        raise RuntimeError(
+            f"{BASE_URL_ENV} must be https to protect the API token (got {base_url!r}); "
+            "only localhost may use http"
+        )
+    url = f"{base_url.rstrip('/')}{path}"
+    try:
+        resp = requests.get(
+            url,
+            headers={"Accept": "application/json", "Authorization": f"Bearer {token}"},
+            params=params or None,
+            timeout=_WORKSPACE_READ_TIMEOUT,
+        )
+    except Exception as e:  # noqa: BLE001 — transport errors become one clean message
+        raise RuntimeError(f"could not reach {url}: {e}") from e
+    if resp.status_code in (401, 403):
+        raise RuntimeError(
+            f"Paramify rejected the token (HTTP {resp.status_code}) for {url}; "
+            "check that it has read scope on this workspace"
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(f"GET {url} failed (HTTP {resp.status_code}): {resp.text[:300]}")
+    try:
+        return resp.json()
+    except ValueError as e:
+        raise RuntimeError(f"GET {url} returned a non-JSON body: {resp.text[:200]}") from e
 
 
 def program_display_name(program: dict) -> str:
@@ -1372,43 +1675,7 @@ def list_programs() -> List[dict]:
     non-https endpoint, or a transport/HTTP failure — the CLI turns that into
     {"ok": false, "errors": [...]}.
     """
-    import requests  # local: keeps `paramify list`/`tui` startup free of it
-
-    token = os.environ.get("PARAMIFY_API_TOKEN") or os.environ.get("PARAMIFY_UPLOAD_API_TOKEN")
-    if not token:
-        raise RuntimeError(
-            "No Paramify API token: set PARAMIFY_API_TOKEN (or "
-            "PARAMIFY_UPLOAD_API_TOKEN) to a token with read scope on the workspace"
-        )
-    base_url = os.environ.get("PARAMIFY_API_BASE_URL") or "https://app.paramify.com/api/v0"
-    # Same rule the uploader enforces (uploader._base_url_error): a Bearer token
-    # must not go out over plaintext. Localhost is exempt so a local stub works.
-    host = urlparse(base_url).hostname or ""
-    if urlparse(base_url).scheme != "https" and host not in ("localhost", "127.0.0.1", "::1"):
-        raise RuntimeError(
-            f"PARAMIFY_API_BASE_URL must be https to protect the API token (got {base_url!r}); "
-            "only localhost may use http"
-        )
-    url = f"{base_url.rstrip('/')}{_PROGRAMS_PATH}"
-    try:
-        resp = requests.get(
-            url,
-            headers={"Accept": "application/json", "Authorization": f"Bearer {token}"},
-            timeout=_PROGRAMS_TIMEOUT,
-        )
-    except Exception as e:  # noqa: BLE001 — transport errors become one clean message
-        raise RuntimeError(f"could not reach {url}: {e}") from e
-    if resp.status_code in (401, 403):
-        raise RuntimeError(
-            f"Paramify rejected the token (HTTP {resp.status_code}) for {url}; "
-            "check that it has read scope on this workspace"
-        )
-    if resp.status_code != 200:
-        raise RuntimeError(f"GET {url} failed (HTTP {resp.status_code}): {resp.text[:300]}")
-    try:
-        payload = resp.json()
-    except ValueError as e:
-        raise RuntimeError(f"GET {url} returned a non-JSON body: {resp.text[:200]}") from e
+    payload = _workspace_get(_PROGRAMS_PATH)
 
     # List endpoints wrap in {"projects": [...]}; tolerate a bare list.
     raw = payload.get("projects", []) if isinstance(payload, dict) else payload
@@ -1524,6 +1791,120 @@ def add_program_targets(
             existing.add(program["id"])
             added.append({"use": use, "program_id": program["id"], "program_name": label})
     return {"added": added, "skipped": skipped}
+
+
+# --------------------------------------------------------------------------- #
+# Assessments — read the workspace's vulnerability/configuration assessments and
+# write the chosen one into a manifest, so nobody copies a UUID by hand. Exactly
+# the shape of the programs block above, for the same reason: the API identifies
+# an assessment by UUID while operators know it by name.
+# --------------------------------------------------------------------------- #
+
+ASSESSMENT_TYPES = ("VULNERABILITY", "CONFIGURATION")
+
+
+def assessment_display_name(assessment: dict) -> str:
+    """Best human-readable label for an assessment, falling back to its UUID."""
+    return assessment.get("name") or assessment.get("reference_id") or assessment.get("id", "")
+
+
+def list_assessments(assessment_type: Optional[str] = None) -> List[dict]:
+    """Fetch the workspace's assessments via GET /assessment.
+
+    `assessment_type` ("VULNERABILITY" / "CONFIGURATION") filters server-side.
+    Passing the type an issue-report fetcher declares is how the picker makes
+    pointing a CSPM report at a vulnerability assessment impossible, rather than
+    catching it afterwards.
+
+    Returns [{"id", "name", "type", "frequency", "reference_id", "mechanism_name",
+    "cycle_count"}] sorted by display name. Raises RuntimeError with an
+    actionable message on missing credentials or a transport/HTTP failure.
+    """
+    if assessment_type is not None and assessment_type not in ASSESSMENT_TYPES:
+        raise ValueError(
+            f"assessment_type must be one of {', '.join(ASSESSMENT_TYPES)}, got {assessment_type!r}"
+        )
+    # `type` is an array parameter in the spec, so it goes out as a one-element
+    # list rather than a bare string.
+    params = {"type": [assessment_type]} if assessment_type else None
+    payload = _workspace_get(_ASSESSMENTS_PATH, params)
+
+    raw = payload.get("assessments", []) if isinstance(payload, dict) else payload
+    assessments = []
+    for a in raw:
+        if not isinstance(a, dict) or not a.get("id"):
+            continue
+        mechanism = a.get("mechanism") or {}
+        assessments.append({
+            "id": a["id"],
+            "name": a.get("name") or "",
+            "type": a.get("type") or "",
+            "frequency": a.get("frequency") or "",
+            "reference_id": a.get("referenceId") or "",
+            # Two assessments often differ only by which scanner feeds them, so
+            # the mechanism is part of telling them apart in a picker.
+            "mechanism_name": (mechanism.get("name") or "") if isinstance(mechanism, dict) else "",
+            "cycle_count": len(a.get("cycles") or []),
+        })
+    assessments.sort(key=lambda a: assessment_display_name(a).lower())
+    return assessments
+
+
+def resolve_assessment(assessments: List[dict], selector: str) -> dict:
+    """Resolve one assessment from a user-supplied id or name.
+
+    Exact id, then exact case-insensitive display name, then a unique
+    case-insensitive substring. Raises LookupError when nothing matches and
+    ValueError when a substring is ambiguous — intaking a scan into the wrong
+    assessment creates issues against the wrong system, so an ambiguous pick
+    must never resolve silently.
+    """
+    needle = selector.strip()
+    for a in assessments:
+        if a["id"] == needle:
+            return a
+    lowered = needle.lower()
+    exact = [a for a in assessments if assessment_display_name(a).lower() == lowered]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        raise ValueError(
+            f"{selector!r} matches {len(exact)} assessments by name; use the assessment id instead"
+        )
+    partial = [a for a in assessments if lowered in assessment_display_name(a).lower()]
+    if len(partial) == 1:
+        return partial[0]
+    if len(partial) > 1:
+        names = ", ".join(f"{assessment_display_name(a)} ({a['id']})" for a in partial[:5])
+        raise ValueError(f"{selector!r} is ambiguous — matches: {names}")
+    raise LookupError(f"no assessment matches {selector!r}")
+
+
+def issue_report_fetchers(
+    m: dict, root: Path, fetchers: Optional[dict] = None
+) -> List[str]:
+    """Manifest entries that produce an issue report — the default set, so
+    `assessments select` with no fetcher argument does the obvious thing."""
+    discovered = fetchers if fetchers is not None else discover_fetchers(root)
+    return [
+        entry["use"] for entry in _entries(m)
+        if (f := discovered.get(entry.get("use"))) is not None and f.is_issue_report
+    ]
+
+
+def set_assessment(m: dict, use: str, assessment: dict) -> dict:
+    """Point one manifest entry at an assessment.
+
+    Writes the UUID (authoritative) and the display name (so the manifest reads
+    as something a human recognises, and a UUID that no longer resolves can be
+    spotted). Goes through set_fetcher_config, so this produces exactly the
+    manifest a hand-written `manifest set-config` would.
+    """
+    set_fetcher_config(m, use, ASSESSMENT_ID_FIELD, assessment["id"])
+    label = assessment_display_name(assessment)
+    if label and label != assessment["id"]:
+        set_fetcher_config(m, use, ASSESSMENT_NAME_FIELD, label)
+    return m
 
 
 def effective_config(

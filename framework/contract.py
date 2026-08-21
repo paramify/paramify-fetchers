@@ -70,6 +70,21 @@ class EvidenceSet:
 
 
 @dataclass
+class IssueReport:
+    """Paramify assessment-intake identity for a `kind: issue_report` fetcher.
+
+    The analogue of EvidenceSet, and the same kind of knowledge: what this report
+    is, declared in fetcher.yaml, shipped with the code. It deliberately carries
+    no assessment id — which assessment a report feeds is a per-customer choice
+    that lives in the manifest as `config.assessment_id`, the way a program UUID
+    does. `assessment_type` filters the assessment picker so a CSPM report cannot
+    be pointed at a vulnerability assessment.
+    """
+    assessment_type: str
+    title: Optional[str] = None
+
+
+@dataclass
 class ConfigField:
     """A non-secret config knob a fetcher (or platform) accepts.
 
@@ -105,10 +120,23 @@ class Fetcher:
     config_schema: Dict[str, ConfigField] = field(default_factory=dict)
     evidence_set: Optional["EvidenceSet"] = None
     ksis: List[str] = field(default_factory=list)
+    kind: str = "evidence"
+    issue_report: Optional["IssueReport"] = None
 
     @property
     def entry_path(self) -> Path:
         return self.path / self.runtime_entry
+
+    @property
+    def is_issue_report(self) -> bool:
+        """True when this fetcher writes a raw tool report rather than evidence.
+
+        The one flag that decides where the runner points EVIDENCE_DIR, whether
+        the output gets enveloped, and which uploader will collect it. The schema
+        guarantees `issue_report` is present whenever this is true, so callers
+        can read that block without a second guard.
+        """
+        return self.kind == "issue_report"
 
 
 @dataclass

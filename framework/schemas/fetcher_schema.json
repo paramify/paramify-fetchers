@@ -9,6 +9,13 @@
     "description": { "type": "string" },
     "category": { "type": "string" },
 
+    "kind": {
+      "type": "string",
+      "enum": ["evidence", "issue_report"],
+      "default": "evidence",
+      "description": "What class of output this fetcher produces. `evidence` (the default) writes a JSON payload the runner wraps in the evidence envelope and the paramify_evidence uploader attaches to an evidence set. `issue_report` writes the source tool's own file (a scan report) UNMODIFIED into <run>/issue-reports/, where the paramify_issues uploader posts it to an assessment intake. Issue reports are never enveloped: Paramify's intake parser reads the vendor's own structure, so anything added to the file breaks it."
+    },
+
     "runtime": {
       "type": "object",
       "required": ["type", "entry"],
@@ -27,7 +34,11 @@
       "type": "object",
       "required": ["type", "path"],
       "properties": {
-        "type": { "type": "string", "enum": ["json", "csv", "html"] },
+        "type": {
+          "type": "string",
+          "enum": ["json", "csv", "html", "xml", "nessus"],
+          "description": "Output format. For an issue_report fetcher this is the format the source tool emits, and is the single source for the MIME type the uploader sends (xml and nessus are the scan-report formats; Paramify's intake accepts csv, json, xml, and nessus)."
+        },
         "path": { "type": "string" },
         "aggregation": {
           "type": "string",
@@ -111,6 +122,23 @@
       }
     },
 
+    "issue_report": {
+      "type": "object",
+      "description": "Paramify assessment-intake identity for a `kind: issue_report` fetcher — the analogue of `evidence_set`, and equally fetcher-knowledge. Deliberately holds no assessmentId: which assessment a report goes to is a per-customer choice that lives in the manifest (`config.assessment_id`, written by `paramify assessments select`). See docs/issue_report_fetchers.md.",
+      "required": ["assessment_type"],
+      "properties": {
+        "assessment_type": {
+          "type": "string",
+          "enum": ["VULNERABILITY", "CONFIGURATION"],
+          "description": "Which kind of Paramify assessment this report feeds. Used to filter the assessment picker, so a CSPM fetcher can only be pointed at a CONFIGURATION assessment and a vulnerability scanner at a VULNERABILITY one."
+        },
+        "title": {
+          "type": "string",
+          "description": "Artifact display title in Paramify. Defaults to the source filename when omitted. Per-target runs get the target identifier appended."
+        }
+      }
+    },
+
     "ksis": {
       "type": "array",
       "description": "FedRAMP Key Security Indicators this fetcher's evidence speaks to (1 or more). Intrinsic to the fetcher, not a per-customer control mapping (those stay Paramify-side).",
@@ -131,5 +159,38 @@
         }
       }
     }
-  }
+  },
+
+  "allOf": [
+    {
+      "$comment": "The two kinds have disjoint identity blocks, and mixing them is always a mistake worth failing discovery over: an issue_report fetcher with an evidence_set would be silently ignored by both uploaders, and an evidence fetcher with an issue_report block would never reach an assessment.",
+      "if": {
+        "properties": { "kind": { "const": "issue_report" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "required": ["issue_report"],
+        "not": { "required": ["evidence_set"] }
+      },
+      "else": {
+        "not": { "required": ["issue_report"] }
+      }
+    },
+    {
+      "$comment": "Paramify's assessment intake accepts only these four formats, so an issue_report fetcher declaring html has no path to upload.",
+      "if": {
+        "properties": { "kind": { "const": "issue_report" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "output": {
+            "properties": {
+              "type": { "enum": ["csv", "json", "xml", "nessus"] }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

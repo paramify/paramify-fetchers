@@ -15,10 +15,13 @@
 #
 # Run:
 #   .venv/bin/paramify run examples/aws_guard_duty_findings_intake.yaml
-# Then intake into the assessment (separate stage, see
-# uploaders/paramify_issues/README.md — UNVERIFIED endpoint contract, --dry-run
-# first):
-#   .venv/bin/python uploaders/paramify_issues/uploader.py --config examples/issues_intake.yaml --dry-run
+#
+# This fetcher is still `kind: evidence` (it writes an enveloped JSON snapshot of
+# findings, not the vendor's own scan file). To feed a raw scanner export into
+# assessment intake instead, write a `kind: issue_report` fetcher — see
+# docs/issue_report_fetchers.md — then:
+#   paramify assessments select <fetcher>
+#   paramify issues upload --dry-run
 
 run:
   output_dir: ./evidence

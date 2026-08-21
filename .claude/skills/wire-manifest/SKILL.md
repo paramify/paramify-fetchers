@@ -106,8 +106,17 @@ Build the exact command sequence from the gaps. Map each gap to one command:
 | Missing platform config | `manifest set-platform-config <category> key=value` |
 | Fanout needs targets | `manifest add-target <fetcher> field=val ... --secret name=ENV_VAR` |
 | Ambient-cred var stripped | `manifest set-passthrough <category> VAR [VAR ...]` |
+| Programs needed as targets | `programs target [fetcher ...]` |
+| Issue report has no `assessment_id` | `assessments select <fetcher>` |
 
 All prefixed with `paramify`.
+
+The last two reach the Paramify API (`PARAMIFY_API_TOKEN`, read scope) because
+both wire in a UUID the operator knows only by name. Use them rather than
+`set-config assessment_id=<uuid>` or a hand-written target: they compose the same
+mutators, and they validate the UUID exists while it is still cheap to fix.
+`assessments select` also filters the choices to the assessment type the fetcher
+declares, which `set-config` cannot do.
 
 The manifest is the **user's file** — before editing it, show the planned
 commands and ask whether to run them or just hand them over. Default to showing
@@ -129,6 +138,9 @@ first when several edits are involved.
    ```bash
    paramify run <manifest>
    ```
+   If the fetcher is `kind: issue_report`, also remind them that `paramify run`
+   only collects: intake is `paramify issues upload` after the run, and a
+   missing `assessment_id` is `paramify assessments select <fetcher>` first.
 
 ---
 

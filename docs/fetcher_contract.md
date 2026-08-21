@@ -21,7 +21,7 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 | `description` | string | One- or two-sentence summary of what evidence this collects |
 | `runtime.type` | enum | `python` or `bash` |
 | `runtime.entry` | string | Entry script filename (e.g. `fetcher.py`) |
-| `output.type` | enum | `json`, `csv`, or `html` |
+| `output.type` | enum | `json`, `csv`, `html`, `xml`, or `nessus` |
 | `output.path` | string | Output filename relative to `EVIDENCE_DIR` (single-target) or base name (per-target fanout) |
 | `secrets[]` | array | Each entry: `{name, env, per_target?}` |
 
@@ -29,6 +29,7 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 
 | Field | Type | Purpose |
 |---|---|---|
+| `kind` | enum | `evidence` (default) or `issue_report`. See [Collection kinds](#collection-kinds). |
 | `runtime.timeout` | int | Max seconds for one invocation before the runner kills it (default 600). Raise for long scanners. |
 | `category` | string | Source-system family (e.g. `okta`, `gitlab`) |
 | `config_schema` | object | Typed config the fetcher accepts (free-form for v0.x) |
@@ -38,9 +39,42 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 | `secrets[].per_target` | bool | Secret resolved per-target instead of once per fetcher |
 | `target_schema.<field>.env` | string | Env var the runner sets from this field per target |
 | `depends_on` | array | Fetcher names this one depends on (not yet honored by the runner) |
-| `evidence_set` | object | Paramify evidence-set identity: `{reference_id, name, instructions?}`. Carried into envelope metadata and used by the uploader to get-or-create the set. |
+| `evidence_set` | object | Paramify evidence-set identity: `{reference_id, name, instructions?}`. Carried into envelope metadata and used by the uploader to get-or-create the set. `kind: evidence` only. |
+| `issue_report` | object | Paramify assessment-intake identity: `{assessment_type, title?}`. Required for, and only valid on, `kind: issue_report`. Carries no assessment id — that is per-customer and lives in the manifest. |
 | `ksis` | array | FedRAMP KSIs this fetcher's evidence speaks to (1+) — *suggested / related* mappings, not a claim that the fetcher alone satisfies the indicator. Intrinsic to the fetcher; per-customer control mappings stay Paramify-side. |
 | `validators` | array | Regex checks over the evidence payload that show the control is being implemented. Each entry: `{id, regex, proves?, failure_modes?}` (`id` + `regex` required); each regex matches the whole payload. |
+
+---
+
+## Collection kinds
+
+`kind` selects which of two contracts a fetcher is signing. Omitting it means
+`evidence`, which is what every fetcher in this repo was before the field existed
+and what most should stay.
+
+| | `kind: evidence` (default) | `kind: issue_report` |
+|---|---|---|
+| Produces | a JSON payload asserting a state | the source tool's own report file |
+| Writes to | `EVIDENCE_DIR` = `<run>/` | `EVIDENCE_DIR` = `<run>/issue-reports/` |
+| Runner wraps output in the envelope | yes | **no** |
+| Identity block | `evidence_set` | `issue_report` |
+| `output.type` | `json`, `csv`, `html` | `csv`, `json`, `xml`, `nessus` |
+| Uploaded by | `paramify upload` | `paramify issues upload` |
+
+Two clauses bind an issue-report fetcher beyond the shared contract below:
+
+1. **The output file must be the source tool's bytes, unmodified.** Paramify's
+   assessment intake parses the vendor's own format, so the framework never
+   envelopes the file and the fetcher must not parse and rewrite it. This is why
+   the envelope guard keys on `kind` rather than the file extension — a JSON scan
+   report is still a scan report.
+2. **The two identity blocks are mutually exclusive.** Declaring `evidence_set` on
+   an issue report (or `issue_report` on an evidence fetcher) is rejected at
+   discovery, because the result would be a fetcher neither uploader collects.
+
+Everything else — input env, exit codes, `$FETCHER_STATUS_FILE`, fanout, timeouts
+— is identical for both kinds. Full detail:
+[`issue_report_fetchers.md`](issue_report_fetchers.md).
 
 ---
 
@@ -50,7 +84,7 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 
 The runner exec's the fetcher's entry script with a tightly controlled environment. The fetcher receives **resolved values**, not env var names — it doesn't need to know whether the runner read the secret from a `.env` file, AWS Secrets Manager, K8s, Vault, or anywhere else.
 
-- **`EVIDENCE_DIR`** — output directory the fetcher writes to
+- **`EVIDENCE_DIR`** — output directory the fetcher writes to. The runner points this at `<run>/issue-reports/` for a `kind: issue_report` fetcher, so a fetcher always writes a bare filename into `EVIDENCE_DIR` and never builds a subdirectory itself
 - **`FETCHER_STATUS_FILE`** — path the fetcher reports its failure reason to (see [Output](#output)). Deliberately outside `EVIDENCE_DIR`, so it is never collected as evidence; it lives in a per-invocation temp dir that goes away with the invocation
 - **Declared secrets** — every entry from `secrets[]` resolved and set on the env var named in `secrets[].env`
 - **Target fields (fanout only)** — each `target_schema` field with an `env` mapping set to the target's value
@@ -145,18 +179,23 @@ paramify manifests                  # discovered run manifests (manifests/*.yaml
 paramify validate <manifest.yaml>   # validates a manifest against the schema + against discovered fetchers
 paramify run <manifest.yaml>        # collect: enveloped JSON + _run_metadata.json under the output dir
 paramify runs                       # past runs under the output dir (newest first)
-paramify evidence <file>            # read one evidence file (normalizing the envelope)
+paramify evidence <file>            # read one evidence file (or an issue-report sidecar)
 paramify upload [run-dir]           # push one run's evidence to Paramify (default: latest run)
+paramify issues upload [run-dir]    # push one run's issue reports to assessment intake
 paramify programs list              # programs in the Paramify workspace: readable name + project UUID
 paramify programs target [fetcher ...]  # select programs by name and write them as fanout targets
+paramify assessments list           # assessments in the workspace: readable name + UUID
+paramify assessments select [fetcher ...]  # point issue-report fetchers at an assessment
 paramify manifest <sub>             # build/edit a manifest file (init/new/add/remove/set-config/set-secret/add-target/remove-target/...)
 ```
 
-`paramify programs` is the only command that reads live workspace state (`GET
-/projects`, needs `PARAMIFY_API_TOKEN`); it exists because the API identifies
-programs by UUID while operators know them by name. `target` composes
-`add_target` under the hood, so it produces exactly the manifest a hand-written
-`manifest add-target` would.
+`paramify programs` and `paramify assessments` are the commands that read live
+workspace state (`GET /projects` and `GET /assessment`, both needing
+`PARAMIFY_API_TOKEN`). They exist for the same reason: the API identifies these by
+UUID while operators know them by name. Both compose the ordinary manifest
+mutators under the hood (`add_target`, `set_fetcher_config`), so each produces
+exactly the manifest a hand-written `manifest add-target` / `manifest set-config`
+would.
 
 Every `manifest` subcommand also accepts `--json`, emitting a stable `{ok, path, errors}` object so an agent can build a manifest step by step and read `errors` to see what's still missing.
 
@@ -169,7 +208,7 @@ Every `manifest` subcommand also accepts `--json`, emitting a stable `{ok, path,
 These are accepted violations during the porting period. Each is tracked, scoped, and time-limited:
 
 - **Fetchers may read env directly.** v0.x entry scripts call `load_dotenv()` and use `os.getenv()` / shell env access rather than receiving a typed secrets object. The framework's secret resolver replaces this once it takes over per-fetcher invocation. The runner already sets the right env vars for the child; this clause is about the entry script reading them rather than receiving them as arguments.
-- **Fetchers write a raw evidence dict; the runner wraps it.** A fetcher emits its plain payload; the runner wraps each output file in the standard envelope `{schema_version, metadata, payload}` after the invocation. `metadata` carries `fetcher_name`/`version`/`category`/`run_id`/`target`/`collected_at`/`status`/`exit_code`, the fetcher's `evidence_set` when present, and `error`/`error_code` on failed invocations. The per-run `_run_metadata.json` index is not enveloped. Fetchers don't build the envelope themselves in v0.x. See [`envelope_design.md`](envelope_design.md).
+- **Fetchers write a raw evidence dict; the runner wraps it.** A fetcher emits its plain payload; the runner wraps each output file in the standard envelope `{schema_version, metadata, payload}` after the invocation. `metadata` carries `fetcher_name`/`version`/`category`/`run_id`/`target`/`collected_at`/`status`/`exit_code`, the fetcher's `evidence_set` when present, and `error`/`error_code` on failed invocations. The per-run `_run_metadata.json` index is not enveloped, and neither is any `kind: issue_report` output — those carry the same facts in a sidecar index instead. Fetchers don't build the envelope themselves in v0.x. See [`envelope_design.md`](envelope_design.md).
 - **CLI flags** like Okta's `--skip-check` aren't declarable in the current schema. Treat as interim plumbing; they become `config_schema` entries when the runner is invoking fetchers.
 - **Structured exit codes** are not categorized — only `0` vs. non-zero. The failure *category* lives in the `code` field of `$FETCHER_STATUS_FILE` instead, so the exit-code space stays uncarved.
 

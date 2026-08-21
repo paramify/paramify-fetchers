@@ -106,3 +106,54 @@ def test_fetcher_names_unique_and_complete() -> None:
         f"{len(FETCHER_YAMLS)} fetcher.yaml files on disk but "
         f"{len(fetchers)} discovered"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Collection kinds. Both templates must satisfy the schema they teach against —
+# a template that would be rejected at discovery teaches a shape that cannot run,
+# and it is copied before anyone finds out.
+# --------------------------------------------------------------------------- #
+
+TEMPLATE_YAMLS = sorted(FETCHERS_ROOT.glob("_template*/fetcher.yaml"))
+
+
+def test_templates_discovered() -> None:
+    assert TEMPLATE_YAMLS, "no _template*/fetcher.yaml found"
+
+
+@pytest.mark.parametrize("yaml_path", TEMPLATE_YAMLS, ids=_rel_ids(TEMPLATE_YAMLS))
+def test_template_yaml_matches_schema(yaml_path: Path) -> None:
+    """Placeholders like <category>_<short_name> are fine — the schema constrains
+    structure, not naming, so this catches a template with a bad block."""
+    validator = Draft202012Validator(_load_schema("fetcher_schema.json"))
+    data = yaml.safe_load(yaml_path.read_text())
+    errors = sorted(validator.iter_errors(data), key=lambda e: list(e.path))
+    assert not errors, f"{yaml_path} violates fetcher_schema.json:\n{_format_errors(errors)}"
+
+
+def test_every_fetcher_declares_the_identity_its_kind_needs() -> None:
+    """An evidence fetcher needs an evidence_set to reach an evidence set; an
+    issue report needs an issue_report block to reach an assessment. The schema
+    enforces this per file — this asserts it across the discovered set, so a
+    fetcher that would be silently ignored by both uploaders fails the suite.
+    """
+    missing: list[str] = []
+    for name, f in discover_fetchers(REPO_ROOT).items():
+        if f.is_issue_report:
+            if f.issue_report is None or f.evidence_set is not None:
+                missing.append(f"{name}: kind=issue_report but identity blocks are wrong")
+        elif f.issue_report is not None:
+            missing.append(f"{name}: kind=evidence but declares an issue_report block")
+    assert not missing, "\n".join(missing)
+
+
+def test_issue_reports_declare_an_intakeable_format() -> None:
+    """Paramify's assessment intake accepts only csv/json/xml/nessus, so any other
+    format means a report that collects and can never be uploaded."""
+    intakeable = {"csv", "json", "xml", "nessus"}
+    bad = [
+        f"{name}: output.type={f.output_type}"
+        for name, f in discover_fetchers(REPO_ROOT).items()
+        if f.is_issue_report and f.output_type not in intakeable
+    ]
+    assert not bad, "\n".join(bad)

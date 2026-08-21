@@ -15,7 +15,7 @@ Read / discover:
   paramify doctor [manifest] [--probe] [--json]  # preflight: deps, manifest, upload
   paramify manifests [--json]                  # discovered run manifests
   paramify runs [--output-dir DIR] [--json]    # past runs under an output dir
-  paramify evidence <path> [--json]            # read one evidence file
+    paramify evidence <path> [--json]            # read one evidence file (or issue-report sidecar)
   paramify upload [run-dir] [--dry-run] [--json]
 
 Paramify workspace (live lookups; needs PARAMIFY_API_TOKEN with read scope):
@@ -24,6 +24,9 @@ Paramify workspace (live lookups; needs PARAMIFY_API_TOKEN with read scope):
                            [--cert-uri URI] [--report-from DATE] [-f FILE] [--json]
                            # -f takes a bare name (resolved under manifests/) or a
                            # path; omit it to pick from the discovered manifests
+  paramify assessments list [--type VULNERABILITY|CONFIGURATION] [--json]
+  paramify assessments select [fetcher ...] [--assessment NAME|ID] [-f FILE] [--json]
+                           # points issue-report fetchers at an assessment
 
 Manifest editing (writes the manifest file; -f/--file, default ./manifest.yaml;
 every subcommand accepts --json, emitting {"ok", "path", "errors"}):
@@ -44,11 +47,18 @@ Validate / run / launch:
   paramify validate <manifest> [--json]
   paramify run <manifest> [--json]
   paramify upload [run-dir] [--output-dir DIR] [--config PATH] [--dry-run] [--json]
+  paramify issues upload [run-dir] [--output-dir DIR] [--config PATH] [--dry-run] [--json]
   paramify tui [--manifest PATH] [--at ROOT]   # interactive terminal UI
 
 Secrets are referenced as ${env:VAR} — set-secret / add-target take the ENV VAR
 NAME, never the secret value. The runner resolves refs from its own environment.
 Outputs land in <output_dir>/run-<timestamp>/ with a _run_metadata.json.
+
+Two collection kinds, two upload commands: evidence fetchers write enveloped JSON
+that `paramify upload` attaches to evidence sets, while `kind: issue_report`
+fetchers write raw scan files to <run>/issue-reports/ that `paramify issues
+upload` posts to assessment intake. A run of both needs both commands. See
+docs/issue_report_fetchers.md.
 """
 
 from __future__ import annotations
@@ -66,6 +76,7 @@ import typer
 
 from framework import api, paramify_auth
 from framework import cli_style as style
+from framework.issue_reports import ISSUE_REPORTS_DIR
 
 _DEFAULT_MANIFEST = "manifest.yaml"
 
@@ -100,6 +111,20 @@ programs_app = typer.Typer(
     help="List the workspace's programs and turn them into manifest targets.",
 )
 app.add_typer(programs_app, name="programs")
+
+assessments_app = typer.Typer(
+    no_args_is_help=True,
+    context_settings=_HELP_OPTS,
+    help="List the workspace's assessments and point issue-report fetchers at one.",
+)
+app.add_typer(assessments_app, name="assessments")
+
+issues_app = typer.Typer(
+    no_args_is_help=True,
+    context_settings=_HELP_OPTS,
+    help="Upload issue reports (scan results) into Paramify assessment intake.",
+)
+app.add_typer(issues_app, name="issues")
 
 
 @app.callback()
@@ -234,13 +259,20 @@ def _human_run_printer():
     return on_event
 
 
-def _human_upload_printer():
-    """Return an on_event callback for Paramify upload progress."""
+def _human_upload_printer(noun: str = "file", log_name: str = "upload_log.json"):
+    """Return an on_event callback for Paramify upload progress.
+
+    Shared by the evidence and issue-report stages: both emit the same
+    upload_start / upload_file / upload_complete events, and differ only in what
+    they call the thing being sent and where each item landed.
+    """
     def on_event(ev: dict) -> None:
         kind = ev["event"]
         if kind == "upload_start":
             mode = " (dry-run)" if ev.get("dry_run") else ""
-            typer.echo(f"Upload {ev['files']} file(s) from {ev['run_dir']} → {ev['base_url']}{mode}\n")
+            typer.echo(
+                f"Upload {ev['files']} {noun}(s) from {ev['run_dir']} → {ev['base_url']}{mode}\n"
+            )
         elif kind == "upload_file":
             outcome = ev.get("outcome")
             if outcome == "uploaded":
@@ -251,7 +283,12 @@ def _human_upload_printer():
                 mark = "DRY"
             else:
                 mark = "FAIL"
-            ref = f"  set={ev['reference_id']}" if ev.get("reference_id") else ""
+            if ev.get("reference_id"):
+                ref = f"  set={ev['reference_id']}"
+            elif ev.get("assessment_id"):
+                ref = f"  assessment={ev['assessment_id']}"
+            else:
+                ref = ""
             reason = ev.get("reason") or ev.get("error")
             suffix = f"  {reason}" if reason else ""
             typer.echo(
@@ -266,9 +303,94 @@ def _human_upload_printer():
                 f"skipped_failed={ev['skipped_failed']} "
                 f"errors={ev['errors']}"
             )
+            if ev.get("halted"):
+                typer.echo(f"\nStopped early: {ev['halted']}")
             if ev.get("log_path"):
-                typer.echo(f"upload_log.json → {ev['log_path']}")
+                typer.echo(f"{log_name} → {ev['log_path']}")
     return on_event
+
+
+def _upload_stage(
+    *,
+    run_dir: Optional[str],
+    output_dir: str,
+    config: Optional[str],
+    dry_run: bool,
+    json_out: bool,
+    preflight_fn,
+    upload_fn,
+    noun: str,
+    log_name: str,
+    upload_kwargs: Optional[dict] = None,
+) -> NoReturn:
+    """Resolve a run directory, preflight it, and upload — the whole flow for one
+    upload stage.
+
+    Both stages (evidence artifacts, issue-report intake) do exactly this against
+    different endpoints. Parameterizing it keeps the token prompt, the JSON error
+    shape, and the exit codes identical between them, which is what a caller
+    scripting either one depends on.
+    """
+    root = api.find_repo_root()
+    if run_dir:
+        resolved_run_dir = Path(run_dir).resolve()
+    else:
+        runs = api.list_runs(output_dir)
+        if not runs:
+            msg = f"No runs found under {output_dir}."
+            if json_out:
+                typer.echo(json.dumps({"ok": False, "errors": [msg]}, indent=2))
+            else:
+                _err(msg)
+            raise typer.Exit(1)
+        resolved_run_dir = Path(runs[0]["dir"]).resolve()
+
+    config_path = Path(config).resolve() if config else None
+    try:
+        preflight = preflight_fn(resolved_run_dir, root, config_path, dry_run=dry_run)
+    except Exception as e:  # noqa: BLE001 — surface setup errors to CLI users
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
+        else:
+            _err(f"Upload setup failed: {e}")
+        raise typer.Exit(1)
+    # A missing token is the one preflight failure a person can fix on the spot,
+    # and by here they have already paid for a full collection. Ask, rather than
+    # making them quit, export, and re-run. --json and CI never reach this: a
+    # prompt there hangs the job instead of failing it.
+    if not preflight["ok"] and not preflight["token_present"] and not json_out:
+        if paramify_auth.prompt_for_token(preflight["base_url"]) is not None:
+            preflight = preflight_fn(resolved_run_dir, root, config_path, dry_run=dry_run)
+
+    if not preflight["ok"]:
+        if json_out:
+            typer.echo(json.dumps(preflight, indent=2, default=str))
+        else:
+            for err in preflight["errors"]:
+                _err(f"  ERROR  {err}")
+        raise typer.Exit(1)
+
+    if not json_out:
+        typer.echo(f"Uploading to {preflight['base_url_label']}: {preflight['base_url']}")
+
+    try:
+        summary = upload_fn(
+            resolved_run_dir,
+            root,
+            config_path,
+            dry_run=dry_run,
+            on_event=None if json_out else _human_upload_printer(noun, log_name),
+            **(upload_kwargs or {}),
+        )
+    except Exception as e:  # noqa: BLE001
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
+        else:
+            _err(f"Upload failed: {e}")
+        raise typer.Exit(1)
+    if json_out:
+        typer.echo(json.dumps(summary, indent=2, default=str))
+    raise typer.Exit(0 if summary["ok"] else 1)
 
 
 # --------------------------------------------------------------------------- #
@@ -636,10 +758,25 @@ def runs_cmd(
 
 @app.command("evidence")
 def evidence_cmd(
-    path: str = typer.Argument(..., help="Path to an evidence JSON file"),
+    path: str = typer.Argument(..., help="Path to an evidence JSON file, or an issue-report file"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
-    """Read & display one evidence file (normalizing the standard envelope)."""
+    """Read & display one evidence file (or the sidecar record of an issue report)."""
+    p = Path(path)
+    if p.parent.name == ISSUE_REPORTS_DIR:
+        try:
+            rec = api.read_issue_report(p)
+        except ValueError as e:
+            if json_out:
+                typer.echo(json.dumps({"error": str(e)}, indent=2))
+            else:
+                _err(str(e))
+            raise typer.Exit(1)
+        if json_out:
+            typer.echo(json.dumps(rec, indent=2, default=str))
+            return
+        typer.echo(api.preview_issue_report(p))
+        return
     try:
         ev = api.read_evidence(path)
     except ValueError as e:
@@ -767,70 +904,22 @@ def upload_cmd(
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and report what would upload; no API calls"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
-    """Upload one evidence run to Paramify."""
-    root = api.find_repo_root()
-    if run_dir:
-        resolved_run_dir = Path(run_dir).resolve()
-    else:
-        runs = api.list_runs(output_dir)
-        if not runs:
-            msg = f"No runs found under {output_dir}."
-            if json_out:
-                typer.echo(json.dumps({"ok": False, "errors": [msg]}, indent=2))
-            else:
-                _err(msg)
-            raise typer.Exit(1)
-        resolved_run_dir = Path(runs[0]["dir"]).resolve()
+    """Upload one evidence run to Paramify.
 
-    config_path = Path(config).resolve() if config else None
-    try:
-        preflight = api.upload_preflight(resolved_run_dir, root, config_path, dry_run=dry_run)
-    except Exception as e:  # noqa: BLE001 — surface setup errors to CLI users
-        if json_out:
-            typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
-        else:
-            _err(f"Upload setup failed: {e}")
-        raise typer.Exit(1)
-    # A missing token is the one preflight failure a person can fix on the spot,
-    # and by here they have already paid for a full collection. Ask, rather than
-    # making them quit, export, and re-run. --json and CI never reach this: a
-    # prompt there hangs the job instead of failing it.
-    if not preflight["ok"] and not preflight["token_present"] and not json_out:
-        if paramify_auth.prompt_for_token(preflight["base_url"]) is not None:
-            preflight = api.upload_preflight(
-                resolved_run_dir, root, config_path, dry_run=dry_run
-            )
-
-    if not preflight["ok"]:
-        if json_out:
-            typer.echo(json.dumps(preflight, indent=2, default=str))
-        else:
-            for err in preflight["errors"]:
-                _err(f"  ERROR  {err}")
-        raise typer.Exit(1)
-
-    if not json_out:
-        typer.echo(
-            f"Uploading to {preflight['base_url_label']}: {preflight['base_url']}"
-        )
-
-    try:
-        summary = api.upload_run(
-            resolved_run_dir,
-            root,
-            config_path,
-            dry_run=dry_run,
-            on_event=None if json_out else _human_upload_printer(),
-        )
-    except Exception as e:  # noqa: BLE001
-        if json_out:
-            typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
-        else:
-            _err(f"Upload failed: {e}")
-        raise typer.Exit(1)
-    if json_out:
-        typer.echo(json.dumps(summary, indent=2, default=str))
-    raise typer.Exit(0 if summary["ok"] else 1)
+    Evidence only. Issue reports collected by the same run go to a different
+    endpoint — see `paramify issues upload`.
+    """
+    _upload_stage(
+        run_dir=run_dir,
+        output_dir=output_dir,
+        config=config,
+        dry_run=dry_run,
+        json_out=json_out,
+        preflight_fn=api.upload_preflight,
+        upload_fn=api.upload_run,
+        noun="file",
+        log_name="upload_log.json",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1538,6 +1627,200 @@ def programs_target(
         for rec in report["skipped"]:
             typer.echo(f"  = {rec['use']}  ->  {rec['program_name']} ({rec['reason']})")
     _save_and_report(m, path, root, json_out, verb="Updated")
+
+
+# --------------------------------------------------------------------------- #
+# Assessments — pick an assessment by name, store its UUID
+#
+# The same gap the programs commands close, for issue reports: the intake
+# endpoint takes an assessment UUID, and operators know their assessments by
+# name. `select` writes the UUID into the manifest so nobody copies one by hand.
+# --------------------------------------------------------------------------- #
+
+def _assessments_or_exit(json_out: bool, assessment_type: Optional[str] = None) -> List[dict]:
+    try:
+        return api.list_assessments(assessment_type)
+    except (RuntimeError, ValueError) as e:
+        _fail(None, str(e), json_out)
+
+
+def _assessment_line(a: dict) -> str:
+    """One assessment as a single readable line. Two assessments often differ
+    only by mechanism or frequency, so both are shown."""
+    bits = [b for b in (a.get("type"), a.get("frequency"), a.get("mechanism_name")) if b]
+    return f"{api.assessment_display_name(a)}" + (f"  ({', '.join(bits)})" if bits else "")
+
+
+@assessments_app.command("list")
+def assessments_list(
+    assessment_type: Optional[str] = typer.Option(
+        None, "--type", "-t",
+        help="Only VULNERABILITY or only CONFIGURATION assessments.",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """List the assessments in the Paramify workspace (name + id)."""
+    normalized = assessment_type.upper() if assessment_type else None
+    assessments = _assessments_or_exit(json_out, normalized)
+    if json_out:
+        typer.echo(json.dumps({"ok": True, "assessments": assessments}, indent=2))
+        return
+    if not assessments:
+        scope = f" of type {normalized}" if normalized else ""
+        typer.echo(f"No assessments{scope} found in this workspace.")
+        return
+    width = max(len(api.assessment_display_name(a)) for a in assessments)
+    typer.echo(f"{len(assessments)} assessment(s):\n")
+    for a in assessments:
+        bits = [b for b in (a.get("type"), a.get("frequency"), a.get("mechanism_name")) if b]
+        note = f"  [{', '.join(bits)}]" if bits else ""
+        typer.echo(
+            f"  {api.assessment_display_name(a):<{width}}  {a['id']}{style.dim(note)}"
+        )
+
+
+@assessments_app.command("select")
+def assessments_select(
+    fetchers: Optional[List[str]] = typer.Argument(
+        None,
+        help="Issue-report fetcher(s) to point at an assessment. "
+             "Default: every issue-report entry in the manifest.",
+    ),
+    assessment: Optional[str] = typer.Option(
+        None, "--assessment", "-a",
+        help="Assessment name or id. Omit to choose interactively.",
+    ),
+    file: Optional[str] = typer.Option(
+        None, "-f", "--file",
+        help="Manifest to edit. A bare name resolves under manifests/. Omit to "
+             "choose from the discovered manifests.",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Point issue-report fetchers at a Paramify assessment."""
+    root = api.find_repo_root()
+    discovered = api.discover(root)
+    path = _manifest_for_edit(root, file, json_out, discovered["fetchers"])
+    m = _read_for_edit(path, json_out)
+
+    uses = list(fetchers or [])
+    if not uses:
+        uses = api.issue_report_fetchers(m, root, discovered["fetchers"])
+        if not uses:
+            _fail(
+                path,
+                "No issue-report fetcher in this manifest. Add one first "
+                "(paramify manifest add <fetcher>), or name it explicitly.",
+                json_out,
+            )
+
+    # Every named entry must be an issue report, or the assessment_id written
+    # would sit in the manifest doing nothing — a silent no-op is worse than a
+    # refusal here.
+    not_issue_reports = [
+        u for u in uses
+        if (f := discovered["fetchers"].get(u)) is not None and not f.is_issue_report
+    ]
+    if not_issue_reports:
+        _fail(
+            path,
+            f"not issue-report fetchers, so an assessment means nothing to them: "
+            f"{', '.join(not_issue_reports)}",
+            json_out,
+        )
+    unknown = [u for u in uses if u not in discovered["fetchers"]]
+    if unknown:
+        _fail(path, f"unknown fetcher(s): {', '.join(unknown)}", json_out)
+
+    # Filter the list by what these fetchers can actually feed, so a CSPM report
+    # is never offered a vulnerability assessment. Mixed kinds in one invocation
+    # means no single filter applies, so nothing is filtered.
+    types = {
+        discovered["fetchers"][u].issue_report.assessment_type
+        for u in uses if discovered["fetchers"][u].issue_report
+    }
+    type_filter = types.pop() if len(types) == 1 else None
+
+    assessments = _assessments_or_exit(json_out, type_filter)
+    if not assessments:
+        scope = f" of type {type_filter}" if type_filter else ""
+        _fail(path, f"No assessments{scope} found in this workspace.", json_out)
+
+    if assessment:
+        try:
+            chosen = api.resolve_assessment(assessments, assessment)
+        except (LookupError, ValueError) as e:
+            _fail(path, str(e), json_out)
+    elif len(assessments) == 1:
+        chosen = assessments[0]
+        if not json_out:
+            typer.echo(f"{style.dim('Assessment:')} {_assessment_line(chosen)}")
+    else:
+        if not _can_prompt(json_out):
+            _fail(
+                path,
+                "No assessment chosen and no terminal to prompt on: pass "
+                "--assessment NAME|ID.",
+                json_out,
+            )
+        scope = f" ({type_filter})" if type_filter else ""
+        typer.echo(f"Assessments in this workspace{scope} (for: {', '.join(uses)})\n")
+        for i, a in enumerate(assessments, 1):
+            typer.echo(f"  {i:>3}. {_assessment_line(a)}")
+        typer.echo("")
+        choice = typer.prompt("Select an assessment", type=int)
+        if not 1 <= choice <= len(assessments):
+            _fail(
+                path,
+                f"Invalid selection: {choice} is outside 1-{len(assessments)}",
+                json_out,
+            )
+        chosen = assessments[choice - 1]
+
+    for use in uses:
+        api.set_assessment(m, use, chosen)
+        if not json_out:
+            typer.echo(
+                f"  + {use}  ->  {api.assessment_display_name(chosen)} ({chosen['id']})"
+            )
+    _save_and_report(m, path, root, json_out, verb="Updated")
+
+
+# --------------------------------------------------------------------------- #
+# Issues — upload raw issue reports into assessment intake
+# --------------------------------------------------------------------------- #
+
+@issues_app.command("upload")
+def issues_upload_cmd(
+    run_dir: Optional[str] = typer.Argument(
+        None, help="Run directory to upload (default: latest under --output-dir)"
+    ),
+    output_dir: str = typer.Option("./evidence", "-o", "--output-dir", help="Base dir to find latest run"),
+    config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and report what would upload; no API calls"),
+    force: bool = typer.Option(
+        False, "--force",
+        help="Re-intake reports already in this run's _intake_log.json (duplicates issues)",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
+):
+    """Upload a run's issue reports into Paramify assessment intake.
+
+    The counterpart to `paramify upload`, which handles evidence. A run
+    containing both kinds needs both commands.
+    """
+    _upload_stage(
+        run_dir=run_dir,
+        output_dir=output_dir,
+        config=config,
+        dry_run=dry_run,
+        json_out=json_out,
+        preflight_fn=api.issues_upload_preflight,
+        upload_fn=api.issues_upload_run,
+        noun="report",
+        log_name="_intake_log.json",
+        upload_kwargs={"force": force},
+    )
 
 
 if __name__ == "__main__":

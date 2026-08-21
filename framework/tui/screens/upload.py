@@ -1,10 +1,14 @@
 """Paramify page — push to Paramify.
 
-Two write actions share this page because they share all their plumbing (token,
-base_url, overrides config, the event-stream shape), stacked as two panels:
+Three write actions share this page because they share all their plumbing (token,
+base_url, overrides config, the event-stream shape), stacked as panels:
 
   * Evidence upload — attach a completed run's evidence to its evidence sets
     (run-scoped; follows Evidence in the tab flow).
+  * Issue-report intake — post a run's raw scan reports to their assessments
+    (run-scoped). A separate action because it is a separate endpoint: the same
+    run can hold both kinds, and uploading evidence leaves the reports unsent.
+    The panel stays empty for a run that collected none, which is most runs.
   * Scripts sync — push each fetcher's entry script and associate it to its
     evidence set (repo-scoped provisioning; independent of the selected run).
     Preview runs a read-only --dry-run and surfaces the per-fetcher plan
@@ -44,10 +48,12 @@ class ScriptsSyncEvent(Message):
 
 
 class UploadPage(Vertical):
-    HINTS = [("ctrl+u", "upload"), ("p", "preview"), ("ctrl+s", "sync"), ("ctrl+r", "refresh")]
+    HINTS = [("ctrl+u", "upload"), ("ctrl+i", "intake"), ("p", "preview"),
+             ("ctrl+s", "sync"), ("ctrl+r", "refresh")]
 
     BINDINGS = [
         Binding("ctrl+u", "upload_run", "Upload"),
+        Binding("ctrl+i", "intake_issues", "Intake"),
         # p mirrors the Manifest tab's preview key (this page has no Input to eat
         # it); ctrl+p stays as an alias, which needs App.ENABLE_COMMAND_PALETTE
         # off — Textual's palette claims ctrl+p as a priority binding.
@@ -61,6 +67,10 @@ class UploadPage(Vertical):
             yield DataTable(id="evidence-summary")
             with Horizontal(id="evidence-actions"):
                 yield Button("Upload to Paramify", variant="primary", id="upload-submit", disabled=True)
+        with Vertical(id="issues-panel", classes="panel"):
+            yield DataTable(id="issues-summary")
+            with Horizontal(id="issues-actions"):
+                yield Button("Intake to Assessment", variant="primary", id="issues-submit", disabled=True)
         with Vertical(id="scripts-panel", classes="panel"):
             yield Static("", id="scripts-header")
             yield Static("", id="scripts-plan-summary")
@@ -74,6 +84,7 @@ class UploadPage(Vertical):
             yield RichLog(id="upload-log", markup=False, wrap=True, highlight=False)
             yield Static(
                 f"progress streams here — [bold {palette.ACCENT}]ctrl+u[/] upload · "
+                f"[bold {palette.ACCENT}]ctrl+i[/] intake · "
                 f"[bold {palette.ACCENT}]ctrl+p[/] preview · [bold {palette.ACCENT}]ctrl+s[/] sync",
                 classes="empty-hint",
             )
@@ -84,10 +95,14 @@ class UploadPage(Vertical):
         self._syncing = False
         self._run_dir: str | None = None
         self._preflight: dict | None = None
+        self._issues_preflight: dict | None = None
         self._scripts_preflight: dict | None = None
         self._plan_counts: dict[str, int] = {}
+        # Which stage the shared log and banner are currently reporting on.
+        self._upload_kind = "evidence"
 
         self.query_one("#evidence-panel", Vertical).border_title = "evidence upload"
+        self.query_one("#issues-panel", Vertical).border_title = "issue reports"
         self.query_one("#scripts-panel", Vertical).border_title = "scripts sync"
         log_panel = self.query_one("#upload-log-panel", Vertical)
         log_panel.border_title = "log"
@@ -97,6 +112,11 @@ class UploadPage(Vertical):
         ev.cursor_type = "row"
         ev.zebra_stripes = True
         ev.add_columns("field", "value")
+
+        issues = self.query_one("#issues-summary", DataTable)
+        issues.cursor_type = "row"
+        issues.zebra_stripes = True
+        issues.add_columns("field", "value")
 
         plan = self.query_one("#scripts-plan", DataTable)
         plan.cursor_type = "row"
@@ -135,6 +155,7 @@ class UploadPage(Vertical):
         if self._busy:
             return
         self._rebuild_evidence()
+        self._rebuild_issues()
         self._rebuild_scripts()
 
     def _rebuild_evidence(self) -> None:
@@ -175,6 +196,53 @@ class UploadPage(Vertical):
         table.add_row("upload files", str(preflight["file_count"]))
         if preflight["ok"]:
             upload.disabled = False
+        else:
+            for err in preflight["errors"]:
+                table.add_row("preflight error", Text(err, style=palette.FAIL))
+
+    def _rebuild_issues(self) -> None:
+        """Issue-report intake readiness for the same run the evidence panel shows.
+
+        Most runs collect no issue reports, so the common case is a panel that
+        says so and a disabled button — not an error. Preflight is only consulted
+        when there is something to send, which also keeps a run of pure evidence
+        from reporting a missing assessment it never needed.
+        """
+        self._issues_preflight = None
+        table = self.query_one("#issues-summary", DataTable)
+        table.clear()
+        submit = self.query_one("#issues-submit", Button)
+        submit.disabled = True
+
+        if not self._run_dir:
+            table.add_row("status", Text("no run selected", style="dim"))
+            return
+
+        runs = [r for r in api.list_runs(self._output_dir()) if r["dir"] == self._run_dir]
+        count = runs[0].get("issue_reports", 0) if runs else 0
+        if not count:
+            table.add_row(
+                "status",
+                Text("this run collected no issue reports", style="dim"),
+            )
+            return
+
+        table.add_row("reports", str(count))
+        try:
+            preflight = api.issues_upload_preflight(self._run_dir, self.app.root_path)
+        except Exception as exc:
+            table.add_row("preflight", Text(str(exc), style=palette.FAIL))
+            return
+
+        self._issues_preflight = preflight
+        table.add_row("Paramify API", preflight["base_url"])
+        table.add_row(
+            "API token",
+            palette.pill("present", "ok") if preflight["token_present"]
+            else palette.pill("missing", "fail"),
+        )
+        if preflight["ok"]:
+            submit.disabled = False
         else:
             for err in preflight["errors"]:
                 table.add_row("preflight error", Text(err, style=palette.FAIL))
@@ -258,10 +326,8 @@ class UploadPage(Vertical):
 
     def _start_upload(self, run_dir: str) -> None:
         self._uploading = True
-        self._disable_actions()
-        self.query_one("#upload-log-panel", Vertical).set_class(False, "empty")
-        self.query_one("#upload-log", RichLog).clear()
-        self._set_banner(Text("uploading to Paramify...", style=palette.WARN))
+        self._upload_kind = "evidence"
+        self._begin_log(Text("uploading to Paramify...", style=palette.WARN))
         self._upload_worker(run_dir, self.app.root_path)
 
     @work(thread=True, exclusive=True)
@@ -270,6 +336,54 @@ class UploadPage(Vertical):
             api.upload_run(run_dir, root, on_event=lambda ev: self.post_message(UploadEvent(ev)))
         except Exception as exc:
             self.post_message(UploadEvent({"event": "_upload_failed", "error": str(exc)}))
+
+    # -- actions: issue-report intake ------------------------------------- #
+
+    @on(Button.Pressed, "#issues-submit")
+    def _on_intake(self) -> None:
+        self.action_intake_issues()
+
+    def action_intake_issues(self) -> None:
+        if self._busy:
+            self.notify("A Paramify operation is already in progress.")
+            return
+        pf = self._issues_preflight
+        if not self._run_dir or not pf or not pf.get("ok"):
+            self.notify("No issue reports ready to intake.")
+            return
+
+        def go(ok: bool) -> None:
+            if ok:
+                self._start_intake(self._run_dir)
+
+        self.app.push_screen(
+            ConfirmModal(
+                f"Intake {pf['file_count']} issue report(s) into their Paramify "
+                f"assessments at {pf['base_url']}?"
+            ),
+            go,
+        )
+
+    def _start_intake(self, run_dir: str) -> None:
+        self._uploading = True
+        self._upload_kind = "issue report"
+        self._begin_log(Text("intaking issue reports...", style=palette.WARN))
+        self._issues_worker(run_dir, self.app.root_path)
+
+    @work(thread=True, exclusive=True)
+    def _issues_worker(self, run_dir: str, root) -> None:
+        try:
+            api.issues_upload_run(
+                run_dir, root, on_event=lambda ev: self.post_message(UploadEvent(ev))
+            )
+        except Exception as exc:
+            self.post_message(UploadEvent({"event": "_upload_failed", "error": str(exc)}))
+
+    def _begin_log(self, banner) -> None:
+        self._disable_actions()
+        self.query_one("#upload-log-panel", Vertical).set_class(False, "empty")
+        self.query_one("#upload-log", RichLog).clear()
+        self._set_banner(banner)
 
     # -- actions: scripts sync ------------------------------------------- #
 
@@ -359,10 +473,11 @@ class UploadPage(Vertical):
         etype = ev.get("event")
         log = self.query_one("#upload-log", RichLog)
 
+        noun = self._upload_kind
         if etype == "upload_start":
             mode = " (dry-run)" if ev.get("dry_run") else ""
-            self._set_banner(Text(f"uploading {ev.get('files', 0)} file(s) to {ev.get('base_url', '')}{mode}", style=palette.WARN))
-            log.write(Text(f"upload {ev.get('files', 0)} file(s) from {ev.get('run_dir', '')}{mode}", style="bold"))
+            self._set_banner(Text(f"uploading {ev.get('files', 0)} {noun}(s) to {ev.get('base_url', '')}{mode}", style=palette.WARN))
+            log.write(Text(f"upload {ev.get('files', 0)} {noun}(s) from {ev.get('run_dir', '')}{mode}", style="bold"))
         elif etype == "upload_file":
             outcome = ev.get("outcome")
             if outcome == "uploaded":
@@ -371,7 +486,12 @@ class UploadPage(Vertical):
                 icon, style = "SKIP", palette.WARN
             else:
                 icon, style = "FAIL", palette.FAIL
-            ref = f"  set={ev.get('reference_id')}" if ev.get("reference_id") else ""
+            if ev.get("reference_id"):
+                ref = f"  set={ev.get('reference_id')}"
+            elif ev.get("assessment_id"):
+                ref = f"  assessment={ev.get('assessment_id')}"
+            else:
+                ref = ""
             reason = ev.get("reason") or ev.get("error")
             suffix = f"  {reason}" if reason else ""
             log.write(Text(f"  [{icon}] {ev.get('file', '?')}  {outcome}{ref}{suffix}", style=style))
@@ -385,16 +505,21 @@ class UploadPage(Vertical):
 
     def _finalize_upload(self, ev: dict) -> None:
         self._uploading = False
+        # An intake changes what the panel should say (those reports are now
+        # duplicates), so re-read readiness rather than only re-enabling buttons.
+        self.rebuild()
         self._restore_actions()
         ok = ev.get("ok")
         style = palette.OK if ok else palette.FAIL
         msg = Text(
-            "upload complete — "
+            f"{self._upload_kind} upload complete — "
             f"uploaded={ev.get('uploaded', 0)} "
             f"duplicates={ev.get('skipped_duplicate', 0)} "
             f"errors={ev.get('errors', 0)}",
             style=style,
         )
+        if ev.get("halted"):
+            msg.append(f"   stopped early: {ev['halted']}", style=palette.FAIL)
         if ev.get("log_path"):
             msg.append(f"   {ev['log_path']}", style="dim")
         self._set_banner(msg)
@@ -502,11 +627,14 @@ class UploadPage(Vertical):
     # -- button state ----------------------------------------------------- #
 
     def _disable_actions(self) -> None:
-        for bid in ("#upload-submit", "#scripts-preview", "#scripts-submit"):
+        for bid in ("#upload-submit", "#issues-submit", "#scripts-preview", "#scripts-submit"):
             self.query_one(bid, Button).disabled = True
 
     def _restore_actions(self) -> None:
         self.query_one("#upload-submit", Button).disabled = not (self._preflight and self._preflight.get("ok"))
+        self.query_one("#issues-submit", Button).disabled = not (
+            self._issues_preflight and self._issues_preflight.get("ok")
+        )
         has_fetchers = bool(self._scripts_preflight and self._scripts_preflight.get("fetcher_count", 0) > 0)
         self.query_one("#scripts-preview", Button).disabled = not has_fetchers
         self.query_one("#scripts-submit", Button).disabled = not has_fetchers

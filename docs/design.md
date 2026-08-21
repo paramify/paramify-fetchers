@@ -283,7 +283,7 @@ Benefits of separation:
 - The Wiz-style case (writing issues back to Paramify, not just evidence) becomes a different uploader, not a hack inside the fetcher
 
 The evidence uploader is built (and exposed as `paramify upload`):
-`uploaders/paramify_evidence/` reads an enveloped run directory, gets-or-creates an evidence set by `reference_id` (Paramify REST v0), multipart-uploads the artifact, and is idempotent within a run. It supports `--dry-run`, `--config`, an https-only token guard, customer `reference_id` overrides, and auth via `PARAMIFY_UPLOAD_API_TOKEN` (+ optional `PARAMIFY_API_BASE_URL` / `--config base_url`). A second uploader, `uploaders/paramify_scripts/` (exposed as `paramify scripts sync`), is also built — a provisioning step that pushes each fetcher's entry script to Paramify and CONNECTs it to that fetcher's evidence set, manifest-scoped by default (`--all` for the whole catalog). See [`uploader_design.md`](uploader_design.md) for both. The Wiz-style issues uploader (`uploaders/paramify_issues/`) is still an empty stub.
+`uploaders/paramify_evidence/` reads an enveloped run directory, gets-or-creates an evidence set by `reference_id` (Paramify REST v0), multipart-uploads the artifact, and is idempotent within a run. It supports `--dry-run`, `--config`, an https-only token guard, customer `reference_id` overrides, and auth via `PARAMIFY_UPLOAD_API_TOKEN` (+ optional `PARAMIFY_API_BASE_URL` / `--config base_url`). A second uploader, `uploaders/paramify_scripts/` (exposed as `paramify scripts sync`), is also built — a provisioning step that pushes each fetcher's entry script to Paramify and CONNECTs it to that fetcher's evidence set, manifest-scoped by default (`--all` for the whole catalog). See [`uploader_design.md`](uploader_design.md) for both. A third uploader, `uploaders/paramify_issues/` (exposed as `paramify issues upload`), posts raw scan reports (CSV/XML/JSON/Nessus, never enveloped) to `POST /assessment/{id}/intake`. See [`issue_report_fetchers.md`](issue_report_fetchers.md).
 
 Orchestration that chains collect → upload is customer-owned, not built into the runner. `run_and_upload.sh` at the repo root is example glue.
 
@@ -308,6 +308,7 @@ paramify-fetchers/
 │   ├── config_loader.py              # discover fetchers; validate against schema
 │   ├── secret_resolver.py            # ${env:VAR_NAME} resolution
 │   ├── envelope.py                   # wraps each output in {schema_version, metadata, payload}
+│   ├── issue_reports.py              # sidecar index for kind: issue_report (no envelope)
 │   ├── runner/
 │   │   ├── __init__.py               # back-compat shim (`python -m framework.runner` → the CLI)
 │   │   ├── __main__.py               # entry point for `python -m framework.runner`
@@ -328,7 +329,8 @@ paramify-fetchers/
 │   │   ├── okta.yaml
 │   │   ├── aws.yaml
 │   │   └── ...                       # (+ ssllabs/wiz stubs — no ported fetchers)
-│   ├── _template/                    # starter directory for new fetchers
+│   ├── _template/                    # starter directory for new evidence fetchers
+│   ├── _template_issue_report/       # starter for a raw scan-report fetcher (kind: issue_report)
 │   ├── aws/                          # 80 bash (largest category; fanout per region/profile)
 │   ├── azure/                        # 27 Python, official SDKs (DefaultAzureCredential; fanout per subscription)
 │   ├── gcp/                          # 19 Python, official clients (ADC; fanout per project)
@@ -339,7 +341,7 @@ paramify-fetchers/
 │   ├── gitlab/                       # 4 fanout-capable Python (e.g. ci_cd_pipeline_config)
 │   ├── k8s/                          # 3 bash (aws-cli + kubectl)
 │   ├── rippling/                     # 3 single-target Python
-│   ├── paramify/                     # 3 Python FedRAMP 20x VER reports (fanout per program); _shared/ver_common.py
+│   ├── paramify/                     # 3 Python FedRAMP KSI VER reports (fanout per program); _shared/ver_common.py
 │   └── checkov/                      # 2 bash IaC scanners (terraform + kubernetes)
 │
 ├── comparators/                      # scaffold only (_template/); no comparator ported, runner doesn't honor depends_on
@@ -347,7 +349,7 @@ paramify-fetchers/
 ├── uploaders/
 │   ├── paramify_evidence/            # BUILT — get-or-create evidence set + multipart upload
 │   ├── paramify_scripts/             # BUILT — sync entry scripts + associate to evidence sets
-│   └── paramify_issues/              # empty stub (Wiz-style issues; not built)
+│   └── paramify_issues/              # BUILT — POST /assessment/{id}/intake, byte-for-byte
 │
 ├── deploy/                           # containerized bundle — the MVP deployment
 │   ├── Dockerfile / docker-compose.yml / entrypoint.sh / crontab
@@ -366,6 +368,7 @@ paramify-fetchers/
     ├── run_manifest_reference.md     # manifest format reference
     ├── config_injection_design.md    # platform/config/auth injection model
     ├── envelope_design.md            # evidence envelope format
+    ├── issue_report_fetchers.md      # the second kind: raw scan reports → assessment intake
     ├── packaging_design.md           # proposed `paramify package` (not built)
     └── onboarding/                   # hands-on guided tutorial (Lathe)
 ```
@@ -374,7 +377,7 @@ paramify-fetchers/
 
 - Fetcher directories grouped by category: `fetchers/<category>/<short_name>/`
 - The fetcher's `name` field in `fetcher.yaml` is globally unique (e.g. `okta_phishing_resistant_mfa`), not category-scoped
-- Directories prefixed with `_` are not fetchers (`_categories/`, `_template/`, `_shared/`); runner discovery walks `fetchers/*/*/fetcher.yaml` and skips underscore-prefixed paths
+- Directories prefixed with `_` are not fetchers (`_categories/`, `_template/`, `_template_issue_report/`, `_shared/`); runner discovery walks `fetchers/*/*/fetcher.yaml` and skips underscore-prefixed paths
 
 ### Shared code
 
@@ -439,10 +442,10 @@ Done since the last revision:
 - ~~**Evidence-set identity**~~ — DONE. Every `fetcher.yaml` carries an `evidence_set` block (reference_id / name / instructions), backfilled from the upstream catalog; it flows into the envelope and drives uploader get-or-create.
 - ~~**Evidence uploader**~~ — DONE. `uploaders/paramify_evidence/` ships (get-or-create by reference_id, multipart upload, idempotent, `--dry-run`, https-only token guard).
 - ~~**Scripts uploader**~~ — DONE. `uploaders/paramify_scripts/` (`paramify scripts sync`) provisions each fetcher's entry script and associates it to the fetcher's evidence set — GitOps reconcile (marker identity, version signal, sha256 drift guard), manifest-scoped by default with `--all`. See [`uploader_design.md`](uploader_design.md).
+- ~~**Issue-report collection**~~ — DONE. `kind: issue_report` fetchers write the source tool's own file (CSV/XML/JSON/Nessus) unmodified to `<run>/issue-reports/`; the runner records identity in a sidecar instead of an envelope; `uploaders/paramify_issues/` (`paramify issues upload`) posts each file to `POST /assessment/{id}/intake`. Assessment chosen by name via `paramify assessments select`, mirroring `paramify programs target`. No vendor fetcher ships in this category yet — start from `fetchers/_template_issue_report/`. See [`issue_report_fetchers.md`](issue_report_fetchers.md).
 
 What's deferred:
 
-- **Issues uploader** — `uploaders/paramify_issues/` is an empty stub; the Wiz-style write-issues-back case is not built
 - **Comparators** — `comparators/_template/` scaffold exists but no comparator ported; `depends_on` is in the schema but not honored by the runner because nothing consumes it (`runner/logger.py`, `retry.py`, `dependency_graph.py` are still empty stubs)
 - **Structured exit codes** — still binary 0/1 (plus 124 = runner timeout-kill). Categorized auth/network/internal/partial codes are contract-era work.
 - **Catalog generator** — fetchers self-describe; the derived `catalog.json` walker isn't written yet

@@ -14,7 +14,11 @@ The contract is not fully enforced yet. Ports are versioned `0.x.y` and carry
 known interim violations (documented at the end of this file). Cleanup happens
 later, after the framework's runner and secret resolver land.
 
-For background and rationale, see [`design.md`](design.md).
+For background and rationale, see [`design.md`](design.md). If the source is a
+scanner export (Nessus, Wiz, SentinelOne, …) rather than a JSON assertion of
+state, this is an **issue-report** fetcher, not an evidence port — start from
+[`issue_report_fetchers.md`](issue_report_fetchers.md) and
+`fetchers/_template_issue_report/` instead of this playbook.
 
 ---
 

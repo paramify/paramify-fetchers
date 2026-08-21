@@ -1,7 +1,8 @@
 """Execute fetchers via subprocess — single-target or fanout.
 
 The runner's contract with a fetcher:
-- Set EVIDENCE_DIR to the per-run output directory
+- Set EVIDENCE_DIR to the per-run output directory (for a `kind: issue_report`
+  fetcher, to the issue-reports/ subdirectory of it — see _invocation_dir)
 - Set FETCHER_STATUS_FILE to a path the fetcher reports its failure reason to
 - Resolve every declared secret and set the corresponding env var
 - For fanout: also set target_schema fields → env vars per target_schema.<field>.env
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from framework.contract import (
+    ConfigField,
     Fetcher,
     InvocationResult,
     ManifestEntry,
@@ -31,6 +33,7 @@ from framework.contract import (
     TargetInstance,
     effective_secrets,
 )
+from framework.issue_reports import ISSUE_REPORTS_DIR
 from framework.secret_resolver import SecretResolutionError, resolve
 
 _INHERITED_ENV_VARS = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "USER", "TZ")
@@ -142,6 +145,34 @@ def _coerce_env(value) -> str:
     return str(value)
 
 
+def merged_config(
+    fetcher: Fetcher,
+    platform_spec: Optional[PlatformSpec],
+    platform_cfg: Optional[PlatformConfig],
+    entry: ManifestEntry,
+) -> Tuple[Dict[str, ConfigField], Dict[str, object]]:
+    """Resolve a fetcher's effective config. Returns (schema, values).
+
+    The precedence ladder, lowest to highest: schema defaults, platform values,
+    per-fetcher values. Extracted from _apply_config so callers that need a
+    resolved value the fetcher never sees can read it without re-implementing the
+    ladder — `api.run()` does this for the issue-report `assessment_id`, which is
+    resolved from the manifest but injected into no env var.
+    """
+    schema: Dict[str, ConfigField] = {}
+    if platform_spec:
+        schema.update(platform_spec.config_schema)
+    schema.update(fetcher.config_schema)  # per-fetcher overrides platform on name clash
+
+    values: Dict[str, object] = {
+        name: f.default for name, f in schema.items() if f.default is not None
+    }
+    if platform_cfg:
+        values.update({k: v for k, v in platform_cfg.config.items() if v is not None})
+    values.update({k: v for k, v in entry.config.items() if v is not None})
+    return schema, values
+
+
 def _apply_config(
     env: Dict[str, str],
     fetcher: Fetcher,
@@ -150,18 +181,9 @@ def _apply_config(
     entry: ManifestEntry,
     secret_sink: Optional[set] = None,
 ) -> None:
-    """Merge config (platform defaults <- platform values <- per-fetcher values)
-    and inject each field that declares an `env` mapping. Also lets the
-    platform's auth passthrough_env vars through the whitelist."""
-    schema = {}
-    if platform_spec:
-        schema.update(platform_spec.config_schema)
-    schema.update(fetcher.config_schema)  # per-fetcher overrides platform on name clash
-
-    values = {name: f.default for name, f in schema.items() if f.default is not None}
-    if platform_cfg:
-        values.update({k: v for k, v in platform_cfg.config.items() if v is not None})
-    values.update({k: v for k, v in entry.config.items() if v is not None})
+    """Merge config and inject each field that declares an `env` mapping. Also
+    lets the platform's auth passthrough_env vars through the whitelist."""
+    schema, values = merged_config(fetcher, platform_spec, platform_cfg, entry)
 
     for name, fdef in schema.items():
         if not fdef.env:
@@ -188,6 +210,18 @@ def _apply_config(
             # captured output too; identity/region/path selectors are not masked.
             if secret_sink is not None and _is_sensitive_env_name(var):
                 secret_sink.add(value)
+
+
+def invocation_dir(fetcher: Fetcher, run_dir: Path) -> Path:
+    """Where this fetcher writes — the run dir, or its issue-reports/ subdir.
+
+    Redirecting EVIDENCE_DIR is what keeps issue reports out of the fetcher's
+    concern entirely: an issue-report fetcher writes to EVIDENCE_DIR exactly like
+    every other fetcher, and only the runner knows the path differs. The
+    alternative — telling fetchers to write to a subdirectory — makes the layout
+    a contributor's responsibility, which is how half of them would get it wrong.
+    """
+    return run_dir / ISSUE_REPORTS_DIR if fetcher.is_issue_report else run_dir
 
 
 def _build_env(
@@ -283,6 +317,7 @@ def _invoke(
     output_dir: Path,
     on_line: Optional[Callable[[str], None]] = None,
     secret_values=None,
+    run_dir: Optional[Path] = None,
 ) -> InvocationResult:
     """Run one fetcher invocation.
 
@@ -291,7 +326,12 @@ def _invoke(
     matches the previous blocking run — full stdout/stderr are still captured
     into the result either way. The wall-clock timeout fires even if the fetcher
     emits no output.
+
+    `output_dir` is where the fetcher writes; `run_dir` is the root the reported
+    outputs are named relative to. They differ only for an issue-report fetcher,
+    and defaulting run_dir to output_dir keeps every existing caller correct.
     """
+    run_dir = run_dir or output_dir
     if fetcher.runtime_type == "python":
         cmd = [sys.executable, str(fetcher.entry_path)]
     elif fetcher.runtime_type == "bash":
@@ -358,7 +398,11 @@ def _invoke(
     completed_at = _utc_now()
 
     after = {p.name for p in output_dir.iterdir()} if output_dir.exists() else set()
-    outputs = sorted(after - before)
+    # Reported relative to the run dir, so every consumer — _run_metadata.json,
+    # api._run_summary, the sidecar — reads one path convention regardless of
+    # which subdirectory the fetcher actually wrote to.
+    rel = output_dir.relative_to(run_dir) if output_dir != run_dir else None
+    outputs = sorted(f"{rel}/{name}" if rel else name for name in (after - before))
 
     return InvocationResult(
         fetcher_name=fetcher.name,
@@ -388,13 +432,19 @@ def run_entry(
 
     Per-target failures are isolated — they don't abort sibling targets.
     When on_line is provided, each invocation streams its stdout lines to it.
+
+    `output_dir` is the run directory. An issue-report fetcher is pointed at its
+    issue-reports/ subdirectory instead, and reports its outputs relative to the
+    run dir either way (see invocation_dir / _invoke).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
+    inv_dir = invocation_dir(fetcher, output_dir)
+    inv_dir.mkdir(parents=True, exist_ok=True)
 
     if not fetcher.supports_targets:
         secrets_seen: set = set()
-        env = _build_env(fetcher, entry, None, output_dir, platform_spec, platform_cfg, secrets_seen)
-        return [_invoke(fetcher, env, None, output_dir, on_line, secrets_seen)]
+        env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg, secrets_seen)
+        return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
 
     if not entry.targets:
         # No targets[] given. If every target field is optional, run once with the
@@ -406,15 +456,15 @@ def run_entry(
                 f"{fetcher.name}: supports_targets but manifest entry has no targets[]"
             )
         secrets_seen = set()
-        env = _build_env(fetcher, entry, None, output_dir, platform_spec, platform_cfg, secrets_seen)
-        return [_invoke(fetcher, env, None, output_dir, on_line, secrets_seen)]
+        env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg, secrets_seen)
+        return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
 
     results = []
     for target in entry.targets:
         try:
             secrets_seen = set()
-            env = _build_env(fetcher, entry, target, output_dir, platform_spec, platform_cfg, secrets_seen)
-            results.append(_invoke(fetcher, env, target, output_dir, on_line, secrets_seen))
+            env = _build_env(fetcher, entry, target, inv_dir, platform_spec, platform_cfg, secrets_seen)
+            results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir))
         except (RuntimeError, SecretResolutionError) as e:
             now = _utc_now()
             # The fetcher never ran, so it had no chance to report anything. The

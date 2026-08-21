@@ -10,6 +10,22 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Added
+
+- **Issue-report fetchers (`kind: issue_report`).** A second collection kind for
+  the file a scanner already produces — a Nessus export, a Wiz findings CSV —
+  rather than a JSON payload asserting a configuration state. The runner writes
+  those files unmodified to `<run>/issue-reports/` (no envelope: Paramify's
+  intake parser reads the vendor's own structure), records identity in a sidecar
+  index, and a new uploader (`paramify issues upload`) posts each file to
+  `POST /assessment/{assessmentId}/intake`. The assessment is chosen by name
+  (`paramify assessments list` / `select`), the same way `paramify programs
+  target` picks a program UUID without anyone typing one. Start from
+  [`fetchers/_template_issue_report/`](fetchers/_template_issue_report/) and
+  [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md). The Paramify
+  REST API spec 0.6.0 is vendored at
+  [`framework/reference/paramify_api_0.6.0.json`](framework/reference/paramify_api_0.6.0.json).
+
 ### Changed
 
 - **Every fetcher's `ksis` re-keyed to the FedRAMP Consolidated Rules for 2026.**

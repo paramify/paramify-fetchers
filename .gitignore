@@ -69,3 +69,6 @@ fetchers/demo/vuln_scan/
 .idea/
 .vscode/
 *.swp
+
+# --- Manifests ---
+manifests/*

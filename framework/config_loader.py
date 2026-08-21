@@ -15,11 +15,13 @@ from framework.contract import (
     ConfigField,
     EvidenceSet,
     Fetcher,
+    IssueReport,
     PlatformSpec,
     Requires,
     Secret,
     TargetField,
 )
+from framework.issue_reports import reserved_config_schema
 
 
 def _load_schema(repo_root: Path, name: str = "fetcher_schema.json") -> dict:
@@ -121,6 +123,24 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
             description=raw_es.get("description") or data["description"],
         )
 
+    issue_report = None
+    raw_ir = data.get("issue_report")
+    if raw_ir:
+        issue_report = IssueReport(
+            assessment_type=raw_ir["assessment_type"],
+            title=raw_ir.get("title"),
+        )
+
+    config_schema = _parse_config_schema(data.get("config_schema"))
+    if data.get("kind") == "issue_report":
+        # Every issue-report fetcher takes the same two fields naming the
+        # assessment its report is intaken into. Added here rather than declared
+        # in each fetcher.yaml because they are framework knowledge, and because
+        # a field that must be declared identically 30 times eventually won't be.
+        # The fetcher's own config wins on a name clash, matching every other
+        # merge in the loader.
+        config_schema = {**reserved_config_schema(), **config_schema}
+
     return Fetcher(
         name=data["name"],
         version=data["version"],
@@ -136,9 +156,11 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
         supports_targets=data.get("supports_targets", False),
         target_schema=target_schema,
         path=path.resolve(),
-        config_schema=_parse_config_schema(data.get("config_schema")),
+        config_schema=config_schema,
         evidence_set=evidence_set,
         ksis=list(data.get("ksis") or []),
+        kind=data.get("kind", "evidence"),
+        issue_report=issue_report,
     )
 
 

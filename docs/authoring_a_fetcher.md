@@ -15,6 +15,24 @@ A "new" fetcher follows the same contract as a ported one, but you don't carry f
 
 ---
 
+## Which kind are you writing?
+
+Before anything else, answer one question: **does the tool already compute the
+findings?**
+
+- **No — you are asserting a state.** MFA is enforced, buckets are encrypted,
+  logging is on. That is an **evidence** fetcher, and it is what the rest of this
+  document describes.
+- **Yes — you are handing over findings someone else computed.** A Nessus scan,
+  Wiz misconfigurations, a SentinelOne export. That is an **issue-report**
+  fetcher: the tool's own file goes to a Paramify assessment untouched, and the
+  rules are different enough to have their own guide —
+  [`issue_report_fetchers.md`](issue_report_fetchers.md). Read that instead, then
+  come back here for the parts that are shared (secrets, categories, fanout,
+  failure reporting).
+
+---
+
 ## Scaffolding
 
 1. **Decide a category and short_name.** Category is the source-system family (e.g. `aws`, `gitlab`, `k8s`). Short_name is the specific evidence type (e.g. `iam_roles_inventory`). Both lowercase, underscore-separated. The full fetcher name combines them: `<category>_<short_name>`.
@@ -23,6 +41,7 @@ A "new" fetcher follows the same contract as a ported one, but you don't carry f
    ```bash
    cp -r fetchers/_template fetchers/<category>/<short_name>
    ```
+   For an issue-report fetcher, copy `fetchers/_template_issue_report/` instead.
    If the category doesn't exist yet, see "Per-category setup" below.
 
 3. **Fill in the files.** Each placeholder in the template needs real content.
@@ -56,9 +75,9 @@ secrets:
 
 Add one `secrets[]` entry per env var the fetcher reads at runtime.
 
-### `evidence_set` (required identity block)
+### `evidence_set` (evidence-fetcher identity)
 
-Every fetcher carries an `evidence_set` block — the Paramify evidence-set identity (1 fetcher = 1 evidence set). This is fetcher-knowledge (what the evidence is and how it's collected); the runner copies it into the output envelope's `metadata`, and the uploader get-or-creates the evidence set by `reference_id`.
+An **evidence** fetcher carries an `evidence_set` block — the Paramify evidence-set identity (1 fetcher = 1 evidence set). This is fetcher-knowledge (what the evidence is and how it's collected); the runner copies it into the output envelope's `metadata`, and the uploader get-or-creates the evidence set by `reference_id`.
 
 ```yaml
 evidence_set:
@@ -68,6 +87,8 @@ evidence_set:
 ```
 
 `reference_id` and `name` are required; `instructions` is optional. Customers override `reference_id` per compliance program in the uploader config — they never edit this block. Do **not** add `controls`/`solution_capabilities` here; that linkage stays Paramify-side.
+
+An issue-report fetcher carries an `issue_report` block instead, and the two are mutually exclusive — see [`issue_report_fetchers.md`](issue_report_fetchers.md).
 
 ### Fanout (when one fetcher should run against N targets)
 
@@ -253,7 +274,7 @@ Unit tests aren't yet a convention. The `tests/` directory in the fetcher scaffo
 
 - **Don't build a CLI argument parser** for `--output-dir`, `--profile`, `--region`. Those are runner-era concerns; v0.x fetchers receive everything via env.
 - **Don't import from `common/`** or any cross-category helper module. The framework's secret resolver eventually replaces what those used to do.
-- **Don't write envelope-wrapped output** (`{schema_version, metadata, payload}`). Write a raw evidence dict as the payload — the runner wraps each output file in the standard envelope automatically after the invocation, populating `metadata` with the fetcher name/version/category/run_id/target/status and your `evidence_set` block (see [`envelope_design.md`](envelope_design.md)).
+- **Don't write envelope-wrapped output** (`{schema_version, metadata, payload}`). Write a raw evidence dict as the payload — the runner wraps each output file in the standard envelope automatically after the invocation, populating `metadata` with the fetcher name/version/category/run_id/target/status and your `evidence_set` block (see [`envelope_design.md`](envelope_design.md)). (An issue-report fetcher writes the tool's file and gets no envelope at all; the same principle applies, in that the framework handles identity either way.)
 - **Don't add `controls`, `solution_capabilities`, or `validation_rules`** to your `fetcher.yaml`. These were in the old `catalog.json` and were intentionally cut.
 - **Don't add retry logic.** Handle pagination internally; let transient failures bubble up to the failures list and exit code. Retry policy is runner-era.
 - **Don't write per-fetcher tests yet.** Until the framework settles on a testing approach, end-to-end smoke against a real tenant is the verification path.
@@ -268,3 +289,4 @@ When in doubt, mirror the shape of one of these:
 - **Single-target bash:** [`fetchers/okta/authenticators/`](../fetchers/okta/authenticators/)
 - **Fanout Python (per-target secret):** [`fetchers/gitlab/ci_cd_pipeline_config/`](../fetchers/gitlab/ci_cd_pipeline_config/)
 - **AWS region/profile fanout (bash):** [`fetchers/aws/auto_scaling_high_availability/`](../fetchers/aws/auto_scaling_high_availability/)
+- **Issue report:** no shipped example yet — start from [`fetchers/_template_issue_report/`](../fetchers/_template_issue_report/) and [`issue_report_fetchers.md`](issue_report_fetchers.md).

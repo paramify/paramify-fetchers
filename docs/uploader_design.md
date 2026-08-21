@@ -5,17 +5,21 @@ dedicated companion to [`design.md`](design.md), which frames uploaders as one o
 the framework's [separate stages](design.md#uploaders-as-a-separate-stage); the
 detail lives here.
 
-Two things reach Paramify today, both under `uploaders/`:
+Three things reach Paramify today, all under `uploaders/`:
 
 - **`paramify_evidence`** — attaches a completed run's evidence files to their
   evidence sets. Runs **every collection**. Exposed as `paramify upload`.
+- **`paramify_issues`** — posts a run's raw issue reports (vulnerability scans,
+  CSPM findings) to assessment intake, where Paramify parses them into issues.
+  Runs after any collection that included a `kind: issue_report` fetcher. Exposed
+  as `paramify issues upload`.
 - **`paramify_scripts`** — pushes each fetcher's entry script and connects it to
   that fetcher's evidence set, so the tenant records *how* the evidence was
   generated. A **provisioning** step, run only when `fetchers/**` change. Exposed
   as `paramify scripts sync`.
 
-A third, `paramify_issues` (the Wiz-style write-issues-back case), is an empty
-stub.
+That there are three rather than one is the design working as intended: a new kind
+of write becomes a new uploader instead of a special case inside an existing one.
 
 ## Why uploading is its own stage
 
@@ -29,7 +33,7 @@ write (issues, scripts) becomes a *new uploader* rather than a hack inside a
 fetcher. Orchestration that chains the stages is customer-owned; `run_and_upload.sh`
 at the repo root is example glue.
 
-Both built uploaders share the same operational contract:
+All three share the same operational contract:
 
 - **Auth** — `PARAMIFY_UPLOAD_API_TOKEN`, read source-agnostically (env, `.env`,
   secret manager, CI). No token is privileged over another.
@@ -43,8 +47,10 @@ Both built uploaders share the same operational contract:
 
 ## The evidence-set identity model (shared)
 
-Both uploaders target the same **evidence set** for a given fetcher, and they find
-it the same way — so a script lands on the exact set its evidence does.
+`paramify_evidence` and `paramify_scripts` target the same **evidence set** for a
+given fetcher, and they find it the same way — so a script lands on the exact set
+its evidence does. (`paramify_issues` does not use this model at all; an issue
+report goes to an assessment, and its identity model is described below.)
 
 - Every `fetcher.yaml` carries an `evidence_set` block (`reference_id`, `name`,
   `instructions`). This is **fetcher knowledge** — what the evidence is and how
@@ -68,6 +74,43 @@ than duplicating them). Supports the shared flags above.
 `paramify upload` takes an optional run directory (default: the latest run under
 the manifest's `--output-dir`). Full setup — API-key permissions included — is in
 [`../uploaders/paramify_evidence/README.md`](../uploaders/paramify_evidence/README.md).
+
+## `paramify_issues` — post raw reports to assessment intake
+
+Reads `<run>/issue-reports/` and posts each report to
+`POST /assessment/{assessmentId}/intake`. Three things make it structurally
+different from the evidence uploader, and all three come from the endpoint rather
+than from preference:
+
+- **The file is sent byte-for-byte.** Intake parses the vendor's own CSV / XML /
+  JSON / Nessus structure, so there is no envelope and no re-serialization — not
+  even for a `.json` report. Identity travels in the `artifact` metadata part and
+  in a sidecar index instead of inside the file.
+- **The destination comes from the manifest, not the fetcher.** A `fetcher.yaml`
+  declares only *what kind* of assessment its report can feed
+  (`issue_report.assessment_type`); *which* assessment is `config.assessment_id`,
+  written by `paramify assessments select`. This is the same shipped-vs-chosen
+  split as `evidence_set` versus a program target, and the reason there is no
+  get-or-create step here: you cannot invent an assessment the way you can an
+  evidence set.
+- **Idempotency is local.** The endpoint documents that it *adds* an artifact to a
+  cycle's intake without replacing what is there, and offers no endpoint to list
+  what is attached — so unlike the evidence uploader's `artifact_exists` check,
+  no API call can detect a duplicate. `issue-reports/_intake_log.json` records
+  what was sent and is the only thing making a re-run safe.
+
+It also inverts one default: `skip_failed` is **true** here. A failed evidence
+fetch still documents the attempt, but a partial scan report is parsed into
+issues, and findings missing from it read as resolved — silently closing real
+vulnerabilities.
+
+`--force` is unique to this uploader: it re-sends a report already listed in
+the run's `_intake_log.json`. The endpoint *adds* a second artifact, so this
+duplicates issues — use it when a previous intake was parsed incorrectly, not
+as a habit.
+
+Full detail is in [`../uploaders/paramify_issues/README.md`](../uploaders/paramify_issues/README.md);
+the collection side is [`issue_report_fetchers.md`](issue_report_fetchers.md).
 
 ## `paramify_scripts` — sync entry scripts, associate to sets
 
@@ -127,6 +170,10 @@ Full usage, config, and required tooling are in
 ## When to run which
 
 - `paramify upload` — **every collection**, after a run, to push the evidence.
+- `paramify issues upload` — after any run that included an issue-report fetcher.
+  It is a separate command rather than part of `paramify upload` because the two
+  write to different endpoints with different failure modes; a run holding both
+  kinds needs both, and `paramify upload` alone leaves the reports unsent.
 - `paramify scripts sync` — a **provisioning** step, when `fetchers/**` change
   (a fetcher added, or its entry script / version bumped). Not on every
   collection.

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -47,11 +48,19 @@ def _registered():
     return top, manifest, scripts
 
 
+def _subcommands(group: str) -> set:
+    """Subcommand names registered under one top-level group."""
+    return set(get_command(app).commands[group].commands.keys())
+
+
 EXPECTED_TOP = {
     "list", "catalog", "describe", "ksi", "doctor", "manifests", "runs",
-    "evidence", "validate", "run", "upload", "manifest", "scripts", "programs", "tui",
+    "evidence", "validate", "run", "upload", "manifest", "scripts", "programs",
+    "assessments", "issues", "tui",
 }
 EXPECTED_PROGRAMS = {"list", "target"}
+EXPECTED_ASSESSMENTS = {"list", "select"}
+EXPECTED_ISSUES = {"upload"}
 EXPECTED_MANIFEST = {
     "init", "new", "add", "remove", "set-config", "set-secret",
     "add-target", "remove-target", "set-platform-config",
@@ -76,6 +85,59 @@ def test_programs_subcommands_registered():
     """
     programs = set(get_command(app).commands["programs"].commands.keys())
     assert EXPECTED_PROGRAMS <= programs, f"missing programs subcommands: {EXPECTED_PROGRAMS - programs}"
+
+
+def test_assessments_and_issues_subcommands_registered():
+    """Same guard as above for the issue-report groups: a decorator that never
+    runs leaves the group visible but every subcommand missing at dispatch."""
+    assessments = _subcommands("assessments")
+    issues = _subcommands("issues")
+    assert EXPECTED_ASSESSMENTS <= assessments, (
+        f"missing assessments subcommands: {EXPECTED_ASSESSMENTS - assessments}"
+    )
+    assert EXPECTED_ISSUES <= issues, f"missing issues subcommands: {EXPECTED_ISSUES - issues}"
+
+
+def test_workspace_lookups_read_token_from_dotenv(tmp_path, monkeypatch):
+    """`paramify assessments list` (and `programs list`) must see a token in
+    `.env` the same way `paramify upload` does. Otherwise a working `.env` looks
+    unset and the command fails before it ever hits the API."""
+    monkeypatch.delenv("PARAMIFY_API_TOKEN", raising=False)
+    monkeypatch.delenv("PARAMIFY_UPLOAD_API_TOKEN", raising=False)
+    monkeypatch.delenv("PARAMIFY_API_BASE_URL", raising=False)
+
+    def fake_load_dotenv(*_a, **_k):
+        os.environ["PARAMIFY_UPLOAD_API_TOKEN"] = "from-dotenv"
+        os.environ["PARAMIFY_API_BASE_URL"] = "https://example.test/api/v0"
+        return True
+
+    monkeypatch.setattr("dotenv.load_dotenv", fake_load_dotenv)
+
+    seen: dict = {}
+
+    class _Resp:
+        status_code = 200
+        text = "{}"
+
+        def json(self):
+            return {"assessments": []}
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        seen["auth"] = (headers or {}).get("Authorization")
+        seen["url"] = url
+        return _Resp()
+
+    monkeypatch.setattr("requests.get", fake_get)
+    api.list_assessments()
+    assert seen["auth"] == "Bearer from-dotenv"
+    assert seen["url"].startswith("https://example.test/api/v0/")
+
+
+def test_issues_upload_accepts_force():
+    """--force is the supported way to re-intake; if the flag disappears, the
+    only remaining option is deleting the log, which re-sends every file."""
+    cmd = get_command(app).commands["issues"].commands["upload"]
+    assert "force" in {p.name for p in cmd.params}
 
 
 def test_doctor_json_ok_without_manifest():
@@ -293,6 +355,15 @@ API_TO_CLI = {
     "scripts_sync": "scripts sync",
     "list_runs": "runs",
     "read_evidence": "evidence",
+    "read_issue_report": "evidence",
+    "preview_issue_report": "evidence",
+    "issues_upload_preflight": "issues upload",
+    "issues_upload_run": "issues upload",
+    "list_assessments": "assessments list",
+    "set_assessment": "assessments select",
+    # Read-only label helper: how an assessment is named in the picker. The CLI
+    # applies the same function to its own list output.
+    "assessment_display_name": "<implicit: assessment label>",
 }
 
 
@@ -317,7 +388,12 @@ def test_parity_every_tui_api_call_has_a_cli_home():
 def test_parity_mapped_commands_actually_exist():
     """Every concrete command named in API_TO_CLI is really registered."""
     top, manifest, scripts = _registered()
-    groups = {"manifest": manifest, "scripts": scripts}
+    groups = {
+        "manifest": manifest,
+        "scripts": scripts,
+        "assessments": _subcommands("assessments"),
+        "issues": _subcommands("issues"),
+    }
     for api_fn, where in API_TO_CLI.items():
         if where.startswith("<implicit"):
             continue
@@ -400,6 +476,10 @@ def test_describe_json(in_repo, fetchers):
     name = fetchers["any"]["name"]
     data = _json(runner.invoke(app, ["describe", name, "--json"]))
     assert data["name"] == name
+    # Existing fetchers omit `kind` in fetcher.yaml, which must still describe as
+    # evidence so a front-end does not treat them as issue reports.
+    assert data["kind"] == "evidence"
+    assert "issue_report" not in data
 
 
 def test_describe_unknown_exits_1(in_repo):

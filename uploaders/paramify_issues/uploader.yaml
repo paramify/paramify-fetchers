@@ -1,0 +1,32 @@
+name: paramify_issues
+version: 0.1.0
+description: >
+  Intakes raw issue reports (vulnerability scans, CSPM findings) from a run
+  directory into Paramify assessments. Reads issue-reports/_issue_reports.json
+  and posts each report byte-for-byte to POST /assessment/{assessmentId}/intake,
+  where Paramify parses it into issues. Idempotent per run via a local intake log.
+
+runtime:
+  type: python
+  entry: uploader.py
+
+# Source-agnostic: the token can come from .env, a secret manager, CI vars, etc.
+# The same token the evidence uploader uses; it needs write scope on the target
+# assessment.
+secrets:
+  - name: api_token
+    env: PARAMIFY_UPLOAD_API_TOKEN
+
+config_schema:
+  base_url:
+    type: string
+    default: https://app.paramify.com/api/v0
+    env: PARAMIFY_API_BASE_URL
+    description: Paramify REST API v0 base URL.
+  skip_failed:
+    type: boolean
+    default: true
+    description: >
+      Skip reports whose collection failed. Defaults to true, unlike the evidence
+      uploader — a partial scan file is parsed into issues, and findings missing
+      from it read as resolved, which silently closes real vulnerabilities.

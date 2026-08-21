@@ -21,6 +21,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Static
 
 from framework import api
+from framework.issue_reports import ISSUE_REPORTS_DIR
 from framework.tui import palette
 from framework.tui.modals import PreviewModal
 
@@ -158,12 +159,21 @@ class EvidencePage(Vertical):
     # -- detail ----------------------------------------------------------- #
 
     def _open_file(self, path: str) -> None:
+        p = Path(path)
+        if ISSUE_REPORTS_DIR in p.parts:
+            try:
+                text = api.preview_issue_report(p)
+            except Exception as exc:
+                self.notify(f"Cannot read issue report: {exc}", severity="error", timeout=8)
+                return
+            self.app.push_screen(PreviewModal(text, title=p.name))
+            return
         try:
-            ev = api.read_evidence(Path(path))
+            ev = api.read_evidence(p)
         except Exception as exc:
             self.notify(f"Cannot read evidence: {exc}", severity="error", timeout=8)
             return
-        self.app.push_screen(PreviewModal(self._format(path, ev), title=Path(path).name))
+        self.app.push_screen(PreviewModal(self._format(path, ev), title=p.name))
 
     @staticmethod
     def _format(path: str, ev: dict) -> str:

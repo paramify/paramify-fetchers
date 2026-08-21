@@ -33,7 +33,7 @@ from framework.tui.modals import (
 class ManifestPage(Vertical):
     HINTS = [
         ("a", "add"), ("e", "edit"), ("x", "remove"), ("t", "target"),
-        ("s", "save"), ("v", "validate"), ("p", "preview"),
+        ("A", "assessment"), ("s", "save"), ("v", "validate"), ("p", "preview"),
     ]
 
     BINDINGS = [
@@ -42,6 +42,7 @@ class ManifestPage(Vertical):
         Binding("x", "remove_entry", "Remove"),
         Binding("t", "add_target", "Add target"),
         Binding("T", "remove_target", "Rm target", show=False),
+        Binding("A", "pick_assessment", "Assessment"),
         Binding("s", "save", "Save"),
         Binding("v", "validate", "Validate"),
         Binding("p", "preview", "Preview"),
@@ -484,6 +485,63 @@ class ManifestPage(Vertical):
 
         self.app.push_screen(
             PickerModal(f"Remove target from {use}", options, subtitle="Pick a target to remove"),
+            done,
+        )
+
+    def action_pick_assessment(self) -> None:
+        """Point the selected issue-report entry at a Paramify assessment.
+
+        The TUI equivalent of `paramify assessments select`, and the same reason
+        the program picker exists: the manifest needs an assessment UUID, and
+        nobody should be typing one. Filtered to the assessment type the fetcher
+        declares, so a CSPM report is never offered a vulnerability assessment.
+
+        This is the one manifest action that needs the network, so a workspace
+        that cannot be reached reports why instead of opening an empty picker.
+        """
+        use, m = self._selected, self._manifest
+        if not use or m is None:
+            return
+        d = self._descriptors().get(use)
+        if not d or d.get("kind") != "issue_report":
+            self.notify(
+                "Only issue-report fetchers go to an assessment.", severity="warning"
+            )
+            return
+
+        assessment_type = (d.get("issue_report") or {}).get("assessment_type")
+        try:
+            assessments = api.list_assessments(assessment_type)
+        except (RuntimeError, ValueError) as exc:
+            self.notify(f"Cannot list assessments: {exc}", severity="error", timeout=12)
+            return
+        if not assessments:
+            scope = f" of type {assessment_type}" if assessment_type else ""
+            self.notify(f"No assessments{scope} in this workspace.", severity="warning")
+            return
+
+        by_id = {a["id"]: a for a in assessments}
+        options = []
+        for a in assessments:
+            bits = [b for b in (a.get("frequency"), a.get("mechanism_name")) if b]
+            note = f"  ({', '.join(bits)})" if bits else ""
+            options.append((a["id"], f"{api.assessment_display_name(a)}{note}"))
+
+        def done(chosen_id: Optional[str]) -> None:
+            if chosen_id is None:
+                return
+            api.set_assessment(m, use, by_id[chosen_id])
+            self.rebuild()
+            self.notify(
+                f"{use} → {api.assessment_display_name(by_id[chosen_id])}"
+            )
+
+        self.app.push_screen(
+            PickerModal(
+                f"Assessment for {use}",
+                options,
+                subtitle=f"{assessment_type or 'any type'} — its reports are intaken here",
+            ),
             done,
         )
 

@@ -183,9 +183,11 @@ paramify manifests             # discovered run manifests (manifests/*.yaml)
 paramify validate <manifest>   # validate a manifest without running
 paramify run      <manifest>   # run it
 paramify runs                  # past runs under an output dir (newest first)
-paramify evidence <file>       # read one evidence file (normalizing the envelope)
+paramify evidence <file>       # read one evidence file, or an issue-report sidecar
 paramify upload   [run-dir]    # push a run's evidence to Paramify (default: latest run)
+paramify issues   upload       # push a run's issue reports to assessment intake
 paramify programs <sub>        # list workspace programs; turn them into targets
+paramify assessments <sub>     # list workspace assessments; point issue reports at one
 paramify manifest <sub>        # build/edit a manifest (see below)
 ```
 
@@ -352,6 +354,26 @@ for how to create a Paramify API key with the required permissions. Chaining the
 customer's job, not the runner's; `run_and_upload.sh` at the repo root is
 example glue.
 
+### Scan results, not evidence
+
+Some tools don't need you to assert anything — they already computed the findings.
+A Nessus export or a Wiz misconfiguration report *is* the answer, and Paramify has
+a parser for it. Those go through a second kind of fetcher, `kind: issue_report`,
+which writes the tool's own file untouched to `run-<ts>/issue-reports/` and posts
+it to a Paramify **assessment**, where it becomes issues rather than evidence:
+
+```bash
+paramify assessments select my_scanner_report   # pick the assessment by name, once
+paramify run manifest.yaml                      # raw report → run-<ts>/issue-reports/
+paramify issues upload                          # → POST /assessment/{id}/intake
+```
+
+The file is never wrapped or rewritten — the intake parser reads the vendor's own
+CSV/XML/JSON/Nessus structure, so anything added to it breaks the parse. That one
+constraint is what makes this a separate kind with a separate uploader instead of
+a flag on the existing one. Nothing ships in this category yet; to write the
+first, start from [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
+
 ### Show how evidence is generated (optional)
 
 Beyond the evidence itself, you can push each fetcher's **entry script** to
@@ -461,10 +483,11 @@ design (peering connections and endpoints are omitted above for brevity).
 > **Status:** pre-1.0 (v0.x). The runner now wraps every output in the
 > `metadata`+`payload` envelope, but fetchers still write raw evidence dicts and
 > read env directly rather than receiving a typed secrets object — both are
-> tracked interim shortcuts, not the target. Comparators (`depends_on`),
-> the `paramify_issues` uploader, and structured exit-code categories (still
-> binary `0`/`1`, plus `124` for a runner timeout-kill) are not built yet. See
-> `docs/design.md` for what's deferred.
+> tracked interim shortcuts, not the target. Comparators (`depends_on`) and
+> structured exit-code categories (still binary `0`/`1`, plus `124` for a runner
+> timeout-kill) are not built yet. Issue-report collection is built end to end —
+> contract, runner, uploader, template — but no vendor fetcher ships in that
+> category yet. See `docs/design.md` for what's deferred.
 
 ---
 
@@ -480,6 +503,7 @@ framework/                      # shared code (facade, runner, contract, schemas
 fetchers/
   _categories/<name>.yaml       # platform-wide config + auth for a category
   _template/                    # copy this to start a new fetcher
+  _template_issue_report/       # …or this, for a raw scan-report fetcher
   <category>/
     README.md                   # credential setup guide for this service
     _shared/                    # code shared across fetchers in this category
@@ -489,8 +513,8 @@ fetchers/
 comparators/                    # cross-source comparators (template only so far)
 uploaders/
   paramify_evidence/            # push evidence to Paramify (built)
+  paramify_issues/              # push raw scan reports to assessment intake (built)
   paramify_scripts/             # push fetcher entry scripts + associate to evidence sets (built)
-  paramify_issues/              # stub, not built yet
 examples/                       # sample run manifests
 tests/                          # framework test suite (pytest)
 manifest.yaml                   # working manifest at repo root
@@ -504,7 +528,7 @@ Directories starting with `_` are not fetchers — the runner skips them.
 
 ## Adding a fetcher
 
-To add evidence collection for a new control or a new tool, see [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md).
+To add evidence collection for a new control or a new tool, see [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md). If the tool already produces the findings — a vulnerability scan or a CSPM export — you want an issue-report fetcher instead: [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
 
 ---
 
@@ -521,9 +545,11 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`fetchers/k8s/README.md`](fetchers/k8s/README.md) | Kubernetes / EKS credential setup |
 | [`fetchers/checkov/README.md`](fetchers/checkov/README.md) | Checkov setup + git token for IaC scanning |
 | [`uploaders/paramify_evidence/README.md`](uploaders/paramify_evidence/README.md) | Paramify API key setup + upload options |
+| [`uploaders/paramify_issues/README.md`](uploaders/paramify_issues/README.md) | Intaking raw scan reports into an assessment + why the file is never touched |
 | [`uploaders/paramify_scripts/README.md`](uploaders/paramify_scripts/README.md) | Syncing fetcher entry scripts to Paramify + the association model |
-| [`docs/uploader_design.md`](docs/uploader_design.md) | How both uploaders work + the shared evidence-set identity model |
+| [`docs/uploader_design.md`](docs/uploader_design.md) | How the three uploaders work + the shared evidence-set identity model |
 | [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md) | Writing a new fetcher from scratch |
+| [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md) | The second kind of fetcher: raw scan reports → assessment issues |
 | [`docs/fetcher_contract.md`](docs/fetcher_contract.md) | The binding runner↔fetcher contract |
 | [`docs/ksi_mapping.md`](docs/ksi_mapping.md) | Which fetchers map to which FedRAMP KSIs, per indicator and per fetcher, plus open gaps |
 | [`docs/run_manifest_reference.md`](docs/run_manifest_reference.md) | Manifest format reference |

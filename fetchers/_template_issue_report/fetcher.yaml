@@ -1,0 +1,59 @@
+# Template issue-report fetcher.yaml. Copy this directory to
+# fetchers/<category>/<short_name>/ and fill in the placeholders.
+#
+# An ISSUE REPORT is not evidence. It is the scan report a tool already produces
+# — a Nessus export, a Wiz findings CSV, a SentinelOne JSON — handed to Paramify's
+# assessment intake, which parses it into issues. See docs/issue_report_fetchers.md.
+#
+# Use `kind: evidence` (the default, see ../_template/) when you are asserting a
+# configuration state. Use this template when you are handing over a list of
+# findings the vendor already computed.
+#
+# Validated against framework/schemas/fetcher_schema.json.
+
+name: <category>_<short_name>            # globally unique (e.g. tenable_vuln_scan)
+version: 0.1.0
+description: <what report this pulls, from which tool, covering what scope>
+category: <category>                      # matches the parent directory
+
+kind: issue_report                        # the one line that makes this a report
+
+runtime:
+  type: python                            # or bash
+  entry: fetcher.py
+
+output:
+  # The format the TOOL emits — never a format you convert to. Intake accepts
+  # csv, json, xml, and nessus. This is also the MIME type the uploader sends.
+  type: csv
+  # Filename only, no directory: the runner points EVIDENCE_DIR at
+  # <run>/issue-reports/ for you. Keep the tool's own extension (.nessus stays
+  # .nessus — Paramify picks its parser from it).
+  path: <category>_<short_name>.csv
+
+secrets:
+  - name: api_token
+    env: <UPPER_SNAKE_ENV_VAR>
+    description: <what this credential is, and where to get it>
+  # Same rules as an evidence fetcher: one entry per env var read, `required:
+  # false` for the ambient-identity case, and category-wide credentials go in
+  # fetchers/_categories/<category>.yaml instead. Anything this fetcher needs
+  # installed must be declared in that category file's `requires:` block.
+
+issue_report:
+  # Which kind of Paramify assessment this report feeds. VULNERABILITY for scan
+  # results, CONFIGURATION for posture/CSPM findings. This filters the assessment
+  # picker, so getting it right means a CSPM report can never be pointed at a
+  # vulnerability assessment.
+  assessment_type: VULNERABILITY
+  # Artifact title in Paramify. Optional — defaults to the filename. A per-target
+  # run gets the target identifier appended automatically.
+  title: <e.g. Monthly Nessus Scan>
+
+# NOTE: no `evidence_set` block. An issue report goes to an assessment, not an
+# evidence set, and declaring both is refused at discovery. Which assessment is a
+# per-customer choice that lives in the manifest — set it with
+# `paramify assessments select <name>`, never here.
+#
+# NOTE: no `validators` either. A validator regex is matched against an evidence
+# payload; a scan report's findings are Paramify's to interpret.
