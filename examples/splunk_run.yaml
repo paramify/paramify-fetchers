@@ -1,0 +1,48 @@
+# The Splunk fetchers against a real deployment.
+#
+# The management API is on port 8089 — not the 8000 web UI. On Splunk Cloud it
+# is a separate hostname and must be enabled through support.
+#
+#   export SPLUNK_TOKEN=...          # Settings > Tokens, in the Splunk UI
+#   paramify run examples/splunk_run.yaml
+#
+# A token is the right credential: it carries the creating user's roles, can be
+# given an expiry, and is revocable without changing a password. Username and
+# password are the fallback for a fresh install that has not enabled tokens yet.
+#
+# ca_bundle should point at the CA that signed the Splunk certificate. Splunk's
+# stock certificate is self-signed, so without it the run either fails
+# verification or has to set verify_ssl false — and whichever way that resolves
+# is recorded in the evidence for an assessor to see.
+
+run:
+  output_dir: ./evidence
+  fetchers:
+    - use: splunk_indexes
+      secrets:
+        token: ${env:SPLUNK_TOKEN}
+      config:
+        base_url: https://splunk.internal.example.com:8089
+        ca_bundle: /etc/ssl/certs/internal-ca.pem
+
+    - use: splunk_saved_searches
+      secrets:
+        token: ${env:SPLUNK_TOKEN}
+      config:
+        base_url: https://splunk.internal.example.com:8089
+        ca_bundle: /etc/ssl/certs/internal-ca.pem
+
+    - use: splunk_users_roles
+      secrets:
+        token: ${env:SPLUNK_TOKEN}
+      config:
+        base_url: https://splunk.internal.example.com:8089
+        ca_bundle: /etc/ssl/certs/internal-ca.pem
+        dormant_days: "90"
+
+    - use: splunk_fired_alerts
+      secrets:
+        token: ${env:SPLUNK_TOKEN}
+      config:
+        base_url: https://splunk.internal.example.com:8089
+        ca_bundle: /etc/ssl/certs/internal-ca.pem

@@ -1,0 +1,38 @@
+# Offline rehearsal of the Splunk fetchers against the local test double — no
+# Splunk deployment, no credentials, no network egress.
+#
+#   python tools/splunk_mock.py --port 8899
+#   export SPLUNK_TOKEN=mock-token
+#   paramify run examples/splunk_mock_run.yaml
+#
+# base_url MUST be set here rather than exported. The runner passes only
+# declared secrets and config through to a fetcher and strips everything else,
+# so an exported SPLUNK_BASE_URL is dropped and the fetcher falls back to
+# https://localhost:8089.
+
+run:
+  output_dir: ./evidence
+  fetchers:
+    - use: splunk_indexes
+      secrets:
+        token: ${env:SPLUNK_TOKEN}
+      config:
+        base_url: http://127.0.0.1:8899
+
+    - use: splunk_saved_searches
+      secrets:
+        token: ${env:SPLUNK_TOKEN}
+      config:
+        base_url: http://127.0.0.1:8899
+
+    - use: splunk_users_roles
+      secrets:
+        token: ${env:SPLUNK_TOKEN}
+      config:
+        base_url: http://127.0.0.1:8899
+
+    - use: splunk_fired_alerts
+      secrets:
+        token: ${env:SPLUNK_TOKEN}
+      config:
+        base_url: http://127.0.0.1:8899

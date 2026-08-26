@@ -1,0 +1,94 @@
+name: splunk_indexes
+version: 0.1.0
+description: >-
+  Pulls every index on a Splunk deployment from the management REST API with
+  its retention period, freeze/archival behaviour, event volume and per-index
+  data integrity control — evidencing that a SIEM is operating as the
+  centralized, tamper-resistant log store.
+category: splunk
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 600
+
+output:
+  type: json
+  path: splunk_indexes.json
+
+# Either a token, or a username and password. All three are optional secrets:
+# the fetcher needs one of the two mechanisms, and the runner injects only what
+# the manifest supplies.
+#
+# The token is the credential to prefer — it carries the creating user's roles,
+# can be given an expiry, and is revocable without changing anyone's password.
+# The username/password path exists because token authentication is **off by
+# default** in Splunk Enterprise (Settings > Tokens > Enable Token
+# Authentication), so a fresh install cannot use a token until someone turns it
+# on. The fetcher prefers the token when both are supplied.
+secrets:
+  - name: token
+    env: SPLUNK_TOKEN
+    required: false
+    description: >-
+      Splunk authentication token (a JWT). Preferred. Create at
+      Settings > Tokens; token auth must be enabled there first.
+  - name: username
+    env: SPLUNK_USERNAME
+    required: false
+    description: >-
+      Username for the session-login fallback. Use with password when token
+      authentication is not enabled on the deployment.
+  - name: password
+    env: SPLUNK_PASSWORD
+    required: false
+    description: Password for the session-login fallback. Use with username.
+
+config_schema:
+  base_url:
+    type: string
+    required: false
+    env: SPLUNK_BASE_URL
+    description: >-
+      Splunk management API base URL, including the port — the management port
+      is 8089, not the 8000 web UI. Defaults to https://localhost:8089.
+  ca_bundle:
+    type: string
+    required: false
+    env: SPLUNK_CA_BUNDLE
+    description: >-
+      Path to the CA bundle that signed the Splunk certificate. Splunk ships a
+      self-signed certificate, so set this to verify it properly.
+  verify_ssl:
+    type: string
+    required: false
+    env: SPLUNK_VERIFY_SSL
+    description: >-
+      Set false to skip TLS verification against a self-signed Splunk
+      certificate. Whichever way this resolves is recorded in the evidence, so
+      an assessor can see whether the server was authenticated.
+
+evidence_set:
+  reference_id: EVD-SPLK-INDEXES
+  name: Splunk Index Configuration
+  instructions: >-
+    Script: fetcher.py. Authenticates with a bearer token (SPLUNK_TOKEN), or
+    by POST /services/auth/login when only a username and password are set.
+    Reads GET /services/server/info for the version and server roles, then
+    pages GET /services/data/indexes with output_mode=json and explicit
+    count/offset. Extracts per index: enabled state, datatype,
+    enableDataIntegrityControl, frozenTimePeriodInSecs, coldToFrozenDir /
+    coldToFrozenScript, totalEventCount, currentDBSizeMB and
+    maxTotalDataSizeMB. Summarizes which indexes have data integrity control
+    on, the retention configured for each, which archive rather than delete on
+    freeze, and which have received no events.
+  description: >-
+    Index configuration from a Splunk deployment, evidencing a centralized log
+    store with defined retention and, where data integrity control is enabled,
+    cryptographic tamper-evidence over the stored data.
+
+ksis:
+  - KSI-MLA-OSM
+  - KSI-SVC-VRI

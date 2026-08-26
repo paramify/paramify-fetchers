@@ -42,6 +42,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | **SentinelOne** | 5 | Agents, activities, cloud detection rules, XDR assets, user config |
 | **KnowBe4** | 4 | Security-awareness, high-risk, developer, and module-based training summaries |
 | **GitLab** | 4 | CI/CD pipeline config, merge-request and project summaries, significant change notifications |
+| **Splunk** | 4 | Index retention, archival and per-index cryptographic integrity; saved searches and alerts with their schedules and notification routing; accounts and roles with log-data access; alerts that actually fired |
 | **Kubernetes** | 3 | EKS pod inventory, microservice segmentation, `kubectl` security posture |
 | **Rippling** | 3 | Employee roster, current employees, managed devices |
 | **Checkov** | 2 | IaC scans over cloned Terraform / Kubernetes source |
@@ -541,6 +542,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`fetchers/gitlab/README.md`](fetchers/gitlab/README.md) | GitLab project access token setup |
 | [`fetchers/sentinelone/README.md`](fetchers/sentinelone/README.md) | SentinelOne service user + API token |
 | [`fetchers/knowbe4/README.md`](fetchers/knowbe4/README.md) | KnowBe4 Reporting API key |
+| [`fetchers/splunk/README.md`](fetchers/splunk/README.md) | Splunk management API tokens, capabilities, TLS, and the port 8089 gotcha |
 | [`fetchers/rippling/README.md`](fetchers/rippling/README.md) | Rippling Developer Hub token + scopes |
 | [`fetchers/k8s/README.md`](fetchers/k8s/README.md) | Kubernetes / EKS credential setup |
 | [`fetchers/checkov/README.md`](fetchers/checkov/README.md) | Checkov setup + git token for IaC scanning |
