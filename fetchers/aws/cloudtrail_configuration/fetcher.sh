@@ -68,8 +68,22 @@ if [ "$(echo "$trails" | jq 'length')" -gt 0 ]; then
         trail_name=$(echo "$trail" | jq -r '.[0]')
         trail_arn=$(echo "$trail" | jq -r '.[1]')
 
+        # Address the trail by ARN, not by name. `list-trails` returns every trail
+        # visible to this account, which in an AWS Organization includes the shadow
+        # copy of an organization trail OWNED BY THE MANAGEMENT ACCOUNT. A bare
+        # --name is resolved against the CALLER's account, so for that trail it
+        # fails with TrailNotFoundException ("Unknown trail: arn:aws:cloudtrail:
+        # <region>:<caller-account>:trail/<name>") even though list-trails just
+        # named it and the caller can read it. The ARN carries the owning account,
+        # so it resolves in both cases. Fall back to the name only if list-trails
+        # somehow returned no ARN.
+        case "$trail_arn" in
+            ""|null) trail_ref="$trail_name" ;;
+            *)       trail_ref="$trail_arn" ;;
+        esac
+
         # Get trail details
-        trail_details=$(aws cloudtrail get-trail --name "$trail_name" --output json 2>/dev/null)
+        trail_details=$(aws cloudtrail get-trail --name "$trail_ref" --output json 2>/dev/null)
         ec=$?
         if [ $ec -ne 0 ] || [ -z "$trail_details" ] || ! echo "$trail_details" | jq . >/dev/null 2>&1; then
             echo "aws cloudtrail get-trail failed for $trail_name (exit=$ec)" >> "$_FAILURE_LOG"
@@ -77,7 +91,7 @@ if [ "$(echo "$trails" | jq 'length')" -gt 0 ]; then
         fi
 
         # Get trail status
-        trail_status=$(aws cloudtrail get-trail-status --name "$trail_name" --output json 2>/dev/null)
+        trail_status=$(aws cloudtrail get-trail-status --name "$trail_ref" --output json 2>/dev/null)
         ec=$?
         if [ $ec -ne 0 ] || [ -z "$trail_status" ] || ! echo "$trail_status" | jq . >/dev/null 2>&1; then
             echo "aws cloudtrail get-trail-status failed for $trail_name (exit=$ec)" >> "$_FAILURE_LOG"
@@ -214,6 +228,9 @@ jq --argjson summary "$summary_json" '.results.summary = $summary' "$OUTPUT_JSON
 failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
 failure_count=${failure_count:-0}
 if [ "$failure_count" -gt 0 ]; then
+    # Report WHICH calls failed before the log is discarded on exit; the count
+    # alone cannot be acted on. See aws_report_failures in ../_shared/aws.sh.
+    aws_report_failures "$_FAILURE_LOG" "$failure_count"
     log_error "Encountered $failure_count AWS API failures during collection"
     exit 1
 fi

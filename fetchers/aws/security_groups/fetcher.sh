@@ -52,7 +52,7 @@ if [ $list_exit -ne 0 ]; then
     echo "aws ec2 describe-security-groups (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list security groups"
 else
-    for sg_id in $sg_ids; do
+    for sg_id in $(aws_text_list "$sg_ids"); do
         group_data=$(jq -n --arg id "$sg_id" '{"GroupId": $id, "Rules": []}')
 
         for direction in inbound outbound; do
@@ -89,6 +89,9 @@ fi
 failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
 failure_count=${failure_count:-0}
 if [ "$failure_count" -gt 0 ]; then
+    # Report WHICH calls failed before the log is discarded on exit; the count
+    # alone cannot be acted on. See aws_report_failures in ../_shared/aws.sh.
+    aws_report_failures "$_FAILURE_LOG" "$failure_count"
     log_error "Encountered $failure_count AWS API failures during collection"
     exit 1
 fi

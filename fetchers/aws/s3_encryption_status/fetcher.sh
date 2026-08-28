@@ -52,7 +52,7 @@ if [ $list_exit -ne 0 ]; then
     echo "aws s3api list-buckets failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list S3 buckets"
 else
-    for bucket in $bucket_names; do
+    for bucket in $(aws_text_list "$bucket_names"); do
         total_buckets=$((total_buckets + 1))
 
         if encryption_config=$(aws s3api get-bucket-encryption --bucket "$bucket" 2>/dev/null); then
@@ -100,6 +100,9 @@ jq -n \
 failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
 failure_count=${failure_count:-0}
 if [ "$failure_count" -gt 0 ]; then
+    # Report WHICH calls failed before the log is discarded on exit; the count
+    # alone cannot be acted on. See aws_report_failures in ../_shared/aws.sh.
+    aws_report_failures "$_FAILURE_LOG" "$failure_count"
     log_error "Encountered $failure_count AWS API failures during collection"
     exit 1
 fi

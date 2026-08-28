@@ -51,7 +51,7 @@ if [ $inst_list_exit -ne 0 ]; then
     echo "aws rds describe-db-instances (list) failed (exit=$inst_list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list RDS instances"
 else
-    for instance in $instances; do
+    for instance in $(aws_text_list "$instances"); do
         total_databases=$((total_databases + 1))
         instance_details=$(aws rds describe-db-instances --db-instance-identifier "$instance" 2>/dev/null)
         if [ $? -ne 0 ]; then
@@ -75,7 +75,7 @@ if [ $clus_list_exit -ne 0 ]; then
     echo "aws rds describe-db-clusters (list) failed (exit=$clus_list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list RDS Aurora clusters"
 else
-    for cluster in $clusters; do
+    for cluster in $(aws_text_list "$clusters"); do
         total_databases=$((total_databases + 1))
         cluster_details=$(aws rds describe-db-clusters --db-cluster-identifier "$cluster" 2>/dev/null)
         if [ $? -ne 0 ]; then
@@ -117,6 +117,9 @@ jq -n \
 failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
 failure_count=${failure_count:-0}
 if [ "$failure_count" -gt 0 ]; then
+    # Report WHICH calls failed before the log is discarded on exit; the count
+    # alone cannot be acted on. See aws_report_failures in ../_shared/aws.sh.
+    aws_report_failures "$_FAILURE_LOG" "$failure_count"
     log_error "Encountered $failure_count AWS API failures during collection"
     exit 1
 fi

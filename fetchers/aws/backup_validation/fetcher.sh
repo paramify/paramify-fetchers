@@ -26,7 +26,8 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_backup_validation_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_backup_validation.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_backup_validation_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
+_RDS_RESULTS="$(mktemp -t aws_backup_validation_rds.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_RDS_RESULTS"' EXIT
 
 log_info() { printf '%s INFO aws_backup_validation %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_backup_validation %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -75,7 +76,14 @@ fi
 if [ "$(echo "$rds_instances" | jq -r 'length')" -gt 0 ]; then
     log_info "Found $(echo "$rds_instances" | jq -r 'length') RDS instances"
     # Build all RDS_Backup results in one jq pass (transform JSON, merge once)
-    rds_results_json="$(echo "$rds_instances" | jq -c '
+    # Written to a file, NOT a shell variable: each element embeds the entire
+    # describe-db-instances object as InstanceInfo, so the array runs to hundreds
+    # of KB in an account with a few dozen instances. Passing that to jq through
+    # --argjson puts it in argv, which blows the kernel's per-argument limit
+    # (MAX_ARG_STRLEN, 128 KiB) and fails the merge with "Argument list too long"
+    # — losing every RDS result while the rest of the scan appears to succeed.
+    # --slurpfile below reads it from the file, which has no size limit.
+    echo "$rds_instances" | jq -c '
       map(
         . as $inst
         | {
@@ -97,10 +105,10 @@ if [ "$(echo "$rds_instances" | jq -r 'length')" -gt 0 ]; then
             InstanceInfo: $inst
           }
       )
-    ')"
+    ' > "$_RDS_RESULTS"
 
     tmp_out="$(mktemp "${OUTPUT_DIR%/}/.${COMPONENT}.rds_merge.XXXXXX")"
-    jq --argjson rds "$rds_results_json" '.results += $rds' "$OUTPUT_JSON" > "$tmp_out" \
+    jq --slurpfile rds "$_RDS_RESULTS" '.results += ($rds[0] // [])' "$OUTPUT_JSON" > "$tmp_out" \
       && mv "$tmp_out" "$OUTPUT_JSON" \
       || {
         rm -f "$tmp_out" 2>/dev/null || true
@@ -256,6 +264,9 @@ jq --arg rds_backups "$rds_with_backups" \
 failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
 failure_count=${failure_count:-0}
 if [ "$failure_count" -gt 0 ]; then
+    # Report WHICH calls failed before the log is discarded on exit; the count
+    # alone cannot be acted on. See aws_report_failures in ../_shared/aws.sh.
+    aws_report_failures "$_FAILURE_LOG" "$failure_count"
     log_error "Encountered $failure_count AWS API failures during collection"
     exit 1
 fi

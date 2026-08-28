@@ -72,3 +72,11 @@ auth:
     - AWS_ROLE_SESSION_NAME
     - AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
     - AWS_CONTAINER_CREDENTIALS_FULL_URI
+    # Retry/throttling tuning. A large-inventory account (thousands of volumes,
+    # hundreds of auto-scaling groups) throttles the per-resource describe calls
+    # long before it runs out of permissions, and the CLI's default of 3 attempts
+    # surfaces that as an opaque "Rate exceeded" collection failure. _shared/aws.sh
+    # raises the default to adaptive/10 for every AWS fetcher; these let an
+    # operator tune it per environment, and an explicit value always wins.
+    - AWS_RETRY_MODE
+    - AWS_MAX_ATTEMPTS

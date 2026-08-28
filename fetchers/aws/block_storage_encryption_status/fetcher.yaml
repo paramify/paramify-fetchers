@@ -8,6 +8,10 @@ supports_targets: true
 runtime:
   type: bash
   entry: fetcher.sh
+  # one describe-volumes per EBS volume; 1171s observed across 628 volumes.
+  # The 600s default kills the sweep mid-collection, which yields no evidence
+  # at all rather than a partial scan.
+  timeout: 1800
 
 output:
   type: json

@@ -61,7 +61,7 @@ if [ $? -ne 0 ]; then
     echo "aws ec2 describe-volumes (list) failed" >> "$_FAILURE_LOG"
     log_error "Failed to list EBS volumes"
 else
-    for volume in $volume_ids; do
+    for volume in $(aws_text_list "$volume_ids"); do
         total_storage=$((total_storage + 1))
         volume_details=$(aws ec2 describe-volumes --volume-ids "$volume" 2>/dev/null)
         if [ $? -ne 0 ]; then
@@ -85,7 +85,7 @@ if [ $? -ne 0 ]; then
     echo "aws efs describe-file-systems (list) failed" >> "$_FAILURE_LOG"
     log_error "Failed to list EFS file systems"
 else
-    for fs in $fs_ids; do
+    for fs in $(aws_text_list "$fs_ids"); do
         total_storage=$((total_storage + 1))
         fs_details=$(aws efs describe-file-systems --file-system-id "$fs" 2>/dev/null)
         if [ $? -ne 0 ]; then
@@ -131,6 +131,9 @@ jq -n \
 failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
 failure_count=${failure_count:-0}
 if [ "$failure_count" -gt 0 ]; then
+    # Report WHICH calls failed before the log is discarded on exit; the count
+    # alone cannot be acted on. See aws_report_failures in ../_shared/aws.sh.
+    aws_report_failures "$_FAILURE_LOG" "$failure_count"
     log_error "Encountered $failure_count AWS API failures during collection"
     exit 1
 fi
