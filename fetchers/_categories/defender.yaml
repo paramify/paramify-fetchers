@@ -1,0 +1,100 @@
+description: >-
+  Microsoft Defender for Endpoint (MDE). Device onboarding coverage, sensor
+  health, and antivirus signature currency across the managed endpoint fleet.
+  One Entra app registration per tenant, or an ambient Azure identity granted the
+  MDE application roles.
+
+# Defender for Endpoint is a different product from Defender for Cloud. Defender
+# for Cloud is an Azure Resource Manager surface scoped to a subscription and its
+# fetchers live under the `azure` category (azure_defender_plans). MDE is
+# licensed through Microsoft 365, has no subscription, and answers on its own
+# REST API — so it gets its own category rather than inheriting azure's
+# subscription-shaped targets and its twenty-odd azure-mgmt-* preflight.
+#
+# The fetchers are python (requests) against the MDE REST API. They authenticate
+# with azure-identity's DefaultAzureCredential and exchange it for a token scoped
+# to the MDE resource, so the credential chain is the same one the azure category
+# documents:
+#   1. Environment service principal — AZURE_TENANT_ID + AZURE_CLIENT_ID +
+#      AZURE_CLIENT_SECRET. A stored secret, so the least-preferred path; declared
+#      below so a customer who already keeps an app registration in their own
+#      secret store can opt it in per run.
+#   2. Workload identity federation — AZURE_TENANT_ID + AZURE_CLIENT_ID +
+#      AZURE_FEDERATED_TOKEN_FILE. No stored secret; recommended in-cluster.
+#   3. Managed identity via IMDS — IDENTITY_ENDPOINT / IDENTITY_HEADER /
+#      MSI_ENDPOINT. No stored secret; recommended on Azure compute. The managed
+#      identity must be granted the MDE app role, same as any other principal.
+#   4. Azure CLI cached login — the local dev-loop path (`az login`), needs no
+#      env var at all. Works only if the signed-in user holds a Defender role.
+#
+# Whichever path authenticates, the principal needs the MDE application
+# permission the fetcher declares in its evidence_set instructions
+# (Machine.Read.All for the device fetchers), admin-consented in Entra. A
+# credential that authenticates without the app role gets a 403, which the
+# fetchers report as code `not_authorized` rather than as an auth failure —
+# the distinction matters because the fix is a consent grant, not a new secret.
+
+config_schema:
+  api_base_url:
+    type: string
+    required: false
+    default: https://api.securitycenter.microsoft.com
+    env: DEFENDER_API_BASE_URL
+    description: >
+      MDE service endpoint for the tenant's cloud. Commercial is the default; US
+      GCC is https://api-gcc.securitycenter.microsoft.us and GCC High / DoD is
+      https://api-gov.securitycenter.microsoft.us. The OAuth scope is derived
+      from this value, so pointing it at a sovereign cloud is the only change the
+      fetcher needs — pair it with
+      AZURE_AUTHORITY_HOST=https://login.microsoftonline.us so the credential
+      authenticates against the government Entra endpoint too. Worth setting
+      deliberately: CMMC and DFARS work commonly runs in GCC High, where the
+      commercial default authenticates and then returns an empty fleet.
+
+# The service-principal path, declared so it is visible in `paramify describe`
+# and the TUI instead of the category reporting that it needs nothing. All three
+# are optional: supply them together to authenticate with a stored credential, or
+# omit all three and DefaultAzureCredential falls through to workload identity
+# federation, managed identity, or a cached `az login`. Declaring them mandatory
+# is the mistake — it fails `paramify validate` for every manifest that
+# authenticates through an ambient identity.
+secrets:
+  - name: tenant_id
+    env: AZURE_TENANT_ID
+    required: false
+    description: >
+      Entra tenant (GUID) hosting the Defender for Endpoint subscription.
+      Required for the service-principal and workload-identity-federation paths;
+      not a secret, but supplied alongside the client credentials.
+  - name: client_id
+    env: AZURE_CLIENT_ID
+    required: false
+    description: >
+      Application (client) id of the app registration or user-assigned managed
+      identity holding the MDE app roles. Not a secret; identifies which
+      principal to authenticate as.
+  - name: client_secret
+    env: AZURE_CLIENT_SECRET
+    required: false
+    description: >
+      App registration client secret — the only stored credential MDE needs.
+      Provide with tenant_id and client_id, or omit all three to use an ambient
+      identity instead.
+
+# requests and python-dotenv are framework core dependencies, so they need no
+# declaration here (see tests/test_category_requires.py). azure-identity is not;
+# doctor checks it against the pin in requirements.txt.
+requires:
+  python_packages:
+    - azure-identity
+
+auth:
+  passthrough_env:
+    - AZURE_TENANT_ID
+    - AZURE_CLIENT_ID
+    - AZURE_CLIENT_SECRET
+    - AZURE_FEDERATED_TOKEN_FILE
+    - AZURE_AUTHORITY_HOST
+    - MSI_ENDPOINT
+    - IDENTITY_ENDPOINT
+    - IDENTITY_HEADER

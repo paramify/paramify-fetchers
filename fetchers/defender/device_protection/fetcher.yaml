@@ -1,0 +1,106 @@
+name: defender_device_protection
+version: 0.1.0
+description: >
+  Every device Microsoft Defender for Endpoint knows about, with the four facts
+  that show endpoint protection is actually operating rather than merely
+  licensed: whether the device is onboarded to the MDE sensor, whether that
+  sensor is reporting (health) and how recently, whether its antivirus signatures
+  are current, and what agent version it runs. Summarised into fleet counters —
+  devices not onboarded, sensors inactive, signatures out of date, devices unseen
+  for 30 days — alongside the per-device records the counters are derived from.
+  A tenant that returns no devices reports device_count 0 with
+  fleet_empty true, which is a finding to investigate (wrong cloud endpoint,
+  wrong tenant, no MDE licence) rather than a clean fleet.
+category: defender
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: defender_device_protection.json
+
+secrets: []          # DefaultAzureCredential only — see _categories/defender.yaml
+
+config_schema:
+  stale_after_days:
+    type: integer
+    required: false
+    default: 30
+    env: DEFENDER_STALE_AFTER_DAYS
+    description: >
+      How many days without a sensor check-in before a device counts as stale in
+      the summary. Does not filter the device list — every device is reported
+      either way; this only sets the threshold the stale counter uses.
+
+ksis:
+  - KSI-PIY-GIV      # Real-time inventory of information resources — the device fleet, from the authoritative EDR
+  - KSI-CNA-EIS      # Automated services persistently assess machine-based resources — the MDE sensor doing so continuously
+
+validators:
+  - id: mde_fleet_not_empty
+    regex: '"fleet_empty":\s*false'
+    proves: >
+      Defender for Endpoint returned at least one device, so the counters below
+      are assertions about a real fleet. This validator exists because every
+      other check in this set is a count-equals-zero assertion, and an empty
+      response satisfies all of them at once — a tenant pointed at the wrong
+      cloud endpoint would otherwise produce a perfect score with no evidence
+      behind it. Check this one first; the rest mean nothing without it.
+    failure_modes:
+      - DEFENDER_API_BASE_URL left at the commercial default while the tenant is GCC High or DoD
+      - Credential authenticated against a tenant with no Defender for Endpoint licence
+      - App registration scoped to an RBAC device group that contains no machines
+  - id: mde_all_devices_onboarded
+    regex: '"not_onboarded_count":\s*0'
+    proves: >
+      Every device Defender can see is onboarded to the MDE sensor — malicious
+      code protection is deployed across the fleet, not just on part of it.
+      Speaks to CMMC SI.L1-b.1.XII (NIST 800-171 3.14.2), which asks for
+      protection at the points where malicious code enters, and to CM.L2-3.4.1,
+      which needs the inventory this fetcher's device list provides.
+    failure_modes:
+      - Devices discovered by network scan that were never onboarded (onboardingStatus CanBeOnboarded)
+      - A platform the sensor cannot run on lands in unsupported_count instead, so this
+        validator passes while the coverage gap is real — read onboarding_coverage_pct beside it
+      - Decommissioned machines Defender has not aged out yet
+  - id: mde_av_signatures_current
+    regex: '"av_signature_not_updated_count":\s*0'
+    proves: >
+      No device is running out-of-date antivirus definitions. This is the
+      updating half of malicious code protection — CMMC SI.L1-b.1.XIII (NIST
+      800-171 3.14.4) — which deployment coverage alone does not demonstrate: a
+      fully onboarded fleet on stale signatures is protected against last
+      month's threats.
+    failure_modes:
+      - Devices offline long enough to miss definition updates
+      - Update channel blocked by a proxy or firewall rule
+      - Third-party antivirus in control, leaving Defender AV passive and its status unknown
+  - id: mde_sensors_reporting
+    regex: '"health_inactive_count":\s*0'
+    proves: >
+      Every onboarded sensor is actively reporting to the Defender service, so
+      the monitoring is live rather than nominally configured — CMMC
+      SI.L2-3.14.6 and SI.L2-3.14.7, which ask that systems be monitored for
+      attacks and unauthorised use. An inactive sensor is a monitoring blind
+      spot that an onboarding count will not reveal.
+    failure_modes:
+      - Machine powered off or off the network for the reporting window
+      - Sensor service stopped or corrupted on the endpoint
+      - Devices retired without being offboarded, which report inactive indefinitely
+
+evidence_set:
+  reference_id: EVD-DEFENDER-DEVICE-PROTECTION
+  name: Microsoft Defender for Endpoint Device Protection
+  instructions: >
+    Script: fetchers/defender/device_protection/fetcher.py. Authenticates with
+    azure-identity DefaultAzureCredential, exchanging it for a token scoped to
+    the MDE resource ({api_base_url}/.default). Calls GET
+    {api_base_url}/api/machines, following @odata.nextLink until the fleet is
+    exhausted, and projects each record to its identity, platform, onboarding
+    status, health status, Defender AV status, agent version and last-seen
+    timestamp. Requires the Machine.Read.All application permission,
+    admin-consented on the app registration or managed identity used.
