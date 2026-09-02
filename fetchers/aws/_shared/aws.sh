@@ -58,3 +58,98 @@ aws_text_list() {
     *) printf '%s' "$1" ;;
   esac
 }
+
+# --------------------------------------------------------------------------- #
+# Failure reporting -- $FETCHER_STATUS_FILE
+#
+# Every AWS fetcher accumulates failures in a $_FAILURE_LOG temp file, counts the
+# lines, and exits 1. The COUNT reaches the runner (as an ERROR log line); the
+# recorded causes do not -- the temp file is dropped by the EXIT trap. So the
+# envelope's metadata.error falls back to the tail of stderr, which is that
+# count, and a triager learns "3 API failures" and nothing about which call or
+# why. These helpers hand the runner the causes instead.
+#
+# The runner redacts every injected secret out of what it reads here
+# (framework/runner/executor.py:_read_status_file), which is why raw AWS stderr
+# is safe to pass through -- that was the concern that motivated 2>/dev/null.
+# --------------------------------------------------------------------------- #
+
+# The contract's closed set of `code` values (docs/fetcher_contract.md).
+# Deliberately no "not_enabled": a service that is not in use is valid evidence
+# and exits 0 (see aws_service_unavailable), so it never reports a failure code.
+
+# aws_classify_code <file> -- echoes the contract `code` for the AWS error text in
+# <file>, else "partial_failure". Ordered most-specific-first and matched against
+# the whole file, so a run whose real problem is an expired credential is not
+# reported as a generic partial failure just because a later call also 403'd.
+aws_classify_code() {
+  local f="${1:-/dev/null}"
+  [ -s "$f" ] || { printf 'partial_failure'; return 0; }
+  if grep -qiE 'ExpiredToken|InvalidClientTokenId|UnrecognizedClientException|SignatureDoesNotMatch|InvalidUserID\.NotFound|Unable to locate credentials|The security token included in the request is (expired|invalid)|NoCredentialProviders|sso session .* is expired' "$f"; then
+    printf 'auth_failed'
+  elif grep -qiE 'AccessDenied|UnauthorizedOperation|not authorized to perform|AuthorizationError|explicit deny|\(403\)' "$f"; then
+    printf 'not_authorized'
+  elif grep -qiE 'Throttling|ThrottlingException|TooManyRequests|RequestLimitExceeded|SlowDown|Rate exceeded|\(429\)' "$f"; then
+    printf 'rate_limited'
+  elif grep -qiE 'Could not connect to the endpoint URL|EndpointConnectionError|ConnectTimeoutError|ReadTimeoutError|Connection was closed|Name or service not known|temporary failure in name resolution|\(50[34]\)' "$f"; then
+    printf 'target_unreachable'
+  elif grep -qiE 'InvalidParameterValue|ValidationError|ValidationException|MalformedPolicyDocument|Invalid region|Could not connect to the endpoint URL for|Invalid( |-)?ARN|InvalidInput' "$f"; then
+    printf 'bad_config'
+  else
+    printf 'partial_failure'
+  fi
+}
+
+# aws_status_write <error> [code] -- report the failure reason to the runner.
+# A no-op when the runner set no status file. Never fails the run: the exit code
+# stays authoritative, so a missing jq or an unwritable path is swallowed, the
+# same guarantee the Python helpers give (azure_common.write_status).
+aws_status_write() {
+  local error="$1" code="${2:-}" path="${FETCHER_STATUS_FILE:-}"
+  [ -n "$path" ] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  # Collapse to one line: AWS errors wrap, and `error` is a single-line field.
+  error="$(printf '%s' "$error" | tr '\n\r\t' '   ' | tr -s ' ' | sed 's/^ *//;s/ *$//')"
+  [ -n "$error" ] || error="collection failed"
+  if [ -n "$code" ]; then
+    jq -n --arg e "$error" --arg c "$code" '{error:$e, code:$c}' > "$path" 2>/dev/null || return 0
+  else
+    jq -n --arg e "$error" '{error:$e}' > "$path" 2>/dev/null || return 0
+  fi
+}
+
+# aws_report_failures <failure-log> [max-lines] -- classify what is in the log,
+# write it to the status file, and echo the human count. The caller keeps its
+# own log_error/exit; this only adds the machine-readable channel.
+# Reports the FIRST failures, not the last: the first is usually the cause and
+# the rest its consequences (a failed list call makes every per-item call fail).
+aws_report_failures() {
+  local log="${1:-/dev/null}" max="${2:-3}" n first
+  n=$(wc -l < "$log" 2>/dev/null | tr -d ' '); n=${n:-0}
+  [ "$n" -gt 0 ] || return 0
+  # awk, not `tr '\n' ';'`: tr maps one char to one char, so it cannot emit the
+  # "; " separator, and it leaves a trailing one before the "(+N more)" suffix.
+  first="$(head -n "$max" "$log" | awk '{printf "%s%s", sep, $0; sep="; "}')"
+  [ "$n" -gt "$max" ] && first="${first}; (+$((n - max)) more)"
+  aws_status_write "$n AWS API failure(s); first: $first" "$(aws_classify_code "$log")"
+}
+
+# aws_call <failure-log> <label> -- run an AWS CLI command with stderr CAPTURED
+# rather than discarded: stdout passes through, and on a non-zero exit the
+# stderr text is appended to <failure-log> under <label>. Replaces the
+# `cmd 2>/dev/null` / `echo "<label> failed" >> "$_FAILURE_LOG"` pair, which
+# recorded that a call failed but never why. Returns the command's exit code.
+#   out=$(aws_call "$_FAILURE_LOG" "s3api list-buckets" aws s3api list-buckets)
+aws_call() {
+  local log="$1" label="$2"; shift 2
+  local err ec
+  err="$(mktemp -t aws_call_err.XXXXXX)"
+  "$@" 2>"$err"
+  ec=$?
+  if [ $ec -ne 0 ]; then
+    printf '%s failed (exit=%s): %s\n' \
+      "$label" "$ec" "$(tr '\n\r\t' '   ' < "$err" | tr -s ' ' | cut -c1-500)" >> "$log"
+  fi
+  rm -f "$err"
+  return $ec
+}

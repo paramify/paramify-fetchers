@@ -33,9 +33,9 @@ trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
 log_info() { printf '%s INFO aws_guard_duty_findings %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_guard_duty_findings %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
-CALLER_IDENTITY=$(aws sts get-caller-identity --output json 2>/dev/null)
+CALLER_IDENTITY=$(aws_call "$_FAILURE_LOG" "aws sts get-caller-identity" \
+    aws sts get-caller-identity --output json)
 if [ $? -ne 0 ]; then
-    echo "aws sts get-caller-identity failed" >> "$_FAILURE_LOG"
     CALLER_IDENTITY='{"Account":"unknown","Arn":"unknown"}'
 fi
 ACCOUNT_ID=$(echo "$CALLER_IDENTITY" | jq -r '.Account // "unknown"')
@@ -95,22 +95,25 @@ echo "$detectors" | jq -r '.[]' | while read -r detector_id; do
     page=1
     while :; do
         if [ -n "$next_token" ]; then
-            page_result=$(aws guardduty list-findings \
+            page_result=$(aws_call "$_FAILURE_LOG" \
+                "aws guardduty list-findings ($detector_id page $page)" \
+                aws guardduty list-findings \
                 --detector-id "$detector_id" \
                 --finding-criteria "$CRITERIA" \
                 --max-results 50 \
                 --next-token "$next_token" \
-                --output json 2>/dev/null)
+                --output json)
         else
-            page_result=$(aws guardduty list-findings \
+            page_result=$(aws_call "$_FAILURE_LOG" \
+                "aws guardduty list-findings ($detector_id page $page)" \
+                aws guardduty list-findings \
                 --detector-id "$detector_id" \
                 --finding-criteria "$CRITERIA" \
                 --max-results 50 \
-                --output json 2>/dev/null)
+                --output json)
         fi
         ec=$?
         if [ $ec -ne 0 ]; then
-            echo "aws guardduty list-findings ($detector_id page $page) failed (exit=$ec)" >> "$_FAILURE_LOG"
             break
         fi
 
@@ -142,13 +145,14 @@ echo "$detectors" | jq -r '.[]' | while read -r detector_id; do
             chunk_args+=("$fid")
         done < <(echo "$chunk" | jq -r '.[]')
 
-        chunk_result=$(aws guardduty get-findings \
+        chunk_result=$(aws_call "$_FAILURE_LOG" \
+            "aws guardduty get-findings ($detector_id offset $i)" \
+            aws guardduty get-findings \
             --detector-id "$detector_id" \
             --finding-ids "${chunk_args[@]}" \
-            --output json 2>/dev/null)
+            --output json)
         ec=$?
         if [ $ec -ne 0 ]; then
-            echo "aws guardduty get-findings ($detector_id offset $i) failed (exit=$ec)" >> "$_FAILURE_LOG"
             i=$((i + 50))
             continue
         fi
@@ -185,6 +189,9 @@ failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
 failure_count=${failure_count:-0}
 
 if [ "$failure_count" -gt 0 ]; then
+    # The count goes to stderr for a human; the causes go to the status file so
+    # the envelope's metadata.error names the call that failed and why.
+    aws_report_failures "$_FAILURE_LOG"
     log_error "Encountered $failure_count API failures during collection"
     exit 1
 fi
