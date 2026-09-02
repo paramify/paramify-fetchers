@@ -74,7 +74,7 @@ azure-mgmt-containerregistry>=15.0.0,<16
 # models at all, so diagnostic_settings collects nothing.
 azure-mgmt-keyvault>=14.0.1,<15
 azure-keyvault-keys>=4.11.1,<5
-azure-mgmt-monitor>=6.0.2,<7
+azure-mgmt-monitor>=6.0.2,<8
 azure-mgmt-recoveryservices>=4.1.0,<5
 azure-mgmt-recoveryservicesbackup>=10.0.0,<11
 
