@@ -9,6 +9,10 @@
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The preflight below can exit before ../_shared/aws.sh is sourced, so the
+# status helper is sourced here: a config error must reach the runner via
+# $FETCHER_STATUS_FILE, not only stderr (docs/fetcher_contract.md § Output).
+source "$SCRIPT_DIR/../../_lib/status.sh"
 FEDRAMP_LOW_TEMPLATE="$SCRIPT_DIR/Operational-Best-Practices-for-FedRAMP-Low.yaml"
 FEDRAMP_MODERATE_TEMPLATE="$SCRIPT_DIR/Operational-Best-Practices-for-FedRAMP-Moderate.yaml"
 FEDRAMP_LOW_CONTROL_MAPPING="$SCRIPT_DIR/control_mappings/fedramp_low.json"
@@ -32,23 +36,19 @@ case "$FEDRAMP_PACK" in
         REFERENCE_SOURCE_URL="https://github.com/awslabs/aws-config-rules/blob/master/aws-config-conformance-packs/Operational-Best-Practices-for-FedRAMP.yaml"
         ;;
     *)
-        printf 'FEDRAMP_PACK must be either low or moderate (got: %s)\n' "${FEDRAMP_PACK:-<unset>}" >&2
+        report_failure "FEDRAMP_PACK must be either low or moderate (got: ${FEDRAMP_PACK:-<unset>})"
         exit 2
         ;;
 esac
 
 if [ ! -f "$REFERENCE_TEMPLATE" ]; then
-    printf 'Selected %s reference template is missing: %s\n' "$FEDRAMP_PACK" "$REFERENCE_TEMPLATE" >&2
-    if [ "$FEDRAMP_PACK" = "moderate" ]; then
-        printf 'Run %s/sync_reference_templates.sh once to vendor the official AWS Moderate template.\n' "$SCRIPT_DIR" >&2
-    fi
+    report_failure "selected $FEDRAMP_PACK reference template is missing: $REFERENCE_TEMPLATE"
     exit 2
 fi
 
 for mapping_file in "$FEDRAMP_CONTROL_MAPPING" "$NIST_800_53_CONTROL_MAPPING"; do
     if [ ! -f "$mapping_file" ]; then
-        printf 'Required control mapping is missing: %s\n' "$mapping_file" >&2
-        printf 'Run %s/sync_control_mappings.py to vendor the official AWS mappings.\n' "$SCRIPT_DIR" >&2
+        report_failure "required control mapping is missing: $mapping_file"
         exit 2
     fi
 done
@@ -66,9 +66,11 @@ source "$(dirname "$0")/../_shared/aws.sh"
 
 _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_config_conformance_packs_${_TARGET_ID}.json"
-_FETCHER_TMP_JSON="$(mktemp -t aws_config_conformance_packs.XXXXXX.json)"
-_FAILURE_LOG="$(mktemp -t aws_config_conformance_packs_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_TMP_DIR="$(mktemp -d -t aws_config_conformance_packs.XXXXXX)"
+_FETCHER_TMP_JSON="$_TMP_DIR/output.json"
+_FAILURE_LOG="$_TMP_DIR/failures.log"
+touch "$_FAILURE_LOG"
+trap 'rm -rf "$_TMP_DIR"; rm -f "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_config_conformance_packs %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_config_conformance_packs %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
