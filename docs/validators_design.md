@@ -268,29 +268,64 @@ been written against v0.6.0. Three things confirmed, one gap:
   matching on name remains the only route, and the rename-before-cache
   duplicate risk stands.
 
-**The gap: `disposition` is not in the v0.8.0 surface.** `validationRules[]`
-documents only `{regexOperation, criteria, value}`, all three required, with no
-`disposition`. The only dispositions in the spec are `yesDisposition` /
-`noDisposition` on *attestation* rules, enumerated `PASS | FAIL |
-BASED_ON_NESTED` — no `ERROR`. `ERROR` appears exactly once in the whole
-document, as a validator **result** on `GET /evidence/{id}/artifacts`
-(`PASS | FAIL | NOT_SET | ERROR`) — the app can land a validator in an error
-state, but 0.8.0 documents no way to *author* a rule that produces one.
+**The gap: `disposition` is silently dropped.** Verified against a live stage
+tenant on 2026-09-03, not inferred from the spec.
 
-`build_payload` passes `validation_rules` through verbatim, so `disposition:
-ERROR` does go on the wire. Since neither the request body nor the rule item
-sets `additionalProperties: false`, the likeliest outcome is that it is accepted
-and ignored rather than rejected — which is the bad one: the two ERROR rules
-silently become no-ops and a failed collection reads as a compliance FAIL, the
-exact confusion they exist to prevent.
+`validationRules[]` documents only `{regexOperation, criteria, value}`. The only
+dispositions in v0.8.0 are `yesDisposition` / `noDisposition` on *attestation*
+rules (`PASS | FAIL | BASED_ON_NESTED`), and `ERROR` appears once in the whole
+document as a validator **result** on `GET /evidence/{id}/artifacts`.
 
-The app was reported to support error-state validation as of 2026-08-11, so the
-published spec may simply lag the implementation. **This is the first thing the
-live-tenant check has to answer**: `POST` one validator carrying a
-`disposition: ERROR` rule, then `GET` it back and see whether the field
-survived. If it did not, the error state needs either a different encoding or an
-API change before the library ships — every validator in it is built on this
-shape.
+What the live test established:
+
+- `POST /validators` and `PATCH /validators/{id}` both return **HTTP 200** and
+  store the rule with `disposition` removed. No error, no warning.
+- It is not a read-back omission. Three validators identical but for the
+  disposition sent (`ERROR`, `FAIL`, none), one rule each whose condition was
+  **true**, all scored **PASS**. The field never reaches evaluation.
+- It is not a naming problem. `disposition`, `ruleDisposition`,
+  `validationRuleDisposition`, `dispositionType`, `outcome`, `result`, `status`,
+  `errorDisposition`, and nesting inside `regexOperation` or `value` — all ten
+  returned 200 and were discarded.
+- **Rules combine with AND.** One true rule plus one false rule scores FAIL.
+
+The feature is not missing from the product — it is missing from this API.
+`disposition` (with `ERROR`) shipped to the DB and UI in June 2026, and the
+validator endpoints were built before that and never updated. The identical
+omission in the validator CSV export is a filed bug, and the API case is now
+tracked separately.
+
+### Consequence for the shipped rule shape
+
+Because dispositions are dropped and rules are ANDed, the two ERROR guards on
+`validators/aws/alb_encryption_in_transit.yaml` stop being guards and become
+requirements: that the regex match **zero** times, and that `exit_code` be
+**non-zero**. Against a live tenant that validator therefore reports **FAIL on
+fully compliant evidence** — measured, not predicted.
+
+This is accepted deliberately. `disposition` stays in the registry because it
+costs nothing (the request is not rejected) and because the rules are written
+for the API we are getting, not the one we have. **Until the API ships, do not
+sync this validator to a workspace whose results anyone is reading** — that
+includes `paramify upload --with-validators`.
+
+A shape that is correct under today's semantics exists (gate the regex on
+`exit_code: 0`, and add a `MATCH_COUNT NOT_EQUALS 0` presence guard) but cannot
+express ERROR at all, so it was not adopted.
+
+### A separate trap: `MATCH_GROUP` passes vacuously
+
+Independent of disposition, and it affects every validator in the library. When
+the regex does not match, a `MATCH_GROUP` comparison compares nothing to nothing
+and evaluates **true** — an artifact the regex misses scores PASS, silently.
+Confirmed on stage: a validator whose only rule was `MATCH_GROUP 1 EQUALS
+MATCH_GROUP 2` passed a failed-collection artifact its regex never matched.
+
+Any validator built on `MATCH_GROUP` comparisons therefore needs a
+`MATCH_COUNT NOT_EQUALS 0` presence rule, or a drifted field name, a
+restructured envelope, and a failed collection all read as compliant.
+
+---
 
 ### These are templates — create-or-skip, never clobber
 
