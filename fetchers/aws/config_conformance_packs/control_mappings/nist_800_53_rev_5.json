@@ -1,0 +1,2696 @@
+{
+  "framework": "nist_800_53_rev_5",
+  "title": "NIST SP 800-53 Revision 5",
+  "source_url": "https://docs.aws.amazon.com/config/latest/developerguide/operational-best-practices-for-nist-800-53_rev_5.html",
+  "disclaimer": "AWS sample mappings do not guarantee compliance; validate applicability for your environment.",
+  "rule_count": 128,
+  "control_count": 113,
+  "aliases": {
+    "cloud-trail-enabled": "cloudtrail-enabled",
+    "ec2-instance-managed-by-ssm": "ec2-instance-managed-by-systems-manager",
+    "incoming-ssh-disabled": "restricted-ssh",
+    "instances-in-vpc": "ec2-instances-in-vpc",
+    "multi-region-cloud-trail-enabled": "multi-region-cloudtrail-enabled"
+  },
+  "rules": {
+    "access-keys-rotated": [
+      "AC-3(15)"
+    ],
+    "account-part-of-organizations": [
+      "CA-9(1)",
+      "CM-2"
+    ],
+    "acm-certificate-expiration-check": [
+      "SC-28(3)",
+      "SC-7(16)"
+    ],
+    "alb-http-to-https-redirection-check": [
+      "AC-17(2)",
+      "IA-5(1)",
+      "SC-12(3)",
+      "SC-13",
+      "SC-23",
+      "SC-23(3)",
+      "SC-7(4)",
+      "SC-8",
+      "SC-8(1)",
+      "SC-8(2)",
+      "SI-7(6)"
+    ],
+    "api-gw-cache-enabled-and-encrypted": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SI-7(6)"
+    ],
+    "api-gw-execution-logging-enabled": [
+      "AC-4(26)",
+      "AU-10",
+      "AU-12",
+      "AU-2",
+      "AU-3",
+      "AU-6(3)",
+      "AU-6(4)",
+      "CA-7",
+      "SC-7(9)",
+      "SI-7(8)"
+    ],
+    "api-gw-ssl-enabled": [
+      "AC-17(2)",
+      "IA-5(1)",
+      "SC-12(3)",
+      "SC-13",
+      "SC-23",
+      "SC-23(3)",
+      "SC-7(4)",
+      "SC-8",
+      "SC-8(1)",
+      "SC-8(2)",
+      "SI-7(6)"
+    ],
+    "autoscaling-group-elb-healthcheck-required": [
+      "CA-7",
+      "CP-2(2)",
+      "SI-2"
+    ],
+    "autoscaling-launch-config-public-ip-disabled": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "beanstalk-enhanced-health-reporting-enabled": [
+      "CA-7",
+      "SI-2"
+    ],
+    "cloud-trail-cloud-watch-logs-enabled": [
+      "AC-2(4)",
+      "AC-4(26)",
+      "AC-6(9)",
+      "AU-10",
+      "AU-12",
+      "AU-2",
+      "AU-3",
+      "AU-6(1)",
+      "AU-6(3)",
+      "AU-6(4)",
+      "AU-6(5)",
+      "AU-7(1)",
+      "AU-9(7)",
+      "CA-7",
+      "SC-7(9)",
+      "SI-20",
+      "SI-3(8)",
+      "SI-4(20)",
+      "SI-4(5)",
+      "SI-7(8)"
+    ],
+    "cloud-trail-encryption-enabled": [
+      "AU-9",
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "cloud-trail-log-file-validation-enabled": [
+      "AU-9",
+      "SI-4",
+      "SI-7(1)",
+      "SI-7(3)",
+      "SI-7(7)"
+    ],
+    "cloudtrail-enabled": [
+      "AC-2(4)",
+      "AC-4(26)",
+      "AC-6(9)",
+      "AU-10",
+      "AU-12",
+      "AU-14(1)",
+      "AU-2",
+      "AU-3",
+      "AU-6(3)",
+      "AU-6(4)",
+      "AU-9",
+      "CA-7",
+      "SA-8(22)",
+      "SC-7(9)",
+      "SI-3(8)",
+      "SI-4(20)",
+      "SI-7(8)"
+    ],
+    "cloudtrail-s3-dataevents-enabled": [
+      "AC-2(4)",
+      "AC-4(26)",
+      "AC-6(9)",
+      "AU-10",
+      "AU-12",
+      "AU-2",
+      "AU-3",
+      "AU-6(3)",
+      "AU-6(4)",
+      "CA-7",
+      "SC-7(9)",
+      "SI-3(8)",
+      "SI-4(20)",
+      "SI-7(8)"
+    ],
+    "cloudwatch-alarm-action-check": [
+      "AU-6(1)",
+      "AU-6(5)",
+      "CA-7",
+      "IR-4(1)",
+      "IR-4(5)",
+      "SI-2",
+      "SI-20",
+      "SI-4(12)",
+      "SI-4(5)"
+    ],
+    "cmk-backing-key-rotation-enabled": [
+      "SC-12",
+      "SC-12(2)",
+      "SC-28(3)"
+    ],
+    "codebuild-project-artifact-encryption": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SI-7(6)"
+    ],
+    "codebuild-project-envvar-awscred-check": [
+      "IA-5(7)",
+      "SA-3"
+    ],
+    "db-instance-backup-enabled": [
+      "CP-10",
+      "CP-6",
+      "CP-6(1)",
+      "CP-6(2)",
+      "CP-9",
+      "SC-5(2)",
+      "SI-12",
+      "SI-13(5)"
+    ],
+    "dms-replication-not-public": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "dynamodb-autoscaling-enabled": [
+      "CP-10",
+      "CP-2(2)",
+      "CP-6(2)",
+      "SC-36",
+      "SC-5(2)",
+      "SI-13(5)"
+    ],
+    "dynamodb-in-backup-plan": [
+      "CP-10",
+      "CP-6",
+      "CP-6(1)",
+      "CP-6(2)",
+      "CP-9",
+      "SC-5(2)",
+      "SI-12",
+      "SI-13(5)"
+    ],
+    "dynamodb-pitr-enabled": [
+      "CP-10",
+      "CP-6(2)",
+      "CP-9",
+      "SC-5(2)",
+      "SI-12",
+      "SI-13(5)"
+    ],
+    "dynamodb-table-encrypted-kms": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "dynamodb-throughput-limit-check": [
+      "CA-7",
+      "SI-2"
+    ],
+    "ebs-in-backup-plan": [
+      "CP-10",
+      "CP-6",
+      "CP-6(1)",
+      "CP-6(2)",
+      "CP-9",
+      "SC-5(2)",
+      "SI-12",
+      "SI-13(5)"
+    ],
+    "ebs-optimized-instance": [
+      "CP-10",
+      "CP-9",
+      "SC-5(2)"
+    ],
+    "ebs-snapshot-public-restorable-check": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "ec2-ebs-encryption-by-default": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "ec2-imdsv2-check": [
+      "AC-3",
+      "AC-3(15)"
+    ],
+    "ec2-instance-managed-by-systems-manager": [
+      "CA-9(1)",
+      "CM-2",
+      "CM-2(2)",
+      "CM-8",
+      "CM-8(1)",
+      "CM-8(2)",
+      "CM-8(3)",
+      "SA-15(2)",
+      "SA-15(8)",
+      "SA-3",
+      "SI-2(3)"
+    ],
+    "ec2-instance-no-public-ip": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "ec2-instance-profile-attached": [
+      "AC-3",
+      "AC-3(15)"
+    ],
+    "ec2-instances-in-vpc": [
+      "AC-21",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "ec2-managedinstance-association-compliance-status-check": [
+      "CA-9(1)",
+      "CM-2",
+      "CM-2(2)",
+      "CM-8",
+      "CM-8(1)",
+      "CM-8(3)",
+      "SI-2(3)"
+    ],
+    "ec2-managedinstance-patch-compliance-status-check": [
+      "CM-8(3)",
+      "SI-2",
+      "SI-2(2)",
+      "SI-2(3)",
+      "SI-2(4)",
+      "SI-2(5)"
+    ],
+    "ec2-stopped-instance": [
+      "CA-9(1)",
+      "CM-2",
+      "CM-2(2)"
+    ],
+    "ec2-volume-inuse-check": [
+      "CA-9(1)",
+      "CM-2",
+      "CM-2(2)"
+    ],
+    "ecs-containers-readonly-access": [
+      "AC-3",
+      "AC-3(15)",
+      "AC-5"
+    ],
+    "ecs-task-definition-user-for-host-mode-check": [
+      "AC-3",
+      "AC-3(15)",
+      "AC-5"
+    ],
+    "efs-encrypted-check": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "efs-in-backup-plan": [
+      "CP-10",
+      "CP-6",
+      "CP-6(1)",
+      "CP-6(2)",
+      "CP-9",
+      "SC-5(2)",
+      "SI-12",
+      "SI-13(5)"
+    ],
+    "elastic-beanstalk-managed-updates-enabled": [
+      "SI-2",
+      "SI-2(2)",
+      "SI-2(4)",
+      "SI-2(5)"
+    ],
+    "elasticache-redis-cluster-automatic-backup-check": [
+      "CP-10",
+      "CP-6",
+      "CP-6(1)",
+      "CP-6(2)",
+      "CP-9",
+      "SC-5(2)",
+      "SI-12",
+      "SI-13(5)"
+    ],
+    "elasticsearch-encrypted-at-rest": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "elasticsearch-in-vpc-only": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "elasticsearch-logs-to-cloudwatch": [
+      "AC-2(4)",
+      "AC-4(26)",
+      "AC-6(9)",
+      "AU-10",
+      "AU-12",
+      "AU-2",
+      "AU-3",
+      "AU-6(3)",
+      "AU-6(4)",
+      "CA-7",
+      "SC-7(9)",
+      "SI-3(8)",
+      "SI-4(20)",
+      "SI-7(8)"
+    ],
+    "elasticsearch-node-to-node-encryption-check": [
+      "SC-13",
+      "SC-23",
+      "SC-23(3)",
+      "SC-7(4)",
+      "SC-8",
+      "SC-8(1)",
+      "SC-8(2)"
+    ],
+    "elb-acm-certificate-required": [
+      "AC-17(2)",
+      "IA-5(1)",
+      "SC-12(3)",
+      "SC-13",
+      "SC-23",
+      "SC-23(5)",
+      "SC-7(4)",
+      "SC-8",
+      "SC-8(1)",
+      "SC-8(2)",
+      "SI-7(6)"
+    ],
+    "elb-cross-zone-load-balancing-enabled": [
+      "CP-10",
+      "CP-6(2)",
+      "SC-36",
+      "SC-5(2)",
+      "SI-13(5)"
+    ],
+    "elb-deletion-protection-enabled": [
+      "CA-9(1)",
+      "CM-2",
+      "CM-2(2)",
+      "CM-3",
+      "SC-5(2)"
+    ],
+    "elb-logging-enabled": [
+      "AC-4(26)",
+      "AU-10",
+      "AU-12",
+      "AU-2",
+      "AU-3",
+      "AU-6(3)",
+      "AU-6(4)",
+      "CA-7",
+      "SC-7(9)",
+      "SI-7(8)"
+    ],
+    "elb-tls-https-listeners-only": [
+      "AC-17(2)",
+      "IA-5(1)",
+      "SC-12(3)",
+      "SC-13",
+      "SC-23",
+      "SC-23(3)",
+      "SC-7(4)",
+      "SC-8",
+      "SC-8(1)",
+      "SC-8(2)",
+      "SI-7(6)"
+    ],
+    "elbv2-acm-certificate-required": [
+      "AC-17(2)",
+      "IA-5(1)",
+      "SC-12(3)",
+      "SC-13",
+      "SC-23",
+      "SC-23(3)",
+      "SC-23(5)",
+      "SC-7(4)",
+      "SC-8",
+      "SC-8(1)",
+      "SC-8(2)",
+      "SI-7(6)"
+    ],
+    "emr-master-no-public-ip": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "encrypted-volumes": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "guardduty-enabled-centralized": [
+      "AC-2(12)",
+      "AU-6(1)",
+      "AU-6(5)",
+      "CA-7",
+      "CM-8(3)",
+      "RA-3(4)",
+      "SA-11(1)",
+      "SA-11(6)",
+      "SA-15(2)",
+      "SA-15(8)",
+      "SA-8(19)",
+      "SA-8(21)",
+      "SA-8(25)",
+      "SC-5",
+      "SC-5(1)",
+      "SC-5(3)",
+      "SI-20",
+      "SI-3(8)",
+      "SI-4",
+      "SI-4(1)",
+      "SI-4(13)",
+      "SI-4(2)",
+      "SI-4(22)",
+      "SI-4(25)",
+      "SI-4(4)",
+      "SI-4(5)"
+    ],
+    "iam-customer-policy-blocked-kms-actions": [
+      "AC-2",
+      "AC-3",
+      "AC-3(15)",
+      "AC-5",
+      "AC-6(3)"
+    ],
+    "iam-inline-policy-blocked-kms-actions": [
+      "AC-2",
+      "AC-3",
+      "AC-3(15)",
+      "AC-5",
+      "AC-6(3)"
+    ],
+    "iam-no-inline-policy-check": [
+      "AC-2",
+      "AC-3",
+      "AC-3(15)",
+      "AC-6(3)"
+    ],
+    "iam-password-policy": [
+      "AC-3(15)",
+      "IA-5(1)"
+    ],
+    "iam-policy-no-statements-with-admin-access": [
+      "AC-2",
+      "AC-3",
+      "AC-3(15)",
+      "AC-5",
+      "AC-6(10)",
+      "AC-6(2)",
+      "AC-6(3)"
+    ],
+    "iam-policy-no-statements-with-full-access": [
+      "AC-2",
+      "AC-3",
+      "AC-3(15)",
+      "AC-5",
+      "AC-6(10)",
+      "AC-6(2)",
+      "AC-6(3)"
+    ],
+    "iam-root-access-key-check": [
+      "AC-3(15)",
+      "AC-6(10)",
+      "AC-6(2)"
+    ],
+    "iam-user-group-membership-check": [
+      "AC-2",
+      "AC-3",
+      "AC-3(15)",
+      "AC-6(3)"
+    ],
+    "iam-user-mfa-enabled": [
+      "AC-3(15)",
+      "IA-2(1)",
+      "IA-2(2)",
+      "IA-2(6)",
+      "IA-2(8)"
+    ],
+    "iam-user-unused-credentials-check": [
+      "AC-2",
+      "AC-3",
+      "AC-3(15)"
+    ],
+    "kinesis-stream-encrypted": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "kms-cmk-not-scheduled-for-deletion": [
+      "SC-12",
+      "SC-12(2)"
+    ],
+    "lambda-dlq-check": [
+      "CA-7",
+      "SI-2"
+    ],
+    "lambda-function-public-access-prohibited": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "lambda-inside-vpc": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "mfa-enabled-for-iam-console-access": [
+      "AC-3(15)",
+      "IA-2(1)",
+      "IA-2(2)",
+      "IA-2(6)",
+      "IA-2(8)"
+    ],
+    "multi-region-cloudtrail-enabled": [
+      "AC-2(4)",
+      "AC-4(26)",
+      "AC-6(9)",
+      "AU-10",
+      "AU-12",
+      "AU-2",
+      "AU-3",
+      "AU-6(3)",
+      "AU-6(4)",
+      "CA-7",
+      "SC-7(9)",
+      "SI-3(8)",
+      "SI-4(20)",
+      "SI-7(8)"
+    ],
+    "no-unrestricted-route-to-igw": [
+      "CM-7",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(4)"
+    ],
+    "opensearch-encrypted-at-rest": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SI-7(6)"
+    ],
+    "opensearch-https-required": [
+      "AC-17(2)",
+      "IA-5(1)",
+      "SC-12(3)",
+      "SC-13",
+      "SC-23",
+      "SC-23(3)",
+      "SC-7(4)",
+      "SC-8",
+      "SC-8(1)",
+      "SC-8(2)",
+      "SI-7(6)"
+    ],
+    "opensearch-in-vpc-only": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "opensearch-logs-to-cloudwatch": [
+      "AC-2(4)",
+      "AC-4(26)",
+      "AC-6(9)",
+      "AU-10",
+      "AU-12",
+      "AU-2",
+      "AU-3",
+      "AU-6(3)",
+      "AU-6(4)",
+      "CA-7",
+      "SC-7(9)",
+      "SI-3(8)",
+      "SI-4(20)",
+      "SI-7(8)"
+    ],
+    "opensearch-node-to-node-encryption-check": [
+      "SC-13",
+      "SC-23",
+      "SC-23(3)",
+      "SC-7(4)",
+      "SC-8",
+      "SC-8(1)",
+      "SC-8(2)"
+    ],
+    "rds-enhanced-monitoring-enabled": [
+      "CA-7",
+      "SI-2"
+    ],
+    "rds-instance-default-admin-check": [
+      "CA-9(1)",
+      "CM-2"
+    ],
+    "rds-instance-deletion-protection-enabled": [
+      "CM-3",
+      "SC-5(2)",
+      "SI-13(5)"
+    ],
+    "rds-instance-public-access-check": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "rds-logging-enabled": [
+      "AC-2(4)",
+      "AC-4(26)",
+      "AC-6(9)",
+      "AU-10",
+      "AU-12",
+      "AU-2",
+      "AU-3",
+      "AU-6(3)",
+      "AU-6(4)",
+      "CA-7",
+      "SC-7(10)",
+      "SC-7(9)",
+      "SI-3(8)",
+      "SI-4(20)",
+      "SI-7(8)"
+    ],
+    "rds-multi-az-support": [
+      "CP-10",
+      "CP-6(2)",
+      "SC-36",
+      "SC-5(2)",
+      "SI-13(5)"
+    ],
+    "rds-snapshot-encrypted": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "rds-snapshots-public-prohibited": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "rds-storage-encrypted": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "redshift-backup-enabled": [
+      "CP-10",
+      "CP-6",
+      "CP-6(1)",
+      "CP-6(2)",
+      "CP-9",
+      "SC-5(2)",
+      "SC-7(10)",
+      "SI-13(5)"
+    ],
+    "redshift-cluster-configuration-check": [
+      "AC-2(4)",
+      "AC-4(26)",
+      "AC-6(9)",
+      "AU-10",
+      "AU-12",
+      "AU-2",
+      "AU-3",
+      "AU-6(3)",
+      "AU-6(4)",
+      "CA-7",
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SC-7(9)",
+      "SI-3(8)",
+      "SI-4(20)",
+      "SI-7(6)",
+      "SI-7(8)"
+    ],
+    "redshift-cluster-kms-enabled": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SI-7(6)"
+    ],
+    "redshift-cluster-maintenancesettings-check": [
+      "CA-9(1)",
+      "CM-2",
+      "CP-9",
+      "SC-5(2)",
+      "SI-2",
+      "SI-2(2)",
+      "SI-2(4)",
+      "SI-2(5)"
+    ],
+    "redshift-cluster-public-access-check": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "redshift-default-admin-check": [
+      "CA-9(1)",
+      "CM-2"
+    ],
+    "redshift-enhanced-vpc-routing-enabled": [
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(21)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "redshift-require-tls-ssl": [
+      "SC-13",
+      "SC-23",
+      "SC-23(3)",
+      "SC-7(4)",
+      "SC-8",
+      "SC-8(1)",
+      "SC-8(2)"
+    ],
+    "restricted-common-ports": [
+      "CA-9(1)",
+      "CM-2",
+      "CM-2(2)",
+      "CM-7",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(4)",
+      "SC-7(5)"
+    ],
+    "restricted-ssh": [
+      "CM-7",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(4)",
+      "SC-7(5)"
+    ],
+    "root-account-hardware-mfa-enabled": [
+      "AC-3(15)",
+      "IA-2(1)",
+      "IA-2(2)",
+      "IA-2(6)",
+      "IA-2(8)"
+    ],
+    "root-account-mfa-enabled": [
+      "AC-3(15)",
+      "IA-2(1)",
+      "IA-2(2)",
+      "IA-2(6)",
+      "IA-2(8)"
+    ],
+    "s3-account-level-public-access-blocks-periodic": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "s3-bucket-level-public-access-prohibited": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "s3-bucket-logging-enabled": [
+      "AC-2(4)",
+      "AC-4(26)",
+      "AC-6(9)",
+      "AU-10",
+      "AU-12",
+      "AU-2",
+      "AU-3",
+      "AU-6(3)",
+      "AU-6(4)",
+      "CA-7",
+      "SC-7(9)",
+      "SI-3(8)",
+      "SI-4(20)",
+      "SI-7(8)"
+    ],
+    "s3-bucket-public-read-prohibited": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "s3-bucket-public-write-prohibited": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "s3-bucket-replication-enabled": [
+      "AU-9(2)",
+      "CP-10",
+      "CP-6",
+      "CP-6(1)",
+      "CP-6(2)",
+      "CP-9",
+      "SC-36(2)",
+      "SC-5(2)",
+      "SI-13(5)"
+    ],
+    "s3-bucket-server-side-encryption-enabled": [
+      "AU-9",
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "s3-bucket-ssl-requests-only": [
+      "AC-17(2)",
+      "IA-5(1)",
+      "SC-12(3)",
+      "SC-13",
+      "SC-23",
+      "SC-23(3)",
+      "SC-7(4)",
+      "SC-8",
+      "SC-8(1)",
+      "SC-8(2)",
+      "SI-7(6)"
+    ],
+    "s3-bucket-versioning-enabled": [
+      "AU-9(2)",
+      "CP-10",
+      "CP-6",
+      "CP-6(1)",
+      "CP-6(2)",
+      "CP-9",
+      "SC-5(2)",
+      "SI-12",
+      "SI-13(5)"
+    ],
+    "s3-default-encryption-kms": [
+      "AU-9",
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "s3-event-notifications-enabled": [
+      "CA-7",
+      "SI-3(8)",
+      "SI-4",
+      "SI-4(4)"
+    ],
+    "s3-version-lifecycle-policy-check": [
+      "AU-9(2)",
+      "CP-10",
+      "CP-6(2)",
+      "CP-9",
+      "SC-5(2)",
+      "SI-13(5)"
+    ],
+    "sagemaker-endpoint-configuration-kms-key-configured": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "sagemaker-notebook-instance-kms-key-configured": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "sagemaker-notebook-no-direct-internet-access": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "secretsmanager-rotation-enabled-check": [
+      "AC-3(15)"
+    ],
+    "secretsmanager-using-cmk": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SI-7(6)"
+    ],
+    "securityhub-enabled": [
+      "AU-6(1)",
+      "AU-6(5)",
+      "CA-7"
+    ],
+    "sns-encrypted-kms": [
+      "CA-9(1)",
+      "CM-3(6)",
+      "SC-13",
+      "SC-28",
+      "SC-28(1)",
+      "SC-7(10)",
+      "SI-7(6)"
+    ],
+    "ssm-document-not-public": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "subnet-auto-assign-public-ip-disabled": [
+      "AC-21",
+      "AC-3",
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(3)",
+      "SC-7(4)",
+      "SC-7(9)"
+    ],
+    "vpc-default-security-group-closed": [
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(4)",
+      "SC-7(5)"
+    ],
+    "vpc-flow-logs-enabled": [
+      "AC-4(26)",
+      "AU-12",
+      "AU-2",
+      "AU-3",
+      "AU-6(3)",
+      "AU-6(4)",
+      "CA-7",
+      "SI-7(8)"
+    ],
+    "vpc-sg-open-only-to-authorized-ports": [
+      "SC-7",
+      "SC-7(11)",
+      "SC-7(16)",
+      "SC-7(21)",
+      "SC-7(4)",
+      "SC-7(5)"
+    ],
+    "vpc-vpn-2-tunnels-up": [
+      "CP-10",
+      "CP-6(2)",
+      "SC-36",
+      "SC-5(2)",
+      "SI-13(5)"
+    ],
+    "wafv2-logging-enabled": [
+      "AC-4(26)",
+      "AU-10",
+      "AU-12",
+      "AU-2",
+      "AU-3",
+      "AU-6(3)",
+      "AU-6(4)",
+      "CA-7",
+      "SC-7(10)",
+      "SC-7(9)",
+      "SI-7(8)"
+    ]
+  },
+  "controls": {
+    "AC-17(2)": {
+      "description": "Remote Access | Protection of Confidentiality and Integrity Using Encryption",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-ssl-enabled",
+        "elb-acm-certificate-required",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "opensearch-https-required",
+        "s3-bucket-ssl-requests-only"
+      ]
+    },
+    "AC-2": {
+      "description": "Account Management",
+      "config_rules": [
+        "iam-customer-policy-blocked-kms-actions",
+        "iam-inline-policy-blocked-kms-actions",
+        "iam-no-inline-policy-check",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access",
+        "iam-user-group-membership-check",
+        "iam-user-unused-credentials-check"
+      ]
+    },
+    "AC-2(12)": {
+      "description": "Account Management | Account Monitoring for Atypical Usage",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "AC-2(4)": {
+      "description": "Account Management | Automated Audit Actions",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled"
+      ]
+    },
+    "AC-21": {
+      "description": "Information Sharing",
+      "config_rules": [
+        "autoscaling-launch-config-public-ip-disabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "opensearch-in-vpc-only",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "ssm-document-not-public",
+        "subnet-auto-assign-public-ip-disabled"
+      ]
+    },
+    "AC-3": {
+      "description": "Access Enforcement",
+      "config_rules": [
+        "autoscaling-launch-config-public-ip-disabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-imdsv2-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instance-profile-attached",
+        "ecs-containers-readonly-access",
+        "ecs-task-definition-user-for-host-mode-check",
+        "elasticsearch-in-vpc-only",
+        "emr-master-no-public-ip",
+        "iam-customer-policy-blocked-kms-actions",
+        "iam-inline-policy-blocked-kms-actions",
+        "iam-no-inline-policy-check",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access",
+        "iam-user-group-membership-check",
+        "iam-user-unused-credentials-check",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "opensearch-in-vpc-only",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "ssm-document-not-public",
+        "subnet-auto-assign-public-ip-disabled"
+      ]
+    },
+    "AC-3(15)": {
+      "description": "Access Enforcement | Discretionary and Mandatory Access Control",
+      "config_rules": [
+        "access-keys-rotated",
+        "ec2-imdsv2-check",
+        "ec2-instance-profile-attached",
+        "ecs-containers-readonly-access",
+        "ecs-task-definition-user-for-host-mode-check",
+        "iam-customer-policy-blocked-kms-actions",
+        "iam-inline-policy-blocked-kms-actions",
+        "iam-no-inline-policy-check",
+        "iam-password-policy",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access",
+        "iam-root-access-key-check",
+        "iam-user-group-membership-check",
+        "iam-user-mfa-enabled",
+        "iam-user-unused-credentials-check",
+        "mfa-enabled-for-iam-console-access",
+        "root-account-hardware-mfa-enabled",
+        "root-account-mfa-enabled",
+        "secretsmanager-rotation-enabled-check"
+      ]
+    },
+    "AC-4(26)": {
+      "description": "Information Flow Enforcement | Audit Filtering Actions",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "elb-logging-enabled",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "vpc-flow-logs-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "AC-5": {
+      "description": "Separation of Duties",
+      "config_rules": [
+        "ecs-containers-readonly-access",
+        "ecs-task-definition-user-for-host-mode-check",
+        "iam-customer-policy-blocked-kms-actions",
+        "iam-inline-policy-blocked-kms-actions",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access"
+      ]
+    },
+    "AC-6(10)": {
+      "description": "Least Privilege | Prohibit Non-privileged Users from Executing Privileged Functions",
+      "config_rules": [
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access",
+        "iam-root-access-key-check"
+      ]
+    },
+    "AC-6(2)": {
+      "description": "Least Privilege | Non-privileged Access for Nonsecurity Functions",
+      "config_rules": [
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access",
+        "iam-root-access-key-check"
+      ]
+    },
+    "AC-6(3)": {
+      "description": "Least Privilege | Network Access to Privileged Commands",
+      "config_rules": [
+        "iam-customer-policy-blocked-kms-actions",
+        "iam-inline-policy-blocked-kms-actions",
+        "iam-no-inline-policy-check",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access",
+        "iam-user-group-membership-check"
+      ]
+    },
+    "AC-6(9)": {
+      "description": "Least Privilege | Log Use of Privileged Functions",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled"
+      ]
+    },
+    "AU-10": {
+      "description": "Non-repudiation",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "elb-logging-enabled",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "AU-12": {
+      "description": "Audit Record Generation",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "elb-logging-enabled",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "vpc-flow-logs-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "AU-14(1)": {
+      "description": "Session Audit | System Start-up",
+      "config_rules": [
+        "cloudtrail-enabled"
+      ]
+    },
+    "AU-2": {
+      "description": "Event Logging",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "elb-logging-enabled",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "vpc-flow-logs-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "AU-3": {
+      "description": "Content of Audit Records",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "elb-logging-enabled",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "vpc-flow-logs-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "AU-6(1)": {
+      "description": "Audit Record Review, Analysis, and Reporting | Automated Process Integration",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudwatch-alarm-action-check",
+        "guardduty-enabled-centralized",
+        "securityhub-enabled"
+      ]
+    },
+    "AU-6(3)": {
+      "description": "Audit Record Review, Analysis, and Reporting | Correlate Audit Record Repositories",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "elb-logging-enabled",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "vpc-flow-logs-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "AU-6(4)": {
+      "description": "Audit Record Review, Analysis, and Reporting | Central Review and Analysis",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "elb-logging-enabled",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "vpc-flow-logs-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "AU-6(5)": {
+      "description": "Audit Record Review, Analysis, and Reporting | Integrated Analysis of Audit Records",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudwatch-alarm-action-check",
+        "guardduty-enabled-centralized",
+        "securityhub-enabled"
+      ]
+    },
+    "AU-7(1)": {
+      "description": "Audit Record Reduction and Report Generation | Automatic Processing",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled"
+      ]
+    },
+    "AU-9": {
+      "description": "Protection of Audit Information",
+      "config_rules": [
+        "cloud-trail-encryption-enabled",
+        "cloud-trail-log-file-validation-enabled",
+        "cloudtrail-enabled",
+        "s3-bucket-server-side-encryption-enabled",
+        "s3-default-encryption-kms"
+      ]
+    },
+    "AU-9(2)": {
+      "description": "Protection of Audit Information | Store on Separate Physical Systems or Components",
+      "config_rules": [
+        "s3-bucket-replication-enabled",
+        "s3-bucket-versioning-enabled",
+        "s3-version-lifecycle-policy-check"
+      ]
+    },
+    "AU-9(7)": {
+      "description": "Protection of Audit Information | Store on Component with Different Operating System",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled"
+      ]
+    },
+    "CA-7": {
+      "description": "Continuous Monitoring",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "autoscaling-group-elb-healthcheck-required",
+        "beanstalk-enhanced-health-reporting-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "cloudwatch-alarm-action-check",
+        "dynamodb-throughput-limit-check",
+        "elasticsearch-logs-to-cloudwatch",
+        "elb-logging-enabled",
+        "guardduty-enabled-centralized",
+        "lambda-dlq-check",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-enhanced-monitoring-enabled",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "s3-event-notifications-enabled",
+        "securityhub-enabled",
+        "vpc-flow-logs-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "CA-9(1)": {
+      "description": "Internal System Connections | Compliance Checks",
+      "config_rules": [
+        "account-part-of-organizations",
+        "api-gw-cache-enabled-and-encrypted",
+        "cloud-trail-encryption-enabled",
+        "codebuild-project-artifact-encryption",
+        "dynamodb-table-encrypted-kms",
+        "ec2-ebs-encryption-by-default",
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-managedinstance-association-compliance-status-check",
+        "ec2-stopped-instance",
+        "ec2-volume-inuse-check",
+        "efs-encrypted-check",
+        "elasticsearch-encrypted-at-rest",
+        "elb-deletion-protection-enabled",
+        "encrypted-volumes",
+        "kinesis-stream-encrypted",
+        "opensearch-encrypted-at-rest",
+        "rds-instance-default-admin-check",
+        "rds-snapshot-encrypted",
+        "rds-storage-encrypted",
+        "redshift-cluster-configuration-check",
+        "redshift-cluster-kms-enabled",
+        "redshift-cluster-maintenancesettings-check",
+        "redshift-default-admin-check",
+        "restricted-common-ports",
+        "s3-bucket-server-side-encryption-enabled",
+        "s3-default-encryption-kms",
+        "sagemaker-endpoint-configuration-kms-key-configured",
+        "sagemaker-notebook-instance-kms-key-configured",
+        "secretsmanager-using-cmk",
+        "sns-encrypted-kms"
+      ]
+    },
+    "CM-2": {
+      "description": "Baseline Configuration",
+      "config_rules": [
+        "account-part-of-organizations",
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-managedinstance-association-compliance-status-check",
+        "ec2-stopped-instance",
+        "ec2-volume-inuse-check",
+        "elb-deletion-protection-enabled",
+        "rds-instance-default-admin-check",
+        "redshift-cluster-maintenancesettings-check",
+        "redshift-default-admin-check",
+        "restricted-common-ports"
+      ]
+    },
+    "CM-2(2)": {
+      "description": "Baseline Configuration | Automation Support for Accuracy and Currency",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-managedinstance-association-compliance-status-check",
+        "ec2-stopped-instance",
+        "ec2-volume-inuse-check",
+        "elb-deletion-protection-enabled",
+        "restricted-common-ports"
+      ]
+    },
+    "CM-3": {
+      "description": "Configuration Change Control",
+      "config_rules": [
+        "elb-deletion-protection-enabled",
+        "rds-instance-deletion-protection-enabled"
+      ]
+    },
+    "CM-3(6)": {
+      "description": "Configuration Change Control | Cryptography Management",
+      "config_rules": [
+        "api-gw-cache-enabled-and-encrypted",
+        "cloud-trail-encryption-enabled",
+        "codebuild-project-artifact-encryption",
+        "dynamodb-table-encrypted-kms",
+        "ec2-ebs-encryption-by-default",
+        "efs-encrypted-check",
+        "elasticsearch-encrypted-at-rest",
+        "encrypted-volumes",
+        "kinesis-stream-encrypted",
+        "opensearch-encrypted-at-rest",
+        "rds-snapshot-encrypted",
+        "rds-storage-encrypted",
+        "redshift-cluster-configuration-check",
+        "redshift-cluster-kms-enabled",
+        "s3-bucket-server-side-encryption-enabled",
+        "s3-default-encryption-kms",
+        "sagemaker-endpoint-configuration-kms-key-configured",
+        "sagemaker-notebook-instance-kms-key-configured",
+        "secretsmanager-using-cmk",
+        "sns-encrypted-kms"
+      ]
+    },
+    "CM-7": {
+      "description": "Least Functionality",
+      "config_rules": [
+        "no-unrestricted-route-to-igw",
+        "restricted-common-ports",
+        "restricted-ssh"
+      ]
+    },
+    "CM-8": {
+      "description": "System Component Inventory",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-managedinstance-association-compliance-status-check"
+      ]
+    },
+    "CM-8(1)": {
+      "description": "System Component Inventory | Updates During Installation and Removal",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-managedinstance-association-compliance-status-check"
+      ]
+    },
+    "CM-8(2)": {
+      "description": "System Component Inventory | Automated Maintenance",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager"
+      ]
+    },
+    "CM-8(3)": {
+      "description": "System Component Inventory | Automated Unauthorized Component Detection",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-managedinstance-association-compliance-status-check",
+        "ec2-managedinstance-patch-compliance-status-check",
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "CP-10": {
+      "description": "System Recovery and Reconstitution",
+      "config_rules": [
+        "db-instance-backup-enabled",
+        "dynamodb-autoscaling-enabled",
+        "dynamodb-in-backup-plan",
+        "dynamodb-pitr-enabled",
+        "ebs-in-backup-plan",
+        "ebs-optimized-instance",
+        "efs-in-backup-plan",
+        "elasticache-redis-cluster-automatic-backup-check",
+        "elb-cross-zone-load-balancing-enabled",
+        "rds-multi-az-support",
+        "redshift-backup-enabled",
+        "s3-bucket-replication-enabled",
+        "s3-bucket-versioning-enabled",
+        "s3-version-lifecycle-policy-check",
+        "vpc-vpn-2-tunnels-up"
+      ]
+    },
+    "CP-2(2)": {
+      "description": "Contingency Plan | Capacity Planning",
+      "config_rules": [
+        "autoscaling-group-elb-healthcheck-required",
+        "dynamodb-autoscaling-enabled"
+      ]
+    },
+    "CP-6": {
+      "description": "Alternate Storage Site",
+      "config_rules": [
+        "db-instance-backup-enabled",
+        "dynamodb-in-backup-plan",
+        "ebs-in-backup-plan",
+        "efs-in-backup-plan",
+        "elasticache-redis-cluster-automatic-backup-check",
+        "redshift-backup-enabled",
+        "s3-bucket-replication-enabled",
+        "s3-bucket-versioning-enabled"
+      ]
+    },
+    "CP-6(1)": {
+      "description": "Alternate Storage Site | Separation from Primary Site",
+      "config_rules": [
+        "db-instance-backup-enabled",
+        "dynamodb-in-backup-plan",
+        "ebs-in-backup-plan",
+        "efs-in-backup-plan",
+        "elasticache-redis-cluster-automatic-backup-check",
+        "redshift-backup-enabled",
+        "s3-bucket-replication-enabled",
+        "s3-bucket-versioning-enabled"
+      ]
+    },
+    "CP-6(2)": {
+      "description": "Alternate Storage Site | Recovery Time and Recovery Point Objectives",
+      "config_rules": [
+        "db-instance-backup-enabled",
+        "dynamodb-autoscaling-enabled",
+        "dynamodb-in-backup-plan",
+        "dynamodb-pitr-enabled",
+        "ebs-in-backup-plan",
+        "efs-in-backup-plan",
+        "elasticache-redis-cluster-automatic-backup-check",
+        "elb-cross-zone-load-balancing-enabled",
+        "rds-multi-az-support",
+        "redshift-backup-enabled",
+        "s3-bucket-replication-enabled",
+        "s3-bucket-versioning-enabled",
+        "s3-version-lifecycle-policy-check",
+        "vpc-vpn-2-tunnels-up"
+      ]
+    },
+    "CP-9": {
+      "description": "System Backup",
+      "config_rules": [
+        "db-instance-backup-enabled",
+        "dynamodb-in-backup-plan",
+        "dynamodb-pitr-enabled",
+        "ebs-in-backup-plan",
+        "ebs-optimized-instance",
+        "efs-in-backup-plan",
+        "elasticache-redis-cluster-automatic-backup-check",
+        "redshift-backup-enabled",
+        "redshift-cluster-maintenancesettings-check",
+        "s3-bucket-replication-enabled",
+        "s3-bucket-versioning-enabled",
+        "s3-version-lifecycle-policy-check"
+      ]
+    },
+    "IA-2(1)": {
+      "description": "Identification and Authentication (organizational Users) | Multi-factor Authentication to Privileged Accounts",
+      "config_rules": [
+        "iam-user-mfa-enabled",
+        "mfa-enabled-for-iam-console-access",
+        "root-account-hardware-mfa-enabled",
+        "root-account-mfa-enabled"
+      ]
+    },
+    "IA-2(2)": {
+      "description": "Identification and Authentication (organizational Users) | Multi-factor Authentication to Non-privileged Accounts",
+      "config_rules": [
+        "iam-user-mfa-enabled",
+        "mfa-enabled-for-iam-console-access",
+        "root-account-hardware-mfa-enabled",
+        "root-account-mfa-enabled"
+      ]
+    },
+    "IA-2(6)": {
+      "description": "Identification and Authentication (organizational Users) | Access to Accounts \u2014separate Device",
+      "config_rules": [
+        "iam-user-mfa-enabled",
+        "mfa-enabled-for-iam-console-access",
+        "root-account-hardware-mfa-enabled",
+        "root-account-mfa-enabled"
+      ]
+    },
+    "IA-2(8)": {
+      "description": "Identification and Authentication (organizational Users) | Access to Accounts \u2014 Replay Resistant",
+      "config_rules": [
+        "iam-user-mfa-enabled",
+        "mfa-enabled-for-iam-console-access",
+        "root-account-hardware-mfa-enabled",
+        "root-account-mfa-enabled"
+      ]
+    },
+    "IA-5(1)": {
+      "description": "Authenticator Management | Password-based Authentication",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-ssl-enabled",
+        "elb-acm-certificate-required",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "iam-password-policy",
+        "opensearch-https-required",
+        "s3-bucket-ssl-requests-only"
+      ]
+    },
+    "IA-5(7)": {
+      "description": "Authenticator Management | No Embedded Unencrypted Static Authenticators",
+      "config_rules": [
+        "codebuild-project-envvar-awscred-check"
+      ]
+    },
+    "IR-4(1)": {
+      "description": "Incident Handling | Automated Incident Handling Processes",
+      "config_rules": [
+        "cloudwatch-alarm-action-check"
+      ]
+    },
+    "IR-4(5)": {
+      "description": "Incident Handling | Automatic Disabling of System",
+      "config_rules": [
+        "cloudwatch-alarm-action-check"
+      ]
+    },
+    "RA-3(4)": {
+      "description": "Risk Assessment | Predictive Cyber Analytics",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SA-11(1)": {
+      "description": "Developer Testing and Evaluation | Static Code Analysis",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SA-11(6)": {
+      "description": "Developer Testing and Evaluation | Attack Surface Reviews",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SA-15(2)": {
+      "description": "Development Process, Standards, and Tools | Security and Privacy Tracking Tools",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager",
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SA-15(8)": {
+      "description": "Development Process, Standards, and Tools | Reuse of Threat and Vulnerability Information",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager",
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SA-3": {
+      "description": "System Development Life Cycle",
+      "config_rules": [
+        "codebuild-project-envvar-awscred-check",
+        "ec2-instance-managed-by-systems-manager"
+      ]
+    },
+    "SA-8(19)": {
+      "description": "Security and Privacy Engineering Principles | Continuous Protection",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SA-8(21)": {
+      "description": "Security and Privacy Engineering Principles | Self-analysis",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SA-8(22)": {
+      "description": "Security and Privacy Engineering Principles | Accountability and Traceability",
+      "config_rules": [
+        "cloudtrail-enabled"
+      ]
+    },
+    "SA-8(25)": {
+      "description": "Security and Privacy Engineering Principles | Economic Security",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SC-12": {
+      "description": "Cryptographic Key Establishment and Management",
+      "config_rules": [
+        "cmk-backing-key-rotation-enabled",
+        "kms-cmk-not-scheduled-for-deletion"
+      ]
+    },
+    "SC-12(2)": {
+      "description": "Cryptographic Key Establishment and Management | Symmetric Keys",
+      "config_rules": [
+        "cmk-backing-key-rotation-enabled",
+        "kms-cmk-not-scheduled-for-deletion"
+      ]
+    },
+    "SC-12(3)": {
+      "description": "Cryptographic Key Establishment and Management | Asymmetric Keys",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-ssl-enabled",
+        "elb-acm-certificate-required",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "opensearch-https-required",
+        "s3-bucket-ssl-requests-only"
+      ]
+    },
+    "SC-13": {
+      "description": "Cryptographic Protection",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-cache-enabled-and-encrypted",
+        "api-gw-ssl-enabled",
+        "cloud-trail-encryption-enabled",
+        "codebuild-project-artifact-encryption",
+        "dynamodb-table-encrypted-kms",
+        "ec2-ebs-encryption-by-default",
+        "efs-encrypted-check",
+        "elasticsearch-encrypted-at-rest",
+        "elasticsearch-node-to-node-encryption-check",
+        "elb-acm-certificate-required",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "encrypted-volumes",
+        "kinesis-stream-encrypted",
+        "opensearch-encrypted-at-rest",
+        "opensearch-https-required",
+        "opensearch-node-to-node-encryption-check",
+        "rds-snapshot-encrypted",
+        "rds-storage-encrypted",
+        "redshift-cluster-configuration-check",
+        "redshift-cluster-kms-enabled",
+        "redshift-require-tls-ssl",
+        "s3-bucket-server-side-encryption-enabled",
+        "s3-bucket-ssl-requests-only",
+        "s3-default-encryption-kms",
+        "sagemaker-endpoint-configuration-kms-key-configured",
+        "sagemaker-notebook-instance-kms-key-configured",
+        "secretsmanager-using-cmk",
+        "sns-encrypted-kms"
+      ]
+    },
+    "SC-23": {
+      "description": "Session Authenticity",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-ssl-enabled",
+        "elasticsearch-node-to-node-encryption-check",
+        "elb-acm-certificate-required",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "opensearch-https-required",
+        "opensearch-node-to-node-encryption-check",
+        "redshift-require-tls-ssl",
+        "s3-bucket-ssl-requests-only"
+      ]
+    },
+    "SC-23(3)": {
+      "description": "Session Authenticity | Unique System-generated Session Identifiers",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-ssl-enabled",
+        "elasticsearch-node-to-node-encryption-check",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "opensearch-https-required",
+        "opensearch-node-to-node-encryption-check",
+        "redshift-require-tls-ssl",
+        "s3-bucket-ssl-requests-only"
+      ]
+    },
+    "SC-23(5)": {
+      "description": "Session Authenticity | Allowed Certificate Authorities",
+      "config_rules": [
+        "elb-acm-certificate-required",
+        "elbv2-acm-certificate-required"
+      ]
+    },
+    "SC-28": {
+      "description": "Protection of Information at Rest",
+      "config_rules": [
+        "api-gw-cache-enabled-and-encrypted",
+        "cloud-trail-encryption-enabled",
+        "codebuild-project-artifact-encryption",
+        "dynamodb-table-encrypted-kms",
+        "ec2-ebs-encryption-by-default",
+        "efs-encrypted-check",
+        "elasticsearch-encrypted-at-rest",
+        "encrypted-volumes",
+        "kinesis-stream-encrypted",
+        "opensearch-encrypted-at-rest",
+        "rds-snapshot-encrypted",
+        "rds-storage-encrypted",
+        "redshift-cluster-configuration-check",
+        "redshift-cluster-kms-enabled",
+        "s3-bucket-server-side-encryption-enabled",
+        "s3-default-encryption-kms",
+        "sagemaker-endpoint-configuration-kms-key-configured",
+        "sagemaker-notebook-instance-kms-key-configured",
+        "secretsmanager-using-cmk",
+        "sns-encrypted-kms"
+      ]
+    },
+    "SC-28(1)": {
+      "description": "Protection of Information at Rest | Cryptographic Protection",
+      "config_rules": [
+        "api-gw-cache-enabled-and-encrypted",
+        "cloud-trail-encryption-enabled",
+        "codebuild-project-artifact-encryption",
+        "dynamodb-table-encrypted-kms",
+        "ec2-ebs-encryption-by-default",
+        "efs-encrypted-check",
+        "elasticsearch-encrypted-at-rest",
+        "encrypted-volumes",
+        "kinesis-stream-encrypted",
+        "opensearch-encrypted-at-rest",
+        "rds-snapshot-encrypted",
+        "rds-storage-encrypted",
+        "redshift-cluster-configuration-check",
+        "redshift-cluster-kms-enabled",
+        "s3-bucket-server-side-encryption-enabled",
+        "s3-default-encryption-kms",
+        "sagemaker-endpoint-configuration-kms-key-configured",
+        "sagemaker-notebook-instance-kms-key-configured",
+        "secretsmanager-using-cmk",
+        "sns-encrypted-kms"
+      ]
+    },
+    "SC-28(3)": {
+      "description": "Protection of Information at Rest | Cryptographic Keys",
+      "config_rules": [
+        "acm-certificate-expiration-check",
+        "cmk-backing-key-rotation-enabled"
+      ]
+    },
+    "SC-36": {
+      "description": "Distributed Processing and Storage",
+      "config_rules": [
+        "dynamodb-autoscaling-enabled",
+        "elb-cross-zone-load-balancing-enabled",
+        "rds-multi-az-support",
+        "vpc-vpn-2-tunnels-up"
+      ]
+    },
+    "SC-36(2)": {
+      "description": "Distributed Processing and Storage | Synchronization",
+      "config_rules": [
+        "s3-bucket-replication-enabled"
+      ]
+    },
+    "SC-5": {
+      "description": "Denial-of-service Protection",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SC-5(1)": {
+      "description": "Denial-of-service Protection | Restrict Ability to Attack Other Systems",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SC-5(2)": {
+      "description": "Denial-of-service Protection | Capacity, Bandwidth, and Redundancy",
+      "config_rules": [
+        "db-instance-backup-enabled",
+        "dynamodb-autoscaling-enabled",
+        "dynamodb-in-backup-plan",
+        "dynamodb-pitr-enabled",
+        "ebs-in-backup-plan",
+        "ebs-optimized-instance",
+        "efs-in-backup-plan",
+        "elasticache-redis-cluster-automatic-backup-check",
+        "elb-cross-zone-load-balancing-enabled",
+        "elb-deletion-protection-enabled",
+        "rds-instance-deletion-protection-enabled",
+        "rds-multi-az-support",
+        "redshift-backup-enabled",
+        "redshift-cluster-maintenancesettings-check",
+        "s3-bucket-replication-enabled",
+        "s3-bucket-versioning-enabled",
+        "s3-version-lifecycle-policy-check",
+        "vpc-vpn-2-tunnels-up"
+      ]
+    },
+    "SC-5(3)": {
+      "description": "Denial-of-service Protection | Detection and Monitoring",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SC-7": {
+      "description": "Boundary Protection",
+      "config_rules": [
+        "autoscaling-launch-config-public-ip-disabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "no-unrestricted-route-to-igw",
+        "opensearch-in-vpc-only",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "redshift-enhanced-vpc-routing-enabled",
+        "restricted-common-ports",
+        "restricted-ssh",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "ssm-document-not-public",
+        "subnet-auto-assign-public-ip-disabled",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "SC-7(10)": {
+      "description": "Boundary Protection | Prevent Exfiltration",
+      "config_rules": [
+        "cloud-trail-encryption-enabled",
+        "dynamodb-table-encrypted-kms",
+        "ec2-ebs-encryption-by-default",
+        "efs-encrypted-check",
+        "elasticsearch-encrypted-at-rest",
+        "encrypted-volumes",
+        "kinesis-stream-encrypted",
+        "rds-logging-enabled",
+        "rds-snapshot-encrypted",
+        "rds-storage-encrypted",
+        "redshift-backup-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-server-side-encryption-enabled",
+        "s3-default-encryption-kms",
+        "sagemaker-endpoint-configuration-kms-key-configured",
+        "sagemaker-notebook-instance-kms-key-configured",
+        "sns-encrypted-kms",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "SC-7(11)": {
+      "description": "Boundary Protection | Restrict Incoming Communications Traffic",
+      "config_rules": [
+        "autoscaling-launch-config-public-ip-disabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "no-unrestricted-route-to-igw",
+        "opensearch-in-vpc-only",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "redshift-enhanced-vpc-routing-enabled",
+        "restricted-common-ports",
+        "restricted-ssh",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "ssm-document-not-public",
+        "subnet-auto-assign-public-ip-disabled",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "SC-7(16)": {
+      "description": "Boundary Protection | Prevent Discovery of System Components",
+      "config_rules": [
+        "acm-certificate-expiration-check",
+        "autoscaling-launch-config-public-ip-disabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "no-unrestricted-route-to-igw",
+        "opensearch-in-vpc-only",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "restricted-common-ports",
+        "restricted-ssh",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "ssm-document-not-public",
+        "subnet-auto-assign-public-ip-disabled",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "SC-7(21)": {
+      "description": "Boundary Protection | Isolation of System Components",
+      "config_rules": [
+        "autoscaling-launch-config-public-ip-disabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "no-unrestricted-route-to-igw",
+        "opensearch-in-vpc-only",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "redshift-enhanced-vpc-routing-enabled",
+        "restricted-common-ports",
+        "restricted-ssh",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "ssm-document-not-public",
+        "subnet-auto-assign-public-ip-disabled",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "SC-7(3)": {
+      "description": "Boundary Protection | Access Points",
+      "config_rules": [
+        "autoscaling-launch-config-public-ip-disabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "opensearch-in-vpc-only",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "ssm-document-not-public",
+        "subnet-auto-assign-public-ip-disabled"
+      ]
+    },
+    "SC-7(4)": {
+      "description": "Boundary Protection | External Telecommunications Services",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-ssl-enabled",
+        "autoscaling-launch-config-public-ip-disabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "elasticsearch-node-to-node-encryption-check",
+        "elb-acm-certificate-required",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "no-unrestricted-route-to-igw",
+        "opensearch-https-required",
+        "opensearch-in-vpc-only",
+        "opensearch-node-to-node-encryption-check",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "redshift-enhanced-vpc-routing-enabled",
+        "redshift-require-tls-ssl",
+        "restricted-common-ports",
+        "restricted-ssh",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "s3-bucket-ssl-requests-only",
+        "sagemaker-notebook-no-direct-internet-access",
+        "ssm-document-not-public",
+        "subnet-auto-assign-public-ip-disabled",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "SC-7(5)": {
+      "description": "Boundary Protection | Deny by Default \u2014 Allow by Exception",
+      "config_rules": [
+        "restricted-common-ports",
+        "restricted-ssh",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "SC-7(9)": {
+      "description": "Boundary Protection | Restrict Threatening Outgoing Communications Traffic",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "autoscaling-launch-config-public-ip-disabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "elasticsearch-logs-to-cloudwatch",
+        "elb-logging-enabled",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-in-vpc-only",
+        "opensearch-logs-to-cloudwatch",
+        "rds-instance-public-access-check",
+        "rds-logging-enabled",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-configuration-check",
+        "redshift-cluster-public-access-check",
+        "redshift-enhanced-vpc-routing-enabled",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-logging-enabled",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "ssm-document-not-public",
+        "subnet-auto-assign-public-ip-disabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "SC-8": {
+      "description": "Transmission Confidentiality and Integrity",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-ssl-enabled",
+        "elasticsearch-node-to-node-encryption-check",
+        "elb-acm-certificate-required",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "opensearch-https-required",
+        "opensearch-node-to-node-encryption-check",
+        "redshift-require-tls-ssl",
+        "s3-bucket-ssl-requests-only"
+      ]
+    },
+    "SC-8(1)": {
+      "description": "Transmission Confidentiality and Integrity | Cryptographic Protection",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-ssl-enabled",
+        "elasticsearch-node-to-node-encryption-check",
+        "elb-acm-certificate-required",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "opensearch-https-required",
+        "opensearch-node-to-node-encryption-check",
+        "redshift-require-tls-ssl",
+        "s3-bucket-ssl-requests-only"
+      ]
+    },
+    "SC-8(2)": {
+      "description": "Transmission Confidentiality and Integrity | Pre- and Post-transmission Handling",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-ssl-enabled",
+        "elasticsearch-node-to-node-encryption-check",
+        "elb-acm-certificate-required",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "opensearch-https-required",
+        "opensearch-node-to-node-encryption-check",
+        "redshift-require-tls-ssl",
+        "s3-bucket-ssl-requests-only"
+      ]
+    },
+    "SI-12": {
+      "description": "Information Management and Retention",
+      "config_rules": [
+        "db-instance-backup-enabled",
+        "dynamodb-in-backup-plan",
+        "dynamodb-pitr-enabled",
+        "ebs-in-backup-plan",
+        "efs-in-backup-plan",
+        "elasticache-redis-cluster-automatic-backup-check",
+        "s3-bucket-versioning-enabled"
+      ]
+    },
+    "SI-13(5)": {
+      "description": "Predictable Failure Prevention | Failover Capability",
+      "config_rules": [
+        "db-instance-backup-enabled",
+        "dynamodb-autoscaling-enabled",
+        "dynamodb-in-backup-plan",
+        "dynamodb-pitr-enabled",
+        "ebs-in-backup-plan",
+        "efs-in-backup-plan",
+        "elasticache-redis-cluster-automatic-backup-check",
+        "elb-cross-zone-load-balancing-enabled",
+        "rds-instance-deletion-protection-enabled",
+        "rds-multi-az-support",
+        "redshift-backup-enabled",
+        "s3-bucket-replication-enabled",
+        "s3-bucket-versioning-enabled",
+        "s3-version-lifecycle-policy-check",
+        "vpc-vpn-2-tunnels-up"
+      ]
+    },
+    "SI-2": {
+      "description": "Flaw Remediation",
+      "config_rules": [
+        "autoscaling-group-elb-healthcheck-required",
+        "beanstalk-enhanced-health-reporting-enabled",
+        "cloudwatch-alarm-action-check",
+        "dynamodb-throughput-limit-check",
+        "ec2-managedinstance-patch-compliance-status-check",
+        "elastic-beanstalk-managed-updates-enabled",
+        "lambda-dlq-check",
+        "rds-enhanced-monitoring-enabled",
+        "redshift-cluster-maintenancesettings-check"
+      ]
+    },
+    "SI-2(2)": {
+      "description": "Flaw Remediation | Automated Flaw Remediation Status",
+      "config_rules": [
+        "ec2-managedinstance-patch-compliance-status-check",
+        "elastic-beanstalk-managed-updates-enabled",
+        "redshift-cluster-maintenancesettings-check"
+      ]
+    },
+    "SI-2(3)": {
+      "description": "Flaw Remediation | Time to Remediate Flaws and Benchmarks for Corrective Actions",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-managedinstance-association-compliance-status-check",
+        "ec2-managedinstance-patch-compliance-status-check"
+      ]
+    },
+    "SI-2(4)": {
+      "description": "Flaw Remediation | Automated Patch Management Tools",
+      "config_rules": [
+        "ec2-managedinstance-patch-compliance-status-check",
+        "elastic-beanstalk-managed-updates-enabled",
+        "redshift-cluster-maintenancesettings-check"
+      ]
+    },
+    "SI-2(5)": {
+      "description": "Flaw Remediation | Automatic Software and Firmware Updates",
+      "config_rules": [
+        "ec2-managedinstance-patch-compliance-status-check",
+        "elastic-beanstalk-managed-updates-enabled",
+        "redshift-cluster-maintenancesettings-check"
+      ]
+    },
+    "SI-20": {
+      "description": "Tainting",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudwatch-alarm-action-check",
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SI-3(8)": {
+      "description": "Malicious Code Protection | Detect Unauthorized Commands",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "guardduty-enabled-centralized",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "s3-event-notifications-enabled"
+      ]
+    },
+    "SI-4": {
+      "description": "System Monitoring",
+      "config_rules": [
+        "cloud-trail-log-file-validation-enabled",
+        "guardduty-enabled-centralized",
+        "s3-event-notifications-enabled"
+      ]
+    },
+    "SI-4(1)": {
+      "description": "System Monitoring | System-wide Intrusion Detection System",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SI-4(12)": {
+      "description": "System Monitoring | Automated Organization-generated Alerts",
+      "config_rules": [
+        "cloudwatch-alarm-action-check"
+      ]
+    },
+    "SI-4(13)": {
+      "description": "System Monitoring | Analyze Traffic and Event Patterns",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SI-4(2)": {
+      "description": "System Monitoring | Automated Tools and Mechanisms for Real-time Analysis",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SI-4(20)": {
+      "description": "System Monitoring | Privileged Users",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled"
+      ]
+    },
+    "SI-4(22)": {
+      "description": "System Monitoring | Unauthorized Network Services",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SI-4(25)": {
+      "description": "System Monitoring | Optimize Network Traffic Analysis",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SI-4(4)": {
+      "description": "System Monitoring | Inbound and Outbound Communications Traffic",
+      "config_rules": [
+        "guardduty-enabled-centralized",
+        "s3-event-notifications-enabled"
+      ]
+    },
+    "SI-4(5)": {
+      "description": "System Monitoring | System-generated Alerts",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudwatch-alarm-action-check",
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SI-7(1)": {
+      "description": "Software, Firmware, and Information Integrity | Integrity Checks",
+      "config_rules": [
+        "cloud-trail-log-file-validation-enabled"
+      ]
+    },
+    "SI-7(3)": {
+      "description": "Software, Firmware, and Information Integrity | Centrally Managed Integrity Tools",
+      "config_rules": [
+        "cloud-trail-log-file-validation-enabled"
+      ]
+    },
+    "SI-7(6)": {
+      "description": "Software, Firmware, and Information Integrity | Cryptographic Protection",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-cache-enabled-and-encrypted",
+        "api-gw-ssl-enabled",
+        "cloud-trail-encryption-enabled",
+        "codebuild-project-artifact-encryption",
+        "dynamodb-table-encrypted-kms",
+        "ec2-ebs-encryption-by-default",
+        "efs-encrypted-check",
+        "elasticsearch-encrypted-at-rest",
+        "elb-acm-certificate-required",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "encrypted-volumes",
+        "kinesis-stream-encrypted",
+        "opensearch-encrypted-at-rest",
+        "opensearch-https-required",
+        "rds-snapshot-encrypted",
+        "rds-storage-encrypted",
+        "redshift-cluster-configuration-check",
+        "redshift-cluster-kms-enabled",
+        "s3-bucket-server-side-encryption-enabled",
+        "s3-bucket-ssl-requests-only",
+        "s3-default-encryption-kms",
+        "sagemaker-endpoint-configuration-kms-key-configured",
+        "sagemaker-notebook-instance-kms-key-configured",
+        "secretsmanager-using-cmk",
+        "sns-encrypted-kms"
+      ]
+    },
+    "SI-7(7)": {
+      "description": "Software, Firmware, and Information Integrity | Integration of Detection and Response",
+      "config_rules": [
+        "cloud-trail-log-file-validation-enabled"
+      ]
+    },
+    "SI-7(8)": {
+      "description": "Software, Firmware, and Information Integrity | Auditing Capability for Significant Events",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "elb-logging-enabled",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "vpc-flow-logs-enabled",
+        "wafv2-logging-enabled"
+      ]
+    }
+  }
+}

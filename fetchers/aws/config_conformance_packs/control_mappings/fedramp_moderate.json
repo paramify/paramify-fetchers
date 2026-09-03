@@ -1,0 +1,1848 @@
+{
+  "framework": "fedramp_moderate",
+  "title": "FedRAMP Moderate Baseline Controls",
+  "source_url": "https://docs.aws.amazon.com/config/latest/developerguide/operational-best-practices-for-fedramp-moderate.html",
+  "disclaimer": "AWS sample mappings do not guarantee compliance; validate applicability for your environment.",
+  "rule_count": 128,
+  "control_count": 71,
+  "aliases": {
+    "cloud-trail-enabled": "cloudtrail-enabled",
+    "ec2-instance-managed-by-ssm": "ec2-instance-managed-by-systems-manager",
+    "incoming-ssh-disabled": "restricted-ssh",
+    "instances-in-vpc": "ec2-instances-in-vpc",
+    "multi-region-cloud-trail-enabled": "multi-region-cloudtrail-enabled"
+  },
+  "rules": {
+    "access-keys-rotated": [
+      "AC-2(1)",
+      "AC-2(f)",
+      "AC-2(j)"
+    ],
+    "acm-certificate-expiration-check": [
+      "AC-17(2)",
+      "AC-4",
+      "SC-12"
+    ],
+    "alb-http-to-https-redirection-check": [
+      "AC-17(2)",
+      "SC-23",
+      "SC-7",
+      "SC-8",
+      "SC-8(1)"
+    ],
+    "alb-waf-enabled": [
+      "CM-2",
+      "SC-7",
+      "SI-4(a)(b)(c)"
+    ],
+    "api-gw-associated-with-waf": [
+      "CM-2",
+      "SI-4(a)(b)(c)"
+    ],
+    "api-gw-cache-enabled-and-encrypted": [
+      "SC-28"
+    ],
+    "api-gw-execution-logging-enabled": [
+      "AC-2(g)",
+      "AU-12(a)(c)",
+      "AU-2(a)(d)",
+      "AU-3",
+      "AU-6(1)(3)",
+      "SI-11"
+    ],
+    "api-gw-ssl-enabled": [
+      "SC-23",
+      "SC-8",
+      "SC-8(1)"
+    ],
+    "aurora-resources-protected-by-backup-plan": [
+      "CP-10",
+      "CP-9(b)",
+      "SI-12"
+    ],
+    "autoscaling-group-elb-healthcheck-required": [
+      "CA-7(a)(b)",
+      "IR-4(1)",
+      "SC-5"
+    ],
+    "autoscaling-launch-config-public-ip-disabled": [
+      "AC-21(b)",
+      "AC-3",
+      "CM-2",
+      "SC-7(3)"
+    ],
+    "backup-plan-min-frequency-and-min-retention-check": [
+      "CP-10",
+      "CP-9(b)",
+      "SI-12"
+    ],
+    "beanstalk-enhanced-health-reporting-enabled": [
+      "CA-7(a)(b)"
+    ],
+    "cloud-trail-cloud-watch-logs-enabled": [
+      "AC-2(4)",
+      "AC-2(g)",
+      "AU-12(a)(c)",
+      "AU-2(a)(d)",
+      "AU-3",
+      "AU-6(1)(3)",
+      "AU-7(1)",
+      "SI-11",
+      "SI-4(4)",
+      "SI-4(5)",
+      "SI-4(a)(b)(c)"
+    ],
+    "cloud-trail-encryption-enabled": [
+      "AU-9",
+      "SC-28"
+    ],
+    "cloud-trail-log-file-validation-enabled": [
+      "AU-9",
+      "SI-7",
+      "SI-7(1)"
+    ],
+    "cloudtrail-enabled": [
+      "AC-2(4)",
+      "AC-2(g)",
+      "AU-12(a)(c)",
+      "AU-2(a)(d)",
+      "AU-3",
+      "AU-6(1)(3)",
+      "CA-7(a)(b)",
+      "SI-4(16)",
+      "SI-4(2)"
+    ],
+    "cloudtrail-s3-dataevents-enabled": [
+      "AC-2(4)",
+      "AC-2(g)",
+      "AU-12(a)(c)",
+      "AU-2(a)(d)",
+      "AU-3",
+      "AU-6(1)(3)",
+      "CA-7(a)(b)",
+      "SI-4(16)",
+      "SI-4(2)"
+    ],
+    "cloudwatch-alarm-action-check": [
+      "AC-2(4)",
+      "AU-6(1)(3)",
+      "AU-7(1)",
+      "CA-7(a)(b)",
+      "IR-4(1)",
+      "SI-4(2)",
+      "SI-4(4)",
+      "SI-4(5)",
+      "SI-4(a)(b)(c)",
+      "SI-5"
+    ],
+    "cloudwatch-log-group-encrypted": [
+      "AU-9",
+      "SC-28"
+    ],
+    "cmk-backing-key-rotation-enabled": [
+      "SC-12"
+    ],
+    "codebuild-project-envvar-awscred-check": [
+      "AC-6",
+      "IA-5(7)",
+      "SA-3(a)",
+      "SI-3"
+    ],
+    "codebuild-project-logging-enabled": [
+      "AC-2(4)",
+      "AC-2(g)",
+      "AU-12(a)(c)",
+      "AU-2(a)(d)",
+      "AU-3",
+      "AU-6(1)(3)",
+      "SI-11"
+    ],
+    "codebuild-project-source-repo-url-check": [
+      "SA-3(a)",
+      "SI-3"
+    ],
+    "cw-loggroup-retention-period-check": [
+      "AU-11",
+      "AU-6(1)(3)",
+      "SI-12"
+    ],
+    "db-instance-backup-enabled": [
+      "CP-10",
+      "CP-9(b)",
+      "SI-12"
+    ],
+    "dms-replication-not-public": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "dynamodb-autoscaling-enabled": [
+      "CP-10",
+      "SC-5"
+    ],
+    "dynamodb-pitr-enabled": [
+      "CP-10",
+      "CP-9(b)",
+      "SC-5",
+      "SI-12"
+    ],
+    "dynamodb-resources-protected-by-backup-plan": [
+      "CP-10",
+      "CP-9(b)",
+      "SI-12"
+    ],
+    "dynamodb-throughput-limit-check": [
+      "CA-7(a)(b)"
+    ],
+    "ebs-optimized-instance": [
+      "CP-10",
+      "SC-5"
+    ],
+    "ebs-resources-protected-by-backup-plan": [
+      "CP-10",
+      "CP-9(b)",
+      "SI-12"
+    ],
+    "ebs-snapshot-public-restorable-check": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "ec2-ebs-encryption-by-default": [
+      "SC-28"
+    ],
+    "ec2-imdsv2-check": [
+      "AC-3",
+      "AC-6"
+    ],
+    "ec2-instance-detailed-monitoring-enabled": [
+      "CA-7(a)(b)",
+      "SI-4(2)",
+      "SI-4(a)(b)(c)"
+    ],
+    "ec2-instance-managed-by-systems-manager": [
+      "CM-2",
+      "CM-7(a)",
+      "CM-8(1)",
+      "CM-8(3)(a)",
+      "SA-10",
+      "SA-3(a)",
+      "SI-2(2)",
+      "SI-7(1)"
+    ],
+    "ec2-instance-no-public-ip": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "ec2-instance-profile-attached": [
+      "AC-2(j)",
+      "AC-3",
+      "CM-7(a)"
+    ],
+    "ec2-instances-in-vpc": [
+      "AC-17(1)",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "ec2-managedinstance-association-compliance-status-check": [
+      "CM-2",
+      "CM-7(a)",
+      "CM-8(1)",
+      "CM-8(3)(a)",
+      "SI-2(2)"
+    ],
+    "ec2-managedinstance-patch-compliance-status-check": [
+      "CM-8(3)(a)",
+      "SI-2(2)",
+      "SI-7(1)"
+    ],
+    "ec2-resources-protected-by-backup-plan": [
+      "CP-10",
+      "CP-9(b)",
+      "SI-12"
+    ],
+    "ec2-stopped-instance": [
+      "CM-2"
+    ],
+    "ec2-volume-inuse-check": [
+      "CM-2",
+      "SC-4"
+    ],
+    "ecs-task-definition-memory-hard-limit": [
+      "SI-16",
+      "SI-3"
+    ],
+    "ecs-task-definition-user-for-host-mode-check": [
+      "AC-2(j)",
+      "AC-3",
+      "AC-5c"
+    ],
+    "efs-encrypted-check": [
+      "SC-28"
+    ],
+    "efs-resources-protected-by-backup-plan": [
+      "CP-10",
+      "CP-9(b)",
+      "SI-12"
+    ],
+    "elastic-beanstalk-managed-updates-enabled": [
+      "SI-2(2)"
+    ],
+    "elasticache-redis-cluster-automatic-backup-check": [
+      "CP-10",
+      "CP-9(b)",
+      "SC-5",
+      "SI-12"
+    ],
+    "elasticsearch-encrypted-at-rest": [
+      "SC-28"
+    ],
+    "elasticsearch-in-vpc-only": [
+      "AC-17(1)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "elasticsearch-logs-to-cloudwatch": [
+      "AC-2(g)",
+      "SI-11"
+    ],
+    "elasticsearch-node-to-node-encryption-check": [
+      "SC-23",
+      "SC-7",
+      "SC-8",
+      "SC-8(1)"
+    ],
+    "elb-cross-zone-load-balancing-enabled": [
+      "CP-10",
+      "SC-5"
+    ],
+    "elb-deletion-protection-enabled": [
+      "CM-2",
+      "CP-10",
+      "SC-5"
+    ],
+    "elb-logging-enabled": [
+      "AU-12(a)(c)",
+      "AU-2(a)(d)",
+      "AU-3",
+      "AU-6(1)(3)"
+    ],
+    "elb-tls-https-listeners-only": [
+      "AC-17(2)",
+      "SC-23",
+      "SC-7",
+      "SC-8",
+      "SC-8(1)"
+    ],
+    "elbv2-acm-certificate-required": [
+      "SC-8",
+      "SC-8(1)"
+    ],
+    "emr-master-no-public-ip": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "encrypted-volumes": [
+      "SC-28"
+    ],
+    "fsx-resources-protected-by-backup-plan": [
+      "CP-10",
+      "CP-9(b)",
+      "SI-12"
+    ],
+    "guardduty-enabled-centralized": [
+      "AC-17(1)",
+      "AC-2(1)",
+      "AC-2(12)(a)",
+      "AC-2(4)",
+      "AC-2(g)",
+      "AU-6(1)(3)",
+      "CA-7(a)(b)",
+      "CM-8(3)(a)",
+      "IR-4(1)",
+      "IR-6(1)",
+      "IR-7(1)",
+      "RA-5",
+      "RA-5(1)",
+      "SA-10",
+      "SC-5",
+      "SI-4(1)",
+      "SI-4(16)",
+      "SI-4(2)",
+      "SI-4(4)",
+      "SI-4(5)",
+      "SI-4(a)(b)(c)",
+      "SI-5"
+    ],
+    "guardduty-non-archived-findings": [
+      "IR-4(1)",
+      "IR-6(1)",
+      "IR-7(1)",
+      "RA-5",
+      "RA-5(1)",
+      "SA-10",
+      "SI-4(a)(b)(c)",
+      "SI-5"
+    ],
+    "iam-customer-policy-blocked-kms-actions": [
+      "AC-2(7)",
+      "AC-2(j)",
+      "AC-5c"
+    ],
+    "iam-group-has-users-check": [
+      "AC-2(7)",
+      "AC-2(j)",
+      "AC-3",
+      "AC-5c",
+      "AC-6",
+      "SC-2"
+    ],
+    "iam-inline-policy-blocked-kms-actions": [
+      "AC-2(7)",
+      "AC-2(f)",
+      "AC-2(j)",
+      "AC-5c"
+    ],
+    "iam-no-inline-policy-check": [
+      "AC-2(1)",
+      "AC-2(7)",
+      "AC-2(f)",
+      "AC-2(j)",
+      "AC-3",
+      "AC-5c",
+      "AC-6",
+      "SC-2"
+    ],
+    "iam-password-policy": [
+      "AC-2(1)",
+      "AC-2(3)",
+      "AC-2(f)",
+      "AC-2(j)",
+      "AC-5c",
+      "IA-2",
+      "IA-5(1)(a)(d)(e)",
+      "IA-5(4)"
+    ],
+    "iam-policy-no-statements-with-admin-access": [
+      "AC-2(1)",
+      "AC-2(7)",
+      "AC-2(f)",
+      "AC-2(j)",
+      "AC-3",
+      "AC-5c",
+      "AC-6",
+      "AC-6(10)",
+      "SC-2"
+    ],
+    "iam-policy-no-statements-with-full-access": [
+      "AC-2(7)",
+      "AC-2(f)",
+      "AC-2(j)",
+      "AC-3",
+      "AC-5c",
+      "AC-6(10)"
+    ],
+    "iam-root-access-key-check": [
+      "AC-2(1)",
+      "AC-2(f)",
+      "AC-2(j)",
+      "AC-3",
+      "AC-5c",
+      "AC-6",
+      "AC-6(10)",
+      "IA-2"
+    ],
+    "iam-user-group-membership-check": [
+      "AC-2(1)",
+      "AC-2(f)",
+      "AC-2(j)",
+      "AC-3",
+      "AC-5c",
+      "AC-6",
+      "SC-2"
+    ],
+    "iam-user-mfa-enabled": [
+      "AC-2(1)",
+      "AC-2(f)",
+      "AC-2(j)",
+      "IA-2(1)",
+      "IA-2(1)(2)"
+    ],
+    "iam-user-no-policies-check": [
+      "AC-2(1)",
+      "AC-2(f)",
+      "AC-2(j)",
+      "AC-3",
+      "AC-5c",
+      "AC-6",
+      "SC-2"
+    ],
+    "iam-user-unused-credentials-check": [
+      "AC-2(1)",
+      "AC-2(3)",
+      "AC-2(f)",
+      "AC-2(j)",
+      "AC-3",
+      "AC-5c",
+      "AC-6"
+    ],
+    "kms-cmk-not-scheduled-for-deletion": [
+      "SC-12",
+      "SC-13",
+      "SC-28"
+    ],
+    "lambda-concurrency-check": [
+      "CA-7(a)(b)"
+    ],
+    "lambda-dlq-check": [
+      "CA-7(a)(b)"
+    ],
+    "lambda-function-public-access-prohibited": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "lambda-inside-vpc": [
+      "AC-17(1)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "mfa-enabled-for-iam-console-access": [
+      "AC-2(1)",
+      "AC-2(f)",
+      "AC-2(j)",
+      "IA-2(1)",
+      "IA-2(1)(2)"
+    ],
+    "multi-region-cloudtrail-enabled": [
+      "AC-2(4)",
+      "AC-2(g)",
+      "AU-12(a)(c)",
+      "AU-2(a)(d)",
+      "AU-3",
+      "AU-6(1)(3)",
+      "CA-7(a)(b)",
+      "SI-4(16)",
+      "SI-4(2)"
+    ],
+    "no-unrestricted-route-to-igw": [
+      "AC-21(b)",
+      "CM-2",
+      "SC-4"
+    ],
+    "opensearch-logs-to-cloudwatch": [
+      "AC-2(g)",
+      "SI-11"
+    ],
+    "rds-enhanced-monitoring-enabled": [
+      "CA-7(a)(b)"
+    ],
+    "rds-instance-deletion-protection-enabled": [
+      "SC-5"
+    ],
+    "rds-instance-public-access-check": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "rds-logging-enabled": [
+      "AC-2(4)",
+      "AC-2(g)",
+      "AU-12(a)(c)",
+      "AU-2(a)(d)",
+      "AU-3",
+      "AU-6(1)(3)"
+    ],
+    "rds-multi-az-support": [
+      "CP-10",
+      "SC-5"
+    ],
+    "rds-resources-protected-by-backup-plan": [
+      "CP-10",
+      "CP-9(b)",
+      "SI-12"
+    ],
+    "rds-snapshot-encrypted": [
+      "SC-28",
+      "SC-7(4)"
+    ],
+    "rds-snapshots-public-prohibited": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)",
+      "SC-7(4)"
+    ],
+    "rds-storage-encrypted": [
+      "SC-28",
+      "SC-7(4)"
+    ],
+    "redshift-backup-enabled": [
+      "CP-10",
+      "CP-9(b)",
+      "SI-12"
+    ],
+    "redshift-cluster-configuration-check": [
+      "AC-2(4)",
+      "AC-2(g)",
+      "AU-12(a)(c)",
+      "AU-2(a)(d)",
+      "AU-3",
+      "AU-6(1)(3)",
+      "CA-7(a)(b)",
+      "SC-28",
+      "SI-4(16)",
+      "SI-4(2)"
+    ],
+    "redshift-cluster-kms-enabled": [
+      "SC-13",
+      "SC-28",
+      "SC-7(4)"
+    ],
+    "redshift-cluster-public-access-check": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "redshift-require-tls-ssl": [
+      "AC-17(2)",
+      "SC-23",
+      "SC-7",
+      "SC-8",
+      "SC-8(1)"
+    ],
+    "restricted-common-ports": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-4",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "restricted-ssh": [
+      "AC-17(1)",
+      "AC-4",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "root-account-hardware-mfa-enabled": [
+      "AC-2(1)",
+      "AC-2(f)",
+      "IA-2(1)",
+      "IA-2(1)(2)"
+    ],
+    "root-account-mfa-enabled": [
+      "AC-2(1)",
+      "AC-2(f)",
+      "AC-2(j)",
+      "IA-2(1)",
+      "IA-2(1)(2)"
+    ],
+    "s3-account-level-public-access-blocks-periodic": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-6",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "s3-bucket-default-lock-enabled": [
+      "SC-28"
+    ],
+    "s3-bucket-level-public-access-prohibited": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-6",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "s3-bucket-logging-enabled": [
+      "AC-2(4)",
+      "AC-2(g)",
+      "AU-12(a)(c)",
+      "AU-2(a)(d)",
+      "AU-3",
+      "AU-6(1)(3)",
+      "SI-11"
+    ],
+    "s3-bucket-public-read-prohibited": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "s3-bucket-public-write-prohibited": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "s3-bucket-replication-enabled": [
+      "AU-9(2)",
+      "CP-10",
+      "CP-9(b)",
+      "SC-5"
+    ],
+    "s3-bucket-server-side-encryption-enabled": [
+      "SC-28"
+    ],
+    "s3-bucket-ssl-requests-only": [
+      "AC-17(2)",
+      "SC-23",
+      "SC-7",
+      "SC-8",
+      "SC-8(1)"
+    ],
+    "s3-bucket-versioning-enabled": [
+      "AU-9(2)",
+      "CP-10",
+      "CP-9(b)",
+      "SC-5",
+      "SI-12"
+    ],
+    "s3-default-encryption-kms": [
+      "SC-13",
+      "SC-28"
+    ],
+    "sagemaker-endpoint-configuration-kms-key-configured": [
+      "SC-13",
+      "SC-28"
+    ],
+    "sagemaker-notebook-instance-kms-key-configured": [
+      "SC-13",
+      "SC-28"
+    ],
+    "sagemaker-notebook-no-direct-internet-access": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-4",
+      "AC-6",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "securityhub-enabled": [
+      "AC-17(1)",
+      "AC-2(1)",
+      "AC-2(12)(a)",
+      "AC-2(4)",
+      "AC-2(g)",
+      "AU-6(1)(3)",
+      "CA-7(a)(b)",
+      "IR-4(1)",
+      "IR-6(1)",
+      "IR-7(1)",
+      "RA-5(1)",
+      "SA-10",
+      "SI-4(16)",
+      "SI-4(2)",
+      "SI-4(4)",
+      "SI-4(5)",
+      "SI-4(a)(b)(c)",
+      "SI-5"
+    ],
+    "sns-encrypted-kms": [
+      "SC-13",
+      "SC-28"
+    ],
+    "ssm-document-not-public": [
+      "AC-3",
+      "SC-4",
+      "SC-7(3)"
+    ],
+    "subnet-auto-assign-public-ip-disabled": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-3",
+      "AC-6",
+      "CM-2",
+      "SC-7",
+      "SC-7(3)"
+    ],
+    "vpc-default-security-group-closed": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-4",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)",
+      "SC-7(4)"
+    ],
+    "vpc-flow-logs-enabled": [
+      "AU-12(a)(c)",
+      "AU-2(a)(d)",
+      "AU-3",
+      "AU-6(1)(3)",
+      "SC-7(4)",
+      "SI-11"
+    ],
+    "vpc-sg-open-only-to-authorized-ports": [
+      "AC-17(1)",
+      "AC-21(b)",
+      "AC-4",
+      "CM-2",
+      "SC-4",
+      "SC-7",
+      "SC-7(3)",
+      "SC-7(5)"
+    ],
+    "vpc-vpn-2-tunnels-up": [
+      "CP-10",
+      "SC-5"
+    ],
+    "wafv2-logging-enabled": [
+      "AC-2(g)",
+      "AU-12(a)(c)",
+      "AU-2(a)(d)",
+      "AU-3",
+      "AU-6(1)(3)",
+      "SC-7",
+      "SI-4(a)(b)(c)"
+    ]
+  },
+  "controls": {
+    "AC-17(1)": {
+      "description": "The information system monitors and controls remote access methods.",
+      "config_rules": [
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "emr-master-no-public-ip",
+        "guardduty-enabled-centralized",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "restricted-common-ports",
+        "restricted-ssh",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "securityhub-enabled",
+        "subnet-auto-assign-public-ip-disabled",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "AC-17(2)": {
+      "description": "The information system implements cryptographic mechanisms to protect the confidentiality and integrity of remote access sessions.",
+      "config_rules": [
+        "acm-certificate-expiration-check",
+        "alb-http-to-https-redirection-check",
+        "elb-tls-https-listeners-only",
+        "redshift-require-tls-ssl",
+        "s3-bucket-ssl-requests-only"
+      ]
+    },
+    "AC-2(1)": {
+      "description": "The organization employs automated mechanisms to support the management of information system accounts.",
+      "config_rules": [
+        "access-keys-rotated",
+        "guardduty-enabled-centralized",
+        "iam-no-inline-policy-check",
+        "iam-password-policy",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-root-access-key-check",
+        "iam-user-group-membership-check",
+        "iam-user-mfa-enabled",
+        "iam-user-no-policies-check",
+        "iam-user-unused-credentials-check",
+        "mfa-enabled-for-iam-console-access",
+        "root-account-hardware-mfa-enabled",
+        "root-account-mfa-enabled",
+        "securityhub-enabled"
+      ]
+    },
+    "AC-2(12)(a)": {
+      "description": "The organization: a. Monitors information system accounts for [Assignment: organization-defined atypical use].",
+      "config_rules": [
+        "guardduty-enabled-centralized",
+        "securityhub-enabled"
+      ]
+    },
+    "AC-2(3)": {
+      "description": "The information system automatically disables inactive accounts after 90 days for users.",
+      "config_rules": [
+        "iam-password-policy",
+        "iam-user-unused-credentials-check"
+      ]
+    },
+    "AC-2(4)": {
+      "description": "The information system automatically audits account creation, modification, enabling, disabling, and removal actions, and notifies [Assignment: organization-defined personnel or roles].",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "cloudwatch-alarm-action-check",
+        "codebuild-project-logging-enabled",
+        "guardduty-enabled-centralized",
+        "multi-region-cloudtrail-enabled",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "securityhub-enabled"
+      ]
+    },
+    "AC-2(7)": {
+      "description": "The organization: (a) Establishes and administers privileged users in accordance with a role-based access scheme that organizes allowed information system access and privileges into roles; (b) Monitors privileged role assignments; and (c) Takes [Assignment: organization-defined actions] when privileged role assignments are no longer appropriate. Supplemental Guidance: Privileged roles are organization-defined roles assigned to individuals that allow those individuals to perform certain security-relevant functions that ordinary users are not authorized to perform. These privileged roles include, for example, key management, account management, network and system administration, database administration, and web administration.",
+      "config_rules": [
+        "iam-customer-policy-blocked-kms-actions",
+        "iam-group-has-users-check",
+        "iam-inline-policy-blocked-kms-actions",
+        "iam-no-inline-policy-check",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access"
+      ]
+    },
+    "AC-2(f)": {
+      "description": "The organization: f. Creates, enables, modifies, disables, and removes information system accounts in accordance with [Assignment: organization-defined procedures or conditions].",
+      "config_rules": [
+        "access-keys-rotated",
+        "iam-inline-policy-blocked-kms-actions",
+        "iam-no-inline-policy-check",
+        "iam-password-policy",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access",
+        "iam-root-access-key-check",
+        "iam-user-group-membership-check",
+        "iam-user-mfa-enabled",
+        "iam-user-no-policies-check",
+        "iam-user-unused-credentials-check",
+        "mfa-enabled-for-iam-console-access",
+        "root-account-hardware-mfa-enabled",
+        "root-account-mfa-enabled"
+      ]
+    },
+    "AC-2(g)": {
+      "description": "The organization: g. Monitors the use of information system accounts.",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "codebuild-project-logging-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "guardduty-enabled-centralized",
+        "multi-region-cloudtrail-enabled",
+        "opensearch-logs-to-cloudwatch",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "securityhub-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "AC-2(j)": {
+      "description": "The organization: j. Reviews accounts for compliance with account management requirements [Assignment: organization-defined frequency].",
+      "config_rules": [
+        "access-keys-rotated",
+        "ec2-instance-profile-attached",
+        "ecs-task-definition-user-for-host-mode-check",
+        "iam-customer-policy-blocked-kms-actions",
+        "iam-group-has-users-check",
+        "iam-inline-policy-blocked-kms-actions",
+        "iam-no-inline-policy-check",
+        "iam-password-policy",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access",
+        "iam-root-access-key-check",
+        "iam-user-group-membership-check",
+        "iam-user-mfa-enabled",
+        "iam-user-no-policies-check",
+        "iam-user-unused-credentials-check",
+        "mfa-enabled-for-iam-console-access",
+        "root-account-mfa-enabled"
+      ]
+    },
+    "AC-21(b)": {
+      "description": "The organization: b. Employs [Assignment: organization-defined automated mechanisms or manual processes] to assist users in making information sharing/collaboration decisions.",
+      "config_rules": [
+        "autoscaling-launch-config-public-ip-disabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "no-unrestricted-route-to-igw",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "restricted-common-ports",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "subnet-auto-assign-public-ip-disabled",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "AC-3": {
+      "description": "The information system enforces approved authorizations for logical access to information and system resources in accordance with applicable access control policies.",
+      "config_rules": [
+        "autoscaling-launch-config-public-ip-disabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-imdsv2-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instance-profile-attached",
+        "ecs-task-definition-user-for-host-mode-check",
+        "elasticsearch-in-vpc-only",
+        "emr-master-no-public-ip",
+        "iam-group-has-users-check",
+        "iam-no-inline-policy-check",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access",
+        "iam-root-access-key-check",
+        "iam-user-group-membership-check",
+        "iam-user-no-policies-check",
+        "iam-user-unused-credentials-check",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "ssm-document-not-public",
+        "subnet-auto-assign-public-ip-disabled"
+      ]
+    },
+    "AC-4": {
+      "description": "The information system enforces approved authorizations for controlling the flow of information within the system and between interconnected systems based on [Assignment: organization-defined information flow control policies].",
+      "config_rules": [
+        "acm-certificate-expiration-check",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "restricted-common-ports",
+        "restricted-ssh",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "AC-5c": {
+      "description": "The organization: c. Defines information system access authorizations to support separation of duties.",
+      "config_rules": [
+        "ecs-task-definition-user-for-host-mode-check",
+        "iam-customer-policy-blocked-kms-actions",
+        "iam-group-has-users-check",
+        "iam-inline-policy-blocked-kms-actions",
+        "iam-no-inline-policy-check",
+        "iam-password-policy",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access",
+        "iam-root-access-key-check",
+        "iam-user-group-membership-check",
+        "iam-user-no-policies-check",
+        "iam-user-unused-credentials-check"
+      ]
+    },
+    "AC-6": {
+      "description": "The organization employs the principle of least privilege, allowing only authorized accesses for users (or processes acting on behalf of users) which are necessary to accomplish assigned tasks in accordance with organizational missions and business functions.",
+      "config_rules": [
+        "codebuild-project-envvar-awscred-check",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-imdsv2-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "emr-master-no-public-ip",
+        "iam-group-has-users-check",
+        "iam-no-inline-policy-check",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-root-access-key-check",
+        "iam-user-group-membership-check",
+        "iam-user-no-policies-check",
+        "iam-user-unused-credentials-check",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "subnet-auto-assign-public-ip-disabled"
+      ]
+    },
+    "AC-6(10)": {
+      "description": "The information system prevents non-privileged users from executing privileged functions to include disabling, circumventing, or altering implemented security safeguards/countermeasures.",
+      "config_rules": [
+        "iam-policy-no-statements-with-admin-access",
+        "iam-policy-no-statements-with-full-access",
+        "iam-root-access-key-check"
+      ]
+    },
+    "AU-11": {
+      "description": "The organization retains audit records for at least 90 days to provide support for after-the-fact investigations of security incidents and to meet regulatory and organizational information retention requirements.",
+      "config_rules": [
+        "cw-loggroup-retention-period-check"
+      ]
+    },
+    "AU-12(a)(c)": {
+      "description": "The information system: a. Provides audit record generation capability for the auditable events defined in AU-2 a. at all information system and network components where audit capability is deployed/available c. Generates audit records for the events defined in AU-2 d. with the content defined in AU-3.",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "codebuild-project-logging-enabled",
+        "elb-logging-enabled",
+        "multi-region-cloudtrail-enabled",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "vpc-flow-logs-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "AU-2(a)(d)": {
+      "description": "The organization: a. Determines that the information system is capable of auditing the following events: Successful and unsuccessful account logon events, account management events, object access, policy change, privilege functions, process tracking, and system events. For Web applications: all administrator activity, authentication checks, authorization checks, data deletions, data access, data changes, and permission changes. d. Determines that the following events are to be audited within the information system: [organization-defined subset of the auditable events defined in AU-2 a to be audited continually for each identified event].",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "codebuild-project-logging-enabled",
+        "elb-logging-enabled",
+        "multi-region-cloudtrail-enabled",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "vpc-flow-logs-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "AU-3": {
+      "description": "The information system generates audit records containing information that establishes what type of event occurred, when the event occurred, where the event occurred, the source of the event, the outcome of the event, and the identity of any individuals or subjects associated with the event.",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "codebuild-project-logging-enabled",
+        "elb-logging-enabled",
+        "multi-region-cloudtrail-enabled",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "vpc-flow-logs-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "AU-6(1)(3)": {
+      "description": "(1) The organization employs automated mechanisms to integrate audit review, analysis, and reporting processes to support organizational processes for investigation and response to suspicious activities. (3) The organization analyzes and correlates audit records across different repositories to gain organization-wide situational awareness.",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "cloudwatch-alarm-action-check",
+        "codebuild-project-logging-enabled",
+        "cw-loggroup-retention-period-check",
+        "elb-logging-enabled",
+        "guardduty-enabled-centralized",
+        "multi-region-cloudtrail-enabled",
+        "rds-logging-enabled",
+        "redshift-cluster-configuration-check",
+        "s3-bucket-logging-enabled",
+        "securityhub-enabled",
+        "vpc-flow-logs-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "AU-7(1)": {
+      "description": "The information system provides the capability to process audit records for events of interest based on [Assignment: organization-defined audit fields within audit records].",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudwatch-alarm-action-check"
+      ]
+    },
+    "AU-9": {
+      "description": "The information system protects audit information and audit tools from unauthorized access, modification, and deletion.",
+      "config_rules": [
+        "cloud-trail-encryption-enabled",
+        "cloud-trail-log-file-validation-enabled",
+        "cloudwatch-log-group-encrypted"
+      ]
+    },
+    "AU-9(2)": {
+      "description": "The information system backs up audit records at least weekly onto a physically different system or system component than the system or component being audited.",
+      "config_rules": [
+        "s3-bucket-replication-enabled",
+        "s3-bucket-versioning-enabled"
+      ]
+    },
+    "CA-7(a)(b)": {
+      "description": "The organization develops a continuous monitoring strategy and implements a continuous monitoring program that includes: a. Establishment of [Assignment: organization-defined metrics] to be monitored; b. Establishment of [Assignment: organization-defined frequencies] for monitoring and [Assignment: organization-defined frequencies] for assessments supporting such monitoring",
+      "config_rules": [
+        "autoscaling-group-elb-healthcheck-required",
+        "beanstalk-enhanced-health-reporting-enabled",
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "cloudwatch-alarm-action-check",
+        "dynamodb-throughput-limit-check",
+        "ec2-instance-detailed-monitoring-enabled",
+        "guardduty-enabled-centralized",
+        "lambda-concurrency-check",
+        "lambda-dlq-check",
+        "multi-region-cloudtrail-enabled",
+        "rds-enhanced-monitoring-enabled",
+        "redshift-cluster-configuration-check",
+        "securityhub-enabled"
+      ]
+    },
+    "CM-2": {
+      "description": "The organization develops, documents, and maintains under configuration control, a current baseline configuration of the information system.",
+      "config_rules": [
+        "alb-waf-enabled",
+        "api-gw-associated-with-waf",
+        "autoscaling-launch-config-public-ip-disabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "ec2-managedinstance-association-compliance-status-check",
+        "ec2-stopped-instance",
+        "ec2-volume-inuse-check",
+        "elasticsearch-in-vpc-only",
+        "elb-deletion-protection-enabled",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "no-unrestricted-route-to-igw",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "restricted-common-ports",
+        "restricted-ssh",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "subnet-auto-assign-public-ip-disabled",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "CM-7(a)": {
+      "description": "The organization: a. Configures the information system to provide only essential capabilities.",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-instance-profile-attached",
+        "ec2-managedinstance-association-compliance-status-check"
+      ]
+    },
+    "CM-8(1)": {
+      "description": "The organization updates the inventory of information system components as an integral part of component installations, removals, and information system updates.",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-managedinstance-association-compliance-status-check"
+      ]
+    },
+    "CM-8(3)(a)": {
+      "description": "The organization: a. Employs automated mechanisms continuously, using automated mechanisms with a maximum five-minute delay in detection, to detect the presence of unauthorized hardware, software, and firmware components within the information system",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-managedinstance-association-compliance-status-check",
+        "ec2-managedinstance-patch-compliance-status-check",
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "CP-10": {
+      "description": "The organization provides for the recovery and reconstitution of the information system to a known state after a disruption, compromise, or failure.",
+      "config_rules": [
+        "aurora-resources-protected-by-backup-plan",
+        "backup-plan-min-frequency-and-min-retention-check",
+        "db-instance-backup-enabled",
+        "dynamodb-autoscaling-enabled",
+        "dynamodb-pitr-enabled",
+        "dynamodb-resources-protected-by-backup-plan",
+        "ebs-optimized-instance",
+        "ebs-resources-protected-by-backup-plan",
+        "ec2-resources-protected-by-backup-plan",
+        "efs-resources-protected-by-backup-plan",
+        "elasticache-redis-cluster-automatic-backup-check",
+        "elb-cross-zone-load-balancing-enabled",
+        "elb-deletion-protection-enabled",
+        "fsx-resources-protected-by-backup-plan",
+        "rds-multi-az-support",
+        "rds-resources-protected-by-backup-plan",
+        "redshift-backup-enabled",
+        "s3-bucket-replication-enabled",
+        "s3-bucket-versioning-enabled",
+        "vpc-vpn-2-tunnels-up"
+      ]
+    },
+    "CP-9(b)": {
+      "description": "The organization: b. Conducts backups of system-level information contained in the information system (daily incremental; weekly full).",
+      "config_rules": [
+        "aurora-resources-protected-by-backup-plan",
+        "backup-plan-min-frequency-and-min-retention-check",
+        "db-instance-backup-enabled",
+        "dynamodb-pitr-enabled",
+        "dynamodb-resources-protected-by-backup-plan",
+        "ebs-resources-protected-by-backup-plan",
+        "ec2-resources-protected-by-backup-plan",
+        "efs-resources-protected-by-backup-plan",
+        "elasticache-redis-cluster-automatic-backup-check",
+        "fsx-resources-protected-by-backup-plan",
+        "rds-resources-protected-by-backup-plan",
+        "redshift-backup-enabled",
+        "s3-bucket-replication-enabled",
+        "s3-bucket-versioning-enabled"
+      ]
+    },
+    "IA-2": {
+      "description": "The information system uniquely identifies and authenticates organizational users (or processes acting on behalf of organizational users).",
+      "config_rules": [
+        "iam-password-policy",
+        "iam-root-access-key-check"
+      ]
+    },
+    "IA-2(1)": {
+      "description": "(1) The information system implements multifactor authentication for network access to privileged accounts.",
+      "config_rules": [
+        "iam-user-mfa-enabled",
+        "mfa-enabled-for-iam-console-access",
+        "root-account-hardware-mfa-enabled",
+        "root-account-mfa-enabled"
+      ]
+    },
+    "IA-2(1)(2)": {
+      "description": "(1) The information system implements multifactor authentication for network access to privileged accounts. (2) The information system implements multifactor authentication for network access to non- privileged accounts.",
+      "config_rules": [
+        "iam-user-mfa-enabled",
+        "mfa-enabled-for-iam-console-access",
+        "root-account-hardware-mfa-enabled",
+        "root-account-mfa-enabled"
+      ]
+    },
+    "IA-5(1)(a)(d)(e)": {
+      "description": "The information system, for password-based authentication: a. Enforces minimum password complexity of [Assignment: organization-defined requirements for case sensitivity, number of characters, mix of upper-case letters, lower-case letters, numbers, and special characters, including minimum requirements for each type]; d. Enforces password minimum and maximum lifetime restrictions of [Assignment: organization- defined numbers for lifetime minimum, lifetime maximum]; e. Prohibits password reuse for 24 generations",
+      "config_rules": [
+        "iam-password-policy"
+      ]
+    },
+    "IA-5(4)": {
+      "description": "The organization employs automated tools to determine if password authenticators are sufficiently strong to satisfy [Assignment: organization-defined requirements].",
+      "config_rules": [
+        "iam-password-policy"
+      ]
+    },
+    "IA-5(7)": {
+      "description": "The organization ensures that unencrypted static authenticators are not embedded in applications or access scripts or stored on function keys.",
+      "config_rules": [
+        "codebuild-project-envvar-awscred-check"
+      ]
+    },
+    "IR-4(1)": {
+      "description": "The organization employs automated mechanisms to support the incident handling process.",
+      "config_rules": [
+        "autoscaling-group-elb-healthcheck-required",
+        "cloudwatch-alarm-action-check",
+        "guardduty-enabled-centralized",
+        "guardduty-non-archived-findings",
+        "securityhub-enabled"
+      ]
+    },
+    "IR-6(1)": {
+      "description": "The organization employs automated mechanisms to assist in the reporting of security incidents.",
+      "config_rules": [
+        "guardduty-enabled-centralized",
+        "guardduty-non-archived-findings",
+        "securityhub-enabled"
+      ]
+    },
+    "IR-7(1)": {
+      "description": "The organization employs automated mechanisms to increase the availability of incident response-related information and support.",
+      "config_rules": [
+        "guardduty-enabled-centralized",
+        "guardduty-non-archived-findings",
+        "securityhub-enabled"
+      ]
+    },
+    "RA-5": {
+      "description": "The organization: a. Scans for vulnerabilities in the information system and hosted applications monthly [operating system/infrastructure; monthly web applications and databases] and when new vulnerabilities potentially affecting the system/applications are identified and reported; b. Employs vulnerability scanning tools and techniques that facilitate interoperability among tools and automate parts of the vulnerability management process by using standards for: 1. Enumerating platforms, software flaws, and improper configurations; 2. Formatting checklists and test procedures; and 3. Measuring vulnerability impact; c. Analyzes vulnerability scan reports and results from security control assessments; d. Remediates legitimate vulnerabilities: high-risk vulnerabilities mitigated within thirty (30) days from date of discovery; moderate-risk vulnerabilities mitigated within ninety (90) days from date of discovery; low risk vulnerabilities mitigated within one hundred and eighty (180) days from date of discovery, in accordance with an organizational assessment of risk; and e. Shares information obtained from the vulnerability scanning process and security control assessments with [Assignment: organization-defined personnel or roles] to help eliminate similar vulnerabilities in other information systems (i.e., systemic weaknesses or deficiencies).",
+      "config_rules": [
+        "guardduty-enabled-centralized",
+        "guardduty-non-archived-findings"
+      ]
+    },
+    "RA-5(1)": {
+      "description": "The organization employs vulnerability scanning tools that include the capability to readily update the information system vulnerabilities to be scanned. Supplemental Guidance: The vulnerabilities to be scanned need to be readily updated as new vulnerabilities are discovered, announced, and scanning methods developed. This updating process helps to ensure that potential vulnerabilities in the information system are identified and addressed as quickly as possible. Related controls: SI-3, SI-7.",
+      "config_rules": [
+        "guardduty-enabled-centralized",
+        "guardduty-non-archived-findings",
+        "securityhub-enabled"
+      ]
+    },
+    "SA-10": {
+      "description": "The organization requires the developer of the information system, system component, or information system service to: a. Perform configuration management during system, component, or service development, implementation, AND operation; b. Document, manage, and control the integrity of changes to [Assignment: organization-defined configuration items under configuration management]; c. Implement only organization-approved changes to the system, component, or service; d. Document approved changes to the system, component, or service and the potential security impacts of such changes; and e. Track security flaws and flaw resolution within the system, component, or service and report findings to [Assignment: organization-defined personnel].",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager",
+        "guardduty-enabled-centralized",
+        "guardduty-non-archived-findings",
+        "securityhub-enabled"
+      ]
+    },
+    "SA-3(a)": {
+      "description": "The organization: a. Manages the information system using [Assignment: organization-defined system development life cycle] that incorporates information security considerations.",
+      "config_rules": [
+        "codebuild-project-envvar-awscred-check",
+        "codebuild-project-source-repo-url-check",
+        "ec2-instance-managed-by-systems-manager"
+      ]
+    },
+    "SC-12": {
+      "description": "The organization establishes and manages cryptographic keys for required cryptography employed within the information system in accordance with [Assignment: organization-defined requirements for key generation, distribution, storage, access, and destruction].",
+      "config_rules": [
+        "acm-certificate-expiration-check",
+        "cmk-backing-key-rotation-enabled",
+        "kms-cmk-not-scheduled-for-deletion"
+      ]
+    },
+    "SC-13": {
+      "description": "The information system implements FIPS-validated or NSA-approved cryptography in accordance with applicable federal laws, Executive Orders, directives, policies, regulations, and standards.",
+      "config_rules": [
+        "kms-cmk-not-scheduled-for-deletion",
+        "redshift-cluster-kms-enabled",
+        "s3-default-encryption-kms",
+        "sagemaker-endpoint-configuration-kms-key-configured",
+        "sagemaker-notebook-instance-kms-key-configured",
+        "sns-encrypted-kms"
+      ]
+    },
+    "SC-2": {
+      "description": "The information system separates user functionality (including user interface services) from information system management functionality.",
+      "config_rules": [
+        "iam-group-has-users-check",
+        "iam-no-inline-policy-check",
+        "iam-policy-no-statements-with-admin-access",
+        "iam-user-group-membership-check",
+        "iam-user-no-policies-check"
+      ]
+    },
+    "SC-23": {
+      "description": "The information system protects the authenticity of communications sessions.",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-ssl-enabled",
+        "elasticsearch-node-to-node-encryption-check",
+        "elb-tls-https-listeners-only",
+        "redshift-require-tls-ssl",
+        "s3-bucket-ssl-requests-only"
+      ]
+    },
+    "SC-28": {
+      "description": "The information system protects the confidentiality AND integrity of [Assignment: organization-defined information at rest].",
+      "config_rules": [
+        "api-gw-cache-enabled-and-encrypted",
+        "cloud-trail-encryption-enabled",
+        "cloudwatch-log-group-encrypted",
+        "ec2-ebs-encryption-by-default",
+        "efs-encrypted-check",
+        "elasticsearch-encrypted-at-rest",
+        "encrypted-volumes",
+        "kms-cmk-not-scheduled-for-deletion",
+        "rds-snapshot-encrypted",
+        "rds-storage-encrypted",
+        "redshift-cluster-configuration-check",
+        "redshift-cluster-kms-enabled",
+        "s3-bucket-default-lock-enabled",
+        "s3-bucket-server-side-encryption-enabled",
+        "s3-default-encryption-kms",
+        "sagemaker-endpoint-configuration-kms-key-configured",
+        "sagemaker-notebook-instance-kms-key-configured",
+        "sns-encrypted-kms"
+      ]
+    },
+    "SC-4": {
+      "description": "The information system prevents unauthorized and unintended information transfer from shared system resources.",
+      "config_rules": [
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-volume-inuse-check",
+        "lambda-function-public-access-prohibited",
+        "no-unrestricted-route-to-igw",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "restricted-common-ports",
+        "restricted-ssh",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "ssm-document-not-public",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "SC-5": {
+      "description": "The information system protects against or limits the effects of the following types of denial of service attacks: [Assignment: organization-defined types of denial of service attacks or references to sources for such information] by employing [Assignment: organization-defined security safeguards].",
+      "config_rules": [
+        "autoscaling-group-elb-healthcheck-required",
+        "dynamodb-autoscaling-enabled",
+        "dynamodb-pitr-enabled",
+        "ebs-optimized-instance",
+        "elasticache-redis-cluster-automatic-backup-check",
+        "elb-cross-zone-load-balancing-enabled",
+        "elb-deletion-protection-enabled",
+        "guardduty-enabled-centralized",
+        "rds-instance-deletion-protection-enabled",
+        "rds-multi-az-support",
+        "s3-bucket-replication-enabled",
+        "s3-bucket-versioning-enabled",
+        "vpc-vpn-2-tunnels-up"
+      ]
+    },
+    "SC-7": {
+      "description": "The information system: a. Monitors and controls communications at the external boundary of the system and at key internal boundaries within the system; b. Implements subnetworks for publicly accessible system components that are [Selection: physically; logically] separated from internal organizational networks; and c. Connects to external networks or information systems only through managed interfaces consisting of boundary protection devices arranged in accordance with an organizational security architecture.",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "alb-waf-enabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "elasticsearch-node-to-node-encryption-check",
+        "elb-tls-https-listeners-only",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "redshift-require-tls-ssl",
+        "restricted-common-ports",
+        "restricted-ssh",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "s3-bucket-ssl-requests-only",
+        "sagemaker-notebook-no-direct-internet-access",
+        "subnet-auto-assign-public-ip-disabled",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "SC-7(3)": {
+      "description": "The organization limits the number of external network connections to the information system.",
+      "config_rules": [
+        "autoscaling-launch-config-public-ip-disabled",
+        "dms-replication-not-public",
+        "ebs-snapshot-public-restorable-check",
+        "ec2-instance-no-public-ip",
+        "ec2-instances-in-vpc",
+        "elasticsearch-in-vpc-only",
+        "emr-master-no-public-ip",
+        "lambda-function-public-access-prohibited",
+        "lambda-inside-vpc",
+        "rds-instance-public-access-check",
+        "rds-snapshots-public-prohibited",
+        "redshift-cluster-public-access-check",
+        "restricted-common-ports",
+        "restricted-ssh",
+        "s3-account-level-public-access-blocks-periodic",
+        "s3-bucket-level-public-access-prohibited",
+        "s3-bucket-public-read-prohibited",
+        "s3-bucket-public-write-prohibited",
+        "sagemaker-notebook-no-direct-internet-access",
+        "ssm-document-not-public",
+        "subnet-auto-assign-public-ip-disabled",
+        "vpc-default-security-group-closed",
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "SC-7(4)": {
+      "description": "The organization: (a) Implements a managed interface for each external telecommunication service; (b) Establishes a traffic flow policy for each managed interface; (c) Protects the confidentiality and integrity of the information being transmitted across each interface; (d) Documents each exception to the traffic flow policy with a supporting mission/business need and duration of that need; and (e) Reviews exceptions to the traffic flow policy [Assignment: organization-defined frequency] and removes exceptions that are no longer supported by an explicit mission/business need. Supplemental Guidance: Related control: SC-8.",
+      "config_rules": [
+        "rds-snapshot-encrypted",
+        "rds-snapshots-public-prohibited",
+        "rds-storage-encrypted",
+        "redshift-cluster-kms-enabled",
+        "vpc-default-security-group-closed",
+        "vpc-flow-logs-enabled"
+      ]
+    },
+    "SC-7(5)": {
+      "description": "The information system at managed interfaces denies network communications traffic by default and allows network communications traffic by exception(i.e., deny all, permit by exception). Supplemental Guidance: This control enhancement applies to both inbound and outbound network communications traffic. A deny-all, permit-by-exception network communications traffic policy ensures that only those connections which are essential and approved are allowed.",
+      "config_rules": [
+        "vpc-sg-open-only-to-authorized-ports"
+      ]
+    },
+    "SC-8": {
+      "description": "The information system protects the confidentiality AND integrity of transmitted information.",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-ssl-enabled",
+        "elasticsearch-node-to-node-encryption-check",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "redshift-require-tls-ssl",
+        "s3-bucket-ssl-requests-only"
+      ]
+    },
+    "SC-8(1)": {
+      "description": "The information system implements cryptographic mechanisms to [Selection (one or more): prevent unauthorized disclosure of information; detect changes to information] during transmission unless otherwise protected by [Assignment: organization-defined alternative physical safeguards].",
+      "config_rules": [
+        "alb-http-to-https-redirection-check",
+        "api-gw-ssl-enabled",
+        "elasticsearch-node-to-node-encryption-check",
+        "elb-tls-https-listeners-only",
+        "elbv2-acm-certificate-required",
+        "redshift-require-tls-ssl",
+        "s3-bucket-ssl-requests-only"
+      ]
+    },
+    "SI-11": {
+      "description": "The information system: a. Generates error messages that provide information necessary for corrective actions without revealing information that could be exploited by adversaries; and b. Reveals error messages only to [Assignment: organization-defined personnel or roles]. Supplemental Guidance: Organizations carefully consider the structure/content of error messages. The extent to which information systems are able to identify and handle error conditions is guided by organizational policy and operational requirements. Information that could be exploited by adversaries includes, for example, erroneous logon attempts with passwords entered by mistake as the username, mission/business information that can be derived from(if not stated explicitly by) information recorded, and personal information such as account numbers, social security numbers, and credit card numbers. In addition, error messages may provide a covert channel for transmitting information. Related controls: AU-2, AU-3, SC-31. Control Enhancements: None. References: None.",
+      "config_rules": [
+        "api-gw-execution-logging-enabled",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "codebuild-project-logging-enabled",
+        "elasticsearch-logs-to-cloudwatch",
+        "opensearch-logs-to-cloudwatch",
+        "s3-bucket-logging-enabled",
+        "vpc-flow-logs-enabled"
+      ]
+    },
+    "SI-12": {
+      "description": "The organization handles and retains information within the information system and information output from the system in accordance with applicable federal laws, Executive Orders, directives, policies, regulations, standards, and operational requirements.",
+      "config_rules": [
+        "aurora-resources-protected-by-backup-plan",
+        "backup-plan-min-frequency-and-min-retention-check",
+        "cw-loggroup-retention-period-check",
+        "db-instance-backup-enabled",
+        "dynamodb-pitr-enabled",
+        "dynamodb-resources-protected-by-backup-plan",
+        "ebs-resources-protected-by-backup-plan",
+        "ec2-resources-protected-by-backup-plan",
+        "efs-resources-protected-by-backup-plan",
+        "elasticache-redis-cluster-automatic-backup-check",
+        "fsx-resources-protected-by-backup-plan",
+        "rds-resources-protected-by-backup-plan",
+        "redshift-backup-enabled",
+        "s3-bucket-versioning-enabled"
+      ]
+    },
+    "SI-16": {
+      "description": "The information system implements [Assignment: organization-defined security safeguards] to protect its memory from unauthorized code execution. Supplemental Guidance: Some adversaries launch attacks with the intent of executing code in non- executable regions of memory or in memory locations that are prohibited. Security safeguards employed to protect memory include, for example, data execution prevention and address space layout randomization. Data execution prevention safeguards can either be hardware-enforced or software-enforced with hardware providing the greater strength of mechanism. Related controls: AC-25, SC-3. Control Enhancements: None. References: None.",
+      "config_rules": [
+        "ecs-task-definition-memory-hard-limit"
+      ]
+    },
+    "SI-2(2)": {
+      "description": "The organization employs automated mechanisms at least monthly to determine the state of information system components with regard to flaw remediation.",
+      "config_rules": [
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-managedinstance-association-compliance-status-check",
+        "ec2-managedinstance-patch-compliance-status-check",
+        "elastic-beanstalk-managed-updates-enabled"
+      ]
+    },
+    "SI-3": {
+      "description": "The organization: a. Employs malicious code protection mechanisms at information system entry and exit points to detect and eradicate malicious code; b. Updates malicious code protection mechanisms whenever new releases are available in accordance with organizational configuration management policy and procedures; c. Configures malicious code protection mechanisms to: 1. Perform periodic scans of the information system [Assignment: organization-defined frequency] and real-time scans of files from external sources at [Selection(one or more); endpoint; network entry/exit points] as the files are downloaded, opened, or executed in accordance with organizational security policy; and 2. [Selection(one or more): block malicious code; quarantine malicious code; send alert to administrator; [Assignment: organization-defined action]] in response to malicious code detection; and d. Addresses the receipt of false positives during malicious code detection and eradication and the resulting potential impact on the availability of the information system. Supplemental Guidance: Information system entry and exit points include, for example, firewalls, electronic mail servers, web servers, proxy servers, remote-access servers, workstations, notebook computers, and mobile devices. Malicious code includes, for example, viruses, worms, Trojan horses, and spyware. Malicious code can also be encoded in various formats(for example, UUENCODE, Unicode), contained within compressed or hidden files, or hidden in files using steganography. Malicious code can be transported by different means including, for example, web accesses, electronic mail, electronic mail attachments, and portable storage devices. Malicious code insertions occur through the exploitation of information system vulnerabilities. Malicious code protection mechanisms include, for example, anti-virus signature definitions and reputation-based technologies. A variety of technologies and methods exist to limit or eliminate the effects of malicious code. Pervasive configuration management and comprehensive software integrity controls may be effective in preventing execution of unauthorized code. In addition to commercial off-the-shelf software, malicious code may also be present in custom-built software. This could include, for example, logic bombs, back doors, and other types of cyber attacks that could affect organizational missions/business functions. Traditional malicious code protection mechanisms cannot always detect such code. In these situations, organizations rely instead on other safeguards including, for example, secure coding practices, configuration management and control, trusted procurement processes, and monitoring practices to help ensure that software does not perform functions other than the functions intended. Organizations may determine that in response to the detection of malicious code, different actions may be warranted. For example, organizations can define actions in response to malicious code detection during periodic scans, actions in response to detection of malicious downloads, and/or actions in response to detection of maliciousness when attempting to open or execute files. Related controls: CM-3, MP-2, SA-4, SA-8, SA-12, SA-13, SC-7, SC-26, SC-44, SI-2, SI-4, SI-7. References: NIST Special Publication 800-83.",
+      "config_rules": [
+        "codebuild-project-envvar-awscred-check",
+        "codebuild-project-source-repo-url-check",
+        "ecs-task-definition-memory-hard-limit"
+      ]
+    },
+    "SI-4(1)": {
+      "description": "The organization connects and configures individual intrusion detection tools into an information system-wide intrusion detection system.",
+      "config_rules": [
+        "guardduty-enabled-centralized"
+      ]
+    },
+    "SI-4(16)": {
+      "description": "The organization correlates information from monitoring tools employed throughout the information system.",
+      "config_rules": [
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "guardduty-enabled-centralized",
+        "multi-region-cloudtrail-enabled",
+        "redshift-cluster-configuration-check",
+        "securityhub-enabled"
+      ]
+    },
+    "SI-4(2)": {
+      "description": "The organization employs automated tools to support near real-time analysis of events.",
+      "config_rules": [
+        "cloudtrail-enabled",
+        "cloudtrail-s3-dataevents-enabled",
+        "cloudwatch-alarm-action-check",
+        "ec2-instance-detailed-monitoring-enabled",
+        "guardduty-enabled-centralized",
+        "multi-region-cloudtrail-enabled",
+        "redshift-cluster-configuration-check",
+        "securityhub-enabled"
+      ]
+    },
+    "SI-4(4)": {
+      "description": "The information system monitors inbound and outbound communications traffic continuously for unusual or unauthorized activities or conditions.",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudwatch-alarm-action-check",
+        "guardduty-enabled-centralized",
+        "securityhub-enabled"
+      ]
+    },
+    "SI-4(5)": {
+      "description": "The information system alerts [Assignment: organization-defined personnel or roles] when the following indications of compromise or potential compromise occur: [Assignment: organization- defined compromise indicators].",
+      "config_rules": [
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudwatch-alarm-action-check",
+        "guardduty-enabled-centralized",
+        "securityhub-enabled"
+      ]
+    },
+    "SI-4(a)(b)(c)": {
+      "description": "The organization: a. Monitors the information system to detect: 1. Attacks and indicators of potential attacks in accordance with [Assignment: organization- defined monitoring objectives]; and 2. Unauthorized local, network, and remote connections; b. Identifies unauthorized use of the information system through [Assignment: organization- defined techniques and methods]; c. Deploys monitoring devices: i. strategically within the information system to collect organization-determined essential information; and (ii) at ad hoc locations within the system to track specific types of transactions of interest to the organization.",
+      "config_rules": [
+        "alb-waf-enabled",
+        "api-gw-associated-with-waf",
+        "cloud-trail-cloud-watch-logs-enabled",
+        "cloudwatch-alarm-action-check",
+        "ec2-instance-detailed-monitoring-enabled",
+        "guardduty-enabled-centralized",
+        "guardduty-non-archived-findings",
+        "securityhub-enabled",
+        "wafv2-logging-enabled"
+      ]
+    },
+    "SI-5": {
+      "description": "The organization: a. Receives information system security alerts, advisories, and directives from [Assignment: organization-defined external organizations] on an ongoing basis; b. Generates internal security alerts, advisories, and directives as deemed necessary; c. Disseminates security alerts, advisories, and directives to: [Selection(one or more): [Assignment: organization-defined personnel or roles]; [Assignment: organization-defined elements within the organization]; [Assignment: organization-defined external organizations]]; and d. Implements security directives in accordance with established time frames, or notifies the issuing organization of the degree of noncompliance. Supplemental Guidance: The United States Computer Emergency Readiness Team(US-CERT) generates security alerts and advisories to maintain situational awareness across the federal government. Security directives are issued by OMB or other designated organizations with the responsibility and authority to issue such directives. Compliance to security directives is essential due to the critical nature of many of these directives and the potential immediate adverse effects on organizational operations and assets, individuals, other organizations, and the Nation should the directives not be implemented in a timely manner. External organizations include, for example, external mission/business partners, supply chain partners, external service providers, and other peer/supporting organizations. Related control: SI-2. References: NIST Special Publication 800-40.",
+      "config_rules": [
+        "cloudwatch-alarm-action-check",
+        "guardduty-enabled-centralized",
+        "guardduty-non-archived-findings",
+        "securityhub-enabled"
+      ]
+    },
+    "SI-7": {
+      "description": "The organization employs integrity verification tools to detect unauthorized changes to [Assignment: organization-defined software, firmware, and information].",
+      "config_rules": [
+        "cloud-trail-log-file-validation-enabled"
+      ]
+    },
+    "SI-7(1)": {
+      "description": "The information system performs an integrity check security relevant events at least monthly.",
+      "config_rules": [
+        "cloud-trail-log-file-validation-enabled",
+        "ec2-instance-managed-by-systems-manager",
+        "ec2-managedinstance-patch-compliance-status-check"
+      ]
+    }
+  }
+}

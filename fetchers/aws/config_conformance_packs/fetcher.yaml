@@ -1,6 +1,6 @@
 name: aws_config_conformance_packs
-version: 0.1.0
-description: Lists AWS Config conformance packs and collects each pack's deployment status, per-rule compliance evaluation results (paginated), and counts of compliant/non-compliant/not-applicable rules. Ships with the Operational-Best-Practices-for-FedRAMP-Low.yaml conformance pack template (resolved relative to the fetcher dir) for reference.
+version: 0.4.0
+description: Collects AWS Config conformance pack deployment status, rule and resource compliance, and maps Config rules to FedRAMP and NIST SP 800-53 Rev. 5 controls.
 category: aws
 
 supports_targets: true
@@ -13,6 +13,14 @@ output:
   type: json
   path: aws_config_conformance_packs.json
   aggregation: per_target
+
+config_schema:
+  fedramp_pack:
+    type: string
+    required: true
+    default: low
+    env: FEDRAMP_PACK
+    description: FedRAMP reference conformance pack to validate against. Supported values are low and moderate; defaults to low for compatibility with existing manifests.
 
 target_schema:
   region:
@@ -35,4 +43,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CONFIG-PACKS
   name: AWS Config Conformance Packs
-  instructions: 'Script: aws_config_conformance_packs.sh. Commands executed: aws configservice describe-conformance-packs, aws configservice describe-conformance-pack-status, aws configservice get-conformance-pack-compliance-summary, aws configservice get-conformance-pack-compliance-details'
+  instructions: 'Commands executed: aws configservice describe-conformance-packs, describe-conformance-pack-status, describe-conformance-pack-compliance, describe-config-rules, get-conformance-pack-compliance-summary, get-conformance-pack-compliance-details. Source.SourceIdentifier links generated conformance-pack rule names to the selected FedRAMP and NIST SP 800-53 Rev. 5 mappings.'
