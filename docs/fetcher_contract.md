@@ -42,7 +42,7 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 | `evidence_set` | object | Paramify evidence-set identity: `{reference_id, name, instructions?}`. Carried into envelope metadata and used by the uploader to get-or-create the set. `kind: evidence` only. |
 | `issue_report` | object | Paramify assessment-intake identity: `{assessment_type, title?}`. Required for, and only valid on, `kind: issue_report`. Carries no assessment id — that is per-customer and lives in the manifest. |
 | `ksis` | array | FedRAMP KSIs this fetcher's evidence speaks to (1+) — *suggested / related* mappings, not a claim that the fetcher alone satisfies the indicator. Intrinsic to the fetcher; per-customer control mappings stay Paramify-side. |
-| `validators` | array | Regex checks over the evidence payload that show the control is being implemented. Each entry: `{id, regex, proves?, failure_modes?}` (`id` + `regex` required); each regex matches the whole payload. |
+| `validators` | array | **Deprecated.** The legacy inline block (`{id, regex, proves?, failure_modes?}`); nothing reads it, and only `gitlab/significant_change_notifications` still carries one. Validators are now first-class objects in the central `validators/` registry, linked to a fetcher by its `evidence_set.reference_id` — see [`validators_design.md`](validators_design.md). |
 
 ---
 
