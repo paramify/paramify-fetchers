@@ -1,0 +1,37 @@
+key: alb_encryption_in_transit
+name: ALB Encryption In Transit
+type: AUTOMATED
+role: configuration
+statement: Ensures that all application load balancers are encrypting data in transit.
+
+# ECMAScript regex (Paramify applies `g` + `s`, never `m`). The error anchor comes
+# first and the compliance half is optional, so a well-formed envelope matches
+# exactly once whether or not the payload arrived. Groups: 1 exit_code,
+# 2 alb_total, 3 alb_encrypted — naming does not renumber.
+regex: '"exit_code":\s*(?<exit_code>-?\d+)(?:[\s\S]*?"alb_total":\s*(?<alb_total>\d+)[\s\S]*?"alb_encrypted":\s*(?<alb_encrypted>\d+))?'
+rules_summary: MATCH_COUNT EQUALS 0 -> ERROR; MATCH_GROUP[1] NOT_EQUALS 0 -> ERROR; MATCH_GROUP[2] EQUALS MATCH_GROUP[3]
+validation_rules:
+  # Drift canary: the envelope always yields one match, so zero means the
+  # exit_code anchor is gone (envelope restructured, file truncated, wrong
+  # artifact) — which a MATCH_GROUP rule would otherwise pass silently.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+    disposition: ERROR
+  # Collection failed — compliance is unknown, not failing.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # exit_code
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+    disposition: ERROR
+  # Compliance: every ALB counted is an ALB encrypted.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # alb_total
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 3 }            # alb_encrypted
+    disposition: PASS
+
+# Applies to the automated Load Balancer Encryption Status set (the
+# aws_load_balancer_encryption_status fetcher). In Paramify this validator is
+# also attached to the "Non-automated Load Balancer Encryption Status" sibling
+# set; add its reference_id here once that manual set exists.
+evidence_sets:
+  - EVD-LB-ENC-STATUS

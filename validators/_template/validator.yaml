@@ -1,0 +1,82 @@
+# Template validator. Copy this file to validators/<category>/<key>.yaml and
+# fill in the placeholders. See docs/validators_design.md for the full model.
+#
+# Validated against framework/schemas/validator_schema.json.
+#
+# A validator is a first-class, DEDUPLICATED object: define it ONCE, then list
+# EVERY evidence set it applies to under `evidence_sets`. A validator shared by
+# several fetchers is a single file with several entries there — never a copy.
+
+key: <category>_<short_name>            # stable id; MUST equal this file's basename
+# No Paramify UUID lives here — these files are shared TEMPLATES. The per-instance
+# validator id is resolved and cached customer-side at sync time; the customer's
+# tuned copy is never overwritten. See docs/validators_design.md.
+
+name: <Validator display name>          # e.g. ALB Encryption In Transit
+type: AUTOMATED                         # AUTOMATED (regex-driven) | ATTESTATION (reviewer Q&A)
+# role: configuration                   # optional repo-side tag: completeness | configuration
+statement: <what passing this validator asserts>
+
+# --- AUTOMATED validators: regex over the evidence envelope + structured logic ---
+# (omit this block for ATTESTATION validators)
+#
+# FLAVOR: Paramify's engine is ECMAScript (JavaScript) — NOT Python `re` / PCRE.
+#   * `g` and `s` are applied automatically; `m` is not, so `^`/`$` match the
+#     whole document — span lines with `[\s\S]*?`.
+#   * Named groups are `(?<name>…)`. The Python form `(?P<name>…)` is a hard
+#     compile error here.
+#   * Test with `node`, not Python:
+#       node -e 'const t=require("fs").readFileSync("<evidence.json>","utf8");
+#                const re=new RegExp(String.raw`<regex>`,"gs");
+#                let m,n=0; while((m=re.exec(t))!==null){ if(n<5)console.log(m.groups); n++; }
+#                console.log(n+" match(es)");'
+#
+# NAME EVERY GROUP, in snake_case from the key it captures — `(?<alb_total>\d+)`
+# reads where a bare `(\d+)` forces you to count parentheses. Naming does NOT
+# renumber anything, so validation_rules still references groups by number.
+#
+# SHAPE: error anchor FIRST, compliance pattern in an optional group — so the
+# envelope matches exactly once whether or not the payload arrived:
+#   "exit_code":\s*(?<exit_code>-?\d+)(?:[\s\S]*?<your compliance pattern>)?
+regex: '"exit_code":\s*(?<exit_code>-?\d+)(?:[\s\S]*?<compliance pattern with named groups>)?'
+rules_summary: <human summary, e.g. MATCH_COUNT EQUALS 0 -> ERROR; MATCH_GROUP[1] NOT_EQUALS 0 -> ERROR; MATCH_GROUP[2] EQUALS MATCH_GROUP[3]>
+validation_rules:
+  # --- Keep both ERROR rules. They separate "evidence never arrived" (unknown)
+  # from "evidence says the control is bad" (fail). Without them an expired
+  # token reads as a compliance failure. Paramify resolves ERROR before FAIL
+  # before PASS, so these short-circuit regardless of position.
+  #
+  # Drift canary: a well-formed envelope always matches once, so zero matches
+  # means the exit_code anchor itself is gone (envelope restructured, file
+  # truncated, wrong artifact) — which a MATCH_GROUP rule passes silently.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+    disposition: ERROR
+  # Collection failed — compliance is unknown, not failing.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # exit_code
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+    disposition: ERROR
+  # --- Your compliance rule(s); groups start at 2 because exit_code is group 1.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # or { type: MATCH_COUNT }
+    criteria: EQUALS                                        # CONTAINS | EQUALS | GREATER_THAN | ... (12 operators)
+    value: { type: MATCH_GROUP, groupNumber: 3 }            # or { type: CUSTOM_TEXT, customText: "..." } / { type: MATCH_COUNT }
+    disposition: PASS                                       # PASS (default) | FAIL | ERROR
+#
+# Do NOT pin `schema_version` for version-safety: a bump that leaves exit_code
+# untouched would stop the pattern matching entirely, and a zero-match validator
+# passes silently. The MATCH_COUNT canary above covers that case and fails loudly.
+
+# --- ATTESTATION validators: reviewer yes/no questions (use INSTEAD of regex/validation_rules) ---
+# attestation_rules:
+#   - question: <yes/no question for the reviewer>
+#     yesDisposition: PASS      # PASS | FAIL | BASED_ON_NESTED
+#     noDisposition: FAIL
+#     nestedRules: []           # follow-on rules when a disposition is BASED_ON_NESTED
+
+# Evidence sets this validator applies to, by reference_id (a fetcher's
+# evidence_set.reference_id). Add one line per set that reuses this validator —
+# that list IS the dedup mechanism.
+evidence_sets:
+  - <EVD-REFERENCE-ID>

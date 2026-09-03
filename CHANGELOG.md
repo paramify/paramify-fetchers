@@ -10,6 +10,33 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Added
+
+- **A central `validators/` registry.** A validator is now a first-class,
+  deduplicated object — one file at `validators/<category>/<key>.yaml`, checked
+  against the new `framework/schemas/validator_schema.json`. It carries the
+  Paramify fields as native YAML and owns its side of the fetcher link through an
+  `evidence_sets` list of `reference_id`s, so a validator that applies to four
+  fetchers is one file naming four sets rather than four copies drifting apart.
+  A fetcher's validators are the reverse lookup on its `evidence_set.reference_id`.
+  See [`docs/validators_design.md`](docs/validators_design.md).
+- **Validator sync** — `paramify validators sync` and `paramify upload
+  --with-validators` (engine in `uploaders/paramify_validators/`). Pushes registry
+  validators to Paramify (`POST /validators`) and CONNECTs each to its evidence
+  sets. The validators shipped here are templates that customers tune in their own
+  instance, so the sync is **create-or-skip**: an existing validator is never
+  modified unless `--update` is passed, association happens on create only, and
+  `--dry-run` previews without writing. The per-instance Paramify id is resolved
+  at sync time and cached in a gitignored `.paramify/` lock — never written back
+  to the shared registry.
+
+### Deprecated
+
+- The inline `validators` block on `fetcher.yaml`. Nothing in the framework reads
+  it and only `gitlab/significant_change_notifications` still carries one; it stays
+  in the schema, marked deprecated, so that fetcher's data remains shape-checked
+  until it migrates to the registry. New validators belong in `validators/`.
+
 ## [0.5.1-beta] - 2026-09-02
 
 ### Fixed

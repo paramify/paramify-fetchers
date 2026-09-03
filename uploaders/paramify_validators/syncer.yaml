@@ -1,0 +1,27 @@
+name: paramify_validators
+version: 0.1.0
+description: >
+  Syncs validators from the central validators/ registry to Paramify and
+  associates them to evidence sets. Create-or-skip (never clobbers customer
+  tuning); associates on create only. Idempotent via a customer-side lock file.
+
+runtime:
+  type: python
+  entry: syncer.py
+
+# Source-agnostic: the token can come from .env, a secret manager, CI vars, etc.
+# Same token as the evidence uploader, so one credential covers both stages.
+secrets:
+  - name: api_token
+    env: PARAMIFY_UPLOAD_API_TOKEN
+
+config_schema:
+  base_url:
+    type: string
+    default: https://app.paramify.com/api/v0
+    env: PARAMIFY_API_BASE_URL
+    description: Paramify REST API v0 base URL.
+  lock_path:
+    type: string
+    default: ./.paramify/validators-sync.lock.json
+    description: Customer-side {key -> Paramify validator id} map; never committed.
