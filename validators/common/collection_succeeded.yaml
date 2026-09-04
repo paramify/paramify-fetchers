@@ -50,3 +50,4 @@ validation_rules:
 # validators are authored for it.
 evidence_sets:
   - EVD-LB-ENC-STATUS
+  - EVD-SQS-ENC
