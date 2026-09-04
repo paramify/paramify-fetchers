@@ -185,7 +185,6 @@ def summarize(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         "total_events": total_events,
         "total_size_mb": total_size_mb,
         "audit_index": audit,
-        "indexes": described,
     }
 
 

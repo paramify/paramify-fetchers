@@ -177,7 +177,6 @@ def summarize(
             "deployment with no alerting configured all look identical here — "
             "splunk_saved_searches is what distinguishes them."
         ),
-        "firings": described,
     }
 
 

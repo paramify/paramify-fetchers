@@ -198,7 +198,6 @@ def summarize(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         "by_app": dict(Counter(d["app"] or "unknown" for d in described).most_common()),
         "by_owner": dict(Counter(d["owner"] or "unknown" for d in described).most_common()),
         "by_action": dict(action_counts.most_common()),
-        "searches": described,
     }
 
 

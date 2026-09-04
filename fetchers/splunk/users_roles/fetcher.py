@@ -247,8 +247,6 @@ def summarize(
         "by_auth_type": dict(
             Counter(u["auth_type"] or "unknown" for u in described_users).most_common()
         ),
-        "roles": described_roles,
-        "users": described_users,
     }
 
 

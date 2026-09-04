@@ -768,7 +768,7 @@ def test_actions_is_a_comma_separated_string_not_a_list(
     assert analysis["by_action"] == {"email": 3, "summary_index": 2}
 
     weekly = next(
-        s for s in analysis["searches"] if s["name"] == "Weekly access review digest"
+        s for s in payload["data"] if s["name"] == "Weekly access review digest"
     )
     assert weekly["actions"] == ["email", "summary_index"]
 
@@ -788,7 +788,7 @@ def test_a_scheduled_report_is_not_counted_as_an_alert(
     _, payload = _run_fetcher("saved_searches", mock_server, tmp_path)
     analysis = payload["analysis"]
 
-    by_name = {s["name"]: s for s in analysis["searches"]}
+    by_name = {s["name"]: s for s in payload["data"]}
     assert by_name["Daily index growth report"]["is_alert"] is False
     assert by_name["Failed authentication review - hourly"]["is_alert"] is True
     assert analysis["total_alerts"] == 6
@@ -838,7 +838,7 @@ def test_an_alert_that_notifies_nobody_is_named(
     ]
     # Tracked but action-less still counts as notifying — it is reviewable in
     # Splunk's own alert list.
-    by_name = {s["name"]: s for s in analysis["searches"]}
+    by_name = {s["name"]: s for s in payload["data"]}
     # Tracked with an action.
     assert by_name["Failed authentication review - hourly"]["notifies"] is True
     # Tracked with NO action — still reviewable, in Splunk's own alert list.
@@ -893,7 +893,7 @@ def test_saved_searches_decode_both_value_renderings(
     inverts it into a disabled one.
     """
     _, payload = _run_fetcher("saved_searches", mock_server, tmp_path)
-    by_name = {s["name"]: s for s in payload["analysis"]["searches"]}
+    by_name = {s["name"]: s for s in payload["data"]}
     legacy = by_name["Legacy string rendered search"]
 
     assert legacy["scheduled"] is True
@@ -1327,7 +1327,7 @@ def test_a_roles_power_includes_what_it_inherits(
     assert "splunk-system-role" in analysis["administrative_roles"]
     assert analysis["roles_administrative_only_by_inheritance"] == ["splunk-system-role"]
 
-    role = next(r for r in analysis["roles"] if r["name"] == "splunk-system-role")
+    role = next(r for r in payload["roles"] if r["name"] == "splunk-system-role")
     assert role["direct_capability_count"] == 0
     assert role["capability_count"] > 0
     assert "admin_all_objects" in role["administrative_capabilities"]
@@ -1361,7 +1361,7 @@ def test_a_star_index_grant_does_not_reach_the_audit_trail(
     # Granted `*` and nothing else — must NOT appear.
     for role in ("power", "user"):
         assert role not in analysis["roles_that_can_search_the_audit_trail"]
-        entry = next(r for r in analysis["roles"] if r["name"] == role)
+        entry = next(r for r in payload["roles"] if r["name"] == role)
         assert entry["can_search_all_non_internal"] is True
         assert entry["can_search_internal"] is False
 
@@ -1576,7 +1576,7 @@ def test_the_retention_window_caveat_travels_with_the_evidence(
     assert "rolling window" in note or "not a complete history" in note
     assert "splunk_saved_searches" in analysis["retention_note"]
 
-    for firing in analysis["firings"]:
+    for firing in payload["data"]:
         assert firing["expires"], "each firing should carry its own expiry"
 
 
