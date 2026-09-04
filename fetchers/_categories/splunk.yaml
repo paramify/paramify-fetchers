@@ -1,0 +1,7 @@
+---
+description: >
+  Splunk Enterprise / Splunk Cloud. Collects index configuration, saved search
+  and alert configuration, and account/role authorization from the Splunk
+  management REST API (default port 8089) — log retention and cryptographic
+  integrity, the scheduled searches that evidence logs being reviewed, and which
+  roles can read the log data including Splunk's own audit trail.

@@ -1,0 +1,102 @@
+name: splunk_users_roles
+version: 0.1.0
+description: >-
+  Pulls every Splunk account and role with its authentication type, effective
+  capabilities and the indexes each role may search — evidencing who can read
+  the log data, including Splunk's own audit trail.
+category: splunk
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 600
+
+output:
+  type: json
+  path: splunk_users_roles.json
+
+# Either a token, or a username and password. All three are optional secrets:
+# the fetcher needs one of the two mechanisms, and the runner injects only what
+# the manifest supplies.
+#
+# The token is the credential to prefer — it carries the creating user's roles,
+# can be given an expiry, and is revocable without changing anyone's password.
+# The username/password path exists because token authentication is **off by
+# default** in Splunk Enterprise (Settings > Tokens > Enable Token
+# Authentication), so a fresh install cannot use a token until someone turns it
+# on. The fetcher prefers the token when both are supplied.
+secrets:
+  - name: token
+    env: SPLUNK_TOKEN
+    required: false
+    description: >-
+      Splunk authentication token (a JWT). Preferred. Create at
+      Settings > Tokens; token auth must be enabled there first.
+  - name: username
+    env: SPLUNK_USERNAME
+    required: false
+    description: >-
+      Username for the session-login fallback. Use with password when token
+      authentication is not enabled on the deployment.
+  - name: password
+    env: SPLUNK_PASSWORD
+    required: false
+    description: Password for the session-login fallback. Use with username.
+
+config_schema:
+  base_url:
+    type: string
+    required: false
+    env: SPLUNK_BASE_URL
+    description: >-
+      Splunk management API base URL, including the port — the management port
+      is 8089, not the 8000 web UI. Defaults to https://localhost:8089.
+  ca_bundle:
+    type: string
+    required: false
+    env: SPLUNK_CA_BUNDLE
+    description: >-
+      Path to the CA bundle that signed the Splunk certificate. Splunk ships a
+      self-signed certificate, so set this to verify it properly.
+  verify_ssl:
+    type: boolean
+    required: false
+    env: SPLUNK_VERIFY_SSL
+    description: >-
+      Set false to skip TLS verification against a self-signed Splunk
+      certificate. Whichever way this resolves is recorded in the evidence.
+  dormant_days:
+    type: integer
+    required: false
+    env: SPLUNK_DORMANT_DAYS
+    description: >-
+      Days without a successful login before an account is reported dormant.
+      Defaults to 90. Accounts that have never logged in are reported
+      separately, since that is a different finding.
+
+evidence_set:
+  reference_id: EVD-SPLK-USERS-ROLES
+  name: Splunk Users and Roles
+  instructions: >-
+    Script: fetcher.py. Authenticates with a bearer token (SPLUNK_TOKEN), or
+    by POST /services/auth/login when only a username and password are set.
+    Pages GET /servicesNS/-/-/authentication/users and
+    GET /servicesNS/-/-/authorization/roles with output_mode=json and explicit
+    count/offset. For each role the effective capability set is the union of
+    `capabilities` and `imported_capabilities`, and the searchable index set the
+    union of `srchIndexesAllowed` and `imported_srchIndexesAllowed` — reading
+    only the direct fields reports an inheriting role as holding nothing.
+    Splunk's `*` matches non-internal indexes only, so reaching `_audit`
+    requires `_*` or the index named explicitly. Summarizes which roles can
+    search the audit trail, which hold administrative capabilities (and which
+    hold them only by inheritance), which accounts are locally defined rather
+    than federated, and which are locked out, dormant or have never logged in.
+  description: >-
+    Account and role configuration from a Splunk deployment, evidencing a
+    least-privileged authorization model over log data and naming every role
+    that can read the audit trail.
+
+ksis:
+  - KSI-MLA-ALA
