@@ -6,16 +6,34 @@
 # A validator is a first-class, DEDUPLICATED object: define it ONCE, then list
 # EVERY evidence set it applies to under `evidence_sets`. A validator shared by
 # several fetchers is a single file with several entries there — never a copy.
+#
+# EXPECT TO COPY THIS MORE THAN ONCE. One control is covered by a SET of
+# validators, because an evidence set passes only when all of its validators
+# pass. A typical set is:
+#
+#   role: completeness   exactly one  - the collection succeeded (see A below)
+#   role: configuration  one or more  - the posture is right     (see B below)
+#   role: integrity      one per      - the field a count-based configuration
+#                        count-based    validator reads was actually present
+#                        validator      (see C below) — MANDATORY when you use
+#                                       the violation-count form
+#
+# The three shapes are given at the bottom of this file. Delete the two you are
+# not using, and delete these comments as you fill it in.
 
-key: <category>_<short_name>            # stable id; MUST equal this file's basename
+key: category_short_name                # stable id; MUST equal this file's basename
+                                        # and match ^[a-z0-9]+(?:_[a-z0-9]+)*$
 # No Paramify UUID lives here — these files are shared TEMPLATES. The per-instance
 # validator id is resolved and cached customer-side at sync time; the customer's
 # tuned copy is never overwritten. See docs/validators_design.md.
 
-name: <Validator display name>          # e.g. ALB Encryption In Transit
+name: Validator display name            # e.g. S3 Buckets All Encrypted.
+                                        # MUST be unique across the whole
+                                        # workspace — Paramify rejects a
+                                        # duplicate name with HTTP 400.
 type: AUTOMATED                         # AUTOMATED (regex-driven) | ATTESTATION (reviewer Q&A)
-# role: configuration                   # optional repo-side tag: completeness | configuration
-statement: <what passing this validator asserts>
+role: configuration                     # completeness | configuration | integrity
+statement: What passing this validator asserts.
 
 # --- AUTOMATED validators: regex over the evidence envelope + structured logic ---
 # (omit this block for ATTESTATION validators)
@@ -35,38 +53,30 @@ statement: <what passing this validator asserts>
 # reads where a bare `(\d+)` forces you to count parentheses. Naming does NOT
 # renumber anything, so validation_rules still references groups by number.
 #
-# SHAPE: error anchor FIRST, compliance pattern in an optional group — so the
-# envelope matches exactly once whether or not the payload arrived:
-#   "exit_code":\s*(?<exit_code>-?\d+)(?:[\s\S]*?<your compliance pattern>)?
-regex: '"exit_code":\s*(?<exit_code>-?\d+)(?:[\s\S]*?<compliance pattern with named groups>)?'
-rules_summary: <human summary, e.g. MATCH_COUNT EQUALS 0 -> ERROR; MATCH_GROUP[1] NOT_EQUALS 0 -> ERROR; MATCH_GROUP[2] EQUALS MATCH_GROUP[3]>
+# MATCH_GROUP READS THE FIRST MATCH ONLY. You therefore cannot use capture
+# groups to assert something about every item in a list — invert it into
+# "the count of bad items is zero" (shape B2 below).
+#
+# ENCODE NUMERIC THRESHOLDS IN THE REGEX, not only in the criteria: the
+# comparison operators are not documented as numeric or lexicographic, and
+# "8" >= "14" is true as a string.
+regex: '"<payload_key>":\s*(?<payload_key>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
 validation_rules:
-  # --- Keep both ERROR rules. They separate "evidence never arrived" (unknown)
-  # from "evidence says the control is bad" (fail). Without them an expired
-  # token reads as a compliance failure. Paramify resolves ERROR before FAIL
-  # before PASS, so these short-circuit regardless of position.
-  #
-  # Drift canary: a well-formed envelope always matches once, so zero matches
-  # means the exit_code anchor itself is gone (envelope restructured, file
-  # truncated, wrong artifact) — which a MATCH_GROUP rule passes silently.
+  # Presence first: prove the field was there to read. Without this, a renamed
+  # upstream key reads as absent-and-therefore-fine and the validator passes
+  # silently. See the three shapes below for which form you need.
   - regexOperation: { type: MATCH_COUNT }
-    criteria: EQUALS
-    value: { type: CUSTOM_TEXT, customText: "0" }
-    disposition: ERROR
-  # Collection failed — compliance is unknown, not failing.
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # exit_code
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
-    disposition: ERROR
-  # --- Your compliance rule(s); groups start at 2 because exit_code is group 1.
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # or { type: MATCH_COUNT }
-    criteria: EQUALS                                        # CONTAINS | EQUALS | GREATER_THAN | ... (12 operators)
-    value: { type: MATCH_GROUP, groupNumber: 3 }            # or { type: CUSTOM_TEXT, customText: "..." } / { type: MATCH_COUNT }
-    disposition: PASS                                       # PASS (default) | FAIL | ERROR
+  # Then the compliance assertion.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS                    # CONTAINS | EQUALS | GREATER_THAN | ... (12 operators)
+    value: { type: CUSTOM_TEXT, customText: "100" }
 #
-# Do NOT pin `schema_version` for version-safety: a bump that leaves exit_code
-# untouched would stop the pattern matching entirely, and a zero-match validator
-# passes silently. The MATCH_COUNT canary above covers that case and fails loudly.
+# Do NOT pin `schema_version` for version-safety: a bump that leaves your anchor
+# untouched would stop the pattern matching entirely. The presence rule above
+# covers structural change and fails loudly.
 
 # --- ATTESTATION validators: reviewer yes/no questions (use INSTEAD of regex/validation_rules) ---
 # attestation_rules:
@@ -79,4 +89,71 @@ validation_rules:
 # evidence_set.reference_id). Add one line per set that reuses this validator —
 # that list IS the dedup mechanism.
 evidence_sets:
-  - <EVD-REFERENCE-ID>
+  - EVD-REFERENCE-ID
+
+# =============================================================================
+# THE THREE SHAPES
+# =============================================================================
+#
+# --- A. Collection health (role: completeness) — exactly one per evidence set --
+#
+#   regex: '"exit_code":\s*(?<exit_code>-?\d+)'
+#   validation_rules:
+#     - regexOperation: { type: MATCH_COUNT }
+#       criteria: NOT_EQUALS
+#       value: { type: CUSTOM_TEXT, customText: "0" }
+#     - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+#       criteria: EQUALS
+#       value: { type: CUSTOM_TEXT, customText: "0" }
+#
+# This is the one sanctioned exception to the rule against anchoring on envelope
+# metadata: here the envelope IS the subject of the check. Because this
+# validator carries the exit_code anchor for the whole set, the configuration
+# validators below do NOT need it — their groups start at 1.
+#
+# WHY POSITIVE, NOT `disposition: ERROR`. `ERROR` ("evidence never arrived, so
+# compliance is unknown") is the right label and is a real field — but the REST
+# API accepts it and DISCARDS it (verified against a live tenant). Every rule
+# then becomes a pass-requirement, so the negative form
+# (MATCH_COUNT EQUALS 0 + exit_code NOT_EQUALS 0) demands the envelope both be
+# absent and carry a non-zero exit code: a validator that can never pass. When
+# the API honours disposition, migrate by inverting both rules and adding
+# `disposition: ERROR`. That is why collection health is its own file.
+#
+# --- B. Compliance (role: configuration) — one per distinct assertion ---------
+#
+#   B1. Read a value (normal polarity). Self-guarding: the MATCH_COUNT rule
+#       proves the field was present, so no separate integrity validator.
+#
+#         regex: '"encryption_percentage":\s*(?<encryption_percentage>\d+)'
+#         rules: MATCH_COUNT NOT_EQUALS 0 ; MATCH_GROUP[1] EQUALS "100"
+#
+#   B2. Count violations (inverted polarity, or ANY per-resource check). The
+#       regex matches only bad things and the rule requires zero of them.
+#
+#         regex: '"CIDRs":\s*"0\.0\.0\.0/0"'
+#         rules: MATCH_COUNT EQUALS 0
+#
+#       B2 CANNOT GUARD ITSELF — zero matches is its pass condition, so it
+#       cannot tell "no violations" from "the key I search for is gone". One
+#       regex cannot both count violations and prove structure. Every B2
+#       validator REQUIRES a C validator alongside it.
+#
+# --- C. Integrity (role: integrity) — one per B2 validator, mandatory --------
+#
+#   regex: '"CIDRs":\s*"'                 # the key itself, any value
+#   validation_rules:
+#     - regexOperation: { type: MATCH_COUNT }
+#       criteria: NOT_EQUALS
+#       value: { type: CUSTOM_TEXT, customText: "0" }
+#
+# Measured, not hypothetical: S3 evidence with three genuinely unencrypted
+# buckets flips FAIL -> PASS when only the per-item key `encrypted` is renamed
+# upstream — the violation regex stops matching, the count goes 4 -> 1, and the
+# validator reports compliance. The exit_code anchor does not catch it, because
+# the envelope is intact. Envelope drift and payload drift are different
+# failures and need different guards.
+#
+# Pick the structural anchor one level up from the violation: if you count
+# '"CIDRs":\s*"0\.0\.0\.0/0"', prove '"CIDRs":\s*"'. If you count
+# '"isPublic":\s*true', prove '"findings":\s*\['.

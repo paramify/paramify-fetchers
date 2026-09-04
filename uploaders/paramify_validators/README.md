@@ -44,6 +44,14 @@ Paramify after its id is cached.
 
 ## Known limits (v0.x)
 
+- **`validationRules[].disposition` is accepted and discarded by the API.**
+  Verified against a live tenant. A rule authored in the negative ERROR form
+  (`MATCH_COUNT EQUALS 0 -> ERROR` plus `exit_code NOT_EQUALS 0 -> ERROR`)
+  therefore degrades into two contradictory pass-requirements, and the validator
+  returns FAIL on every input including clean evidence. The registry authors the
+  positive form instead — see `docs/validators_design.md`. Nothing here needs to
+  change when the API is fixed; the validators migrate, not the syncer.
+
 - If a validator is **renamed** in Paramify *before* its id is cached, the
   name-match misses and a duplicate is created. The lock exists to prevent this
   on every subsequent run.

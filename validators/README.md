@@ -16,8 +16,12 @@ live here as first-class objects.
   validator (it owns its evidence-set list).
 - **A fetcher's validators = reverse lookup:** every registry file whose
   `evidence_sets` includes that fetcher's `evidence_set.reference_id`.
-- **Two roles** (`role:`): each evidence set has exactly one `completeness`
-  validator (full-population check) plus any number of `configuration` checks.
+- **Three roles** (`role:`): each evidence set has exactly one `completeness`
+  validator (did the collection succeed, is the population real), any number of
+  `configuration` checks (is the posture right), and one `integrity` validator
+  beside every configuration check that concludes from a *count* of violations
+  (was the counted field actually there). A set passes only when all of its
+  validators pass, so expect 2–5 per set.
 
 ## Authoring
 
@@ -35,20 +39,47 @@ mode that is otherwise silent (full rationale in
   Test with `node`, not `python -c 'import re'`.
 - **Name every capture group**, in `snake_case` from the key it captures.
   Naming does not renumber anything, so `validation_rules` still references
-  groups by number.
-- **Carry an error state.** Anchor on the envelope's `exit_code` and add two
-  `disposition: ERROR` rules, so a failed *collection* reports as unknown rather
-  than as a compliance failure:
+  groups by number. Note `MATCH_GROUP` reads the **first** match only, so you
+  cannot use groups to assert something about every item in a list — invert it
+  into "the count of bad items is zero".
+- **Guard the read.** A rule that reads nothing *passes*: a `MATCH_GROUP`
+  comparison over a regex that missed compares nothing to nothing and evaluates
+  true, and a count-of-violations rule reads a renamed key as zero violations.
+  So open every validator with a presence rule:
 
+  ```yaml
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
   ```
-  "exit_code":\s*(?<exit_code>-?\d+)(?:[\s\S]*?<compliance pattern>)?
-  ```
 
-  `MATCH_COUNT EQUALS 0 -> ERROR` (the anchor is gone) and
-  `MATCH_GROUP[1] NOT_EQUALS 0 -> ERROR` (collection failed). Your compliance
-  groups then start at 2. See
-  [`aws/alb_encryption_in_transit.yaml`](aws/alb_encryption_in_transit.yaml) for
-  a worked example.
+  A validator that *reads a value* guards itself this way. A validator that
+  *counts violations* cannot — zero matches is its pass condition — so it needs
+  a separate `role: integrity` validator proving the structural key exists.
 
-- **Shape / field reference:** [`framework/schemas/validator_schema.json`](../framework/schemas/validator_schema.json)
-- **Design & rationale:** [`docs/validators_design.md`](../docs/validators_design.md)
+Collection health is **not** part of a compliance validator. It lives once, in
+[`common/collection_succeeded.yaml`](common/collection_succeeded.yaml), which
+lists every evidence set that wants it. Add your `reference_id` there rather than
+re-anchoring on `exit_code` in your own file. Its guards are written positively
+(`MATCH_COUNT NOT_EQUALS 0`, `exit_code EQUALS 0`) because the REST API accepts
+`disposition` and discards it — the negative `ERROR` form self-contradicts today
+and yields a validator that can never pass.
+
+See [`aws/alb_encryption_in_transit.yaml`](aws/alb_encryption_in_transit.yaml)
+for a worked compliance validator.
+
+Prove it before you commit. Write the three directions down in
+[`_cases/<key>.yaml`](_cases/README.md) — compliant, non-compliant, and the key
+**renamed** — then:
+
+```bash
+paramify validators check --select <your key>
+```
+
+That evaluates them with the real ECMAScript engine, including the semantics
+that bite: `MATCH_GROUP` reads only the first match, rules combine with AND, and
+a rule that read nothing still holds. The renamed-key direction is the one that
+catches silent false passes and the one that gets skipped.
+
+It is an authoring aid rather than a merge gate — nothing stops you committing a
+validator without cases, but nothing then proves it can fail either.

@@ -1078,6 +1078,19 @@ def reference_ids_from_run(run_dir) -> set:
     return refs
 
 
+def check_validators(root, select=None, mode="api-today") -> dict:
+    """Run the behaviour cases in validators/_cases/ and report what held.
+
+    An authoring aid, not a merge gate: a validator's failure modes are silent,
+    so the only way to know one works is to run it against evidence that should
+    fail as well as evidence that should pass. Needs `node` — Paramify evaluates
+    these with ECMAScript, so Python `re` would use the wrong engine.
+    """
+    from framework.validator_eval.cases import run_cases
+
+    return run_cases(Path(root), select=select, mode=mode)
+
+
 def sync_validators(
     root: Path,
     manifest_path: Optional[Path] = None,

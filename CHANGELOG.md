@@ -30,6 +30,43 @@ schemas and the `paramify` CLI — not the internal code.
   at sync time and cached in a gitignored `.paramify/` lock — never written back
   to the shared registry.
 
+### Changed
+
+- **`paramify validators check`** — runs the behaviour cases in
+  `validators/_cases/` through the real ECMAScript engine
+  (`framework/validator_eval/`, evaluated under `node` because Paramify's engine
+  is JavaScript and Python `re` cannot compile `(?<name>...)` at all). A case
+  file pins what a validator must return for a given artifact; a set-level file
+  combines every validator on an evidence set the way Paramify does
+  (ERROR > FAIL > PASS), which is the only way to prove an `integrity` validator
+  covers its partner — a violation-counting validator passes its own drifted
+  artifact, because zero matches is its pass condition. Reports vacuous passes
+  (a PASS reached with a rule that read nothing) and names validators with no
+  cases. Deliberately not a CI gate: the cases are an authoring aid, and
+  legitimate evidence-shape changes should not block a merge.
+
+- **Validator authoring: guards are written positively, and collection health is
+  its own validator.** `validationRules[].disposition` is accepted and then
+  discarded by the REST API, so a rule authored in the negative `ERROR` form
+  degrades into a contradictory pass-requirement and the validator can never
+  pass — measured returning FAIL on every input, including compliant evidence.
+  Collection health now lives once in `validators/common/collection_succeeded.yaml`
+  (listing every evidence set that wants it) with plain PASS rules; compliance
+  validators no longer carry an `exit_code` anchor, so their capture groups start
+  at 1. Migration when the API honours `disposition` is an inversion of two rules
+  in that single file.
+- **Every validator opens with a presence rule, and count-based validators get an
+  `integrity` partner.** A `MATCH_GROUP` comparison over a regex that did not
+  match evaluates true, and a count-of-violations rule reads a renamed upstream
+  key as zero violations — both silent false passes. `role` gains a third value,
+  `integrity`, for the validator that proves the counted field was present.
+  `validators/aws/alb_encryption_in_transit.yaml` is reshaped accordingly; in its
+  previous form it returned PASS on drifted evidence where 1 of 4 load balancers
+  was encrypted.
+- The `suggest-validator` skill now authors validators into `validators/` rather
+  than only proposing a regex, and verifies them against compliant,
+  non-compliant, and **unreadable** evidence.
+
 ### Deprecated
 
 - The inline `validators` block on `fetcher.yaml`. Nothing in the framework reads
