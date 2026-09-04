@@ -1,0 +1,36 @@
+key: gcp_vpc_default_network_absent
+name: GCP Default VPC Network Has Been Removed
+type: AUTOMATED
+role: configuration
+statement: >
+  The auto-created `default` VPC network no longer exists in the project, so the
+  project's networking is deliberately designed rather than inherited from
+  Google's permissive starting state. Does not assert anything about the
+  networks that DO exist — their subnet mode, routing, peerings or firewall
+  posture are separate assertions.
+
+# Project-level fact (a project has at most one `default` network), so it reads
+# the rollup directly rather than inverting into a per-network count — the
+# MATCH_GROUP first-match limit does not bite on a single-valued field.
+#
+# Reads a value, so it guards itself: the MATCH_COUNT rule proves the rollup was
+# present before the value rule reads it, and a renamed key fails loudly. No
+# exit_code anchor — collection health is asserted once for the set by
+# `collection_succeeded`, so this pattern's groups start at 1.
+#
+# THIS FAILS ON ANY PROJECT THAT STILL HAS THE DEFAULT NETWORK, which is the
+# intended outcome: the default network is auto-mode, so it silently creates a
+# subnet in every current and future region with Google's defaults. That is
+# precisely why a project keeping it cannot hold flow-log coverage.
+regex: '"default_network_present":\s*(?<default_network_present>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS false
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "false" }
+
+evidence_sets:
+  - EVD-GCP-VPC-CONFIG

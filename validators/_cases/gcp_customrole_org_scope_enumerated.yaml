@@ -1,0 +1,33 @@
+# Synthetic artifacts only.
+validator: gcp_customrole_org_scope_enumerated
+cases:
+  - name: organization_roles_were_readable
+    expect: PASS
+    note: >
+      The collecting identity could list roles at the organization, so
+      organization_scoped_roles is a count and not an unknown.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"organization_roles_readable":true,"organization_scoped_roles":0}}}'
+
+  - name: organization_roles_were_not_readable
+    expect: FAIL
+    note: >
+      The live posture these validators were authored against, and the reason
+      this validator exists. Everything else in the payload reads clean —
+      organization_scoped_roles is 0 — but that 0 means "not counted", not "none
+      exist", so the set must not report compliance over it.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"organization_roles_readable":false,"organization_scoped_roles":0}}}'
+
+  - name: readability_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. With the flag gone the presence rule fails, rather than the
+      value rule reading nothing and holding vacuously — an unreported scope is
+      not an enumerated one.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"org_roles_readable":false,"organization_scoped_roles":0}}}'
+
+  - name: flag_present_but_not_a_boolean
+    expect: FAIL
+    note: >
+      Restructuring the flag into a string is caught by the presence rule, since
+      the pattern requires a bare true or false.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"organization_roles_readable":"denied","organization_scoped_roles":0}}}'

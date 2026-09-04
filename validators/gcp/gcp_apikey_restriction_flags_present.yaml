@@ -1,0 +1,28 @@
+key: gcp_apikey_restriction_flags_present
+name: GCP API Key Restriction Counts Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  The unrestricted-key rollup is present in the evidence, so a zero count of
+  unrestricted keys reflects posture rather than an unreadable payload. Does not
+  assert what the count's value is.
+
+# Integrity partner to `gcp_apikey_no_unrestricted_keys`.
+#
+# Anchored on the SUMMARY rollup, not the per-key `unrestricted` flag, because a
+# project with no API keys has no per-key flags to find — anchoring there would
+# fail the most compliant posture in the fleet. The summary key is emitted on
+# every run regardless of key count.
+#
+# The per-key flag is still covered: if only it is renamed, the rollup keeps
+# counting the offenders and the violation validator catches them; both have to
+# drift together to blind that validator, and that is what this one fails on.
+regex: '"unrestricted_keys":\s*'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-API-KEYS

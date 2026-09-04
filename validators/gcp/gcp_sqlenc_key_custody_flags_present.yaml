@@ -1,0 +1,25 @@
+key: gcp_sqlenc_key_custody_flags_present
+name: Cloud SQL Key Custody Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-instance key-custody flags are present in the evidence and still carry a
+  boolean, so a zero count of Google-managed instances reflects posture rather
+  than an unreadable payload. Does NOT assert what those flags say.
+
+# Integrity partner to `gcp_sqlenc_no_google_managed_key_instances`. Anchors one
+# level up from the violation: that validator counts `"cmek": false`, this one
+# proves the `cmek` key exists at all and its value is still a bare boolean
+# token. A value reshaped to a quoted "false" would silence the violation regex,
+# and this catches it. It also fails on a project reporting zero Cloud SQL
+# instances, where there is no key custody to read — deliberate, so an emptied
+# payload cannot be mistaken for a fully CMEK-protected project.
+regex: '"cmek":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-ENC

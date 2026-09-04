@@ -1,0 +1,29 @@
+# Synthetic artifacts only. Invented key labels; nothing here comes from a real
+# project.
+validator: gcp_apikey_all_keys_restricted
+cases:
+  - name: every_key_carries_a_restriction
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","unrestricted":false},{"display_name":"key-two","unrestricted":false}]},"summary":{"total_api_keys":2,"unrestricted_keys":0,"restricted_key_percentage":100}}}'
+
+  - name: project_holds_no_api_keys
+    expect: PASS
+    note: >
+      The reason this validator is not the ordinary MATCH_GROUP form. With no
+      keys the percentage helper divides by zero and reports 0, so reading the
+      rollup and requiring 100 would fail the most defensible posture there is.
+      The total_api_keys alternative is what carries this case.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[]},"summary":{"total_api_keys":0,"unrestricted_keys":0,"restricted_key_percentage":0}}}'
+
+  - name: half_the_keys_unrestricted
+    expect: FAIL
+    note: the real posture collected from a live project when these were authored
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","unrestricted":true},{"display_name":"key-two","unrestricted":false},{"display_name":"key-three","unrestricted":true},{"display_name":"key-four","unrestricted":false}]},"summary":{"total_api_keys":4,"unrestricted_keys":2,"restricted_key_percentage":50}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. Both compliant readings gone, so the regex matches nothing and
+      the MATCH_COUNT NOT_EQUALS 0 rule fails — this form guards itself, which is
+      why it ships without an integrity partner.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","unrestricted":false},{"display_name":"key-two","unrestricted":false}]},"summary":{"api_key_count":2,"unrestricted_keys":0,"restriction_percentage":100}}}'

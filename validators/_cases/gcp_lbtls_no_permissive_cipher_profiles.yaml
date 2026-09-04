@@ -1,0 +1,34 @@
+validator: gcp_lbtls_no_permissive_cipher_profiles
+cases:
+  - name: no_permissive_profiles
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"ssl_policies":[{"name":"policy-strict","profile":"MODERN","permissive_profile":false}]},"summary":{"total_ssl_policies":1,"weak_ssl_policies":0,"permissive_profile_ssl_policies":0}}}'
+
+  - name: one_permissive_profile
+    expect: FAIL
+    note: >
+      The live posture these were authored from. Note the per-policy key
+      `permissive_profile` sits right beside the rollup this validator reads; the
+      anchor must bind to the rollup, and MATCH_GROUP reads the first match only.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"ssl_policies":[{"name":"policy-strict","profile":"MODERN","permissive_profile":false},{"name":"policy-legacy","profile":"COMPATIBLE","permissive_profile":true}]},"summary":{"total_ssl_policies":2,"weak_ssl_policies":1,"permissive_profile_ssl_policies":1}}}'
+
+  - name: compatible_profile_at_tls_1_2_still_fails
+    expect: FAIL
+    note: >
+      Why this is not folded into the minimum-version checks. The version floor is
+      met and the cipher suite set is still the permissive one, so
+      gcp_lbtls_no_weak_ssl_policy_minimums passes on this artifact and only this
+      validator catches it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"ssl_policies":[{"name":"policy-mixed","min_tls_version":"TLS_1_2","profile":"COMPATIBLE","permissive_profile":true}]},"summary":{"total_ssl_policies":1,"ssl_policy_min_tls_versions":["TLS_1_2"],"permissive_profile_ssl_policies":1}}}'
+
+  - name: rollup_key_renamed
+    expect: FAIL
+    note: >
+      Direction 3, and this validator passes it on its own — it reads a value
+      rather than counting violations, so the MATCH_COUNT presence rule catches
+      the rename and no integrity partner is needed.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"ssl_policies":[{"name":"policy-legacy","profile":"COMPATIBLE","permissive_profile":true}]},"summary":{"total_ssl_policies":1,"permissive_profile_policy_count":1}}}'
+
+  - name: payload_emptied
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed"},"payload":{}}'

@@ -1,0 +1,21 @@
+key: gcp_vpc_network_legacy_flags_present
+name: GCP VPC Network Legacy-Mode Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-network subnet-mode flags are present in the evidence, so a zero count of
+  legacy networks reflects the project's posture rather than an unreadable
+  payload. Does not assert what those flags say.
+
+# Integrity partner to `gcp_vpc_no_legacy_networks`. Anchors one level up from
+# the violation: that validator counts '"legacy": true', this one proves the
+# `legacy` key was emitted at all, for either value.
+regex: '"legacy":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-VPC-CONFIG

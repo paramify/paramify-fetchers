@@ -1,0 +1,22 @@
+key: gcp_gcs_public_access_prevention_recorded
+name: Cloud Storage Public Access Prevention Values Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-bucket public access prevention values are present in the evidence, so a
+  zero count of unprotected buckets reflects posture rather than an unreadable
+  payload. Does NOT assert what those values say.
+
+# Integrity partner to `gcp_gcs_public_access_prevention_enforced`. Proves the
+# key exists and still carries a scalar value; a value reshaped to an object
+# would silence the violation regex, and this catches that. It also fails on a
+# project reporting zero buckets, where there is no posture to read.
+regex: '"public_access_prevention":\s*(?:"[^"]*"|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-STORAGE-ENC

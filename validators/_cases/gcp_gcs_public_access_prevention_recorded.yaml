@@ -1,0 +1,17 @@
+validator: gcp_gcs_public_access_prevention_recorded
+cases:
+  - name: values_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","public_access_prevention":"enforced"},{"name":"bucket-beta","public_access_prevention":"inherited"}]},"summary":{"total_buckets":2}}}'
+
+  - name: key_renamed_upstream
+    expect: FAIL
+    note: the drift its partner cannot see.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","pap_state":"enforced"},{"name":"bucket-beta","pap_state":"inherited"}]},"summary":{"total_buckets":2}}}'
+
+  - name: value_reshaped_to_object
+    expect: FAIL
+    note: >
+      A nested object silences the violation regex as thoroughly as a rename,
+      so integrity proves a scalar value, not just the key.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","public_access_prevention":{"state":"enforced"}},{"name":"bucket-beta","public_access_prevention":{"state":"inherited"}}]},"summary":{"total_buckets":2}}}'

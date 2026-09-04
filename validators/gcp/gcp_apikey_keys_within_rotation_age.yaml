@@ -1,0 +1,30 @@
+key: gcp_apikey_keys_within_rotation_age
+name: GCP API Keys Are Within Rotation Age
+type: AUTOMATED
+role: configuration
+statement: >
+  No API key has aged past the rotation interval the fetcher measures against —
+  neither the project rollup nor any individual key reports one. An API key never
+  expires, so its age is the whole of the rotation evidence. Does not assert what
+  the tenant's own rotation policy is: the interval is the fetcher's declared
+  one, recorded alongside as rotation_age_days.
+
+# INVERTED POLARITY: zero is compliant; any match is a stale key.
+#
+# The alternation reads both the per-key `past_rotation_age` flag and the
+# `keys_past_rotation_age` rollup. A MATCH_GROUP form on the rollup would be the
+# obvious shape and is wrong here: MATCH_GROUP reads the first match only, and
+# the per-key copies serialize before the summary. Counting the non-zero form
+# covers every key and the rollup at once, with the threshold in the regex.
+#
+# Violation-count form, so it cannot guard itself.
+# `gcp_apikey_rotation_age_counts_present` is its mandatory integrity partner.
+regex: '"past_rotation_age":\s*true|"keys_past_rotation_age":\s*[1-9][0-9]*'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-API-KEYS

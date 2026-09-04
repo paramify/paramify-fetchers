@@ -1,0 +1,32 @@
+key: gcp_customrole_no_role_management_grants
+name: No GCP Custom Role Definition Grants IAM Role Management
+type: AUTOMATED
+role: configuration
+statement: >
+  The evidence's own rollup reports zero custom role definitions granting an
+  `iam.roles` create / update / delete / undelete permission. A role holding one
+  can edit its own definition and add any permission to itself, so the
+  permission list the role is reviewed against stops being a boundary. An
+  independent reading of the same fact as
+  `gcp_customrole_no_escalation_path_grants`, taken from the summary rather than
+  the per-role classifications. Does NOT cover the other escalation paths
+  (setIamPolicy, key creation, actAs), does not assert that the roles which
+  remain are least-privileged, and does not cover organization-scoped custom
+  roles when those were not readable.
+
+# Reads a value, so it guards itself — see the sibling
+# `gcp_customrole_no_set_iam_policy_grants` for why a count of roles rather than
+# `no_privilege_escalation_percentage` is the anchor. This key appears only in
+# payload.summary, so the first match is the only match.
+regex: '"roles_granting_role_management":\s*(?<roles_granting_role_management>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-IAM-CUSTOM-ROLES

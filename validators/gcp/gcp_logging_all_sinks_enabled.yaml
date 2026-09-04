@@ -1,0 +1,42 @@
+key: gcp_logging_all_sinks_enabled
+name: Cloud Logging Sinks Are All Enabled
+type: AUTOMATED
+role: configuration
+statement: >
+  The project has at least one Cloud Logging sink and none of them are
+  disabled, so every configured log export route is actively delivering. Does
+  NOT assert what those sinks capture, where they deliver, or that their
+  filters cover the audit stream — a sink can be enabled and still export
+  almost nothing.
+
+# Form A (reads a value), so it guards itself: the MATCH_COUNT rule proves both
+# rollups were present before the equality rule reads them. No exit_code anchor
+# — collection health is asserted once for the set by `collection_succeeded`,
+# so the capture groups start at 1.
+#
+# WHY THE ROLLUP AND NOT A PER-SINK VIOLATION COUNT. `disabled` is not unique to
+# sinks in this payload (log-based metrics carry it too), so a bare
+# `"disabled":\s*true` counter would conflate two different postures, and
+# fencing it to sink objects would depend on key ordering — where drift yields
+# ZERO matches, which is a violation counter's silent pass condition. The rollup
+# pair fails LOUDLY in that same direction instead: rename either key and the
+# regex stops matching, so MATCH_COUNT NOT_EQUALS 0 fails.
+#
+# `[1-9]\d*` on the numerator is the anti-vacuity guard: a project with no sinks
+# at all reports 0 == 0, which would otherwise pass while proving nothing.
+regex: '"enabled_sinks":\s*(?<enabled_sinks>[1-9]\d*)[\s\S]*?"total_sinks":\s*(?<total_sinks>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  # Both rollups were present, and at least one sink is enabled. Zero matches
+  # means the summary was renamed, absent, or reported no enabled sinks.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  # Every sink that exists is enabled. Group-to-group equality, so the string
+  # comparison and the numeric one agree.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # enabled_sinks
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # total_sinks
+
+evidence_sets:
+  - EVD-GCP-LOGGING-CONFIG

@@ -1,0 +1,20 @@
+# Synthetic artifacts only — invented network names, no real project data.
+validator: gcp_vpc_network_legacy_flags_present
+cases:
+  - name: subnet_mode_flags_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"networks":[{"name":"net-alpha","legacy":false},{"name":"net-beta","legacy":false}]}}}'
+
+  - name: flags_present_and_posture_is_bad
+    expect: PASS
+    note: >
+      Deliberate. This validator asserts readability, not posture — a legacy
+      network is a real finding, but it is gcp_vpc_no_legacy_networks that must
+      report it. An integrity validator that also failed on bad posture would
+      hide which of the two things went wrong.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"networks":[{"name":"net-alpha","legacy":false},{"name":"net-legacy","legacy":true}]}}}'
+
+  - name: legacy_flag_renamed_upstream
+    expect: FAIL
+    note: the whole point of the role — the key the violation count reads is gone.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"networks":[{"name":"net-alpha","legacy_mode":false},{"name":"net-beta","legacy_mode":false}]}}}'

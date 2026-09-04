@@ -1,0 +1,29 @@
+validator: gcp_sqlnet_internet_exposure_flags_present
+cases:
+  - name: per_instance_exposure_flags_present
+    expect: PASS
+    note: passes on either value — this validator asserts the key was read, not what it said.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","authorized_networks":[],"open_to_internet":false},{"name":"sql-beta","engine":"POSTGRES","authorized_networks":[{"name":"anywhere","value":"0.0.0.0/0","open_to_internet":true}],"open_to_internet":true}]},"summary":{"total_instances":2,"instances_open_to_internet":1}}}'
+
+  - name: exposure_flag_renamed_upstream
+    expect: FAIL
+    note: the drift its partner cannot see.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","authorized_networks":[],"authorized_network_count":0,"internet_reachable":false}]},"summary":{"total_instances":1,"instances_open_to_internet":0}}}'
+
+  - name: summary_rollup_alone_does_not_satisfy_it
+    expect: FAIL
+    note: >
+      Guards the key-prefix ambiguity in the other direction. The summary key
+      `instances_open_to_internet` contains `open_to_internet` as a substring,
+      and a payload that lost its per-instance records must not be rescued by
+      the rollup. The mandatory opening quote in the pattern keeps it out.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL"}]},"summary":{"total_instances":1,"instances_open_to_internet":0,"instances_with_authorized_networks":0}}}'
+
+  - name: project_with_no_cloud_sql_instances
+    expect: FAIL
+    note: >
+      No instances means no per-instance flags, so there is no posture to read —
+      including the case where sqladmin.googleapis.com is disabled and the
+      fetcher recorded cloud_sql_api_readable false. "Could not look" must not
+      read as "nothing to find".
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[]},"summary":{"cloud_sql_api_readable":false,"total_instances":0,"instances_open_to_internet":0}}}'

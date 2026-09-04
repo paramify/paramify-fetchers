@@ -1,0 +1,32 @@
+key: gcp_vm_ip_forwarding_flags_present
+name: GCP Compute Instance IP Forwarding Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  The per-instance IP-forwarding flag is present in the evidence, so a zero count
+  of forwarding-enabled instances reflects posture rather than an unreadable
+  payload. Does NOT assert the flag's value — that is
+  `gcp_vm_no_ip_forwarding_enabled`.
+
+# Integrity partner to `gcp_vm_no_ip_forwarding_enabled`. Anchors one level up
+# from the violation: that validator counts `"can_ip_forward": true`, this one
+# proves the key exists at all, with either value.
+#
+# Anchored on the PER-INSTANCE flag rather than the `ip_forwarding_instances`
+# rollup on purpose. The rollup is derived from this same flag with a defaulting
+# read, so a rename drives the rollup to 0 while leaving the key present — the
+# rollup would still be found, the violation counter would still see zero, and
+# the drift would pass silently. Only the per-instance anchor catches it.
+#
+# The `"total_instances":\s*0` branch keeps a project with no Compute instances
+# from failing: there are no per-instance flags to read, and that is a compliant
+# posture, not a drifted payload.
+regex: '"can_ip_forward":\s*(?:true|false)|"total_instances":\s*0(?![0-9])'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-VM-CONFIG

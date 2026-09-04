@@ -1,0 +1,22 @@
+key: gcp_sa_role_breadth_flags_present
+name: GCP Project Role Binding Breadth Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-binding role-breadth flags are present in the evidence, so a zero count of
+  over-broad bindings reflects posture rather than an unreadable payload. Does
+  not assert what any flag's value is, nor that every binding in the project was
+  enumerated.
+
+# Integrity partner to `gcp_sa_no_over_broad_project_roles`. Anchors one level up
+# from the violation: that validator counts `"over_broad_role": true`, this one
+# proves the `over_broad_role` key exists at all, with any value.
+regex: '"over_broad_role":\s*'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-IAM-SA

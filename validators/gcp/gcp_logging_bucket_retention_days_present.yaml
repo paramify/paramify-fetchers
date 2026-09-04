@@ -1,0 +1,29 @@
+key: gcp_logging_bucket_retention_days_present
+name: Log Bucket Retention Periods Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-bucket retention periods are present in the evidence as numbers, so a
+  zero count of short-retention log buckets reflects posture rather than an
+  unreadable payload. Also asserts that at least one log bucket was enumerated,
+  which is what makes the retention count non-vacuous.
+
+# Integrity partner to `gcp_logging_buckets_retain_at_least_30_days`, and it is
+# not optional. That validator counts `"retention_days"` values below 30 and
+# passes on zero; rename the key upstream, or let the value go null, and the
+# count drops to zero on evidence that hides a one-day bucket. The exit_code
+# anchor does not catch it, because the envelope is intact — envelope drift and
+# payload drift are different failures and need different guards.
+#
+# Anchors one level up from the violation: the same key, but any numeric value.
+# `\d` rather than a bare `:\s*` deliberately — `"retention_days": null` would
+# satisfy a key-only anchor while leaving the violation counter blind.
+regex: '"retention_days":\s*\d'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-LOGGING-CONFIG

@@ -1,0 +1,29 @@
+key: gcp_disk_key_custody_flags_present
+name: Persistent Disk and Snapshot Key Custody Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-record key-custody flags are present in the persistent disk evidence and
+  still carry a bare boolean, so a zero count of custody contradictions reflects
+  the collected posture rather than an unreadable payload. Does NOT assert what
+  those flags say, nor how many records there are.
+
+# Integrity partner to `gcp_disk_cmek_claims_name_a_kms_key` and
+# `gcp_disk_google_managed_records_carry_no_key`. Anchors one level up from both
+# violations: they match on `"cmek": true` / `"cmek": false`, this one proves the
+# `cmek` key exists at all and its value is still an unquoted boolean token. A
+# rename to `customer_managed`, or a reshape to a quoted "false", would silence
+# both violation regexes and be invisible without this.
+#
+# It also fails on a project reporting no disks and no snapshots at all, where
+# there is no key custody to read — deliberate, so an emptied payload cannot be
+# mistaken for a project whose custody claims all check out.
+regex: '"cmek":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-PD-ENC

@@ -1,0 +1,30 @@
+validator: gcp_lbtls_proxy_effective_tls_version_present
+cases:
+  - name: effective_versions_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_2","effective_profile":"MODERN"}]},"summary":{"total_proxies":1}}}'
+
+  - name: present_but_null_still_counts_as_read
+    expect: PASS
+    note: >
+      This validator asserts the field was there, not what it says. An unresolved
+      policy leaves a null the fetcher wrote on purpose — that is a readable
+      payload, and gcp_lbtls_no_proxy_below_tls_floor is what fails on it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","ssl_policy_resolved":false,"effective_min_tls_version":null}]},"summary":{"total_proxies":1}}}'
+
+  - name: effective_version_key_renamed
+    expect: FAIL
+    note: this is the failure that covers gcp_lbtls_no_proxy_below_tls_floor
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","uses_default_ssl_policy":false,"negotiated_min_tls_version":"TLS_1_0"}]},"summary":{"total_proxies":1}}}'
+
+  - name: summary_rollups_alone_do_not_satisfy_it
+    expect: FAIL
+    note: >
+      The proxy array is gone and only the summary survives. The decoy key
+      `default_min_tls_version_when_no_policy` must not be mistaken for a per-proxy
+      record — that would make this guard hold on evidence with nothing in it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[]},"summary":{"tls_floor":"TLS_1_2","default_min_tls_version_when_no_policy":"TLS_1_0","ssl_policy_min_tls_versions":["TLS_1_2"],"total_proxies":0}}}'
+
+  - name: payload_emptied
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed"},"payload":{}}'

@@ -1,0 +1,68 @@
+# Set-level: every validator naming EVD-GCP-IAM-SA, combined the way Paramify
+# combines them (ERROR > FAIL > PASS). This is where the integrity validators
+# earn their place — three of the four configuration validators count violations,
+# and a count-based validator cannot cover its own drift.
+#
+# Synthetic artifacts only. Invented account labels and role names; nothing here
+# comes from a real project.
+evidence_set: EVD-GCP-IAM-SA
+cases:
+  - name: keyless_and_least_privileged
+    expect: PASS
+    note: >
+      The target posture: no user-managed keys anywhere, every key expiring, no
+      key past rotation age, no over-broad project binding.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","user_managed_key_count":0,"user_managed_keys_past_rotation_age":0,"keys":[{"id":"k1","user_managed":false,"never_expires":false}]}],"project_role_bindings":[{"role":"roles/logging.logWriter","over_broad_role":false,"primitive_role":false}]},"summary":{"total_service_accounts":1,"no_user_managed_key_percentage":100,"never_expiring_user_managed_keys":0,"over_broad_project_role_bindings":0,"user_managed_keys_past_rotation_age":0}}}'
+
+  - name: one_account_holds_a_never_expiring_user_managed_key
+    expect: FAIL
+    note: >
+      The live posture these validators were authored against, in miniature.
+      gcp_sa_no_user_managed_keys fails on the rollup and
+      gcp_sa_no_never_expiring_keys fails on the key itself — two independent
+      readings of the same finding, which is the point of keeping both.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","user_managed_key_count":0,"user_managed_keys_past_rotation_age":0,"keys":[{"id":"k1","user_managed":false,"never_expires":false}]},{"email":"sa-two@example","user_managed_key_count":1,"user_managed_keys_past_rotation_age":0,"keys":[{"id":"k2","user_managed":true,"never_expires":true}]}],"project_role_bindings":[{"role":"roles/logging.logWriter","over_broad_role":false,"primitive_role":false}]},"summary":{"total_service_accounts":2,"no_user_managed_key_percentage":50,"never_expiring_user_managed_keys":1,"over_broad_project_role_bindings":0,"user_managed_keys_past_rotation_age":0}}}'
+
+  - name: an_account_holds_a_primitive_project_role
+    expect: FAIL
+    note: >
+      Keys are clean; only the least-privilege assertion fails. Isolated on
+      purpose, so the case cannot pass for the wrong reason.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","user_managed_key_count":0,"user_managed_keys_past_rotation_age":0,"keys":[{"id":"k1","user_managed":false,"never_expires":false}]}],"project_role_bindings":[{"role":"roles/logging.logWriter","over_broad_role":false,"primitive_role":false},{"role":"roles/editor","over_broad_role":true,"primitive_role":true}]},"summary":{"total_service_accounts":1,"no_user_managed_key_percentage":100,"never_expiring_user_managed_keys":0,"over_broad_project_role_bindings":1,"user_managed_keys_past_rotation_age":0}}}'
+
+  - name: key_expiry_flags_renamed_upstream
+    expect: FAIL
+    note: >
+      never_expires renamed, everything else reading compliant. Alone,
+      gcp_sa_no_never_expiring_keys counts zero never-expiring keys and reports
+      PASS on an artifact that hides one. gcp_sa_key_expiry_flags_present fails
+      because the key it proves is gone, so the set fails. Delete that validator
+      and this case goes green while the evidence proves nothing — the silent
+      false pass the integrity role exists to prevent.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","user_managed_key_count":0,"user_managed_keys_past_rotation_age":0,"keys":[{"id":"k1","user_managed":false,"key_never_expires":false},{"id":"k2","user_managed":true,"key_never_expires":true}]}],"project_role_bindings":[{"role":"roles/logging.logWriter","over_broad_role":false,"primitive_role":false}]},"summary":{"total_service_accounts":1,"no_user_managed_key_percentage":100,"never_expiring_user_managed_keys":0,"over_broad_project_role_bindings":0,"user_managed_keys_past_rotation_age":0}}}'
+
+  - name: role_breadth_flags_renamed_upstream
+    expect: FAIL
+    note: >
+      over_broad_role renamed while a roles/editor binding is still present, and
+      everything else reading compliant. gcp_sa_no_over_broad_project_roles counts
+      zero violations and would PASS alone; gcp_sa_role_breadth_flags_present is
+      what fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","user_managed_key_count":0,"user_managed_keys_past_rotation_age":0,"keys":[{"id":"k1","user_managed":false,"never_expires":false}]}],"project_role_bindings":[{"role":"roles/logging.logWriter","role_is_over_broad":false},{"role":"roles/editor","role_is_over_broad":true}]},"summary":{"total_service_accounts":1,"no_user_managed_key_percentage":100,"never_expiring_user_managed_keys":0,"over_broad_project_role_bindings":1,"user_managed_keys_past_rotation_age":0}}}'
+
+  - name: rotation_age_counts_renamed_upstream
+    expect: FAIL
+    note: >
+      user_managed_keys_past_rotation_age renamed, everything else reading
+      compliant. gcp_sa_keys_within_rotation_age counts zero stale keys and would
+      PASS alone; gcp_sa_key_rotation_age_counts_present is what fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","user_managed_key_count":0,"keys_past_rotation_age":0,"keys":[{"id":"k1","user_managed":false,"never_expires":false}]}],"project_role_bindings":[{"role":"roles/logging.logWriter","over_broad_role":false,"primitive_role":false}]},"summary":{"total_service_accounts":1,"no_user_managed_key_percentage":100,"never_expiring_user_managed_keys":0,"over_broad_project_role_bindings":0,"rotation_age_days":90,"keys_past_rotation_age":0}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict — compliance is unknown, not bad —
+      but the API discards disposition, so FAIL is the best reachable answer
+      today. What matters is that it does not PASS. collection_succeeded is what
+      catches this; none of the validators above anchor on exit_code.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"PermissionDenied"},"payload":{}}'

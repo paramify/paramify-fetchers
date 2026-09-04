@@ -1,0 +1,29 @@
+key: gcp_apikey_no_all_cloud_api_targets
+name: No GCP API Key Targets All Cloud APIs
+type: AUTOMATED
+role: configuration
+statement: >
+  No API key names the cloudapis.googleapis.com wildcard as an API target. That
+  target is a restriction in form only — a key holding it can still call every
+  Cloud API — so it fails wherever it appears: on the per-key flag, on the raw
+  per-target record, or in the project rollup. Does not assert which services a
+  key may call, only that it is not the everything wildcard.
+
+# INVERTED POLARITY: zero is compliant; any match is a key restricted to nothing.
+#
+# The alternation reads the finding in all three places the fetcher writes it —
+# the derived per-key `targets_all_cloud_apis`, the `keys_targeting_all_cloud_apis`
+# rollup, and the raw `wildcard_service` flag on each api_target — so no single
+# upstream rename can hide it.
+#
+# Violation-count form, so it cannot guard itself.
+# `gcp_apikey_wildcard_target_flags_present` is its mandatory integrity partner.
+regex: '"targets_all_cloud_apis":\s*true|"keys_targeting_all_cloud_apis":\s*[1-9][0-9]*|"wildcard_service":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-API-KEYS

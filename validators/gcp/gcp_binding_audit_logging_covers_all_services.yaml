@@ -1,0 +1,35 @@
+key: gcp_binding_audit_logging_covers_all_services
+name: GCP Project Audit Logging Covers All Services With Full Log Types
+type: AUTOMATED
+role: configuration
+statement: >
+  The project IAM policy carries a Cloud Audit Logging config on "allServices"
+  that enables the full set of log types (ADMIN_READ, DATA_READ, DATA_WRITE), so
+  administrative and data-plane access to every service is recorded rather than
+  only the always-on admin activity log. Does NOT assert that any member is
+  exempt from that logging, that the resulting logs are retained, exported or
+  monitored, or that a sink exists to receive them.
+
+# Reads a value, so it guards itself: the MATCH_COUNT rule proves the flag was
+# present before the value rule reads it. A renamed key gives zero matches and
+# the validator fails loudly, which is why no integrity partner is needed here.
+#
+# The pattern captures the literal true|false rather than `\w+`, so a value that
+# stops being a boolean (null, a string, an object) also yields zero matches and
+# fails rather than reading as compliant.
+#
+# Anchored on the composite rollup rather than on `audit_logging_configured`,
+# which is true as soon as ANY service has ANY log type enabled and so passes on
+# a policy that audits one service and ignores the rest.
+regex: '"audit_full_log_types_on_all_services":\s*(?<audit_full_log_types_on_all_services>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-GCP-IAM-BINDINGS

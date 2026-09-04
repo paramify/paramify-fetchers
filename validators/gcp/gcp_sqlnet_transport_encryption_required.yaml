@@ -1,0 +1,34 @@
+key: gcp_sqlnet_transport_encryption_required
+name: Cloud SQL Transport Encryption Required On Every Instance
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Cloud SQL instance in the project refuses unencrypted client
+  connections, so credentials and query traffic cannot cross the network in the
+  clear. The fetcher derives this from sslMode (ENCRYPTED_ONLY or
+  TRUSTED_CLIENT_CERTIFICATE_REQUIRED), falling back to the legacy requireSsl
+  toggle when sslMode is unset. Does NOT assert a minimum TLS version, a
+  client-certificate mode, or anything about which networks can reach the
+  instance. A project reporting zero Cloud SQL instances FAILS this rather than
+  passing vacuously: the percentage is 0 when there is nothing to measure.
+
+# Reads a value, so it guards itself: the MATCH_COUNT rule proves the rollup was
+# present before the threshold rule reads it. No exit_code anchor — collection
+# health is asserted once for the set by `collection_succeeded`.
+#
+# `"ssl_required":` (the per-instance key) cannot match this pattern and vice
+# versa: the closing quote before the colon separates `ssl_required` from
+# `ssl_required_percentage` and `ssl_required_instances`. Verified in Node on
+# real evidence — this pattern matches exactly once, in the summary.
+regex: '"ssl_required_percentage":\s*(?<ssl_required_percentage>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-NET

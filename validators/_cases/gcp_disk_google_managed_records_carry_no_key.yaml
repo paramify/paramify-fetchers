@@ -1,0 +1,28 @@
+# Synthetic artifacts only — invented project, key ring and resource names.
+validator: gcp_disk_google_managed_records_carry_no_key
+cases:
+  - name: flags_and_key_fields_agree
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":true,"kms_key_name":"projects/example-project/locations/example-region/keyRings/example-ring/cryptoKeys/example-key","name":"disk-alpha"},{"cmek":false,"kms_key_name":null,"name":"disk-beta"}],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]}}}'
+
+  - name: default_key_record_still_carries_a_kms_key
+    expect: FAIL
+    note: >
+      The custody boolean says Google-managed while a customer key name is
+      attached. The two facts contradict, so the cmek_disks rollup counting that
+      boolean is wrong and cannot be read at face value.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":false,"kms_key_name":"projects/example-project/locations/example-region/keyRings/example-ring/cryptoKeys/example-key","name":"disk-alpha"}],"snapshots":[]}}}'
+
+  - name: snapshot_default_key_record_carries_a_kms_key
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":"projects/example-project/locations/example-region/keyRings/example-ring/cryptoKeys/example-key","name":"snap-alpha"}]}}}'
+
+  - name: custody_flag_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Same deliberate blind spot as its mirror validator: the contradiction is
+      still in the artifact (a default-key record carrying a key name), but the
+      renamed `cmek` key means nothing matches and zero matches is the pass
+      condition. gcp_disk_key_custody_flags_present is what fails; the set-level
+      case file is where that is proved.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"custody":"google_managed","kms_key_name":"projects/example-project/locations/example-region/keyRings/example-ring/cryptoKeys/example-key","name":"disk-alpha"}],"snapshots":[]}}}'

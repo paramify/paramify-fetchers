@@ -1,0 +1,28 @@
+# Synthetic artifacts only — invented subnet names and CIDRs, no real project data.
+validator: gcp_vpc_all_subnets_have_flow_logs
+cases:
+  - name: every_subnet_logs_flows
+    expect: PASS
+    note: >
+      The compliant subnet carries a float sampling rate, so this case also pins
+      that the pattern is unaffected by it — the assertion is on the boolean.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"subnets":[{"name":"subnet-one","network":"net-alpha","flow_logs_enabled":true,"flow_log_sampling":0.5},{"name":"subnet-two","network":"net-alpha","flow_logs_enabled":true,"flow_log_sampling":1.0}]},"summary":{"total_subnets":2,"subnets_with_flow_logs":2,"flow_log_percentage":100}}}'
+
+  - name: auto_mode_subnets_unlogged
+    expect: FAIL
+    note: >
+      The shape of the posture collected when these validators were authored:
+      one deliberately configured subnet with flow logs on, and the auto-created
+      per-region subnets of the `default` network with them off.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"subnets":[{"name":"subnet-one","network":"net-alpha","flow_logs_enabled":true,"flow_log_sampling":0.5},{"name":"default","network":"default","flow_logs_enabled":false,"flow_log_sampling":null},{"name":"default","network":"default","flow_logs_enabled":false,"flow_log_sampling":null}]},"summary":{"total_subnets":3,"subnets_with_flow_logs":1,"flow_log_percentage":33}}}'
+
+  - name: flow_log_flag_renamed_upstream
+    expect: PASS
+    note: >
+      A violation-counting validator CANNOT cover this direction on its own —
+      zero matches is its pass condition, so a renamed key reads as zero
+      unlogged subnets even though two of the three are unlogged. That is
+      exactly why gcp_vpc_subnet_flow_log_flags_present is mandatory. The
+      assertion that matters lives in set_EVD-GCP-VPC-CONFIG.yaml, case
+      subnet_flow_log_flags_renamed_upstream, where the set correctly fails.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"subnets":[{"name":"subnet-one","network":"net-alpha","logging_enabled":true},{"name":"default","network":"default","logging_enabled":false},{"name":"default","network":"default","logging_enabled":false}]},"summary":{"total_subnets":3,"subnets_with_flow_logs":1,"flow_log_percentage":33}}}'

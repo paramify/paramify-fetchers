@@ -1,0 +1,29 @@
+# Synthetic artifacts only.
+validator: gcp_customrole_escalation_categories_present
+cases:
+  - name: every_role_carries_its_classification
+    expect: PASS
+    note: >
+      The array is present with any content — empty on a clean role, populated on
+      an escalating one. This validator reads structure, not posture.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"custom_roles":[{"role_id":"evidenceReader","privilege_escalation_categories":[]},{"role_id":"escalator","privilege_escalation_categories":["set_iam_policy"]}]}}}'
+
+  - name: classification_key_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the integrity role exists for.
+      gcp_customrole_no_escalation_path_grants counts zero violations on this
+      artifact and reports PASS while a setIamPolicy role sits in it; this
+      validator fails because the key it proves is gone.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"custom_roles":[{"role_id":"escalator","escalation_categories":["set_iam_policy"]}]}}}'
+
+  - name: no_custom_roles_defined
+    expect: FAIL
+    note: >
+      The boundary, recorded on purpose. A project that defines no custom roles
+      has no per-role classifications, so this validator cannot tell that
+      population apart from an unreadable one and fails. That is the honest
+      answer for an evidence set whose subject is custom role definitions: with
+      none present it proves nothing about them, and a reviewer should see that
+      rather than a green check over an empty list.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"custom_roles":[]},"summary":{"total_custom_roles":0}}}'

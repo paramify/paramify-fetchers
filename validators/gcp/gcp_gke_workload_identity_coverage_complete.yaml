@@ -1,0 +1,36 @@
+key: gcp_gke_workload_identity_coverage_complete
+name: GKE Workload Identity Coverage Is Total
+type: AUTOMATED
+role: configuration
+statement: >
+  Every GKE cluster in the project has Workload Identity enabled, so pods
+  authenticate to Google APIs as their own federated identity rather than by
+  borrowing the node's service account credentials from the metadata server.
+  Does not assert that individual node pools run GKE_METADATA, that the
+  Kubernetes service accounts are actually bound to Google service accounts, or
+  that those bindings are least-privileged.
+
+# NORMAL POLARITY, read-a-value form (B1). The fetcher already rolls the
+# per-cluster flag up into a percentage, so this is self-guarding: the
+# MATCH_COUNT rule proves the rollup was present before the threshold rule reads
+# it, and no integrity partner is required. Drift fails in the safe direction —
+# if the upstream field disappears the fetcher records the cluster as not
+# enabled, the percentage drops, and this validator fails loudly.
+#
+# The threshold is EQUALS "100" rather than a comparison operator: the criteria
+# are not documented as numeric, and "50" > "100" holds as a string.
+#
+# No exit_code anchor — collection health is asserted once for the set by
+# validators/common/collection_succeeded.yaml, so group 1 is the percentage.
+regex: '"workload_identity_percentage":\s*(?<workload_identity_percentage>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+
+evidence_sets:
+  - EVD-GCP-GKE-CONFIG

@@ -1,0 +1,90 @@
+# Set-level: every validator naming EVD-GCP-PD-ENC, combined the way Paramify
+# combines them (ERROR > FAIL > PASS). This is where the integrity validators
+# earn their place — each violation counter passes its own drifted artifact, so
+# only the set can prove the drift is caught.
+#
+# All artifacts are synthetic. Real evidence carries live Cloud KMS key URIs
+# (which embed the project id) plus real disk and snapshot names, which is why
+# evidence/ is gitignored and none of it is reproduced here.
+evidence_set: EVD-GCP-PD-ENC
+cases:
+  - name: mostly_google_managed_with_one_cmek_disk
+    expect: PASS
+    note: >
+      The posture shape observed on the project these validators were authored
+      from, with synthetic names: five disks of which one is CMEK, one
+      Google-managed snapshot. Deliberate that this passes at 20% disk CMEK and
+      0% snapshot CMEK. GCP encrypts every persistent disk and snapshot at rest
+      unconditionally, so what varies is key custody, and Google-managed keys are
+      an acceptable choice. Nothing in this set asserts a CMEK share; what it
+      asserts is that both inventories were enumerated, every record carries a
+      determinate custody state, and the one CMEK claim names a resolvable key.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"disks":[{"cmek":true,"kms_key_name":"projects/example-project/locations/example-region/keyRings/example-ring/cryptoKeys/example-key/cryptoKeyVersions/1","name":"disk-alpha"},{"cmek":false,"kms_key_name":null,"name":"disk-beta"},{"cmek":false,"kms_key_name":null,"name":"disk-gamma"},{"cmek":false,"kms_key_name":null,"name":"disk-delta"},{"cmek":false,"kms_key_name":null,"name":"disk-epsilon"}],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]},"summary":{"cmek_disk_percentage":20,"cmek_disks":1,"cmek_snapshot_percentage":0,"cmek_snapshots":0,"google_managed_disks":4,"google_managed_snapshots":1,"total_disks":5,"total_snapshots":1}}}'
+
+  - name: entirely_google_managed_project
+    expect: PASS
+    note: >
+      0% CMEK across both populations and the set still passes. Stated plainly
+      because it is the boundary of what this evidence can honestly claim: a
+      tenant whose own policy mandates customer key custody must ADD a
+      `cmek_disk_percentage EQUALS 100` validator, which is deliberately not
+      shipped here — it would sit permanently red on every project running GKE,
+      Dataflow or instance templates left at the platform default.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"disks":[{"cmek":false,"kms_key_name":null,"name":"disk-alpha"},{"cmek":false,"kms_key_name":null,"name":"disk-beta"}],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]},"summary":{"cmek_disk_percentage":0,"cmek_disks":0,"cmek_snapshot_percentage":0,"cmek_snapshots":0,"google_managed_disks":2,"google_managed_snapshots":1,"total_disks":2,"total_snapshots":1}}}'
+
+  - name: cmek_claimed_without_naming_a_key
+    expect: FAIL
+    note: >
+      gcp_disk_cmek_claims_name_a_kms_key is the only failing validator. A disk
+      counted into cmek_disks whose key cannot be named is a custody claim no
+      assessor can follow to a key ring.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"disks":[{"cmek":true,"kms_key_name":null,"name":"disk-alpha"},{"cmek":false,"kms_key_name":null,"name":"disk-beta"}],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]},"summary":{"cmek_disk_percentage":50,"cmek_disks":1,"cmek_snapshot_percentage":0,"cmek_snapshots":0,"google_managed_disks":1,"google_managed_snapshots":1,"total_disks":2,"total_snapshots":1}}}'
+
+  - name: default_key_snapshot_carrying_a_kms_key
+    expect: FAIL
+    note: >
+      gcp_disk_google_managed_records_carry_no_key is the only failing validator.
+      The custody boolean and the key field contradict each other, so the
+      cmek_snapshots rollup that counts the boolean is wrong.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"disks":[{"cmek":false,"kms_key_name":null,"name":"disk-alpha"}],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":"projects/example-project/locations/example-region/keyRings/example-ring/cryptoKeys/example-key","name":"snap-alpha"}]},"summary":{"cmek_disk_percentage":0,"cmek_disks":0,"cmek_snapshot_percentage":0,"cmek_snapshots":0,"google_managed_disks":1,"google_managed_snapshots":1,"total_disks":1,"total_snapshots":1}}}'
+
+  - name: custody_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the integrity role exists for. A disk here claims customer key
+      custody and names no key, but both violation counters match nothing under
+      the renamed field and so ALONE report PASS.
+      gcp_disk_key_custody_flags_present fails because the key it proves is gone,
+      and the set therefore fails. Delete that integrity validator and this case
+      goes green while the evidence proves nothing — the silent false pass.
+      Everything else in the artifact is compliant, so it is the only failure.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"disks":[{"custody":"customer_managed","kms_key_name":null,"name":"disk-alpha"},{"custody":"google_managed","kms_key_name":null,"name":"disk-beta"}],"snapshots":[{"custody":"google_managed","disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]},"summary":{"cmek_disk_percentage":50,"cmek_disks":1,"cmek_snapshot_percentage":0,"cmek_snapshots":0,"google_managed_disks":1,"google_managed_snapshots":1,"total_disks":2,"total_snapshots":1}}}'
+
+  - name: key_name_field_renamed_upstream
+    expect: FAIL
+    note: >
+      Same class, other half of the pair. Both violation counters span cmek AND
+      kms_key_name, so drift in the key-name field silences them just as
+      effectively. gcp_disk_kms_key_name_field_present is the only failing
+      validator; the custody flags are intact and every other check is green.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"disks":[{"cmek":true,"kms_key":null,"name":"disk-alpha"},{"cmek":false,"kms_key":null,"name":"disk-beta"}],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key":null,"name":"snap-alpha"}]},"summary":{"cmek_disk_percentage":50,"cmek_disks":1,"cmek_snapshot_percentage":0,"cmek_snapshots":0,"google_managed_disks":1,"google_managed_snapshots":1,"total_disks":2,"total_snapshots":1}}}'
+
+  - name: snapshot_inventory_never_enumerated
+    expect: FAIL
+    note: >
+      The drift the per-record guards cannot see. The disk list still carries
+      both cmek and kms_key_name, so every other validator in the set passes
+      while snapshot key custody was never looked at — and the summary happily
+      reports 0 CMEK snapshots out of 0. gcp_disk_inventories_enumerated is the
+      only failing validator, and it is the reason it requires exactly two
+      matches rather than merely a non-zero count.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"disks":[{"cmek":true,"kms_key_name":"projects/example-project/locations/example-region/keyRings/example-ring/cryptoKeys/example-key","name":"disk-alpha"},{"cmek":false,"kms_key_name":null,"name":"disk-beta"}]},"summary":{"cmek_disk_percentage":50,"cmek_disks":1,"cmek_snapshot_percentage":0,"cmek_snapshots":0,"google_managed_disks":1,"google_managed_snapshots":0,"total_disks":2,"total_snapshots":0}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict, but the API discards disposition,
+      so FAIL is the best reachable answer today. What matters is that it does
+      not PASS. collection_succeeded catches the exit code; the integrity
+      validators independently catch the emptied payload.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"PermissionDenied on compute.disks.aggregatedList"},"payload":{"metadata":{"api_failures":[{"operation":"compute.disks.aggregatedList"}],"partial_failure":true},"results":{"disks":[],"snapshots":[]}}}'

@@ -1,0 +1,27 @@
+key: gcp_fw_sensitive_exposure_lists_present
+name: GCP Firewall Sensitive Service Exposure Lists Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  The per-rule sensitive-service exposure list is present in the evidence, so a
+  zero count of internet-exposed sensitive ports reflects posture rather than an
+  unreadable payload. Does NOT assert the lists are empty — that is
+  `gcp_fw_no_sensitive_port_open_to_internet`.
+
+# Integrity partner to `gcp_fw_no_sensitive_port_open_to_internet`. Anchors one
+# level up from the violation: that validator counts a NON-EMPTY exposure list,
+# this one proves the key exists at all, with any value.
+#
+# BOUNDARY: this key is emitted per rule AND once in payload.summary, so on a
+# project with zero firewall rules the summary alone satisfies it. Proving the
+# rule population itself is real is `gcp_fw_instance_targeting_flags_present`,
+# whose anchors are per-rule only; the evidence set needs both.
+regex: '"internet_exposed_sensitive_services":\s*\['
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-FW-RULES

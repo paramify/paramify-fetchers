@@ -1,0 +1,31 @@
+key: gcp_gke_legacy_abac_disabled
+name: GKE Legacy ABAC Disabled On Every Cluster
+type: AUTOMATED
+role: configuration
+statement: >
+  No GKE cluster in the project has legacy Attribute-Based Access Control
+  enabled, so Kubernetes authorization runs through RBAC alone. Does not assert
+  that the RBAC bindings themselves are least-privileged, nor anything about who
+  holds cluster-admin — only that the one documented path around RBAC is shut.
+
+# INVERTED POLARITY: zero is compliant. Legacy ABAC grants every node and every
+# authenticated user broad, unrevokable API access and is retired upstream; a
+# cluster with it enabled is the finding, not the baseline.
+#
+# Per-cluster assertion, so it cannot be done with MATCH_GROUP (which reads the
+# first match only) — it is inverted into a violation count. That means it CANNOT
+# guard itself: zero matches is its pass condition, so it cannot tell "no cluster
+# has ABAC" from "the legacy_abac_enabled key is gone".
+# `gcp_gke_legacy_abac_flag_recorded` is its mandatory integrity partner.
+#
+# No exit_code anchor — collection health is asserted once for the set by
+# validators/common/collection_succeeded.yaml.
+regex: '"legacy_abac_enabled":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-GKE-CONFIG

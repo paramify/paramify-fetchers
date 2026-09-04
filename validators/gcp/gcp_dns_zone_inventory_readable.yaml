@@ -1,0 +1,32 @@
+key: gcp_dns_zone_inventory_readable
+name: Cloud DNS Zone Inventory Was Readable
+type: AUTOMATED
+role: integrity
+statement: >
+  The Cloud DNS API answered, so the zone inventory in this evidence is the real
+  one and not an empty list standing in for an unreadable project. Does not
+  assert that the project has any managed zone, nor anything about posture.
+
+# NOT redundant with `collection_succeeded`, and this is the whole point of it.
+# The fetcher deliberately TOLERATES dns.googleapis.com being disabled: it
+# reports `summary.dns_api_readable: false` and exits 0 rather than failing the
+# run. The envelope is therefore intact and exit_code is 0 in exactly the case
+# where nothing was collected — and with an empty zone list every violation
+# counter on this set reads zero, i.e. compliant. This validator is what makes
+# "uncountable" stop reading as "zero".
+#
+# Written as a value read rather than a bare presence-of-true count so the two
+# failures stay distinguishable: rule 1 failing means the field is gone, rule 2
+# failing means the API was genuinely unreadable.
+regex: '"dns_api_readable":\s*(?<dns_api_readable>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-GCP-DNS

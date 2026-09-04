@@ -1,0 +1,67 @@
+validator: gcp_sqlnet_no_instance_open_to_internet
+cases:
+  - name: public_ip_with_no_authorized_networks
+    expect: PASS
+    note: >
+      The distinction this validator is built around, and the posture shape
+      observed on the project it was authored from (synthetic values). The
+      instance has a public IP and still passes, because Cloud SQL admits a
+      connection only from an authorized network and there are none. Asserting
+      "no public IP" instead would fail this legitimate architecture.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"private_ip_only":false,"authorized_networks":[],"authorized_network_count":0,"open_to_internet":false,"ssl_required":true}]},"summary":{"total_instances":1,"public_ip_instances":1,"private_ip_only_percentage":0,"instances_with_authorized_networks":0,"instances_open_to_internet":0}}}'
+
+  - name: restricted_authorized_network
+    expect: PASS
+    note: >
+      An authorized network exists but it is a narrow documentation-range CIDR,
+      not the world. This validator judges openness, not the presence of
+      allow-listing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[{"name":"office","value":"203.0.113.0/24","expiration_time":null,"open_to_internet":false}],"authorized_network_count":1,"open_to_internet":false,"ssl_required":true}]},"summary":{"total_instances":1,"public_ip_instances":1,"instances_with_authorized_networks":1,"instances_open_to_internet":0}}}'
+
+  - name: instance_whitelists_the_world
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[{"name":"anywhere","value":"0.0.0.0/0","expiration_time":null,"open_to_internet":true}],"authorized_network_count":1,"open_to_internet":true,"open_authorized_networks":["0.0.0.0/0"],"ssl_required":true}]},"summary":{"total_instances":1,"public_ip_instances":1,"instances_with_authorized_networks":1,"instances_open_to_internet":1}}}'
+
+  - name: instance_whitelists_the_world_over_ipv6
+    expect: FAIL
+    note: the other CIDR the fetcher treats as open, so the pattern must carry both.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[{"name":"anywhere-v6","value":"::/0","expiration_time":null,"open_to_internet":true}],"authorized_network_count":1,"open_to_internet":true,"open_authorized_networks":["::/0"],"ssl_required":true}]},"summary":{"total_instances":1,"instances_open_to_internet":1}}}'
+
+  - name: benign_public_ip_instance_beside_a_restricted_one
+    expect: PASS
+    note: >
+      The object-bridging case. Instance alpha carries the public-IP flag;
+      instance beta, immediately after it, carries an authorized network. Both
+      are benign. A pattern spanning those two keys — reaching from
+      "public_ip": true to the next "authorized_networks": [{ — matches here and
+      invents an exposure that neither instance has (measured in Node: one false
+      match on exactly this artifact). Fencing with [^}]*? is not an option
+      either, because instance records nest objects. Single-key branches are
+      why this reads PASS.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"authorized_network_count":0,"open_to_internet":false,"ssl_required":true},{"name":"sql-beta","engine":"POSTGRES","public_ip":false,"private_ip_only":true,"authorized_networks":[{"name":"vpn","value":"198.51.100.0/24","expiration_time":null,"open_to_internet":false}],"authorized_network_count":1,"open_to_internet":false,"ssl_required":true}]},"summary":{"total_instances":2,"public_ip_instances":1,"instances_with_authorized_networks":1,"instances_open_to_internet":0}}}'
+
+  - name: exposed_instance_beside_a_benign_one
+    expect: FAIL
+    note: >
+      The converse of the bridging case: a compliant neighbour must not mask a
+      real finding. Instance alpha is benign, beta whitelists the world.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"authorized_network_count":0,"open_to_internet":false,"ssl_required":true},{"name":"sql-beta","engine":"POSTGRES","public_ip":true,"authorized_networks":[{"name":"anywhere","value":"0.0.0.0/0","expiration_time":null,"open_to_internet":true}],"authorized_network_count":1,"open_to_internet":true,"open_authorized_networks":["0.0.0.0/0"],"ssl_required":true}]},"summary":{"total_instances":2,"public_ip_instances":2,"instances_with_authorized_networks":1,"instances_open_to_internet":1}}}'
+
+  - name: derived_flag_renamed_but_raw_cidr_still_open
+    expect: FAIL
+    note: >
+      What the second branch of the alternation buys. The fetcher's derived
+      open_to_internet flag has been renamed away, so branch one matches
+      nothing; the raw 0.0.0.0/0 the API returned still counts. Defence in
+      depth, not redundancy.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[{"name":"anywhere","value":"0.0.0.0/0","expiration_time":null,"internet_reachable":true}],"authorized_network_count":1,"internet_reachable":true,"ssl_required":true}]},"summary":{"total_instances":1,"instances_open_to_internet":0}}}'
+
+  - name: exposure_flag_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3, expecting PASS for the reason every violation counter does:
+      no key, no matches, no violations. Here BOTH branches are blinded — the
+      derived flag is renamed and the network list is empty, so there is no raw
+      CIDR to fall back on. gcp_sqlnet_internet_exposure_flags_present is what
+      fails, and only the set-level case can show it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"authorized_network_count":0,"internet_reachable":false,"ssl_required":true}]},"summary":{"total_instances":1,"instances_open_to_internet":0}}}'

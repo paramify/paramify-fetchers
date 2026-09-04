@@ -1,0 +1,32 @@
+validator: gcp_lbtls_no_weak_ssl_policy_minimums
+cases:
+  - name: every_policy_at_or_above_tls_1_2
+    expect: PASS
+    note: >
+      The proxy records carry `effective_min_tls_version`, which shares a suffix
+      with the key this validator counts. The leading quote in the anchor is what
+      keeps them apart; if it is ever dropped this case goes red.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_2"}],"ssl_policies":[{"name":"policy-strict","min_tls_version":"TLS_1_2","profile":"MODERN","permissive_profile":false},{"name":"policy-strictest","min_tls_version":"TLS_1_3","profile":"RESTRICTED","permissive_profile":false}]},"summary":{"tls_floor":"TLS_1_2","default_min_tls_version_when_no_policy":"TLS_1_0","ssl_policy_min_tls_versions":["TLS_1_2","TLS_1_3"],"total_ssl_policies":2,"weak_ssl_policies":0,"permissive_profile_ssl_policies":0}}}'
+
+  - name: weak_policy_defined_but_attached_to_nothing
+    expect: FAIL
+    note: >
+      The case the per-proxy check cannot see, and the shape of the live evidence
+      these were authored from. Every front end is on the strict policy, so
+      gcp_lbtls_no_proxy_below_tls_floor passes — but a TLS 1.0 policy is sitting
+      in the project waiting to be attached.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_2"}],"ssl_policies":[{"name":"policy-strict","min_tls_version":"TLS_1_2","profile":"MODERN","permissive_profile":false},{"name":"policy-legacy","min_tls_version":"TLS_1_0","profile":"COMPATIBLE","permissive_profile":true}]},"summary":{"tls_floor":"TLS_1_2","default_min_tls_version_when_no_policy":"TLS_1_0","ssl_policy_min_tls_versions":["TLS_1_0","TLS_1_2"],"total_ssl_policies":2,"weak_ssl_policies":1,"permissive_profile_ssl_policies":1}}}'
+
+  - name: policy_minimum_missing_from_the_api_response
+    expect: FAIL
+    note: null reads as below the floor, matching the fetcher's own tls_at_least().
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_2"}],"ssl_policies":[{"name":"policy-unknown","min_tls_version":null,"profile":"MODERN","permissive_profile":false}]},"summary":{"tls_floor":"TLS_1_2","default_min_tls_version_when_no_policy":"TLS_1_0","total_ssl_policies":1,"permissive_profile_ssl_policies":0}}}'
+
+  - name: policy_minimum_key_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. Zero matches is this validator's pass condition, so a renamed
+      `min_tls_version` hides a TLS 1.0 policy behind a green check. Its partner
+      gcp_lbtls_ssl_policy_minimum_version_present is what fails; see the
+      set-level case in set_EVD-GCP-LB-TLS.yaml.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_2"}],"ssl_policies":[{"name":"policy-legacy","minimum_tls_version":"TLS_1_0","profile":"COMPATIBLE","permissive_profile":true}]},"summary":{"tls_floor":"TLS_1_2","default_min_tls_version_when_no_policy":"TLS_1_0","total_ssl_policies":1,"permissive_profile_ssl_policies":1}}}'

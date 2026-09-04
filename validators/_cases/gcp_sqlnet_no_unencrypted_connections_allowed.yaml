@@ -1,0 +1,29 @@
+validator: gcp_sqlnet_no_unencrypted_connections_allowed
+cases:
+  - name: every_instance_requires_ssl
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"open_to_internet":false,"ssl_required":true},{"name":"sql-beta","engine":"POSTGRES","public_ip":false,"authorized_networks":[],"open_to_internet":false,"ssl_required":true}]},"summary":{"total_instances":2,"ssl_required_instances":2,"ssl_required_percentage":100}}}'
+
+  - name: one_instance_accepts_unencrypted
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"open_to_internet":false,"ssl_required":true},{"name":"sql-beta","engine":"POSTGRES","public_ip":false,"authorized_networks":[],"open_to_internet":false,"ssl_required":false}]},"summary":{"total_instances":2,"ssl_required_instances":1,"ssl_required_percentage":50}}}'
+
+  - name: summary_rollup_disagrees_with_the_instance_records
+    expect: FAIL
+    note: >
+      Why this validator exists alongside the rollup one. The summary claims 100
+      percent, but an instance record says otherwise; reading the per-instance
+      fact catches it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"open_to_internet":false,"ssl_required":false}]},"summary":{"total_instances":1,"ssl_required_instances":1,"ssl_required_percentage":100}}}'
+
+  - name: ssl_flag_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3, expecting PASS — and that is the point. A violation counter
+      cannot cover its own drift: no key, no matches, no violations. The
+      assertion that matters lives in
+      validators/_cases/set_EVD-GCP-CLOUDSQL-NET.yaml, where
+      gcp_sqlnet_ssl_enforcement_flags_present fails on this same artifact and
+      takes the set down with it. Note the instance hidden here genuinely
+      accepts unencrypted connections.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"open_to_internet":false,"tls_required":false}]},"summary":{"total_instances":1,"ssl_required_instances":1,"ssl_required_percentage":100}}}'

@@ -1,0 +1,38 @@
+validator: gcp_logging_buckets_retain_at_least_30_days
+cases:
+  - name: every_bucket_at_or_above_the_floor
+    expect: PASS
+    note: 30 is exactly the floor and must not count as a violation; 400 must not match on its leading digits.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_buckets":[{"locked":false,"name":"bucket-alpha","retention_days":30},{"locked":true,"name":"bucket-beta","retention_days":400}]},"summary":{"longest_retention_days":400,"shortest_retention_days":30,"total_log_buckets":2}}}'
+
+  - name: one_bucket_below_the_floor
+    expect: FAIL
+    note: a seven-day bucket is one short-retention bucket, and one is enough.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_buckets":[{"locked":false,"name":"bucket-alpha","retention_days":7},{"locked":true,"name":"bucket-beta","retention_days":400}]},"summary":{"longest_retention_days":400,"shortest_retention_days":7,"total_log_buckets":2}}}'
+
+  - name: boundary_bucket_at_29_days
+    expect: FAIL
+    note: >
+      The off-by-one the threshold-in-the-regex rule exists for. 29 must match
+      and 30 must not; a criteria-side GREATER_THAN_OR_EQUAL_TO would have
+      compared strings, where "8" >= "14" is true.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_buckets":[{"locked":false,"name":"bucket-alpha","retention_days":29}]},"summary":{"longest_retention_days":29,"shortest_retention_days":29,"total_log_buckets":1}}}'
+
+  - name: summary_rollups_do_not_leak_into_the_count
+    expect: PASS
+    note: >
+      `shortest_retention_days` and `longest_retention_days` both end in
+      `retention_days`. Here both rollups are below the floor while every bucket
+      is at or above it, so a pattern missing the leading quote would report a
+      violation. The leading quote keeps them out.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_buckets":[{"locked":false,"name":"bucket-alpha","retention_days":90}]},"summary":{"longest_retention_days":5,"shortest_retention_days":5,"total_log_buckets":1}}}'
+
+  - name: retention_key_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3, and it deliberately expects PASS. A violation-counting
+      validator cannot cover its own drift: the renamed key yields zero matches,
+      which is its pass condition, so an artifact hiding a one-day bucket reads
+      as compliant HERE. gcp_logging_bucket_retention_days_present is what
+      catches it; see set_EVD-GCP-LOGGING-CONFIG.yaml.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_buckets":[{"locked":false,"name":"bucket-alpha","retention_period_days":1}]},"summary":{"longest_retention_days":1,"shortest_retention_days":1,"total_log_buckets":1}}}'

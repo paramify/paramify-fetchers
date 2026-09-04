@@ -1,0 +1,33 @@
+key: gcp_logging_metric_alarm_pair_present
+name: Log-Based Metric Is Paired With An Alerting Policy
+type: AUTOMATED
+role: configuration
+statement: >
+  At least one log-based metric in the project has an alerting policy attached
+  to it — the GCP shape of a metric filter with an alarm. Does NOT assert that
+  EVERY log-based metric is alerted (dashboard- and SLO-only metrics are a
+  legitimate reason for a metric to carry no alarm), which log events the
+  metric's filter selects, or that the attached policy is enabled — that last
+  one is `gcp_logging_all_alert_policies_enabled`.
+
+# Form A (reads a value), so it guards itself. No exit_code anchor — collection
+# health is asserted once for the set by `collection_succeeded`.
+#
+# THE THRESHOLD LIVES IN THE REGEX, NOT IN THE CRITERIA. `[1-9]\d*` matches only
+# a non-zero count, so the single MATCH_COUNT rule IS the assertion: zero
+# alerted metrics, a renamed rollup and an absent summary all yield zero matches
+# and all fail. Comparison operators are not documented as numeric, so
+# GREATER_THAN "0" would have been a string comparison.
+#
+# Note the leading quote in `"alerted_log_metrics"` — without it the pattern
+# would also need to dodge the per-metric `alerted` flag.
+regex: '"alerted_log_metrics":\s*(?<alerted_log_metrics>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0 (the >= 1 threshold is encoded in the regex)
+validation_rules:
+  # The rollup was present AND reported a non-zero count of alerted metrics.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-LOGGING-CONFIG

@@ -1,0 +1,33 @@
+key: gcp_sqlnet_internet_exposure_flags_present
+name: Cloud SQL Internet Exposure Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-instance internet exposure flags are present in the evidence, so a zero
+  count of instances whitelisting 0.0.0.0/0 reflects posture rather than an
+  unreadable payload. Does NOT assert what those flags say.
+
+# Integrity partner to `gcp_sqlnet_no_instance_open_to_internet`. That validator
+# counts `"open_to_internet": true`; this one proves the `open_to_internet` key
+# exists at all and still carries a boolean.
+#
+# The anchor is the per-instance flag, not the authorized_networks array, and
+# that is deliberate: the array is empty on a well-configured project, so a
+# per-entry anchor would be unprovable exactly when the posture is good. The
+# per-instance flag is emitted for every instance regardless.
+#
+# The summary key `instances_open_to_internet` cannot satisfy this pattern — the
+# `"` before `open_to_internet` is mandatory and that key has `_` there — so a
+# payload that lost its per-instance records cannot be rescued by the rollup.
+#
+# It also fails on a project reporting zero Cloud SQL instances, including one
+# where the Cloud SQL Admin API is disabled (`cloud_sql_api_readable: false`).
+regex: '"open_to_internet":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-NET

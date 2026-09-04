@@ -1,0 +1,27 @@
+key: gcp_customrole_escalation_categories_present
+name: GCP Custom Role Escalation Classifications Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Custom role definitions in the evidence carry their per-role escalation
+  classification, so a zero count of escalating roles reflects what the roles
+  actually grant rather than an unreadable payload. Does NOT assert what any
+  classification contains, nor that the roles listed are every role bindable in
+  the project. It also requires at least one custom role to be present: a
+  project that defines no custom roles at all fails this validator rather than
+  passing on an empty population, which is deliberate — this evidence set has
+  nothing to say about custom-role least privilege when there are none.
+
+# Integrity partner to `gcp_customrole_no_escalation_path_grants`. Anchors one
+# level up from the violation: that validator counts a firm escalation category
+# inside `privilege_escalation_categories`, this one proves the array itself is
+# there, empty or not.
+regex: '"privilege_escalation_categories":\s*\['
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-IAM-CUSTOM-ROLES

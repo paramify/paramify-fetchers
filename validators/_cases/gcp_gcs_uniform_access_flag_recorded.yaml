@@ -1,0 +1,25 @@
+validator: gcp_gcs_uniform_access_flag_recorded
+cases:
+  - name: flags_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","uniform_bucket_level_access":true},{"name":"bucket-beta","uniform_bucket_level_access":false}]},"summary":{"total_buckets":2,"uniform_access_buckets":1}}}'
+
+  - name: flag_renamed_upstream
+    expect: FAIL
+    note: the drift its partner cannot see - the key it counts is gone.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","ubla_enabled":true},{"name":"bucket-beta","ubla_enabled":false}]},"summary":{"total_buckets":2,"uniform_access_buckets":1}}}'
+
+  - name: flag_value_reshaped_to_string
+    expect: FAIL
+    note: >
+      Same class as a rename: a quoted "false" stops the violation regex
+      matching too, so the boolean token is part of what integrity proves.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","uniform_bucket_level_access":"true"},{"name":"bucket-beta","uniform_bucket_level_access":"false"}]},"summary":{"total_buckets":2,"uniform_access_buckets":1}}}'
+
+  - name: project_reports_no_buckets
+    expect: FAIL
+    note: >
+      Deliberate boundary. A project with zero buckets has no posture to read,
+      so the set reports FAIL rather than a vacuous green. Suppressing it would
+      make an emptied payload indistinguishable from a hardened project.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[]},"summary":{"total_buckets":0,"uniform_access_buckets":0}}}'

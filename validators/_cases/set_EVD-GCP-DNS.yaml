@@ -1,0 +1,108 @@
+# Set-level: every validator naming EVD-GCP-DNS, combined the way Paramify
+# combines them (ERROR > FAIL > PASS). This is where the integrity validators
+# earn their place — two of the three configuration validators count violations,
+# and a count-based validator cannot cover its own drift.
+#
+# Synthetic artifacts only. Invented zone and policy labels; no project id, DNS
+# name or name server here comes from a real tenant.
+evidence_set: EVD-GCP-DNS
+cases:
+  - name: public_zone_signed_private_zone_correctly_exempt
+    expect: PASS
+    note: >
+      The posture collected when these validators were authored, in miniature:
+      one signed public zone on RSASHA256 with NSEC3, one unsigned private zone.
+      The private zone is exempt by design — DNSSEC protects a public resolution
+      path and a private zone has none — and this case is the proof the set does
+      not punish it. Note also that zone query logging is OFF here and the set
+      still passes: that is deliberate, not an oversight. See the note at the
+      bottom of this file.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","visibility":"private","public":false,"dnssec_applicable":false,"dnssec_enabled":false,"dnssec_non_existence":null,"uses_weak_signing_algorithm":false,"logging_enabled":false},{"name":"zone-beta","visibility":"public","public":true,"dnssec_applicable":true,"dnssec_enabled":true,"dnssec_non_existence":"nsec3","uses_weak_signing_algorithm":false,"logging_enabled":false}],"dns_policies":[{"name":"policy-one","logging_enabled":true,"inbound_forwarding_enabled":false}]},"summary":{"dns_api_readable":true,"total_managed_zones":2,"public_zones":1,"private_zones":1,"dnssec_public_zone_percentage":100,"unsigned_public_zones":0,"zones_using_weak_signing_algorithm":0,"logging_enabled_zones":0,"logging_enabled_zone_percentage":0,"logging_enabled_policies":1}}}'
+
+  - name: a_public_zone_is_left_unsigned
+    expect: FAIL
+    note: >
+      Only gcp_dns_public_zones_dnssec_signed fails — algorithms and NSEC3 stay
+      clean, so the case cannot pass for the wrong reason.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","visibility":"private","public":false,"dnssec_applicable":false,"dnssec_enabled":false,"dnssec_non_existence":null,"uses_weak_signing_algorithm":false},{"name":"zone-beta","visibility":"public","public":true,"dnssec_applicable":true,"dnssec_enabled":true,"dnssec_non_existence":"nsec3","uses_weak_signing_algorithm":false},{"name":"zone-gamma","visibility":"public","public":true,"dnssec_applicable":true,"dnssec_enabled":false,"dnssec_non_existence":null,"uses_weak_signing_algorithm":false}]},"summary":{"dns_api_readable":true,"total_managed_zones":3,"public_zones":2,"private_zones":1,"dnssec_public_zone_percentage":50,"unsigned_public_zones":1,"zones_using_weak_signing_algorithm":0}}}'
+
+  - name: a_zone_signs_with_rsasha1
+    expect: FAIL
+    note: >
+      Every public zone is signed and NSEC3 is in use, so only
+      gcp_dns_no_weak_signing_algorithm_zones fails. Signed with a weak key is
+      not the same fact as unsigned, which is why the two assertions are separate
+      validators.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","visibility":"private","public":false,"dnssec_applicable":false,"dnssec_enabled":false,"dnssec_non_existence":null,"uses_weak_signing_algorithm":false},{"name":"zone-beta","visibility":"public","public":true,"dnssec_applicable":true,"dnssec_enabled":true,"dnssec_non_existence":"nsec3","uses_weak_signing_algorithm":true,"rsasha1_key_signing":true,"rsasha1_zone_signing":false}]},"summary":{"dns_api_readable":true,"total_managed_zones":2,"public_zones":1,"private_zones":1,"dnssec_public_zone_percentage":100,"unsigned_public_zones":0,"zones_using_weak_signing_algorithm":1}}}'
+
+  - name: a_zone_proves_non_existence_with_nsec
+    expect: FAIL
+    note: >
+      Signed, strong algorithms, and still a finding: plain NSEC lets the whole
+      zone be walked. Only gcp_dns_no_nsec_zone_enumeration fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","visibility":"private","public":false,"dnssec_applicable":false,"dnssec_enabled":false,"dnssec_non_existence":null,"uses_weak_signing_algorithm":false},{"name":"zone-beta","visibility":"public","public":true,"dnssec_applicable":true,"dnssec_enabled":true,"dnssec_non_existence":"nsec","uses_weak_signing_algorithm":false}]},"summary":{"dns_api_readable":true,"total_managed_zones":2,"public_zones":1,"private_zones":1,"dnssec_public_zone_percentage":100,"unsigned_public_zones":0,"zones_using_weak_signing_algorithm":0}}}'
+
+  - name: signing_strength_flags_renamed_upstream
+    expect: FAIL
+    note: >
+      uses_weak_signing_algorithm renamed while an RSASHA1 zone is still present,
+      and every rollup left reading compliant. Alone,
+      gcp_dns_no_weak_signing_algorithm_zones counts zero weak zones and reports
+      PASS on an artifact that hides one. gcp_dns_zone_signing_strength_flags_present
+      fails because the key it proves is gone, so the set fails. Delete that
+      validator and this case goes green while the evidence proves nothing —
+      the silent false pass the integrity role exists to prevent.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","visibility":"private","public":false,"dnssec_applicable":false,"dnssec_enabled":false,"dnssec_non_existence":null,"weak_signing":false},{"name":"zone-beta","visibility":"public","public":true,"dnssec_applicable":true,"dnssec_enabled":true,"dnssec_non_existence":"nsec3","weak_signing":true,"rsasha1_key_signing":true}]},"summary":{"dns_api_readable":true,"total_managed_zones":2,"public_zones":1,"private_zones":1,"dnssec_public_zone_percentage":100,"unsigned_public_zones":0}}}'
+
+  - name: non_existence_fields_renamed_upstream
+    expect: FAIL
+    note: >
+      dnssec_non_existence renamed while a plain-NSEC zone is still present, and
+      everything else reading compliant. gcp_dns_no_nsec_zone_enumeration counts
+      zero NSEC zones and would PASS alone;
+      gcp_dns_non_existence_proof_fields_present is what fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","visibility":"private","public":false,"dnssec_applicable":false,"dnssec_enabled":false,"nsec_mode":null,"uses_weak_signing_algorithm":false},{"name":"zone-beta","visibility":"public","public":true,"dnssec_applicable":true,"dnssec_enabled":true,"nsec_mode":"nsec","uses_weak_signing_algorithm":false}]},"summary":{"dns_api_readable":true,"total_managed_zones":2,"public_zones":1,"private_zones":1,"dnssec_public_zone_percentage":100,"unsigned_public_zones":0,"zones_using_weak_signing_algorithm":0}}}'
+
+  - name: dns_api_disabled_but_the_run_exited_zero
+    expect: FAIL
+    note: >
+      The other silent false pass on this set, and the reason
+      gcp_dns_zone_inventory_readable exists. The fetcher deliberately tolerates
+      dns.googleapis.com being disabled, so exit_code is 0 and
+      collection_succeeded passes — but the inventory is empty and every
+      violation counter reads zero, i.e. compliant. Three validators fail here;
+      gcp_dns_zone_inventory_readable is the one that names the cause, and it is
+      the only one that would still fail if the summary rollups were populated.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[],"dns_policies":[]},"summary":{"dns_api_readable":false,"total_managed_zones":0,"public_zones":0,"private_zones":0,"dnssec_public_zone_percentage":0,"unsigned_public_zones":0,"zones_using_weak_signing_algorithm":0}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict — compliance is unknown, not bad —
+      but the API discards disposition, so FAIL is the best reachable answer
+      today. What matters is that it does not PASS. collection_succeeded is what
+      catches this; none of the validators above anchor on exit_code.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"PermissionDenied"},"payload":{}}'
+
+# WHAT THIS SET DELIBERATELY DOES NOT ASSERT
+#
+# Zone-level query logging. summary.logging_enabled_zone_percentage was 0 in the
+# tenant these were authored against, and no validator here reads it. Cloud DNS
+# has two independent logging surfaces: per-zone cloudLoggingConfig, which logs
+# queries against a PUBLIC zone, and the DNS policy's enableLogging, which is
+# what CIS asks for on VPC networks and which WAS enabled. Per-zone query logging
+# is a detective/operational preference with real cost and no signing or
+# integrity meaning, and this evidence set exists for KSI-SVC-SIN. Asserting it
+# would fail a correctly configured project for a choice it is entitled to make.
+#
+# DNS policy logging is not asserted here either — it belongs to the logging
+# evidence set, and a project with correct DNSSEC and no DNS policy at all would
+# otherwise fail this set for the wrong reason.
+#
+# dnssec_transferring_zones. "transfer" is a legitimate transient state during a
+# registrar move or a KSK rollover, so requiring zero would fail a routine,
+# correct operation.
+#
+# DNSSEC key length. The evidence carries key_specs[].key_length, and Cloud DNS's
+# own default preset is a 2048-bit key-signing key with a 1024-bit zone-signing
+# key. Demanding 2048 everywhere would mark the platform default non-compliant.

@@ -1,0 +1,37 @@
+validator: gcp_sqlenc_cmek_coverage_complete
+cases:
+  - name: every_instance_customer_managed
+    expect: PASS
+    note: >
+      The posture shape observed on the project these validators were authored
+      from (synthetic names and values): every Cloud SQL instance bound to a
+      customer-managed key.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","cmek":true},{"name":"sql-beta","cmek":true}]},"summary":{"total_instances":2,"cmek_instances":2,"google_managed_instances":0,"cmek_percentage":100}}}'
+
+  - name: one_instance_on_google_default
+    expect: FAIL
+    note: >
+      Direction 2. Half the fleet is on the Google-managed key, so custody of
+      the data of record is not the customer's. This is the assertion most
+      likely to need tuning per tenant - see the judgment note in the validator.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","cmek":true},{"name":"sql-beta","cmek":false}]},"summary":{"total_instances":2,"cmek_instances":1,"google_managed_instances":1,"cmek_percentage":50}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3, the silent false pass this validator must not produce. The
+      envelope is intact and the fleet is genuinely fully CMEK, but the rollup
+      key has drifted, so there is nothing to read. The MATCH_COUNT presence
+      rule is what fails; without it the MATCH_GROUP comparison would compare
+      nothing to nothing and pass vacuously.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","cmek":true},{"name":"sql-beta","cmek":true}]},"summary":{"total_instances":2,"cmek_instances":2,"google_managed_instances":0,"cmek_pct":100}}}'
+
+  - name: project_reports_no_instances
+    expect: FAIL
+    note: >
+      Deliberate boundary. The fetcher computes coverage as 0 when the
+      population is empty, so a project with no Cloud SQL fails rather than
+      reporting a vacuous 100%. An empty population is not a demonstrated
+      posture, and suppressing this would make an emptied payload
+      indistinguishable from a fully CMEK-protected project.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[]},"summary":{"total_instances":0,"cmek_instances":0,"google_managed_instances":0,"cmek_percentage":0}}}'

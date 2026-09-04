@@ -1,0 +1,27 @@
+key: gcp_disk_kms_key_name_field_present
+name: Persistent Disk and Snapshot KMS Key Name Field Was Read
+type: AUTOMATED
+role: integrity
+statement: >
+  The per-record Cloud KMS key-name field is present in the persistent disk
+  evidence and still carries either a string or an explicit null, so a zero count
+  of unnamed CMEK claims reflects the collected posture rather than a field that
+  is no longer there. Does NOT assert that any key name is populated — a project
+  running entirely on Google-managed keys reports null for every record and
+  passes.
+
+# Second integrity partner to `gcp_disk_cmek_claims_name_a_kms_key` and
+# `gcp_disk_google_managed_records_carry_no_key`. Both violation regexes span two
+# keys, so both can be silenced by drift in EITHER of them;
+# `gcp_disk_key_custody_flags_present` covers `cmek`, this one covers
+# `kms_key_name`. A rename to `kms_key`, or a reshape from a scalar to a nested
+# object, stops the violation patterns matching and is caught only here.
+regex: '"kms_key_name":\s*(?:null|")'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-PD-ENC

@@ -1,0 +1,31 @@
+validator: gcp_logging_metric_alarm_pair_present
+cases:
+  - name: metric_with_an_alarm
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_metrics":[{"alerted":true,"disabled":false,"name":"metric-alpha"}]},"summary":{"alerted_log_metrics":1,"total_log_metrics":1}}}'
+
+  - name: metrics_defined_but_none_alerted
+    expect: FAIL
+    note: >
+      Log-based metrics exist and nothing fires on any of them. The regex refuses
+      to match a zero count, so the presence rule fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_metrics":[{"alerted":false,"disabled":false,"name":"metric-alpha"},{"alerted":false,"disabled":false,"name":"metric-beta"}]},"summary":{"alerted_log_metrics":0,"total_log_metrics":2}}}'
+
+  - name: no_log_metrics_at_all
+    expect: FAIL
+    note: the metric-filter-with-alarm pattern is simply not implemented.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_metrics":[]},"summary":{"alerted_log_metrics":0,"total_log_metrics":0}}}'
+
+  - name: partial_alerting_still_passes
+    expect: PASS
+    note: >
+      Deliberate. Two metrics, one alerted. This validator asserts the pattern is
+      in place, not that every metric carries an alarm — a dashboard- or SLO-only
+      log-based metric is a legitimate reason to have none, and requiring 100%
+      would false-fail it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_metrics":[{"alerted":true,"disabled":false,"name":"metric-alpha"},{"alerted":false,"disabled":false,"name":"metric-beta"}]},"summary":{"alerted_log_metrics":1,"total_log_metrics":2}}}'
+
+  - name: alerted_rollup_renamed_upstream
+    expect: FAIL
+    note: Direction 3 — the rollup key is gone, the regex stops matching, the presence rule fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_metrics":[{"alerted":true,"disabled":false,"name":"metric-alpha"}]},"summary":{"metrics_with_alerts":1,"total_log_metrics":1}}}'

@@ -1,0 +1,29 @@
+validator: gcp_sqlnet_ssl_enforcement_flags_present
+cases:
+  - name: per_instance_ssl_flags_present
+    expect: PASS
+    note: passes on either value — this validator asserts the key was read, not what it said.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","ssl_required":true},{"name":"sql-beta","engine":"POSTGRES","ssl_required":false}]},"summary":{"total_instances":2,"ssl_required_instances":1,"ssl_required_percentage":50}}}'
+
+  - name: ssl_flag_renamed_upstream
+    expect: FAIL
+    note: the drift its partner cannot see.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","tls_required":true}]},"summary":{"total_instances":1,"ssl_required_instances":1,"ssl_required_percentage":100}}}'
+
+  - name: ssl_flag_reshaped_into_an_object
+    expect: FAIL
+    note: >
+      The key survives but stops carrying a boolean, so the violation counter
+      would silently stop matching. Requiring true|false rather than any value
+      catches the reshape too.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","ssl_required":{"enforced":false,"mode":"ALLOW_UNENCRYPTED_AND_ENCRYPTED"}}]},"summary":{"total_instances":1,"ssl_required_percentage":100}}}'
+
+  - name: project_with_no_cloud_sql_instances
+    expect: FAIL
+    note: >
+      No instances means no per-instance flags to read, so there is no posture
+      to conclude anything from — including when the Cloud SQL Admin API was
+      disabled and the fetcher recorded cloud_sql_api_readable false. The
+      summary keys `ssl_required_instances` and `ssl_required_percentage` do not
+      rescue it: the closing quote in the pattern keeps them out.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[]},"summary":{"cloud_sql_api_readable":false,"total_instances":0,"ssl_required_instances":0,"ssl_required_percentage":0}}}'

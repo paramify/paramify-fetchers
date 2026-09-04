@@ -1,0 +1,32 @@
+key: gcp_disk_inventories_enumerated
+name: Persistent Disk and Snapshot Inventories Were Both Enumerated
+type: AUTOMATED
+role: integrity
+statement: >
+  Both populations this evidence set covers — Compute Engine persistent disks and
+  their snapshots — are present in the payload as enumerated lists, so a clean
+  verdict cannot come from a run where one of the two was never listed. Does NOT
+  assert that either list is non-empty: a project with no snapshots reports an
+  empty array and passes, which is the honest reading.
+
+# The guard the record-level integrity validators cannot give. `cmek` and
+# `kms_key_name` flags from the disk list alone satisfy
+# `gcp_disk_key_custody_flags_present` and `gcp_disk_kms_key_name_field_present`,
+# so if the snapshot list were dropped or renamed upstream the whole set would
+# still go green while snapshot key custody had never been examined at all —
+# exactly the "uncountable read as zero" failure, one level above the per-record
+# keys. Requiring EXACTLY two matches is what makes it bite: NOT_EQUALS 0 would
+# be satisfied by the disk list on its own.
+#
+# `"total_disks"`, `"cmek_disks"` and the other summary keys do not match — the
+# pattern requires the quote immediately before the word and a `[` after the
+# colon, so only the two `results` lists qualify.
+regex: '"(?<inventory>disks|snapshots)":\s*\['
+rules_summary: MATCH_COUNT EQUALS 2
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "2" }
+
+evidence_sets:
+  - EVD-GCP-PD-ENC

@@ -1,0 +1,62 @@
+# All artifacts are synthetic: invented project, key ring, disk and snapshot
+# names. Real evidence carries live KMS key URIs (which embed the project id)
+# and real resource names, which is why evidence/ is gitignored.
+validator: gcp_disk_cmek_claims_name_a_kms_key
+cases:
+  - name: cmek_disk_names_its_key
+    expect: PASS
+    note: >
+      The shape of the project these were authored from: one CMEK disk alongside
+      Google-managed ones. Passing at 20% CMEK is deliberate — see the validator
+      file for why no coverage bar is asserted.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":true,"kms_key_name":"projects/example-project/locations/example-region/keyRings/example-ring/cryptoKeys/example-key/cryptoKeyVersions/1","name":"disk-alpha"},{"cmek":false,"kms_key_name":null,"name":"disk-beta"}],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]}}}'
+
+  - name: all_google_managed
+    expect: PASS
+    note: >
+      A project entirely on the default Google-managed key makes no CMEK claim,
+      so there is nothing to trace and the validator passes. This is the case a
+      `cmek_disk_percentage EQUALS 100` validator would sit permanently red on.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":false,"kms_key_name":null,"name":"disk-alpha"},{"cmek":false,"kms_key_name":null,"name":"disk-beta"}],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]}}}'
+
+  - name: cmek_claimed_with_no_key_name
+    expect: FAIL
+    note: A disk asserting customer key custody that names no key is an untraceable claim.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":true,"kms_key_name":null,"name":"disk-alpha"},{"cmek":false,"kms_key_name":null,"name":"disk-beta"}],"snapshots":[]}}}'
+
+  - name: cmek_key_name_not_a_kms_resource_path
+    expect: FAIL
+    note: >
+      A bare key label instead of a projects/.../cryptoKeys/... resource path.
+      An assessor cannot resolve it to a key ring, so the custody claim is not
+      verifiable.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":true,"kms_key_name":"example-key","name":"disk-alpha"}],"snapshots":[]}}}'
+
+  - name: snapshot_cmek_claimed_with_no_key_name
+    expect: FAIL
+    note: >
+      Snapshot records interleave disk_size_gb between cmek and kms_key_name, so
+      this proves the [^}]*? fence spans the intervening key and covers snapshots
+      as well as disks.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[],"snapshots":[{"cmek":true,"disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]}}}'
+
+  - name: compliant_record_next_to_a_default_one_does_not_splice
+    expect: PASS
+    note: >
+      A CMEK disk with a valid key immediately followed by a Google-managed disk
+      whose kms_key_name is null. There is no per-object scoping in the engine,
+      so this pins that the [^}]*? fence stops at the record boundary rather than
+      pairing the first record's cmek with the second record's null.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":true,"kms_key_name":"projects/example-project/locations/example-region/keyRings/example-ring/cryptoKeys/example-key"},{"cmek":false,"kms_key_name":null}],"snapshots":[]}}}'
+
+  - name: custody_flag_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate, and the reason the integrity role exists. Counting violations
+      cannot distinguish "no contradictions" from "the key I count is gone" —
+      zero matches is this validator's pass condition. Here a disk claims custody
+      with no key and the validator still reports PASS. Its partners
+      gcp_disk_key_custody_flags_present and gcp_disk_kms_key_name_field_present
+      are what fail; see set_EVD-GCP-PD-ENC.yaml, which is the assertion that
+      actually matters.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"custody":"customer_managed","kms_key":null,"name":"disk-alpha"}],"snapshots":[]}}}'

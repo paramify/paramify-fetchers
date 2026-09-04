@@ -1,0 +1,23 @@
+# Synthetic artifacts only — invented cluster names, no project or tenant data.
+validator: gcp_gke_shielded_nodes_enabled
+cases:
+  - name: shielded_nodes_on_every_cluster
+    expect: PASS
+    note: the posture collected from the live project these validators were authored against.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"clusters":[{"name":"cluster-alpha","shielded_nodes_enabled":true},{"name":"cluster-beta","shielded_nodes_enabled":true}]}}}'
+
+  - name: one_cluster_has_shielded_nodes_off
+    expect: FAIL
+    note: >
+      The failure direction, with the non-compliant cluster placed second so the
+      case would go green if this were ever rewritten as a first-match read.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"clusters":[{"name":"cluster-alpha","shielded_nodes_enabled":true},{"name":"cluster-beta","shielded_nodes_enabled":false}]}}}'
+
+  - name: shielded_flag_renamed_upstream
+    expect: PASS
+    note: >
+      Same limit as every violation count: a renamed key reads as zero
+      violations. gcp_gke_shielded_nodes_flag_recorded is what covers it, and
+      set_EVD-GCP-GKE-CONFIG.yaml case shielded_nodes_flags_renamed_upstream is
+      where that coverage is proven.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"clusters":[{"name":"cluster-alpha","shielded_node_vms":true},{"name":"cluster-beta","shielded_node_vms":false}]}}}'

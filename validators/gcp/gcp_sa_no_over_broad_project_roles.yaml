@@ -1,0 +1,28 @@
+key: gcp_sa_no_over_broad_project_roles
+name: No Over-Broad GCP Project Role Bindings
+type: AUTOMATED
+role: configuration
+statement: >
+  No project-level role binding in the evidence is flagged over-broad — no
+  service account holds a primitive or administrative project role such as
+  roles/owner or roles/editor. Does not assert least privilege within the
+  narrower roles that remain, and does not cover folder- or organization-level
+  bindings, which this fetcher does not collect.
+
+# INVERTED POLARITY: zero is compliant; each over-broad binding is a violation.
+#
+# Per-binding assertion across a list, so MATCH_GROUP cannot express it — it is
+# inverted into a violation count and therefore CANNOT guard itself.
+# `gcp_sa_role_breadth_flags_present` is its mandatory integrity partner.
+#
+# The leading quote in the anchor keeps this off the neighbouring keys
+# `has_over_broad_project_role` and `over_broad_project_roles`.
+regex: '"over_broad_role":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-IAM-SA

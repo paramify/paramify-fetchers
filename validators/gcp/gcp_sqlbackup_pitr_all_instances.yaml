@@ -1,0 +1,28 @@
+key: gcp_sqlbackup_pitr_all_instances
+name: Cloud SQL Point-In-Time Recovery Covers Every Instance
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Cloud SQL instance in the project has point-in-time recovery on — binary
+  logging on MySQL, the PITR toggle on PostgreSQL and SQL Server — so recovery is
+  not limited to the last scheduled backup (KSI-RPL-ABO). Does NOT assert how far
+  back the PITR window reaches; the transaction log retention period is a
+  customer RPO decision this set deliberately leaves unasserted. A project with
+  no Cloud SQL instances reports 0% and fails.
+
+# Reads a value, so it guards itself. The rollup is derived per engine by the
+# fetcher, which is why this anchors on the derived percentage rather than on
+# `binary_log_enabled` or `pitr_toggle_enabled` — either raw flag alone would be
+# a false failure on the other engine family.
+regex: '"point_in_time_recovery_percentage":\s*(?<point_in_time_recovery_percentage>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-BACKUP

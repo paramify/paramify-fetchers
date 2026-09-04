@@ -1,0 +1,29 @@
+key: gcp_apikey_no_unrestricted_keys
+name: No Unrestricted GCP API Keys
+type: AUTOMATED
+role: configuration
+statement: >
+  No API key is reported with neither restriction axis set. An unrestricted key
+  is a bearer credential that works against every enabled API in the project
+  from anywhere, so any key flagged that way — or any non-zero rollup of them —
+  fails. Does not assert how narrow a restriction is, only that one exists.
+
+# INVERTED POLARITY: zero is compliant; any match is an unrestricted key.
+#
+# The alternation reads the finding in two places — the per-key `unrestricted`
+# flag and the `unrestricted_keys` rollup — so a rename of either one alone
+# still leaves the violation visible. The threshold is encoded in the regex
+# ([1-9][0-9]*) rather than left to an undocumented numeric comparison.
+#
+# Violation-count form, so it cannot guard itself: zero matches is its pass
+# condition. `gcp_apikey_restriction_flags_present` is its mandatory integrity
+# partner.
+regex: '"unrestricted":\s*true|"unrestricted_keys":\s*[1-9][0-9]*'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-API-KEYS

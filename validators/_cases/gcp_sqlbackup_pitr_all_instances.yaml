@@ -1,0 +1,16 @@
+# Synthetic artifacts only.
+validator: gcp_sqlbackup_pitr_all_instances
+cases:
+  - name: pitr_on_every_instance
+    expect: PASS
+    note: the authored-against posture — PITR derived on, rollup at 100%.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","binary_log_enabled":true,"pitr_toggle_enabled":false,"point_in_time_recovery_enabled":true}]},"summary":{"total_instances":1,"point_in_time_recovery_instances":1,"point_in_time_recovery_percentage":100}}}'
+
+  - name: pitr_off_on_one_instance
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","point_in_time_recovery_enabled":true},{"name":"db-two","point_in_time_recovery_enabled":false}]},"summary":{"total_instances":2,"point_in_time_recovery_instances":1,"point_in_time_recovery_percentage":50}}}'
+
+  - name: pitr_rollup_renamed_upstream
+    expect: FAIL
+    note: Direction 3 — the derived rollup key is gone, so the presence rule fails.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","point_in_time_recovery_enabled":true}]},"summary":{"total_instances":1,"pitr_percentage":100}}}'

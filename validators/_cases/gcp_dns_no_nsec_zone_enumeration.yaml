@@ -1,0 +1,28 @@
+# Synthetic artifacts only — invented zone labels, nothing from a real tenant.
+validator: gcp_dns_no_nsec_zone_enumeration
+cases:
+  - name: signed_zone_uses_nsec3
+    expect: PASS
+    note: >
+      Also the "nsec3" near-miss test: the pattern's closing quote is what stops
+      it matching the compliant value. Drop that quote and this case goes red.
+      The unsigned private zone reports null and can never match.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","public":false,"dnssec_enabled":false,"dnssec_non_existence":null},{"name":"zone-beta","public":true,"dnssec_enabled":true,"dnssec_non_existence":"nsec3"}]},"summary":{"dns_api_readable":true,"total_managed_zones":2}}}'
+
+  - name: signed_zone_uses_plain_nsec
+    expect: FAIL
+    note: >
+      NSEC chains name to name, so anyone who can query the zone can walk it and
+      enumerate every record. This is the finding.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","public":false,"dnssec_enabled":false,"dnssec_non_existence":null},{"name":"zone-beta","public":true,"dnssec_enabled":true,"dnssec_non_existence":"nsec"}]},"summary":{"dns_api_readable":true,"total_managed_zones":2}}}'
+
+  - name: non_existence_field_renamed_upstream
+    expect: PASS
+    note: >
+      A violation-counting validator CANNOT cover this direction on its own —
+      zero matches is its pass condition, so a renamed key reads as zero NSEC
+      zones while one is present. That is why
+      gcp_dns_non_existence_proof_fields_present is mandatory. The assertion that
+      matters lives in set_EVD-GCP-DNS.yaml, case
+      non_existence_fields_renamed_upstream, where the set correctly fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","public":false,"dnssec_enabled":false,"nsec_mode":null},{"name":"zone-beta","public":true,"dnssec_enabled":true,"nsec_mode":"nsec"}]},"summary":{"dns_api_readable":true,"total_managed_zones":2}}}'

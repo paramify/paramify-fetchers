@@ -1,0 +1,37 @@
+key: gcp_binding_no_public_project_access
+name: GCP Project IAM Policy Grants Nothing To The Public
+type: AUTOMATED
+role: configuration
+statement: >
+  The project IAM policy rollup reports zero bindings granting a role to
+  allUsers or allAuthenticatedUsers, so no role on this project is held by the
+  internet at large. This is the fetcher's own verdict over every binding it
+  collected. Does NOT assert anything about resource-level policies (a bucket,
+  a topic, a dataset can be public while the project policy is clean), nor
+  about folder- or organization-level bindings, which this fetcher does not
+  collect.
+
+# Reads a value, so it guards itself: the MATCH_COUNT rule proves the rollup was
+# present before the threshold rule reads it. No exit_code anchor — collection
+# health is asserted once for the set by `collection_succeeded`.
+#
+# `public_bindings` is summary-only; the leading quote keeps this off the
+# per-binding `publicly_granted` and `public_members` keys. Deliberately NOT
+# anchored on `public_members`, which is an EMPTY LIST on a clean project and so
+# matches nothing whether the project is clean or the key was renamed.
+#
+# This is the fetcher's DERIVED verdict. Its independent partner is
+# `gcp_binding_no_public_iam_principals`, which reads the raw member strings and
+# therefore still fires if the derivation itself is wrong.
+regex: '"public_bindings":\s*(?<public_bindings>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-IAM-BINDINGS

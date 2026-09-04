@@ -1,0 +1,28 @@
+# Cases for gcp_vm_no_ip_forwarding_enabled. Artifacts are synthetic.
+validator: gcp_vm_no_ip_forwarding_enabled
+cases:
+  - name: no_instance_forwards_packets
+    expect: PASS
+    note: >
+      Direction 1, and the posture observed on the project these validators
+      were authored from: no instance may forward packets it did not
+      originate. The GKE node passes without an exemption because VPC-native
+      clusters, Google's default, do not set canIpForward on nodes.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"can_ip_forward":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":true,"email":"node-pool@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-b","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"app-runtime@example.invalid","full_api_access":true,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"vm-app-c-runtime@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":100,"shielded_vm_percentage":100,"total_instances":3}}}'
+
+  - name: one_instance_forwards_packets
+    expect: FAIL
+    note: >
+      Direction 2. A single instance with IP forwarding enabled can route
+      around the VPC's subnet and firewall boundaries, and one is enough to
+      fail.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"can_ip_forward":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":true,"email":"node-pool@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":true,"gke_managed":false,"integrity_monitoring":true,"name":"vm-router-b","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"vm-router-b-runtime@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"vm-app-c-runtime@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":1,"os_login_percentage":100,"shielded_vm_percentage":100,"total_instances":3}}}'
+
+  - name: ip_forwarding_flag_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3, and it deliberately expects PASS. Zero matches is this
+      validator's pass condition, so a renamed canIpForward field reads as
+      zero violations here. gcp_vm_ip_forwarding_flags_present is what catches
+      it; see set_EVD-GCP-VM-CONFIG.yaml.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"ip_forwarding_allowed":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":true,"email":"node-pool@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"ip_forwarding_allowed":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-b","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"app-runtime@example.invalid","full_api_access":true,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"ip_forwarding_allowed":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"vm-app-c-runtime@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":100,"shielded_vm_percentage":100,"total_instances":3}}}'

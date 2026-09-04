@@ -1,0 +1,24 @@
+key: gcp_dns_non_existence_proof_fields_present
+name: Cloud DNS Non-Existence Proof Fields Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-zone proof-of-non-existence fields are present in the evidence, so a zero
+  count of NSEC zones reflects posture rather than an unreadable payload. Does
+  not assert what any field's value is. Correctly fails on a project with no
+  managed zones at all: there is then no population to read.
+
+# Integrity partner to `gcp_dns_no_nsec_zone_enumeration`. Anchors one level up
+# from the violation: that validator counts `"dnssec_non_existence": "nsec"`,
+# this one proves the key exists at all, with any value. The fetcher emits it for
+# every zone — null on an unsigned or private one — so it is a stable anchor even
+# in a project where nothing is signed.
+regex: '"dnssec_non_existence":\s*'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-DNS

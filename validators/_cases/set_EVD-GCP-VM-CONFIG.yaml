@@ -1,0 +1,86 @@
+# Set-level: every validator naming EVD-GCP-VM-CONFIG, combined the way Paramify
+# combines them (ERROR > FAIL > PASS). This is where the integrity validators earn
+# their place — each violation counter passes its own drifted artifact, so only
+# the set can prove the drift is caught.
+#
+# Every case here carries exit_code 0 so the verdict is decided by the Compute
+# Engine posture alone; collection health has its own case file
+# (validators/_cases/collection_succeeded.yaml) and is not re-proved here.
+#
+# Artifacts are synthetic throughout: invented instance names and service-account
+# emails on example.invalid. The real default service account's local part is the
+# project number and is deliberately never reproduced.
+evidence_set: EVD-GCP-VM-CONFIG
+cases:
+  - name: fully_hardened_project
+    expect: PASS
+    note: >
+      Three instances, one GKE-managed: all shielded, OS Login everywhere, no
+      IP forwarding, and no instance pairing the default service account with
+      the cloud-platform scope. Note what is deliberately NOT asserted and
+      still passes here — Secure Boot, Confidential Computing, external IP
+      addresses and deletion protection are all out of scope for this set.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"can_ip_forward":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":true,"email":"node-pool@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-b","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"app-runtime@example.invalid","full_api_access":true,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"vm-app-c-runtime@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":100,"shielded_vm_percentage":100,"total_instances":3}}}'
+
+  - name: observed_posture_shape
+    expect: FAIL
+    note: >
+      The posture shape collected from the project these validators were
+      authored against (synthetic names and values): OS Login off at the
+      project with one instance overriding it on, and one legacy instance
+      running the Compute Engine default account with the cloud-platform
+      scope. gcp_vm_os_login_enforced_on_all_instances and
+      gcp_vm_no_default_sa_with_full_api_access fail; Shielded VM and IP
+      forwarding pass. Two genuine findings, honestly reported.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"can_ip_forward":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":false,"service_accounts":[{"default_compute_service_account":true,"email":"node-pool@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-legacy-d","os_login_enabled":false,"service_accounts":[{"default_compute_service_account":true,"email":"legacy-default@example.invalid","full_api_access":true,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"vm-app-c-runtime@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":1,"ip_forwarding_instances":0,"os_login_percentage":33,"shielded_vm_percentage":100,"total_instances":3}}}'
+
+  - name: bridging_hardened_next_to_broad_scope
+    expect: PASS
+    note: >
+      The object-bridging case at set level: a GKE node on the default account
+      with narrow scopes sitting next to an instance on a dedicated account
+      with cloud-platform. Neither is a finding and the set stays green.
+      Unfence gcp_vm_no_default_sa_with_full_api_access and this case turns
+      red on a project with nothing wrong with it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"can_ip_forward":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":true,"email":"node-pool@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-b","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"app-runtime@example.invalid","full_api_access":true,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":100,"shielded_vm_percentage":100,"total_instances":2}}}'
+
+  - name: project_holds_no_instances
+    expect: PASS
+    note: >
+      A project with no Compute Engine instances is vacuously compliant. Every
+      validator in the set has to survive it, including both integrity
+      partners, whose per-instance anchors have nothing to match — which is
+      why each carries a total_instances branch.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":0,"shielded_vm_percentage":0,"total_instances":0}}}'
+
+  - name: service_account_flags_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the integrity role exists for. Both service-account flags are
+      renamed upstream. gcp_vm_no_default_sa_with_full_api_access counts zero
+      violations and reports PASS on an artifact that could be hiding a
+      default account with full API access;
+      gcp_vm_service_account_scope_flags_present fails because the structure
+      it proves is gone, and the set therefore fails. Every other posture
+      value in this artifact is compliant, so that integrity partner is the
+      only thing failing — delete it and this case goes green while the
+      evidence proves nothing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"can_ip_forward":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":true,"service_accounts":[{"is_default_sa":true,"email":"node-pool@example.invalid","has_cloud_platform_scope":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-b","os_login_enabled":true,"service_accounts":[{"is_default_sa":false,"email":"app-runtime@example.invalid","has_cloud_platform_scope":true,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"is_default_sa":false,"email":"vm-app-c-runtime@example.invalid","has_cloud_platform_scope":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":100,"shielded_vm_percentage":100,"total_instances":3}}}'
+
+  - name: service_account_record_key_order_reversed
+    expect: FAIL
+    note: >
+      Same class, different drift: the keys inside each service-account record
+      are reordered, which is enough to break a fenced two-key pattern. The
+      violation counter goes blind and passes; the integrity partner, which
+      depends on the same ordering, fails and carries the set. Nothing else in
+      the artifact is non-compliant.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"can_ip_forward":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":true,"service_accounts":[{"full_api_access":false,"email":"node-pool@example.invalid","default_compute_service_account":true,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-b","os_login_enabled":true,"service_accounts":[{"full_api_access":true,"email":"app-runtime@example.invalid","default_compute_service_account":false,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"full_api_access":false,"email":"vm-app-c-runtime@example.invalid","default_compute_service_account":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":100,"shielded_vm_percentage":100,"total_instances":3}}}'
+
+  - name: ip_forwarding_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      Same class, third key: gcp_vm_no_ip_forwarding_enabled counts zero and
+      passes, gcp_vm_ip_forwarding_flags_present is the only failing
+      validator.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"ip_forwarding_allowed":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":true,"email":"node-pool@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"ip_forwarding_allowed":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-b","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"app-runtime@example.invalid","full_api_access":true,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"ip_forwarding_allowed":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"vm-app-c-runtime@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":100,"shielded_vm_percentage":100,"total_instances":3}}}'

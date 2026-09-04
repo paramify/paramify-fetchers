@@ -1,0 +1,34 @@
+# Synthetic artifacts only — invented zone labels, no project ids, DNS names or
+# name servers from any real tenant.
+validator: gcp_dns_public_zones_dnssec_signed
+cases:
+  - name: every_public_zone_signed
+    expect: PASS
+    note: >
+      The posture collected when these validators were authored, in miniature:
+      one signed public zone alongside one unsigned private zone. The private
+      zone is NOT a violation and must not be counted as one.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","visibility":"private","public":false,"dnssec_applicable":false,"dnssec_enabled":false},{"name":"zone-beta","visibility":"public","public":true,"dnssec_applicable":true,"dnssec_enabled":true}]},"summary":{"dns_api_readable":true,"total_managed_zones":2,"public_zones":1,"private_zones":1,"dnssec_public_zone_percentage":100,"unsigned_public_zones":0}}}'
+
+  - name: private_zones_only
+    expect: PASS
+    note: >
+      The case that decides the anchor. A project running only private zones has
+      nothing DNSSEC could protect, so it is compliant — but with a zero
+      denominator the fetcher's coverage math reports
+      dnssec_public_zone_percentage: 0. A validator built on the percentage would
+      fail this project; the unsigned-count form reads 0 and correctly passes.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","visibility":"private","public":false,"dnssec_applicable":false,"dnssec_enabled":false}]},"summary":{"dns_api_readable":true,"total_managed_zones":1,"public_zones":0,"private_zones":1,"dnssec_public_zone_percentage":0,"unsigned_public_zones":0}}}'
+
+  - name: one_public_zone_unsigned
+    expect: FAIL
+    note: A public zone with DNSSEC off — the finding this validator exists for.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","visibility":"private","public":false,"dnssec_applicable":false,"dnssec_enabled":false},{"name":"zone-beta","visibility":"public","public":true,"dnssec_applicable":true,"dnssec_enabled":true},{"name":"zone-gamma","visibility":"public","public":true,"dnssec_applicable":true,"dnssec_enabled":false}]},"summary":{"dns_api_readable":true,"total_managed_zones":3,"public_zones":2,"private_zones":1,"dnssec_public_zone_percentage":50,"unsigned_public_zones":1}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Envelope intact, unsigned_public_zones renamed while an unsigned public
+      zone is present. Reading a value guards itself: MATCH_COUNT is 0, the
+      presence rule fails, and the validator does not report compliance.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-beta","visibility":"public","public":true,"dnssec_applicable":true,"dnssec_enabled":false}]},"summary":{"dns_api_readable":true,"total_managed_zones":1,"public_zones":1,"private_zones":0,"unsigned_public_zone_count":1}}}'

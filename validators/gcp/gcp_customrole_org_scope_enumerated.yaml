@@ -1,0 +1,44 @@
+key: gcp_customrole_org_scope_enumerated
+name: GCP Organization Custom Roles Were Enumerable
+type: AUTOMATED
+role: integrity
+statement: >
+  The organization's custom roles were readable when this evidence was
+  collected, so the escalation counts in this evidence set range over every
+  custom role bindable inside the project rather than the project-scoped ones
+  alone. Organization-scoped custom roles are bindable in a member project, so
+  when `iam.roles.list` is denied at the organization the collector reports
+  `organization_scoped_roles: 0` — a zero that means "not counted", not "none
+  exist". Without this validator, "no custom role grants setIamPolicy" would be
+  a statement about part of the population presented as the whole. Does NOT
+  assert that any organization-scoped custom role exists, nor anything about
+  what such a role grants; it asserts only that the scope was readable, so the
+  other validators' zeros can be trusted as posture.
+
+# Scope-level integrity partner for the whole set — the same failure the
+# per-key integrity validators exist to prevent ("uncountable must never read as
+# zero"), one level up: the population itself, not a field inside it.
+#
+# It is written to FAIL for a collector that holds project-scoped permissions
+# only, and that is the intended behaviour. The remediation is a decision, not a
+# code change: either grant the collecting identity `iam.roles.list` at the
+# organization (roles/iam.organizationRoleViewer), or accept that this evidence
+# set covers project-scoped custom roles and assess organization-scoped ones
+# separately. Failing loudly is what forces that decision to be made rather than
+# assumed.
+#
+# `(true|false)` rather than `\w+` so a renamed or restructured flag fails the
+# presence rule instead of capturing something that is not a boolean. This key
+# appears only in payload.summary, so the first match is the only match.
+regex: '"organization_roles_readable":\s*(?<organization_roles_readable>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-GCP-IAM-CUSTOM-ROLES

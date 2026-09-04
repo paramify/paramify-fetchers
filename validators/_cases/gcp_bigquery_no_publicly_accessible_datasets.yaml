@@ -1,0 +1,27 @@
+validator: gcp_bigquery_no_publicly_accessible_datasets
+cases:
+  - name: no_dataset_flagged_public
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[{"name":"analytics_curated","public_access_entries":[],"publicly_accessible":false},{"name":"analytics_raw","public_access_entries":[],"publicly_accessible":false}]},"summary":{"publicly_accessible_datasets":0,"total_datasets":2}}}'
+
+  - name: one_dataset_granted_to_all_users
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[{"name":"analytics_curated","public_access_entries":[],"publicly_accessible":false},{"name":"analytics_raw","public_access_entries":[{"principal":"allUsers","principal_type":"specialGroup","public":true,"role":"READER"}],"publicly_accessible":true}]},"summary":{"publicly_accessible_datasets":1,"total_datasets":2}}}'
+
+  - name: every_dataset_shared_publicly
+    expect: FAIL
+    note: >
+      Also pins that the summary rollup is not read as a per-dataset flag: the
+      key is matched with its closing quote, so `publicly_accessible_datasets`
+      never contributes to the violation count.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[{"name":"analytics_curated","publicly_accessible":true},{"name":"analytics_raw","publicly_accessible":true}]},"summary":{"publicly_accessible_datasets":2,"total_datasets":2}}}'
+
+  - name: public_flag_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3, expecting PASS for the reason every violation counter does: no
+      key, no matches, no violations. The artifact hides a dataset shared with
+      allUsers and this validator alone reports compliance — which is why
+      gcp_bigquery_public_access_flags_present is mandatory, and why the assertion
+      that matters lives in set_EVD-GCP-BIGQUERY-CONFIG.yaml.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[{"name":"analytics_curated","is_public":false},{"name":"analytics_raw","is_public":true}]},"summary":{"publicly_accessible_datasets":0,"total_datasets":2}}}'

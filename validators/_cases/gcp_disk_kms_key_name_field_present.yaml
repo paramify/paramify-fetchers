@@ -1,0 +1,28 @@
+# Synthetic artifacts only — invented project, key ring and resource names.
+validator: gcp_disk_kms_key_name_field_present
+cases:
+  - name: key_name_field_present
+    expect: PASS
+    note: Every record here is Google-managed, so every key name is null and it still passes.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":false,"kms_key_name":null,"name":"disk-alpha"}],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]}}}'
+
+  - name: key_name_field_renamed_upstream
+    expect: FAIL
+    note: >
+      Both violation counters span cmek AND kms_key_name, so drift in either half
+      silences them. gcp_disk_key_custody_flags_present covers the first half;
+      this case is why the second half needs its own guard.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":true,"kms_key":null,"name":"disk-alpha"}],"snapshots":[]}}}'
+
+  - name: key_name_field_reshaped_to_an_object
+    expect: FAIL
+    note: >
+      A nested {"path": ...} instead of a scalar. The key still exists, so
+      anchoring on the key name alone would pass while the violation regexes
+      quietly stopped matching.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":true,"kms_key_name":{"path":"projects/example-project/locations/example-region/keyRings/example-ring/cryptoKeys/example-key"},"name":"disk-alpha"}],"snapshots":[]}}}'
+
+  - name: empty_inventories
+    expect: FAIL
+    note: No records means no key-name field to read; an empty payload must not read as clean.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[],"snapshots":[]}}}'

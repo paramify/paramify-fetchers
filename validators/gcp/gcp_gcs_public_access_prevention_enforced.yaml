@@ -1,0 +1,25 @@
+key: gcp_gcs_public_access_prevention_enforced
+name: Cloud Storage Buckets All Enforce Public Access Prevention
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Cloud Storage bucket in the project sets public access prevention to
+  "enforced", so no bucket can be granted to allUsers or allAuthenticatedUsers.
+  A bucket reporting "inherited" counts as a violation: this evidence carries no
+  organization policy, so prevention inherited from a parent is unproven here.
+  Does NOT assert anything about the IAM bindings a bucket already has.
+
+# Counts violations, so it CANNOT guard itself. Mandatory integrity partner:
+# `gcp_gcs_public_access_prevention_recorded`. The pattern negates the compliant
+# value rather than listing "inherited", so a new enum value or a null still
+# counts as a violation. The lookahead sits before a MANDATORY value token, so
+# \s* cannot backtrack into a false match on "enforced" (verified in Node).
+regex: '"public_access_prevention":\s*(?!"enforced")(?<public_access_prevention>"[^"]*"|null)'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-STORAGE-ENC

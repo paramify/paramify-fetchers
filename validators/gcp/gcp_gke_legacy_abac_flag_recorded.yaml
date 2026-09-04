@@ -1,0 +1,22 @@
+key: gcp_gke_legacy_abac_flag_recorded
+name: GKE Legacy ABAC Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Each cluster in the evidence carries a legacy ABAC flag, so a zero count of
+  ABAC-enabled clusters reflects the collected posture rather than a payload the
+  regex could no longer read. Says nothing about the flag's value.
+
+# Integrity partner to `gcp_gke_legacy_abac_disabled`. That validator counts
+# '"legacy_abac_enabled": true' and passes on zero matches; this one proves the
+# key exists at all, so an upstream rename fails loudly instead of reading as
+# compliance. Anchors one level up from the violation: the key, any value.
+regex: '"legacy_abac_enabled":\s*'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-GKE-CONFIG

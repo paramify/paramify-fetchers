@@ -1,0 +1,29 @@
+validator: gcp_fw_no_rule_exposes_all_ports_to_internet
+cases:
+  - name: no_all_port_exposure
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-public-https","open_to_internet":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"rules_exposing_all_ports_to_internet":0,"total_rules":1}}}'
+
+  - name: rule_opens_every_port_to_the_world
+    expect: FAIL
+    note: the real posture shape - a protocol-wide allow reachable from 0.0.0.0/0.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"exposes_all_ports":true,"internet_exposed_sensitive_services":[],"name":"rule-allow-any","open_to_internet":true,"priority":65534}]},"summary":{"internet_exposed_sensitive_services":[],"rules_exposing_all_ports_to_internet":1,"total_rules":1}}}'
+
+  - name: internal_all_ports_rule_is_not_a_violation
+    expect: PASS
+    note: >
+      Proves the key boundary. The raw `allowed[].all_ports` sub-key is true
+      here - an internal rule allowing every port from a private range, which is
+      ordinary - while the derived per-rule flag is false. The leading quote in
+      the pattern is what keeps `"all_ports"` from being read as
+      `"exposes_all_ports"`.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"allowed":[{"all_ports":true,"ports":[],"protocol":"tcp"}],"applies_to_all_instances":true,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-internal","open_to_internet":false,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"rules_exposing_all_ports_to_internet":0,"total_rules":1}}}'
+
+  - name: all_port_flag_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3, which a violation counter cannot pass alone - zero matches is
+      its pass condition. Recorded honestly as PASS; the set-level case
+      `all_port_flag_renamed_upstream` is where the integrity partner
+      `gcp_fw_all_port_exposure_flags_present` fails and the set goes red.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"internet_exposed_sensitive_services":[],"name":"rule-allow-any","open_to_internet":true,"opens_every_port":true,"priority":65534}]},"summary":{"internet_exposed_sensitive_services":[],"rules_exposing_all_ports_to_internet":1,"total_rules":1}}}'

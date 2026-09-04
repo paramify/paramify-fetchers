@@ -1,0 +1,33 @@
+# Synthetic artifacts only.
+validator: gcp_apikey_no_unrestricted_keys
+cases:
+  - name: every_key_carries_a_restriction
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","unrestricted":false},{"display_name":"key-two","unrestricted":false}]},"summary":{"total_api_keys":2,"unrestricted_keys":0,"restricted_key_percentage":100}}}'
+
+  - name: project_holds_no_api_keys
+    expect: PASS
+    note: nothing to be unrestricted, so the violation count is legitimately zero
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[]},"summary":{"total_api_keys":0,"unrestricted_keys":0,"restricted_key_percentage":0}}}'
+
+  - name: a_key_has_neither_restriction_axis
+    expect: FAIL
+    note: the live posture in miniature — a bearer credential against every enabled API
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","unrestricted":true},{"display_name":"key-two","unrestricted":false}]},"summary":{"total_api_keys":2,"unrestricted_keys":1,"restricted_key_percentage":50}}}'
+
+  - name: only_the_per_key_flag_renamed
+    expect: FAIL
+    note: >
+      Why the regex reads the finding in two places. The per-key flag is gone but
+      the rollup still counts the offender, so the violation stays visible. It
+      takes a rename of BOTH to blind this validator — the next case.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","key_unrestricted":true},{"display_name":"key-two","key_unrestricted":false}]},"summary":{"total_api_keys":2,"unrestricted_keys":1,"restricted_key_percentage":50}}}'
+
+  - name: restriction_flags_renamed_upstream
+    expect: PASS
+    note: >
+      Cannot be covered here — zero matches is this validator's pass condition, so
+      a payload with both anchors renamed reads as zero unrestricted keys.
+      gcp_apikey_restriction_flags_present is what fails; see
+      set_EVD-GCP-API-KEYS.yaml, case restriction_flags_renamed_upstream.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","key_unrestricted":true},{"display_name":"key-two","key_unrestricted":false}]},"summary":{"total_api_keys":2,"count_unrestricted_keys":1,"restricted_key_percentage":100}}}'

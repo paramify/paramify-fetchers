@@ -1,0 +1,29 @@
+# Synthetic artifacts only.
+validator: gcp_sqlbackup_no_instance_without_automated_backups
+cases:
+  - name: no_instance_with_backups_off
+    expect: PASS
+    note: the authored-against posture.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","backup_enabled":true}]},"summary":{"total_instances":1,"backup_enabled_instances":1,"backup_enabled_percentage":100}}}'
+
+  - name: an_instance_has_backups_off
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","backup_enabled":true},{"name":"db-two","backup_enabled":false}]},"summary":{"total_instances":2,"backup_enabled_instances":1,"backup_enabled_percentage":50}}}'
+
+  - name: summary_counters_do_not_trigger_it
+    expect: PASS
+    note: >
+      `backup_enabled_instances` and `backup_enabled_percentage` sit next to the
+      anchor key. The closing quote before the colon is what keeps them out; if
+      the pattern were `"backup_enabled` this case would be the one to catch it.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","backup_enabled":true}]},"summary":{"total_instances":1,"backup_enabled_instances":0,"backup_enabled_percentage":0}}}'
+
+  - name: instance_backup_flags_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3 cannot be covered here — zero matches is this validator's pass
+      condition, so a renamed per-instance key reads as zero instances without
+      backups even though db-two has them off.
+      `gcp_sqlbackup_instance_backup_flags_present` is what fails; see
+      set_EVD-GCP-CLOUDSQL-BACKUP.yaml, case instance_backup_flags_renamed_upstream.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","backups_enabled":true},{"name":"db-two","backups_enabled":false}]},"summary":{"total_instances":2,"backup_enabled_instances":1,"backup_enabled_percentage":50}}}'

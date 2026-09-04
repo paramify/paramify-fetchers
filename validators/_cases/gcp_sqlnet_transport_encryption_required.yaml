@@ -1,0 +1,38 @@
+validator: gcp_sqlnet_transport_encryption_required
+cases:
+  - name: every_instance_requires_ssl
+    expect: PASS
+    note: the posture shape observed on the project these were authored from (synthetic values).
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"open_to_internet":false,"ssl_required":true}]},"summary":{"total_instances":1,"public_ip_instances":1,"instances_open_to_internet":0,"ssl_required_instances":1,"ssl_required_percentage":100}}}'
+
+  - name: half_the_instances_require_ssl
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"open_to_internet":false,"ssl_required":true},{"name":"sql-beta","engine":"POSTGRES","public_ip":false,"authorized_networks":[],"open_to_internet":false,"ssl_required":false}]},"summary":{"total_instances":2,"public_ip_instances":1,"instances_open_to_internet":0,"ssl_required_instances":1,"ssl_required_percentage":50}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. The summary key is renamed, the envelope is intact, and the
+      MATCH_COUNT presence rule is what fails — without it the MATCH_GROUP
+      comparison would read nothing, hold vacuously, and pass.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"open_to_internet":false,"ssl_required":true}]},"summary":{"total_instances":1,"public_ip_instances":1,"instances_open_to_internet":0,"tls_required_percentage":100}}}'
+
+  - name: project_with_no_cloud_sql_instances
+    expect: FAIL
+    note: >
+      Deliberate, not a defect. coverage_percentage returns 0 for an empty
+      population, so a project with no Cloud SQL instances — or one where the
+      Cloud SQL Admin API is disabled and nothing could be listed — reads as
+      non-compliant rather than vacuously compliant. Tenants that genuinely run
+      no Cloud SQL should drop this evidence set, not soften the validator.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[]},"summary":{"cloud_sql_api_readable":false,"total_instances":0,"public_ip_instances":0,"instances_open_to_internet":0,"ssl_required_instances":0,"ssl_required_percentage":0}}}'
+
+  - name: per_instance_ssl_key_does_not_satisfy_the_rollup
+    expect: FAIL
+    note: >
+      Guards the key-prefix ambiguity. `"ssl_required"` is a prefix of
+      `"ssl_required_percentage"`, and the two must not be confusable in either
+      direction. Here the per-instance flags are all true but the rollup key is
+      gone, and the validator correctly declines to read the instance flags as
+      the rollup.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"open_to_internet":false,"ssl_required":true}]},"summary":{"total_instances":1,"ssl_required_instances":1}}}'

@@ -1,0 +1,29 @@
+key: gcp_kms_primary_versions_all_enabled
+name: Cloud KMS Primary Key Versions Are All Enabled
+type: AUTOMATED
+role: configuration
+statement: >
+  No Cloud KMS key reports a primary version in a state other than ENABLED, so
+  every key presented as protecting data is actually operative rather than
+  disabled, destroyed or pending destruction. It asserts nothing about
+  non-primary versions, which are routinely disabled as part of rotation.
+
+# Reads a summary count, so it guards itself: the MATCH_COUNT rule proves the
+# rollup was present before the value rule reads it. EQUALS "0" reads the same
+# numerically and lexicographically, so no threshold ambiguity.
+#
+# The count's denominator is keys whose primary_version_state was readable at all,
+# so a key with no primary version reported is not silently counted as compliant
+# here — that shape is caught by the rotation rollup and by collection health.
+regex: '"keys_with_disabled_primary_version":\s*(?<keys_with_disabled_primary_version>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-KMS-KEYS

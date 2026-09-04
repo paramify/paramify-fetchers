@@ -1,0 +1,20 @@
+validator: gcp_gcs_uniform_bucket_level_access_enforced
+cases:
+  - name: every_bucket_uniform
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","uniform_bucket_level_access":true},{"name":"bucket-beta","uniform_bucket_level_access":true}]},"summary":{"total_buckets":2,"uniform_access_buckets":2}}}'
+
+  - name: one_bucket_still_uses_acls
+    expect: FAIL
+    note: a single bucket with uniform bucket-level access off is enough to fail the set.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","uniform_bucket_level_access":true},{"name":"bucket-beta","uniform_bucket_level_access":false}]},"summary":{"total_buckets":2,"uniform_access_buckets":1}}}'
+
+  - name: uniform_access_flag_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3, and it deliberately expects PASS. A violation-counting
+      validator cannot cover its own drift: the renamed key yields zero matches,
+      which is its pass condition, so an artifact hiding an ACL-governed bucket
+      reads as compliant HERE. gcp_gcs_uniform_access_flag_recorded is what
+      catches it; see set_EVD-GCP-STORAGE-ENC.yaml.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","ubla_enabled":true},{"name":"bucket-beta","ubla_enabled":false}]},"summary":{"total_buckets":2,"uniform_access_buckets":1}}}'

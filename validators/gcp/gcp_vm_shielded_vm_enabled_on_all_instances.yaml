@@ -1,0 +1,45 @@
+key: gcp_vm_shielded_vm_enabled_on_all_instances
+name: GCP Compute Instances All Run As Shielded VMs
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Compute Engine instance in the project runs as a Shielded VM — virtual
+  TPM plus integrity monitoring, so the boot chain is measured and boot-level
+  tampering is detectable — or the project holds no instances at all. Does NOT
+  assert Secure Boot, which CIS treats as a separate, optional setting because
+  it blocks unsigned kernel modules; does NOT assert Confidential Computing,
+  which is a specialist memory-encryption feature and not a baseline; and says
+  nothing about the guest OS or its patch level.
+
+# NORMAL POLARITY, read as a positive match count rather than MATCH_GROUP.
+#
+# `shielded_vm_percentage` is coverage_percentage(shielded, total), and that
+# helper returns 0 when the denominator is 0. A project with NO Compute
+# instances would therefore report 0%, and the ordinary Form A shape
+# (MATCH_COUNT NOT_EQUALS 0 + MATCH_GROUP[1] EQUALS 100) would fail a project
+# that has nothing to harden. Matching only the compliant readings instead keeps
+# the assertion self-guarding: a partial rollup produces no match and fails, and
+# a renamed rollup also produces no match and fails, so no integrity partner is
+# needed.
+#
+# The rollup counts an instance as shielded only when BOTH vtpm and
+# integrity_monitoring are true (see the fetcher's `shielded_vm_enabled`), so a
+# renamed upstream shieldedInstanceConfig field drives the percentage down
+# rather than leaving it silently at 100.
+#
+# GKE-managed nodes are deliberately NOT exempted: Container-Optimized OS node
+# images enable vTPM and integrity monitoring by default, so a default GKE node
+# satisfies this without special handling.
+#
+# The (?![0-9]) guards stop `100` matching inside a longer number and `0`
+# matching a leading digit. No exit_code anchor — collection health is asserted
+# once for the set by `collection_succeeded`.
+regex: '"shielded_vm_percentage":\s*100(?![0-9])|"total_instances":\s*0(?![0-9])'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-VM-CONFIG

@@ -1,0 +1,30 @@
+# Cases for gcp_vm_ip_forwarding_flags_present, the integrity partner to
+# gcp_vm_no_ip_forwarding_enabled. Artifacts are synthetic.
+validator: gcp_vm_ip_forwarding_flags_present
+cases:
+  - name: ip_forwarding_flags_present
+    expect: PASS
+    note: >
+      Direction 1. Every instance carries the flag, so the partner's zero
+      count means posture rather than an unreadable payload.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"can_ip_forward":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":true,"email":"node-pool@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-b","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"app-runtime@example.invalid","full_api_access":true,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"vm-app-c-runtime@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":100,"shielded_vm_percentage":100,"total_instances":3}}}'
+
+  - name: ip_forwarding_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3 for the pair. The per-instance flag is renamed with the
+      envelope intact and three instances still reported.
+      gcp_vm_no_ip_forwarding_enabled passes on this artifact; this one fails,
+      so the evidence set fails. Anchoring on the ip_forwarding_instances
+      rollup instead would NOT catch this — the rollup is derived from the
+      same flag with a defaulting read, so it would still be present and
+      reading 0.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"ip_forwarding_allowed":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":true,"email":"node-pool@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"ip_forwarding_allowed":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-b","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"app-runtime@example.invalid","full_api_access":true,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"ip_forwarding_allowed":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"vm-app-c-runtime@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":100,"shielded_vm_percentage":100,"total_instances":3}}}'
+
+  - name: project_holds_no_instances
+    expect: PASS
+    note: >
+      A project with no Compute instances has no per-instance flags to read.
+      The total_instances branch keeps that vacuous case from reading as
+      drift.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":0,"shielded_vm_percentage":0,"total_instances":0}}}'

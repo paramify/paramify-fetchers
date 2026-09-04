@@ -1,0 +1,20 @@
+validator: gcp_kms_primary_versions_all_enabled
+cases:
+  - name: every_primary_version_enabled
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_crypto_keys":3,"primary_version_states":{"ENABLED":3},"keys_with_disabled_primary_version":0}}}'
+
+  - name: one_primary_version_disabled
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_crypto_keys":3,"primary_version_states":{"ENABLED":2,"DISABLED":1},"keys_with_disabled_primary_version":1}}}'
+
+  - name: ten_disabled_is_not_zero
+    expect: FAIL
+    note: >
+      Guards the string comparison: EQUALS "0" must not be satisfied by a value
+      that merely starts with a zero digit or reads small.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_crypto_keys":40,"keys_with_disabled_primary_version":10}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_crypto_keys":3,"keys_with_disabled_primary":0}}}'

@@ -1,0 +1,36 @@
+key: gcp_logging_all_alert_policies_enabled
+name: Cloud Logging Alert Policies Are All Enabled
+type: AUTOMATED
+role: configuration
+statement: >
+  The project has at least one Cloud Monitoring alert policy and none of them
+  are disabled, so no configured alarm is silently switched off. Does NOT
+  assert what the policies watch, that they have notification channels
+  attached, or that anyone reads them — an enabled policy with zero
+  notification channels still passes.
+
+# Form A (reads a value), so it guards itself. No exit_code anchor — collection
+# health is asserted once for the set by `collection_succeeded`.
+#
+# This is the second half of the metric-filter-with-alarm chain:
+# `gcp_logging_metric_alarm_pair_present` proves an alerting policy is attached
+# to a log-based metric, and this proves the attached policies are actually
+# armed. Neither is sufficient alone — a metric pointing at a disabled policy
+# looks alerted and fires nothing.
+#
+# `[1-9]\d*` on the numerator is the anti-vacuity guard: a project with no alert
+# policies reports 0 == 0, which would otherwise pass while proving nothing.
+regex: '"enabled_alert_policies":\s*(?<enabled_alert_policies>[1-9]\d*)[\s\S]*?"total_alert_policies":\s*(?<total_alert_policies>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  # Both rollups were present, and at least one policy is enabled.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  # Every policy that exists is enabled.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # enabled_alert_policies
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # total_alert_policies
+
+evidence_sets:
+  - EVD-GCP-LOGGING-CONFIG

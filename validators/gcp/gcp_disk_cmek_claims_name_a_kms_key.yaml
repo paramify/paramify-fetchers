@@ -1,0 +1,47 @@
+key: gcp_disk_cmek_claims_name_a_kms_key
+name: Persistent Disk CMEK Claims Name a Cloud KMS Key
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Compute Engine persistent disk and snapshot that the evidence reports as
+  customer-managed (CMEK) also names the fully-qualified Cloud KMS crypto key
+  that backs it, so each custody claim is traceable to a key an assessor can
+  inspect for rotation, IAM grants and destruction schedule. Does NOT assert that
+  any disk or snapshot uses CMEK, nor what share of them do — GCP encrypts every
+  persistent disk and snapshot at rest unconditionally, and Google-managed keys
+  are an acceptable custody choice, so this validator passes on a project running
+  entirely on the default key. It says nothing about the key's rotation period,
+  its location, its IAM policy, or whether it is HSM-backed.
+
+# WHY THIS AND NOT A CMEK-COVERAGE BAR. The sibling Cloud Storage set
+# (EVD-GCP-STORAGE-ENC) declines to require 100% CMEK because GCS is always
+# encrypted at rest and custody is a choice, not the control. That reasoning
+# applies to persistent disks with more force, not less: a project accumulates
+# disks nobody chose one by one — GKE node boot disks and PVCs, Dataflow and
+# Dataproc workers, instance-template boot disks — and those default to the
+# Google-managed key unless the node pool or template was created with a CMEK.
+# `cmek_disk_percentage EQUALS 100` would therefore sit permanently red on every
+# tenant that runs GKE, and disk CMEK cannot be retrofitted in place (it needs a
+# snapshot-and-recreate), so the red would stay. That is noise, not coverage. A
+# tenant whose own policy mandates customer key custody should ADD that
+# percentage validator deliberately; it is not shipped here.
+#
+# Counts violations, so it CANNOT guard itself — zero matches is its pass
+# condition. `gcp_disk_key_custody_flags_present` and
+# `gcp_disk_kms_key_name_field_present` are its mandatory integrity partners:
+# without them a renamed `cmek` or `kms_key_name` key reads as zero violations.
+# The `[^}]*?` fence keeps both halves inside one record — neither disk nor
+# snapshot objects nest braces — so a compliant record cannot splice into a
+# following one. Key order is guaranteed: the fetchers write evidence with
+# sort_keys=True, and `cmek` sorts before `kms_key_name` in both record shapes.
+# No exit_code anchor — collection health is asserted once for the set by
+# `collection_succeeded`.
+regex: '"cmek":\s*true[^}]*?"kms_key_name":\s*(?:null|"(?!projects/[^"]*/cryptoKeys/)[^"]*")'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-PD-ENC

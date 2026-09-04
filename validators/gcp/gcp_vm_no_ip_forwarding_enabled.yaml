@@ -1,0 +1,38 @@
+key: gcp_vm_no_ip_forwarding_enabled
+name: No GCP Compute Instance Enables IP Forwarding
+type: AUTOMATED
+role: configuration
+statement: >
+  No Compute Engine instance is permitted to forward packets it did not
+  originate, so no VM can act as an unmanaged router around the VPC's firewall
+  and subnet boundaries. Does NOT assert anything about the firewall rules
+  themselves (that is EVD-GCP-FW-RULES), does NOT assert that instances lack an
+  external IP address — an external IP is a legitimate configuration for a
+  bastion or a public service — and says nothing about routes defined at the
+  VPC level.
+
+# COUNTS VIOLATIONS, so it CANNOT guard itself — zero matches is its pass
+# condition. `gcp_vm_ip_forwarding_flags_present` is its mandatory integrity
+# partner; without it a renamed `canIpForward` field reads as zero violations.
+#
+# Single-key pattern, so there is no object-bridging exposure here.
+#
+# GKE CAVEAT: VPC-native (alias-IP) clusters — Google's default and its
+# recommendation — do not set canIpForward on node VMs, so a default GKE node
+# pool passes. A legacy ROUTE-BASED cluster does set it, and this validator would
+# flag those node VMs with no way to exempt them: there is no per-object scoping,
+# so `gke_managed` cannot be excluded from the count. That is the deliberate
+# call — the remediation is to move to a VPC-native cluster, not to suppress the
+# finding.
+#
+# No exit_code anchor — collection health is asserted once for the set by
+# `collection_succeeded`.
+regex: '"can_ip_forward":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-VM-CONFIG

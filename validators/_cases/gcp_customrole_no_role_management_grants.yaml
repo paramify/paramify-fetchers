@@ -1,0 +1,27 @@
+# Synthetic artifacts only.
+validator: gcp_customrole_no_role_management_grants
+cases:
+  - name: no_custom_role_grants_role_management
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_custom_roles":2,"roles_granting_role_management":0}}}'
+
+  - name: one_custom_role_can_edit_role_definitions
+    expect: FAIL
+    note: >
+      The live posture these validators were authored against — a role holding
+      iam.roles.update, which lets it add any permission to itself.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_custom_roles":2,"roles_granting_role_management":1}}}'
+
+  - name: several_roles_grant_role_management
+    expect: FAIL
+    note: >
+      A two-digit count. EQUALS "0" is exact, so string-versus-numeric comparison
+      cannot make this read as compliant the way a GREATER_THAN threshold could.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_custom_roles":40,"roles_granting_role_management":10}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. The presence rule fails when the rollup key is gone, so the
+      renamed key cannot read as zero escalating roles.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_custom_roles":2,"role_management_role_count":1}}}'

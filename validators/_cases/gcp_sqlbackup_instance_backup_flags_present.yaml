@@ -1,0 +1,29 @@
+# Synthetic artifacts only.
+validator: gcp_sqlbackup_instance_backup_flags_present
+cases:
+  - name: flags_present_and_true
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","backup_enabled":true}]},"summary":{"total_instances":1,"backup_enabled_percentage":100}}}'
+
+  - name: flags_present_and_false
+    expect: PASS
+    note: >
+      Integrity asserts the key was READ, not that it is compliant. A recorded
+      false is a legible payload; the posture verdict belongs to
+      gcp_sqlbackup_no_instance_without_automated_backups.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","backup_enabled":false}]},"summary":{"total_instances":1,"backup_enabled_percentage":0}}}'
+
+  - name: instance_backup_flags_renamed_upstream
+    expect: FAIL
+    note: >
+      The whole reason this validator exists. Its count-based partner reports
+      PASS on this artifact; this one fails because the key it proves is gone.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","backups_enabled":true},{"name":"db-two","backups_enabled":false}]},"summary":{"total_instances":2,"backup_enabled_instances":1,"backup_enabled_percentage":50}}}'
+
+  - name: no_readable_cloud_sql_instances
+    expect: FAIL
+    note: >
+      The Cloud SQL Admin API disabled, which the fetcher records as
+      cloud_sql_api_readable false while still exiting 0 — so collection_succeeded
+      passes and only this validator notices there was nothing to count.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[]},"summary":{"cloud_sql_api_readable":false,"total_instances":0,"backup_enabled_percentage":0}}}'

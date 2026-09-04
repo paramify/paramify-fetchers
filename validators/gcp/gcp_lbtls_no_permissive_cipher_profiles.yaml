@@ -1,0 +1,41 @@
+key: gcp_lbtls_no_permissive_cipher_profiles
+name: No Permissive Cipher Profile In GCP SSL Policies
+type: AUTOMATED
+role: configuration
+statement: >
+  The evidence reports zero SSL policies on GCP's permissive COMPATIBLE cipher
+  profile, which re-admits out-of-date cipher suites whatever the minimum TLS
+  version says. Does not assert which of the stronger profiles is in use
+  (MODERN / RESTRICTED / FIPS_202205 / CUSTOM), and covers defined policies only —
+  a front end inheriting COMPATIBLE from GCP's default is caught by
+  `gcp_lbtls_no_proxy_on_default_ssl_policy`, not here.
+
+# Reads a rollup VALUE rather than counting matches, so it guards itself: the
+# MATCH_COUNT rule proves the summary field was present before the second rule
+# reads it. A renamed `permissive_profile_ssl_policies` key drops the count to
+# zero and the presence rule fails — no integrity partner needed, which is why
+# the cipher-profile assertion is written against the summary and the two
+# version assertions are written per-record.
+#
+# The trade that buys: this trusts the fetcher's own tally instead of re-deriving
+# it from the per-policy `permissive_profile` flags. If the summariser and the
+# records ever disagree, this validator believes the summary.
+#
+# EQUALS "0" is an exact string comparison, so it holds under either a numeric or
+# a lexicographic reading of the operator — no ordering assumption. `\d+` keeps it
+# from matching a null or a restructured value.
+regex: '"permissive_profile_ssl_policies":\s*(?<permissive_profile_ssl_policies>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  # Presence: the rollup was there to read. Without this, a renamed summary key
+  # leaves the MATCH_GROUP rule comparing nothing to nothing, which holds.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  # Compliance: no policy is on the permissive profile.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-LB-TLS

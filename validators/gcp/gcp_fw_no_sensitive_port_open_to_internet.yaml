@@ -1,0 +1,31 @@
+key: gcp_fw_no_sensitive_port_open_to_internet
+name: No GCP Firewall Rule Opens A Sensitive Port To The Internet
+type: AUTOMATED
+role: configuration
+statement: >
+  No enforced VPC firewall rule lets the public internet (0.0.0.0/0 or ::/0)
+  reach a remote-administration or datastore port — SSH, RDP, telnet, FTP, SMB,
+  MSRPC, VNC, the Docker API, etcd, or a database port. Both the per-rule
+  exposure list and the project rollup must be empty. Does NOT assert that no
+  rule is internet-facing at all: a rule allowing 443 from anywhere is out of
+  scope here. Does NOT assert who the rule targets — see
+  `gcp_fw_no_internet_open_rule_targets_all_instances`.
+
+# Counts violations, so it CANNOT guard itself — zero matches is its pass
+# condition. `gcp_fw_sensitive_exposure_lists_present` is its mandatory
+# integrity partner; without it a renamed exposure key reads as zero exposures.
+#
+# The `\[\s*"` tail is what makes this a violation counter rather than a
+# presence check: a compliant rule emits `[]`, which has no quote after the
+# bracket and therefore does not match. The key appears both per rule and once
+# in `payload.summary`, so this single pattern counts the per-rule findings AND
+# the rollup — a summary that disagrees with the rules fails, which is correct.
+regex: '"internet_exposed_sensitive_services":\s*\[\s*"'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-FW-RULES

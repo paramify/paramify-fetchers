@@ -1,0 +1,63 @@
+# Synthetic artifacts only. Invented principals on example.com; nothing here
+# comes from a real project.
+validator: gcp_binding_no_public_iam_principals
+cases:
+  - name: no_public_principals
+    expect: PASS
+    note: the compliant posture — every member is a named user or service account.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/owner","members":["user:ada@example.com"],"public_members":[],"publicly_granted":false},{"role":"roles/logging.logWriter","members":["serviceAccount:app-runner@example-project.iam.gserviceaccount.com"],"public_members":[],"publicly_granted":false}],"principals":[{"member":"user:ada@example.com","public":false},{"member":"serviceAccount:app-runner@example-project.iam.gserviceaccount.com","public":false}]},"summary":{"total_bindings":2,"public_bindings":0,"public_members":[],"publicly_granted":false}}}'
+
+  - name: all_users_granted_a_role
+    expect: FAIL
+    note: >
+      The top-severity finding: anyone on the internet holds a role on the
+      project. The token appears in the binding member list, in public_members
+      and in the per-principal rollup, so the count is well above zero.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/viewer","members":["allUsers"],"public_members":["allUsers"],"publicly_granted":true}],"principals":[{"member":"allUsers","public":true}]},"summary":{"total_bindings":1,"public_bindings":1,"public_members":["allUsers"],"publicly_granted":true}}}'
+
+  - name: all_authenticated_users_granted_a_role
+    expect: FAIL
+    note: >
+      The second public principal. Any Google account, not only members of the
+      organization — a distinct token, and the alternation must catch it too.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/storage.objectViewer","members":["allAuthenticatedUsers"],"public_members":["allAuthenticatedUsers"],"publicly_granted":true}],"principals":[{"member":"allAuthenticatedUsers","public":true}]},"summary":{"total_bindings":1,"public_bindings":1,"public_members":["allAuthenticatedUsers"],"publicly_granted":true}}}'
+
+  - name: rollup_says_clean_but_a_member_is_public
+    expect: FAIL
+    note: >
+      The reason this validator exists alongside
+      gcp_binding_no_public_project_access. Every derived flag reads compliant —
+      public_bindings 0, publicly_granted false, public_members empty — but the
+      raw member list grants a role to allUsers. The rollup validator passes on
+      this artifact; anchoring on the member token rather than on the fetcher's
+      own verdict is what still fails it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/viewer","members":["allUsers"],"public_members":[],"publicly_granted":false}],"principals":[{"member":"allUsers","public":false}]},"summary":{"total_bindings":1,"public_bindings":0,"public_members":[],"publicly_granted":false}}}'
+
+  - name: the_word_inside_a_longer_string_is_not_a_match
+    expect: PASS
+    note: >
+      False-positive guard. The pattern requires the token to be the WHOLE JSON
+      string, because GCP writes these two principals bare. A project label or
+      display name that merely contains the word must not read as a public
+      grant.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"project":{"display_name":"allUsers access review sandbox"},"bindings":[{"role":"roles/logging.logWriter","members":["serviceAccount:app-runner@example-project.iam.gserviceaccount.com"],"public_members":[],"publicly_granted":false}],"principals":[{"member":"serviceAccount:app-runner@example-project.iam.gserviceaccount.com","public":false}]},"summary":{"total_bindings":1,"public_bindings":0,"public_members":[],"publicly_granted":false}}}'
+
+  - name: member_key_renamed_but_tokens_remain
+    expect: FAIL
+    note: >
+      A rename alone does NOT blind this validator, which is the payoff of
+      anchoring on the member token rather than on a key. The binding key is
+      granted_to instead of members and the derived flags all read clean, yet
+      allUsers is still in the artifact and the count is still non-zero.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/viewer","granted_to":["allUsers"],"publicly_granted":false}],"principals":[]},"summary":{"total_bindings":1,"public_bindings":0,"public_members":[],"publicly_granted":false}}}'
+
+  - name: member_lists_dropped_upstream
+    expect: PASS
+    note: >
+      Direction 3, and the genuine blind spot: not a rename but the member data
+      disappearing altogether, leaving only counts. No members, no tokens to
+      find, no violations — so this validator reports compliance on an artifact
+      that could be hiding a public grant. That is the silent false pass, and it
+      is covered at the set level by gcp_binding_member_lists_present — see
+      set_EVD-GCP-IAM-BINDINGS.yaml.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/viewer","member_count":1,"publicly_granted":false}],"principals":[]},"summary":{"total_bindings":1,"public_bindings":0,"public_members":[],"publicly_granted":false}}}'

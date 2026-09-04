@@ -1,0 +1,32 @@
+key: gcp_sqlbackup_retention_meets_weekly_floor
+name: Cloud SQL Backup Retention Meets The Weekly Floor
+type: AUTOMATED
+role: configuration
+statement: >
+  The Cloud SQL instance retaining the fewest automated backups still keeps at
+  least seven of them, so every instance in the project holds roughly a week of
+  restore points (KSI-RPL-ABO). Seven is Cloud SQL's own default for
+  `retainedBackups`; a lower number is a deliberate reduction, and customers with
+  a longer retention requirement should raise the threshold in their tuned copy.
+  Does NOT assert the backup schedule, that the backups are restorable, or that
+  any copy exists outside the project.
+
+# THRESHOLD IS ENCODED IN THE REGEX, not in the criteria: the comparison
+# operators are not documented as numeric, and "8" >= "14" is true as a string.
+# The pattern matches only values >= 7 — `[1-9][0-9]+` is every integer of two or
+# more digits (all >= 10) and `[7-9]` covers the single digits — so a value of 3,
+# a null (the fetcher writes null when no instance reports a retention setting),
+# or a renamed key all yield zero matches and fail.
+#
+# Anchors on `minimum_`, the weakest link across the fleet, so this covers every
+# instance rather than whichever one is serialized first. The leading quote keeps
+# it off the per-instance `retained_backup_count` and off `maximum_...`.
+regex: '"minimum_retained_backup_count":\s*(?<minimum_retained_backup_count>[1-9][0-9]+|[7-9])'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-BACKUP

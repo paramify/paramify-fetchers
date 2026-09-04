@@ -1,0 +1,30 @@
+key: gcp_bigquery_dataset_listing_readable
+name: BigQuery Dataset Listing Was Readable
+type: AUTOMATED
+role: integrity
+statement: >
+  The BigQuery API answered for this project, so an empty dataset list means the
+  project holds no datasets rather than that the collector could not look. Does
+  NOT assert that any dataset exists, nor anything about their posture.
+
+# The fetcher TOLERATES bigquery.googleapis.com being disabled: it records
+# `bigquery_api_readable: false`, writes an empty dataset list and still exits 0.
+# `collection_succeeded` therefore passes on such a run, and every count-based
+# rule in this set counts zero violations out of zero datasets. This is the guard
+# for that specific "could not look" case, and it names the cause rather than
+# leaving the set to fail as a side effect of an empty rollup.
+#
+# Reads a value, so it guards itself: the key must be present and boolean before
+# the second rule reads it.
+regex: '"bigquery_api_readable":\s*(?<bigquery_api_readable>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-GCP-BIGQUERY-CONFIG

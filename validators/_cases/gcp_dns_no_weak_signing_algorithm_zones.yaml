@@ -1,0 +1,25 @@
+# Synthetic artifacts only — invented zone labels, nothing from a real tenant.
+validator: gcp_dns_no_weak_signing_algorithm_zones
+cases:
+  - name: every_zone_signs_with_rsasha256
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","public":false,"uses_weak_signing_algorithm":false,"rsasha1_key_signing":false,"rsasha1_zone_signing":false},{"name":"zone-beta","public":true,"uses_weak_signing_algorithm":false,"rsasha1_key_signing":false,"rsasha1_zone_signing":false}]},"summary":{"dns_api_readable":true,"total_managed_zones":2,"zones_using_weak_signing_algorithm":0}}}'
+
+  - name: one_zone_uses_rsasha1_for_the_key_signing_key
+    expect: FAIL
+    note: >
+      RSASHA1 in either position makes the zone weak, which is why the per-zone
+      flag rolls both together. Note the summary's zones_using_weak_signing_algorithm
+      key is present here too and must not be mistaken for the per-zone flag.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","public":false,"uses_weak_signing_algorithm":false,"rsasha1_key_signing":false,"rsasha1_zone_signing":false},{"name":"zone-beta","public":true,"uses_weak_signing_algorithm":true,"rsasha1_key_signing":true,"rsasha1_zone_signing":false}]},"summary":{"dns_api_readable":true,"total_managed_zones":2,"zones_using_weak_signing_algorithm":1}}}'
+
+  - name: signing_strength_flag_renamed_upstream
+    expect: PASS
+    note: >
+      A violation-counting validator CANNOT cover this direction on its own —
+      zero matches is its pass condition, so a renamed key reads as zero weak
+      zones even though one is right there. That is exactly why
+      gcp_dns_zone_signing_strength_flags_present is mandatory. The assertion
+      that matters lives in set_EVD-GCP-DNS.yaml, case
+      signing_strength_flags_renamed_upstream, where the set correctly fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","public":false,"weak_signing":false},{"name":"zone-beta","public":true,"weak_signing":true}]},"summary":{"dns_api_readable":true,"total_managed_zones":2}}}'

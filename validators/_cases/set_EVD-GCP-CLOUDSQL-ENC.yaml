@@ -1,0 +1,59 @@
+# Set-level: every validator naming EVD-GCP-CLOUDSQL-ENC, combined the way
+# Paramify combines them (ERROR > FAIL > PASS). This is where the integrity
+# validator earns its place - the violation counter passes its own drifted
+# artifact, so only the set can prove the drift is caught.
+#
+# Every case here carries exit_code 0 so the verdict is decided by the Cloud SQL
+# key-custody posture alone; collection health has its own case file
+# (validators/_cases/collection_succeeded.yaml) and is not re-proved here.
+evidence_set: EVD-GCP-CLOUDSQL-ENC
+cases:
+  - name: every_instance_customer_managed
+    expect: PASS
+    note: >
+      The posture shape observed on the project these validators were authored
+      from (synthetic names and values): every Cloud SQL instance bound to a
+      customer-managed key, rollup and instance list in agreement.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","cmek":true},{"name":"sql-beta","cmek":true}]},"summary":{"total_instances":2,"cmek_instances":2,"google_managed_instances":0,"cmek_percentage":100}}}'
+
+  - name: one_instance_on_google_default
+    expect: FAIL
+    note: >
+      Direction 2. Both configuration validators fail, which is the honest
+      reading of the assertion this set makes - and the assertion a tenant that
+      has accepted Google-managed keys will want to tune. Note what this does
+      NOT mean: Cloud SQL always encrypts at rest, so a failure here is about
+      who holds the key, never about plaintext data.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","cmek":true},{"name":"sql-beta","cmek":false}]},"summary":{"total_instances":2,"cmek_instances":1,"google_managed_instances":1,"cmek_percentage":50}}}'
+
+  - name: summary_disagrees_with_instance_list
+    expect: FAIL
+    note: >
+      Why the set carries two configuration validators rather than one. The
+      rollup claims total coverage while a Google-managed instance sits in the
+      list. gcp_sqlenc_cmek_coverage_complete reads 100 and passes;
+      gcp_sqlenc_no_google_managed_key_instances is the only thing failing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","cmek":true},{"name":"sql-beta","cmek":false}]},"summary":{"total_instances":2,"cmek_instances":2,"google_managed_instances":0,"cmek_percentage":100}}}'
+
+  - name: custody_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the integrity role exists for.
+      gcp_sqlenc_no_google_managed_key_instances counts "cmek": false and finds
+      none, so ALONE it reports PASS on an artifact hiding a Google-managed
+      database. gcp_sqlenc_key_custody_flags_present fails because the key it
+      proves is gone, and the set therefore fails. Delete that integrity
+      validator and this case goes green while the evidence proves nothing -
+      the silent false pass. The rollup is held at 100 so the coverage validator
+      passes and the integrity partner is the only thing failing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","key_is_customer_managed":true},{"name":"sql-beta","key_is_customer_managed":false}]},"summary":{"total_instances":2,"cmek_instances":2,"google_managed_instances":0,"cmek_percentage":100}}}'
+
+  - name: project_reports_no_cloud_sql_instances
+    expect: FAIL
+    note: >
+      Deliberate boundary, failed twice over: the fetcher rolls an empty
+      population up to 0%, and the integrity validator finds no custody flag to
+      read. A project with no Cloud SQL has no encryption posture to
+      demonstrate, and reporting green would make an emptied payload
+      indistinguishable from a fully CMEK-protected project.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[]},"summary":{"total_instances":0,"cmek_instances":0,"google_managed_instances":0,"cmek_percentage":0}}}'

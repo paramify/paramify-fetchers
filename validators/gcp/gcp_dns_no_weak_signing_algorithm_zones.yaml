@@ -1,0 +1,35 @@
+key: gcp_dns_no_weak_signing_algorithm_zones
+name: No Cloud DNS Zone Signs With RSASHA1
+type: AUTOMATED
+role: configuration
+statement: >
+  No Cloud DNS managed zone signs with RSASHA1 in either position — key-signing
+  or zone-signing key. RSASHA1 is configured independently for the two, and
+  either one weak makes the zone's signatures weak, which is why the fetcher
+  rolls both into a single per-zone flag. Does not assert key length, that any
+  zone is signed at all, or that the algorithm in use is the strongest available.
+
+# INVERTED POLARITY: zero is compliant. RSASHA1 in either signing position is the
+# finding, so the regex matches only the bad state and the rule requires none.
+#
+# Per-zone assertion, so it cannot be done with MATCH_GROUP (which reads the
+# first match only) — it is inverted into a violation count, which means it
+# CANNOT guard itself: zero matches is its pass condition.
+# `gcp_dns_zone_signing_strength_flags_present` is its mandatory integrity
+# partner; without it a renamed `uses_weak_signing_algorithm` key reads as zero
+# weak zones and this validator reports compliance.
+#
+# The per-zone flag is used rather than the `zones_using_weak_signing_algorithm`
+# rollup because the flag is emitted for EVERY zone whether or not it is signed,
+# so the integrity partner has a stable anchor. Note it does not collide with the
+# summary's `zones_using_weak_signing_algorithm` — that key reads "..._using_...",
+# this one "uses_...", and the leading quote pins the start of the key name.
+regex: '"uses_weak_signing_algorithm":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-DNS

@@ -1,0 +1,29 @@
+key: gcp_binding_member_lists_present
+name: GCP Project IAM Binding Member Lists Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-binding member lists are present in the evidence, so a zero count of
+  public principals reflects the project's posture rather than an unreadable or
+  redacted payload. Does not assert who the members are, nor that every binding
+  on the project was enumerated.
+
+# Integrity partner to `gcp_binding_no_public_iam_principals`. Anchors one level
+# up from the violation: that validator counts the allUsers /
+# allAuthenticatedUsers tokens inside member lists, this one proves the member
+# lists exist at all, with any contents.
+#
+# The leading quote keeps this off the sibling keys `public_members`,
+# `external_members`, `exempted_members`, `service_account_members`,
+# `consumer_account_members` and `cross_project_service_account_members`, none of
+# which is the binding's own member list. Verified in Node against real evidence:
+# 13 matches for 13 bindings.
+regex: '"members":\s*\['
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-IAM-BINDINGS

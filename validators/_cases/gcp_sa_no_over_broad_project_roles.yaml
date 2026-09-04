@@ -1,0 +1,27 @@
+# Synthetic artifacts only — invented role bindings, no real tenant members.
+validator: gcp_sa_no_over_broad_project_roles
+cases:
+  - name: every_binding_is_narrow
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"project_role_bindings":[{"role":"roles/logging.logWriter","over_broad_role":false,"primitive_role":false},{"role":"roles/monitoring.viewer","over_broad_role":false,"primitive_role":false}]}}}'
+
+  - name: an_account_holds_a_primitive_project_role
+    expect: FAIL
+    note: the shape of the posture collected when these validators were authored.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"project_role_bindings":[{"role":"roles/logging.logWriter","over_broad_role":false,"primitive_role":false},{"role":"roles/editor","over_broad_role":true,"primitive_role":true}]}}}'
+
+  - name: breadth_flag_renamed_upstream
+    expect: PASS
+    note: >
+      Cannot be covered here — zero matches is this validator's pass condition.
+      gcp_sa_role_breadth_flags_present is what fails; see set_EVD-GCP-IAM-SA.yaml,
+      case role_breadth_flags_renamed_upstream.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"project_role_bindings":[{"role":"roles/logging.logWriter","role_is_over_broad":false},{"role":"roles/editor","role_is_over_broad":true}]}}}'
+
+  - name: neighbouring_keys_do_not_satisfy_the_anchor
+    expect: PASS
+    note: >
+      has_over_broad_project_role and over_broad_project_roles sit next to the
+      flag this counts. The leading quote in the anchor keeps them out, so a
+      per-account true does not register as a binding-level violation.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","has_over_broad_project_role":true,"over_broad_project_roles":["roles/editor"]}],"project_role_bindings":[{"role":"roles/logging.logWriter","over_broad_role":false}]}}}'

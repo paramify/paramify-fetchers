@@ -1,0 +1,59 @@
+# Set-level: every validator naming EVD-GCP-LOGGING-CONFIG, combined the way
+# Paramify combines them (ERROR > FAIL > PASS). This is where the integrity
+# validator earns its place — the retention counter passes its own drifted
+# artifact, so only the set can prove the drift is caught.
+#
+# Every case here carries exit_code 0 so the verdict is decided by the Cloud
+# Logging posture alone; collection health has its own case file
+# (validators/_cases/collection_succeeded.yaml) and is not re-proved here.
+evidence_set: EVD-GCP-LOGGING-CONFIG
+cases:
+  - name: healthy_logging_posture
+    expect: PASS
+    note: >
+      Deliberate: no bucket uses CMEK, only one is locked, and no sink exports
+      the whole log stream — and the set still passes. None of those is asserted
+      here, for reasons recorded on the individual validators. What the set does
+      assert is that logs are being exported, retained for at least the platform
+      default, and watched by an armed alarm.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"alert_policies":[{"display_name":"policy-alpha","enabled":true},{"display_name":"policy-beta","enabled":true}],"log_buckets":[{"cmek":false,"locked":false,"name":"bucket-alpha","retention_days":30},{"cmek":false,"locked":true,"name":"bucket-beta","retention_days":400}],"log_metrics":[{"alerted":true,"disabled":false,"name":"metric-alpha"}],"sinks":[{"destination_type":"log_bucket","disabled":false,"exports_all_logs":false,"name":"sink-alpha"},{"destination_type":"cloud_storage","disabled":false,"exports_all_logs":false,"name":"sink-beta"}]},"summary":{"alerted_log_metrics":1,"cmek_log_buckets":0,"enabled_alert_policies":2,"enabled_sinks":2,"locked_log_buckets":1,"longest_retention_days":400,"shortest_retention_days":30,"total_alert_policies":2,"total_log_buckets":2,"total_log_metrics":1,"total_sinks":2}}}'
+
+  - name: one_sink_disabled
+    expect: FAIL
+    note: gcp_logging_all_sinks_enabled is the only failing validator.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"alert_policies":[{"display_name":"policy-alpha","enabled":true},{"display_name":"policy-beta","enabled":true}],"log_buckets":[{"cmek":false,"locked":false,"name":"bucket-alpha","retention_days":30},{"cmek":false,"locked":true,"name":"bucket-beta","retention_days":400}],"log_metrics":[{"alerted":true,"disabled":false,"name":"metric-alpha"}],"sinks":[{"destination_type":"log_bucket","disabled":false,"exports_all_logs":false,"name":"sink-alpha"},{"destination_type":"cloud_storage","disabled":true,"exports_all_logs":false,"name":"sink-beta"}]},"summary":{"alerted_log_metrics":1,"cmek_log_buckets":0,"enabled_alert_policies":2,"enabled_sinks":1,"locked_log_buckets":1,"longest_retention_days":400,"shortest_retention_days":30,"total_alert_policies":2,"total_log_buckets":2,"total_log_metrics":1,"total_sinks":2}}}'
+
+  - name: alert_policy_switched_off
+    expect: FAIL
+    note: >
+      gcp_logging_all_alert_policies_enabled is the only failing validator. Note
+      the metric still reports alerted:true — a metric can be paired with a
+      policy that is armed for nothing, which is why the two alerting assertions
+      are separate validators.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"alert_policies":[{"display_name":"policy-alpha","enabled":true},{"display_name":"policy-beta","enabled":false}],"log_buckets":[{"cmek":false,"locked":false,"name":"bucket-alpha","retention_days":30},{"cmek":false,"locked":true,"name":"bucket-beta","retention_days":400}],"log_metrics":[{"alerted":true,"disabled":false,"name":"metric-alpha"}],"sinks":[{"destination_type":"log_bucket","disabled":false,"exports_all_logs":false,"name":"sink-alpha"},{"destination_type":"cloud_storage","disabled":false,"exports_all_logs":false,"name":"sink-beta"}]},"summary":{"alerted_log_metrics":1,"cmek_log_buckets":0,"enabled_alert_policies":1,"enabled_sinks":2,"locked_log_buckets":1,"longest_retention_days":400,"shortest_retention_days":30,"total_alert_policies":2,"total_log_buckets":2,"total_log_metrics":1,"total_sinks":2}}}'
+
+  - name: no_metric_carries_an_alarm
+    expect: FAIL
+    note: gcp_logging_metric_alarm_pair_present is the only failing validator.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"alert_policies":[{"display_name":"policy-alpha","enabled":true},{"display_name":"policy-beta","enabled":true}],"log_buckets":[{"cmek":false,"locked":false,"name":"bucket-alpha","retention_days":30},{"cmek":false,"locked":true,"name":"bucket-beta","retention_days":400}],"log_metrics":[{"alerted":false,"disabled":false,"name":"metric-alpha"}],"sinks":[{"destination_type":"log_bucket","disabled":false,"exports_all_logs":false,"name":"sink-alpha"},{"destination_type":"cloud_storage","disabled":false,"exports_all_logs":false,"name":"sink-beta"}]},"summary":{"alerted_log_metrics":0,"cmek_log_buckets":0,"enabled_alert_policies":2,"enabled_sinks":2,"locked_log_buckets":1,"longest_retention_days":400,"shortest_retention_days":30,"total_alert_policies":2,"total_log_buckets":2,"total_log_metrics":1,"total_sinks":2}}}'
+
+  - name: one_bucket_below_retention_floor
+    expect: FAIL
+    note: >
+      gcp_logging_buckets_retain_at_least_30_days is the only failing validator;
+      its integrity partner passes, which is the point — the count is zero
+      because of posture, not because the payload became unreadable.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"alert_policies":[{"display_name":"policy-alpha","enabled":true},{"display_name":"policy-beta","enabled":true}],"log_buckets":[{"cmek":false,"locked":false,"name":"bucket-alpha","retention_days":7},{"cmek":false,"locked":true,"name":"bucket-beta","retention_days":400}],"log_metrics":[{"alerted":true,"disabled":false,"name":"metric-alpha"}],"sinks":[{"destination_type":"log_bucket","disabled":false,"exports_all_logs":false,"name":"sink-alpha"},{"destination_type":"cloud_storage","disabled":false,"exports_all_logs":false,"name":"sink-beta"}]},"summary":{"alerted_log_metrics":1,"cmek_log_buckets":0,"enabled_alert_policies":2,"enabled_sinks":2,"locked_log_buckets":1,"longest_retention_days":400,"shortest_retention_days":7,"total_alert_policies":2,"total_log_buckets":2,"total_log_metrics":1,"total_sinks":2}}}'
+
+  - name: retention_key_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the integrity role exists for. bucket-alpha retains for ONE day,
+      but the per-bucket key is now `retention_period_days`, so
+      gcp_logging_buckets_retain_at_least_30_days counts zero short buckets and
+      ALONE reports PASS. gcp_logging_bucket_retention_days_present fails because
+      the key it proves is gone, and the set therefore fails. Delete that
+      integrity validator and this case goes green while the evidence proves
+      nothing — the silent false pass. Every other posture value here is
+      compliant, so the integrity partner is the only thing failing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"alert_policies":[{"display_name":"policy-alpha","enabled":true},{"display_name":"policy-beta","enabled":true}],"log_buckets":[{"cmek":false,"locked":false,"name":"bucket-alpha","retention_period_days":1},{"cmek":false,"locked":true,"name":"bucket-beta","retention_period_days":400}],"log_metrics":[{"alerted":true,"disabled":false,"name":"metric-alpha"}],"sinks":[{"destination_type":"log_bucket","disabled":false,"exports_all_logs":false,"name":"sink-alpha"},{"destination_type":"cloud_storage","disabled":false,"exports_all_logs":false,"name":"sink-beta"}]},"summary":{"alerted_log_metrics":1,"cmek_log_buckets":0,"enabled_alert_policies":2,"enabled_sinks":2,"locked_log_buckets":1,"longest_retention_days":400,"shortest_retention_days":1,"total_alert_policies":2,"total_log_buckets":2,"total_log_metrics":1,"total_sinks":2}}}'

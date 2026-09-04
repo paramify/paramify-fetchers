@@ -1,0 +1,30 @@
+# Synthetic artifacts only.
+validator: gcp_customrole_no_set_iam_policy_grants
+cases:
+  - name: no_custom_role_grants_set_iam_policy
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_custom_roles":2,"roles_granting_set_iam_policy":0}}}'
+
+  - name: one_custom_role_grants_set_iam_policy
+    expect: FAIL
+    note: The live posture these validators were authored against.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_custom_roles":2,"roles_granting_set_iam_policy":1}}}'
+
+  - name: no_custom_roles_defined_at_all
+    expect: PASS
+    note: >
+      A count of roles, not a percentage, so an empty project reads 0 and passes.
+      `no_privilege_escalation_percentage` would read 0 here — the fetcher
+      returns 0 rather than 100 for an empty denominator — and anchoring on it
+      would report the safest posture as total non-compliance. That is why this
+      validator reads the count.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_custom_roles":0,"no_privilege_escalation_percentage":0,"roles_granting_set_iam_policy":0}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. The rollup key is gone while an escalating role is still in
+      the payload; the presence rule fails rather than the value rule reading
+      nothing and holding. A value-reading validator guards itself here, which is
+      why it needs no integrity partner.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_custom_roles":2,"set_iam_policy_role_count":1}}}'

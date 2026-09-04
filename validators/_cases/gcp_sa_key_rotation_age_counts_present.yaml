@@ -1,0 +1,19 @@
+# Synthetic artifacts only.
+validator: gcp_sa_key_rotation_age_counts_present
+cases:
+  - name: rotation_age_counts_present
+    expect: PASS
+    note: passes on any value — this validator asserts structure, not posture.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","user_managed_keys_past_rotation_age":2}]},"summary":{"user_managed_keys_past_rotation_age":2}}}'
+
+  - name: rotation_age_counts_renamed_upstream
+    expect: FAIL
+    note: the drift its partner cannot see.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","keys_past_rotation_age":2}]},"summary":{"keys_past_rotation_age":2}}}'
+
+  - name: rotation_age_never_computed
+    expect: FAIL
+    note: >
+      A run that enumerated accounts but never aged their keys. Zero stale keys
+      would be an unsupported verdict, so the set must not report compliance.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example"}]},"summary":{"rotation_age_days":90}}}'

@@ -1,0 +1,22 @@
+# Synthetic artifacts only — invented zone labels, nothing from a real tenant.
+validator: gcp_dns_zone_inventory_readable
+cases:
+  - name: dns_api_answered
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-beta","public":true,"dnssec_enabled":true}]},"summary":{"dns_api_readable":true,"total_managed_zones":1,"unsigned_public_zones":0}}}'
+
+  - name: dns_api_disabled_on_the_project
+    expect: FAIL
+    note: >
+      The case this validator exists for. The fetcher tolerates a disabled
+      dns.googleapis.com, so exit_code is 0 and collection_succeeded passes — but
+      the zone list is empty, and every violation counter on this set therefore
+      reads zero, i.e. compliant. Nothing else on the set catches it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[],"dns_policies":[]},"summary":{"dns_api_readable":false,"total_managed_zones":0,"public_zones":0,"unsigned_public_zones":0,"zones_using_weak_signing_algorithm":0}}}'
+
+  - name: readability_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      Envelope intact, dns_api_readable renamed. MATCH_COUNT is 0, so the
+      presence rule fails rather than the value rule passing vacuously.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[],"dns_policies":[]},"summary":{"api_readable":false,"total_managed_zones":0,"unsigned_public_zones":0}}}'

@@ -1,0 +1,28 @@
+validator: gcp_fw_all_port_exposure_flags_present
+cases:
+  - name: all_port_flag_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-a","open_to_internet":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"rules_exposing_all_ports_to_internet":0,"total_rules":1}}}'
+
+  - name: all_port_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      The partner validator reports PASS on this artifact while a rule opening
+      every port to the world sits under a different key.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"internet_exposed_sensitive_services":[],"name":"rule-allow-any","open_to_internet":true,"opens_every_port":true,"priority":65534}]},"summary":{"internet_exposed_sensitive_services":[],"rules_exposing_all_ports_to_internet":1,"total_rules":1}}}'
+
+  - name: raw_all_ports_subkey_is_not_a_substitute
+    expect: FAIL
+    note: >
+      The derived per-rule flag is gone but the raw `allowed[].all_ports`
+      sub-key is still there. A looser anchor would have accepted it and masked
+      the loss; this one requires the full key name.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"allowed":[{"all_ports":true,"ports":[],"protocol":"all"}],"applies_to_all_instances":true,"internet_exposed_sensitive_services":[],"name":"rule-allow-any","open_to_internet":true,"priority":65534}]},"summary":{"internet_exposed_sensitive_services":[],"rules_exposing_all_ports_to_internet":1,"total_rules":1}}}'
+
+  - name: flag_present_but_not_a_boolean
+    expect: FAIL
+    note: >
+      A null where the boolean should be. The value alternation is deliberate -
+      an unreadable value is not a readable false, and the violation counter
+      would report zero either way.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"exposes_all_ports":null,"internet_exposed_sensitive_services":[],"name":"rule-a","open_to_internet":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"rules_exposing_all_ports_to_internet":0,"total_rules":1}}}'

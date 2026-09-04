@@ -1,0 +1,43 @@
+key: gcp_fw_no_internet_open_rule_targets_all_instances
+name: No Internet-Open GCP Firewall Rule Applies To All Instances
+type: AUTOMATED
+role: configuration
+statement: >
+  Every firewall rule that accepts traffic from the public internet is narrowed
+  to specific target tags or target service accounts, so no internet-facing
+  allowance lands on every instance in the network by default. Does NOT assert
+  that a rule is free of internet sources — a rule open to 0.0.0.0/0 passes here
+  as long as it is scoped to named targets. Does NOT assert the target tags
+  resolve to instances that exist.
+
+# Counts violations, so it CANNOT guard itself. Mandatory integrity partner:
+# `gcp_fw_instance_targeting_flags_present`.
+#
+# OBJECT-BRIDGING FENCE. This pattern spans two keys and there is no per-object
+# scoping in the engine, so an unfenced `[\s\S]*?` splices a benign rule's
+# `applies_to_all_instances: true` onto the NEXT rule's `open_to_internet: true`
+# and invents a violation. Measured on the live evidence this was authored from:
+# unfenced counts 4, two of which straddle a rule boundary; fenced counts 3,
+# which is what payload.summary.internet_open_rules_applying_to_all_instances
+# independently reports.
+#
+# The fence is a tempered token, not `[^}]*?` — the gap between these two keys
+# contains the `allowed[]`/`denied[]` sub-objects, so a brace fence would never
+# match. It refuses to cross either key that marks leaving the current rule
+# object: another `applies_to_all_instances` (the next rule's) or this rule's
+# own `priority`, which sorts immediately after `open_to_internet`.
+#
+# ORDER DEPENDENCE: evidence is written with sort_keys=True (see
+# fetchers/gcp/_shared/gcp_common.py), so `applies_to_all_instances` always
+# precedes `open_to_internet`. Should that ever stop holding, this pattern
+# silently counts zero — which is why the integrity partner asserts the same
+# ordered pair rather than the two keys independently.
+regex: '"applies_to_all_instances":\s*true(?:(?!"applies_to_all_instances"|"priority")[\s\S])*?"open_to_internet":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-FW-RULES

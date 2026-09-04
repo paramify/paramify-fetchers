@@ -1,0 +1,73 @@
+# Set-level: every validator naming EVD-GCP-IAM-CUSTOM-ROLES, combined the way
+# Paramify combines them (ERROR > FAIL > PASS). This is where the two integrity
+# validators earn their place — the per-role escalation check counts violations
+# and cannot cover its own drift, and no single validator can notice that the
+# organization's roles were never read at all.
+#
+# Synthetic artifacts only. Invented role ids and an invented organization id;
+# nothing here comes from a real project.
+evidence_set: EVD-GCP-IAM-CUSTOM-ROLES
+cases:
+  - name: no_custom_role_opens_an_escalation_path
+    expect: PASS
+    note: >
+      The target posture: two custom roles, neither classified into any
+      escalation category, both rollups zero, and the organization's roles
+      readable so those zeros cover the whole bindable population.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"custom_roles":[{"role_id":"evidenceReader","scope":"project","privilege_escalation_categories":[],"read_only":true},{"role_id":"logViewer","scope":"project","privilege_escalation_categories":[],"read_only":true}]},"summary":{"total_custom_roles":2,"organization_scope":"organizations/123456789012","organization_roles_readable":true,"organization_scoped_roles":0,"roles_granting_set_iam_policy":0,"roles_granting_role_management":0}}}'
+
+  - name: a_custom_role_grants_set_iam_policy_and_role_management
+    expect: FAIL
+    note: >
+      The live posture these validators were authored against, in miniature. The
+      per-role check fails on the classification array and both rollups fail on
+      the summary — three independent readings of one finding, which is the point
+      of keeping the per-role and summary forms side by side.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"custom_roles":[{"role_id":"evidenceReader","scope":"project","privilege_escalation_categories":[],"read_only":true},{"role_id":"escalator","scope":"project","privilege_escalation_categories":["act_as_service_account","role_management","service_account_key_creation","set_iam_policy"],"read_only":false}]},"summary":{"total_custom_roles":2,"organization_scope":"organizations/123456789012","organization_roles_readable":true,"organization_scoped_roles":0,"roles_granting_set_iam_policy":1,"roles_granting_role_management":1}}}'
+
+  - name: organization_roles_were_not_readable
+    expect: FAIL
+    note: >
+      The judgment call this set turns on, isolated so it cannot pass for the
+      wrong reason: every role reads clean, both rollups are zero, and
+      organization_scoped_roles is 0 — yet that 0 means "the collector was denied
+      iam.roles.list at the organization", not "no organization role exists".
+      Organization-scoped custom roles are bindable inside a member project, so
+      without gcp_customrole_org_scope_enumerated the set would report "no custom
+      role grants setIamPolicy" over a population it never finished enumerating.
+      Delete that validator and this case goes green on exactly that false
+      comfort.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"custom_roles":[{"role_id":"evidenceReader","scope":"project","privilege_escalation_categories":[],"read_only":true}]},"summary":{"total_custom_roles":1,"organization_scope":"organizations/123456789012","organization_roles_readable":false,"organization_scoped_roles":0,"roles_granting_set_iam_policy":0,"roles_granting_role_management":0}}}'
+
+  - name: escalation_classifications_renamed_upstream
+    expect: FAIL
+    note: >
+      privilege_escalation_categories renamed while a role that plainly escalates
+      is still in the list, and everything else reading compliant. Alone,
+      gcp_customrole_no_escalation_path_grants counts zero violations and reports
+      PASS; gcp_customrole_escalation_categories_present is what fails, so the set
+      fails. Delete that validator and this case goes green while the evidence
+      proves nothing — the silent false pass the integrity role exists to prevent.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"custom_roles":[{"role_id":"evidenceReader","scope":"project","escalation_categories":[],"read_only":true},{"role_id":"escalator","scope":"project","escalation_categories":["set_iam_policy"],"read_only":false}]},"summary":{"total_custom_roles":2,"organization_scope":"organizations/123456789012","organization_roles_readable":true,"organization_scoped_roles":0,"roles_granting_set_iam_policy":0,"roles_granting_role_management":0}}}'
+
+  - name: no_custom_roles_defined
+    expect: FAIL
+    note: >
+      The boundary, recorded rather than hidden. Both rollups read 0 correctly
+      and pass, but gcp_customrole_escalation_categories_present has no per-role
+      classification to prove and fails, so an empty project fails this set. That
+      is deliberate: with no custom roles the evidence has nothing to say about
+      custom-role least privilege, and it should not read as a compliance verdict
+      over an empty list. It is also why the rollups anchor on role COUNTS rather
+      than no_privilege_escalation_percentage, which the fetcher computes as 0 —
+      not 100 — for an empty denominator.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"custom_roles":[]},"summary":{"total_custom_roles":0,"no_privilege_escalation_percentage":0,"organization_scope":"organizations/123456789012","organization_roles_readable":true,"organization_scoped_roles":0,"roles_granting_set_iam_policy":0,"roles_granting_role_management":0}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict — compliance is unknown, not bad —
+      but the API discards disposition, so FAIL is the best reachable answer
+      today. What matters is that it does not PASS. collection_succeeded is what
+      catches this; none of the validators above anchor on exit_code.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"PermissionDenied"},"payload":{}}'

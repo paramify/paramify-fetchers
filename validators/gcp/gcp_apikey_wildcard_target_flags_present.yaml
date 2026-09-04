@@ -1,0 +1,24 @@
+key: gcp_apikey_wildcard_target_flags_present
+name: GCP API Key Wildcard Target Counts Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  The wildcard-target rollup is present in the evidence, so a zero count of keys
+  targeting all Cloud APIs reflects posture rather than an unreadable payload.
+  Does not assert what the count's value is.
+
+# Integrity partner to `gcp_apikey_no_all_cloud_api_targets`.
+#
+# Anchored on the summary rollup rather than the per-key or per-target flags: a
+# project with no API keys, or with keys that carry no api_targets at all, has
+# neither of those to find, and failing those tenants would be noise. The rollup
+# is emitted on every run.
+regex: '"keys_targeting_all_cloud_apis":\s*'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-API-KEYS

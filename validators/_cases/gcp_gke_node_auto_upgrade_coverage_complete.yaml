@@ -1,0 +1,23 @@
+# Synthetic artifacts only — invented node pool names, no project or tenant data.
+validator: gcp_gke_node_auto_upgrade_coverage_complete
+cases:
+  - name: every_node_pool_auto_upgrades
+    expect: PASS
+    note: the posture collected from the live project these validators were authored against.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_node_pools":2,"auto_upgrade_node_pools":2,"auto_upgrade_percentage":100}}}'
+
+  - name: one_node_pool_pinned_off_auto_upgrade
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_node_pools":2,"auto_upgrade_node_pools":1,"auto_upgrade_percentage":50}}}'
+
+  - name: no_node_pool_auto_upgrades
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_node_pools":2,"auto_upgrade_node_pools":0,"auto_upgrade_percentage":0}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      The unreadable direction, covered by the presence rule rather than by an
+      integrity partner. Note the near-miss key auto_upgrade_node_pools is still
+      present and does not satisfy the anchor.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_node_pools":2,"auto_upgrade_node_pools":2,"node_auto_upgrade_percentage":100}}}'

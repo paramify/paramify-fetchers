@@ -1,0 +1,26 @@
+# Synthetic artifacts only — invented cluster names, no project or tenant data.
+validator: gcp_gke_legacy_abac_disabled
+cases:
+  - name: abac_off_on_every_cluster
+    expect: PASS
+    note: the posture collected from the live project these validators were authored against.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"clusters":[{"name":"cluster-alpha","legacy_abac_enabled":false},{"name":"cluster-beta","legacy_abac_enabled":false}]}}}'
+
+  - name: one_cluster_runs_legacy_abac
+    expect: FAIL
+    note: >
+      The failure direction. One cluster out of two bypasses RBAC, and because
+      the rule counts violations rather than reading the first match, the second
+      cluster is what trips it — a MATCH_GROUP form would have read cluster-alpha
+      and reported compliance.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"clusters":[{"name":"cluster-alpha","legacy_abac_enabled":false},{"name":"cluster-beta","legacy_abac_enabled":true}]}}}'
+
+  - name: abac_flag_renamed_upstream
+    expect: PASS
+    note: >
+      A violation-counting validator cannot cover this direction alone — zero
+      matches is its pass condition, so a renamed key reads as zero ABAC-enabled
+      clusters. That is why gcp_gke_legacy_abac_flag_recorded is mandatory. The
+      assertion that matters lives in set_EVD-GCP-GKE-CONFIG.yaml, case
+      legacy_abac_flags_renamed_upstream, where the set correctly fails.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"clusters":[{"name":"cluster-alpha","abac_enabled_legacy":false},{"name":"cluster-beta","abac_enabled_legacy":true}]}}}'

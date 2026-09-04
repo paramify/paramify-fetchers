@@ -1,0 +1,29 @@
+key: gcp_fw_no_rule_exposes_all_ports_to_internet
+name: No GCP Firewall Rule Exposes All Ports To The Internet
+type: AUTOMATED
+role: configuration
+statement: >
+  No enforced ingress allow rule opens the whole port range to the public
+  internet — no rule whose protocol is `all`, or whose tcp/udp entry carries no
+  port list, is reachable from 0.0.0.0/0 or ::/0. This is the widest single
+  exposure a VPC firewall can express and it is never in scope for a narrow
+  allowance. Does NOT assert anything about rules that open all ports to a
+  PRIVATE range, which is ordinary internal traffic.
+
+# Counts violations, so it CANNOT guard itself. Mandatory integrity partner:
+# `gcp_fw_all_port_exposure_flags_present`.
+#
+# Anchors on the per-rule derived flag, not on the raw `allowed[].all_ports`
+# sub-key: `all_ports` is true for any protocol with no port concept (icmp on an
+# internal rule, for instance) and says nothing about internet reachability.
+# The leading quote in the pattern is load-bearing — it is what stops
+# `"all_ports": true` inside allowed[] from being counted as a violation.
+regex: '"exposes_all_ports":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-FW-RULES

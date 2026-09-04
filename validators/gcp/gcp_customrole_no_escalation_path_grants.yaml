@@ -1,0 +1,40 @@
+key: gcp_customrole_no_escalation_path_grants
+name: No GCP Custom Role Definition Opens A Privilege Escalation Path
+type: AUTOMATED
+role: configuration
+statement: >
+  No custom IAM role definition collected for the project includes a permission
+  on one of the four escalation paths that let its holder step outside the
+  role's own grant — a `*.setIamPolicy` permission, `iam.roles`
+  create/update/delete/undelete, service-account key creation, or
+  `iam.serviceAccounts.actAs` and the token-signing permissions. Does NOT treat
+  create-or-update permissions on a deployment surface as a finding on their own
+  (that classification is `deployment_pivot`, and a deployer role that cannot
+  also attach an identity is not an escalation); does not assert that a role is
+  least-privileged within the permissions it keeps, nor anything about how many
+  permissions or services it spans; and does not cover custom roles the
+  collector could not enumerate — `gcp_customrole_org_scope_enumerated` is what
+  asserts the organization's roles were readable.
+
+# INVERTED POLARITY: zero is compliant; each role carrying one of the four firm
+# escalation classifications is a violation.
+#
+# Per-role assertion across a list, so MATCH_GROUP cannot express it (it reads
+# the first match only) — inverted into a violation count, and therefore it
+# CANNOT guard itself. `gcp_customrole_escalation_categories_present` is its
+# mandatory integrity partner.
+#
+# The `[^\]]*` fence keeps the match inside one role's own category array: a `]`
+# terminates it, so an empty `[]` cannot reach forward into a sibling role or
+# into the summary's `privilege_escalation_category_counts`, where these same
+# category names appear as keys. `deployment_pivot` is deliberately absent from
+# the alternation — see the statement.
+regex: '"privilege_escalation_categories":\s*\[[^\]]*"(?:act_as_service_account|role_management|service_account_key_creation|set_iam_policy)"'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-IAM-CUSTOM-ROLES

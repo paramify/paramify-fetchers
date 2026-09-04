@@ -1,0 +1,21 @@
+key: gcp_gcs_versioning_flag_recorded
+name: Cloud Storage Versioning Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-bucket object versioning flags are present in the evidence with a boolean
+  value, so a zero count of unversioned buckets reflects posture rather than an
+  unreadable payload. Does NOT assert what those flags say.
+
+# Integrity partner to `gcp_gcs_object_versioning_enabled`. Proves the key
+# exists and still carries a bare boolean. It also fails on a project reporting
+# zero buckets, where there is no posture to read.
+regex: '"versioning_enabled":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-STORAGE-ENC

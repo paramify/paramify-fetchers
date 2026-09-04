@@ -1,0 +1,19 @@
+# Synthetic artifacts only — invented network names, no real project data.
+validator: gcp_vpc_every_network_has_subnets
+cases:
+  - name: every_network_carries_subnets
+    expect: PASS
+    note: the posture collected when these validators were authored — the list was empty.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"networks":[{"name":"net-alpha","subnet_count":2}]},"summary":{"total_networks":1,"networks_without_subnets":[]}}}'
+
+  - name: one_network_without_subnets
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"networks":[{"name":"net-alpha","subnet_count":2},{"name":"net-empty","subnet_count":0}]},"summary":{"total_networks":2,"networks_without_subnets":["net-empty"]}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      This validator matches the COMPLIANT literal rather than counting
+      violations, so zero matches is never its pass condition — a renamed key
+      and a real violation both fail it, and it needs no integrity partner.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"networks":[{"name":"net-alpha","subnet_count":2}]},"summary":{"total_networks":1,"empty_networks":[]}}}'

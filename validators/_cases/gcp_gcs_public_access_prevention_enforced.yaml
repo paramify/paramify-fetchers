@@ -1,0 +1,26 @@
+validator: gcp_gcs_public_access_prevention_enforced
+cases:
+  - name: every_bucket_enforced
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","public_access_prevention":"enforced"},{"name":"bucket-beta","public_access_prevention":"enforced"}]},"summary":{"total_buckets":2}}}'
+
+  - name: one_bucket_inherited
+    expect: FAIL
+    note: >
+      An inherited setting may in fact be blocked by an organization policy, but
+      this evidence does not carry one, so it counts as unproven rather than
+      compliant. This is the assertion most likely to need tuning per tenant.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","public_access_prevention":"enforced"},{"name":"bucket-beta","public_access_prevention":"inherited"}]},"summary":{"total_buckets":2}}}'
+
+  - name: one_bucket_null
+    expect: FAIL
+    note: negating the compliant value, rather than listing the inherited one, makes null a violation too.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","public_access_prevention":"enforced"},{"name":"bucket-beta","public_access_prevention":null}]},"summary":{"total_buckets":2}}}'
+
+  - name: public_access_prevention_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3, expecting PASS for the same reason as the other violation
+      counters: no key, no matches, no violations. Covered at the set level by
+      gcp_gcs_public_access_prevention_recorded.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","pap_state":"enforced"},{"name":"bucket-beta","pap_state":"inherited"}]},"summary":{"total_buckets":2}}}'

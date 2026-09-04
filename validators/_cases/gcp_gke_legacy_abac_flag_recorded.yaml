@@ -1,0 +1,23 @@
+# Synthetic artifacts only — invented cluster names, no project or tenant data.
+validator: gcp_gke_legacy_abac_flag_recorded
+cases:
+  - name: flags_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"clusters":[{"name":"cluster-alpha","legacy_abac_enabled":false}]}}}'
+
+  - name: flags_present_and_non_compliant
+    expect: PASS
+    note: >
+      Integrity asserts readability, not posture. A cluster with ABAC actually
+      enabled must still pass here, or the partner validator would never be the
+      one reporting the finding.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"clusters":[{"name":"cluster-alpha","legacy_abac_enabled":true}]}}}'
+
+  - name: flags_renamed
+    expect: FAIL
+    note: this is the failure that covers gcp_gke_legacy_abac_disabled.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"clusters":[{"name":"cluster-alpha","abac_enabled_legacy":true}]}}}'
+
+  - name: payload_emptied
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{}}'

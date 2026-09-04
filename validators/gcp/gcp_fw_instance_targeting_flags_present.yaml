@@ -1,0 +1,31 @@
+key: gcp_fw_instance_targeting_flags_present
+name: GCP Firewall Rule Instance Targeting Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one firewall rule in the evidence carries both the
+  applies-to-all-instances flag and the open-to-internet flag, in that order, so
+  a zero count of unscoped internet-facing rules reflects posture rather than an
+  unreadable payload or an empty rule population. Does NOT assert the flags are
+  false — that is `gcp_fw_no_internet_open_rule_targets_all_instances`.
+
+# Integrity partner to `gcp_fw_no_internet_open_rule_targets_all_instances`.
+# Deliberately the SAME ordered, fenced pair as the violation pattern with the
+# values widened to any boolean, because that validator's zero count depends on
+# three things at once: both keys existing, both being readable booleans, and
+# `applies_to_all_instances` still preceding `open_to_internet`. Two independent
+# presence checks would miss the ordering failure and leave a silent false pass.
+#
+# Both anchors are per-rule only (neither appears in payload.summary), so this
+# also fails on a project whose firewall_rules array is empty — the population
+# guard that `gcp_fw_sensitive_exposure_lists_present` cannot provide, since its
+# key is mirrored into the summary.
+regex: '"applies_to_all_instances":\s*(?:true|false)(?:(?!"applies_to_all_instances"|"priority")[\s\S])*?"open_to_internet":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-FW-RULES

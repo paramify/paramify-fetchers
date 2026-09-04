@@ -1,0 +1,36 @@
+key: gcp_dns_no_nsec_zone_enumeration
+name: No Cloud DNS Zone Proves Non-Existence With NSEC
+type: AUTOMATED
+role: configuration
+statement: >
+  No signed Cloud DNS managed zone uses plain NSEC for authenticated denial of
+  existence. NSEC chains every name in the zone to the next, so anyone who can
+  query the zone can walk it end to end and enumerate every record in it — NSEC3
+  hashes the names and is Cloud DNS's own default. Does not assert NSEC3 salt or
+  iteration parameters, and says nothing about unsigned zones, which carry no
+  proof-of-non-existence setting at all.
+
+# INVERTED POLARITY: zero is compliant. Plain NSEC on a signed zone is the
+# finding, so the regex matches only the bad value.
+#
+# The closing quote is load-bearing: it is what stops this matching "nsec3". The
+# character classes tolerate a case change in the API enum (documented lowercase)
+# — without them an uppercased value would silently stop matching, and for a
+# violation counter that is the dangerous direction.
+#
+# Per-zone assertion inverted into a violation count, so it CANNOT guard itself.
+# `gcp_dns_non_existence_proof_fields_present` is its mandatory integrity
+# partner; without it a renamed `dnssec_non_existence` key reads as zero
+# NSEC zones and this validator reports compliance.
+#
+# No scoping is needed here and none is attempted: an unsigned or private zone
+# reports null for this field, so it can never match.
+regex: '"dnssec_non_existence":\s*"[Nn][Ss][Ee][Cc]"'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-DNS

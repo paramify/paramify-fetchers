@@ -1,0 +1,38 @@
+# Cases for gcp_vm_os_login_enforced_on_all_instances. Artifacts are synthetic:
+# only the keys the regex touches plus a plausible instance shape, with invented
+# names, emails and ids. No tenant data.
+validator: gcp_vm_os_login_enforced_on_all_instances
+cases:
+  - name: os_login_on_every_instance
+    expect: PASS
+    note: >
+      Direction 1. OS Login is in effect on all three instances, GKE node
+      included — a GKE node pool inherits the project's enable-oslogin
+      metadata, so the project-level fix carries it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"can_ip_forward":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":true,"email":"node-pool@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-b","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"app-runtime@example.invalid","full_api_access":true,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"vm-app-c-runtime@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":100,"shielded_vm_percentage":100,"total_instances":3}}}'
+
+  - name: os_login_on_one_of_three_instances
+    expect: FAIL
+    note: >
+      Direction 2, and the posture shape actually observed when these
+      validators were authored (synthetic values): the project default is off,
+      one instance overrides it on, the rollup reads 33 and the validator
+      fails. That is the honest reading — two instances still accept metadata
+      SSH keys.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"can_ip_forward":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":false,"service_accounts":[{"default_compute_service_account":true,"email":"node-pool@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-legacy-d","os_login_enabled":false,"service_accounts":[{"default_compute_service_account":true,"email":"legacy-default@example.invalid","full_api_access":true,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"vm-app-c-runtime@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":1,"ip_forwarding_instances":0,"os_login_percentage":33,"shielded_vm_percentage":100,"total_instances":3}}}'
+
+  - name: project_holds_no_instances
+    expect: PASS
+    note: >
+      Same vacuous-population reasoning as the Shielded VM validator:
+      coverage_percentage returns 0 on an empty project, so the
+      total_instances branch keeps a project with no VMs from failing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"os_login_percentage":0,"shielded_vm_percentage":0,"total_instances":0}}}'
+
+  - name: os_login_rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. The rollup key is renamed with the envelope intact and
+      three instances still reported; neither branch matches and the validator
+      fails rather than reading the absence as compliance.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"can_ip_forward":false,"gke_managed":true,"integrity_monitoring":true,"name":"vm-node-a","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":true,"email":"node-pool@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-b","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"app-runtime@example.invalid","full_api_access":true,"scopes":["https://www.googleapis.com/auth/cloud-platform"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"},{"can_ip_forward":false,"gke_managed":false,"integrity_monitoring":true,"name":"vm-app-c","os_login_enabled":true,"service_accounts":[{"default_compute_service_account":false,"email":"vm-app-c-runtime@example.invalid","full_api_access":false,"scopes":["https://www.googleapis.com/auth/devstorage.read_only"]}],"shielded_vm_enabled":true,"vtpm":true,"zone":"us-central1-a"}]},"summary":{"default_service_account_full_api_access_instances":0,"ip_forwarding_instances":0,"oslogin_pct":100,"shielded_vm_percentage":100,"total_instances":3}}}'

@@ -1,0 +1,27 @@
+validator: service_api_reachable
+cases:
+  - name: api_answered
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"compute_api_readable":true,"total_instances":3}}}'
+
+  - name: api_disabled_but_run_exited_zero
+    expect: FAIL
+    note: >
+      The failure this validator exists for. The envelope is intact and
+      collection_succeeded passes, the instance list is empty, and every
+      violation counter on the set reports zero-out-of-zero. Without this rule
+      the artifact is green having inspected nothing.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"compute_api_readable":false,"total_instances":0},"results":{"instances":[]}}}'
+
+  - name: a_second_service_is_unreadable
+    expect: FAIL
+    note: counts every flag, not just the first — MATCH_GROUP would read only one
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"compute_api_readable":true,"gke_api_readable":false}}}'
+
+  - name: flag_absent_does_not_fail
+    expect: PASS
+    note: >
+      Deliberate. Sets whose fetcher emits no readability flag must not fail, and
+      a renamed key is caught by the set's own per-record integrity validator
+      rather than here — see the comment in the validator file.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_instances":3}}}'

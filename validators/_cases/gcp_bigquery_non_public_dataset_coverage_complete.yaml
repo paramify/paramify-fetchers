@@ -1,0 +1,29 @@
+validator: gcp_bigquery_non_public_dataset_coverage_complete
+cases:
+  - name: every_dataset_non_public
+    expect: PASS
+    note: >
+      Deliberately carries cmek_percentage 50 and one dataset without a default
+      table expiration: this validator asserts neither, and the case would be
+      misleading if it only ever saw a uniformly hardened project.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"bigquery_api_readable":true,"cmek_percentage":50,"datasets_with_default_table_expiration":1,"non_public_dataset_percentage":100,"publicly_accessible_datasets":0,"total_datasets":2}}}'
+
+  - name: one_dataset_shared_publicly
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"bigquery_api_readable":true,"cmek_percentage":50,"non_public_dataset_percentage":50,"publicly_accessible_datasets":1,"total_datasets":2}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. The presence rule is what fails: with the key gone the
+      MATCH_GROUP comparison would otherwise compare nothing to nothing and pass
+      vacuously.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"bigquery_api_readable":true,"cmek_percentage":50,"non_public_dataset_pct":100,"publicly_accessible_datasets":0,"total_datasets":2}}}'
+
+  - name: project_holds_no_datasets
+    expect: FAIL
+    note: >
+      The fetcher's coverage math yields 0, not 100, for an empty project, so
+      "nothing to measure" fails rather than reading as total coverage. An
+      evidence set that proves no posture should not report compliance.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"bigquery_api_readable":true,"cmek_percentage":0,"non_public_dataset_percentage":0,"publicly_accessible_datasets":0,"total_datasets":0}}}'

@@ -1,0 +1,42 @@
+validator: gcp_fw_no_sensitive_port_open_to_internet
+cases:
+  - name: no_sensitive_service_exposed
+    expect: PASS
+    note: >
+      An internet-facing rule is fine here as long as it exposes nothing
+      sensitive. Also proves the empty list `[]` is not counted: the pattern
+      needs a quote after the bracket.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-public-https","open_to_internet":true,"priority":1000},{"applies_to_all_instances":true,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-internal","open_to_internet":false,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"rules_open_to_internet":1,"total_rules":2}}}'
+
+  - name: ssh_open_to_the_world
+    expect: FAIL
+    note: >
+      The shape of the posture actually collected when these were authored — a
+      rule reaching port 22 from 0.0.0.0/0. Counted twice: once on the rule and
+      once on the rollup.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":["ssh"],"name":"rule-admin","open_to_internet":true,"priority":1000},{"applies_to_all_instances":true,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-internal","open_to_internet":false,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":["ssh"],"rules_open_to_internet":1,"total_rules":2}}}'
+
+  - name: rollup_disagrees_with_rules
+    expect: FAIL
+    note: >
+      Every rule reads clean but the project rollup names an exposure. The
+      pattern covers both, so an inconsistent summary cannot be shrugged off.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-a","open_to_internet":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":["rdp"],"rules_open_to_internet":1,"total_rules":1}}}'
+
+  - name: whitespace_tolerant
+    expect: FAIL
+    note: >
+      Same violation with the evidence spaced differently, proving the pattern
+      anchors on the key and not on byte position.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":   [    "rdp"  ],"name":"rule-admin","open_to_internet":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"rules_open_to_internet":1,"total_rules":1}}}'
+
+  - name: exposure_key_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3, and a violation counter cannot pass it alone: zero matches IS
+      the pass condition, so a renamed key reads as zero exposures. Recorded
+      here as PASS to be honest about the boundary. The assertion that matters
+      is the set-level case `sensitive_exposure_key_renamed_upstream` in
+      set_EVD-GCP-FW-RULES.yaml, where the integrity partner
+      `gcp_fw_sensitive_exposure_lists_present` is what fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":false,"exposed_services":["ssh"],"exposes_all_ports":false,"name":"rule-admin","open_to_internet":true,"priority":1000}]},"summary":{"exposed_services":["ssh"],"rules_open_to_internet":1,"total_rules":1}}}'

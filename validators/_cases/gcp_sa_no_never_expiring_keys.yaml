@@ -1,0 +1,21 @@
+# Synthetic artifacts only — invented key ids and account labels.
+validator: gcp_sa_no_never_expiring_keys
+cases:
+  - name: every_key_expires
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","keys":[{"id":"k1","user_managed":false,"never_expires":false},{"id":"k2","user_managed":true,"never_expires":false}]}]}}}'
+
+  - name: one_user_managed_key_never_expires
+    expect: FAIL
+    note: the shape of the posture collected when these validators were authored.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","keys":[{"id":"k1","user_managed":false,"never_expires":false},{"id":"k2","user_managed":true,"never_expires":true}]}]}}}'
+
+  - name: expiry_flag_renamed_upstream
+    expect: PASS
+    note: >
+      A violation-counting validator CANNOT cover this direction on its own — zero
+      matches is its pass condition, so a renamed key reads as zero never-expiring
+      keys. That is exactly why gcp_sa_key_expiry_flags_present is mandatory. The
+      assertion that matters lives in set_EVD-GCP-IAM-SA.yaml, case
+      key_expiry_flags_renamed_upstream, where the set correctly fails.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","keys":[{"id":"k1","user_managed":false,"key_never_expires":false},{"id":"k2","user_managed":true,"key_never_expires":true}]}]}}}'

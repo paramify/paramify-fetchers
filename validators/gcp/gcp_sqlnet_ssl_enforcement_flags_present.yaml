@@ -1,0 +1,27 @@
+key: gcp_sqlnet_ssl_enforcement_flags_present
+name: Cloud SQL Transport Encryption Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-instance SSL enforcement flags are present in the evidence, so a zero
+  count of instances accepting unencrypted connections reflects posture rather
+  than an unreadable payload. Does NOT assert what those flags say.
+
+# Integrity partner to `gcp_sqlnet_no_unencrypted_connections_allowed`. That
+# validator counts `"ssl_required": false`; this one proves the `ssl_required`
+# key exists at all and still carries a boolean, so a rename or a reshaped value
+# fails loudly instead of silently reading as zero violations.
+#
+# It also fails on a project reporting zero Cloud SQL instances — including a
+# project where sqladmin.googleapis.com is disabled and the fetcher records
+# `cloud_sql_api_readable: false`. "Could not look" is not "nothing to find",
+# and neither is compliance.
+regex: '"ssl_required":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-NET

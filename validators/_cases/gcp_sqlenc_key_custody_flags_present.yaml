@@ -1,0 +1,30 @@
+validator: gcp_sqlenc_key_custody_flags_present
+cases:
+  - name: flags_present
+    expect: PASS
+    note: >
+      Passes on a mixed fleet - this validator proves the flag was read, not
+      what it says. The summary's cmek_instances and cmek_percentage keys are
+      present too, and the closing quote in the anchor keeps them from being
+      mistaken for the per-instance flag.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","cmek":true},{"name":"sql-beta","cmek":false}]},"summary":{"total_instances":2,"cmek_instances":1,"google_managed_instances":1,"cmek_percentage":50}}}'
+
+  - name: custody_flag_renamed_upstream
+    expect: FAIL
+    note: the drift its partner cannot see - the key it counts is gone.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","key_is_customer_managed":true},{"name":"sql-beta","key_is_customer_managed":false}]},"summary":{"total_instances":2,"cmek_instances":1,"google_managed_instances":1,"cmek_percentage":50}}}'
+
+  - name: flag_value_reshaped_to_string
+    expect: FAIL
+    note: >
+      Same class as a rename: a quoted "false" stops the violation regex
+      matching too, so the bare boolean token is part of what integrity proves.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","cmek":"true"},{"name":"sql-beta","cmek":"false"}]},"summary":{"total_instances":2,"cmek_instances":1,"google_managed_instances":1,"cmek_percentage":50}}}'
+
+  - name: summary_only_no_instance_records
+    expect: FAIL
+    note: >
+      The rollup survives but the instance list has been emptied or restructured
+      away. Nothing here would stop the violation counter reporting a clean
+      zero; this is what makes that zero readable as posture.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[]},"summary":{"total_instances":0,"cmek_instances":0,"google_managed_instances":0,"cmek_percentage":0}}}'

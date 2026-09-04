@@ -1,0 +1,53 @@
+# Set-level: every validator naming EVD-GCP-BIGQUERY-CONFIG, combined the way
+# Paramify combines them (ERROR > FAIL > PASS). This is where the integrity
+# validators earn their place — the violation counter passes its own drifted
+# artifact, so only the set can prove the drift is caught.
+#
+# Every case here carries exit_code 0 so the verdict is decided by the BigQuery
+# posture alone; collection health has its own case file
+# (validators/_cases/collection_succeeded.yaml) and is not re-proved here.
+evidence_set: EVD-GCP-BIGQUERY-CONFIG
+cases:
+  - name: non_public_project_with_partial_cmek
+    expect: PASS
+    note: >
+      Deliberate: cmek_percentage is 50, one dataset has no default table
+      expiration, and the set still passes. BigQuery is always encrypted at rest,
+      so CMEK-vs-Google-managed is a key-custody choice, and table expiration is
+      a retention choice — neither is asserted here. What this set asserts is
+      that no dataset is reachable by allUsers or allAuthenticatedUsers and that
+      the evidence was actually readable. The shape mirrors the project these
+      validators were authored from; the names and key values are synthetic.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[{"cmek":true,"domain_access":[],"has_default_table_expiration":false,"location":"us-central1","name":"analytics_curated","public_access_entries":[],"publicly_accessible":false},{"cmek":false,"domain_access":[],"has_default_table_expiration":true,"location":"us-central1","name":"analytics_raw","public_access_entries":[],"publicly_accessible":false}]},"summary":{"bigquery_api_readable":true,"cmek_datasets":1,"cmek_percentage":50,"datasets_with_all_authenticated_users":0,"datasets_with_all_users":0,"datasets_with_default_table_expiration":1,"datasets_with_domain_access":0,"non_public_dataset_percentage":100,"publicly_accessible_datasets":0,"total_datasets":2}}}'
+
+  - name: one_dataset_shared_with_all_users
+    expect: FAIL
+    note: >
+      The posture failure this set exists to catch: a dataset whose ACL names
+      allUsers. Both configuration validators fail — the rollup drops to 50 and
+      the per-dataset flag counts one violation.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[{"cmek":true,"domain_access":[],"has_default_table_expiration":false,"location":"us-central1","name":"analytics_curated","public_access_entries":[],"publicly_accessible":false},{"cmek":false,"domain_access":[],"has_default_table_expiration":true,"location":"us-central1","name":"analytics_raw","public_access_entries":[{"principal":"allUsers","principal_type":"specialGroup","public":true,"role":"READER"}],"publicly_accessible":true}]},"summary":{"bigquery_api_readable":true,"cmek_datasets":1,"cmek_percentage":50,"datasets_with_all_authenticated_users":0,"datasets_with_all_users":1,"datasets_with_default_table_expiration":1,"datasets_with_domain_access":0,"non_public_dataset_percentage":50,"publicly_accessible_datasets":1,"total_datasets":2}}}'
+
+  - name: public_access_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the integrity role exists for. gcp_bigquery_no_publicly_accessible_datasets
+      counts the per-dataset flag set to true and finds none, so ALONE it reports
+      PASS on an artifact hiding a dataset shared with allUsers.
+      gcp_bigquery_public_access_flags_present fails because the key it proves is
+      gone, and the set therefore fails. Delete that integrity validator and this
+      case goes green while the evidence proves nothing — the silent false pass.
+      Every other value here reads compliant (rollup 100, API readable), so the
+      integrity partner is the only thing failing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[{"cmek":true,"domain_access":[],"has_default_table_expiration":false,"location":"us-central1","name":"analytics_curated","is_public":false},{"cmek":false,"domain_access":[],"has_default_table_expiration":true,"location":"us-central1","name":"analytics_raw","is_public":true}]},"summary":{"bigquery_api_readable":true,"cmek_datasets":1,"cmek_percentage":50,"datasets_with_all_authenticated_users":0,"datasets_with_all_users":0,"datasets_with_default_table_expiration":1,"datasets_with_domain_access":0,"non_public_dataset_percentage":100,"publicly_accessible_datasets":0,"total_datasets":2}}}'
+
+  - name: bigquery_api_disabled_on_the_project
+    expect: FAIL
+    note: >
+      The fetcher records a project with the BigQuery API turned off as not
+      readable, writes an empty dataset list and still exits 0 — so collection
+      health passes and every violation count is zero out of zero.
+      gcp_bigquery_dataset_listing_readable names the cause; the rollup and the
+      flag-presence guard fail alongside it. "Could not look" must never read as
+      "nothing to fix".
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[]},"summary":{"bigquery_api_readable":false,"cmek_datasets":0,"cmek_percentage":0,"datasets_with_all_authenticated_users":0,"datasets_with_all_users":0,"datasets_with_default_table_expiration":0,"datasets_with_domain_access":0,"non_public_dataset_percentage":0,"publicly_accessible_datasets":0,"total_datasets":0}}}'

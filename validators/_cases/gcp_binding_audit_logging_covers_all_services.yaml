@@ -1,0 +1,42 @@
+# Synthetic artifacts only. Invented principals on example.com; nothing here
+# comes from a real project.
+validator: gcp_binding_audit_logging_covers_all_services
+cases:
+  - name: full_log_types_on_all_services
+    expect: PASS
+    note: >
+      The compliant posture, and the one the live sample reports: an
+      allServices audit config carrying ADMIN_READ, DATA_READ and DATA_WRITE.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"audit_configs":[{"service":"allServices","log_types":["ADMIN_READ","DATA_READ","DATA_WRITE"],"exempted_members":[],"exempted_member_count":0}]},"summary":{"audit_logging_configured":true,"audit_all_services_configured":true,"audit_full_log_types_on_all_services":true,"audit_exempted_member_count":0}}}'
+
+  - name: admin_reads_only
+    expect: FAIL
+    note: >
+      Audit logging is configured on allServices, but only for ADMIN_READ — the
+      data plane is unlogged. The weaker rollup audit_logging_configured is true
+      on this artifact, which is exactly why the composite key is the anchor.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"audit_configs":[{"service":"allServices","log_types":["ADMIN_READ"],"exempted_members":[],"exempted_member_count":0}]},"summary":{"audit_logging_configured":true,"audit_all_services_configured":true,"audit_full_log_types_on_all_services":false,"audit_exempted_member_count":0}}}'
+
+  - name: one_service_audited_instead_of_all
+    expect: FAIL
+    note: >
+      A single service is fully audited and the rest are not covered at all.
+      audit_logging_configured is still true; the composite flag is false.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"audit_configs":[{"service":"storage.googleapis.com","log_types":["ADMIN_READ","DATA_READ","DATA_WRITE"],"exempted_members":[],"exempted_member_count":0}]},"summary":{"audit_logging_configured":true,"audit_all_services_configured":false,"audit_full_log_types_on_all_services":false,"audit_exempted_member_count":0}}}'
+
+  - name: value_is_no_longer_a_boolean
+    expect: FAIL
+    note: >
+      The pattern captures the literal true|false rather than a loose token, so
+      a value that turns null (or a string, or an object) yields zero matches
+      and fails the presence rule instead of reading as compliant.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"audit_configs":[]},"summary":{"audit_logging_configured":false,"audit_all_services_configured":false,"audit_full_log_types_on_all_services":null,"audit_exempted_member_count":0}}}'
+
+  - name: audit_rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. The posture reads clean and the envelope is intact, but the
+      key this validator reads is gone, so MATCH_COUNT is zero and the presence
+      rule fails. A read-a-value validator guards itself; no integrity partner
+      is needed.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"audit_configs":[{"service":"allServices","log_types":["ADMIN_READ","DATA_READ","DATA_WRITE"],"exempted_members":[],"exempted_member_count":0}]},"summary":{"audit_logging_configured":true,"audit_all_services_configured":true,"audit_full_types_all_services":true,"audit_exempted_member_count":0}}}'

@@ -1,0 +1,19 @@
+# Synthetic artifacts only.
+validator: gcp_sa_role_breadth_flags_present
+cases:
+  - name: per_binding_breadth_flags_present
+    expect: PASS
+    note: passes on any value — this validator asserts structure, not posture.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"project_role_bindings":[{"role":"roles/editor","over_broad_role":true},{"role":"roles/viewer","over_broad_role":false}]}}}'
+
+  - name: breadth_flag_renamed_upstream
+    expect: FAIL
+    note: the drift its partner cannot see.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"project_role_bindings":[{"role":"roles/editor","role_is_over_broad":true},{"role":"roles/viewer","role_is_over_broad":false}]}}}'
+
+  - name: bindings_listed_without_breadth_analysis
+    expect: FAIL
+    note: >
+      getIamPolicy returned bindings but nothing classified them, so zero
+      over-broad bindings would be an unsupported verdict.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"project_role_bindings":[{"role":"roles/editor"},{"role":"roles/viewer"}]}}}'

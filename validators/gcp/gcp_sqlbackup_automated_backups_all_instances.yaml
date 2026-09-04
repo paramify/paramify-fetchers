@@ -1,0 +1,30 @@
+key: gcp_sqlbackup_automated_backups_all_instances
+name: Cloud SQL Automated Backups Cover Every Instance
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Cloud SQL instance in the project has automated backups enabled, so the
+  project rollup reports 100% backup coverage (KSI-RPL-ABO). Does NOT assert how
+  many backups are retained, how long they are kept, where they are stored, or
+  that any restore has ever been exercised. Reads only the project rollup — the
+  per-instance reading is `gcp_sqlbackup_no_instance_without_automated_backups`.
+  A project with no Cloud SQL instances reports 0% and fails: this evidence set
+  presumes at least one instance is in scope.
+
+# Reads a value, so it guards itself: the MATCH_COUNT rule proves the rollup was
+# present before the threshold rule reads it. No exit_code anchor — collection
+# health is asserted once for the set by `collection_succeeded`, so groups start
+# at 1. The closing quote in the anchor keeps it off the neighbouring
+# `backup_enabled_instances` and per-instance `backup_enabled` keys.
+regex: '"backup_enabled_percentage":\s*(?<backup_enabled_percentage>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-BACKUP

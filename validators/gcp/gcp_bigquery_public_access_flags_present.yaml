@@ -1,0 +1,24 @@
+key: gcp_bigquery_public_access_flags_present
+name: BigQuery Dataset Public Access Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-dataset public-access flags are present in the evidence and still carry a
+  boolean, so a zero count of publicly accessible datasets reflects posture
+  rather than an unreadable payload. Does NOT assert what those flags say.
+
+# Integrity partner to `gcp_bigquery_no_publicly_accessible_datasets`. Anchors one
+# level up from the violation: that validator counts `"publicly_accessible": true`,
+# this one proves the key exists and holds a scalar boolean — a value reshaped to
+# an object or nulled would silence the violation counter, and this catches it.
+# It also fails on a project reporting zero datasets, where there is no posture
+# to read.
+regex: '"publicly_accessible":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-BIGQUERY-CONFIG

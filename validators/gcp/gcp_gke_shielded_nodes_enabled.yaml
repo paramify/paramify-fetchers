@@ -1,0 +1,29 @@
+key: gcp_gke_shielded_nodes_enabled
+name: GKE Shielded Nodes Enabled On Every Cluster
+type: AUTOMATED
+role: configuration
+statement: >
+  No GKE cluster in the project reports shielded nodes turned off, so node VMs
+  boot with secure boot and integrity monitoring and can attest their identity to
+  the control plane. Does not assert confidential computing, node auto-upgrade,
+  or anything about the workloads running on those nodes.
+
+# INVERTED POLARITY on the flag: the regex matches only the disabled state and
+# the rule requires none of it. Shielded nodes is on by default for current GKE
+# versions and costs nothing to keep, so a cluster that has it off is a
+# deliberate downgrade rather than an architecture choice.
+#
+# Per-cluster assertion, so it is a violation count and CANNOT guard itself.
+# `gcp_gke_shielded_nodes_flag_recorded` is its mandatory integrity partner.
+#
+# No exit_code anchor — collection health is asserted once for the set by
+# validators/common/collection_succeeded.yaml.
+regex: '"shielded_nodes_enabled":\s*false'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-GKE-CONFIG

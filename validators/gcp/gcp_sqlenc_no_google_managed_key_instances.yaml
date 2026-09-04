@@ -1,0 +1,33 @@
+key: gcp_sqlenc_no_google_managed_key_instances
+name: No Cloud SQL Instance Left On Google-Managed Key Custody
+type: AUTOMATED
+role: configuration
+statement: >
+  No individual Cloud SQL instance reports Google-managed disk encryption. This
+  reads the per-instance records rather than the rollup, so it still fails when
+  the summary math and the instance list disagree — a summary that says 100%
+  over a list containing a Google-managed instance is caught here and nowhere
+  else. Does NOT assert that the data is encrypted (Cloud SQL always encrypts at
+  rest; this is about who holds the key), and does NOT assert that the instance
+  list is complete — that a Google-managed instance was omitted from the payload
+  entirely is outside what any regex over this evidence can see.
+
+# Counts violations, so it CANNOT guard itself — zero matches is its pass
+# condition, and an empty project or a renamed key both read as zero. Its
+# mandatory integrity partner is `gcp_sqlenc_key_custody_flags_present`.
+#
+# The key is anchored with its closing quote, so it does not splice into the
+# summary's `cmek_instances` or `cmek_percentage` (verified in Node against real
+# evidence: one match on the per-instance flag, none on the rollup keys).
+# Matching the literal `false` token, rather than negating `true`, follows the
+# landed Cloud Storage boolean-flag precedent: a value reshaped to a string
+# stops this pattern matching and the integrity partner is what fails.
+regex: '"cmek":\s*false'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-ENC

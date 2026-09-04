@@ -1,0 +1,19 @@
+# Synthetic artifacts only.
+validator: gcp_apikey_wildcard_target_flags_present
+cases:
+  - name: wildcard_rollup_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","targets_all_cloud_apis":false}]},"summary":{"total_api_keys":1,"keys_targeting_all_cloud_apis":0}}}'
+
+  - name: rollup_present_on_a_project_with_no_keys
+    expect: PASS
+    note: >
+      Why the anchor is the summary rollup. A key with no api_targets at all has
+      no per-target wildcard_service flag, and an empty project has neither; both
+      are legitimate postures that must not fail an integrity check.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[]},"summary":{"total_api_keys":0,"keys_targeting_all_cloud_apis":0}}}'
+
+  - name: wildcard_rollup_renamed_upstream
+    expect: FAIL
+    note: the drift this validator exists to catch on behalf of its counting partner
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","key_targets_all_cloud_apis":false}]},"summary":{"total_api_keys":1,"count_keys_targeting_all_cloud_apis":0}}}'

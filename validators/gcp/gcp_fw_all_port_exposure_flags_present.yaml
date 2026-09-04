@@ -1,0 +1,27 @@
+key: gcp_fw_all_port_exposure_flags_present
+name: GCP Firewall All-Port Exposure Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  The per-rule all-port exposure flag is present in the evidence as a readable
+  boolean, so a zero count of rules opening every port to the internet reflects
+  posture rather than an unreadable payload. Does NOT assert the flag is false —
+  that is `gcp_fw_no_rule_exposes_all_ports_to_internet`.
+
+# Integrity partner to `gcp_fw_no_rule_exposes_all_ports_to_internet`. Anchors
+# one level up from the violation: that validator counts the flag being true,
+# this one proves the flag exists and is a boolean.
+#
+# It will NOT accept the `allowed[].all_ports` sub-key as a stand-in — the
+# leading quote requires the full key name — which is the point: if the derived
+# per-rule flag is dropped upstream, the raw sub-key is still present and would
+# have masked the loss.
+regex: '"exposes_all_ports":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-FW-RULES

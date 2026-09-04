@@ -1,0 +1,28 @@
+validator: gcp_kms_no_public_iam_members
+cases:
+  - name: no_public_grants
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"crypto_keys":[{"key_id":"key-one","iam_bindings":[{"role":"roles/cloudkms.cryptoKeyEncrypterDecrypter","members":["serviceAccount:example@example.iam.gserviceaccount.com"]}],"public_members":[],"publicly_accessible":false}]}}}'
+
+  - name: key_granted_to_all_users
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"crypto_keys":[{"key_id":"key-one","iam_bindings":[{"role":"roles/cloudkms.cryptoKeyDecrypter","members":["allUsers"]}],"public_members":["allUsers"],"publicly_accessible":true}]}}}'
+
+  - name: key_ring_granted_to_all_authenticated_users
+    expect: FAIL
+    note: >
+      A public grant on the RING is inherited by every key under it, so the ring
+      is as much a violation as the key. The regex reads raw member strings, so it
+      catches both without needing a separate rule per resource type.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"key_rings":[{"key_ring_id":"ring-alpha","iam_bindings":[{"role":"roles/cloudkms.viewer","members":["allAuthenticatedUsers"]}],"public_members":["allAuthenticatedUsers"],"publicly_accessible":true}],"crypto_keys":[]}}}'
+
+  - name: iam_never_collected_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate, and the reason `integrity` exists. Counting violations cannot
+      distinguish "no public grants" from "the IAM policy was never collected" —
+      zero matches is this validator's pass condition. On its own it reports PASS
+      on an artifact where nothing about IAM was read at all. Its partner
+      gcp_kms_iam_bindings_present is what fails; see the set-level case in
+      set_EVD-GCP-KMS-KEYS.yaml, which is the assertion that actually matters.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"crypto_keys":[{"key_id":"key-one","iam_policy":[],"publicly_accessible":false}]}}}'

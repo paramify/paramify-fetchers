@@ -1,0 +1,41 @@
+# Synthetic artifacts only — invented project, key ring and resource names.
+validator: gcp_disk_inventories_enumerated
+cases:
+  - name: both_inventories_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":false,"kms_key_name":null,"name":"disk-alpha"}],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]}}}'
+
+  - name: both_inventories_present_but_empty
+    expect: PASS
+    note: >
+      A project with no snapshots reports an empty array. That is a real and
+      honest posture, so this validator passes on it — proving the list was
+      enumerated is a different question from proving it holds anything.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[],"snapshots":[]},"summary":{"cmek_disk_percentage":0,"cmek_disks":0,"total_disks":0,"total_snapshots":0}}}'
+
+  - name: snapshot_inventory_dropped
+    expect: FAIL
+    note: >
+      The failure this validator exists for. The disk list alone still carries
+      cmek and kms_key_name, so every other validator in the set goes green while
+      snapshot key custody was never examined at all.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":false,"kms_key_name":null,"name":"disk-alpha"}]}}}'
+
+  - name: snapshot_inventory_renamed_upstream
+    expect: FAIL
+    note: >
+      "disk_snapshots" does not match — the pattern requires the quote
+      immediately before the word — so the count falls to one and this fails.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":false,"kms_key_name":null,"name":"disk-alpha"}],"disk_snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]}}}'
+
+  - name: disk_inventory_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"persistent_disks":[{"cmek":false,"kms_key_name":null,"name":"disk-alpha"}],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]}}}'
+
+  - name: summary_counters_alone_do_not_satisfy_it
+    expect: FAIL
+    note: >
+      total_disks / cmek_disks / google_managed_disks all contain the word
+      "disks". Pinning the opening quote and the "[" is what keeps a summary-only
+      payload from reading as two enumerated inventories.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"cmek_disk_percentage":20,"cmek_disks":1,"cmek_snapshot_percentage":0,"cmek_snapshots":0,"google_managed_disks":4,"google_managed_snapshots":1,"total_disks":5,"total_snapshots":1}}}'

@@ -1,0 +1,35 @@
+key: gcp_disk_google_managed_records_carry_no_key
+name: Persistent Disk Google-Managed Records Carry No KMS Key
+type: AUTOMATED
+role: configuration
+statement: >
+  No Compute Engine persistent disk or snapshot is reported as using the default
+  Google-managed key while still carrying a Cloud KMS key name, so the custody
+  boolean and the key field never disagree and the CMEK rollups can be read at
+  face value. Does NOT assert anything about how many disks or snapshots use
+  customer-managed keys — it is the mirror of
+  `gcp_disk_cmek_claims_name_a_kms_key`, checking the same two facts in the other
+  direction. It cannot see customer-supplied (CSEK) disks: those carry a key hash
+  rather than a KMS key name, the fetcher records them as Google-managed, and
+  nothing in this payload distinguishes them.
+
+# Why the pair matters here specifically: this evidence set has no posture bar to
+# offer (see gcp_disk_cmek_claims_name_a_kms_key for why 100% CMEK is not
+# assertable), so the per-record custody boolean IS the evidence. These two
+# validators are what make that boolean trustworthy — a record whose flag and key
+# field contradict each other means the rollup counting them is wrong.
+#
+# Counts violations, so it CANNOT guard itself. Same mandatory integrity partners
+# as its mirror: `gcp_disk_key_custody_flags_present` and
+# `gcp_disk_kms_key_name_field_present`. The `[^}]*?` fence keeps the match inside
+# one record; the trailing quote requires kms_key_name to be a string, so the
+# `null` that every Google-managed record actually carries does not match.
+regex: '"cmek":\s*false[^}]*?"kms_key_name":\s*"'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-PD-ENC

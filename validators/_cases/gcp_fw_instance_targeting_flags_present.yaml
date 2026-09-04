@@ -1,0 +1,36 @@
+validator: gcp_fw_instance_targeting_flags_present
+cases:
+  - name: targeting_pair_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-a","open_to_internet":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":0,"total_rules":1}}}'
+
+  - name: applies_to_all_instances_renamed_upstream
+    expect: FAIL
+    note: >
+      The partner validator reports PASS on this artifact while a rule open to
+      the internet sits on every instance in the network.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-default-allow","open_to_internet":true,"priority":65534,"untargeted":true}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":1,"total_rules":1}}}'
+
+  - name: open_to_internet_renamed_upstream
+    expect: FAIL
+    note: the other half of the pair going missing is equally fatal to the count.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"internet_open":true,"name":"rule-default-allow","priority":65534}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":1,"total_rules":1}}}'
+
+  - name: empty_rule_population
+    expect: FAIL
+    note: >
+      Both anchors are per-rule only, so this is the validator that refuses to
+      read an empty firewall_rules array as a clean posture - the case
+      `gcp_fw_sensitive_exposure_lists_present` cannot cover because its key is
+      mirrored into the summary.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":0,"total_rules":0}}}'
+
+  - name: keys_emitted_out_of_order
+    expect: FAIL
+    note: >
+      Both keys are present and readable, but open_to_internet now precedes
+      applies_to_all_instances. This is why the integrity partner asserts the
+      same ORDERED pair rather than the two keys independently: two separate
+      presence checks would both pass here while the violation counter silently
+      counts zero.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"open_to_internet":true,"name":"rule-default-allow","exposes_all_ports":false,"internet_exposed_sensitive_services":[],"applies_to_all_instances":true}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":1,"total_rules":1}}}'

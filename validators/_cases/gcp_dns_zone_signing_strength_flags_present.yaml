@@ -1,0 +1,25 @@
+# Synthetic artifacts only — invented zone labels, nothing from a real tenant.
+validator: gcp_dns_zone_signing_strength_flags_present
+cases:
+  - name: per_zone_flags_present
+    expect: PASS
+    note: >
+      Passes on any value, including a zone that IS weak — this validator asserts
+      readability, not posture. gcp_dns_no_weak_signing_algorithm_zones is what
+      judges the value.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","public":false,"uses_weak_signing_algorithm":false},{"name":"zone-beta","public":true,"uses_weak_signing_algorithm":true}]},"summary":{"dns_api_readable":true,"total_managed_zones":2}}}'
+
+  - name: flag_renamed_upstream
+    expect: FAIL
+    note: The drift its partner cannot see. Envelope intact, per-zone flag gone.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","public":false,"weak_signing":false},{"name":"zone-beta","public":true,"weak_signing":true}]},"summary":{"dns_api_readable":true,"total_managed_zones":2}}}'
+
+  - name: no_managed_zones_at_all
+    expect: FAIL
+    note: >
+      A known and accepted boundary, pinned so it stays visible. A project with
+      no Cloud DNS zones has no population to read, so this evidence cannot prove
+      the control in either direction and the set declines to pass rather than
+      reporting a vacuous green. The same is true of the landed AWS SQS set for
+      an account with no queues.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[],"dns_policies":[]},"summary":{"dns_api_readable":true,"total_managed_zones":0}}}'

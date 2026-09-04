@@ -1,0 +1,26 @@
+# Synthetic artifacts only. Invented principals on example.com; nothing here
+# comes from a real project.
+validator: gcp_binding_member_lists_present
+cases:
+  - name: member_lists_present
+    expect: PASS
+    note: bindings carry their member lists, so a zero count of public principals means something.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/owner","members":["user:ada@example.com"],"public_members":[]},{"role":"roles/logging.logWriter","members":["serviceAccount:app-runner@example-project.iam.gserviceaccount.com"],"public_members":[]}]},"summary":{"total_bindings":2,"public_bindings":0}}}'
+
+  - name: member_lists_dropped_upstream
+    expect: FAIL
+    note: >
+      The failure this validator exists for. Bindings report only a member
+      count, so gcp_binding_no_public_iam_principals finds no public token and
+      reports compliance. This validator is what turns that into a set-level
+      failure.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/owner","member_count":1},{"role":"roles/logging.logWriter","member_count":1}]},"summary":{"total_bindings":2,"public_bindings":0}}}'
+
+  - name: only_derived_member_keys_remain
+    expect: FAIL
+    note: >
+      Fencing check. The payload is full of keys ending in _members —
+      public_members, external_members, service_account_members,
+      exempted_members — and none of them is the binding's own member list. The
+      leading quote in the anchor is what keeps those from standing in for it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/owner","public_members":[],"external_members":[],"service_account_members":[],"consumer_account_members":[]}],"audit_configs":[{"service":"allServices","exempted_members":[]}]},"summary":{"total_bindings":1,"public_bindings":0,"public_members":[]}}}'

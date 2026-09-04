@@ -1,0 +1,31 @@
+key: gcp_vpc_every_network_has_subnets
+name: Every GCP VPC Network Carries Subnets
+type: AUTOMATED
+role: configuration
+statement: >
+  No VPC network in the project is left without subnets — every network the
+  evidence lists actually carries the address space it is meant to segment, so
+  the routing and peering domain each network defines corresponds to real
+  workloads. Does not assert that the subnets are sized, placed or configured
+  correctly.
+
+# Neither the value-reading form nor the violation-counting form: the regex
+# matches the COMPLIANT LITERAL (the empty list) and requires it to be present.
+# That makes it self-guarding in both directions and it therefore needs no
+# integrity partner — a non-empty list yields zero matches and fails, and a
+# renamed rollup key also yields zero matches and fails. Zero matches is never
+# this validator's pass condition, which is the property a violation count
+# lacks.
+#
+# It doubles as a cross-check on the collection itself: subnets arrive from a
+# single aggregatedList call, so a partial subnet read pushes every network into
+# this list and the validator goes red rather than quietly under-reporting.
+regex: '"networks_without_subnets":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-VPC-CONFIG

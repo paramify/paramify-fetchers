@@ -1,0 +1,27 @@
+# Synthetic artifacts only — invented project, key ring and resource names.
+validator: gcp_disk_key_custody_flags_present
+cases:
+  - name: custody_flags_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":true,"kms_key_name":"projects/example-project/locations/example-region/keyRings/example-ring/cryptoKeys/example-key","name":"disk-alpha"},{"cmek":false,"kms_key_name":null,"name":"disk-beta"}],"snapshots":[{"cmek":false,"disk_size_gb":"10","kms_key_name":null,"name":"snap-alpha"}]}}}'
+
+  - name: custody_flag_renamed_upstream
+    expect: FAIL
+    note: The drift that silences both violation counters. This is the guard that catches it.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"custody":"customer_managed","kms_key_name":null,"name":"disk-alpha"}],"snapshots":[]}}}'
+
+  - name: custody_flag_reshaped_to_a_quoted_string
+    expect: FAIL
+    note: >
+      A bare boolean is what both violation regexes match on. Quoting the value
+      is a shape change that would silence them just as effectively as a rename,
+      so the pattern pins the token, not just the key.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"cmek":"false","kms_key_name":null,"name":"disk-alpha"}],"snapshots":[]}}}'
+
+  - name: empty_inventories
+    expect: FAIL
+    note: >
+      Deliberate. A project reporting no disks and no snapshots has no key
+      custody to read, so an emptied payload cannot be mistaken for one whose
+      custody claims all check out.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[],"snapshots":[]},"summary":{"cmek_disk_percentage":0,"cmek_disks":0,"total_disks":0,"total_snapshots":0}}}'

@@ -1,0 +1,26 @@
+# Synthetic artifacts only.
+validator: gcp_apikey_keys_within_rotation_age
+cases:
+  - name: no_key_past_the_rotation_interval
+    expect: PASS
+    note: >
+      The posture collected when these validators were authored — one of the two
+      assertions in this set the live project already satisfies.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","age_days":12,"past_rotation_age":false}]},"summary":{"total_api_keys":1,"rotation_age_days":90,"keys_past_rotation_age":0,"oldest_key_age_days":12}}}'
+
+  - name: a_key_is_past_the_rotation_interval
+    expect: FAIL
+    note: >
+      The stale flag sits on the key as well as the rollup. Counting the non-zero
+      form catches it wherever it appears, where a MATCH_GROUP form would read
+      whichever per-key copy happened to serialize first.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","age_days":12,"past_rotation_age":false},{"display_name":"key-two","age_days":400,"past_rotation_age":true}]},"summary":{"total_api_keys":2,"rotation_age_days":90,"keys_past_rotation_age":1,"oldest_key_age_days":400}}}'
+
+  - name: rotation_age_counts_renamed_upstream
+    expect: PASS
+    note: >
+      Cannot be covered here — zero matches is this validator's pass condition, so
+      a renamed anchor reads as zero stale keys.
+      gcp_apikey_rotation_age_counts_present is what fails; see
+      set_EVD-GCP-API-KEYS.yaml, case rotation_age_counts_renamed_upstream.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","age_days":12,"key_past_rotation_age":false},{"display_name":"key-two","age_days":400,"key_past_rotation_age":true}]},"summary":{"total_api_keys":2,"rotation_age_days":90,"count_keys_past_rotation_age":1,"oldest_key_age_days":400}}}'

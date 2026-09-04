@@ -1,0 +1,19 @@
+# Synthetic artifacts only.
+validator: gcp_apikey_restriction_flags_present
+cases:
+  - name: restriction_rollup_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","unrestricted":false}]},"summary":{"total_api_keys":1,"unrestricted_keys":0,"restricted_key_percentage":100}}}'
+
+  - name: rollup_present_on_a_project_with_no_keys
+    expect: PASS
+    note: >
+      Why the anchor is the summary rollup and not the per-key flag. An empty
+      project has no per-key flags at all; anchoring there would fail the most
+      compliant tenant in the fleet on an integrity check.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[]},"summary":{"total_api_keys":0,"unrestricted_keys":0,"restricted_key_percentage":0}}}'
+
+  - name: restriction_rollup_renamed_upstream
+    expect: FAIL
+    note: the drift this validator exists to catch on behalf of its counting partner
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","key_unrestricted":false}]},"summary":{"total_api_keys":1,"count_unrestricted_keys":0,"restricted_key_percentage":100}}}'

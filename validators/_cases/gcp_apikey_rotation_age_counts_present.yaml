@@ -1,0 +1,15 @@
+# Synthetic artifacts only.
+validator: gcp_apikey_rotation_age_counts_present
+cases:
+  - name: rotation_rollup_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","past_rotation_age":false}]},"summary":{"total_api_keys":1,"rotation_age_days":90,"keys_past_rotation_age":0}}}'
+
+  - name: rollup_present_on_a_project_with_no_keys
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[]},"summary":{"total_api_keys":0,"rotation_age_days":90,"keys_past_rotation_age":0}}}'
+
+  - name: rotation_rollup_renamed_upstream
+    expect: FAIL
+    note: the drift this validator exists to catch on behalf of its counting partner
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","key_past_rotation_age":false}]},"summary":{"total_api_keys":1,"rotation_age_days":90,"count_keys_past_rotation_age":0}}}'

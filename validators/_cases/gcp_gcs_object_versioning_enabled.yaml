@@ -1,0 +1,17 @@
+validator: gcp_gcs_object_versioning_enabled
+cases:
+  - name: every_bucket_versioned
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","versioning_enabled":true},{"name":"bucket-beta","versioning_enabled":true}]},"summary":{"total_buckets":2,"versioned_buckets":2}}}'
+
+  - name: one_bucket_unversioned
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","versioning_enabled":true},{"name":"bucket-beta","versioning_enabled":false}]},"summary":{"total_buckets":2,"versioned_buckets":1}}}'
+
+  - name: versioning_flag_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3, expecting PASS: a violation counter reads a missing key as
+      zero violations. gcp_gcs_versioning_flag_recorded is the partner that
+      turns this into a set-level FAIL.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","versioning":true},{"name":"bucket-beta","versioning":false}]},"summary":{"total_buckets":2,"versioned_buckets":1}}}'

@@ -1,0 +1,23 @@
+validator: gcp_lbtls_ssl_policy_minimum_version_present
+cases:
+  - name: policy_minimums_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"ssl_policies":[{"name":"policy-strict","min_tls_version":"TLS_1_2","profile":"MODERN"}]},"summary":{"total_ssl_policies":1}}}'
+
+  - name: policy_minimum_key_renamed
+    expect: FAIL
+    note: this is the failure that covers gcp_lbtls_no_weak_ssl_policy_minimums
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"ssl_policies":[{"name":"policy-legacy","minimum_tls_version":"TLS_1_0","profile":"COMPATIBLE"}]},"summary":{"total_ssl_policies":1}}}'
+
+  - name: proxy_records_alone_do_not_satisfy_it
+    expect: FAIL
+    note: >
+      The policy array is gone but the proxies still carry
+      `effective_min_tls_version`, whose name ends in the same characters. If the
+      anchor lost its leading quote this guard would hold on evidence that has no
+      SSL policies in it at all.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","effective_min_tls_version":"TLS_1_2"}],"ssl_policies":[]},"summary":{"default_min_tls_version_when_no_policy":"TLS_1_0","ssl_policy_min_tls_versions":[],"total_ssl_policies":0}}}'
+
+  - name: payload_emptied
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed"},"payload":{}}'

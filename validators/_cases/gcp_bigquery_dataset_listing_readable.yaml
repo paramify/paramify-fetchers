@@ -1,0 +1,18 @@
+validator: gcp_bigquery_dataset_listing_readable
+cases:
+  - name: api_answered_for_the_project
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"bigquery_api_readable":true,"non_public_dataset_percentage":100,"total_datasets":2}}}'
+
+  - name: bigquery_api_disabled_on_the_project
+    expect: FAIL
+    note: >
+      The fetcher tolerates a disabled BigQuery API and still exits 0, so
+      collection_succeeded passes here. Without this validator the only thing
+      distinguishing "no datasets" from "could not look" is an empty rollup.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"bigquery_api_readable":false,"non_public_dataset_percentage":0,"total_datasets":0}}}'
+
+  - name: readable_flag_renamed_upstream
+    expect: FAIL
+    note: direction 3 — the presence rule fails, so the value comparison never passes vacuously.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"api_readable":true,"non_public_dataset_percentage":100,"total_datasets":2}}}'

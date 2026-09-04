@@ -1,0 +1,39 @@
+# Synthetic artifacts only.
+validator: gcp_sqlbackup_retention_meets_weekly_floor
+cases:
+  - name: seven_backups_retained
+    expect: PASS
+    note: >
+      The authored-against posture, and exactly the threshold — Cloud SQL's own
+      default for retainedBackups. Proves the boundary value is inclusive.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","retained_backup_count":7,"retention_unit":"COUNT"}]},"summary":{"minimum_retained_backup_count":7,"maximum_retained_backup_count":7}}}'
+
+  - name: thirty_backups_retained
+    expect: PASS
+    note: >
+      A two-digit value above the floor. The `[1-9][0-9]+` branch has to win here
+      — if only `[7-9]` could match, a fleet retaining 30 backups would read as
+      non-compliant.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","retained_backup_count":30,"retention_unit":"COUNT"}]},"summary":{"minimum_retained_backup_count":30,"maximum_retained_backup_count":30}}}'
+
+  - name: weakest_instance_retains_three
+    expect: FAIL
+    note: >
+      The maximum still clears the floor; the minimum does not. Anchoring on the
+      minimum is what makes this a fleet-wide assertion rather than a reading of
+      whichever instance came first.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","retained_backup_count":14},{"name":"db-two","retained_backup_count":3}]},"summary":{"minimum_retained_backup_count":3,"maximum_retained_backup_count":14}}}'
+
+  - name: no_instance_reports_a_retention_setting
+    expect: FAIL
+    note: >
+      The fetcher writes null when nothing reports retentionSettings. A null must
+      not read as compliant, so the threshold branch has to reject it.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[]},"summary":{"minimum_retained_backup_count":null,"maximum_retained_backup_count":null}}}'
+
+  - name: retention_rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. The threshold lives in the regex, so a renamed key yields zero
+      matches and the presence rule fails — it cannot be read as "no violations".
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","retained_backup_count":3}]},"summary":{"min_retained_backups":3}}}'

@@ -1,0 +1,35 @@
+# Synthetic artifacts only. Service names below are Google's own public API
+# hostnames, not tenant data.
+validator: gcp_apikey_no_all_cloud_api_targets
+cases:
+  - name: keys_target_named_services
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","api_targets":[{"service":"example.googleapis.com","wildcard_service":false}],"targets_all_cloud_apis":false}]},"summary":{"total_api_keys":1,"keys_targeting_all_cloud_apis":0}}}'
+
+  - name: project_holds_no_api_keys
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[]},"summary":{"total_api_keys":0,"keys_targeting_all_cloud_apis":0}}}'
+
+  - name: a_key_targets_the_cloudapis_wildcard
+    expect: FAIL
+    note: >
+      A restriction in form only — this key can still call every Cloud API. All
+      three readings fire at once here.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","api_targets":[{"service":"example.googleapis.com","wildcard_service":false}],"targets_all_cloud_apis":false},{"display_name":"key-two","api_targets":[{"service":"cloudapis.googleapis.com","wildcard_service":true}],"targets_all_cloud_apis":true}]},"summary":{"total_api_keys":2,"keys_targeting_all_cloud_apis":1}}}'
+
+  - name: only_the_derived_flag_renamed
+    expect: FAIL
+    note: >
+      Why the regex reads three anchors. The derived per-key boolean is gone, but
+      the raw per-target wildcard_service flag and the rollup both still report
+      the offender.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","api_targets":[{"service":"cloudapis.googleapis.com","wildcard_service":true}],"key_targets_all_cloud_apis":true}]},"summary":{"total_api_keys":1,"keys_targeting_all_cloud_apis":1}}}'
+
+  - name: wildcard_flags_renamed_upstream
+    expect: PASS
+    note: >
+      Cannot be covered here — zero matches is this validator's pass condition, so
+      a payload with all three anchors renamed reads as zero wildcard targets.
+      gcp_apikey_wildcard_target_flags_present is what fails; see
+      set_EVD-GCP-API-KEYS.yaml, case wildcard_target_flags_renamed_upstream.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"api_keys":[{"display_name":"key-one","api_targets":[{"service":"cloudapis.googleapis.com","service_is_wildcard":true}],"key_targets_all_cloud_apis":true}]},"summary":{"total_api_keys":1,"count_keys_targeting_all_cloud_apis":1}}}'

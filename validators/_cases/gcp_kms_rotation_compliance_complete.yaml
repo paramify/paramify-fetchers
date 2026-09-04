@@ -1,0 +1,33 @@
+validator: gcp_kms_rotation_compliance_complete
+cases:
+  - name: every_eligible_key_rotates_within_the_interval
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"rotation_eligible_keys":3,"keys_meeting_rotation_interval":3,"rotation_interval_days":90,"rotation_compliance_percentage":100}}}'
+
+  - name: two_keys_carry_no_rotation_period
+    expect: FAIL
+    note: >
+      The real posture collected from a live project when these were authored:
+      5 of 7 rotation-eligible keys meet the interval, 2 carry no rotation period
+      at all. This validator correctly fails on that evidence.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"rotation_eligible_keys":7,"keys_meeting_rotation_interval":5,"keys_without_rotation_period":2,"rotation_interval_days":90,"rotation_compliance_percentage":71}}}'
+
+  - name: rotation_period_longer_than_the_interval
+    expect: FAIL
+    note: >
+      The threshold half of the rule. meets_rotation_interval is false for a key
+      whose period exceeds 90 days, so the rollup drops below 100 — no numeric
+      day comparison happens in the regex, which is what keeps "180" from
+      comparing as less than "90" lexicographically.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"rotation_eligible_keys":2,"keys_meeting_rotation_interval":1,"rotation_interval_days":90,"longest_rotation_period_days":180,"rotation_compliance_percentage":50}}}'
+
+  - name: no_eligible_keys_or_api_unreadable
+    expect: FAIL
+    note: >
+      coverage_percentage returns 0 for an empty denominator, so an empty project
+      does not pass vacuously here.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"rotation_eligible_keys":0,"keys_meeting_rotation_interval":0,"rotation_compliance_percentage":0}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"rotation_eligible_keys":3,"keys_meeting_rotation_interval":3,"rotation_compliance_pct":100}}}'

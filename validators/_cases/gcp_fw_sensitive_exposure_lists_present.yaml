@@ -1,0 +1,24 @@
+validator: gcp_fw_sensitive_exposure_lists_present
+cases:
+  - name: exposure_lists_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-a","open_to_internet":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"rules_open_to_internet":1,"total_rules":1}}}'
+
+  - name: exposure_key_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the integrity role exists for. The partner validator
+      `gcp_fw_no_sensitive_port_open_to_internet` reports PASS on this exact
+      artifact while an SSH exposure sits in plain sight under a different key;
+      this one fails because the key it proves is gone.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":false,"exposed_services":["ssh"],"exposes_all_ports":false,"name":"rule-admin","open_to_internet":true,"priority":1000}]},"summary":{"exposed_services":["ssh"],"rules_open_to_internet":1,"total_rules":1}}}'
+
+  - name: empty_rule_population_still_passes
+    expect: PASS
+    note: >
+      The honest boundary of this validator. The key it anchors on is mirrored
+      into payload.summary, so a project with zero firewall rules satisfies it
+      on the summary alone. Proving the rule population is real is
+      `gcp_fw_instance_targeting_flags_present`, whose anchors are per-rule
+      only; the set-level case `empty_rule_population` is where that is proven.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[]},"summary":{"internet_exposed_sensitive_services":[],"rules_open_to_internet":0,"total_rules":0}}}'

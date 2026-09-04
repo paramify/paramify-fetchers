@@ -1,0 +1,23 @@
+key: gcp_kms_iam_bindings_present
+name: Cloud KMS IAM Bindings Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-key and per-key-ring IAM binding lists are present in the evidence, so a
+  zero count of public grants reflects the collected policy rather than a policy
+  that was never read.
+
+# Integrity partner to `gcp_kms_no_public_iam_members`. That validator hunts for
+# allUsers / allAuthenticatedUsers member strings; its one blind spot is an
+# evidence file where getIamPolicy was never collected or the block was renamed,
+# because then no member string appears anywhere and the violation count is
+# vacuously zero. This anchors one level up, on the container itself.
+regex: '"iam_bindings":\s*\['
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-KMS-KEYS

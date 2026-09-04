@@ -1,0 +1,37 @@
+key: gcp_vpc_all_subnets_have_flow_logs
+name: GCP VPC Flow Logs Enabled On Every Subnet
+type: AUTOMATED
+role: configuration
+statement: >
+  Every subnet in the project has VPC flow logs turned on, so traffic to and
+  from every workload subnet is recorded. Does not assert how the logs are
+  tuned — sampling rate, aggregation interval, metadata setting and capture
+  filter are deliberately out of scope — nor where the logs are retained.
+
+# INVERTED POLARITY: zero unlogged subnets is compliant. The regex matches only
+# the bad state.
+#
+# Per-subnet assertion over a list that can run to dozens of entries (44 in the
+# run these were authored from), so MATCH_GROUP is unusable — it reads the first
+# match only. Inverted into a violation count, which means it CANNOT guard
+# itself: zero matches is its pass condition.
+# `gcp_vpc_subnet_flow_log_flags_present` is its mandatory integrity partner.
+#
+# ASSERTS THE BOOLEAN, NOT THE SAMPLING RATE. `flow_log_sampling` is a float
+# (0.5 in the authoring run), so an integer-shaped pattern silently misses it
+# and a string comparison on "0.5" is not a numeric one. The enabled/disabled
+# flag is the part of flow-log posture that is unambiguous.
+#
+# EXPECT THIS TO FAIL WHILE THE DEFAULT NETWORK EXISTS. The auto-mode `default`
+# network creates a subnet in every region with flow logs off, so a project
+# keeping it fails here by construction — correctly. Deleting the default
+# network (see gcp_vpc_default_network_absent) is the fix, not an exception.
+regex: '"flow_logs_enabled":\s*false'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-VPC-CONFIG

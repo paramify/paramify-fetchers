@@ -1,0 +1,23 @@
+# Synthetic artifacts only — invented zone labels, nothing from a real tenant.
+validator: gcp_dns_non_existence_proof_fields_present
+cases:
+  - name: per_zone_fields_present
+    expect: PASS
+    note: >
+      Passes on any value, null included — the fetcher emits this field for every
+      zone whether or not it is signed, which is what makes it a stable anchor in
+      a project where nothing is signed.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","public":false,"dnssec_enabled":false,"dnssec_non_existence":null},{"name":"zone-beta","public":true,"dnssec_enabled":true,"dnssec_non_existence":"nsec"}]},"summary":{"dns_api_readable":true,"total_managed_zones":2}}}'
+
+  - name: field_renamed_upstream
+    expect: FAIL
+    note: The drift its partner cannot see. Envelope intact, per-zone field gone.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[{"name":"zone-alpha","public":false,"dnssec_enabled":false,"nsec_mode":null},{"name":"zone-beta","public":true,"dnssec_enabled":true,"nsec_mode":"nsec"}]},"summary":{"dns_api_readable":true,"total_managed_zones":2}}}'
+
+  - name: no_managed_zones_at_all
+    expect: FAIL
+    note: >
+      Same accepted boundary as gcp_dns_zone_signing_strength_flags_present: no
+      zones means no population to read, so the set declines to pass rather than
+      reporting a vacuous green.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_zones":[],"dns_policies":[]},"summary":{"dns_api_readable":true,"total_managed_zones":0}}}'

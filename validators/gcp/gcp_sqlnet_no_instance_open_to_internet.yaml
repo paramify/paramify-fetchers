@@ -1,0 +1,42 @@
+key: gcp_sqlnet_no_instance_open_to_internet
+name: No Cloud SQL Instance Whitelists The Open Internet
+type: AUTOMATED
+role: configuration
+statement: >
+  No Cloud SQL instance authorizes 0.0.0.0/0 or ::/0, so no instance is
+  reachable from anywhere on the internet. Does NOT assert that instances have
+  no public IP: a public IP with zero authorized networks is not reachable, and
+  those are different facts (Cloud SQL admits a connection only from an
+  authorized network, so the address existing is not the exposure). Does NOT
+  judge the narrower CIDRs that are authorized, nor whether they are
+  time-limited.
+
+# Counts violations, so it CANNOT guard itself. Mandatory integrity partner:
+# `gcp_sqlnet_internet_exposure_flags_present`.
+#
+# TWO INDEPENDENT READS OF THE SAME FACT, as an alternation. The first branch is
+# the fetcher's derived flag, which appears both per instance and per authorized
+# network — either one being true is a violation, and double counting is
+# harmless when the rule requires zero. The second branch is the raw CIDR the
+# API returned, so an upstream rename or regression of the derived flag still
+# leaves a real 0.0.0.0/0 counted. In this payload the literal key `"value"`
+# occurs only inside authorized_networks entries — database_flags is keyed by
+# the flag's own name, so there is no `"value":` there to collide with.
+#
+# NO KEY SPANNING. Each branch matches one key. A pattern reaching from, say, a
+# public-IP flag to an authorized-network entry would splice across two adjacent
+# instances and invent an exposure that no instance has (measured in Node: the
+# naive span matches on a two-instance artifact where both instances are
+# benign). Fencing that with `[^}]*?` is not available here either — instance
+# records contain nested objects (security_flags, authorized_networks), so the
+# fence would break on legitimate violations instead. Single-key branches sidestep
+# the whole class. See validators/_cases/set_EVD-GCP-CLOUDSQL-NET.yaml.
+regex: '(?:"open_to_internet":\s*true|"value":\s*"(?:0\.0\.0\.0/0|::/0)")'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-NET

@@ -1,0 +1,43 @@
+key: gcp_vm_os_login_enforced_on_all_instances
+name: GCP Compute Instances All Enforce OS Login
+type: AUTOMATED
+role: configuration
+statement: >
+  OS Login is in effect on every Compute Engine instance in the project — either
+  inherited from the project-wide metadata default or set on the instance
+  itself — so SSH access is governed by IAM identities and their lifecycle
+  rather than by metadata SSH keys, or the project holds no instances at all.
+  Does NOT assert OS Login two-factor authentication, does NOT assert
+  block-project-ssh-keys (OS Login makes project-wide keys inert on its own),
+  and says nothing about which principals hold the OS Login roles.
+
+# NORMAL POLARITY, read as a positive match count rather than MATCH_GROUP, for
+# the same reason as `gcp_vm_shielded_vm_enabled_on_all_instances`:
+# `os_login_percentage` is coverage_percentage(os_login, total), which returns 0
+# on an empty project, so a MATCH_GROUP EQUALS 100 rule would fail a project with
+# no instances. Matching only the compliant readings keeps this self-guarding —
+# a partial rollup and a renamed rollup both produce no match and both fail.
+#
+# The rollup is computed from the EFFECTIVE per-instance value (instance metadata
+# when set, otherwise the project default; `os_login_source` records which), so
+# this covers both the project-wide setting and per-instance overrides in one
+# assertion. A project that enables OS Login project-wide but has one instance
+# overriding it to false fails here, which is the correct reading.
+#
+# GKE-managed nodes are deliberately NOT exempted, and cannot be: there is no
+# per-object scoping, and the anchor is a project-wide rollup. Nor should they
+# be — GKE node pools inherit the project's enable-oslogin metadata, so turning
+# OS Login on at the project brings the node VMs with it.
+#
+# The (?![0-9]) guards stop `100` matching inside a longer number and `0`
+# matching a leading digit. No exit_code anchor — collection health is asserted
+# once for the set by `collection_succeeded`.
+regex: '"os_login_percentage":\s*100(?![0-9])|"total_instances":\s*0(?![0-9])'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-VM-CONFIG

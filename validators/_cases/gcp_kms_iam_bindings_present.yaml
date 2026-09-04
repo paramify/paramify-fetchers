@@ -1,0 +1,13 @@
+validator: gcp_kms_iam_bindings_present
+cases:
+  - name: bindings_collected
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"crypto_keys":[{"key_id":"key-one","iam_bindings":[]}],"key_rings":[{"key_ring_id":"ring-alpha","iam_bindings":[]}]}}}'
+
+  - name: bindings_key_renamed_upstream
+    expect: FAIL
+    note: >
+      The drift this validator exists to catch. The envelope is intact and the
+      keys are listed, but the IAM container is gone, so a zero count of public
+      members proves nothing.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"crypto_keys":[{"key_id":"key-one","iam_policy":[]}],"key_rings":[{"key_ring_id":"ring-alpha","iam_policy":[]}]}}}'

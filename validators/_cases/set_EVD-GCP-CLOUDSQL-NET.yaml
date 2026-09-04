@@ -1,0 +1,95 @@
+# Set-level: every validator naming EVD-GCP-CLOUDSQL-NET, combined the way
+# Paramify combines them (ERROR > FAIL > PASS). This is where the integrity
+# validators earn their place — each violation counter passes its own drifted
+# artifact, so only the set can prove the drift is caught.
+#
+# Every case here carries exit_code 0 so the verdict is decided by the Cloud SQL
+# network posture alone; collection health has its own case file
+# (validators/_cases/collection_succeeded.yaml) and is not re-proved here.
+evidence_set: EVD-GCP-CLOUDSQL-NET
+cases:
+  - name: public_ip_instance_with_no_authorized_networks
+    expect: PASS
+    note: >
+      The posture shape observed on the project these validators were authored
+      from (synthetic names and values), and the distinction the set is built
+      around. The instance HAS a public IP and the set still passes: with zero
+      authorized networks nothing on the internet can open a connection, so a
+      public address is not an exposure. A set that asserted private-IP-only
+      would fail this, and would fail most legitimate Cloud SQL architectures
+      with it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"private_ip_only":false,"authorized_networks":[],"authorized_network_count":0,"open_to_internet":false,"ssl_required":true,"min_tls_version":null,"unset_security_flags":["local_infile","skip_show_database","tls_version"]}]},"summary":{"cloud_sql_api_readable":true,"total_instances":1,"public_ip_instances":1,"private_ip_only_percentage":0,"instances_with_authorized_networks":0,"instances_open_to_internet":0,"instances_with_min_tls_version":0,"instances_with_unset_security_flags":1,"ssl_required_instances":1,"ssl_required_percentage":100}}}'
+
+  - name: instance_whitelists_the_open_internet
+    expect: FAIL
+    note: gcp_sqlnet_no_instance_open_to_internet is the failing validator; SSL is fine.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[{"name":"anywhere","value":"0.0.0.0/0","expiration_time":null,"open_to_internet":true}],"authorized_network_count":1,"open_to_internet":true,"open_authorized_networks":["0.0.0.0/0"],"ssl_required":true}]},"summary":{"cloud_sql_api_readable":true,"total_instances":1,"public_ip_instances":1,"instances_with_authorized_networks":1,"instances_open_to_internet":1,"ssl_required_instances":1,"ssl_required_percentage":100}}}'
+
+  - name: instance_accepts_unencrypted_connections
+    expect: FAIL
+    note: >
+      The other posture failure, on an instance that is otherwise closed:
+      gcp_sqlnet_transport_encryption_required and
+      gcp_sqlnet_no_unencrypted_connections_allowed both fail.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":false,"private_ip_only":true,"authorized_networks":[],"authorized_network_count":0,"open_to_internet":false,"ssl_mode":"ALLOW_UNENCRYPTED_AND_ENCRYPTED","ssl_required":false}]},"summary":{"cloud_sql_api_readable":true,"total_instances":1,"public_ip_instances":0,"instances_open_to_internet":0,"ssl_required_instances":0,"ssl_required_percentage":0}}}'
+
+  - name: benign_public_ip_instance_beside_a_restricted_one
+    expect: PASS
+    note: >
+      The object-bridging case, at set level. There is no per-object scoping in
+      this engine, so a pattern reaching from one key to another splices
+      neighbouring array elements together. Instance alpha carries the
+      public-IP flag; instance beta, next to it, carries an authorized network.
+      Both are benign, and the set says so. A validator written as
+      "public_ip": true ... "authorized_networks": [{ matches across the pair
+      and reports an exposure neither instance has — measured in Node, one false
+      match on this exact artifact. Fencing with [^}]*? would not rescue it
+      either: instance records nest objects (authorized_networks,
+      security_flags), so the fence breaks on real violations instead. Every
+      configuration validator in this set matches a single key, which is why
+      this reads PASS.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"private_ip_only":false,"authorized_networks":[],"authorized_network_count":0,"open_to_internet":false,"ssl_required":true},{"name":"sql-beta","engine":"POSTGRES","public_ip":false,"private_ip_only":true,"authorized_networks":[{"name":"vpn","value":"198.51.100.0/24","expiration_time":null,"open_to_internet":false}],"authorized_network_count":1,"open_to_internet":false,"ssl_required":true}]},"summary":{"cloud_sql_api_readable":true,"total_instances":2,"public_ip_instances":1,"private_ip_only_percentage":50,"instances_with_authorized_networks":1,"instances_open_to_internet":0,"ssl_required_instances":2,"ssl_required_percentage":100}}}'
+
+  - name: exposed_instance_beside_a_benign_one
+    expect: FAIL
+    note: >
+      The converse of the bridging case, and the reason it is not enough to show
+      no false positive: a compliant neighbour must not mask a real finding
+      either. Alpha is benign, beta whitelists the world, and the set fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"authorized_network_count":0,"open_to_internet":false,"ssl_required":true},{"name":"sql-beta","engine":"POSTGRES","public_ip":true,"authorized_networks":[{"name":"anywhere","value":"0.0.0.0/0","expiration_time":null,"open_to_internet":true}],"authorized_network_count":1,"open_to_internet":true,"open_authorized_networks":["0.0.0.0/0"],"ssl_required":true}]},"summary":{"cloud_sql_api_readable":true,"total_instances":2,"public_ip_instances":2,"instances_with_authorized_networks":1,"instances_open_to_internet":1,"ssl_required_instances":2,"ssl_required_percentage":100}}}'
+
+  - name: exposure_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the integrity role exists for. gcp_sqlnet_no_instance_open_to_internet
+      counts the open flag and the raw open CIDR, finds neither, and ALONE
+      reports PASS. gcp_sqlnet_internet_exposure_flags_present fails because the
+      key it proves is gone, and the set therefore fails. Delete that integrity
+      validator and this case goes green while the evidence proves nothing —
+      the silent false pass. Every other value here is compliant, so the
+      integrity partner is the only thing failing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"authorized_network_count":0,"internet_reachable":false,"ssl_required":true}]},"summary":{"cloud_sql_api_readable":true,"total_instances":1,"public_ip_instances":1,"instances_open_to_internet":0,"ssl_required_instances":1,"ssl_required_percentage":100}}}'
+
+  - name: ssl_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      Same class, other key. The summary still claims 100 percent so
+      gcp_sqlnet_transport_encryption_required passes, and
+      gcp_sqlnet_no_unencrypted_connections_allowed counts zero violations
+      because the key it reads is gone — while the instance it is hiding
+      genuinely accepts unencrypted connections.
+      gcp_sqlnet_ssl_enforcement_flags_present is the only failing validator.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","engine":"MYSQL","public_ip":true,"authorized_networks":[],"authorized_network_count":0,"open_to_internet":false,"tls_required":false}]},"summary":{"cloud_sql_api_readable":true,"total_instances":1,"public_ip_instances":1,"instances_open_to_internet":0,"ssl_required_instances":1,"ssl_required_percentage":100}}}'
+
+  - name: project_with_no_cloud_sql_instances
+    expect: FAIL
+    note: >
+      Deliberate. A project that lists no Cloud SQL instances — including one
+      where sqladmin.googleapis.com is disabled, which the fetcher records as
+      cloud_sql_api_readable false rather than failing the run — has no posture
+      to read, and the set says so instead of passing vacuously. Three
+      validators fail: the coverage rollup is 0 for an empty population, and
+      both integrity validators find no per-instance keys. A tenant that
+      genuinely runs no Cloud SQL should drop this evidence set rather than
+      soften the validators.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[]},"summary":{"cloud_sql_api_readable":false,"total_instances":0,"instances_by_engine":{},"public_ip_instances":0,"private_ip_only_percentage":0,"instances_with_authorized_networks":0,"instances_open_to_internet":0,"ssl_required_instances":0,"ssl_required_percentage":0}}}'

@@ -1,0 +1,27 @@
+validator: gcp_logging_all_sinks_enabled
+cases:
+  - name: every_sink_enabled
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"sinks":[{"destination_type":"log_bucket","disabled":false,"name":"sink-alpha"},{"destination_type":"cloud_storage","disabled":false,"name":"sink-beta"}]},"summary":{"enabled_sinks":2,"total_sinks":2}}}'
+
+  - name: one_sink_disabled
+    expect: FAIL
+    note: a single disabled sink breaks the enabled == total equality.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"sinks":[{"destination_type":"log_bucket","disabled":false,"name":"sink-alpha"},{"destination_type":"cloud_storage","disabled":true,"name":"sink-beta"}]},"summary":{"enabled_sinks":1,"total_sinks":2}}}'
+
+  - name: no_sinks_at_all
+    expect: FAIL
+    note: >
+      The anti-vacuity case. 0 == 0 is true, so without the `[1-9]\d*` numerator
+      guard a project exporting no logs anywhere would read as compliant. The
+      regex refuses to match a zero numerator, so MATCH_COUNT NOT_EQUALS 0 fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"sinks":[]},"summary":{"enabled_sinks":0,"total_sinks":0}}}'
+
+  - name: sink_rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. `enabled_sinks` renamed to `active_sinks`; the regex stops
+      matching and the presence rule fails loudly. This is why the assertion is
+      built on the rollup pair rather than a per-sink violation count — drift in
+      a violation counter reads as zero violations and passes silently.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"sinks":[{"destination_type":"log_bucket","disabled":false,"name":"sink-alpha"}]},"summary":{"active_sinks":1,"total_sinks":1}}}'

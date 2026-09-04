@@ -1,0 +1,39 @@
+key: gcp_apikey_all_keys_restricted
+name: GCP API Keys Are All Restricted
+type: AUTOMATED
+role: configuration
+statement: >
+  Every API key in the project carries at least one restriction axis — an API
+  service allowlist, or a referrer / IP / Android package / iOS bundle
+  allowlist — or the project holds no API keys at all. Does not assert which
+  axis a key uses, does not require both, and says nothing about how narrow the
+  allowlist is.
+
+# NORMAL POLARITY, read as a positive match count rather than MATCH_GROUP.
+#
+# `restricted_key_percentage` is coverage_percentage(restricted, total), and that
+# helper returns 0 when the denominator is 0. A project with NO API keys — the
+# most defensible posture there is, and Prowler's apikeys_key_exists rule —
+# therefore reports 0%, so the ordinary Form A shape (MATCH_COUNT NOT_EQUALS 0 +
+# MATCH_GROUP[1] EQUALS 100) would fail the best tenant in the fleet. Matching
+# only the compliant readings instead keeps the assertion self-guarding: a
+# partial rollup produces no match and fails, and a renamed rollup also produces
+# no match and fails, so no integrity partner is needed.
+#
+# This is the second, independent reading of the finding that
+# `gcp_apikey_no_unrestricted_keys` counts per key. Kept deliberately: it reads a
+# different summary field, so it still lands if the per-key flag and its rollup
+# both drift.
+#
+# The (?![0-9]) guards stop `100` matching inside a longer number and `0`
+# matching a leading digit. No exit_code anchor — collection health is asserted
+# once for the set by `collection_succeeded`.
+regex: '"restricted_key_percentage":\s*100(?![0-9])|"total_api_keys":\s*0(?![0-9])'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-API-KEYS

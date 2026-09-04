@@ -1,0 +1,25 @@
+key: gcp_sqlbackup_instance_backup_flags_present
+name: Cloud SQL Per-Instance Backup Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  Per-instance `backup_enabled` flags are present in the evidence, so a zero
+  count of instances without automated backups reflects posture rather than an
+  unreadable payload. Also fails when the project holds no readable Cloud SQL
+  instances at all — including when the Cloud SQL Admin API is disabled, which
+  the fetcher records as not-readable while still exiting 0.
+
+# Integrity partner to `gcp_sqlbackup_no_instance_without_automated_backups`.
+# Anchors one level up from the violation: that validator counts
+# `"backup_enabled": false`, this one proves the `backup_enabled` key exists at
+# all. Envelope drift and payload drift are different failures — the set's
+# `collection_succeeded` catches the first, this catches the second.
+regex: '"backup_enabled":\s*'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-BACKUP

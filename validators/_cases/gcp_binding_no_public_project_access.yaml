@@ -1,0 +1,35 @@
+# Synthetic artifacts only. Invented principals on example.com; nothing here
+# comes from a real project.
+validator: gcp_binding_no_public_project_access
+cases:
+  - name: no_public_bindings
+    expect: PASS
+    note: >
+      The compliant posture, and the one the live sample this was authored
+      against reports: public_bindings 0. The human owner is present on purpose
+      to show it is not what this validator looks at.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/owner","members":["user:ada@example.com"],"publicly_granted":false},{"role":"roles/logging.logWriter","members":["serviceAccount:app-runner@example-project.iam.gserviceaccount.com"],"publicly_granted":false}]},"summary":{"total_bindings":2,"public_bindings":0,"public_members":[],"publicly_granted":false}}}'
+
+  - name: one_public_binding
+    expect: FAIL
+    note: >
+      A role granted to allUsers. The top-severity finding this evidence set
+      exists to catch, seen through the fetcher's own rollup.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/viewer","members":["allUsers"],"publicly_granted":true}]},"summary":{"total_bindings":1,"public_bindings":1,"public_members":["allUsers"],"publicly_granted":true}}}'
+
+  - name: ten_public_bindings
+    expect: FAIL
+    note: >
+      Guards the comparison itself. The criteria is EQUALS against the string
+      "0", so a two-digit count must not be read as starting with a zero or
+      otherwise compare equal.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/viewer","members":["allUsers"],"publicly_granted":true}]},"summary":{"total_bindings":13,"public_bindings":10,"public_members":["allUsers","allAuthenticatedUsers"],"publicly_granted":true}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. The envelope is intact and the posture reads clean, but the
+      key this validator reads is gone, so MATCH_COUNT is zero and the presence
+      rule fails. A read-a-value validator guards itself here; the violation
+      counters on this set cannot, which is why they carry integrity partners.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/logging.logWriter","members":["serviceAccount:app-runner@example-project.iam.gserviceaccount.com"],"publicly_granted":false}]},"summary":{"total_bindings":1,"public_binding_count":0,"public_members":[],"publicly_granted":false}}}'

@@ -1,0 +1,17 @@
+# Synthetic artifacts only.
+validator: gcp_sa_key_expiry_flags_present
+cases:
+  - name: per_key_expiry_flags_present
+    expect: PASS
+    note: passes on any value — this validator asserts structure, not posture.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","keys":[{"id":"k1","never_expires":false},{"id":"k2","never_expires":true}]}]}}}'
+
+  - name: key_list_present_but_flag_renamed_upstream
+    expect: FAIL
+    note: the drift its partner cannot see.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","keys":[{"id":"k1","key_never_expires":false},{"id":"k2","key_never_expires":true}]}]}}}'
+
+  - name: key_inventory_missing_entirely
+    expect: FAIL
+    note: a payload with no keys collected cannot support a zero-violations verdict.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example"}]}}}'

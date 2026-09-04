@@ -1,0 +1,17 @@
+validator: gcp_kms_api_readable
+cases:
+  - name: api_answered
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"kms_api_readable":true,"locations_scanned":70,"total_crypto_keys":7}}}'
+
+  - name: kms_api_disabled_on_the_project
+    expect: FAIL
+    note: >
+      The fetcher exits 0 in this state, so the envelope is intact and every
+      count-based validator on the set reads its violations as zero. This is the
+      only validator that names the real cause.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"kms_api_readable":false,"locations_scanned":0,"total_crypto_keys":0}}}'
+
+  - name: flag_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"kms_api_reachable":true,"total_crypto_keys":7}}}'

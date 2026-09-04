@@ -1,0 +1,65 @@
+# Set-level: every validator naming EVD-GCP-KMS-KEYS, combined the way Paramify
+# combines them (ERROR > FAIL > PASS). This is the assertion that matters — the
+# two count-based validators on this set cannot cover their own drift, so only
+# the set can. All artifacts are synthetic.
+evidence_set: EVD-GCP-KMS-KEYS
+cases:
+  - name: clean_kms_posture
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"key_rings":[{"key_ring_id":"ring-alpha","iam_bindings":[],"publicly_accessible":false,"separation_of_duties_violated":false}],"crypto_keys":[{"key_id":"key-one","purpose":"ENCRYPT_DECRYPT","rotation_period_days":90,"meets_rotation_interval":true,"primary_version_state":"ENABLED","iam_bindings":[{"role":"roles/cloudkms.cryptoKeyEncrypterDecrypter","members":["serviceAccount:example@example.iam.gserviceaccount.com"]}],"publicly_accessible":false,"separation_of_duties_violated":false}]},"summary":{"kms_api_readable":true,"total_key_rings":1,"total_crypto_keys":1,"rotation_eligible_keys":1,"keys_meeting_rotation_interval":1,"rotation_compliance_percentage":100,"keys_with_disabled_primary_version":0,"publicly_accessible":false,"keys_violating_separation_of_duties":0}}}'
+
+  - name: key_ring_granted_to_all_users
+    expect: FAIL
+    note: >
+      The critical finding for this evidence set. A public grant on the ring is
+      inherited by every key under it, which makes the customer-managed
+      encryption on every resource referencing those keys decorative.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"key_rings":[{"key_ring_id":"ring-alpha","iam_bindings":[{"role":"roles/cloudkms.cryptoKeyDecrypter","members":["allUsers"]}],"publicly_accessible":true,"separation_of_duties_violated":false}],"crypto_keys":[{"key_id":"key-one","purpose":"ENCRYPT_DECRYPT","meets_rotation_interval":true,"iam_bindings":[],"publicly_accessible":false,"separation_of_duties_violated":false}]},"summary":{"kms_api_readable":true,"total_key_rings":1,"total_crypto_keys":1,"rotation_eligible_keys":1,"keys_meeting_rotation_interval":1,"rotation_compliance_percentage":100,"keys_with_disabled_primary_version":0,"publicly_accessible":true,"publicly_accessible_key_rings":1,"keys_violating_separation_of_duties":0}}}'
+
+  - name: rotation_incomplete
+    expect: FAIL
+    note: >
+      The real posture collected from a live project when these were authored:
+      IAM is clean everywhere, but 2 of 7 rotation-eligible keys carry no
+      rotation period, so the rollup sits at 71.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"key_rings":[{"key_ring_id":"ring-alpha","iam_bindings":[],"publicly_accessible":false,"separation_of_duties_violated":false}],"crypto_keys":[{"key_id":"key-one","purpose":"ENCRYPT_DECRYPT","rotation_period_days":90,"meets_rotation_interval":true,"iam_bindings":[],"publicly_accessible":false,"separation_of_duties_violated":false},{"key_id":"key-two","purpose":"ENCRYPT_DECRYPT","rotation_period_days":null,"meets_rotation_interval":false,"iam_bindings":[],"publicly_accessible":false,"separation_of_duties_violated":false}]},"summary":{"kms_api_readable":true,"total_key_rings":1,"total_crypto_keys":7,"rotation_eligible_keys":7,"keys_meeting_rotation_interval":5,"keys_without_rotation_period":2,"rotation_compliance_percentage":71,"keys_with_disabled_primary_version":0,"publicly_accessible":false,"keys_violating_separation_of_duties":0}}}'
+
+  - name: separation_of_duties_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      One of the two cases the integrity role exists for.
+      gcp_kms_no_separation_of_duties_violations counts
+      "separation_of_duties_violated": true and finds none, so ALONE it reports
+      PASS on an artifact that hides a key granting admin and use to the same
+      principal. Every other validator here is deliberately compliant, so
+      gcp_kms_separation_of_duties_flags_present is the only thing failing.
+      Delete it and this case goes green while the evidence proves nothing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"key_rings":[{"key_ring_id":"ring-alpha","iam_bindings":[],"publicly_accessible":false,"sod_violated":false}],"crypto_keys":[{"key_id":"key-one","purpose":"ENCRYPT_DECRYPT","meets_rotation_interval":true,"iam_bindings":[{"role":"roles/cloudkms.admin","members":["serviceAccount:example@example.iam.gserviceaccount.com"]}],"publicly_accessible":false,"sod_violated":true}]},"summary":{"kms_api_readable":true,"total_key_rings":1,"total_crypto_keys":1,"rotation_eligible_keys":1,"keys_meeting_rotation_interval":1,"rotation_compliance_percentage":100,"keys_with_disabled_primary_version":0,"publicly_accessible":false}}}'
+
+  - name: iam_policy_never_collected
+    expect: FAIL
+    note: >
+      The other integrity case. gcp_kms_no_public_iam_members hunts for allUsers /
+      allAuthenticatedUsers member strings, so its blind spot is an evidence file
+      where the IAM policy was never read — no member string appears anywhere and
+      the violation count is vacuously zero. Everything else here is compliant, so
+      gcp_kms_iam_bindings_present is the only thing failing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"key_rings":[{"key_ring_id":"ring-alpha","iam_policy":[],"publicly_accessible":false,"separation_of_duties_violated":false}],"crypto_keys":[{"key_id":"key-one","purpose":"ENCRYPT_DECRYPT","meets_rotation_interval":true,"iam_policy":[],"publicly_accessible":false,"separation_of_duties_violated":false}]},"summary":{"kms_api_readable":true,"total_key_rings":1,"total_crypto_keys":1,"rotation_eligible_keys":1,"keys_meeting_rotation_interval":1,"rotation_compliance_percentage":100,"keys_with_disabled_primary_version":0,"publicly_accessible":false,"keys_violating_separation_of_duties":0}}}'
+
+  - name: kms_api_disabled_on_the_project
+    expect: FAIL
+    note: >
+      The fetcher exits 0 when the Cloud KMS API is disabled, so collection health
+      sees an intact envelope and keys_with_disabled_primary_version reads 0 and
+      passes — an empty population scoring as clean posture. gcp_kms_api_readable
+      names the real cause; the rotation rollup and both integrity validators fail
+      alongside it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"key_rings":[],"crypto_keys":[],"locations":[]},"summary":{"kms_api_readable":false,"locations_scanned":0,"total_key_rings":0,"total_crypto_keys":0,"rotation_eligible_keys":0,"keys_meeting_rotation_interval":0,"rotation_compliance_percentage":0,"keys_with_disabled_primary_version":0,"publicly_accessible":false,"keys_violating_separation_of_duties":0}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict, but the API discards disposition,
+      so FAIL is the best reachable answer today. What matters is that it does
+      not PASS. See docs/validators_design.md.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"PermissionDenied"},"payload":{}}'

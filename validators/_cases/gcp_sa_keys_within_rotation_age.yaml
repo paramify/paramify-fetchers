@@ -1,0 +1,26 @@
+# Synthetic artifacts only.
+validator: gcp_sa_keys_within_rotation_age
+cases:
+  - name: no_key_past_the_rotation_interval
+    expect: PASS
+    note: >
+      The posture collected when these validators were authored — the one
+      assertion in this set that the live tenant already satisfies.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","user_managed_keys_past_rotation_age":0}]},"summary":{"rotation_age_days":90,"user_managed_keys_past_rotation_age":0}}}'
+
+  - name: an_account_holds_a_stale_key
+    expect: FAIL
+    note: >
+      The stale count sits on the account, not only the rollup. Counting the
+      non-zero form catches it wherever it appears, where a MATCH_GROUP form
+      would read whichever account happened to be serialized first.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","user_managed_keys_past_rotation_age":0},{"email":"sa-two@example","user_managed_keys_past_rotation_age":2}]},"summary":{"rotation_age_days":90,"user_managed_keys_past_rotation_age":2}}}'
+
+  - name: rotation_age_counts_renamed_upstream
+    expect: PASS
+    note: >
+      Cannot be covered here — zero matches is this validator's pass condition, so
+      a renamed key reads as zero stale keys. gcp_sa_key_rotation_age_counts_present
+      is what fails; see set_EVD-GCP-IAM-SA.yaml, case
+      rotation_age_counts_renamed_upstream.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"service_accounts":[{"email":"sa-one@example","keys_past_rotation_age":0},{"email":"sa-two@example","keys_past_rotation_age":2}]},"summary":{"rotation_age_days":90,"keys_past_rotation_age":2}}}'

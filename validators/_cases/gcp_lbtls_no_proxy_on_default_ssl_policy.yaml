@@ -1,0 +1,28 @@
+validator: gcp_lbtls_no_proxy_on_default_ssl_policy
+cases:
+  - name: every_front_end_has_a_policy_attached
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","ssl_policy":"policy-strict","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_2"},{"name":"front-b","ssl_policy":"policy-strict","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_2"}]},"summary":{"total_proxies":2,"proxies_with_ssl_policy":2,"proxies_on_default_ssl_policy":0}}}'
+
+  - name: one_front_end_on_the_gcp_default
+    expect: FAIL
+    note: the live posture these were authored from — one of two proxies unpinned.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","ssl_policy":"policy-strict","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_2"},{"name":"front-b","ssl_policy":null,"uses_default_ssl_policy":true,"effective_min_tls_version":"TLS_1_0"}]},"summary":{"total_proxies":2,"proxies_with_ssl_policy":1,"proxies_on_default_ssl_policy":1}}}'
+
+  - name: policy_attached_but_weak_is_not_this_validators_business
+    expect: PASS
+    note: >
+      States the boundary. Every front end is pinned to a policy the project owns,
+      which is all this validator claims; that the policy is TLS 1.0 is
+      gcp_lbtls_no_weak_ssl_policy_minimums and gcp_lbtls_no_proxy_below_tls_floor,
+      both of which fail on this artifact.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","ssl_policy":"policy-legacy","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_0"}],"ssl_policies":[{"name":"policy-legacy","min_tls_version":"TLS_1_0","permissive_profile":true}]},"summary":{"total_proxies":1,"proxies_on_default_ssl_policy":0}}}'
+
+  - name: default_flag_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. Zero matches is the pass condition, so a renamed
+      `uses_default_ssl_policy` hides an unpinned front end. Its partner
+      gcp_lbtls_default_ssl_policy_flag_present is what fails; see the set-level
+      case in set_EVD-GCP-LB-TLS.yaml.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-b","ssl_policy":null,"on_default_ssl_policy":true,"effective_min_tls_version":"TLS_1_2"}]},"summary":{"total_proxies":1,"proxies_on_default_ssl_policy":1}}}'

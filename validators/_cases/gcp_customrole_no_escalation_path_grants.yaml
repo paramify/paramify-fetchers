@@ -1,0 +1,54 @@
+# Synthetic artifacts only. Invented role ids; no project, organization or
+# permission list here comes from a real tenant.
+validator: gcp_customrole_no_escalation_path_grants
+cases:
+  - name: no_role_carries_an_escalation_classification
+    expect: PASS
+    note: The target posture — every custom role's classification array is empty.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"custom_roles":[{"role_id":"evidenceReader","privilege_escalation_categories":[]},{"role_id":"buildViewer","privilege_escalation_categories":[]}]}}}'
+
+  - name: a_role_grants_set_iam_policy
+    expect: FAIL
+    note: >
+      The live posture these validators were authored against, in miniature: one
+      role of two carries every firm escalation classification.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"custom_roles":[{"role_id":"evidenceReader","privilege_escalation_categories":[]},{"role_id":"escalator","privilege_escalation_categories":["act_as_service_account","role_management","service_account_key_creation","set_iam_policy"]}]}}}'
+
+  - name: a_role_grants_only_service_account_key_creation
+    expect: FAIL
+    note: >
+      Key creation on its own is still a firm finding — minting a long-lived
+      credential for a service account is an escalation path whether or not the
+      role can also set policy.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"custom_roles":[{"role_id":"keyMinter","privilege_escalation_categories":["service_account_key_creation"]}]}}}'
+
+  - name: deployment_permissions_alone_are_not_a_finding
+    expect: PASS
+    note: >
+      The deliberate exclusion. `deployment_pivot` is create-or-update on a
+      surface that can run code as an attached identity; without
+      act_as_service_account the role cannot attach one, so a deployer role is
+      not asserted to be an escalation. Drop deployment_pivot into the regex
+      alternation and this case goes red — which is what would make the set fire
+      on ordinary CI roles.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"custom_roles":[{"role_id":"deployer","privilege_escalation_categories":["deployment_pivot"]}]}}}'
+
+  - name: summary_category_names_do_not_splice_into_a_role_array
+    expect: PASS
+    note: >
+      Fence test for the `[^\]]*` bound. The summary carries the same category
+      names as object KEYS, after the roles. If the bound could cross a `]`, an
+      empty per-role array would reach forward into the summary and every clean
+      payload would read as a violation.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"custom_roles":[{"role_id":"evidenceReader","privilege_escalation_by_category":{},"privilege_escalation_categories":[],"privilege_escalation_permissions":[]}]},"summary":{"privilege_escalation_category_counts":{"act_as_service_account":0,"deployment_pivot":0,"role_management":0,"service_account_key_creation":0,"set_iam_policy":0}}}}'
+
+  - name: escalation_classification_renamed_upstream
+    expect: PASS
+    note: >
+      Cannot be covered here — zero matches is this validator's pass condition,
+      so a renamed classification key reads as zero escalating roles even though
+      the role below plainly escalates.
+      `gcp_customrole_escalation_categories_present` is what fails; see
+      set_EVD-GCP-IAM-CUSTOM-ROLES.yaml, case
+      escalation_classifications_renamed_upstream.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"custom_roles":[{"role_id":"escalator","escalation_categories":["set_iam_policy"]}]}}}'

@@ -1,0 +1,14 @@
+validator: gcp_gcs_versioning_flag_recorded
+cases:
+  - name: flags_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","versioning_enabled":true},{"name":"bucket-beta","versioning_enabled":false}]},"summary":{"total_buckets":2,"versioned_buckets":1}}}'
+
+  - name: flag_renamed_upstream
+    expect: FAIL
+    note: the drift its partner cannot see.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","versioning":true},{"name":"bucket-beta","versioning":false}]},"summary":{"total_buckets":2,"versioned_buckets":1}}}'
+
+  - name: flag_value_reshaped_to_string
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"name":"bucket-alpha","versioning_enabled":"true"},{"name":"bucket-beta","versioning_enabled":"false"}]},"summary":{"total_buckets":2,"versioned_buckets":1}}}'

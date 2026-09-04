@@ -1,0 +1,93 @@
+# Set-level: every validator naming EVD-GCP-API-KEYS, combined the way Paramify
+# combines them (ERROR > FAIL > PASS). This is where the integrity validators
+# earn their place — three of the four configuration validators count violations,
+# and a count-based validator cannot cover its own drift.
+#
+# Synthetic artifacts only. Invented key labels; the only real hostnames are
+# Google's own public API names. Nothing here comes from a real project.
+evidence_set: EVD-GCP-API-KEYS
+cases:
+  - name: every_key_restricted_and_current
+    expect: PASS
+    note: >
+      The target posture: every key carries a restriction axis, none names the
+      cloudapis.googleapis.com wildcard, none has aged past the rotation
+      interval.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"api_keys":[{"display_name":"key-one","unrestricted":false,"api_targets":[{"service":"example.googleapis.com","wildcard_service":false}],"targets_all_cloud_apis":false,"age_days":12,"past_rotation_age":false},{"display_name":"key-two","unrestricted":false,"api_targets":[{"service":"example.googleapis.com","wildcard_service":false}],"targets_all_cloud_apis":false,"age_days":30,"past_rotation_age":false}]},"summary":{"total_api_keys":2,"unrestricted_keys":0,"restricted_key_percentage":100,"keys_targeting_all_cloud_apis":0,"rotation_age_days":90,"keys_past_rotation_age":0}}}'
+
+  - name: project_holds_no_api_keys
+    expect: PASS
+    note: >
+      The judgment call this set is built around. A project with no API keys is
+      the most defensible posture there is, but the percentage helper divides by
+      zero and reports 0%, and there are no per-key flags to anchor an integrity
+      check on. Every validator here is shaped to pass it: the coverage rollup
+      accepts total_api_keys 0, and all three integrity validators anchor on
+      summary rollups, which are emitted whether or not the project has keys.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"api_keys":[]},"summary":{"total_api_keys":0,"unrestricted_keys":0,"restricted_key_percentage":0,"keys_targeting_all_cloud_apis":0,"rotation_age_days":90,"keys_past_rotation_age":0,"no_api_keys":true}}}'
+
+  - name: half_the_keys_unrestricted
+    expect: FAIL
+    note: >
+      The live posture these validators were authored against, in miniature.
+      gcp_apikey_all_keys_restricted fails on the coverage rollup and
+      gcp_apikey_no_unrestricted_keys fails on the keys themselves — two
+      independent readings of the same finding, which is the point of keeping
+      both.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"api_keys":[{"display_name":"key-one","unrestricted":true,"api_targets":[],"targets_all_cloud_apis":false,"age_days":1,"past_rotation_age":false},{"display_name":"key-two","unrestricted":false,"api_targets":[{"service":"example.googleapis.com","wildcard_service":false}],"targets_all_cloud_apis":false,"age_days":1,"past_rotation_age":false},{"display_name":"key-three","unrestricted":true,"api_targets":[],"targets_all_cloud_apis":false,"age_days":1,"past_rotation_age":false},{"display_name":"key-four","unrestricted":false,"api_targets":[{"service":"example.googleapis.com","wildcard_service":false}],"targets_all_cloud_apis":false,"age_days":1,"past_rotation_age":false}]},"summary":{"total_api_keys":4,"unrestricted_keys":2,"restricted_key_percentage":50,"keys_targeting_all_cloud_apis":0,"rotation_age_days":90,"keys_past_rotation_age":0}}}'
+
+  - name: a_key_targets_all_cloud_apis
+    expect: FAIL
+    note: >
+      Isolated on purpose, so the case cannot pass for the wrong reason. The
+      offending key carries a referrer allowlist, so it reads as restricted and
+      the coverage rollup stays at 100 — only gcp_apikey_no_all_cloud_api_targets
+      fails. That is the whole point of the wildcard check: a key can satisfy
+      every other restriction test and still be callable against every Cloud API.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"api_keys":[{"display_name":"key-one","unrestricted":false,"api_targets":[{"service":"example.googleapis.com","wildcard_service":false}],"targets_all_cloud_apis":false,"age_days":12,"past_rotation_age":false},{"display_name":"key-two","unrestricted":false,"allowed_referrers":["https://example.test/*"],"api_targets":[{"service":"cloudapis.googleapis.com","wildcard_service":true}],"targets_all_cloud_apis":true,"age_days":30,"past_rotation_age":false}]},"summary":{"total_api_keys":2,"unrestricted_keys":0,"restricted_key_percentage":100,"keys_targeting_all_cloud_apis":1,"rotation_age_days":90,"keys_past_rotation_age":0}}}'
+
+  - name: a_key_is_past_the_rotation_interval
+    expect: FAIL
+    note: >
+      Restrictions are clean; only the rotation assertion fails. Isolated so the
+      case cannot pass for the wrong reason.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"api_keys":[{"display_name":"key-one","unrestricted":false,"api_targets":[{"service":"example.googleapis.com","wildcard_service":false}],"targets_all_cloud_apis":false,"age_days":12,"past_rotation_age":false},{"display_name":"key-two","unrestricted":false,"api_targets":[{"service":"example.googleapis.com","wildcard_service":false}],"targets_all_cloud_apis":false,"age_days":400,"past_rotation_age":true}]},"summary":{"total_api_keys":2,"unrestricted_keys":0,"restricted_key_percentage":100,"keys_targeting_all_cloud_apis":0,"rotation_age_days":90,"keys_past_rotation_age":1,"oldest_key_age_days":400}}}'
+
+  - name: restriction_flags_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the integrity role exists for. Both restriction anchors are
+      renamed while the coverage rollup still reads 100, so an unrestricted key
+      is hidden: gcp_apikey_no_unrestricted_keys counts zero violations and would
+      PASS alone, and gcp_apikey_all_keys_restricted reads a compliant rollup and
+      passes too. gcp_apikey_restriction_flags_present is the only thing that
+      fails, and it is what fails the set. Delete it and this case goes green
+      while the evidence proves nothing — the silent false pass.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"api_keys":[{"display_name":"key-one","key_unrestricted":true,"api_targets":[],"targets_all_cloud_apis":false,"age_days":12,"past_rotation_age":false},{"display_name":"key-two","key_unrestricted":false,"api_targets":[{"service":"example.googleapis.com","wildcard_service":false}],"targets_all_cloud_apis":false,"age_days":30,"past_rotation_age":false}]},"summary":{"total_api_keys":2,"count_unrestricted_keys":1,"restricted_key_percentage":100,"keys_targeting_all_cloud_apis":0,"rotation_age_days":90,"keys_past_rotation_age":0}}}'
+
+  - name: wildcard_target_flags_renamed_upstream
+    expect: FAIL
+    note: >
+      All three wildcard anchors renamed while a cloudapis.googleapis.com target
+      is still present, and everything else reading compliant.
+      gcp_apikey_no_all_cloud_api_targets counts zero violations and would PASS
+      alone; gcp_apikey_wildcard_target_flags_present is what fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"api_keys":[{"display_name":"key-one","unrestricted":false,"api_targets":[{"service":"example.googleapis.com","service_is_wildcard":false}],"key_targets_all_cloud_apis":false,"age_days":12,"past_rotation_age":false},{"display_name":"key-two","unrestricted":false,"api_targets":[{"service":"cloudapis.googleapis.com","service_is_wildcard":true}],"key_targets_all_cloud_apis":true,"age_days":30,"past_rotation_age":false}]},"summary":{"total_api_keys":2,"unrestricted_keys":0,"restricted_key_percentage":100,"count_keys_targeting_all_cloud_apis":1,"rotation_age_days":90,"keys_past_rotation_age":0}}}'
+
+  - name: rotation_age_counts_renamed_upstream
+    expect: FAIL
+    note: >
+      Both rotation anchors renamed while a key sits well past the interval, and
+      everything else reading compliant. gcp_apikey_keys_within_rotation_age
+      counts zero stale keys and would PASS alone;
+      gcp_apikey_rotation_age_counts_present is what fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"api_keys":[{"display_name":"key-one","unrestricted":false,"api_targets":[{"service":"example.googleapis.com","wildcard_service":false}],"targets_all_cloud_apis":false,"age_days":12,"key_past_rotation_age":false},{"display_name":"key-two","unrestricted":false,"api_targets":[{"service":"example.googleapis.com","wildcard_service":false}],"targets_all_cloud_apis":false,"age_days":400,"key_past_rotation_age":true}]},"summary":{"total_api_keys":2,"unrestricted_keys":0,"restricted_key_percentage":100,"keys_targeting_all_cloud_apis":0,"rotation_age_days":90,"count_keys_past_rotation_age":1}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict — compliance is unknown, not bad —
+      but the API discards disposition, so FAIL is the best reachable answer
+      today. What matters is that it does not PASS. collection_succeeded is what
+      catches this; none of the validators above anchor on exit_code.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"PermissionDenied"},"payload":{}}'

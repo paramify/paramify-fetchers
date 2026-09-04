@@ -1,0 +1,22 @@
+# Synthetic artifacts only — invented network names, no real project data.
+validator: gcp_vpc_no_legacy_networks
+cases:
+  - name: all_networks_are_subnet_mode
+    expect: PASS
+    note: the posture collected when these validators were authored — no legacy networks.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"networks":[{"name":"net-alpha","legacy":false,"subnet_mode":"custom"},{"name":"net-beta","legacy":false,"subnet_mode":"auto"}]},"summary":{"legacy_networks":0}}}'
+
+  - name: one_legacy_network
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"networks":[{"name":"net-alpha","legacy":false,"subnet_mode":"custom"},{"name":"net-legacy","legacy":true,"subnet_mode":"legacy"}]},"summary":{"legacy_networks":1}}}'
+
+  - name: legacy_flag_renamed_upstream
+    expect: PASS
+    note: >
+      A violation-counting validator CANNOT cover this direction on its own —
+      zero matches is its pass condition, so a renamed key reads as zero legacy
+      networks. That is exactly why gcp_vpc_network_legacy_flags_present is
+      mandatory. The assertion that matters lives in
+      set_EVD-GCP-VPC-CONFIG.yaml, case network_legacy_flags_renamed_upstream,
+      where the set correctly fails.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"networks":[{"name":"net-alpha","legacy_mode":false,"subnet_mode":"custom"},{"name":"net-legacy","legacy_mode":true,"subnet_mode":"legacy"}]},"summary":{"legacy_networks":0}}}'

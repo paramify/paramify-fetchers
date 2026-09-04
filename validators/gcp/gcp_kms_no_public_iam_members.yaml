@@ -1,0 +1,25 @@
+key: gcp_kms_no_public_iam_members
+name: No Public IAM Members On Cloud KMS Keys Or Key Rings
+type: AUTOMATED
+role: configuration
+statement: >
+  No Cloud KMS key or key ring grants allUsers or allAuthenticatedUsers. This is
+  the critical finding for the whole evidence set: a public grant on a key makes
+  the customer-managed encryption on every resource referencing that key
+  decorative. It asserts nothing about which principals DO hold the key, only
+  that the public ones do not.
+
+# Counts violations in the RAW collected IAM members rather than the fetcher's
+# derived `publicly_accessible` boolean, so a bug in the derivation cannot hide a
+# public grant. Cannot guard itself — zero matches is its pass condition, and its
+# blind spot is an IAM policy that was never collected at all.
+# `gcp_kms_iam_bindings_present` is its mandatory integrity partner.
+regex: '"(?:allUsers|allAuthenticatedUsers)"'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-KMS-KEYS

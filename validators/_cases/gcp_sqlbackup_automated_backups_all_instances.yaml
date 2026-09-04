@@ -1,0 +1,28 @@
+# Synthetic artifacts only — invented instance names, no real project.
+validator: gcp_sqlbackup_automated_backups_all_instances
+cases:
+  - name: every_instance_backed_up
+    expect: PASS
+    note: >
+      The posture collected when these validators were authored — one instance,
+      automated backups on, rollup at 100%.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","backup_enabled":true}]},"summary":{"total_instances":1,"backup_enabled_instances":1,"backup_enabled_percentage":100}}}'
+
+  - name: one_instance_has_backups_off
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","backup_enabled":true},{"name":"db-two","backup_enabled":false}]},"summary":{"total_instances":2,"backup_enabled_instances":1,"backup_enabled_percentage":50}}}'
+
+  - name: no_cloud_sql_instances_in_project
+    expect: FAIL
+    note: >
+      coverage_percentage returns 0 for an empty fleet, so an instance-free
+      project reads as 0% rather than as vacuously compliant. Stated in the
+      validator: this evidence set presumes Cloud SQL is in scope.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[]},"summary":{"total_instances":0,"backup_enabled_instances":0,"backup_enabled_percentage":0}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. The rollup key is gone, so MATCH_COUNT is 0 and the presence
+      rule fails rather than the threshold rule passing silently.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instances":[{"name":"db-one","backup_enabled":true}]},"summary":{"total_instances":1,"backup_coverage_percentage":100}}}'

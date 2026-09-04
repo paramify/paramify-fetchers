@@ -1,0 +1,74 @@
+# Set-level: every validator naming EVD-GCP-CLOUDSQL-BACKUP, combined the way
+# Paramify combines them (ERROR > FAIL > PASS) — collection_succeeded plus the
+# four configuration validators and the one integrity partner. This is where the
+# integrity role earns its place: gcp_sqlbackup_no_instance_without_automated_backups
+# counts violations and so cannot cover its own drift.
+#
+# Synthetic artifacts only. Invented instance names; nothing here comes from a
+# real project. Each failing case isolates ONE validator wherever it can, so no
+# case passes for the wrong reason.
+evidence_set: EVD-GCP-CLOUDSQL-BACKUP
+cases:
+  - name: backups_and_pitr_across_the_fleet
+    expect: PASS
+    note: >
+      The target posture, and the shape of the live project these were authored
+      against — automated backups and point-in-time recovery on every instance,
+      and the shortest retention still a week.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"db-one","backup_enabled":true,"point_in_time_recovery_enabled":true,"retained_backup_count":7},{"name":"db-two","backup_enabled":true,"point_in_time_recovery_enabled":true,"retained_backup_count":14}]},"summary":{"cloud_sql_api_readable":true,"total_instances":2,"backup_enabled_instances":2,"backup_enabled_percentage":100,"point_in_time_recovery_instances":2,"point_in_time_recovery_percentage":100,"minimum_retained_backup_count":7,"maximum_retained_backup_count":14}}}'
+
+  - name: an_instance_has_automated_backups_off
+    expect: FAIL
+    note: >
+      The one finding both backup validators see, from opposite ends —
+      gcp_sqlbackup_automated_backups_all_instances on the rollup and
+      gcp_sqlbackup_no_instance_without_automated_backups on the instance itself.
+      Two independent readings of the same fact, which is why both are kept.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"db-one","backup_enabled":true,"point_in_time_recovery_enabled":true,"retained_backup_count":7},{"name":"db-two","backup_enabled":false,"point_in_time_recovery_enabled":true,"retained_backup_count":14}]},"summary":{"cloud_sql_api_readable":true,"total_instances":2,"backup_enabled_instances":1,"backup_enabled_percentage":50,"point_in_time_recovery_instances":2,"point_in_time_recovery_percentage":100,"minimum_retained_backup_count":7,"maximum_retained_backup_count":14}}}'
+
+  - name: pitr_off_on_one_instance
+    expect: FAIL
+    note: >
+      Backups and retention read compliant; only gcp_sqlbackup_pitr_all_instances
+      fails. Recovery falls back to the last scheduled backup on db-two.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"db-one","backup_enabled":true,"point_in_time_recovery_enabled":true,"retained_backup_count":7},{"name":"db-two","backup_enabled":true,"point_in_time_recovery_enabled":false,"retained_backup_count":14}]},"summary":{"cloud_sql_api_readable":true,"total_instances":2,"backup_enabled_instances":2,"backup_enabled_percentage":100,"point_in_time_recovery_instances":1,"point_in_time_recovery_percentage":50,"minimum_retained_backup_count":7,"maximum_retained_backup_count":14}}}'
+
+  - name: retention_below_the_weekly_floor
+    expect: FAIL
+    note: >
+      Isolated on gcp_sqlbackup_retention_meets_weekly_floor. Backups and PITR
+      are both on everywhere, so the set fails purely on db-two keeping three
+      restore points where the floor is seven. The maximum still clears it —
+      anchoring on the minimum is what catches this.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"db-one","backup_enabled":true,"point_in_time_recovery_enabled":true,"retained_backup_count":7},{"name":"db-two","backup_enabled":true,"point_in_time_recovery_enabled":true,"retained_backup_count":3}]},"summary":{"cloud_sql_api_readable":true,"total_instances":2,"backup_enabled_instances":2,"backup_enabled_percentage":100,"point_in_time_recovery_instances":2,"point_in_time_recovery_percentage":100,"minimum_retained_backup_count":3,"maximum_retained_backup_count":7}}}'
+
+  - name: instance_backup_flags_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the integrity role exists for. The per-instance key is renamed to
+      backups_enabled while the rollup still reads 100, so db-two has automated
+      backups OFF and nothing measures it: gcp_sqlbackup_no_instance_without_automated_backups
+      counts zero violations and reports PASS, and every other validator reads
+      compliant. gcp_sqlbackup_instance_backup_flags_present is the only one that
+      fails, and it is what fails the set. Delete it and this case goes green
+      while the evidence proves nothing — the silent false pass.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"db-one","backups_enabled":true,"point_in_time_recovery_enabled":true,"retained_backup_count":7},{"name":"db-two","backups_enabled":false,"point_in_time_recovery_enabled":true,"retained_backup_count":14}]},"summary":{"cloud_sql_api_readable":true,"total_instances":2,"backup_enabled_instances":2,"backup_enabled_percentage":100,"point_in_time_recovery_instances":2,"point_in_time_recovery_percentage":100,"minimum_retained_backup_count":7,"maximum_retained_backup_count":14}}}'
+
+  - name: cloud_sql_api_disabled_in_the_project
+    expect: FAIL
+    note: >
+      The fetcher records an unreadable Cloud SQL Admin API as
+      cloud_sql_api_readable false and still exits 0, so collection_succeeded
+      passes. gcp_sqlbackup_instance_backup_flags_present is what refuses to read
+      an empty fleet as compliant — "could not look" must not settle as a green
+      backup posture.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[]},"summary":{"cloud_sql_api_readable":false,"total_instances":0,"backup_enabled_instances":0,"backup_enabled_percentage":0,"point_in_time_recovery_instances":0,"point_in_time_recovery_percentage":0,"minimum_retained_backup_count":null,"maximum_retained_backup_count":null}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict — compliance is unknown, not bad —
+      but the API discards disposition, so FAIL is the best reachable answer
+      today. What matters is that it does not PASS. collection_succeeded is what
+      catches this; none of the validators above anchor on exit_code.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"PermissionDenied"},"payload":{}}'

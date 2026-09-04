@@ -1,0 +1,19 @@
+# Synthetic artifacts only — invented project shape, no real tenant values.
+validator: gcp_sa_no_user_managed_keys
+cases:
+  - name: no_service_account_has_a_user_managed_key
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_service_accounts":3,"user_managed_key_count":0,"no_user_managed_key_percentage":100}}}'
+
+  - name: one_of_three_accounts_carries_a_user_managed_key
+    expect: FAIL
+    note: the shape of the posture collected when these validators were authored.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_service_accounts":3,"user_managed_key_count":1,"no_user_managed_key_percentage":66}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Envelope intact, summary key renamed. The MATCH_COUNT presence rule is what
+      catches it — without that rule the MATCH_GROUP comparison would compare
+      nothing to nothing and pass vacuously.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_service_accounts":3,"user_managed_key_count":1,"keyless_service_account_percentage":66}}}'

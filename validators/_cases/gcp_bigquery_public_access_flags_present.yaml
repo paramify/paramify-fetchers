@@ -1,0 +1,27 @@
+validator: gcp_bigquery_public_access_flags_present
+cases:
+  - name: flags_present_for_every_dataset
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[{"name":"analytics_curated","publicly_accessible":false},{"name":"analytics_raw","publicly_accessible":false}]},"summary":{"total_datasets":2}}}'
+
+  - name: flags_present_and_one_is_true
+    expect: PASS
+    note: this validator asserts the flag was READ, not what it says; the posture call belongs to its partner.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[{"name":"analytics_curated","publicly_accessible":false},{"name":"analytics_raw","publicly_accessible":true}]},"summary":{"total_datasets":2}}}'
+
+  - name: flag_renamed_upstream
+    expect: FAIL
+    note: the drift its partner cannot see.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[{"name":"analytics_curated","is_public":false},{"name":"analytics_raw","is_public":true}]},"summary":{"total_datasets":2}}}'
+
+  - name: flag_value_reshaped_to_an_object
+    expect: FAIL
+    note: >
+      A flag that grows into a structure would silence the violation counter just
+      as effectively as a rename, so the pattern requires a scalar boolean.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[{"name":"analytics_curated","publicly_accessible":{"all_authenticated_users":false,"all_users":false}},{"name":"analytics_raw","publicly_accessible":{"all_authenticated_users":false,"all_users":true}}]},"summary":{"total_datasets":2}}}'
+
+  - name: project_holds_no_datasets
+    expect: FAIL
+    note: no datasets, no flags, no posture to read — the zero violation count would otherwise be vacuous.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"datasets":[]},"summary":{"total_datasets":0}}}'

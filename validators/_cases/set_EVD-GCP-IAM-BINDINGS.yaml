@@ -1,0 +1,87 @@
+# Set-level: every validator naming EVD-GCP-IAM-BINDINGS, combined the way
+# Paramify combines them (ERROR > FAIL > PASS). This is where the integrity
+# validators earn their place — two of the four configuration validators count
+# violations, and a count-based validator cannot cover its own drift.
+#
+# Each failing case is built so that exactly ONE assertion fails and everything
+# else reads compliant. A case that fails for several reasons at once proves
+# nothing about the one it was written for.
+#
+# Synthetic artifacts only. Invented principals on example.com, invented project
+# names; nothing here comes from a real project.
+evidence_set: EVD-GCP-IAM-BINDINGS
+cases:
+  - name: least_privileged_and_fully_audited
+    expect: PASS
+    note: >
+      The target posture: nothing public, no service account on a primitive
+      role, audit logging on allServices with the full log types. A human holds
+      roles/owner, which is deliberately NOT a finding — a project needs an
+      owner.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/owner","members":["user:ada@example.com"],"public_members":[],"publicly_granted":false,"over_broad_role":true,"primitive_role":true,"service_account_granted_over_broad_role":false},{"role":"roles/logging.logWriter","members":["serviceAccount:app-runner@example-project.iam.gserviceaccount.com"],"public_members":[],"publicly_granted":false,"over_broad_role":false,"primitive_role":false,"service_account_granted_over_broad_role":false}],"audit_configs":[{"service":"allServices","log_types":["ADMIN_READ","DATA_READ","DATA_WRITE"],"exempted_members":[],"exempted_member_count":0}]},"summary":{"total_bindings":2,"total_principals":2,"public_bindings":0,"public_members":[],"publicly_granted":false,"service_account_bindings_with_over_broad_roles":0,"audit_logging_configured":true,"audit_all_services_configured":true,"audit_full_log_types_on_all_services":true,"audit_exempted_member_count":0}}}'
+
+  - name: a_role_is_granted_to_all_users
+    expect: FAIL
+    note: >
+      The top-severity finding for this evidence set: anyone on the internet
+      holds roles/viewer on the project. Both public-exposure validators fail
+      here — the rollup because public_bindings is 1, the principal scan because
+      the allUsers token is in the member list.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/owner","members":["user:ada@example.com"],"public_members":[],"publicly_granted":false,"over_broad_role":true,"primitive_role":true,"service_account_granted_over_broad_role":false},{"role":"roles/viewer","members":["allUsers"],"public_members":["allUsers"],"publicly_granted":true,"over_broad_role":false,"primitive_role":true,"service_account_granted_over_broad_role":false}],"audit_configs":[{"service":"allServices","log_types":["ADMIN_READ","DATA_READ","DATA_WRITE"],"exempted_members":[],"exempted_member_count":0}]},"summary":{"total_bindings":2,"total_principals":2,"public_bindings":1,"public_members":["allUsers"],"publicly_granted":true,"service_account_bindings_with_over_broad_roles":0,"audit_logging_configured":true,"audit_all_services_configured":true,"audit_full_log_types_on_all_services":true,"audit_exempted_member_count":0}}}'
+
+  - name: public_grant_hidden_from_the_rollup
+    expect: FAIL
+    note: >
+      Why public exposure is asserted twice, from two independent readings. The
+      derived flags all say clean — public_bindings 0, publicly_granted false,
+      public_members empty — so gcp_binding_no_public_project_access passes.
+      gcp_binding_no_public_iam_principals reads the raw member list and fails,
+      because allUsers is still there. Delete that validator and this case goes
+      green over a project the internet can read.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/owner","members":["user:ada@example.com"],"public_members":[],"publicly_granted":false,"over_broad_role":true,"primitive_role":true,"service_account_granted_over_broad_role":false},{"role":"roles/viewer","members":["allUsers"],"public_members":[],"publicly_granted":false,"over_broad_role":false,"primitive_role":true,"service_account_granted_over_broad_role":false}],"audit_configs":[{"service":"allServices","log_types":["ADMIN_READ","DATA_READ","DATA_WRITE"],"exempted_members":[],"exempted_member_count":0}]},"summary":{"total_bindings":2,"total_principals":2,"public_bindings":0,"public_members":[],"publicly_granted":false,"service_account_bindings_with_over_broad_roles":0,"audit_logging_configured":true,"audit_all_services_configured":true,"audit_full_log_types_on_all_services":true,"audit_exempted_member_count":0}}}'
+
+  - name: member_lists_dropped_upstream
+    expect: FAIL
+    note: >
+      The case gcp_binding_member_lists_present exists for. Bindings now carry
+      only a member_count, so gcp_binding_no_public_iam_principals finds no
+      public token and reports PASS, and every other assertion reads compliant.
+      The integrity validator is the only thing failing, and it is what stops an
+      evidence file that can no longer show who holds a role from being read as
+      a clean bill of health. Delete it and this case goes green.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/owner","member_count":1,"public_members":[],"publicly_granted":false,"over_broad_role":true,"primitive_role":true,"service_account_granted_over_broad_role":false},{"role":"roles/logging.logWriter","member_count":1,"public_members":[],"publicly_granted":false,"over_broad_role":false,"primitive_role":false,"service_account_granted_over_broad_role":false}],"audit_configs":[{"service":"allServices","log_types":["ADMIN_READ","DATA_READ","DATA_WRITE"],"exempted_members":[],"exempted_member_count":0}]},"summary":{"total_bindings":2,"total_principals":2,"public_bindings":0,"public_members":[],"publicly_granted":false,"service_account_bindings_with_over_broad_roles":0,"audit_logging_configured":true,"audit_all_services_configured":true,"audit_full_log_types_on_all_services":true,"audit_exempted_member_count":0}}}'
+
+  - name: a_service_account_holds_editor
+    expect: FAIL
+    note: >
+      The live posture the set was authored against, in miniature: a service
+      account carrying roles/editor project-wide. Nothing is public and audit
+      logging is intact, so only the least-privilege assertion fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/owner","members":["user:ada@example.com"],"public_members":[],"publicly_granted":false,"over_broad_role":true,"primitive_role":true,"service_account_granted_over_broad_role":false},{"role":"roles/editor","members":["serviceAccount:build-agent@example-project.iam.gserviceaccount.com"],"public_members":[],"publicly_granted":false,"over_broad_role":true,"primitive_role":true,"service_account_granted_over_broad_role":true}],"audit_configs":[{"service":"allServices","log_types":["ADMIN_READ","DATA_READ","DATA_WRITE"],"exempted_members":[],"exempted_member_count":0}]},"summary":{"total_bindings":2,"total_principals":2,"public_bindings":0,"public_members":[],"publicly_granted":false,"service_account_bindings_with_over_broad_roles":1,"audit_logging_configured":true,"audit_all_services_configured":true,"audit_full_log_types_on_all_services":true,"audit_exempted_member_count":0}}}'
+
+  - name: service_account_role_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      The case gcp_binding_service_account_role_flags_present exists for. The
+      flag is now sa_over_broad and still reads true — a service account really
+      is on roles/editor — but gcp_binding_no_service_account_over_broad_roles
+      counts zero matches and reports PASS. The integrity validator is the only
+      thing failing. Delete it and this case goes green over a real finding.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/owner","members":["user:ada@example.com"],"public_members":[],"publicly_granted":false,"over_broad_role":true,"primitive_role":true,"sa_over_broad":false},{"role":"roles/editor","members":["serviceAccount:build-agent@example-project.iam.gserviceaccount.com"],"public_members":[],"publicly_granted":false,"over_broad_role":true,"primitive_role":true,"sa_over_broad":true}],"audit_configs":[{"service":"allServices","log_types":["ADMIN_READ","DATA_READ","DATA_WRITE"],"exempted_members":[],"exempted_member_count":0}]},"summary":{"total_bindings":2,"total_principals":2,"public_bindings":0,"public_members":[],"publicly_granted":false,"service_account_bindings_with_over_broad_roles":0,"audit_logging_configured":true,"audit_all_services_configured":true,"audit_full_log_types_on_all_services":true,"audit_exempted_member_count":0}}}'
+
+  - name: audit_logging_covers_only_admin_reads
+    expect: FAIL
+    note: >
+      IAM posture is clean; only the audit assertion fails. The weaker rollup
+      audit_logging_configured is true here, which is why the composite flag is
+      the anchor.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"bindings":[{"role":"roles/owner","members":["user:ada@example.com"],"public_members":[],"publicly_granted":false,"over_broad_role":true,"primitive_role":true,"service_account_granted_over_broad_role":false},{"role":"roles/logging.logWriter","members":["serviceAccount:app-runner@example-project.iam.gserviceaccount.com"],"public_members":[],"publicly_granted":false,"over_broad_role":false,"primitive_role":false,"service_account_granted_over_broad_role":false}],"audit_configs":[{"service":"allServices","log_types":["ADMIN_READ"],"exempted_members":[],"exempted_member_count":0}]},"summary":{"total_bindings":2,"total_principals":2,"public_bindings":0,"public_members":[],"publicly_granted":false,"service_account_bindings_with_over_broad_roles":0,"audit_logging_configured":true,"audit_all_services_configured":true,"audit_full_log_types_on_all_services":false,"audit_exempted_member_count":0}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict — the policy was never read, so
+      compliance is unknown — but the API discards disposition, so FAIL is the
+      best reachable answer today. What matters is that it does not PASS. See
+      docs/validators_design.md.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"PermissionDenied: resourcemanager.projects.getIamPolicy"},"payload":{}}'

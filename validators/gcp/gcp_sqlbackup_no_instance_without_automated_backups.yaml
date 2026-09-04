@@ -1,0 +1,28 @@
+key: gcp_sqlbackup_no_instance_without_automated_backups
+name: No Cloud SQL Instance Without Automated Backups
+type: AUTOMATED
+role: configuration
+statement: >
+  No individual Cloud SQL instance reports automated backups switched off. This
+  reads the per-instance flags rather than the project rollup, so it catches an
+  instance the rollup arithmetic misses; `gcp_sqlbackup_automated_backups_all_instances`
+  is the independent reading of the same fact. Does NOT assert retention,
+  schedule, or recoverability.
+
+# Counts violations, so it CANNOT guard itself — zero matches is its pass
+# condition, and a renamed per-instance key reads as zero instances without
+# backups. `gcp_sqlbackup_instance_backup_flags_present` is its mandatory
+# integrity partner; see set_EVD-GCP-CLOUDSQL-BACKUP.yaml, case
+# instance_backup_flags_renamed_upstream.
+#
+# The closing quote before the colon keeps this off the summary's
+# `backup_enabled_instances` and `backup_enabled_percentage`.
+regex: '"backup_enabled":\s*false'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-BACKUP

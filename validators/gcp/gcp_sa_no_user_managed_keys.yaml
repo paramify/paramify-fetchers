@@ -1,0 +1,31 @@
+key: gcp_sa_no_user_managed_keys
+name: GCP Service Accounts Hold No User-Managed Keys
+type: AUTOMATED
+role: configuration
+statement: >
+  Every service account in the project authenticates without a downloadable
+  user-managed key — the no-user-managed-key rate is 100%. Does not assert
+  anything about the roles those accounts hold, about system-managed key
+  rotation (Google rotates those), or about accounts in other projects.
+
+# NORMAL POLARITY: higher is better, 100 is compliant.
+#
+# Reads a rollup value, so it guards itself: the MATCH_COUNT rule proves the
+# summary key was present before the threshold rule reads it. No integrity
+# partner needed, and no exit_code anchor — collection health is asserted once
+# for the set by `collection_succeeded`.
+#
+# The key appears exactly once (payload.summary), so MATCH_GROUP[1] reading only
+# the first match is safe here.
+regex: '"no_user_managed_key_percentage":\s*(?<no_user_managed_key_percentage>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+
+evidence_sets:
+  - EVD-GCP-IAM-SA

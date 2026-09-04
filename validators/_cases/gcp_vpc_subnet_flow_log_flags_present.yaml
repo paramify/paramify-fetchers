@@ -1,0 +1,26 @@
+# Synthetic artifacts only — invented subnet names, no real project data.
+validator: gcp_vpc_subnet_flow_log_flags_present
+cases:
+  - name: flow_log_flags_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"subnets":[{"name":"subnet-one","network":"net-alpha","flow_logs_enabled":true},{"name":"subnet-two","network":"net-alpha","flow_logs_enabled":true}]}}}'
+
+  - name: flags_present_and_posture_is_bad
+    expect: PASS
+    note: >
+      Deliberate — this validator asserts readability, not posture. The unlogged
+      subnet is gcp_vpc_all_subnets_have_flow_logs' finding to report.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"subnets":[{"name":"subnet-one","network":"net-alpha","flow_logs_enabled":true},{"name":"default","network":"default","flow_logs_enabled":false}]}}}'
+
+  - name: flow_log_flag_renamed_upstream
+    expect: FAIL
+    note: the whole point of the role — the key the violation count reads is gone.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"subnets":[{"name":"subnet-one","network":"net-alpha","logging_enabled":true},{"name":"default","network":"default","logging_enabled":false}]}}}'
+
+  - name: flag_present_but_null
+    expect: FAIL
+    note: >
+      A subnet whose logConfig could not be read writes a null placeholder. The
+      pattern pins true|false rather than a bare colon so an unreadable subnet
+      cannot masquerade as a readable one.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"subnets":[{"name":"subnet-one","network":"net-alpha","flow_logs_enabled":null}]}}}'

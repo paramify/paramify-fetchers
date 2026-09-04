@@ -1,0 +1,61 @@
+key: gcp_sqlenc_cmek_coverage_complete
+name: Cloud SQL Instances All Use Customer-Managed Encryption Keys
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Cloud SQL instance in the project binds its disk encryption to a
+  customer-managed KMS key (CMEK) rather than the Google-managed default, so
+  key custody — rotation, disablement and destruction — rests with the customer.
+  Does NOT assert that the data is encrypted: Cloud SQL always encrypts at rest,
+  so this validator failing means the key belongs to Google, not that the
+  database is in the clear. It says nothing about the key's rotation schedule,
+  its IAM grants, its location, or whether the key is itself protected by an
+  HSM. A project reporting zero Cloud SQL instances rolls up to 0% and fails,
+  because an empty population is not a demonstrated posture.
+
+# THE KEY-CUSTODY JUDGMENT CALL, recorded here because this is the validator a
+# tenant is most likely to want tuned.
+#
+# The sibling Cloud Storage set (EVD-GCP-STORAGE-ENC) deliberately does NOT
+# assert 100% CMEK: GCS is always encrypted at rest, CMEK is a custody choice
+# rather than the control, and requiring it would fail every reasonable tenant.
+# That reasoning does not carry over to Cloud SQL, for three reasons:
+#
+#   1. The Cloud Storage set had three other posture checks (public access
+#      prevention, uniform bucket-level access, versioning) to carry it. This
+#      payload's only encryption facts are CMEK and the key identity — backup
+#      and PITR belong to EVD-GCP-CLOUDSQL-BACKUP. Declining CMEK here would
+#      leave the set with no configuration validator at all: a green check
+#      proving only that a script exited 0.
+#   2. The populations differ in kind. A project accumulates buckets nobody
+#      chose — function staging, build artifacts, log sinks — so a blanket CMEK
+#      rule there fails on Google's own leftovers. Cloud SQL instances are few
+#      and deliberate, and every one of them holds structured data of record.
+#   3. The fetcher contract frames CMEK as the fact of record: "Cloud SQL is
+#      always encrypted at rest by default, so the evidence that varies is CMEK
+#      vs Google-managed". This is the axis the fetcher was built to measure.
+#
+# THE COST, stated plainly: Cloud SQL CMEK is set at instance creation and
+# cannot be retrofitted (the service agent cannot be granted the key until the
+# instance exists), so the remediation for a failure is re-creating the
+# database. That makes this a strong-posture bar, not a baseline one, and a
+# tenant that has accepted Google-managed keys should tune or drop it rather
+# than leave it permanently red.
+#
+# Reads a value, so it guards itself: the MATCH_COUNT rule proves the rollup was
+# present before the threshold rule reads it. The threshold is encoded in the
+# criteria as an exact EQUALS, where numeric and lexicographic readings agree.
+# No exit_code anchor — collection health is asserted once for the set by
+# `collection_succeeded`, so group 1 is the percentage.
+regex: '"cmek_percentage":\s*(?<cmek_percentage>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-ENC

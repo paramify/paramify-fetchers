@@ -1,0 +1,48 @@
+validator: gcp_fw_no_internet_open_rule_targets_all_instances
+cases:
+  - name: internet_rule_is_target_scoped
+    expect: PASS
+    note: >
+      An internet-facing rule narrowed to a target tag. This validator is not
+      about whether a rule faces the internet, only about its blast radius.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-public-https","open_to_internet":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":0,"total_rules":1}}}'
+
+  - name: world_open_rule_applies_to_every_instance
+    expect: FAIL
+    note: the real posture shape - a default allow rule reachable from anywhere with no target tags.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-default-allow","open_to_internet":true,"priority":65534}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":1,"total_rules":1}}}'
+
+  - name: benign_rule_adjacent_to_targeted_internet_rule
+    expect: PASS
+    note: >
+      THE OBJECT-BRIDGING CASE. Rule one is an internal rule that legitimately
+      applies to all instances (applies_to_all_instances true, open_to_internet
+      false). Rule two legitimately faces the internet but is target-scoped
+      (applies_to_all_instances false, open_to_internet true). Neither rule is a
+      violation. An unfenced `[\s\S]*?` between the two keys splices rule one''s
+      applies_to_all_instances onto rule two''s open_to_internet and invents a
+      violation, turning this case red. The tempered fence refuses to cross
+      rule one''s own `priority` or rule two''s `applies_to_all_instances`, so
+      it stays green. Verified against the live evidence too: unfenced counts 4
+      with two matches straddling a rule boundary, fenced counts 3, which is
+      what the fetcher''s own rollup independently reports.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-internal","open_to_internet":false,"priority":1000},{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-public-https","open_to_internet":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":0,"total_rules":2}}}'
+
+  - name: open_to_internet_key_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3, which a violation counter cannot pass alone. Recorded as PASS
+      to be honest about the boundary; the set-level case
+      `instance_targeting_key_renamed_upstream` is where the integrity partner
+      `gcp_fw_instance_targeting_flags_present` fails and the set goes red.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"internet_open":true,"name":"rule-default-allow","priority":65534}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":1,"total_rules":1}}}'
+
+  - name: keys_emitted_out_of_order
+    expect: PASS
+    note: >
+      The pattern requires applies_to_all_instances to precede open_to_internet,
+      which sort_keys=True guarantees today. If that ever stops holding the
+      count silently drops to zero - so this too is recorded honestly as PASS,
+      and the integrity partner (which asserts the same ordered pair) is what
+      catches it. See the set-level case `keys_emitted_out_of_order`.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"open_to_internet":true,"name":"rule-default-allow","exposes_all_ports":false,"internet_exposed_sensitive_services":[],"applies_to_all_instances":true}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":1,"total_rules":1}}}'

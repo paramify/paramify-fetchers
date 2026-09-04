@@ -1,0 +1,19 @@
+validator: gcp_kms_no_separation_of_duties_violations
+cases:
+  - name: admin_and_use_roles_held_by_different_principals
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"crypto_keys":[{"key_id":"key-one","separation_of_duties_violated":false},{"key_id":"key-two","separation_of_duties_violated":false}]}}}'
+
+  - name: one_key_grants_admin_and_use_to_same_principal
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"crypto_keys":[{"key_id":"key-one","separation_of_duties_violated":false},{"key_id":"key-two","separation_of_duties_violated":true}]}}}'
+
+  - name: flag_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate, and the reason `integrity` exists. Zero matches is this
+      validator's pass condition, so a renamed upstream key reads as zero
+      violations even while a key genuinely violates. Its partner
+      gcp_kms_separation_of_duties_flags_present is what fails; see the set-level
+      case in set_EVD-GCP-KMS-KEYS.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"crypto_keys":[{"key_id":"key-one","sod_violated":false},{"key_id":"key-two","sod_violated":true}]}}}'

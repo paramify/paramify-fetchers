@@ -1,0 +1,45 @@
+key: gcp_dns_public_zones_dnssec_signed
+name: Public Cloud DNS Zones Are All DNSSEC Signed
+type: AUTOMATED
+role: configuration
+statement: >
+  Every public Cloud DNS managed zone in the project has DNSSEC turned on: the
+  fetcher's public-only rollup reports zero unsigned public zones. Private zones
+  are deliberately out of scope — they have no public resolution path for DNSSEC
+  to protect, and the fetcher carries `dnssec_applicable` per zone to record
+  that. Does not assert that the project has any zone at all, that the signing
+  algorithms are strong, or anything about private, forwarding or peering zones.
+
+# Reads a value, so it guards itself: the MATCH_COUNT rule proves the rollup was
+# present before the count rule reads it. No exit_code anchor — collection health
+# is asserted once for the set by `collection_succeeded`.
+#
+# WHY `unsigned_public_zones` AND NOT `dnssec_public_zone_percentage`. Both are
+# correctly scoped to public zones, but the percentage is computed with integer
+# coverage math that returns 0 when the denominator is 0. A project running only
+# private zones therefore reports `dnssec_public_zone_percentage: 0` while being
+# perfectly compliant, and a "must equal 100" rule would fail it. The count form
+# reads 0 in that case too — and 0 is the pass condition — so it is right in both
+# directions.
+#
+# DO NOT rewrite this as a per-zone violation count. Deciding whether a zone
+# should be signed needs `dnssec_applicable` and `dnssec_enabled` read together
+# on the SAME object, and the engine has no per-object scoping — a `[^}]*?` fence
+# would splice a public zone's applicability onto a private zone's state, or
+# break the moment key order changes. The fetcher already did that scoping
+# correctly; read its answer.
+regex: '"unsigned_public_zones":\s*(?<unsigned_public_zones>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  # The rollup exists. Zero matches means it was renamed or the summary is gone,
+  # which the count rule below would otherwise pass vacuously.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  # No public zone is left unsigned.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-DNS

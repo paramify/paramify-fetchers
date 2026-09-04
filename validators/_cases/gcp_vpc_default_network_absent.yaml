@@ -1,0 +1,22 @@
+# Synthetic artifacts only — invented network names, no real project data.
+validator: gcp_vpc_default_network_absent
+cases:
+  - name: default_network_deleted
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"networks":[{"name":"net-alpha","is_default_network":false}]},"summary":{"total_networks":1,"default_network_present":false}}}'
+
+  - name: default_network_still_present
+    expect: FAIL
+    note: >
+      The shape of the posture collected when these validators were authored —
+      the auto-mode `default` network still exists alongside a purpose-built one.
+      Failing here is the intended outcome, not a tuning problem.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"networks":[{"name":"default","is_default_network":true},{"name":"net-alpha","is_default_network":false}]},"summary":{"total_networks":2,"default_network_present":true}}}'
+
+  - name: rollup_renamed_upstream
+    expect: FAIL
+    note: >
+      Envelope intact, compliance key renamed. The MATCH_COUNT presence rule is
+      what catches it — without that rule the MATCH_GROUP comparison would read
+      nothing, hold vacuously, and report a silent false pass.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"networks":[{"name":"net-alpha","is_default_network":false}]},"summary":{"total_networks":1,"has_default_network":false}}}'

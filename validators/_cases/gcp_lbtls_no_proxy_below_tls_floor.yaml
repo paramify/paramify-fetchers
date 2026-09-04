@@ -1,0 +1,45 @@
+validator: gcp_lbtls_no_proxy_below_tls_floor
+cases:
+  - name: every_proxy_at_or_above_tls_1_2
+    expect: PASS
+    note: >
+      Carries the summary decoys on purpose. `default_min_tls_version_when_no_policy`
+      literally holds the string TLS_1_0 on every run regardless of posture, and
+      `ssl_policy_min_tls_versions` is an array of the same vocabulary. Neither may
+      trip the violation regex; if this case ever goes red the key anchor has lost
+      its leading quote.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_2","effective_profile":"MODERN"},{"name":"front-b","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_3","effective_profile":"RESTRICTED"}],"ssl_policies":[{"name":"policy-strict","min_tls_version":"TLS_1_2","profile":"MODERN","permissive_profile":false}]},"summary":{"tls_floor":"TLS_1_2","default_min_tls_version_when_no_policy":"TLS_1_0","ssl_policy_min_tls_versions":["TLS_1_2"],"total_proxies":2,"proxies_on_default_ssl_policy":0,"proxies_with_weak_tls":0,"tls_floor_percentage":100,"total_ssl_policies":1,"weak_ssl_policies":0,"permissive_profile_ssl_policies":0}}}'
+
+  - name: proxy_silently_inherits_the_gcp_default
+    expect: FAIL
+    note: >
+      The finding this whole evidence set exists for, and the reason the validator
+      reads `effective_min_tls_version` rather than the policy list. Every SSL
+      policy defined here is TLS_1_2 — reasoning across the two arrays would call
+      this compliant. The second proxy has no policy attached, so GCP negotiates
+      TLS 1.0 on it and the fetcher resolves that into the per-proxy field.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_2","effective_profile":"MODERN"},{"name":"front-b","uses_default_ssl_policy":true,"effective_min_tls_version":"TLS_1_0","effective_profile":"COMPATIBLE"}],"ssl_policies":[{"name":"policy-strict","min_tls_version":"TLS_1_2","profile":"MODERN","permissive_profile":false}]},"summary":{"tls_floor":"TLS_1_2","default_min_tls_version_when_no_policy":"TLS_1_0","ssl_policy_min_tls_versions":["TLS_1_2"],"total_proxies":2,"proxies_on_default_ssl_policy":1,"proxies_with_weak_tls":1,"tls_floor_percentage":50,"total_ssl_policies":1,"weak_ssl_policies":0,"permissive_profile_ssl_policies":0}}}'
+
+  - name: proxy_names_a_policy_that_could_not_be_read
+    expect: FAIL
+    note: >
+      `ssl_policy_resolved: false` leaves the effective version null. Unknown must
+      not read as compliant — the fetcher's own floor test treats it as below the
+      floor, so null is in the alternation.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","uses_default_ssl_policy":false,"ssl_policy_resolved":false,"effective_min_tls_version":null,"effective_profile":null}],"ssl_policies":[{"name":"policy-strict","min_tls_version":"TLS_1_2","profile":"MODERN","permissive_profile":false}]},"summary":{"tls_floor":"TLS_1_2","default_min_tls_version_when_no_policy":"TLS_1_0","total_proxies":1,"proxies_on_default_ssl_policy":0,"proxies_with_unresolved_ssl_policy":1,"total_ssl_policies":1,"weak_ssl_policies":0,"permissive_profile_ssl_policies":0}}}'
+
+  - name: proxy_at_tls_1_1
+    expect: FAIL
+    note: TLS 1.1 is the other member of the deprecated pair; enumerated, not compared.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","uses_default_ssl_policy":false,"effective_min_tls_version":"TLS_1_1","effective_profile":"MODERN"}],"ssl_policies":[{"name":"policy-legacy","min_tls_version":"TLS_1_1","profile":"MODERN","permissive_profile":false}]},"summary":{"tls_floor":"TLS_1_2","default_min_tls_version_when_no_policy":"TLS_1_0","total_proxies":1,"total_ssl_policies":1,"permissive_profile_ssl_policies":0}}}'
+
+  - name: effective_version_key_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate, and the reason `integrity` exists. Counting violations cannot
+      distinguish "no weak proxies" from "the key I count is gone" — zero matches
+      is this validator's pass condition. Here a proxy is negotiating TLS 1.0 and
+      this validator reports PASS. Its partner
+      gcp_lbtls_proxy_effective_tls_version_present is what fails; the assertion
+      that actually matters is the set-level case in set_EVD-GCP-LB-TLS.yaml.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"proxies":[{"name":"front-a","uses_default_ssl_policy":false,"negotiated_min_tls_version":"TLS_1_0","effective_profile":"COMPATIBLE"}],"ssl_policies":[{"name":"policy-strict","min_tls_version":"TLS_1_2","profile":"MODERN","permissive_profile":false}]},"summary":{"tls_floor":"TLS_1_2","default_min_tls_version_when_no_policy":"TLS_1_0","total_proxies":1,"total_ssl_policies":1,"permissive_profile_ssl_policies":0}}}'

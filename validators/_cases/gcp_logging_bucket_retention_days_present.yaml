@@ -1,0 +1,30 @@
+validator: gcp_logging_bucket_retention_days_present
+cases:
+  - name: retention_recorded_per_bucket
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_buckets":[{"locked":false,"name":"bucket-alpha","retention_days":30},{"locked":true,"name":"bucket-beta","retention_days":400}]},"summary":{"longest_retention_days":400,"shortest_retention_days":30,"total_log_buckets":2}}}'
+
+  - name: retention_key_renamed_upstream
+    expect: FAIL
+    note: >
+      The whole reason this validator exists. Its partner,
+      gcp_logging_buckets_retain_at_least_30_days, counts short retention periods
+      and finds none here — so ALONE it passes on an artifact hiding a one-day
+      bucket. This one fails because the key it proves is gone.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_buckets":[{"locked":false,"name":"bucket-alpha","retention_period_days":1}]},"summary":{"longest_retention_days":1,"shortest_retention_days":1,"total_log_buckets":1}}}'
+
+  - name: retention_reported_as_null
+    expect: FAIL
+    note: >
+      Why the anchor ends in `\d` rather than stopping at the colon. The key is
+      present but carries no number, which is equally unreadable — and the
+      violation counter would still report zero.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_buckets":[{"locked":false,"name":"bucket-alpha","retention_days":null}]},"summary":{"longest_retention_days":null,"shortest_retention_days":null,"total_log_buckets":1}}}'
+
+  - name: no_log_buckets_enumerated
+    expect: FAIL
+    note: >
+      The anti-vacuity half of the integrity role. With no buckets there is
+      nothing to count, so the retention validator passes on an empty
+      population; this one refuses.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"log_buckets":[]},"summary":{"longest_retention_days":null,"shortest_retention_days":null,"total_log_buckets":0}}}'

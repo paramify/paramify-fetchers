@@ -1,0 +1,44 @@
+key: service_api_reachable
+name: Underlying Service API Answered The Collector
+type: AUTOMATED
+role: integrity
+statement: No service API needed to enumerate this evidence reported itself unreadable, so a zero finding count reflects the tenant's posture rather than a collector that was never allowed to look.
+
+# ONE validator, MANY evidence sets — the `collection_succeeded` model.
+#
+# WHY THIS EXISTS. Several GCP fetchers tolerate a disabled service API: they
+# record `<service>_api_readable: false` and still exit 0. `collection_succeeded`
+# then passes on an intact envelope, the resource list is empty, and every
+# violation-count validator on the set reports zero-out-of-zero and passes. The
+# artifact goes green having inspected nothing. That is "uncountable reads as
+# compliant" at the collection layer rather than the payload layer, which is why
+# neither `collection_succeeded` nor the per-set integrity partners catch it on
+# their own.
+#
+# The pattern is generic on purpose: these flags are named per service
+# (`compute_api_readable`, `gke_api_readable`, `cloud_sql_api_readable`, …), so
+# matching the shape rather than the literal lets one file serve every set and
+# keeps a newly-added service covered the day its fetcher ships.
+regex: '"[a-z_]+_api_readable":\s*false'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+# WHY NO FORM C INTEGRITY PARTNER, against the usual rule for a violation count.
+# A partner asserting the flag is present would fail every artifact that predates
+# the flag, and — more importantly — the drift it would guard is already covered:
+# if the key were renamed AND the API were genuinely unreadable, the population
+# would be empty and each set's own per-record integrity validator (which requires
+# per-resource keys to be present) fails. The two guards compose, so a partner here
+# would add churn rather than coverage.
+
+evidence_sets:
+  - EVD-GCP-CLOUDSQL-BACKUP
+  - EVD-GCP-CLOUDSQL-NET
+  - EVD-GCP-FW-RULES
+  - EVD-GCP-GKE-CONFIG
+  - EVD-GCP-LB-TLS
+  - EVD-GCP-VM-CONFIG
+  - EVD-GCP-VPC-CONFIG

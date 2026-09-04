@@ -1,0 +1,40 @@
+key: gcp_binding_no_public_iam_principals
+name: No allUsers Or allAuthenticatedUsers Principal In The Project IAM Policy
+type: AUTOMATED
+role: configuration
+statement: >
+  The two public principal identifiers GCP recognises — allUsers (anyone on the
+  internet) and allAuthenticatedUsers (any Google account) — appear nowhere in
+  the collected project IAM policy: not in a binding's member list, not in the
+  per-principal rollup, not as an audit-logging exemption. Does NOT assert that
+  every member that IS present is appropriate, and does not cover resource-level
+  or inherited policies.
+
+# INVERTED POLARITY: zero is compliant; a single occurrence is a top-severity
+# finding, so the rule requires a count of zero.
+#
+# Counts violations, so it CANNOT guard itself — zero matches is its pass
+# condition. `gcp_binding_member_lists_present` is its mandatory integrity
+# partner; without it, evidence that stopped carrying member lists at all would
+# read as "no public principals".
+#
+# Anchored on the RAW member token rather than on a fetcher-computed flag, and
+# that is the whole point of keeping this alongside
+# `gcp_binding_no_public_project_access`: if the fetcher's public-exposure
+# derivation is ever wrong — summary says public_bindings 0 while a binding
+# genuinely lists allUsers — the rollup validator passes and this one still
+# fails. Deliberately NOT anchored on `public_members`, which is an empty list on
+# a clean project and therefore proves nothing.
+#
+# The surrounding quotes matter: GCP writes these two principals bare, so the
+# token is the entire JSON string. A display name or description merely
+# containing the word cannot match.
+regex: '"all(?:Users|AuthenticatedUsers)"'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-GCP-IAM-BINDINGS

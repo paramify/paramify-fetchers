@@ -1,0 +1,55 @@
+# Set-level: every validator naming EVD-GCP-STORAGE-ENC, combined the way
+# Paramify combines them (ERROR > FAIL > PASS). This is where the integrity
+# validators earn their place — each violation counter passes its own drifted
+# artifact, so only the set can prove the drift is caught.
+#
+# Every case here carries exit_code 0 so the verdict is decided by the Cloud
+# Storage posture alone; collection health has its own case file
+# (validators/_cases/collection_succeeded.yaml) and is not re-proved here.
+evidence_set: EVD-GCP-STORAGE-ENC
+cases:
+  - name: hardened_project_with_partial_cmek
+    expect: PASS
+    note: >
+      Deliberate: cmek_percentage is 50 and the set still passes. Cloud Storage
+      is always encrypted at rest, so CMEK-vs-Google-managed is a key-custody
+      choice, not the control. Nothing in this set asserts 100% CMEK; what it
+      asserts is that no bucket is reachable by ACL, publicly exposable, or
+      unrecoverable after an overwrite.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"cmek":true,"name":"bucket-alpha","public_access_prevention":"enforced","uniform_bucket_level_access":true,"versioning_enabled":true},{"cmek":false,"name":"bucket-beta","public_access_prevention":"enforced","uniform_bucket_level_access":true,"versioning_enabled":true}]},"summary":{"cmek_buckets":1,"cmek_percentage":50,"total_buckets":2,"uniform_access_buckets":2,"versioned_buckets":2}}}'
+
+  - name: default_buckets_alongside_a_hardened_one
+    expect: FAIL
+    note: >
+      The posture shape observed on the project these validators were authored
+      from (synthetic names and values): one deliberately hardened bucket, the
+      rest left at Cloud Storage defaults. All three configuration validators
+      fail here, which is the honest reading — defaults are not the target
+      posture.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"cmek":true,"name":"bucket-alpha","public_access_prevention":"enforced","uniform_bucket_level_access":true,"versioning_enabled":true},{"cmek":false,"name":"bucket-beta","public_access_prevention":"inherited","uniform_bucket_level_access":false,"versioning_enabled":false},{"cmek":false,"name":"bucket-gamma","public_access_prevention":"inherited","uniform_bucket_level_access":false,"versioning_enabled":false}]},"summary":{"cmek_buckets":1,"cmek_percentage":33,"total_buckets":3,"uniform_access_buckets":1,"versioned_buckets":1}}}'
+
+  - name: uniform_access_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the integrity role exists for. gcp_gcs_uniform_bucket_level_access_enforced
+      counts the disabled value and finds none, so ALONE it reports PASS on an
+      artifact hiding an ACL-governed bucket. gcp_gcs_uniform_access_flag_recorded
+      fails because the key it proves is gone, and the set therefore fails.
+      Delete that integrity validator and this case goes green while the evidence
+      proves nothing — the silent false pass. Every other posture value here is
+      compliant, so the integrity partner is the only thing failing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"cmek":true,"name":"bucket-alpha","public_access_prevention":"enforced","ubla_enabled":true,"versioning_enabled":true},{"cmek":false,"name":"bucket-beta","public_access_prevention":"enforced","ubla_enabled":false,"versioning_enabled":true}]},"summary":{"cmek_buckets":1,"cmek_percentage":50,"total_buckets":2,"uniform_access_buckets":1,"versioned_buckets":2}}}'
+
+  - name: public_access_prevention_renamed_upstream
+    expect: FAIL
+    note: >
+      Same class, other key: gcp_gcs_public_access_prevention_recorded is the
+      only failing validator, everything else in the artifact is compliant.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"cmek":true,"name":"bucket-alpha","pap_state":"enforced","uniform_bucket_level_access":true,"versioning_enabled":true},{"cmek":false,"name":"bucket-beta","pap_state":"inherited","uniform_bucket_level_access":true,"versioning_enabled":true}]},"summary":{"cmek_buckets":1,"cmek_percentage":50,"total_buckets":2,"uniform_access_buckets":2,"versioned_buckets":2}}}'
+
+  - name: versioning_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      Same class, third key: gcp_gcs_versioning_flag_recorded is the only
+      failing validator.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"buckets":[{"cmek":true,"name":"bucket-alpha","public_access_prevention":"enforced","uniform_bucket_level_access":true,"versioning":true},{"cmek":false,"name":"bucket-beta","public_access_prevention":"enforced","uniform_bucket_level_access":true,"versioning":false}]},"summary":{"cmek_buckets":1,"cmek_percentage":50,"total_buckets":2,"uniform_access_buckets":2,"versioned_buckets":1}}}'

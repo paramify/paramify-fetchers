@@ -1,0 +1,96 @@
+# Set-level: every validator naming EVD-GCP-FW-RULES, combined the way Paramify
+# combines them. This is where the assertions that no single validator can make
+# live - a violation counter cannot cover its own drift, so only the set can.
+evidence_set: EVD-GCP-FW-RULES
+cases:
+  - name: clean_posture_with_adjacent_benign_rules
+    expect: PASS
+    note: >
+      An internal rule that legitimately applies to all instances sits directly
+      before an internet-facing rule that is legitimately target-scoped. Nothing
+      here is a violation, and the fenced pattern in
+      `gcp_fw_no_internet_open_rule_targets_all_instances` must not splice the
+      first rule''s applies_to_all_instances onto the second rule''s
+      open_to_internet. Remove the fence and this case goes red.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-internal","open_to_internet":false,"priority":1000},{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-public-https","open_to_internet":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":0,"rules_exposing_all_ports_to_internet":0,"rules_open_to_internet":1,"total_rules":2}}}'
+
+  - name: ssh_open_to_the_world
+    expect: FAIL
+    note: the posture actually collected from the live project these were authored against.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-internal","open_to_internet":false,"priority":1000},{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":["ssh"],"name":"rule-admin","open_to_internet":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":["ssh"],"internet_open_rules_applying_to_all_instances":0,"rules_exposing_all_ports_to_internet":0,"rules_open_to_internet":1,"total_rules":2}}}'
+
+  - name: internet_open_rule_on_every_instance
+    expect: FAIL
+    note: >
+      No sensitive port and no all-port exposure - the only thing wrong is the
+      blast radius, which is what
+      `gcp_fw_no_internet_open_rule_targets_all_instances` is for.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"name":"rule-default-allow","open_to_internet":true,"priority":65534}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":1,"rules_exposing_all_ports_to_internet":0,"rules_open_to_internet":1,"total_rules":1}}}'
+
+  - name: rule_opens_every_port_to_the_world
+    expect: FAIL
+    note: target-scoped and exposing no named sensitive service, but the whole port range faces the internet.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":false,"exposes_all_ports":true,"internet_exposed_sensitive_services":[],"name":"rule-allow-any","open_to_internet":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":0,"rules_exposing_all_ports_to_internet":1,"rules_open_to_internet":1,"total_rules":1}}}'
+
+  - name: sensitive_exposure_key_renamed_upstream
+    expect: FAIL
+    note: >
+      An SSH exposure hidden by a renamed key.
+      `gcp_fw_no_sensitive_port_open_to_internet` counts zero and reports PASS;
+      everything else about this artifact is compliant, so
+      `gcp_fw_sensitive_exposure_lists_present` is the ONLY validator failing.
+      Delete that integrity validator and this case goes green while the
+      evidence proves nothing - the silent false pass.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"exposed_services":[],"exposes_all_ports":false,"name":"rule-internal","open_to_internet":false,"priority":1000},{"applies_to_all_instances":false,"exposed_services":["ssh"],"exposes_all_ports":false,"name":"rule-admin","open_to_internet":true,"priority":1000}]},"summary":{"exposed_services":["ssh"],"internet_open_rules_applying_to_all_instances":0,"rules_exposing_all_ports_to_internet":0,"rules_open_to_internet":1,"total_rules":2}}}'
+
+  - name: instance_targeting_key_renamed_upstream
+    expect: FAIL
+    note: >
+      A world-open rule on every instance, hidden by renaming open_to_internet.
+      `gcp_fw_no_internet_open_rule_targets_all_instances` counts zero and
+      reports PASS; `gcp_fw_instance_targeting_flags_present` is the ONLY
+      validator failing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"internet_open":true,"name":"rule-default-allow","priority":65534},{"applies_to_all_instances":false,"exposes_all_ports":false,"internet_exposed_sensitive_services":[],"internet_open":true,"name":"rule-public-https","priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":1,"rules_exposing_all_ports_to_internet":0,"rules_open_to_internet":2,"total_rules":2}}}'
+
+  - name: keys_emitted_out_of_order
+    expect: FAIL
+    note: >
+      Both targeting keys are present and readable, but open_to_internet now
+      precedes applies_to_all_instances, so the ordered violation pattern counts
+      zero on a rule that is open to the world on every instance. Two
+      independent presence checks would both pass here; the ordered integrity
+      pair is the ONLY validator that fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"open_to_internet":true,"name":"rule-default-allow","internet_exposed_sensitive_services":[],"exposes_all_ports":false,"applies_to_all_instances":true}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":1,"rules_exposing_all_ports_to_internet":0,"rules_open_to_internet":1,"total_rules":1}}}'
+
+  - name: all_port_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      A rule opening every port to the world, hidden by renaming
+      exposes_all_ports. `gcp_fw_no_rule_exposes_all_ports_to_internet` counts
+      zero and reports PASS; `gcp_fw_all_port_exposure_flags_present` is the
+      ONLY validator failing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[{"applies_to_all_instances":true,"internet_exposed_sensitive_services":[],"name":"rule-internal","open_to_internet":false,"opens_every_port":false,"priority":1000},{"applies_to_all_instances":false,"internet_exposed_sensitive_services":[],"name":"rule-allow-any","open_to_internet":true,"opens_every_port":true,"priority":1000}]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":0,"rules_exposing_all_ports_to_internet":1,"rules_open_to_internet":1,"total_rules":2}}}'
+
+  - name: empty_rule_population
+    expect: FAIL
+    note: >
+      Collection succeeded but no rule was returned - a project whose Compute
+      API was unreadable, or a genuinely empty result read as one. Every
+      violation counter reports zero, and
+      `gcp_fw_sensitive_exposure_lists_present` is satisfied by the summary
+      mirror of its key. The two integrity validators anchored on per-rule-only
+      keys are what refuse to call this a clean posture.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"firewall_rules":[]},"summary":{"internet_exposed_sensitive_services":[],"internet_open_rules_applying_to_all_instances":0,"rules_exposing_all_ports_to_internet":0,"rules_open_to_internet":0,"total_rules":0}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict, but the API discards
+      disposition, so FAIL is the best reachable answer today. What matters is
+      that a failed collection does not read as a compliance verdict. Today it
+      is the three integrity validators that deliver that, because the envelope
+      carries no rules to read. Collection health proper belongs to
+      validators/common/collection_succeeded.yaml, which does NOT yet list
+      EVD-GCP-FW-RULES; adding it there is what makes this case fail for the
+      right reason rather than as a side effect.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"PermissionDenied"},"payload":{}}'

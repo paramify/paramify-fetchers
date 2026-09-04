@@ -1,0 +1,22 @@
+validator: gcp_logging_all_alert_policies_enabled
+cases:
+  - name: every_policy_enabled
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"alert_policies":[{"display_name":"policy-alpha","enabled":true},{"display_name":"policy-beta","enabled":true}]},"summary":{"enabled_alert_policies":2,"total_alert_policies":2}}}'
+
+  - name: one_policy_switched_off
+    expect: FAIL
+    note: >
+      The posture this validator exists for — the alarm is configured, looks
+      present in an inventory, and fires nothing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"alert_policies":[{"display_name":"policy-alpha","enabled":true},{"display_name":"policy-beta","enabled":false}]},"summary":{"enabled_alert_policies":1,"total_alert_policies":2}}}'
+
+  - name: no_alert_policies_at_all
+    expect: FAIL
+    note: the anti-vacuity case; 0 == 0 must not read as compliant.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"alert_policies":[]},"summary":{"enabled_alert_policies":0,"total_alert_policies":0}}}'
+
+  - name: policy_rollup_renamed_upstream
+    expect: FAIL
+    note: Direction 3 — `enabled_alert_policies` renamed, the regex stops matching, the presence rule fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"alert_policies":[{"display_name":"policy-alpha","enabled":true}]},"summary":{"active_alert_policies":1,"total_alert_policies":1}}}'

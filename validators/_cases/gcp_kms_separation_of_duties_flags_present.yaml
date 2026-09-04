@@ -1,0 +1,9 @@
+validator: gcp_kms_separation_of_duties_flags_present
+cases:
+  - name: flags_collected
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"crypto_keys":[{"key_id":"key-one","separation_of_duties_violated":false}]}}}'
+
+  - name: flag_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"crypto_keys":[{"key_id":"key-one","sod_violated":true}]}}}'

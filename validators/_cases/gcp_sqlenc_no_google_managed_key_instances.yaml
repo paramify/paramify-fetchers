@@ -1,0 +1,29 @@
+validator: gcp_sqlenc_no_google_managed_key_instances
+cases:
+  - name: every_instance_customer_managed
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","cmek":true},{"name":"sql-beta","cmek":true}]},"summary":{"total_instances":2,"cmek_instances":2,"google_managed_instances":0,"cmek_percentage":100}}}'
+
+  - name: one_instance_on_google_default
+    expect: FAIL
+    note: direction 2 - a Google-managed instance is present in the list.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","cmek":true},{"name":"sql-beta","cmek":false}]},"summary":{"total_instances":2,"cmek_instances":1,"google_managed_instances":1,"cmek_percentage":50}}}'
+
+  - name: summary_disagrees_with_instance_list
+    expect: FAIL
+    note: >
+      Why this validator is not a restatement of gcp_sqlenc_cmek_coverage_complete.
+      The rollup claims total coverage while the instance list contains a
+      Google-managed database. The coverage validator reads 100 and passes; only
+      this per-instance counter catches it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","cmek":true},{"name":"sql-beta","cmek":false}]},"summary":{"total_instances":2,"cmek_instances":2,"google_managed_instances":0,"cmek_percentage":100}}}'
+
+  - name: custody_flag_renamed_upstream
+    expect: PASS
+    note: >
+      Direction 3, expecting PASS - and that is the defect, not an oversight. A
+      violation counter cannot cover its own drift: no key, no matches, no
+      violations. The assertion that matters lives at the set level, where
+      gcp_sqlenc_key_custody_flags_present fails on this same artifact. See
+      validators/_cases/set_EVD-GCP-CLOUDSQL-ENC.yaml.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"instances":[{"name":"sql-alpha","key_is_customer_managed":true},{"name":"sql-beta","key_is_customer_managed":false}]},"summary":{"total_instances":2,"cmek_instances":1,"google_managed_instances":1,"cmek_percentage":50}}}'
