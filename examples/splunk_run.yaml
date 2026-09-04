@@ -38,7 +38,7 @@ run:
       config:
         base_url: https://splunk.internal.example.com:8089
         ca_bundle: /etc/ssl/certs/internal-ca.pem
-        dormant_days: "90"
+        dormant_days: 90
 
     - use: splunk_fired_alerts
       secrets:

@@ -21,7 +21,7 @@ Implements: `POST /services/auth/login`, `GET /services/server/info`,
     # or: export SPLUNK_TOKEN=mock-token
 
 **These fixtures were checked against a real Splunk Enterprise 10.4.2** and the
-capture is committed at `tests/fixtures/splunk_real_responses.json`. Names,
+capture is committed at `fetchers/splunk/tests/splunk_real_responses.json`. Names,
 value types and stock settings come from that instance.
 
 The fixtures are deliberately awkward, and every awkwardness is a real Splunk
@@ -101,7 +101,7 @@ def _server_info() -> Dict[str, Any]:
 def _indexes() -> List[Dict[str, Any]]:
     """
     Shaped like a real Splunk Enterprise 10.4.2, because it was checked against
-    one. `tests/fixtures/splunk_real_responses.json` is the capture.
+    one. `fetchers/splunk/tests/splunk_real_responses.json` is the capture.
 
     **The types are mixed, and that is the real behaviour, not a quirk of this
     fixture.** Under `output_mode=json` a live 10.4.2 sends `disabled` and
