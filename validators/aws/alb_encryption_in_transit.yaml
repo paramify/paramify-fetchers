@@ -2,32 +2,30 @@ key: alb_encryption_in_transit
 name: ALB Encryption In Transit
 type: AUTOMATED
 role: configuration
-statement: Ensures that all application load balancers are encrypting data in transit.
+statement: Every application load balancer counted in the evidence is encrypting data in transit.
 
-# ECMAScript regex (Paramify applies `g` + `s`, never `m`). The error anchor comes
-# first and the compliance half is optional, so a well-formed envelope matches
-# exactly once whether or not the payload arrived. Groups: 1 exit_code,
-# 2 alb_total, 3 alb_encrypted — naming does not renumber.
-regex: '"exit_code":\s*(?<exit_code>-?\d+)(?:[\s\S]*?"alb_total":\s*(?<alb_total>\d+)[\s\S]*?"alb_encrypted":\s*(?<alb_encrypted>\d+))?'
-rules_summary: MATCH_COUNT EQUALS 0 -> ERROR; MATCH_GROUP[1] NOT_EQUALS 0 -> ERROR; MATCH_GROUP[2] EQUALS MATCH_GROUP[3]
+# ECMAScript regex (Paramify applies `g` + `s`, never `m`). Groups: 1 alb_total,
+# 2 alb_encrypted — naming does not renumber.
+#
+# No `exit_code` anchor here. Collection health is asserted once for the whole
+# evidence set by `collection_succeeded`, so this validator carries only the one
+# thing it claims. That also keeps its groups starting at 1.
+regex: '"alb_total":\s*(?<alb_total>\d+)[\s\S]*?"alb_encrypted":\s*(?<alb_encrypted>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
 validation_rules:
-  # Drift canary: the envelope always yields one match, so zero means the
-  # exit_code anchor is gone (envelope restructured, file truncated, wrong
-  # artifact) — which a MATCH_GROUP rule would otherwise pass silently.
+  # Presence, and it is load-bearing rather than ceremonial. A MATCH_GROUP
+  # comparison over a regex that did not match compares nothing to nothing and
+  # evaluates TRUE, so without this rule a renamed summary key reads as
+  # compliant. Measured: with the previous shape, an intact envelope whose
+  # payload keys had drifted scored PASS on evidence where 1 of 4 ALBs was
+  # encrypted.
   - regexOperation: { type: MATCH_COUNT }
-    criteria: EQUALS
-    value: { type: CUSTOM_TEXT, customText: "0" }
-    disposition: ERROR
-  # Collection failed — compliance is unknown, not failing.
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # exit_code
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
-    disposition: ERROR
   # Compliance: every ALB counted is an ALB encrypted.
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # alb_total
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # alb_total
     criteria: EQUALS
-    value: { type: MATCH_GROUP, groupNumber: 3 }            # alb_encrypted
-    disposition: PASS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # alb_encrypted
 
 # Applies to the automated Load Balancer Encryption Status set (the
 # aws_load_balancer_encryption_status fetcher). In Paramify this validator is

@@ -55,21 +55,15 @@ name: ALB Encryption In Transit
 type: AUTOMATED
 role: configuration
 statement: Ensures that all application load balancers are encrypting data in transit.
-regex: '"exit_code":\s*(?<exit_code>-?\d+)(?:[\s\S]*?"alb_total":\s*(?<alb_total>\d+)[\s\S]*?"alb_encrypted":\s*(?<alb_encrypted>\d+))?'
-rules_summary: MATCH_COUNT EQUALS 0 -> ERROR; MATCH_GROUP[1] NOT_EQUALS 0 -> ERROR; MATCH_GROUP[2] EQUALS MATCH_GROUP[3]
+regex: '"alb_total":\s*(?<alb_total>\d+)[\s\S]*?"alb_encrypted":\s*(?<alb_encrypted>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
 validation_rules:
-  - regexOperation: { type: MATCH_COUNT }
-    criteria: EQUALS
-    value: { type: CUSTOM_TEXT, customText: "0" }
-    disposition: ERROR
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # exit_code
+  - regexOperation: { type: MATCH_COUNT }                   # the fields were read
     criteria: NOT_EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
-    disposition: ERROR
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # alb_total
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # alb_total
     criteria: EQUALS
-    value: { type: MATCH_GROUP, groupNumber: 3 }            # alb_encrypted
-    disposition: PASS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # alb_encrypted
 attestation_rules: []
 evidence_sets:                          # <- the link lives HERE
   - EVD-LB-ENC-STATUS
@@ -147,56 +141,79 @@ Naming does **not** renumber anything — `(?<x>…)` is still group 1 — so
 `validation_rules`, which references groups by `groupNumber`, is unaffected. The
 names are for the human reading the YAML; the numbers still drive the rules.
 
-### 3. Carry an error state, anchored on `exit_code`
+### 3. Guard the read, and put collection health in its own validator
 
-Validation rules have a **disposition** of `PASS`, `FAIL`, or `ERROR`. The
-distinction is the point: `FAIL` means evidence was collected and the control
-looks bad; `ERROR` means the evidence never arrived, so compliance is
-**unknown**. Without an `ERROR` rule an expired token or a network timeout is
-indistinguishable from a real compliance failure — the fetcher returns no
-payload, the regex finds nothing, and the artifact reports a clean Fail.
+Two silent failures live here, and they need different guards.
 
-The envelope already carries the signal. `wrap_outputs` sets
-`"status": "success" if exit_code == 0 else "failed"`, so `status` and
-`exit_code` are perfectly redundant — anchor on `exit_code` alone. It is numeric,
-appears exactly once, and avoids the `status` key collision (the envelope says
-`failed` while a payload may say `error` — two vocabularies for one event).
+**A rule that reads nothing passes.** A `MATCH_GROUP` comparison over a regex
+that did not match compares nothing to nothing and evaluates **true**. A
+`MATCH_COUNT`-of-violations rule reads a renamed upstream key as zero violations,
+and therefore as compliant. Both report PASS on evidence that proves nothing.
 
-Build the pattern as **the error anchor first, then the compliance pattern in an
-optional group**, so it matches exactly once whether or not the payload arrived
-(`metadata` always precedes `payload` in the envelope, so the ordering holds):
+So **every validator opens with a presence rule**:
 
 ```
-"exit_code":\s*(?<exit_code>-?\d+)(?:[\s\S]*?<compliance pattern>)?
+- regexOperation: { type: MATCH_COUNT }
+  criteria: NOT_EQUALS
+  value: { type: CUSTOM_TEXT, customText: "0" }
 ```
 
-| # | Operation | Criteria | Value | Disposition |
-|---|-----------|----------|-------|-------------|
-| 1 | `MATCH_COUNT` | `EQUALS` | `0` | `ERROR` |
-| 2 | `MATCH_GROUP` 1 (`exit_code`) | `NOT_EQUALS` | `0` | `ERROR` |
-| 3+ | your compliance group(s) | … | … | `PASS` |
+A validator that *reads a value* guards itself this way. A validator that
+*counts violations* cannot — zero matches is its pass condition, so one regex
+cannot both count violations and prove structure. Those need a separate
+`role: integrity` validator asserting the structural key exists (count
+`"CIDRs":\s*"0\.0\.0\.0/0"`, prove `"CIDRs":\s*"`).
 
-Rules evaluate in array order, but Paramify resolves `ERROR` before `FAIL`
-before `PASS`, so an error short-circuits the compliance rules regardless of
-position.
+This is not hypothetical. Measured on real AWS evidence: a payload with three
+genuinely unencrypted buckets flips FAIL → PASS when only the per-item key
+`encrypted` is renamed upstream — the violation regex stops matching, the count
+goes 4 → 1, and the validator reports compliance.
 
-Rule 1 is the **drift canary**. Because the compliance half is optional, a
-well-formed envelope always yields exactly one match — so zero matches means the
-`exit_code` anchor itself is gone (envelope restructured, file truncated, wrong
-artifact). That case would otherwise pass silently, since a `MATCH_GROUP` rule
-with nothing to read does not fail. Rule 1 turns that silence into an `ERROR`.
+**Collection health is one validator per set, not two rules per validator.**
+`wrap_outputs` derives `status` from `exit_code`, so the two are redundant —
+anchor on `exit_code` alone. It is numeric and avoids the `status` key collision
+(the envelope says `success` while a payload may say `ACTIVE` or `error`).
+
+```yaml
+regex: '"exit_code":\s*(?<exit_code>-?\d+)'
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+```
+
+`validators/common/collection_succeeded.yaml` is that validator. The envelope is
+identical for every fetcher, so it is defined **once** and lists every evidence
+set that wants it — the dedup mechanism doing exactly what it is for, and the
+reason the whole library migrates in one file (below). Because it carries the
+anchor for the set, compliance validators do not need `exit_code` at all, which
+keeps their patterns to the one thing they assert and their groups starting at 1.
+
+**Why the guards are positive rather than `disposition: ERROR`.** `ERROR` is the
+semantically right label — "the evidence never arrived, so compliance is
+unknown" is a different fact from "the control looks bad", and without it an
+expired token is indistinguishable from a real failure. But **the REST API
+accepts `disposition` and discards it** (see the gap below). Every rule then
+becomes a pass-requirement, so the negative guard pair — `MATCH_COUNT EQUALS 0
+-> ERROR` plus `exit_code NOT_EQUALS 0 -> ERROR` — demands that the envelope be
+simultaneously absent and carrying a non-zero exit code. Measured: a validator
+written that way is a **constant function**, returning FAIL on every input
+including clean evidence. It is not pessimistic; it is inert.
+
+The positive form asserts the same thing and works today. **Migration when the
+API lands:** invert both criteria and add `disposition: ERROR` to each. That is
+the whole change, in one file, for every evidence set at once.
 
 **Do not pin `schema_version`** as version-safety. It fails in the dangerous
-direction: a bump to `2.0` that leaves `exit_code` untouched would stop the
-pattern matching entirely, and a zero-match validator passes silently. Rule 1 is
-strictly better — it fires on *any* structural change that breaks the anchor, not
-just a version bump, and it fails loudly. A workspace that wants an explicit
-envelope-contract check should put it in one dedicated validator applied across
-all fetcher evidence sets, not duplicate it into every per-fetcher validator.
+direction: a bump that leaves your anchor untouched stops the pattern matching
+entirely. The presence rules above cover structural change and fail loudly.
 
 Anchoring on `exit_code` is the **one sanctioned exception** to the rule against
-matching envelope metadata instead of payload: here the envelope *is* the
-subject of the check.
+matching envelope metadata instead of payload: in the collection-health
+validator the envelope *is* the subject of the check.
 
 ---
 
@@ -219,11 +236,15 @@ that live only Paramify-side.
 
 - **1 fetcher = 1 (automated) evidence set** — unchanged. When one collection
   would feed two sets, split the fetcher, don't fan one artifact out.
-- **Each evidence set carries exactly one `completeness` validator** (does the
-  evidence cover the full population? — often the minimum assessment scope) plus
-  **any number of `configuration` validators** (posture/config checks). `role:`
-  records which is which. This is why multiple validators per fetcher is the
-  norm, not the exception.
+- **An evidence set carries a validator *set*, and `role:` records which is
+  which.** Exactly one `completeness` validator (did the collection succeed and
+  is the population real? — often the minimum assessment scope), any number of
+  `configuration` validators (posture checks), and one `integrity` validator
+  alongside each configuration validator that concludes from a count of
+  violations (was the counted field actually present?). This is why multiple
+  validators per set is the norm, not the exception — an evidence set passes
+  only when all of its validators pass. Both halves of a measured A/B on live
+  AWS evidence produced 2–5 validators per set without being asked to.
 
 ---
 
@@ -295,23 +316,30 @@ validator endpoints were built before that and never updated. The identical
 omission in the validator CSV export is a filed bug, and the API case is now
 tracked separately.
 
-### Consequence for the shipped rule shape
+### Consequence for the rule shape
 
-Because dispositions are dropped and rules are ANDed, the two ERROR guards on
-`validators/aws/alb_encryption_in_transit.yaml` stop being guards and become
-requirements: that the regex match **zero** times, and that `exit_code` be
-**non-zero**. Against a live tenant that validator therefore reports **FAIL on
-fully compliant evidence** — measured, not predicted.
+Because dispositions are dropped and rules are ANDed, a rule written in the
+negative ERROR form stops being a guard and becomes a requirement. The pair
+`MATCH_COUNT EQUALS 0 -> ERROR` and `exit_code NOT_EQUALS 0 -> ERROR` therefore
+demands that the regex match **zero** times *and* that `exit_code` be
+**non-zero** — conditions that cannot both hold on any real artifact.
 
-This is accepted deliberately. `disposition` stays in the registry because it
-costs nothing (the request is not rejected) and because the rules are written
-for the API we are getting, not the one we have. **Until the API ships, do not
-sync this validator to a workspace whose results anyone is reading** — that
-includes `paramify upload --with-validators`.
+Measured against a rule-evaluation emulator calibrated to this tenant: a
+validator in that shape is a **constant function**. It returns FAIL on every
+input — clean evidence, non-compliant evidence, and a failed collection alike.
+Six of six evidence sets in one arm of the A/B behaved this way, as did a
+hand-built reference that scores 100% under the intended semantics.
 
-A shape that is correct under today's semantics exists (gate the regex on
-`exit_code: 0`, and add a `MATCH_COUNT NOT_EQUALS 0` presence guard) but cannot
-express ERROR at all, so it was not adopted.
+So the registry authors the **positive** form (§3): plain PASS rules asserting
+`MATCH_COUNT NOT_EQUALS 0` and `exit_code EQUALS 0`, in a dedicated
+`role: completeness` validator. That form scored 16/16 on today's semantics and
+discriminates properly. Migration is a mechanical inversion of two rules in
+`validators/common/collection_succeeded.yaml`, which is precisely why collection
+health is factored out of the compliance validators.
+
+Nothing is lost by waiting: `disposition` is not *rejected* by the API, so a
+validator that carries it still syncs — it simply has no effect until the
+endpoints are updated.
 
 ### A separate trap: `MATCH_GROUP` passes vacuously
 
@@ -393,6 +421,9 @@ to Paramify and associates them to evidence sets, and document the model.
   bootstrap tool, the inverse of the sync — separate work.
 - **A live-tenant run.** Everything here is verified dry-run and against a mocked
   client; the first real `POST /validators` needs a stage token.
-- **`suggest-validator` skill.** It still frames Paramify as the validator's only
-  home; it should point an accepted suggestion at this registry once the
-  authoring path exists.
+- **A registry contract test for the template.** `validators/_template/validator.yaml`
+  is now schema-valid — its `key` placeholder previously violated the `key`
+  pattern, so it could never have been gated. A `test_template_yaml_matches_schema`
+  mirroring the fetcher-template gate in `tests/test_contracts.py` would keep it
+  that way: a template that would be rejected at discovery teaches a shape that
+  cannot run, and it is copied before anyone finds out.

@@ -51,9 +51,14 @@ def test_reference_ids_from_missing_dir():
 def test_collect_validators_scoped_by_reference_ids():
     syncer = _load_syncer()
     hit = syncer.collect_validators(REPO_ROOT, reference_ids=["EVD-LB-ENC-STATUS"])
-    assert [v["key"] for v in hit] == ["alb_encryption_in_transit"]
+    # An evidence set collects a validator SET, not a single validator: the
+    # compliance check plus the shared collection-health one that lists this
+    # reference_id among many. Scoping must return every validator naming the
+    # set, so assert membership rather than an exact one-element list.
+    keys = {v["key"] for v in hit}
+    assert {"alb_encryption_in_transit", "collection_succeeded"} <= keys
     # payload-facing dict maps validation_rules through unchanged
-    assert hit[0]["validation_rules"] and hit[0]["type"] == "AUTOMATED"
+    assert all(v["validation_rules"] and v["type"] == "AUTOMATED" for v in hit)
 
     miss = syncer.collect_validators(REPO_ROOT, reference_ids=["EVD-NOPE"])
     assert miss == []
