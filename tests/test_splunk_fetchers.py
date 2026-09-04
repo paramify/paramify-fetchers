@@ -209,8 +209,8 @@ def test_no_account_secret_or_ui_preference_reaches_the_evidence(
     assert any(u["name"] == "admin" for u in payload["data"])
 
     serialised = json.dumps(payload)
-    for leaked in ("password", "search_assistant", "search_syntax_highlighting",
-                   "theme", "defaultApp"):
+    for leaked in ("password", "email", "search_assistant",
+                   "search_syntax_highlighting", "theme", "defaultApp"):
         assert leaked not in serialised, f"{leaked} reached the evidence payload"
 
 

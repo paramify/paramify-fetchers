@@ -172,7 +172,6 @@ def describe_user(record: Dict[str, Any], dormant_days: int) -> Dict[str, Any]:
     return {
         "name": record.get("name"),
         "real_name": record.get("realname") or None,
-        "email": record.get("email") or None,
         "roles": list(record.get("roles") or []),
         "auth_type": auth_type,
         "locally_defined": isinstance(auth_type, str)
