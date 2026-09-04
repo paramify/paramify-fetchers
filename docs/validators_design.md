@@ -421,9 +421,15 @@ to Paramify and associates them to evidence sets, and document the model.
   bootstrap tool, the inverse of the sync — separate work.
 - **A live-tenant run.** Everything here is verified dry-run and against a mocked
   client; the first real `POST /validators` needs a stage token.
-- **A registry contract test for the template.** `validators/_template/validator.yaml`
+- **A contract test for the template.** `validators/_template/validator.yaml`
   is now schema-valid — its `key` placeholder previously violated the `key`
   pattern, so it could never have been gated. A `test_template_yaml_matches_schema`
   mirroring the fetcher-template gate in `tests/test_contracts.py` would keep it
-  that way: a template that would be rejected at discovery teaches a shape that
-  cannot run, and it is copied before anyone finds out.
+  that way.
+- **Behaviour checking is a command, not a gate.** `paramify validators check`
+  runs `validators/_cases/` through the ECMAScript evaluator in
+  `framework/validator_eval/`, so "prove it fails too" is one command instead
+  of a hand-rolled `node` invocation per rule. It is deliberately NOT wired
+  into CI: the cases are an authoring aid, and a validator whose evidence
+  shape legitimately changed should not block a merge. Nothing therefore
+  enforces that a validator has cases — `check` reports which ones don't.

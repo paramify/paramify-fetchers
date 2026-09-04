@@ -1016,6 +1016,56 @@ def upload_cmd(
     )
 
 
+@validators_app.command("check")
+def validators_check_cmd(
+    select: Optional[str] = typer.Option(None, "-s", "--select", help="Only this validator key or evidence-set reference_id"),
+    mode: str = typer.Option("api-today", "--mode", help="api-today (what a live tenant does) | as-designed"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Run validators/_cases/ through the ECMAScript evaluator.
+
+    Proves a validator can FAIL, not just pass — the failure modes here are
+    silent, so a validator asserting the wrong thing looks identical to one that
+    works until the evidence changes shape.
+    """
+    root = api.find_repo_root()
+    report = api.check_validators(root, select=select, mode=mode)
+
+    if json_out:
+        typer.echo(json.dumps(report, indent=2))
+        raise typer.Exit(0 if report["ok"] else 1)
+
+    if report.get("error"):
+        _err(report["error"])
+        raise typer.Exit(1)
+
+    for f in report["files"]:
+        if f.get("error"):
+            typer.echo(f"  {style.dim('SKIP')}  {f['file']}: {f['error']}")
+            continue
+        typer.echo(f"\n{style.head(f['target'])}  {style.dim(f['file'])}")
+        for c in f["cases"]:
+            mark = style.dim("ok  ") if c["ok"] else "FAIL"
+            extra = ""
+            if c["vacuous"]:
+                extra = "  <- PASSED VACUOUSLY: a rule held having read nothing"
+            elif not c["ok"]:
+                extra = f"  (expected {c['expect']})"
+            typer.echo(f"  {mark}  {style.name(c['name']):<38s} {c['got']}{extra}")
+
+    s = report["summary"]
+    typer.echo(
+        f"\n{s['cases']} case(s) across {s['files']} file(s), "
+        f"{s['failed']} failed, {s['vacuous_passes']} vacuous pass(es)"
+    )
+    if s["validators_without_cases"]:
+        typer.echo(
+            style.dim("no cases (nothing proves these can fail): ")
+            + ", ".join(s["validators_without_cases"])
+        )
+    raise typer.Exit(0 if report["ok"] else 1)
+
+
 @validators_app.command("sync")
 def validators_sync_cmd(
     manifest: Optional[str] = typer.Option(None, "-m", "--manifest", help="Scope to validators for this manifest's fetchers (default: whole registry)"),

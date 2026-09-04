@@ -313,50 +313,79 @@ Pick the structural anchor one level up from the violation: if you count
 
 ## Phase 4 — Prove it, in three directions (STOP on any failure)
 
-Verify in **Node**, not Python — Paramify runs ECMAScript, and `(?<name>…)` will
-not compile under Python `re` at all. Avoid `grep -P`; BSD grep on macOS lacks it.
+Write the cases down, then run them. `validators/_cases/<key>.yaml` pins what
+each validator must return for a given artifact, and
+`paramify validators check` evaluates them with the real ECMAScript engine —
+the same semantics Paramify applies, including the ones that bite:
+`MATCH_GROUP` reads only the first match, rules combine with AND, and a rule
+that read nothing still *holds*.
 
-```bash
-node -e '
-const fs = require("fs");
-const t = fs.readFileSync("<path>", "utf8");
-const re = new RegExp(String.raw`<your regex>`, "gs");
-let m, n = 0;
-while ((m = re.exec(t)) !== null) {
-  if (m[0] === "") { re.lastIndex++; continue; }
-  if (n < 5) console.log("match:", m.groups ?? m[0].slice(0, 80));
-  n++;
-}
-console.log(n + " match(es)");
-'
+```yaml
+validator: <your key>
+cases:
+  - name: full_coverage
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"encryption_percentage":100}}}}'
+  - name: partial_coverage
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"encryption_percentage":66}}}}'
+  - name: rollup_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"encryption_pct":66}}}}'
 ```
 
-The `gs` flags mirror Paramify, which applies `g` and `s` automatically. Run
-every validator in the set against **three** artifacts:
+```bash
+paramify validators check --select <your key>
+```
 
-1. **Compliant.** The real evidence, or a copy edited to good posture.
-   **PASS:** every validator in the set passes.
-   **FAIL:** anything else — most often the regex never matched, meaning the
-   evidence is empty for this metric. Return to Phase 1.
+Artifacts are inline and synthetic — just the keys your regex touches, plus the
+envelope. **Never paste real tenant evidence**: it carries account ids and
+resource names, which is why `evidence/` is gitignored.
 
-2. **Non-compliant.** A copy edited to bad posture — coverage below threshold,
-   a flag flipped, a violation introduced.
-   **PASS:** at least one configuration validator fails.
-   **FAIL:** the set still passes. A validator that cannot fail proves nothing;
-   this is the single most common defect.
+Write all three directions. They are not optional:
 
-3. **Unreadable.** A copy with the envelope intact but the compliance key
-   **renamed** (`encrypted` → `is_encrypted`), plus a copy with `exit_code` set
-   to `1` and the payload emptied.
-   **PASS:** the set does **not** pass in either case — the integrity validator
-   catches the rename, the collection-health validator catches the failed run.
-   **FAIL:** the set passes. This is the silent false pass, and it is worse than
-   a false failure because nobody investigates a green check.
+1. **Compliant** — good posture. **PASS:** the validator passes.
+   **FAIL:** most often the regex never matched, meaning the evidence is empty
+   for this metric. Return to Phase 1.
+
+2. **Non-compliant** — coverage below threshold, a flag flipped, a violation
+   introduced. **PASS:** the validator fails. **FAIL:** it still passes, and a
+   validator that cannot fail proves nothing. This is the most common defect.
+
+3. **Unreadable** — the envelope intact but the compliance key **renamed**.
+   **PASS:** the validator does not pass. **FAIL:** it passes, which is the
+   silent false pass — worse than a false failure, because nobody investigates a
+   green check.
 
 Direction 3 is the one that gets skipped and the one that catches the whole
-class of bug this phase exists for. Do not skip it.
+class of bug this phase exists for.
 
----
+**A violation-counting validator cannot pass direction 3 on its own** — zero
+matches is its pass condition, so a renamed key reads as zero violations. Its
+case file should say so plainly and expect PASS; the assertion that matters goes
+in a **set-level** case file instead, which combines every validator on the
+evidence set the way Paramify does:
+
+```yaml
+evidence_set: EVD-SQS-ENC
+cases:
+  - name: per_queue_flag_renamed_upstream
+    expect: FAIL          # the integrity validator is what fails here
+    artifact: '...'
+```
+
+Build that case so the *only* thing failing is the integrity validator — keep
+the rollup reading compliant. Otherwise the case passes for the wrong reason and
+proves nothing about the partner. Sanity-check it by deleting the integrity
+validator and confirming the case goes red.
+
+If you need the raw trace for one artifact — every rule's left and right side
+and whether it held — call the evaluator directly:
+
+```bash
+node framework/validator_eval/score.mjs <validator.json> <artifact.json> --mode api-today --pretty
+```
+
 
 ## Phase 5 — Record it in the registry
 
@@ -392,7 +421,12 @@ written back here.
    duplicate `name` with HTTP 400. A compliance validator and its integrity
    partner need genuinely distinct names, not `Foo` and `Foo 2`.
 
-5. **Verify it lands** (STOP on any failure):
+5. **Commit the cases with it.** The case file you wrote in Phase 4 belongs in
+   `validators/_cases/<key>.yaml` (or `set_<REFERENCE-ID>.yaml` for a set-level
+   one). A validator without cases has nothing proving it can fail, and
+   `paramify validators check` will name it.
+
+6. **Verify it lands** (STOP on any failure):
    ```bash
    .venv/bin/python -m pytest tests/test_validators_registry.py -q
    ```
@@ -401,7 +435,7 @@ written back here.
    **FAIL:** fix before moving on. A schema-invalid file breaks discovery for
    the whole registry, not just itself.
 
-6. **Hand back, and state the boundary.** Report each validator's key, role, and
+7. **Hand back, and state the boundary.** Report each validator's key, role, and
    what it asserts, and say plainly that these are derived from one evidence
    sample: they are templates to confirm against more runs. Syncing to Paramify
    is a separate, explicit step (`paramify validators sync`, create-or-skip) and

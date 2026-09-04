@@ -1,0 +1,32 @@
+# Set-level: every validator naming EVD-SQS-ENC, combined the way Paramify
+# combines them (ERROR > FAIL > PASS). This is the assertion that matters —
+# a count-based validator cannot cover its own drift, so only the set can.
+evidence_set: EVD-SQS-ENC
+cases:
+  - name: fully_encrypted
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"queues":[{"name":"a","encrypted":true},{"name":"b","encrypted":true},{"name":"c","encrypted":true}],"summary":{"total_queues":3,"encrypted_queues":3,"encryption_percentage":100}}}}'
+
+  - name: one_queue_unencrypted
+    expect: FAIL
+    note: the real posture collected from a live account when these were authored
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"queues":[{"name":"a","encrypted":true},{"name":"b","encrypted":false},{"name":"c","encrypted":true}],"summary":{"total_queues":3,"encrypted_queues":2,"encryption_percentage":66}}}}'
+
+  - name: per_queue_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the whole integrity role exists for. sqs_no_unencrypted_queues
+      counts "encrypted": false and finds none, so ALONE it reports PASS on an
+      artifact that hides an unencrypted queue. sqs_queue_encryption_flags_present
+      fails because the key it proves is gone, and the set therefore fails.
+      Delete the integrity validator and this case goes green while the evidence
+      proves nothing — which is exactly the silent false pass.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"queues":[{"name":"a","is_encrypted":true},{"name":"b","is_encrypted":false},{"name":"c","is_encrypted":true}],"summary":{"total_queues":3,"encrypted_queues":3,"encryption_percentage":100}}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict, but the API discards disposition,
+      so FAIL is the best reachable answer today. What matters is that it does
+      not PASS. See docs/validators_design.md.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"ExpiredToken"},"payload":{}}'

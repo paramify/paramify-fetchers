@@ -68,7 +68,18 @@ and yields a validator that can never pass.
 See [`aws/alb_encryption_in_transit.yaml`](aws/alb_encryption_in_transit.yaml)
 for a worked compliance validator.
 
-Prove it before you commit: run the regex in `node` against real evidence, then
-against a copy edited to bad posture, then against a copy with the key
-**renamed**. The third case is the one that catches silent false passes, and the
-one that gets skipped.
+Prove it before you commit. Write the three directions down in
+[`_cases/<key>.yaml`](_cases/README.md) — compliant, non-compliant, and the key
+**renamed** — then:
+
+```bash
+paramify validators check --select <your key>
+```
+
+That evaluates them with the real ECMAScript engine, including the semantics
+that bite: `MATCH_GROUP` reads only the first match, rules combine with AND, and
+a rule that read nothing still holds. The renamed-key direction is the one that
+catches silent false passes and the one that gets skipped.
+
+It is an authoring aid rather than a merge gate — nothing stops you committing a
+validator without cases, but nothing then proves it can fail either.
