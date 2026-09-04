@@ -118,7 +118,7 @@ named in the body:
 That text is carried through into `api_failures`, so the evidence file tells you
 which capability to grant rather than just that something went wrong. (This
 wording was guessed when the client was written and turns out to be exact — the
-capture is in `tests/fixtures/splunk_real_responses.json`.)
+capture is in `fetchers/splunk/tests/splunk_real_responses.json`.)
 
 ## TLS
 
@@ -234,9 +234,11 @@ ephemeral port in-process, which is why this only bites manual runs.
 ## Validated against a real instance (2026-08-24)
 
 **This has been run against a real Splunk Enterprise 10.4.2** — a local free
-install — and `tests/fixtures/splunk_real_responses.json` is the sanitized
-capture, replayed by four tests. The fetcher collected all 46 indexes and exited
-0. What that changed:
+install — and `fetchers/splunk/tests/splunk_real_responses.json` is the sanitized
+capture, replayed by 13 tests. The fetcher collected all 46 indexes and exited
+0; the committed capture keeps a few records per endpoint rather than the whole
+run, chosen to preserve the value types and the specific records those tests
+assert on. What that changed:
 
 - Every field name it reads exists on a real index record. ✅
 - `count` really does default to 30, and the client really does page past it. ✅

@@ -205,6 +205,7 @@ def collect() -> Dict[str, Any]:
         client=client,
         endpoint=INDEXES_PATH,
         records=records,
+        data=[describe(r) for r in records if isinstance(r, dict)],
         analysis=summarize(records),
         empty_message="No indexes returned",
     )

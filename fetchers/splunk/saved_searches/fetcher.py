@@ -216,6 +216,7 @@ def collect() -> Dict[str, Any]:
         client=client,
         endpoint=SEARCHES_PATH,
         records=records,
+        data=[describe(r) for r in records if isinstance(r, dict)],
         analysis=summarize(records),
         empty_message="No saved searches returned",
     )

@@ -273,11 +273,12 @@ def collect() -> Dict[str, Any]:
         client=client,
         endpoint=USERS_PATH,
         records=users,
+        data=[describe_user(u, dormant_days) for u in users if isinstance(u, dict)],
         analysis=summarize(users, roles, dormant_days),
         empty_message="No Splunk accounts returned",
         # Roles are the other half of the evidence, not a sub-record of a user,
         # so they travel as their own top-level key.
-        roles=roles,
+        roles=[describe_role(r) for r in roles if isinstance(r, dict)],
         role_count=len(roles),
     )
 

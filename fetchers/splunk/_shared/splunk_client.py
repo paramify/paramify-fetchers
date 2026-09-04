@@ -681,6 +681,7 @@ def evidence(
     records: List[Dict[str, Any]],
     analysis: Dict[str, Any],
     empty_message: str,
+    data: Optional[List[Dict[str, Any]]] = None,
     **extra: Any,
 ) -> Dict[str, Any]:
     """
@@ -695,13 +696,19 @@ def evidence(
     `**extra` carries fetcher-specific top-level keys (the firewall fetcher adds
     its containers, rule groups and rules) without every fetcher restating the
     common ones.
+
+    `data` is the allowlisted view of `records` — what each fetcher's
+    `describe()` keeps. It is a separate argument because `record_count` must
+    still count what was collected, not what survived the allowlist. Passing
+    the raw records straight through would ship Splunk's whole `content` block,
+    including the account password hash and every UI preference.
     """
     body: Dict[str, Any] = {
         "status": "success" if records else "partial_or_empty",
         "api_endpoint": f"{client.base_url}{endpoint}",
         "record_count": len(records),
         "api_failures": client.api_failures,
-        "data": records,
+        "data": records if data is None else data,
         "analysis": analysis,
         "collection": collection_provenance(client),
         "retrieved_at": current_timestamp(),

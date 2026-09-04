@@ -127,6 +127,93 @@ def test_fetcher_collects_successfully(name: str, mock_server: str, tmp_path: Pa
     assert payload["retrieved_at"].endswith("Z")
 
 
+# How to reach each fetcher's allowlist. The keys are not written out here:
+# calling describe() with an empty record returns the dict it always builds, so
+# the expected set comes from the code rather than from a list beside it. The
+# check is still real — `data` is read back from a subprocess run of the whole
+# fetcher, so a fetcher that stopped routing through describe() fails even
+# though both halves name the same function.
+DESCRIBERS = {
+    "indexes": lambda m: m.describe({}),
+    "saved_searches": lambda m: m.describe({}),
+    "fired_alerts": lambda m: m.describe_firing({}),
+    "users_roles": lambda m: m.describe_user({}, 90),
+}
+
+
+def _allowed_keys(name: str) -> set:
+    module = _load_module(FETCHER_ROOT / name / "fetcher.py", f"allowlist_{name}")
+    return set(DESCRIBERS[name](module))
+
+
+@pytest.mark.parametrize("name", FETCHERS)
+def test_data_carries_only_the_allowlisted_fields(
+    name: str, mock_server: str, tmp_path: Path
+) -> None:
+    """
+    `data` is what describe() keeps, not Splunk's whole `content` block.
+
+    Passing the collected records straight to evidence() shipped every setting
+    Splunk returns — on an account that means the masked password and ~20 UI
+    preferences, none of which this evidence set asks for. Upstream review
+    caught it; this pins the routing so it cannot come back.
+    """
+    code, payload = _run_fetcher(name, mock_server, tmp_path)
+
+    assert code == 0
+    assert payload["data"], f"{name} returned no records to check"
+
+    allowed = _allowed_keys(name)
+    assert len(allowed) >= 10, "describe() probe returned suspiciously few keys"
+
+    for record in payload["data"]:
+        assert set(record) <= allowed, (
+            f"{name} leaked {sorted(set(record) - allowed)} into data"
+        )
+
+
+def test_roles_travel_through_the_allowlist_too(
+    mock_server: str, tmp_path: Path
+) -> None:
+    """
+    users_roles puts roles in their own top-level key, so `data` alone does not
+    cover it. A role record carries no password, but it carries the same kind
+    of raw settings, and the two halves should not diverge.
+    """
+    module = _load_module(FETCHER_ROOT / "users_roles" / "fetcher.py", "allowlist_roles")
+    allowed = set(module.describe_role({}))
+
+    code, payload = _run_fetcher("users_roles", mock_server, tmp_path)
+
+    assert code == 0
+    assert payload["roles"]
+    for record in payload["roles"]:
+        assert set(record) <= allowed, (
+            f"roles leaked {sorted(set(record) - allowed)}"
+        )
+
+
+def test_no_account_secret_or_ui_preference_reaches_the_evidence(
+    mock_server: str, tmp_path: Path
+) -> None:
+    """
+    The specific fields that prompted the fix, checked against the whole file.
+
+    Scanned over the serialised payload rather than the parsed records, so a
+    new top-level key added later cannot reintroduce them unnoticed.
+    """
+    code, payload = _run_fetcher("users_roles", mock_server, tmp_path)
+
+    assert code == 0
+    # The mock serves these on the admin account, as a real Splunk does.
+    assert any(u["name"] == "admin" for u in payload["data"])
+
+    serialised = json.dumps(payload)
+    for leaked in ("password", "search_assistant", "search_syntax_highlighting",
+                   "theme", "defaultApp"):
+        assert leaked not in serialised, f"{leaked} reached the evidence payload"
+
+
 @pytest.mark.parametrize("name", FETCHERS)
 def test_fetcher_writes_evidence_even_when_auth_fails(
     name: str, mock_server: str, tmp_path: Path
@@ -437,7 +524,7 @@ def test_the_client_cannot_express_a_write() -> None:
 
 # --- real recorded responses --------------------------------------------------
 #
-# `tests/fixtures/splunk_real_responses.json` was captured from a real Splunk
+# `fetchers/splunk/tests/splunk_real_responses.json` was captured from a real Splunk
 # Enterprise 10.4.2 (a local free-trial install), sanitized of hostnames, paths
 # and the instance GUID. Unlike the crowdstrike corpus these are our own
 # instance's responses, so they are committed rather than downloaded, and they
@@ -447,7 +534,7 @@ def test_the_client_cannot_express_a_write() -> None:
 # the same assumption as the fetcher. These can, and did: the first version of
 # this client was built believing every Splunk value is a string.
 
-REAL_RESPONSES = REPO_ROOT / "tests" / "fixtures" / "splunk_real_responses.json"
+REAL_RESPONSES = FETCHER_ROOT / "tests" / "splunk_real_responses.json"
 
 
 @pytest.fixture(scope="module")

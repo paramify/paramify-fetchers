@@ -227,6 +227,7 @@ def collect() -> Dict[str, Any]:
         client=client,
         endpoint=FIRED_PATH,
         records=firings,
+        data=[describe_firing(f) for f in firings if isinstance(f, dict)],
         analysis=summarize(per_search, firings, reported_total, truncated),
         empty_message=(
             "No alerts have fired within Splunk's retention window. This is not "

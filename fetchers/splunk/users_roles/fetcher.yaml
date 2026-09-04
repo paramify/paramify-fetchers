@@ -61,14 +61,14 @@ config_schema:
       Path to the CA bundle that signed the Splunk certificate. Splunk ships a
       self-signed certificate, so set this to verify it properly.
   verify_ssl:
-    type: string
+    type: boolean
     required: false
     env: SPLUNK_VERIFY_SSL
     description: >-
       Set false to skip TLS verification against a self-signed Splunk
       certificate. Whichever way this resolves is recorded in the evidence.
   dormant_days:
-    type: string
+    type: integer
     required: false
     env: SPLUNK_DORMANT_DAYS
     description: >-

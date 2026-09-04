@@ -625,6 +625,17 @@ def _users() -> List[Dict[str, Any]]:
             "capabilities": ["admin_all_objects", "edit_user", "search"],
             "locked-out": False,
             "last_successful_login": 1787703902,
+            # A real /authentication/users record carries the account's masked
+            # password and the owner's UI preferences alongside the fields this
+            # category actually reads. Reproduced on one account so the suite
+            # can prove they never reach the evidence payload.
+            "password": "********",
+            "tz": "",
+            "lang": "",
+            "theme": "default_system_theme",
+            "search_assistant": "compact",
+            "search_syntax_highlighting": "default-system-theme",
+            "defaultApp": "launcher",
         },
         {
             # Federated through SAML, and recently active.

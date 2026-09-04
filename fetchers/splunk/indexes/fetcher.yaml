@@ -62,7 +62,7 @@ config_schema:
       Path to the CA bundle that signed the Splunk certificate. Splunk ships a
       self-signed certificate, so set this to verify it properly.
   verify_ssl:
-    type: string
+    type: boolean
     required: false
     env: SPLUNK_VERIFY_SSL
     description: >-
