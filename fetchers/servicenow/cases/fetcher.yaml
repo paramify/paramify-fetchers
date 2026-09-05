@@ -1,0 +1,38 @@
+name: servicenow_cases
+version: 0.1.0
+description: Pulls customer service cases from the ServiceNow Paramify Evidence API and writes the raw JSON response as evidence.
+category: servicenow
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: servicenow_cases.json
+
+secrets:
+- name: username
+  env: SERVICENOW_USERNAME
+  description: ServiceNow username for basic auth.
+- name: password
+  env: SERVICENOW_PASSWORD
+  description: ServiceNow password for basic auth.
+- name: api_url
+  env: SERVICENOW_CASES_API_URL
+  description: >-
+    Full URL of the cases endpoint, including the scoped-app path — the path is
+    not assumed, because the scope prefix differs per instance. For example
+    https://<instance>.example.com/api/sn_customerservice/paramify_evidence/cases
+
+config_schema:
+  last_run:
+    type: string
+    required: false
+    env: SERVICENOW_CASES_LAST_RUN
+    description: >-
+      Watermark timestamp (YYYY-MM-DD HH:MM:SS). When set, only cases modified
+      since this time are returned. Omit for a full pull — the fetcher persists
+      no watermark of its own, so an incremental pull yields partial evidence.
