@@ -1472,20 +1472,38 @@ def test_a_refused_mutation_creates_nothing(sandbox):
     assert list(sandbox.iterdir()) == [], "a refused mutation must not write anything"
 
 
+@pytest.fixture
+def workspace(tmp_path, monkeypatch):
+    """A self-contained repo-shaped tree holding manifests/demo.yaml.
+
+    Deliberately NOT the real repo: .gitignore ignores manifests/*, so this
+    repo's own manifests are untracked local state. A test that reads them
+    passes on a developer's machine and fails in CI, where the directory does
+    not exist at all — which is exactly what happened.
+    """
+    for d in ("fetchers", "framework", "manifests"):
+        (tmp_path / d).mkdir()
+    (tmp_path / "manifests" / "demo.yaml").write_text(
+        "run:\n  output_dir: ./evidence\n  fetchers:\n  - use: demo_hello\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
 @pytest.mark.parametrize("spelling", ["demo", "demo.yaml", "manifests/demo.yaml"])
-def test_a_bare_name_finds_the_real_manifest(in_repo, spelling):
+def test_a_bare_name_finds_the_manifest(workspace, spelling):
     """All three spellings must reach manifests/demo.yaml. A bare name used to
     resolve against cwd, so it found nothing and read as empty."""
     result = runner.invoke(app, ["manifest", "show", "-f", spelling])
     assert result.exit_code == 0, result.output
-    assert "demo_hello" in result.output, "did not read the real manifest"
+    assert "demo_hello" in result.output, "did not read the manifest"
 
 
-def test_the_refusal_names_the_manifests_it_found(in_repo):
+def test_the_refusal_names_the_manifests_it_found(workspace):
     """A path error should point at the way out, not just report failure."""
     result = runner.invoke(app, ["manifest", "show", "-f", "ghost"])
     assert "discovered:" in result.output
-    assert "manifests/demo.yaml" in result.output
+    assert "demo.yaml" in result.output
 
 
 def test_manifest_init_still_creates(in_repo, tmp_path):
