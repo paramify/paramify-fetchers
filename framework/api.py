@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
@@ -630,14 +631,107 @@ def upload_readiness(root: Path, config_path: Optional[Path] = None) -> dict:
 # Manifest read / write
 # --------------------------------------------------------------------------- #
 
-def read_manifest(path: Path) -> dict:
-    """Read a manifest YAML into its raw dict. Returns an empty manifest if the
-    file is missing or blank. Raises yaml.YAMLError on malformed YAML."""
+class ManifestNotFound(FileNotFoundError):
+    """No manifest resolved from what the caller asked for.
+
+    Carries the candidates that were tried so the CLI can say where it looked
+    without re-deriving the ladder.
+    """
+
+    def __init__(self, given: str, tried: List[Path]):
+        self.given = given
+        self.tried = tried
+        super().__init__(f"no such manifest: {given}")
+
+
+def resolve_manifest_path(root: Path, name: str, *, must_exist: bool = True) -> Path:
+    """Resolve what the user typed to a manifest path.
+
+    Tries the value as typed, then — for a bare name with no directory part —
+    <root>/manifests/<name> and <root>/manifests/<name>.yaml, then <root>/<name>,
+    so a bare name works from anywhere in the tree.
+
+    This is workspace policy, not CLI presentation: the console resolves the
+    same way, and the two disagreeing is the bug this replaces. Sixteen call
+    sites used a bare Path(x).resolve(), which for a bare name resolves against
+    the process's cwd — so `manifest add -f demo` read ./demo as an empty
+    manifest and WROTE a brand-new one there, while manifests/demo.yaml sat
+    untouched. The manifest silently forks in two and nothing says so.
+
+    must_exist=False is for the create commands (`manifest init`, `manifest
+    new`) and returns the first candidate whether or not anything is there.
+    Everything else should let this raise.
+    """
+    given = Path(name)
+    candidates: List[Path] = [given]
+    if not given.is_absolute():
+        if len(given.parts) == 1:
+            candidates += [root / "manifests" / name, root / "manifests" / f"{name}.yaml"]
+        candidates.append(root / name)
+
+    # `root / name` repeats the as-typed candidate when the CLI already runs
+    # from the repo root, which is the common case. Dedupe on the resolved path
+    # so the error lists each place once.
+    seen, tried = set(), []
+    for candidate in candidates:
+        key = candidate.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
+        tried.append(candidate)
+        if candidate.is_file():
+            return key
+
+    if not must_exist:
+        return tried[0].resolve()
+    raise ManifestNotFound(name, tried)
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Write via a temp file in the same directory, then rename over the target.
+
+    write_text truncates in place, so a crash or a full disk between truncate
+    and write leaves a half-written or empty manifest — and the manifest is the
+    only record of what a run is supposed to collect. os.replace is atomic on
+    the same filesystem, so a reader sees either the old file or the new one.
+
+    Same directory rather than the system temp dir: a rename across filesystems
+    is not atomic and raises OSError.
+    """
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def read_manifest(path: Path, *, must_exist: bool = False) -> dict:
+    """Read a manifest YAML into its raw dict. Raises yaml.YAMLError on malformed YAML.
+
+    must_exist=True raises ManifestNotFound for a missing file or a non-mapping
+    root, instead of returning an empty manifest. Every command that GATES on a
+    manifest (doctor, validate, run) or MUTATES one wants that: an empty
+    manifest validates clean, so reading a path that isn't there reported a
+    typo'd filename as a passing preflight, and reading a non-mapping YAML
+    reported it as valid with zero entries.
+
+    The default stays permissive because the editing path genuinely wants it —
+    the console opens a not-yet-created manifest and fills it in.
+    """
     p = Path(path)
     if not p.exists():
+        if must_exist:
+            raise ManifestNotFound(str(path), [p])
         return init_manifest()
     data = yaml_io.load_path(p)
-    return data if isinstance(data, dict) else init_manifest()
+    if isinstance(data, dict):
+        return data
+    if must_exist:
+        raise ManifestNotFound(str(path), [p])
+    return init_manifest()
 
 
 def dump_manifest(manifest: dict, path: Path, root: Path) -> None:
@@ -649,7 +743,7 @@ def dump_manifest(manifest: dict, path: Path, root: Path) -> None:
         raise ValueError("refusing to write schema-invalid manifest:\n  " + "\n  ".join(errs))
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(yaml.safe_dump(manifest, sort_keys=False, default_flow_style=False))
+    _atomic_write(p, yaml.safe_dump(manifest, sort_keys=False, default_flow_style=False))
 
 
 # --------------------------------------------------------------------------- #

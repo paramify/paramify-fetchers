@@ -420,3 +420,44 @@ def test_multipicker_filter_arrows_walk_the_tree(tmp_path):
     before, after, focused = _run(body, manifest)
     assert after == before + 1, "down did not move the picker cursor from the filter"
     assert focused == "multi-pick-filter"
+
+
+# --------------------------------------------------------------------------- #
+# The console resolves a manifest the same way the CLI does
+# --------------------------------------------------------------------------- #
+
+def test_launch_resolves_a_bare_manifest_name(monkeypatch, tmp_path):
+    """--manifest demo must find manifests/demo.yaml, as -f demo does.
+
+    The app took the string verbatim, and read_manifest returns an EMPTY
+    manifest for a path that is not there — so the console opened blank with no
+    warning and the first edit wrote a brand-new ./demo.
+    """
+    from framework.tui import __main__ as tui_main
+
+    (tmp_path / "fetchers").mkdir()
+    (tmp_path / "framework").mkdir()
+    (tmp_path / "manifests").mkdir()
+    real = tmp_path / "manifests" / "demo.yaml"
+    real.write_text("run:\n  output_dir: ./evidence\n  fetchers: []\n")
+
+    seen = {}
+    monkeypatch.setattr(tui_main, "FetcherApp",
+                        lambda **kw: type("A", (), {"run": lambda self: seen.update(kw)})())
+    monkeypatch.chdir(tmp_path)
+
+    tui_main.launch("demo")
+    assert seen["manifest_path"] == str(real.resolve())
+
+
+def test_launch_refuses_a_manifest_that_does_not_exist(monkeypatch, tmp_path):
+    from framework.tui import __main__ as tui_main
+
+    (tmp_path / "fetchers").mkdir()
+    (tmp_path / "framework").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(tui_main, "FetcherApp",
+                        lambda **kw: type("A", (), {"run": lambda self: None})())
+
+    with pytest.raises(SystemExit, match="no such manifest"):
+        tui_main.launch("ghost")

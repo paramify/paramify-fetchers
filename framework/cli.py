@@ -639,7 +639,7 @@ def doctor_cmd(
     root = api.find_repo_root()
     rep = api.doctor(
         root,
-        Path(manifest) if manifest else None,
+        _resolve_optional_manifest(root, manifest, json_out),
         upload_config=Path(upload_config) if upload_config else None,
         require_upload=require_upload,
         probe=probe,
@@ -897,14 +897,15 @@ def validate_cmd(
 ):
     """Validate a manifest against the schema + discovered fetchers."""
     root = api.find_repo_root()
-    mpath = Path(manifest).resolve()
-    if not mpath.is_file():
-        msg = f"no such manifest: {manifest}"
+    try:
+        mpath = api.resolve_manifest_path(root, manifest)
+    except api.ManifestNotFound as e:
+        msg = str(e)
         if json_out:
             typer.echo(json.dumps({"ok": False, "errors": [msg]}, indent=2))
         else:
             _err(f"Validation failed: {msg}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     try:
         m = api.read_manifest(mpath)
     except Exception as e:  # noqa: BLE001 — surface any load error to the user
@@ -934,14 +935,15 @@ def run_cmd(
 ):
     """Run a manifest; streams per-fetcher results (or a JSON summary with --json)."""
     root = api.find_repo_root()
-    mpath = Path(manifest).resolve()
-    if not mpath.is_file():
-        msg = f"no such manifest: {manifest}"
+    try:
+        mpath = api.resolve_manifest_path(root, manifest)
+    except api.ManifestNotFound as e:
+        msg = str(e)
         if json_out:
             typer.echo(json.dumps({"ok": False, "error": msg}, indent=2))
         else:
             _err(f"Setup failed: {msg}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     try:
         m = api.read_manifest(mpath)
     except Exception as e:  # noqa: BLE001
@@ -965,7 +967,7 @@ def run_cmd(
         summary = api.run(
             m, root,
             on_event=None if json_out else _human_run_printer(),
-            manifest_path=Path(manifest).resolve(),
+            manifest_path=mpath,
         )
     except (ValueError, RuntimeError) as e:
         if json_out:
@@ -1077,10 +1079,14 @@ def validators_sync_cmd(
 ):
     """Create/associate registry validators in Paramify. Create-or-skip by default."""
     root = api.find_repo_root()
+    # Resolved OUTSIDE the try: a miss exits via _fail's typer.Exit, which the
+    # broad `except Exception` below would otherwise catch and re-report as
+    # "Validator sync failed: 1".
+    mpath = _resolve_optional_manifest(root, manifest, json_out)
     try:
         summary = api.sync_validators(
             root,
-            Path(manifest).resolve() if manifest else None,
+            mpath,
             Path(config).resolve() if config else None,
             dry_run=dry_run,
             update=update,
@@ -1150,7 +1156,10 @@ def scripts_sync_cmd(
     config_path = Path(config).resolve() if config else None
     include = None
     if not all_fetchers:
-        mpath = Path(manifest).resolve() if manifest else (root / _DEFAULT_MANIFEST)
+        mpath = _resolve_optional_manifest(root, manifest, json_out) or (root / _DEFAULT_MANIFEST)
+        # The default manifest is allowed to be absent — an empty include set
+        # then means "every fetcher", which is what --all asks for anyway. A
+        # name the user actually typed has already had to resolve.
         m = api.read_manifest(mpath)
         entries = (m.get("run") or {}).get("fetchers") or []
         include = {e.get("use") for e in entries if e.get("use")}
@@ -1238,7 +1247,7 @@ def manifest_init(
     """Create a new empty manifest file."""
     root = api.find_repo_root()
     m = api.init_manifest(output_dir)
-    _save_and_report(m, Path(file).resolve(), root, json_out)
+    _save_and_report(m, api.resolve_manifest_path(root, file, must_exist=False), root, json_out)
 
 
 @manifest_app.command("new")
@@ -1274,7 +1283,7 @@ def manifest_add(
 ):
     """Add a fetcher entry to the manifest."""
     root = api.find_repo_root()
-    path = Path(file).resolve()
+    path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     api.add_entry(m, fetcher)
     _save_and_report(m, path, root, json_out)
@@ -1288,7 +1297,7 @@ def manifest_remove(
 ):
     """Remove a fetcher entry from the manifest."""
     root = api.find_repo_root()
-    path = Path(file).resolve()
+    path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     api.remove_entry(m, fetcher)
     _save_and_report(m, path, root, json_out)
@@ -1303,7 +1312,7 @@ def manifest_set_config(
 ):
     """Set a config key on a fetcher entry."""
     root = api.find_repo_root()
-    path = Path(file).resolve()
+    path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
     value = _coerce_or_fail(raw, _config_type(root, fetcher, key), key, path, json_out)
@@ -1321,7 +1330,7 @@ def manifest_set_secret(
 ):
     """Set a secret reference (${env:VAR}) on a fetcher entry."""
     root = api.find_repo_root()
-    path = Path(file).resolve()
+    path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     api.set_secret(m, fetcher, secret_name, env_var)
     _save_and_report(m, path, root, json_out)
@@ -1337,7 +1346,7 @@ def manifest_add_target(
 ):
     """Append a fanout target (with optional per-target secrets) to a fetcher."""
     root = api.find_repo_root()
-    path = Path(file).resolve()
+    path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     vals = {}
     for kv in (values or []):
@@ -1360,7 +1369,7 @@ def manifest_remove_target(
 ):
     """Remove the fanout target at the given index from a fetcher entry."""
     root = api.find_repo_root()
-    path = Path(file).resolve()
+    path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     api.remove_target(m, fetcher, index)
     _save_and_report(m, path, root, json_out)
@@ -1375,7 +1384,7 @@ def manifest_set_platform_config(
 ):
     """Set a platform-wide config key for a category."""
     root = api.find_repo_root()
-    path = Path(file).resolve()
+    path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
     value = _coerce_or_fail(raw, _platform_config_type(root, category, key), key, path, json_out)
@@ -1392,7 +1401,7 @@ def manifest_set_passthrough(
 ):
     """Set the ambient passthrough env vars for a platform category."""
     root = api.find_repo_root()
-    path = Path(file).resolve()
+    path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     api.set_passthrough_env(m, category, env_vars)
     _save_and_report(m, path, root, json_out)
@@ -1406,7 +1415,7 @@ def manifest_set_output_dir(
 ):
     """Set the manifest's run output directory."""
     root = api.find_repo_root()
-    path = Path(file).resolve()
+    path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     api.set_output_dir(m, output_dir)
     _save_and_report(m, path, root, json_out)
@@ -1418,7 +1427,8 @@ def manifest_show(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Print the current manifest (YAML, or JSON with --json). No write, no validation."""
-    path = Path(file).resolve()
+    root = api.find_repo_root()
+    path = _resolve_manifest_arg(root, file, json_out)
     try:
         m = api.read_manifest(path)
     except Exception as e:  # noqa: BLE001
@@ -1540,30 +1550,35 @@ def _manifest_choice_note(choice: dict) -> str:
 
 
 def _resolve_manifest_arg(root: Path, file: str, json_out: bool) -> Path:
-    """Resolve an explicit -f value: as typed, then against <root>/manifests/ and
-    the repo root, so a bare name works from anywhere in the tree.
+    """Resolve an explicit -f value, reporting a miss the way the CLI reports
+    argument errors: {ok, path, errors} under --json, a styled line otherwise.
 
-    A value that resolves to nothing is an error here. read_manifest() reads a
-    missing file as an *empty* manifest, which this command then reports as "no
-    entry takes a program" — blaming the contents for a path that isn't there —
-    and whose write would fork a brand-new manifest at the wrong location.
+    The ladder itself lives in api.resolve_manifest_path — the console resolves
+    the same way, and the two disagreeing is what let a bare name fork a
+    manifest. This function is only the presentation half.
     """
-    given = Path(file)
-    candidates = [given]
-    if not given.is_absolute():
-        if len(given.parts) == 1:
-            candidates += [root / "manifests" / file, root / "manifests" / f"{file}.yaml"]
-        candidates.append(root / file)
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate.resolve()
-    known = ", ".join(_manifest_label(i["path"], root) for i in api.list_manifests(root))
-    _fail(
-        given.resolve(),
-        f"no such manifest: {file}"
-        + (f" (discovered: {known})" if known else " (no manifests discovered)"),
-        json_out,
-    )
+    try:
+        return api.resolve_manifest_path(root, file)
+    except api.ManifestNotFound:
+        known = ", ".join(_manifest_label(i["path"], root) for i in api.list_manifests(root))
+        _fail(
+            Path(file).resolve(),
+            f"no such manifest: {file}"
+            + (f" (discovered: {known})" if known else " (no manifests discovered)"),
+            json_out,
+        )
+
+
+def _resolve_optional_manifest(root: Path, file: Optional[str], json_out: bool) -> Optional[Path]:
+    """Resolve an optional manifest argument. None passes through.
+
+    A supplied value that resolves to nothing is an error. It used to become an
+    empty manifest, which reads downstream as "this manifest selects nothing" —
+    so `validators sync -m typo` collected zero validators and reported ok with
+    a valid token in hand, and `scripts sync typo` failed complaining about the
+    manifest's contents rather than the path.
+    """
+    return _resolve_manifest_arg(root, file, json_out) if file else None
 
 
 def _manifest_for_edit(root: Path, file: Optional[str], json_out: bool, fetchers: dict) -> Path:

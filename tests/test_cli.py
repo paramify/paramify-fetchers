@@ -364,6 +364,14 @@ API_TO_CLI = {
     # Read-only label helper: how an assessment is named in the picker. The CLI
     # applies the same function to its own list output.
     "assessment_display_name": "<implicit: assessment label>",
+    # Backs -f / -m on every manifest-taking CLI command, and --manifest on the
+    # console. The two resolving differently is what let a bare name fork a
+    # manifest, so both front ends deliberately call the same function.
+    "resolve_manifest_path": "<implicit: -f / --manifest resolution>",
+    # Not a call — the exception resolve_manifest_path raises, caught in the
+    # console's launch path. The walker collects every api.<name> attribute,
+    # which is the right breadth, so an exception type has to be mapped too.
+    "ManifestNotFound": "<implicit: the -f / --manifest error path>",
 }
 
 
@@ -1401,3 +1409,106 @@ def test_assessments_select_accepts_an_id_directly(stub_assessments, report_mani
     rep = _json(_select(report_manifest, "testcat_vuln_scan", "-a", _ASSESSMENTS[2]["id"]))
     assert rep["ok"] is True
     assert _entry_config(report_manifest, "testcat_vuln_scan")["assessment_name"] == "Staging Vuln Scan"
+
+
+# --------------------------------------------------------------------------- #
+# One manifest identity across every command that takes one
+#
+# Sixteen sites resolved -f with a bare Path(x).resolve() while two used a
+# ladder. A bare name therefore resolved against the process cwd, so
+# `manifest add -f demo` read ./demo as an empty manifest and WROTE a new one
+# there while manifests/demo.yaml sat untouched.
+# --------------------------------------------------------------------------- #
+
+# (argv, whether --json is accepted) for every command that takes a manifest.
+MANIFEST_COMMANDS = [
+    (["doctor", "MANIFEST", "--json"], True),
+    (["validate", "MANIFEST"], False),
+    (["run", "MANIFEST", "--json"], True),
+    (["validators", "sync", "-m", "MANIFEST", "--dry-run"], False),
+    (["scripts", "sync", "MANIFEST"], False),
+    (["manifest", "show", "-f", "MANIFEST"], False),
+    (["manifest", "add", "demo_hello", "-f", "MANIFEST"], False),
+    (["manifest", "remove", "demo_hello", "-f", "MANIFEST"], False),
+    (["manifest", "set-output-dir", "./x", "-f", "MANIFEST"], False),
+]
+
+
+@pytest.fixture
+def sandbox(tmp_path, monkeypatch):
+    """cwd in a scratch dir, but discovery still pointed at the real repo.
+
+    These tests drive commands that WRITE. Running them with cwd = the repo
+    root means a regression writes into the repo — which is exactly what
+    happened while developing this: a run against the pre-fix code left a
+    stray manifest named after the test's own sentinel in the repo root, and
+    later runs then found it and passed for the wrong reason.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(api, "find_repo_root", lambda *a, **k: REPO_ROOT)
+    return tmp_path
+
+
+@pytest.mark.parametrize("argv,_json_ok", MANIFEST_COMMANDS,
+                         ids=[" ".join(a[:3]) for a, _ in MANIFEST_COMMANDS])
+def test_a_manifest_that_does_not_exist_is_refused(sandbox, argv, _json_ok):
+    """Not one of these may treat an absent manifest as an empty one.
+
+    An empty manifest validates clean, so the old behaviour reported a typo'd
+    filename as a passing preflight (doctor), a silent no-op (validators sync),
+    or a brand-new file at the wrong path (the mutators).
+    """
+    result = runner.invoke(app, [a.replace("MANIFEST", "no-such-manifest-here") for a in argv])
+    assert result.exit_code == 1, f"{argv} exited {result.exit_code}, not 1"
+    assert "no such manifest" in result.output
+    assert list(sandbox.iterdir()) == [], "a refused command must not write anything"
+
+
+def test_a_refused_mutation_creates_nothing(sandbox):
+    """The failure mode was a new file at the wrong path, so assert on the disk."""
+    result = runner.invoke(app, ["manifest", "add", "demo_hello", "-f", "ghost", "--json"])
+
+    assert result.exit_code == 1
+    assert list(sandbox.iterdir()) == [], "a refused mutation must not write anything"
+
+
+@pytest.fixture
+def workspace(tmp_path, monkeypatch):
+    """A self-contained repo-shaped tree holding manifests/demo.yaml.
+
+    Deliberately NOT the real repo: .gitignore ignores manifests/*, so this
+    repo's own manifests are untracked local state. A test that reads them
+    passes on a developer's machine and fails in CI, where the directory does
+    not exist at all — which is exactly what happened.
+    """
+    for d in ("fetchers", "framework", "manifests"):
+        (tmp_path / d).mkdir()
+    (tmp_path / "manifests" / "demo.yaml").write_text(
+        "run:\n  output_dir: ./evidence\n  fetchers:\n  - use: demo_hello\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+@pytest.mark.parametrize("spelling", ["demo", "demo.yaml", "manifests/demo.yaml"])
+def test_a_bare_name_finds_the_manifest(workspace, spelling):
+    """All three spellings must reach manifests/demo.yaml. A bare name used to
+    resolve against cwd, so it found nothing and read as empty."""
+    result = runner.invoke(app, ["manifest", "show", "-f", spelling])
+    assert result.exit_code == 0, result.output
+    assert "demo_hello" in result.output, "did not read the manifest"
+
+
+def test_the_refusal_names_the_manifests_it_found(workspace):
+    """A path error should point at the way out, not just report failure."""
+    result = runner.invoke(app, ["manifest", "show", "-f", "ghost"])
+    assert "discovered:" in result.output
+    assert "demo.yaml" in result.output
+
+
+def test_manifest_init_still_creates(in_repo, tmp_path):
+    """Creation is the one path that must NOT require the file to exist."""
+    target = tmp_path / "fresh.yaml"
+    result = runner.invoke(app, ["manifest", "init", "-f", str(target), "--json"])
+    assert result.exit_code == 0, result.output
+    assert target.is_file()
