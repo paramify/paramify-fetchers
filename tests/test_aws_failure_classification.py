@@ -201,9 +201,36 @@ def _fetchers():
 
 
 def test_every_aws_fetcher_reports_through_the_shared_reporter():
+    """Every fetcher must end with aws_finish, which is what calls the reporter.
+
+    This used to assert the literal `aws_report_failures` appeared in each file,
+    back when all 80 pasted the nine-line epilogue inline. The epilogue now
+    lives in aws.sh, so the invariant is stated where it actually holds: the
+    last statement of every fetcher hands off to the shared summarizer.
+
+    Asserting on the LAST line, not just presence, is deliberate — aws_finish
+    exits 1 on any recorded failure, so anything after it would only run on the
+    success path, which is a trap rather than a feature.
+    """
     assert len(_fetchers()) == 80
-    missing = [p.parent.name for p in _fetchers() if "aws_report_failures" not in p.read_text()]
-    assert not missing, f"fetchers not using aws_report_failures: {missing}"
+    offenders = []
+    for p in _fetchers():
+        code = [ln.strip() for ln in p.read_text().splitlines()
+                if ln.strip() and not ln.strip().startswith("#")]
+        if not code or code[-1] != "aws_finish":
+            offenders.append(f"{p.parent.name} (ends with {code[-1][:40]!r})" if code else p.parent.name)
+    assert not offenders, f"fetchers not ending in aws_finish: {offenders}"
+
+
+def test_no_aws_fetcher_still_carries_its_own_epilogue():
+    """The nine lines aws_finish replaced must not creep back in.
+
+    A copy left behind would run the summary twice: report a partial collection,
+    exit 1, and never reach aws_finish — or worse, drift from it.
+    """
+    offenders = [f"{p.parent.name}" for p in _fetchers()
+                 if "failure_count=" in p.read_text()]
+    assert not offenders, f"inline epilogue still present: {offenders}"
 
 
 def test_no_aws_fetcher_hardcodes_a_status_code():
