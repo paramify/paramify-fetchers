@@ -364,6 +364,14 @@ API_TO_CLI = {
     # Read-only label helper: how an assessment is named in the picker. The CLI
     # applies the same function to its own list output.
     "assessment_display_name": "<implicit: assessment label>",
+    # Backs -f / -m on every manifest-taking CLI command, and --manifest on the
+    # console. The two resolving differently is what let a bare name fork a
+    # manifest, so both front ends deliberately call the same function.
+    "resolve_manifest_path": "<implicit: -f / --manifest resolution>",
+    # Not a call — the exception resolve_manifest_path raises, caught in the
+    # console's launch path. The walker collects every api.<name> attribute,
+    # which is the right breadth, so an exception type has to be mapped too.
+    "ManifestNotFound": "<implicit: the -f / --manifest error path>",
 }
 
 
@@ -1426,29 +1434,42 @@ MANIFEST_COMMANDS = [
 ]
 
 
+@pytest.fixture
+def sandbox(tmp_path, monkeypatch):
+    """cwd in a scratch dir, but discovery still pointed at the real repo.
+
+    These tests drive commands that WRITE. Running them with cwd = the repo
+    root means a regression writes into the repo — which is exactly what
+    happened while developing this: a run against the pre-fix code left a
+    stray manifest named after the test's own sentinel in the repo root, and
+    later runs then found it and passed for the wrong reason.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(api, "find_repo_root", lambda *a, **k: REPO_ROOT)
+    return tmp_path
+
+
 @pytest.mark.parametrize("argv,_json_ok", MANIFEST_COMMANDS,
                          ids=[" ".join(a[:3]) for a, _ in MANIFEST_COMMANDS])
-def test_a_manifest_that_does_not_exist_is_refused(in_repo, argv, _json_ok):
+def test_a_manifest_that_does_not_exist_is_refused(sandbox, argv, _json_ok):
     """Not one of these may treat an absent manifest as an empty one.
 
     An empty manifest validates clean, so the old behaviour reported a typo'd
     filename as a passing preflight (doctor), a silent no-op (validators sync),
     or a brand-new file at the wrong path (the mutators).
     """
-    result = runner.invoke(app, [a.replace("MANIFEST", "definitely-not-a-manifest") for a in argv])
+    result = runner.invoke(app, [a.replace("MANIFEST", "no-such-manifest-here") for a in argv])
     assert result.exit_code == 1, f"{argv} exited {result.exit_code}, not 1"
     assert "no such manifest" in result.output
+    assert list(sandbox.iterdir()) == [], "a refused command must not write anything"
 
 
-def test_a_refused_mutation_creates_nothing(in_repo, tmp_path, monkeypatch):
+def test_a_refused_mutation_creates_nothing(sandbox):
     """The failure mode was a new file at the wrong path, so assert on the disk."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(api, "find_repo_root", lambda *a, **k: REPO_ROOT)
-
     result = runner.invoke(app, ["manifest", "add", "demo_hello", "-f", "ghost", "--json"])
 
     assert result.exit_code == 1
-    assert list(tmp_path.iterdir()) == [], "a refused mutation must not write anything"
+    assert list(sandbox.iterdir()) == [], "a refused mutation must not write anything"
 
 
 @pytest.mark.parametrize("spelling", ["demo", "demo.yaml", "manifests/demo.yaml"])
