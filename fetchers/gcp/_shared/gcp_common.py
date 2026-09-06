@@ -116,12 +116,6 @@ def _one_line(text: Any, limit: int = 800) -> str:
     return collapsed if len(collapsed) <= limit else collapsed[: limit - 1] + "…"
 
 
-# Deprecated alias: the standard name is `report_failure` (docs/fetcher_contract.md
-# § Output). Kept only so the gcp fetchers that import `write_status` keep working
-# until they are moved over; new code must import `report_failure`.
-write_status = report_failure
-
-
 # Substrings mapping a recorded failure onto a STATUS_CODES category, matched
 # against "<exception type> <message>" lowercased. First hit wins, so the order
 # is deliberate: a 403 while refreshing a token is auth, not a missing IAM role.

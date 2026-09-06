@@ -437,3 +437,42 @@ def test_allowlist_entries_still_exist():
             f"allowlisted {rel}:{line} is not a non-zero exit any more — it reads "
             f"{target.strip()!r}. The code moved; re-verify and re-point or drop the entry."
         )
+
+
+# --------------------------------------------------------------------------- #
+# One spelling of the failure path
+# --------------------------------------------------------------------------- #
+
+def test_no_fetcher_reports_through_the_old_write_status_alias():
+    """`report_failure` is the contract name; `write_status` was an alias.
+
+    azure_common and gcp_common each aliased write_status = report_failure with
+    a comment saying it was kept "until they are moved over". All 46 of their
+    fetchers still called the alias, so the migration never happened and the
+    corpus had two names for one function. The alias is now gone.
+    """
+    offenders = []
+    for p in list(_fetchers("py")) + _shared_shell_libs() + list(FETCHERS.glob("*/_shared/*.py")):
+        if re.search(r"\bwrite_status\b", p.read_text()):
+            offenders.append(str(p.relative_to(FETCHERS)))
+    assert not offenders, f"still using the removed write_status alias: {offenders}"
+
+
+def test_no_fetcher_logs_the_failure_reason_twice():
+    """report_failure logs the reason itself — callers must not log it first.
+
+    Its docstring says so explicitly, and the reason it gives matters: logging
+    inside report_failure is what guarantees the reason is the LAST thing on
+    stderr, which is where the runner's fallback reads from.
+
+    27 Azure fetchers logged a count with no cause ("Encountered N Azure API
+    failure(s)") and 19 GCP fetchers logged the identical reason string, both
+    immediately before the call. The count was redundant too: failure_reason()
+    already begins "N Azure API failure(s); first: ...".
+    """
+    dupe = re.compile(r"logger\.error\((?:[^()]|\([^()]*\))*\)\s*\n\s*report_failure\(", re.M)
+    offenders = [str(p.relative_to(FETCHERS)) for p in _fetchers("py")
+                 if dupe.search(p.read_text())]
+    assert not offenders, (
+        f"these log the reason before report_failure, which logs it again: {offenders}"
+    )
