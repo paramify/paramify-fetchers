@@ -84,7 +84,7 @@ azure-mgmt-recoveryservicesbackup>=10.0.0,<12
 # install it. It coexists with azure-mgmt-resource via namespace packaging.
 azure-mgmt-web>=11.0.1,<12
 azure-mgmt-databricks>=3.0.0,<4
-azure-mgmt-resource-policy==1.0.0b3
+azure-mgmt-resource-policy==1.0.0b4
 
 # GCP category (fetchers/gcp/*) — official Google Cloud client libraries. Auth is
 # Application Default Credentials (google-auth is pulled in transitively); no
