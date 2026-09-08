@@ -19,6 +19,13 @@ secrets:
 - name: org_url
   env: OKTA_ORG_URL
 
+config_schema:
+  known_super_admins:
+    type: string
+    default: ''
+    env: OKTA_KNOWN_SUPER_ADMINS
+    description: Optional comma-separated Okta logins/emails to treat as Super Admins on top of the role, group, and app detection methods. For tenants that grant Super Admin outside a discoverable group. Empty by default.
+
 ksis:
   - KSI-IAM-ELP
 

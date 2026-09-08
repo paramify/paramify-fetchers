@@ -19,6 +19,13 @@ secrets:
 - name: org_url
   env: OKTA_ORG_URL
 
+config_schema:
+  known_service_accounts:
+    type: string
+    default: ''
+    env: OKTA_KNOWN_SERVICE_ACCOUNTS
+    description: Optional comma-separated Okta logins/emails to treat as service accounts on top of the name-independent indicators (userType, API tokens, OAuth clients, group membership). Empty by default; prefer setting userType=Service in Okta.
+
 ksis:
   - KSI-IAM-SNU
 

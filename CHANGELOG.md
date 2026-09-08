@@ -66,6 +66,17 @@ schemas and the `paramify` CLI — not the internal code.
 - The `suggest-validator` skill now authors validators into `validators/` rather
   than only proposing a regex, and verifies them against compliant,
   non-compliant, and **unreadable** evidence.
+- **The Okta account allowlists are configuration, not code** (SEC-71).
+  `okta_iam_core.py` carried a hardcoded list of one service account and two named
+  people's email addresses, used to seed service-account and Super Admin detection
+  for a single tenant. Both lists now come from config and default to empty:
+  `OKTA_KNOWN_SERVICE_ACCOUNTS` on `okta/non_user_accounts_authentication` and
+  `OKTA_KNOWN_SUPER_ADMINS` on `okta/least_privilege`, each declared in that
+  fetcher's `config_schema` and accepting a comma- or newline-separated list of
+  logins/emails. No behaviour change for a tenant that sets them; every other
+  tenant now gets only the name-independent detection methods (userType, API token
+  ownership, OAuth client assignment, group membership, assigned admin roles),
+  which is what it should always have been.
 
 ### Deprecated
 

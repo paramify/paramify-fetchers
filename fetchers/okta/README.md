@@ -8,6 +8,25 @@ Okta fetchers pull IAM evidence — phishing-resistant MFA, passwordless authent
 |---|---|---|
 | `OKTA_API_TOKEN` | Yes | Okta SSWS API token |
 | `OKTA_ORG_URL` | Yes | Okta org base URL, no trailing slash (e.g. `https://your-org.okta.com`) |
+| `OKTA_KNOWN_SERVICE_ACCOUNTS` | No | Comma-separated logins/emails to treat as service accounts, on top of the detected ones (`non_user_accounts_authentication`) |
+| `OKTA_KNOWN_SUPER_ADMINS` | No | Comma-separated logins/emails to treat as Super Admins, on top of the detected ones (`least_privilege`) |
+
+### Account allowlists
+
+Both allowlists are empty by default, and both are optional — the collectors detect
+service accounts and admins from the tenant itself (userType, API token ownership,
+OAuth client assignment, group membership, assigned admin roles). Set one only when
+your tenant grants something the API does not make discoverable, e.g. a Super Admin
+role assigned directly to a person rather than through a group:
+
+```bash
+export OKTA_KNOWN_SUPER_ADMINS="ada@example.com,grace@example.com"
+export OKTA_KNOWN_SERVICE_ACCOUNTS="ci-bot@example.com"
+```
+
+They are tenant-specific, so keep them in your manifest or environment rather than
+committing them. For service accounts, setting `userType=Service` on the user in Okta
+is the better fix — it is name-independent and needs no configuration here.
 
 ## Creating an API token
 
