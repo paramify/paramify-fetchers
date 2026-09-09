@@ -17,7 +17,11 @@ paste them. The result was 27 copies under two names: `report_failure` 25 times
 (22 fetchers, falcon_client, and both templates) and `write_status` twice
 (azure_common, gcp_common) — plus seven whole categories (aws, okta, knowbe4,
 k8s, paramify, rippling, checkov) that never pasted anything and so reported
-nothing. See docs/fetcher_contract.md § Output.
+nothing.
+
+The `write_status` alias is gone: azure_common and gcp_common re-export
+`report_failure`, and all 46 of their fetchers call it by that name. There is
+one spelling now. See docs/fetcher_contract.md § Output.
 """
 
 from __future__ import annotations

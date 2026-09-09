@@ -154,3 +154,32 @@ aws_report_failures() {
     report_failure "$count AWS API failure(s); first: ${reasons}${detail}" \
         "$(aws_classify_code)"
 }
+
+# aws_finish -- the end of every AWS fetcher: summarize $_FAILURE_LOG, report a
+# partial collection if there is one, otherwise log where the evidence landed.
+#
+# This was nine lines pasted identically into all 80 fetchers -- byte for byte,
+# once the fetcher name was normalized out. One copy means a change to how a
+# partial collection is summarized lands everywhere at once, instead of in the
+# subset someone remembered to update.
+#
+# Exits 1 on any recorded failure, so it is the LAST line of a fetcher. The
+# three-reason cap and the "(+N more)" suffix are the behaviour the 80 copies
+# had; they are kept exactly, because the runner surfaces this string and the
+# uploader stores it.
+#
+# Usage (last line of the fetcher):
+#   aws_finish
+aws_finish() {
+    local count reasons
+    count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
+    count=${count:-0}
+    if [ "$count" -gt 0 ]; then
+        reasons="$(head -n 3 "$_FAILURE_LOG" | awk '{printf "%s%s", sep, $0; sep="; "}')"
+        [ "$count" -gt 3 ] && reasons="${reasons}(+$((count - 3)) more)"
+        aws_report_failures "$count" "$reasons"
+        exit 1
+    fi
+
+    log_info "Evidence saved to $OUTPUT_JSON"
+}

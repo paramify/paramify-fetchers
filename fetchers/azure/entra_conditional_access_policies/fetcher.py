@@ -31,7 +31,7 @@ from azure_common import (  # noqa: E402
     credential,
     failure_reason,
     write_evidence,
-    write_status,
+    report_failure,
 )
 from entra_graph import (  # noqa: E402
     graph_attr,
@@ -406,11 +406,7 @@ def main() -> int:
     path = write_evidence(output_dir, filename, evidence)
 
     if not collector.ok:
-        logger.error(
-            "Encountered %d Microsoft Graph API failure(s) during collection",
-            len(collector.failures),
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1

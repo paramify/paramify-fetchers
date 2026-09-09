@@ -202,12 +202,6 @@ def failure_reason(failures: List[Dict[str, str]], limit: int = 300) -> str:
     )
 
 
-# Deprecated alias: the standard name is `report_failure` (docs/fetcher_contract.md
-# § Output). Kept only so the azure fetchers that import `write_status` keep working
-# until they are moved over; new code must import `report_failure`.
-write_status = report_failure
-
-
 # --------------------------------------------------------------------------- #
 # Auth / subscription resolution
 # --------------------------------------------------------------------------- #
