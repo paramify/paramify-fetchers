@@ -25,6 +25,21 @@ class SecretResolutionError(RuntimeError):
     pass
 
 
+class UnsetSecretError(SecretResolutionError):
+    """A well-formed reference whose env var is unset or empty.
+
+    Separate from a malformed reference so a caller holding an OPTIONAL secret
+    can treat "nothing supplied" as an omission and let the fetcher's credential
+    chain fall through to ambient identity, while a typo'd reference still fails
+    loudly whether the secret is optional or not. Subclasses
+    SecretResolutionError so callers that catch the base keep working.
+    """
+
+    def __init__(self, env_var: str, message: str):
+        super().__init__(message)
+        self.env_var = env_var
+
+
 def resolve(value: str) -> str:
     """Resolve a ${env:VAR_NAME} reference. Plain strings pass through unchanged.
 
@@ -51,9 +66,10 @@ def resolve(value: str) -> str:
     env_var = m.group(1)
     resolved = os.environ.get(env_var, "")
     if not resolved:
-        raise SecretResolutionError(
+        raise UnsetSecretError(
+            env_var,
             f"Secret reference ${{env:{env_var}}} could not be resolved: "
-            f"env var '{env_var}' is unset or empty in the runner's environment"
+            f"env var '{env_var}' is unset or empty in the runner's environment",
         )
     return resolved
 

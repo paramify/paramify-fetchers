@@ -12,6 +12,7 @@ import pytest
 
 from framework.secret_resolver import (
     SecretResolutionError,
+    UnsetSecretError,
     env_var_name,
     is_env_ref_attempt,
     resolve,
@@ -103,3 +104,37 @@ def test_env_var_name_and_resolve_agree_on_what_is_valid(monkeypatch):
     assert env_var_name("literal") is None
     assert is_env_ref_attempt("literal") is False
     assert resolve("literal") == "literal"
+
+
+# --- which error, and why it matters --------------------------------------- #
+# The runner lets an OPTIONAL secret fall through to ambient identity when its
+# env var is unset, but never when the reference itself is broken. That split is
+# only expressible if the two failures are distinguishable here.
+
+def test_unset_env_var_raises_the_distinct_unset_error(monkeypatch):
+    monkeypatch.delenv("MISSING_TOK", raising=False)
+    with pytest.raises(UnsetSecretError) as e:
+        resolve("${env:MISSING_TOK}")
+    assert e.value.env_var == "MISSING_TOK"
+
+
+def test_empty_env_value_also_raises_the_unset_error(monkeypatch):
+    monkeypatch.setenv("EMPTY_TOK", "")
+    with pytest.raises(UnsetSecretError):
+        resolve("${env:EMPTY_TOK}")
+
+
+def test_malformed_reference_is_not_an_unset_error(monkeypatch):
+    """A typo'd name must not qualify for the optional-secret fallback, or the
+    credential the operator meant to supply is silently dropped."""
+    monkeypatch.setenv("api_token", "v")
+    with pytest.raises(SecretResolutionError) as e:
+        resolve("${env:api_token}")
+    assert not isinstance(e.value, UnsetSecretError)
+
+
+def test_unset_error_is_catchable_as_the_base_error(monkeypatch):
+    """Callers that catch the base class keep working unchanged."""
+    monkeypatch.delenv("MISSING_TOK", raising=False)
+    with pytest.raises(SecretResolutionError):
+        resolve("${env:MISSING_TOK}")

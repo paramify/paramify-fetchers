@@ -250,6 +250,8 @@ def _human_run_printer():
         elif kind == "fetcher_start":
             targets = style.dim(f"  ({ev['targets']} targets)") if ev["fanout"] else ""
             typer.echo(f"  {style.dim('RUN')}   {style.name(ev['fetcher'])}{targets}")
+        elif kind == "fetcher_note":
+            _err(f"        {style.mark('NOTE')}  {style.dim(ev['note'])}")
         elif kind == "fetcher_error":
             _err(f"        {style.fail('runner error')}: {ev['error']}")
         elif kind == "fetcher_result":

@@ -940,6 +940,11 @@ def run(
         def on_line(line: str, _use=entry.use) -> None:
             emit({"event": "log_line", "fetcher": _use, "line": line})
 
+        # Its own event, not a log_line: consumers drop log_line by default, and
+        # a dropped credential has to reach the operator.
+        def on_note(note: str, _use=entry.use) -> None:
+            emit({"event": "fetcher_note", "fetcher": _use, "note": note})
+
         try:
             results = run_entry(
                 fetcher,
@@ -948,6 +953,7 @@ def run(
                 platforms.get(fetcher.category or ""),
                 parsed.platforms.get(fetcher.category or ""),
                 on_line=on_line,
+                on_note=on_note,
             )
         except (RuntimeError, ValueError) as e:
             emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
