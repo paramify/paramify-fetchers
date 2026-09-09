@@ -314,8 +314,11 @@ def test_build_env_required_secret_with_unresolvable_ref_still_raises(tmp_path, 
     monkeypatch.delenv("API_TOKEN", raising=False)
     fetcher = make_fetcher(tmp_path, secrets=[Secret(name="api_token", env="API_TOKEN")])
     entry = ManifestEntry(use="x", secrets={"api_token": "${env:API_TOKEN}"})
-    with pytest.raises(SecretResolutionError, match="could not be resolved"):
+    # Re-raised as-is, not reclassified: the operator needs to see which var was
+    # empty, and UnsetSecretError carries it.
+    with pytest.raises(UnsetSecretError, match="could not be resolved") as e:
         _build_env(fetcher, entry, None, tmp_path)
+    assert e.value.env_var == "API_TOKEN"
 
 
 def test_build_env_optional_per_target_secret_with_unresolvable_ref_is_skipped(tmp_path, monkeypatch):
