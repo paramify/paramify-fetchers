@@ -69,3 +69,4 @@ run:
       app_key: ${env:DATADOG_APP_KEY}
       base_url: ${env:DATADOG_BASE_URL}
       signals_lookback_days: ${env:DATADOG_SIGNALS_LOOKBACK_DAYS}
+  - use: azure_defender_assessments
