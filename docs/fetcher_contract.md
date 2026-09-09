@@ -86,7 +86,7 @@ The runner exec's the fetcher's entry script with a tightly controlled environme
 
 - **`EVIDENCE_DIR`** — output directory the fetcher writes to. The runner points this at `<run>/issue-reports/` for a `kind: issue_report` fetcher, so a fetcher always writes a bare filename into `EVIDENCE_DIR` and never builds a subdirectory itself
 - **`FETCHER_STATUS_FILE`** — path the fetcher reports its failure reason to (see [Output](#output)). Deliberately outside `EVIDENCE_DIR`, so it is never collected as evidence; it lives in a per-invocation temp dir that goes away with the invocation
-- **Declared secrets** — every entry from `secrets[]` resolved and set on the env var named in `secrets[].env`
+- **Declared secrets** — every entry from `secrets[]` resolved and set on the env var named in `secrets[].env`. An optional secret (`required: false`) whose reference cannot be resolved is skipped rather than injected, so the fetcher's own credential chain reaches ambient identity — see [Secret references](run_manifest_reference.md#secret-references)
 - **Target fields (fanout only)** — each `target_schema` field with an `env` mapping set to the target's value
 - **A minimal inherited env** — `PATH`, `HOME`, `LANG`, `LC_ALL`, `LC_CTYPE`, `USER`, `TZ`, `PYTHONUNBUFFERED=1`
 

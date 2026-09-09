@@ -31,7 +31,8 @@ from framework.contract import (
     TargetField,
     TargetInstance,
 )
-from framework.runner.executor import _apply_config, _build_env, run_entry
+from framework.runner.executor import _apply_config, _build_env, _emit_notes, run_entry
+from framework.secret_resolver import SecretResolutionError, UnsetSecretError
 
 # --------------------------------------------------------------------------- #
 # Builders
@@ -233,6 +234,101 @@ def test_build_env_optional_per_target_secret_without_target_does_not_raise(tmp_
         secrets=[Secret(name="tok", env="TOK", per_target=True, required=False)],
     )
     env = _build_env(fetcher, ManifestEntry(use="x"), None, tmp_path)
+    assert "TOK" not in env
+
+
+def test_build_env_optional_secret_with_unresolvable_ref_is_not_injected(tmp_path, monkeypatch):
+    """A reference the manifest carries but cannot resolve is an omission when the
+    secret is optional — the ambient-deployment case.
+
+    The TUI auto-wires every optional secret to its default env var on add, so a
+    manifest built there arrives in an ECS task / IRSA pod holding refs for keys
+    that deployment deliberately does not set. Raising would fail the entry at
+    setup, before the fetcher runs, over credentials it never needed.
+    """
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    fetcher = make_fetcher(
+        tmp_path,
+        secrets=[Secret(name="access_key_id", env="AWS_ACCESS_KEY_ID", required=False)],
+    )
+    entry = ManifestEntry(use="x", secrets={"access_key_id": "${env:AWS_ACCESS_KEY_ID}"})
+    env = _build_env(fetcher, entry, None, tmp_path)
+    assert "AWS_ACCESS_KEY_ID" not in env
+
+
+def test_build_env_skipped_optional_secret_is_recorded_for_the_operator(tmp_path, monkeypatch):
+    """The skip must not be silent: a typo'd var name is indistinguishable from an
+    ambient deployment, so the operator has to see which credential was dropped."""
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    fetcher = make_fetcher(
+        tmp_path,
+        secrets=[Secret(name="access_key_id", env="AWS_ACCESS_KEY_ID", required=False)],
+    )
+    entry = ManifestEntry(use="x", secrets={"access_key_id": "${env:AWS_ACCESS_KEY_ID}"})
+    notes = []
+    _build_env(fetcher, entry, None, tmp_path, note_sink=notes)
+    assert notes == [("access_key_id", "AWS_ACCESS_KEY_ID")]
+
+
+def test_emit_notes_coalesces_a_whole_credential_set_into_one_line(monkeypatch):
+    """A cloud category declares several static-key secrets and an ambient
+    deployment drops all of them at once. One line per invocation, or the run
+    output fills with text nobody reads."""
+    seen = []
+    _emit_notes(
+        [("access_key_id", "AWS_ACCESS_KEY_ID"),
+         ("secret_access_key", "AWS_SECRET_ACCESS_KEY"),
+         ("session_token", "AWS_SESSION_TOKEN")],
+        seen.append,
+    )
+    assert len(seen) == 1
+    assert "3 optional secrets" in seen[0]
+    for name in ("access_key_id", "secret_access_key", "session_token"):
+        assert name in seen[0]
+    assert "ambient identity" in seen[0]
+
+
+def test_emit_notes_says_nothing_when_no_secret_was_dropped():
+    """The channel stays quiet on a normal run."""
+    seen = []
+    _emit_notes([], seen.append)
+    assert seen == []
+
+
+def test_build_env_optional_secret_with_malformed_ref_still_raises(tmp_path):
+    """Optionality excuses an unset var, never a broken reference. A lowercase
+    name is the usual typo, and passing it through would hand the fetcher the
+    literal string as its credential."""
+    fetcher = make_fetcher(
+        tmp_path,
+        secrets=[Secret(name="access_key_id", env="AWS_ACCESS_KEY_ID", required=False)],
+    )
+    entry = ManifestEntry(use="x", secrets={"access_key_id": "${env:aws_access_key_id}"})
+    with pytest.raises(SecretResolutionError, match="Malformed secret reference"):
+        _build_env(fetcher, entry, None, tmp_path)
+
+
+def test_build_env_required_secret_with_unresolvable_ref_still_raises(tmp_path, monkeypatch):
+    """The fallback is scoped to optional secrets. A required credential that
+    cannot be resolved is still a hard failure before the fetcher runs."""
+    monkeypatch.delenv("API_TOKEN", raising=False)
+    fetcher = make_fetcher(tmp_path, secrets=[Secret(name="api_token", env="API_TOKEN")])
+    entry = ManifestEntry(use="x", secrets={"api_token": "${env:API_TOKEN}"})
+    with pytest.raises(SecretResolutionError, match="could not be resolved"):
+        _build_env(fetcher, entry, None, tmp_path)
+
+
+def test_build_env_optional_per_target_secret_with_unresolvable_ref_is_skipped(tmp_path, monkeypatch):
+    """The per_target branch shares the fallback — add_target wires per-target
+    secrets the same way, so the same refs arrive on targets."""
+    monkeypatch.delenv("TOK", raising=False)
+    fetcher = make_fetcher(
+        tmp_path,
+        secrets=[Secret(name="tok", env="TOK", per_target=True, required=False)],
+    )
+    target = TargetInstance(values={}, secrets={"tok": "${env:TOK}"})
+    entry = ManifestEntry(use="x", targets=[target])
+    env = _build_env(fetcher, entry, target, tmp_path)
     assert "TOK" not in env
 
 
