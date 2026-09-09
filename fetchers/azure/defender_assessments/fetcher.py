@@ -34,7 +34,7 @@ from azure_common import (  # noqa: E402
     resolve_subscription,  # figures out which subscription_id to collect from
     sanitize_for_filename,  # makes a subscription id safe to use in a filename
     write_evidence,        # writes the evidence dict to disk as JSON
-    write_status,           # writes $FETCHER_STATUS_FILE (deprecated alias of report_failure)
+    report_failure,        # logs the reason AND writes $FETCHER_STATUS_FILE
 )
 
 logger = logging.getLogger("azure_defender_assessments")
@@ -311,13 +311,15 @@ def main() -> int:
     # Step 6: decide the exit code. `collector.ok` is False if ANY step above
     # (resolve_subscription, credential(), or collect_assessments) recorded a
     # failure. On failure we still keep the evidence file we already wrote
-    # (partial data can still be useful) but additionally write the status file
-    # and exit 1, which is what the runner reads to mark this run as failed.
+    # (partial data can still be useful) but additionally report the failure and
+    # exit 1, which is what the runner reads to mark this run as failed.
+    #
+    # report_failure is the WHOLE failure path: it logs the reason at error
+    # level and writes $FETCHER_STATUS_FILE. Do not add a logger.error before
+    # it — the reason would appear twice, and failure_reason() already opens
+    # with the failure count.
     if not collector.ok:
-        logger.error(
-            "Encountered %d Azure API failure(s) during collection", len(collector.failures)
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1
