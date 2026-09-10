@@ -1,0 +1,101 @@
+name: traffic
+
+# GitHub keeps repository traffic for 14 days and not a day longer. This job is
+# the long window: once a day it reads the traffic endpoints and merges them
+# into dated CSVs on the orphan `metrics` branch, so the history accumulates
+# instead of scrolling off.
+#
+# The 14-day retention is also the safety margin. A missed run costs nothing —
+# the next one still sees every day the last one saw, and backfills. It takes
+# 14 consecutive failures to lose data, which is why this is a plain daily cron
+# with no retry cleverness.
+#
+# Two things to know before touching it:
+#   * Scheduled workflows only fire from the default branch, so this file has to
+#     live on main even though everything it writes lands on `metrics`.
+#   * GitHub disables scheduled workflows after 60 days with no repo activity.
+#     Quiet repo, silent stop. The `report` subcommand prints a gap warning
+#     when that has happened.
+
+on:
+  schedule:
+    # 06:17 UTC. Off the hour deliberately: GitHub queues every :00 cron in the
+    # world at once and drops runs it cannot get to.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+# Only for pushing to `metrics`. The traffic API reads use TRAFFIC_TOKEN, which
+# GITHUB_TOKEN cannot substitute for at any permission level — see below.
+permissions:
+  contents: write
+
+concurrency:
+  group: traffic
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: snapshot traffic
+    runs-on: ubuntu-latest
+    steps:
+      # main, for the tool.
+      - uses: actions/checkout@v7
+
+      # The data branch, checked out beside it. `metrics` is an orphan branch —
+      # no code, no shared history — so this is a couple of CSVs, not a clone.
+      - uses: actions/checkout@v7
+        with:
+          ref: metrics
+          path: .metrics
+
+      # Fail here with a sentence rather than 20 lines down with a bare 403.
+      # The traffic endpoints require the Administration:read permission, and
+      # `administration` is not a key the workflow `permissions:` block accepts —
+      # so GITHUB_TOKEN cannot read them however it is configured. It has to be
+      # a fine-grained PAT. Administration:read is the only scope it needs; the
+      # push below rides on GITHUB_TOKEN.
+      - name: check for the traffic token
+        env:
+          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+        run: |
+          if [ -z "${TRAFFIC_TOKEN}" ]; then
+            echo "::error::secrets.TRAFFIC_TOKEN is not set. Create a fine-grained PAT" \
+                 "scoped to this repo with Administration: read, and save it as TRAFFIC_TOKEN." \
+                 "GITHUB_TOKEN cannot read the traffic API — see docs/traffic_metrics.md."
+            exit 1
+          fi
+
+      # Stdlib only, so there is nothing to install.
+      - name: snapshot
+        env:
+          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+        run: python3 tools/traffic_snapshot.py snapshot --data .metrics
+
+      - name: commit the snapshot
+        working-directory: .metrics
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # --porcelain, not `git diff --quiet`: on the first run against the
+          # empty orphan branch the CSVs are untracked, and `git diff` does not
+          # see untracked files — the seeding run would have reported "no
+          # change" and committed nothing.
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "no change — GitHub reported nothing new today"
+            exit 0
+          fi
+          git add -A
+          git commit -m "Traffic snapshot $(date -u +%Y-%m-%d)"
+          git push
+
+      # Puts the rollup in the Actions run summary, so the trend is readable
+      # from the web UI without checking the branch out.
+      - name: summary
+        if: always()
+        run: |
+          {
+            echo '```'
+            python3 tools/traffic_snapshot.py report --data .metrics || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

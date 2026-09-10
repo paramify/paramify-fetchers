@@ -92,3 +92,10 @@ manifests/*
 
 # Downloaded third-party CrowdStrike response captures (tools/crowdstrike_corpus.py)
 tests/fixtures/crowdstrike_corpus/
+
+# --- Traffic metrics ---
+# Worktree of the orphan `metrics` branch, where tools/traffic_snapshot.py
+# accumulates GitHub traffic past the API's 14-day window. Create it with
+# `git worktree add .metrics metrics`; it is a checkout of another branch, so
+# main must never track it.
+.metrics/
