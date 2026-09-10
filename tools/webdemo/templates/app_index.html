@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ application.name }}</title>
+    <link rel="stylesheet" href="{{ config.static.url }}css/xterm.css" />
+    <script src="{{ config.static.url }}js/textual.js"></script>
+    <style>
+      /* textual.js constructs xterm.js with
+           fontFamily: "'Roboto Mono', Monaco, 'Courier New', monospace"
+         and gives us no way to pass options. So alias that family to the
+         viewer's own terminal font: Courier's block-drawing glyphs (█ ╗ ═) do
+         not tile, which shreds the PARAMIFY logo and every panel border. Each
+         platform's first hit is the font its terminal already uses. */
+      @font-face {
+        font-family: "Roboto Mono";
+        font-weight: 400;
+        src: local("SF Mono"), local("SFMono-Regular"), local("Menlo"),
+             local("DejaVu Sans Mono"), local("Consolas"),
+             local("Liberation Mono"), local("Ubuntu Mono");
+      }
+      @font-face {
+        font-family: "Roboto Mono";
+        font-weight: 700;
+        src: local("SF Mono Bold"), local("SFMono-Bold"), local("Menlo Bold"),
+             local("DejaVu Sans Mono Bold"), local("Consolas Bold"),
+             local("Liberation Mono Bold");
+      }
+
+      /* Tokyo Night, so the page and the app inside it are one object. */
+      :root {
+        --bg: #16171f;
+        --term: #1a1b26;
+        --rule: #292e42;
+        --fg: #c0caf5;
+        --dim: #565f89;
+        --accent: #7aa2f7;
+        --warn: #e0af68;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 400 13px/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+              Consolas, "DejaVu Sans Mono", monospace;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      header {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 8px 18px;
+        flex-wrap: wrap;
+        padding: 9px 16px;
+        border-bottom: 1px solid var(--rule);
+        font-size: 12px;
+      }
+      .brand { font-weight: 700; letter-spacing: .02em; }
+      .brand span { color: var(--warn); font-weight: 400; margin: 0 6px; }
+      .brand em { color: var(--dim); font-style: normal; font-weight: 400; }
+      .note { color: var(--dim); }
+      .note b { color: var(--fg); font-weight: 600; }
+      .spacer { flex: 1 1 auto; }
+      .keys { color: var(--dim); white-space: nowrap; }
+      .keys kbd {
+        font: inherit; font-size: 11px; padding: 1px 5px; margin: 0 1px;
+        border: 1px solid var(--rule); border-radius: 3px; color: var(--accent);
+      }
+
+      /* textual.js sizes the terminal to this element, so it has to be the one
+         that owns the leftover space. */
+      .textual-terminal {
+        flex: 1 1 auto;
+        min-height: 0;
+        background: var(--term);
+        padding: 6px 8px;
+        opacity: 0;
+        transition: opacity .25s ease-out;
+      }
+      body.-first-byte .textual-terminal { opacity: 1; }
+
+      .dialog {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--bg);
+      }
+      body.-first-byte #booting { opacity: 0; display: none; }
+      #ended { display: none; }
+      body.-closed #ended { display: flex; }
+
+      .card {
+        width: min(520px, calc(100vw - 48px));
+        border: 1px solid var(--rule);
+        background: var(--term);
+        padding: 26px 28px;
+        text-align: left;
+      }
+      .card h1 {
+        margin: 0 0 10px;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: .01em;
+      }
+      .card p { margin: 0 0 8px; color: var(--dim); }
+      .card p:last-of-type { margin-bottom: 0; }
+      .card .cursor { color: var(--accent); animation: blink 1.1s steps(1) infinite; }
+      @keyframes blink { 50% { opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) {
+        .card .cursor { animation: none; }
+        .textual-terminal { transition: none; }
+      }
+
+      button {
+        font: inherit;
+        margin-top: 18px;
+        padding: 8px 18px;
+        background: transparent;
+        color: var(--accent);
+        border: 1px solid var(--accent);
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button:hover { background: var(--accent); color: #1a1b26; }
+      button:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
+      #start { display: none; }
+      #start.-delay { display: inline-block; }
+    </style>
+    <script>
+      function getStartUrl() {
+        const url = new URL(window.location.href);
+        const params = new URLSearchParams(url.search);
+        params.delete("delay");
+        return url.pathname + "?" + params.toString();
+      }
+      async function refresh() {
+        const ping_url = document.body.dataset.pingurl;
+        if (ping_url) {
+          await fetch(ping_url, { method: "GET", mode: "no-cors" });
+        }
+        window.location.href = getStartUrl();
+      }
+    </script>
+  </head>
+  <body data-pingurl="{{ ping_url }}">
+    <header>
+      <span class="brand">paramify fetcher<span>&bull;</span><em>hosted sandbox</em></span>
+      <span class="note">
+        Your own throwaway workspace. Edits and runs are <b>real</b>; the tenant is
+        fictional and nothing reaches a live API.
+      </span>
+      <span class="spacer"></span>
+      <span class="keys">
+        <kbd>1</kbd>&ndash;<kbd>5</kbd> tabs
+        <kbd>/</kbd> filter
+        <kbd>a</kbd> add
+        <kbd>ctrl</kbd>+<kbd>r</kbd> run
+      </span>
+    </header>
+
+    <div class="dialog" id="booting">
+      <div class="card">
+        <h1>{{ application.name }}</h1>
+        <p>Starting a private workspace for this session<span class="cursor">&#9608;</span></p>
+        <p>Reload at any time to start over with a clean one.</p>
+        <button type="button" onclick="refresh()" id="start">Start</button>
+      </div>
+    </div>
+
+    <div class="dialog" id="ended">
+      <div class="card">
+        <h1>Session ended</h1>
+        <p>The workspace for this session has been discarded.</p>
+        <button type="button" onclick="refresh()">Start a new one</button>
+      </div>
+    </div>
+
+    <div
+      class="textual-terminal"
+      data-session-websocket-url="{{ app_websocket_url }}"
+      data-font-size="{{ font_size }}"
+    ></div>
+  </body>
+</html>

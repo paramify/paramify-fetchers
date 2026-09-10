@@ -1,0 +1,57 @@
+# Hosted sandbox of the terminal console — https://fly.io/docs/reference/configuration/
+#
+#   fly launch --no-deploy --copy-config --config deploy/fly/fly.toml   # first time
+#   fly deploy --config deploy/fly/fly.toml --dockerfile deploy/fly/Dockerfile
+#
+# Run both from the REPO ROOT: the Dockerfile copies from the repo, so the build
+# context has to be the repo, not deploy/fly/.
+
+app = "paramify-fetcher-demo"
+primary_region = "sjc"          # nearest live Fly region to Utah (den is deprecated)
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # This MUST match the URL a visitor actually loads. textual-serve builds the
+  # session websocket URL from it, and only an https value yields wss:// — with
+  # the wrong scheme the terminal connects in local testing and then hangs on
+  # "Starting a private workspace" behind Fly's TLS terminator.
+  DEMO_PUBLIC_URL = "https://paramify-fetcher-demo.fly.dev"
+  DEMO_WORKSPACE_TEMPLATE = "/srv/demo-workspace"
+  # Seconds between invocations in the replayed run. The default paces a
+  # 16-invocation run at about eight seconds.
+  DEMO_RUN_STEP = "0.42"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # Scale to zero between visitors. The first request after an idle period pays
+  # a wake-up of a second or so, which lands on the "starting a workspace" card
+  # the page already shows.
+  min_machines_running = 0
+  processes = ["app"]
+
+  # Each browser session is its own Python process (~90 MB), so concurrency is
+  # the real resource limit, not requests/sec. These caps are what stops a
+  # public URL from being turned into a fork bomb: with 1 GB, eight concurrent
+  # sessions leaves comfortable headroom.
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 6
+    hard_limit = 10
+
+  # The index is a template render with no session behind it, so a health check
+  # against it stays cheap and never spawns an app process.
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
