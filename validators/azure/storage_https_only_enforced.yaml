@@ -1,0 +1,30 @@
+key: storage_https_only_enforced
+name: Azure Storage HTTPS-Only Enforced
+type: AUTOMATED
+role: configuration
+statement: >
+  Every storage account in the subscription rejects plaintext HTTP, so all
+  client traffic to blob, file, queue and table endpoints is encrypted in
+  transit (payload.summary.https_only_accounts equals
+  payload.summary.total_storage_accounts).
+
+  Compares the enforcing count against the full population rather than asserting
+  a fixed number, so it stays correct as accounts are added or removed. Does NOT
+  assert the minimum TLS version those connections negotiate — an account can be
+  HTTPS-only and still accept TLS 1.0 — nor anything about encryption at rest,
+  key custody, or public network exposure.
+
+  Fails when any account still permits HTTP, and fails loudly if either summary
+  rollup key is renamed upstream, since the span then stops matching and the
+  presence rule fires.
+regex: '"https_only_accounts":\s*(?<https_only_accounts>\d+)[\s\S]*?"total_storage_accounts":\s*(?<total_storage_accounts>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+evidence_sets:
+  - EVD-AZURE-STORAGE-ENC

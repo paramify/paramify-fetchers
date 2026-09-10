@@ -1,0 +1,36 @@
+key: nsg_no_admin_ports_from_internet
+name: Azure NSG No Admin Ports Open To Internet
+type: AUTOMATED
+role: configuration
+statement: >
+  No network security group in the subscription allows inbound SSH (22) or RDP
+  (3389) from the internet — both payload.summary.rdp_open_to_internet_groups
+  and payload.summary.ssh_open_to_internet_groups are zero.
+
+  Reads the two violation COUNTS rather than a coverage percentage, so a
+  subscription that legitimately holds no network security groups reads zero and
+  passes, instead of false-failing the way an "EQUALS 100" coverage rule would.
+
+  Does NOT assert anything about other administrative ports (WinRM 5985/5986,
+  database and management ports), about non-admin internet exposure, or about
+  outbound rules. Critically, it does NOT assert that these groups are actually
+  ATTACHED to anything — a rule is only enforced on a subnet the NSG is
+  associated with, which is what Azure NSG Subnet Association Complete covers.
+
+  Fails when any group permits 22 or 3389 from 0.0.0.0/0 or "*", and fails
+  loudly if either rollup key is renamed upstream, since the span then stops
+  matching and the presence rule fires.
+regex: '"rdp_open_to_internet_groups":\s*(?<rdp_open_to_internet_groups>\d+)[\s\S]*?"ssh_open_to_internet_groups":\s*(?<ssh_open_to_internet_groups>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+evidence_sets:
+  - EVD-AZURE-NSG

@@ -1,0 +1,26 @@
+validator: nsg_subnet_association_complete
+cases:
+  - name: every_subnet_associated
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"subnet_nsg_coverage_percentage":100,"subnets_with_nsg":5,"subnets_without_nsg":0,"total_subnets":5}}}'
+
+  - name: two_subnets_unassociated
+    expect: FAIL
+    note: The live demo subscription's actual posture — 3 of 5 subnets covered.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"subnet_nsg_coverage_percentage":60,"subnets_with_nsg":3,"subnets_without_nsg":2,"total_subnets":5}}}'
+
+  - name: no_subnets_at_all
+    expect: PASS
+    note: >
+      Empty population. subnet_nsg_coverage_percentage is 0 here, which is
+      exactly why this validator anchors on the violation count instead — an
+      EQUALS 100 rule on the percentage would fail a subscription that has no
+      subnets to leave uncovered.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"subnet_nsg_coverage_percentage":0,"subnets_with_nsg":0,"subnets_without_nsg":0,"total_subnets":0}}}'
+
+  - name: violation_key_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. The renamed key must not read as "zero uncovered subnets".
+      The presence rule is what stops that silent false pass.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"subnet_nsg_coverage_percentage":100,"subnetsWithoutNsg":0,"total_subnets":5}}}'

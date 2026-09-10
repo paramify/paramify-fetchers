@@ -1,0 +1,21 @@
+validator: storage_cmk_encryption
+cases:
+  - name: all_accounts_customer_managed
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"cmk_percentage":100,"customer_managed_key_storage":4,"platform_managed_key_storage":0,"total_storage_accounts":4}}}'
+
+  - name: one_of_four_customer_managed
+    expect: FAIL
+    note: >
+      The live demo subscription's actual posture: one hardened account on a
+      Key Vault key, three on Microsoft-managed keys.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"cmk_percentage":25,"customer_managed_key_storage":1,"platform_managed_key_storage":3,"total_storage_accounts":4}}}'
+
+  - name: rollup_key_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. The envelope is intact and exit_code is still 0, so a
+      collection-health check would not catch this. Without the leading
+      MATCH_COUNT presence rule the MATCH_GROUP comparison would read nothing
+      and hold vacuously, reporting compliance for an unreadable payload.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"cmkPercentage":100,"total_storage_accounts":4}}}'

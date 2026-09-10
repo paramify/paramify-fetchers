@@ -1,0 +1,27 @@
+validator: storage_https_only_enforced
+cases:
+  - name: all_accounts_https_only
+    expect: PASS
+    note: The live demo subscription's actual posture — 4 of 4 enforce HTTPS-only.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"https_only_accounts":4,"minimum_tls_1_2_accounts":3,"total_storage_accounts":4}}}'
+
+  - name: three_of_four_https_only
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"https_only_accounts":3,"minimum_tls_1_2_accounts":3,"total_storage_accounts":4}}}'
+
+  - name: summary_keys_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. Both rollup keys renamed, so the two-key span stops matching
+      entirely and the presence rule fires. A group-to-group comparison over a
+      regex that never matched compares nothing to nothing and would otherwise
+      pass silently.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"httpsOnlyAccounts":4,"totalStorageAccounts":4}}}'
+
+  - name: population_key_renamed_only
+    expect: FAIL
+    note: >
+      Half-rename: the enforcing count still reads but the population it is
+      compared against is gone. The span requires both keys, so this fails
+      rather than silently comparing against a stale or absent total.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"https_only_accounts":4,"totalStorageAccounts":4}}}'

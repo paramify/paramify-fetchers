@@ -1,0 +1,29 @@
+key: storage_cmk_encryption
+name: Azure Storage Customer-Managed Key Encryption
+type: AUTOMATED
+role: configuration
+statement: >
+  Every storage account in the subscription encrypts data at rest with a
+  customer-managed key held in Azure Key Vault rather than a Microsoft-managed
+  platform key (payload.summary.cmk_percentage is 100).
+
+  Asserts key CUSTODY, not the existence of encryption: Azure Storage is always
+  encrypted at rest, so "encrypted: true" is never the discriminator — CMK vs
+  platform-managed is. Does NOT assert infrastructure (double) encryption, key
+  rotation or expiration policy, network exposure, or anything about encryption
+  in transit.
+
+  Fails when any account falls back to a Microsoft-managed key, and fails loudly
+  if the summary rollup key is renamed upstream (the presence rule stops the
+  rename from reading as a vacuous pass).
+regex: '"cmk_percentage":\s*(?<cmk_percentage>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+evidence_sets:
+  - EVD-AZURE-STORAGE-ENC

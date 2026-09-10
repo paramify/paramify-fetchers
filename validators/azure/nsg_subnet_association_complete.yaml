@@ -1,0 +1,31 @@
+key: nsg_subnet_association_complete
+name: Azure NSG Subnet Association Complete
+type: AUTOMATED
+role: configuration
+statement: >
+  Every subnet across the subscription's virtual networks is associated with a
+  network security group (payload.summary.subnets_without_nsg is zero), so
+  network segmentation is actually ENFORCED rather than merely defined. An
+  unassociated subnet inherits no NSG rules at all, so its traffic is
+  unfiltered no matter how strict the groups elsewhere in the subscription are.
+
+  Reads the violation COUNT rather than subnet_nsg_coverage_percentage on
+  purpose: a percentage reads 0 for an empty population, so a subscription with
+  no subnets would false-fail an "EQUALS 100" rule. The count reads 0 for both
+  the compliant case and the empty one.
+
+  Does NOT assert anything about the RULES those groups contain — a subnet
+  covered by a wide-open NSG passes this validator. Pair it with Azure NSG No
+  Admin Ports Open To Internet, which asserts the complementary half. Also does
+  not assert DDoS protection, vnet peering, or route-table posture.
+regex: '"subnets_without_nsg":\s*(?<subnets_without_nsg>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+evidence_sets:
+  - EVD-AZURE-NSG

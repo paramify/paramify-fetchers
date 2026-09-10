@@ -1,0 +1,37 @@
+validator: nsg_no_admin_ports_from_internet
+cases:
+  - name: no_admin_ports_exposed
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"rdp_open_to_internet_groups":0,"ssh_open_to_internet_groups":0,"total_network_security_groups":3}}}'
+
+  - name: ssh_open_on_one_group
+    expect: FAIL
+    note: Exercises group 2 independently — RDP is clean, SSH is not.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"rdp_open_to_internet_groups":0,"ssh_open_to_internet_groups":1,"total_network_security_groups":3}}}'
+
+  - name: rdp_open_on_one_group
+    expect: FAIL
+    note: Exercises group 1 independently — SSH is clean, RDP is not.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"rdp_open_to_internet_groups":1,"ssh_open_to_internet_groups":0,"total_network_security_groups":3}}}'
+
+  - name: both_open_live_demo_posture
+    expect: FAIL
+    note: The live demo subscription's actual posture — nsg-pf-exposed allows both.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"rdp_open_to_internet_groups":1,"ssh_open_to_internet_groups":1,"total_network_security_groups":3}}}'
+
+  - name: no_groups_at_all
+    expect: PASS
+    note: >
+      Empty population. Documents why this reads violation counts rather than a
+      coverage percentage: with no NSGs there is nothing exposed, so zero
+      violations is genuinely compliant. A percentage rollup would read 0 here
+      and false-fail an EQUALS 100 rule.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"rdp_open_to_internet_groups":0,"ssh_open_to_internet_groups":0,"total_network_security_groups":0}}}'
+
+  - name: summary_keys_renamed_upstream
+    expect: FAIL
+    note: >
+      Direction 3. Envelope intact and exit_code still 0, so collection health
+      would not catch it. Without the leading presence rule the two MATCH_GROUP
+      comparisons would read nothing and hold vacuously.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"rdpOpenToInternetGroups":0,"sshOpenToInternetGroups":0}}}'
