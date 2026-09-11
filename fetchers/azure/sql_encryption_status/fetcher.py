@@ -25,6 +25,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -248,7 +249,7 @@ def collect_sql_servers(subscription_id, cred, collector: Collector) -> list[dic
     def _client():
         from azure.mgmt.sql import SqlManagementClient  # lazy
 
-        return SqlManagementClient(credential=cred, subscription_id=subscription_id)
+        return SqlManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     # Guarded: a missing azure-mgmt-sql becomes internal_error, evidence still written.
     client = collector.guard("sql.SqlManagementClient (init)", _client)

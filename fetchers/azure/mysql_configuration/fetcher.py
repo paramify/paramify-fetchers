@@ -27,6 +27,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -230,7 +231,7 @@ def collect_mysql_servers(subscription_id, cred, collector: Collector) -> list[d
     def _client():
         from azure.mgmt.rdbms.mysql_flexibleservers import MySQLManagementClient  # lazy
 
-        return MySQLManagementClient(credential=cred, subscription_id=subscription_id)
+        return MySQLManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     # Guarded: a missing azure-mgmt-rdbms becomes internal_error, evidence still written.
     client = collector.guard("mysql.MySQLManagementClient (init)", _client)

@@ -27,6 +27,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -294,7 +295,7 @@ def policy_client(cred, subscription_id):
     except ImportError:  # pragma: no cover - depends on installed SDK version
         from azure.mgmt.resource import PolicyClient  # lazy
 
-    return PolicyClient(credential=cred, subscription_id=subscription_id)
+    return PolicyClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
 
 def _lookup_definition(client, reference: dict, subscription_id):

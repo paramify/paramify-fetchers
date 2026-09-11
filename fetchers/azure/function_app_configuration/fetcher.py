@@ -31,6 +31,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -390,7 +391,7 @@ def collect_function_apps(subscription_id, cred, collector: Collector) -> list[d
     from azure.mgmt.web import WebSiteManagementClient
 
     def _client():
-        return WebSiteManagementClient(credential=cred, subscription_id=subscription_id)
+        return WebSiteManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     client = collector.guard("web.WebSiteManagementClient (init)", _client)
     if client is None:

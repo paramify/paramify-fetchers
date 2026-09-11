@@ -188,7 +188,9 @@ def collect_assessments(subscription_id, cred, collector: Collector) -> tuple[li
     # exception — that's what lets one bad call fail this fetcher's exit code
     # without crashing the whole script.
     def _client():
-        return SecurityCenter(credential=cred, subscription_id=subscription_id)
+        return SecurityCenter(
+            credential=cred, subscription_id=subscription_id, **arm_client_kwargs()
+        )
 
     client = collector.guard("security.SecurityCenter (init)", _client)
     if client is None:

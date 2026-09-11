@@ -24,6 +24,8 @@ from typing import Any, Callable, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
 from fetcher_status import STATUS_CODES, report_failure  # noqa: E402,F401
 
+_LOGGER = logging.getLogger("azure_common")
+
 
 def current_timestamp() -> str:
     """UTC, second-resolution, Z-suffixed — matches the AWS/GCP fetchers' format."""
@@ -213,6 +215,63 @@ def credential():
     return DefaultAzureCredential()
 
 
+# --------------------------------------------------------------------------- #
+# Which ARM cloud to talk to
+# --------------------------------------------------------------------------- #
+#
+# Derived from AZURE_AUTHORITY_HOST exactly as entra_graph.graph_host() derives the
+# Graph host: that variable is the one declared sovereign-cloud selector, and a
+# second knob could disagree with the credential's own authority.
+#
+# Without this the azure.mgmt clients default to commercial Azure. A Gov Cloud
+# subscription then comes back as `SubscriptionNotFound` — the collection does fail
+# rather than silently returning empty evidence, but it fails naming the
+# subscription, so it reads as a bad id or a permissions problem rather than as a
+# request sent to the wrong cloud.
+ARM_ENDPOINT_PUBLIC = "https://management.azure.com"
+
+_AUTHORITY_TO_ARM_ENDPOINT = {
+    "login.microsoftonline.com": ARM_ENDPOINT_PUBLIC,
+    "login.microsoftonline.us": "https://management.usgovcloudapi.net",
+    "login.microsoftonline.de": "https://management.microsoftazure.de",
+    "login.chinacloudapi.cn": "https://management.chinacloudapi.cn",
+    "login.partner.microsoftonline.cn": "https://management.chinacloudapi.cn",
+}
+
+
+def arm_endpoint() -> str:
+    """ARM management endpoint for the cloud the credential's authority points at."""
+    authority = (os.environ.get("AZURE_AUTHORITY_HOST") or "").strip()
+    if not authority:
+        return ARM_ENDPOINT_PUBLIC
+    host = authority.replace("https://", "").replace("http://", "").strip("/").lower()
+    mapped = _AUTHORITY_TO_ARM_ENDPOINT.get(host)
+    if mapped is None:
+        _LOGGER.warning(
+            "AZURE_AUTHORITY_HOST %r is not a recognized sovereign authority; "
+            "collecting against the public management endpoint %s",
+            authority,
+            ARM_ENDPOINT_PUBLIC,
+        )
+        return ARM_ENDPOINT_PUBLIC
+    return mapped
+
+
+def arm_client_kwargs() -> Dict[str, Any]:
+    """`base_url` + `credential_scopes` for an azure.mgmt client, keyed to the cloud.
+
+    Spread into every management client constructor:
+
+        Client(credential=cred, subscription_id=sub, **arm_client_kwargs())
+
+    Both keys are required together. `base_url` alone sends a token minted for the
+    commercial audience to the sovereign endpoint, which rejects it — so setting
+    only the endpoint trades SubscriptionNotFound for an auth error.
+    """
+    endpoint = arm_endpoint()
+    return {"base_url": endpoint, "credential_scopes": [f"{endpoint}/.default"]}
+
+
 def resolve_subscription(collector: Collector) -> Dict[str, Optional[str]]:
     """Resolve the subscription to collect from.
 
@@ -226,7 +285,7 @@ def resolve_subscription(collector: Collector) -> Dict[str, Optional[str]]:
     def _discover() -> Optional[str]:
         from azure.mgmt.subscription import SubscriptionClient  # lazy
 
-        client = SubscriptionClient(credential())
+        client = SubscriptionClient(credential(), **arm_client_kwargs())
         for sub in client.subscriptions.list():
             # SubscriptionState serializes as "Enabled", its repr as
             # "SubscriptionState.ENABLED"; both contain "enabled", while "Disabled",
@@ -277,7 +336,9 @@ def provider_registration_status(
         except ImportError:  # pragma: no cover - depends on installed SDK version
             from azure.mgmt.resource import ResourceManagementClient  # lazy
 
-        client = ResourceManagementClient(credential=cred, subscription_id=subscription_id)
+        client = ResourceManagementClient(
+            credential=cred, subscription_id=subscription_id, **arm_client_kwargs()
+        )
         return model_attr(client.providers.get(namespace), "registration_state")
 
     state = collector.guard(f"resource.providers.get({namespace})", _get)
