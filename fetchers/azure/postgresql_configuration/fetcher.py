@@ -35,6 +35,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -422,7 +423,7 @@ def collect_postgresql_servers(subscription_id, cred, collector: Collector) -> l
         # a recorded failure and a status file rather than an import-time crash.
         from azure.mgmt.postgresqlflexibleservers import PostgreSQLManagementClient
 
-        return PostgreSQLManagementClient(credential=cred, subscription_id=subscription_id)
+        return PostgreSQLManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     # Guarded: a missing SDK becomes internal_error, evidence still written.
     client = collector.guard("postgresql.PostgreSQLManagementClient (init)", _client)

@@ -23,6 +23,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -256,7 +257,7 @@ def collect_activity_log_alerts(subscription_id, cred, collector: Collector) -> 
     from azure.mgmt.monitor import MonitorManagementClient
 
     def _client():
-        return MonitorManagementClient(credential=cred, subscription_id=subscription_id)
+        return MonitorManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     client = collector.guard("monitor.MonitorManagementClient (init)", _client)
     if client is None:

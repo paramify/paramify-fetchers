@@ -26,6 +26,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -246,7 +247,7 @@ def collect_disks(subscription_id, cred, collector: Collector) -> list[dict]:
     def _client():
         from azure.mgmt.compute import ComputeManagementClient  # lazy
 
-        return ComputeManagementClient(credential=cred, subscription_id=subscription_id)
+        return ComputeManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     client = collector.guard("compute.ComputeManagementClient (init)", _client)
     if client is None:

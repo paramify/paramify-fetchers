@@ -24,6 +24,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     basename,
     build_payload,
     classify_failure_code,
@@ -499,7 +500,7 @@ def _backup_client(cred, subscription_id):
         from azure.mgmt.recoveryservicesbackup.activestamp import (
             RecoveryServicesBackupClient,
         )
-    return RecoveryServicesBackupClient(credential=cred, subscription_id=subscription_id)
+    return RecoveryServicesBackupClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
 
 def collect_vaults(subscription_id, cred, collector: Collector) -> list[dict]:
@@ -507,7 +508,7 @@ def collect_vaults(subscription_id, cred, collector: Collector) -> list[dict]:
     from azure.mgmt.recoveryservices import RecoveryServicesClient
 
     def _client():
-        return RecoveryServicesClient(credential=cred, subscription_id=subscription_id)
+        return RecoveryServicesClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     client = collector.guard("recoveryservices.RecoveryServicesClient (init)", _client)
     if client is None:

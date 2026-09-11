@@ -20,6 +20,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -309,7 +310,7 @@ def collect_storage_accounts(subscription_id, cred, collector: Collector) -> lis
     from azure.mgmt.storage import StorageManagementClient
 
     def _client():
-        return StorageManagementClient(credential=cred, subscription_id=subscription_id)
+        return StorageManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     client = collector.guard("storage.StorageManagementClient (init)", _client)
     if client is None:
