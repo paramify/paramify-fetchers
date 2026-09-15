@@ -1,8 +1,8 @@
 #!/bin/bash
 # Verifies the new-resource detection pipeline: AWS Config recorders, the
-# New-Resource-Launched-Alert-Rule EventBridge rule (targets/schedule), the
-# New_AWS_Resource_Launch_Detected SNS topic/subscriptions, and that the
-# monitoring interval is 5 minutes or less.
+# configured EventBridge rule (targets/schedule), the configured
+# SNS topic/subscriptions, and the event-driven or scheduled trigger.
+# Scheduled rules must run every 5 minutes or less.
 # Output: $EVIDENCE_DIR/aws_detect_new_aws_resource.json
 # Optional env (else the AWS CLI ambient identity/region): AWS_PROFILE, AWS_DEFAULT_REGION
 # Required tools: aws, jq
@@ -10,6 +10,9 @@
 set -o pipefail
 
 [ -f .env ] && { set -a; . .env; set +a; }
+
+EVENTBRIDGE_RULE_NAME="${AWS_DETECT_NEW_RESOURCE_RULE_NAME:-New-Resource-Launched-Alert-Rule}"
+SNS_TOPIC_NAME="${AWS_DETECT_NEW_RESOURCE_TOPIC_NAME:-New_AWS_Resource_Launch_Detected}"
 
 OUTPUT_DIR="${EVIDENCE_DIR:-./evidence}"
 mkdir -p "$OUTPUT_DIR"
@@ -76,11 +79,13 @@ jq --argjson recorders "$config_recorders" \
 
 # 2. Check EventBridge rule for new resource detection.
 log_info "Checking EventBridge rules"
-rules=$(aws events list-rules --name "New-Resource-Launched-Alert-Rule" --query 'Rules[*]' --output json 2>/dev/null)
+rules=$(aws events list-rules --query 'Rules[*]' --output json 2>/dev/null)
 if [ $? -ne 0 ]; then
     echo "aws events list-rules failed" >> "$_FAILURE_LOG"
     rules='[]'
 fi
+
+rules=$(echo "$rules" | jq --arg name "$EVENTBRIDGE_RULE_NAME" '[.[] | select(.Name == $name)]')
 
 # Absence of the rule is valid evidence (control not in place) -> not a failure.
 if [ "$(echo "$rules" | jq 'length')" -gt 0 ]; then
@@ -113,7 +118,7 @@ if [ "$(echo "$rules" | jq 'length')" -gt 0 ]; then
            }' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
     done
 else
-    log_info "No EventBridge rule found with name 'New-Resource-Launched-Alert-Rule'"
+    log_info "No EventBridge rule found with name '$EVENTBRIDGE_RULE_NAME'"
 fi
 
 # 3. Check SNS topics and subscriptions.
@@ -131,7 +136,7 @@ if [ "$(echo "$topics" | jq 'length')" -gt 0 ]; then
         topic_name=$(echo "$topic_arn" | awk -F':' '{print $NF}')
 
         # Only process the specific topic
-        if [[ "$topic_name" == "New_AWS_Resource_Launch_Detected" ]]; then
+        if [[ "$topic_name" == "$SNS_TOPIC_NAME" ]]; then
             subscriptions=$(aws sns list-subscriptions-by-topic --topic-arn "$topic_arn" --query 'Subscriptions[*]' --output json 2>/dev/null)
             if [ $? -ne 0 ]; then
                 echo "aws sns list-subscriptions-by-topic ($topic_name) failed" >> "$_FAILURE_LOG"
@@ -151,33 +156,19 @@ else
     log_info "No SNS topics found"
 fi
 
-# 4. Verify monitoring interval (schedule must be 5 minutes or less).
-log_info "Verifying monitoring intervals"
-if [ "$(jq -r '.results.eventbridge.rules | length' "$OUTPUT_JSON")" -gt 0 ]; then
-    jq -r '.results.eventbridge.rules | keys[]' "$OUTPUT_JSON" | while read -r rule_name; do
-        schedule=$(jq -r --arg name "$rule_name" '.results.eventbridge.rules[$name].schedule' "$OUTPUT_JSON")
-
-        if [[ "$schedule" == *"rate(5 minutes)"* ]] || [[ "$schedule" == *"rate(1 minute)"* ]] || [[ "$schedule" == *"rate(2 minutes)"* ]] || [[ "$schedule" == *"rate(3 minutes)"* ]] || [[ "$schedule" == *"rate(4 minutes)"* ]]; then
-            interval_check="PASS"
-        else
-            interval_check="FAIL"
-        fi
-
-        jq --arg name "$rule_name" \
-           --arg check "$interval_check" \
-           --arg schedule "$schedule" \
-           '.results.validation_results.interval_checks[$name] = {
-               "status": $check,
-               "schedule": $schedule
-           }' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+# 4. Validate the trigger and its connection to the configured SNS topic.
+log_info "Verifying EventBridge trigger and SNS target"
+if jq --arg rule_name "$EVENTBRIDGE_RULE_NAME" \
+      --arg topic_name "$SNS_TOPIC_NAME" \
+      -f "$(dirname "$0")/validate.jq" "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON"; then
+    mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 else
-    log_info "No EventBridge rules found to check intervals"
+    echo "EventBridge validation failed" >> "$_FAILURE_LOG"
 fi
 
 # Summary (informational)
 config_recording=$(jq -r '.results.aws_config.status[0].recording // "false"' "$OUTPUT_JSON")
-rule_state=$(jq -r '.results.eventbridge.rules["New-Resource-Launched-Alert-Rule"].rule.State // "DISABLED"' "$OUTPUT_JSON")
+rule_state=$(jq -r --arg name "$EVENTBRIDGE_RULE_NAME" '.results.eventbridge.rules[$name].rule.State // "DISABLED"' "$OUTPUT_JSON")
 sns_topic_count=$(jq -r '.results.sns.topics | length' "$OUTPUT_JSON")
 log_info "Config recording: $config_recording; EventBridge rule state: $rule_state; matching SNS topics: $sns_topic_count"
 

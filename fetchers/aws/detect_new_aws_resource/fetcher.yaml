@@ -1,6 +1,6 @@
 name: aws_detect_new_aws_resource
 version: 0.1.0
-description: Verifies the new-resource detection pipeline (AWS Config recorders, the New-Resource-Launched-Alert-Rule EventBridge rule and its targets/schedule, the New_AWS_Resource_Launch_Detected SNS topic and subscriptions) and checks the monitoring interval is 5 minutes or less.
+description: Verifies the new-resource detection pipeline (AWS Config recorders, a configurable EventBridge rule and its targets/schedule, a configurable SNS topic and subscriptions) and validates enabled state, event-pattern presence and SNS target linkage. Monitoring intervals are checked only for scheduled rules.
 category: aws
 
 supports_targets: true
@@ -25,6 +25,17 @@ target_schema:
     required: false
     env: AWS_PROFILE
     description: AWS named profile (credentials resolved from ~/.aws / SSO).
+
+  rule_name:
+    type: string
+    required: false
+    env: AWS_DETECT_NEW_RESOURCE_RULE_NAME
+    description: Exact EventBridge rule name. Defaults to New-Resource-Launched-Alert-Rule.
+  topic_name:
+    type: string
+    required: false
+    env: AWS_DETECT_NEW_RESOURCE_TOPIC_NAME
+    description: Exact SNS topic name. Defaults to New_AWS_Resource_Launch_Detected.
 
 secrets: []
 

@@ -1,0 +1,7 @@
+run:
+  output_dir: ./evidence
+  fetchers:
+    - use: aws_detect_new_aws_resource
+      targets:
+        - rule_name: audit-resource-config-changes
+          topic_name: audit-resource-config-changes
