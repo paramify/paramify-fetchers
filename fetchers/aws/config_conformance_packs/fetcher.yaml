@@ -43,4 +43,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CONFIG-PACKS
   name: AWS Config Conformance Packs
-  instructions: 'Commands executed: aws configservice describe-conformance-packs, describe-conformance-pack-status, describe-conformance-pack-compliance, describe-config-rules, get-conformance-pack-compliance-summary, get-conformance-pack-compliance-details. Source.SourceIdentifier links generated conformance-pack rule names to the selected FedRAMP and NIST SP 800-53 Rev. 5 mappings.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws configservice describe-conformance-packs, describe-conformance-pack-status, describe-conformance-pack-compliance, describe-config-rules, get-conformance-pack-compliance-summary, get-conformance-pack-compliance-details. Source.SourceIdentifier links generated conformance-pack rule names to the selected FedRAMP and NIST SP 800-53 Rev. 5 mappings.'

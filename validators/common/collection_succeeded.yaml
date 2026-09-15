@@ -1,0 +1,53 @@
+key: collection_succeeded
+name: Evidence Collection Succeeded
+type: AUTOMATED
+role: completeness
+statement: The fetcher run that produced this artifact completed successfully and the evidence envelope is intact.
+
+# ONE validator, MANY evidence sets. The envelope is identical for every fetcher,
+# so this assertion is defined once and listed against every set that wants it —
+# that is the registry's dedup mechanism, and it is why the whole library
+# migrates in one file when the API starts honouring `disposition` (below).
+#
+# This is the one sanctioned exception to the rule against anchoring on envelope
+# metadata: here the envelope IS the subject of the check. `wrap_outputs` derives
+# `status` from `exit_code`, so the two are redundant — anchor on `exit_code`
+# alone. It is numeric and avoids the `status` key collision (the envelope says
+# "success" while a payload may say "ACTIVE" or "error").
+regex: '"exit_code":\s*(?<exit_code>-?\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  # The envelope is present at all. Zero matches means the anchor is gone —
+  # restructured envelope, truncated file, wrong artifact — which every
+  # downstream MATCH_GROUP rule would otherwise pass silently.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  # The run itself succeeded.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # exit_code
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+# WHY POSITIVE RULES RATHER THAN `disposition: ERROR`.
+#
+# ERROR is the semantically right label — "the evidence never arrived, so
+# compliance is UNKNOWN" is a different fact from "the control looks bad", and
+# without the distinction an expired token is indistinguishable from a real
+# failure. But the REST API accepts `disposition` and DISCARDS it (verified
+# against a live tenant 2026-09-03). Every rule then becomes a pass-requirement,
+# so the negative guard pair — MATCH_COUNT EQUALS 0 -> ERROR plus
+# exit_code NOT_EQUALS 0 -> ERROR — demands that the envelope be simultaneously
+# absent and carrying a non-zero exit code. Measured: a validator written that
+# way is a constant function, returning FAIL on every input including clean
+# evidence.
+#
+# The rules above assert the same thing and work today. MIGRATION, when the API
+# lands: invert both criteria (NOT_EQUALS 0 -> EQUALS 0, EQUALS 0 ->
+# NOT_EQUALS 0) and add `disposition: ERROR` to each. That is the entire change,
+# in this one file, for every evidence set at once.
+
+# Every evidence set that wants a collection-health check. Add a line per set as
+# validators are authored for it.
+evidence_sets:
+  - EVD-LB-ENC-STATUS
+  - EVD-SQS-ENC

@@ -93,4 +93,10 @@ def wrap_outputs(
             "metadata": meta,
             "payload": raw,
         }
-        path.write_text(json.dumps(envelope, indent=2))
+        # default=str for the same reason api.py uses it on _run_metadata.json:
+        # metadata carries the manifest's target values verbatim, and YAML gives
+        # an unquoted `since: 2026-01-01` back as a datetime.date, which json
+        # cannot serialize. Without this the run aborts mid-manifest on a
+        # TypeError that run_cmd does not catch, leaving the collected file
+        # unenveloped and no _run_metadata.json at all.
+        path.write_text(json.dumps(envelope, indent=2, default=str))

@@ -27,6 +27,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -38,7 +39,7 @@ from azure_common import (  # noqa: E402
     resolve_subscription,
     sanitize_for_filename,
     write_evidence,
-    write_status,
+    report_failure,
 )
 
 logger = logging.getLogger("azure_policy_assignments")
@@ -294,7 +295,7 @@ def policy_client(cred, subscription_id):
     except ImportError:  # pragma: no cover - depends on installed SDK version
         from azure.mgmt.resource import PolicyClient  # lazy
 
-    return PolicyClient(credential=cred, subscription_id=subscription_id)
+    return PolicyClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
 
 def _lookup_definition(client, reference: dict, subscription_id):
@@ -434,10 +435,7 @@ def main() -> int:
     path = write_evidence(output_dir, filename, evidence)
 
     if not collector.ok:
-        logger.error(
-            "Encountered %d Azure API failure(s) during collection", len(collector.failures)
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1

@@ -1,0 +1,18 @@
+validator: alb_encryption_in_transit
+cases:
+  - name: all_encrypted
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"summary":{"alb_total":4,"alb_encrypted":4}}'
+
+  - name: one_of_four_encrypted
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"summary":{"alb_total":4,"alb_encrypted":1}}'
+
+  - name: summary_keys_renamed
+    expect: FAIL
+    note: >
+      Regression case. In its previous shape this validator returned PASS here:
+      the exit_code anchor still matched so the match count stayed 1, the drift
+      canary never fired, and MATCH_GROUP[2] EQUALS MATCH_GROUP[3] compared
+      nothing to nothing and held. One of four load balancers is encrypted.
+    artifact: '{"metadata":{"exit_code":0},"summary":{"albTotal":4,"albEncrypted":1}}'

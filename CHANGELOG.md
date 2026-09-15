@@ -10,6 +10,81 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Added
+
+- **A central `validators/` registry.** A validator is now a first-class,
+  deduplicated object — one file at `validators/<category>/<key>.yaml`, checked
+  against the new `framework/schemas/validator_schema.json`. It carries the
+  Paramify fields as native YAML and owns its side of the fetcher link through an
+  `evidence_sets` list of `reference_id`s, so a validator that applies to four
+  fetchers is one file naming four sets rather than four copies drifting apart.
+  A fetcher's validators are the reverse lookup on its `evidence_set.reference_id`.
+  See [`docs/validators_design.md`](docs/validators_design.md).
+- **Validator sync** — `paramify validators sync` and `paramify upload
+  --with-validators` (engine in `uploaders/paramify_validators/`). Pushes registry
+  validators to Paramify (`POST /validators`) and CONNECTs each to its evidence
+  sets. The validators shipped here are templates that customers tune in their own
+  instance, so the sync is **create-or-skip**: an existing validator is never
+  modified unless `--update` is passed, association happens on create only, and
+  `--dry-run` previews without writing. The per-instance Paramify id is resolved
+  at sync time and cached in a gitignored `.paramify/` lock — never written back
+  to the shared registry.
+
+### Changed
+
+- **`paramify validators check`** — runs the behaviour cases in
+  `validators/_cases/` through the real ECMAScript engine
+  (`framework/validator_eval/`, evaluated under `node` because Paramify's engine
+  is JavaScript and Python `re` cannot compile `(?<name>...)` at all). A case
+  file pins what a validator must return for a given artifact; a set-level file
+  combines every validator on an evidence set the way Paramify does
+  (ERROR > FAIL > PASS), which is the only way to prove an `integrity` validator
+  covers its partner — a violation-counting validator passes its own drifted
+  artifact, because zero matches is its pass condition. Reports vacuous passes
+  (a PASS reached with a rule that read nothing) and names validators with no
+  cases. Deliberately not a CI gate: the cases are an authoring aid, and
+  legitimate evidence-shape changes should not block a merge.
+
+- **Validator authoring: guards are written positively, and collection health is
+  its own validator.** `validationRules[].disposition` is accepted and then
+  discarded by the REST API, so a rule authored in the negative `ERROR` form
+  degrades into a contradictory pass-requirement and the validator can never
+  pass — measured returning FAIL on every input, including compliant evidence.
+  Collection health now lives once in `validators/common/collection_succeeded.yaml`
+  (listing every evidence set that wants it) with plain PASS rules; compliance
+  validators no longer carry an `exit_code` anchor, so their capture groups start
+  at 1. Migration when the API honours `disposition` is an inversion of two rules
+  in that single file.
+- **Every validator opens with a presence rule, and count-based validators get an
+  `integrity` partner.** A `MATCH_GROUP` comparison over a regex that did not
+  match evaluates true, and a count-of-violations rule reads a renamed upstream
+  key as zero violations — both silent false passes. `role` gains a third value,
+  `integrity`, for the validator that proves the counted field was present.
+  `validators/aws/alb_encryption_in_transit.yaml` is reshaped accordingly; in its
+  previous form it returned PASS on drifted evidence where 1 of 4 load balancers
+  was encrypted.
+- The `suggest-validator` skill now authors validators into `validators/` rather
+  than only proposing a regex, and verifies them against compliant,
+  non-compliant, and **unreadable** evidence.
+- **The Okta account allowlists are configuration, not code** (SEC-71).
+  `okta_iam_core.py` carried a hardcoded list of one service account and two named
+  people's email addresses, used to seed service-account and Super Admin detection
+  for a single tenant. Both lists now come from config and default to empty:
+  `OKTA_KNOWN_SERVICE_ACCOUNTS` on `okta/non_user_accounts_authentication` and
+  `OKTA_KNOWN_SUPER_ADMINS` on `okta/least_privilege`, each declared in that
+  fetcher's `config_schema` and accepting a comma- or newline-separated list of
+  logins/emails. No behaviour change for a tenant that sets them; every other
+  tenant now gets only the name-independent detection methods (userType, API token
+  ownership, OAuth client assignment, group membership, assigned admin roles),
+  which is what it should always have been.
+
+### Deprecated
+
+- The inline `validators` block on `fetcher.yaml`. Nothing in the framework reads
+  it and only `gitlab/significant_change_notifications` still carries one; it stays
+  in the schema, marked deprecated, so that fetcher's data remains shape-checked
+  until it migrates to the registry. New validators belong in `validators/`.
+
 ## [0.5.1-beta] - 2026-09-02
 
 ### Fixed

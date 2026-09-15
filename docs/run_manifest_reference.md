@@ -106,7 +106,14 @@ Plain strings (not matching the pattern) pass through unchanged.
 
 How `VAR_NAME` ends up in the runner's environment is up to the customer — `.env`, shell `export`, AWS Secrets Manager → env, HashiCorp Vault, K8s secret env mounts, CI provider secret blocks, etc. The resolver is **source-agnostic**; `.env` is not privileged.
 
-If a referenced env var is unset or empty when the runner resolves it, the runner fails the invocation with a structured error (the fetcher is not invoked).
+If a referenced env var is unset or empty when the runner resolves it, what happens depends on whether the fetcher declares that secret as required:
+
+- **Required secret** — the runner fails the invocation with a structured error and the fetcher is not invoked.
+- **Optional secret** (`required: false`) — the reference is treated as though the manifest had omitted it: nothing is injected, and the fetcher's own credential chain falls through to ambient identity (ECS task role, IRSA, workload identity, an instance role, SSO). The runner reports which secrets it dropped so the fallback is never silent.
+
+That second case is what lets one manifest work both locally and in a deployment that supplies no static keys. The TUI wires every optional secret to its default env var when you add a fetcher, so a manifest built there arrives in an ambient deployment holding references — e.g. `${env:AWS_ACCESS_KEY_ID}` — for credentials that deployment deliberately does not set.
+
+A **malformed** reference still fails either way, required or not. A lowercase var name is the usual cause (`${env:api_token}`), and it is an authoring mistake rather than an ambient deployment: passing it through would hand the fetcher the literal string as its credential, and skipping it would silently drop a credential you meant to supply.
 
 ---
 

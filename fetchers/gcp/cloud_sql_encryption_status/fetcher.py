@@ -28,7 +28,7 @@ from gcp_common import (  # noqa: E402
     resolve_project,
     sanitize_for_filename,
     write_evidence,
-    write_status,
+    report_failure,
 )
 
 logger = logging.getLogger("gcp_cloud_sql_encryption_status")
@@ -133,8 +133,7 @@ def main() -> int:
 
     if not collector.ok:
         reason, code = collector.failure_report()
-        logger.error("%s", reason)
-        write_status(reason, code)
+        report_failure(reason, code)
         return 1
     logger.info("Evidence saved to %s", path)
     return 0

@@ -172,13 +172,4 @@ rule_state=$(jq -r --arg name "$EVENTBRIDGE_RULE_NAME" '.results.eventbridge.rul
 sns_topic_count=$(jq -r '.results.sns.topics | length' "$OUTPUT_JSON")
 log_info "Config recording: $config_recording; EventBridge rule state: $rule_state; matching SNS topics: $sns_topic_count"
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    _reasons="$(head -n 3 "$_FAILURE_LOG" | awk '{printf "%s%s", sep, $0; sep="; "}')"
-    [ "$failure_count" -gt 3 ] && _reasons="${_reasons}(+$((failure_count - 3)) more)"
-    aws_report_failures "$failure_count" "$_reasons"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

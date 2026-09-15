@@ -14,6 +14,7 @@ The runner's contract with a fetcher:
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -34,7 +35,7 @@ from framework.contract import (
     effective_secrets,
 )
 from framework.issue_reports import ISSUE_REPORTS_DIR
-from framework.secret_resolver import SecretResolutionError, resolve
+from framework.secret_resolver import SecretResolutionError, UnsetSecretError, resolve
 
 _INHERITED_ENV_VARS = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "USER", "TZ")
 
@@ -232,6 +233,7 @@ def _build_env(
     platform_spec: Optional[PlatformSpec] = None,
     platform_cfg: Optional[PlatformConfig] = None,
     secret_sink: Optional[set] = None,
+    note_sink: Optional[List[Tuple[str, str]]] = None,
 ) -> Dict[str, str]:
     """Build the env dict to pass to a single fetcher invocation.
 
@@ -250,6 +252,17 @@ def _build_env(
     # credential chain falls through to ambient identity (IRSA, workload identity,
     # managed identity). Omitting a REQUIRED one is still a hard error before the
     # fetcher runs, which is the fail-fast the ambient categories otherwise lack.
+    #
+    # A reference the manifest DOES carry but cannot resolve is treated the same
+    # way when the secret is optional. That case is not hypothetical: the TUI
+    # auto-wires every optional secret to its default env var on add, so an
+    # ambient deployment (ECS task role, IRSA) inherits `${env:AWS_ACCESS_KEY_ID}`
+    # refs for keys it deliberately does not set. Erroring there fails the whole
+    # entry at setup, before the fetcher runs, for credentials it never needed.
+    # A MALFORMED reference still raises even when optional — that is an
+    # authoring bug, not an ambient deployment, and silently ignoring it would
+    # hand the fetcher a literal "${env:...}" or skip a credential the operator
+    # meant to supply.
     for secret in effective_secrets(fetcher, platform_spec):
         if secret.per_target:
             if target is None:
@@ -274,7 +287,14 @@ def _build_env(
                 raise RuntimeError(
                     f"{fetcher.name}: manifest entry is missing secret '{secret.name}'"
                 )
-        resolved = resolve(ref)
+        try:
+            resolved = resolve(ref)
+        except UnsetSecretError as e:
+            if secret.required:
+                raise
+            if note_sink is not None:
+                note_sink.append((secret.name, e.env_var))
+            continue
         env[secret.env] = resolved
         if secret_sink is not None:
             secret_sink.add(resolved)
@@ -294,6 +314,30 @@ def _build_env(
     return env
 
 
+#: Ceiling on waiting for the drain threads once the child is gone, shared
+#: across both joins. Reachable when a fetcher leaves a grandchild holding
+#: the pipe — either one that escaped the process group, or one left running
+#: by a fetcher that exited 0, which no timeout covers.
+_DRAIN_JOIN_TIMEOUT = 10.0
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the child's whole process group, falling back to the child alone.
+
+    start_new_session put the child in its own group, so this reaches the
+    grandchildren a bash fetcher spawned. Both lookups race with normal exit:
+    the process may be gone between wait() timing out and the kill landing,
+    which is not an error.
+    """
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+
+
 def _drain(stream, sink: List[str], on_line: Optional[Callable[[str], None]],
            secret_values=None) -> None:
     """Read a subprocess pipe to EOF, accumulating lines and optionally
@@ -305,7 +349,18 @@ def _drain(stream, sink: List[str], on_line: Optional[Callable[[str], None]],
         for line in stream:
             sink.append(line)
             if on_line is not None:
-                on_line(_redact(line.rstrip("\n"), secret_values))
+                try:
+                    on_line(_redact(line.rstrip("\n"), secret_values))
+                except Exception:
+                    # A raising consumer must not take the fetcher down with it.
+                    # This thread's finally closes the pipe, the child dies on
+                    # its next write, and the run reports a fetcher failure for
+                    # a failure the runner caused. The TUI is the live case: it
+                    # forwards each line as a Textual message, which raises once
+                    # the screen is torn down — quitting mid-run would fail the
+                    # fetcher. Dropping the line is the right trade; the sink
+                    # still has it, so nothing is lost from the record.
+                    on_line = None
     finally:
         stream.close()
 
@@ -362,6 +417,11 @@ def _invoke(
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,  # line-buffered so on_line fires per line
+            # Own process group, so a timeout can kill the whole tree. Most
+            # fetchers here are bash and shell out to aws/curl/kubectl; killing
+            # only the direct child leaves the grandchild holding the inherited
+            # pipe, and the drain threads then block until *it* exits.
+            start_new_session=True,
         )
 
         stdout_lines: List[str] = []
@@ -376,12 +436,19 @@ def _invoke(
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
-            proc.kill()
+            _kill_process_group(proc)
             proc.wait()
 
-        # Threads finish once the pipes hit EOF (which the kill guarantees).
-        t_out.join()
-        t_err.join()
+        # The group kill closes every inherited pipe write end, so both threads
+        # see EOF. The deadline is belt-and-braces, and it covers the case a
+        # timeout does NOT: a fetcher that exits 0 having left a grandchild
+        # running in the background still holds the pipe open, and no kill is
+        # ever issued for it. One shared deadline across both joins, so the
+        # bound is what it says rather than twice it. Losing a few trailing log
+        # lines beats never returning.
+        drain_deadline = time.monotonic() + _DRAIN_JOIN_TIMEOUT
+        t_out.join(timeout=max(0.0, drain_deadline - time.monotonic()))
+        t_err.join(timeout=max(0.0, drain_deadline - time.monotonic()))
 
         # Read before the temp dir is removed. Skipped on timeout: the runner's
         # own "killed" message below is the accurate reason, and a status file
@@ -420,6 +487,30 @@ def _invoke(
     )
 
 
+def _emit_notes(
+    notes: List[Tuple[str, str]], on_note: Optional[Callable[[str], None]]
+) -> None:
+    """Surface runner-side setup notes about how an invocation was assembled.
+
+    Deliberately NOT on_line: that channel carries the fetcher's own stdout and
+    the CLI drops it unless asked, whereas skipping a credential must not be
+    silent. A typo'd var name looks exactly like an ambient deployment, and the
+    fetcher would then collect under whatever identity the environment happens
+    to hold — so the operator has to see which credential was dropped.
+    """
+    if on_note is None or not notes:
+        return
+    # One line per invocation, not per secret: a cloud category declares three
+    # or four static-key secrets and an ambient deployment drops all of them, so
+    # per-secret notes would bury the run output in text nobody reads.
+    dropped = ", ".join(f"{name} (${{env:{var}}})" for name, var in notes)
+    plural = "s" if len(notes) > 1 else ""
+    on_note(
+        f"{len(notes)} optional secret{plural} not injected — reference{plural} "
+        f"unset: {dropped}. Credential chain falls through to ambient identity."
+    )
+
+
 def run_entry(
     fetcher: Fetcher,
     entry: ManifestEntry,
@@ -427,11 +518,14 @@ def run_entry(
     platform_spec: Optional[PlatformSpec] = None,
     platform_cfg: Optional[PlatformConfig] = None,
     on_line: Optional[Callable[[str], None]] = None,
+    on_note: Optional[Callable[[str], None]] = None,
 ) -> List[InvocationResult]:
     """Run one manifest entry: single invocation, or one per target for fanout.
 
     Per-target failures are isolated — they don't abort sibling targets.
     When on_line is provided, each invocation streams its stdout lines to it.
+    on_note reports how the invocation was assembled — currently an optional
+    secret dropped because its reference could not be resolved.
 
     `output_dir` is the run directory. An issue-report fetcher is pointed at its
     issue-reports/ subdirectory instead, and reports its outputs relative to the
@@ -443,7 +537,10 @@ def run_entry(
 
     if not fetcher.supports_targets:
         secrets_seen: set = set()
-        env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg, secrets_seen)
+        notes: List[Tuple[str, str]] = []
+        env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg,
+                         secrets_seen, notes)
+        _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
 
     if not entry.targets:
@@ -456,14 +553,20 @@ def run_entry(
                 f"{fetcher.name}: supports_targets but manifest entry has no targets[]"
             )
         secrets_seen = set()
-        env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg, secrets_seen)
+        notes = []
+        env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg,
+                         secrets_seen, notes)
+        _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
 
     results = []
     for target in entry.targets:
         try:
             secrets_seen = set()
-            env = _build_env(fetcher, entry, target, inv_dir, platform_spec, platform_cfg, secrets_seen)
+            notes = []
+            env = _build_env(fetcher, entry, target, inv_dir, platform_spec, platform_cfg,
+                             secrets_seen, notes)
+            _emit_notes(notes, on_note)
             results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir))
         except (RuntimeError, SecretResolutionError) as e:
             now = _utc_now()

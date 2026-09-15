@@ -201,9 +201,36 @@ def _fetchers():
 
 
 def test_every_aws_fetcher_reports_through_the_shared_reporter():
+    """Every fetcher must end with aws_finish, which is what calls the reporter.
+
+    This used to assert the literal `aws_report_failures` appeared in each file,
+    back when all 80 pasted the nine-line epilogue inline. The epilogue now
+    lives in aws.sh, so the invariant is stated where it actually holds: the
+    last statement of every fetcher hands off to the shared summarizer.
+
+    Asserting on the LAST line, not just presence, is deliberate — aws_finish
+    exits 1 on any recorded failure, so anything after it would only run on the
+    success path, which is a trap rather than a feature.
+    """
     assert len(_fetchers()) == 80
-    missing = [p.parent.name for p in _fetchers() if "aws_report_failures" not in p.read_text()]
-    assert not missing, f"fetchers not using aws_report_failures: {missing}"
+    offenders = []
+    for p in _fetchers():
+        code = [ln.strip() for ln in p.read_text().splitlines()
+                if ln.strip() and not ln.strip().startswith("#")]
+        if not code or code[-1] != "aws_finish":
+            offenders.append(f"{p.parent.name} (ends with {code[-1][:40]!r})" if code else p.parent.name)
+    assert not offenders, f"fetchers not ending in aws_finish: {offenders}"
+
+
+def test_no_aws_fetcher_still_carries_its_own_epilogue():
+    """The nine lines aws_finish replaced must not creep back in.
+
+    A copy left behind would run the summary twice: report a partial collection,
+    exit 1, and never reach aws_finish — or worse, drift from it.
+    """
+    offenders = [f"{p.parent.name}" for p in _fetchers()
+                 if "failure_count=" in p.read_text()]
+    assert not offenders, f"inline epilogue still present: {offenders}"
 
 
 def test_no_aws_fetcher_hardcodes_a_status_code():
@@ -255,4 +282,42 @@ def test_not_enabled_branch_never_records_a_failure():
                     break
     assert not offenders, (
         f"not-enabled branch writes to the failure log: {offenders}"
+    )
+
+
+def test_no_aws_fetcher_hand_rolls_service_unavailable_detection():
+    """"Service not in use" must be decided by the shared helper, not by grep.
+
+    `aws_service_unavailable` matches eight markers case-insensitively:
+    SubscriptionRequiredException, OptInRequired, "is not enabled",
+    InvalidAccessException, AWSOrganizationsNotInUseException, "not a member of
+    an organization", "needs a subscription for the service", and
+    ResourceNotFoundException. Three fetchers used to test one of those eight
+    with a case-sensitive `grep -q`, so in a region answering OptInRequired
+    instead they reported a hard collection failure where their siblings
+    correctly recorded not-enabled and exited 0.
+
+    The point is not the grep — it is that a fetcher must not carry its own
+    opinion about what "not enabled" looks like.
+    """
+    import re
+
+    # A marker tested outside a call to the helper, i.e. someone re-deciding.
+    hand_rolled = re.compile(
+        r"(grep|=~|case)\b[^\n]*"
+        r"(SubscriptionRequiredException|OptInRequired|InvalidAccessException"
+        r"|AWSOrganizationsNotInUseException|is not enabled"
+        r"|not a member of an organization)",
+        re.IGNORECASE,
+    )
+    offenders = []
+    for p in _fetchers():
+        for n, line in enumerate(p.read_text().splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if hand_rolled.search(line):
+                offenders.append(f"{p.parent.name}:{n}")
+    assert not offenders, (
+        "these decide 'service not enabled' themselves instead of calling "
+        f"aws_service_unavailable: {offenders}"
     )

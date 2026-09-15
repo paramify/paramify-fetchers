@@ -147,7 +147,8 @@
 
     "validators": {
       "type": "array",
-      "description": "Regex checks over this fetcher's evidence that show the control is being implemented (collection-side assertions, not per-customer compliance judgment). Each regex is matched against the fetcher's evidence payload.",
+      "deprecated": true,
+      "description": "DEPRECATED — superseded by the central validators/ registry (validators/<category>/<key>.yaml, framework/schemas/validator_schema.json). Nothing in the framework reads this block; only gitlab/significant_change_notifications still carries one, and it is kept here so that fetcher's data stays shape-checked until it is migrated. Do not add new inline validators: author them in the registry, where a validator is a first-class object linked to fetchers by evidence_set.reference_id. See docs/validators_design.md.",
       "items": {
         "type": "object",
         "required": ["id", "regex"],

@@ -25,6 +25,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     basename,
     build_payload,
     classify_failure_code,
@@ -37,7 +38,7 @@ from azure_common import (  # noqa: E402
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    write_status,
+    report_failure,
 )
 
 logger = logging.getLogger("azure_vm_hardening_status")
@@ -516,7 +517,7 @@ def collect_compute(
     def _client():
         from azure.mgmt.compute import ComputeManagementClient  # lazy
 
-        return ComputeManagementClient(credential=cred, subscription_id=subscription_id)
+        return ComputeManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     client = collector.guard("compute.ComputeManagementClient (init)", _client)
     if client is None:
@@ -657,10 +658,7 @@ def main() -> int:
     path = write_evidence(output_dir, filename, evidence)
 
     if not collector.ok:
-        logger.error(
-            "Encountered %d Azure API failure(s) during collection", len(collector.failures)
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1

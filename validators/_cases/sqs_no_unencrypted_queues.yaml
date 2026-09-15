@@ -1,0 +1,20 @@
+validator: sqs_no_unencrypted_queues
+cases:
+  - name: all_encrypted
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"queues":[{"name":"a","encrypted":true},{"name":"b","encrypted":true}]}}}'
+
+  - name: one_unencrypted
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"queues":[{"name":"a","encrypted":true},{"name":"b","encrypted":false}]}}}'
+
+  - name: flag_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate, and the reason `integrity` exists. Counting violations cannot
+      distinguish "no violations" from "the key I count is gone" — zero matches
+      is this validator's pass condition. On its own it reports PASS on an
+      artifact where a queue is unencrypted. Its partner
+      sqs_queue_encryption_flags_present is what fails; see the set-level case
+      in set_EVD-SQS-ENC.yaml, which is the assertion that actually matters.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"queues":[{"name":"a","is_encrypted":true},{"name":"b","is_encrypted":false}]}}}'

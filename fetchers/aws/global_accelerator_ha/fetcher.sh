@@ -58,11 +58,11 @@ jq -n \
 _LIST_ERR="$(mktemp -t aws_global_accelerator_ha_lerr.XXXXXX)"
 accelerators=$(aws globalaccelerator list-accelerators --region "$GA_REGION" --query 'Accelerators[*]' --output json 2>"$_LIST_ERR")
 acc_exit=$?
-if [ $acc_exit -ne 0 ] && grep -q 'SubscriptionRequiredException' "$_LIST_ERR"; then
+if [ $acc_exit -ne 0 ] && aws_service_unavailable "$_LIST_ERR"; then
     # Global Accelerator is not subscribed/enabled for this account. This is a
     # valid "service not in use" evidence outcome, not a collection failure.
     log_info "Global Accelerator is not subscribed for this account; recording not-subscribed status"
-    jq '.results += [{"Type": "ServiceStatus", "Service": "GlobalAccelerator", "Status": "NotSubscribed", "Detail": "ListAccelerators returned SubscriptionRequiredException; the account has not subscribed to AWS Global Accelerator."}]' \
+    jq '.results += [{"Type": "ServiceStatus", "Service": "GlobalAccelerator", "Status": "NotSubscribed", "Detail": "ListAccelerators reported the service as unavailable to this account (not subscribed or not enabled)."}]' \
        "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
     rm -f "$_LIST_ERR"
 elif [ $acc_exit -ne 0 ]; then
@@ -98,13 +98,4 @@ else
     done
 fi
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    _reasons="$(head -n 3 "$_FAILURE_LOG" | awk '{printf "%s%s", sep, $0; sep="; "}')"
-    [ "$failure_count" -gt 3 ] && _reasons="${_reasons}(+$((failure_count - 3)) more)"
-    aws_report_failures "$failure_count" "$_reasons"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

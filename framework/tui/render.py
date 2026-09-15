@@ -11,6 +11,7 @@ from rich.console import Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 
+from framework.secret_resolver import env_var_name, is_env_ref_attempt
 from framework.tui import palette
 
 
@@ -89,11 +90,6 @@ def empty_detail(message: Optional[str] = None) -> RenderableType:
 # set in the manifest (used by the manifest editor, Phase 2).
 # --------------------------------------------------------------------------- #
 
-def _env_name(ref: Any) -> str:
-    s = str(ref or "")
-    if s.startswith("${env:") and s.endswith("}"):
-        return s[len("${env:") : -1]
-    return s
 
 
 def _kv_table(rows: List[tuple]) -> Table:
@@ -138,8 +134,16 @@ def entry_detail(
     if top_secrets:
         rows = []
         for s in top_secrets:
-            current = _env_name(secs.get(s["name"]))
-            value = Text(f"${{env:{current}}}", style=palette.OK) if current else _status(False, True)
+            raw = secs.get(s["name"])
+            current = env_var_name(raw)
+            if current:
+                value = Text(f"${{env:{current}}}", style=palette.OK)
+            elif is_env_ref_attempt(raw):
+                # Malformed reference. Showing the var name we guessed out of
+                # it would render it as correctly set; the run will refuse it.
+                value = Text(f"{raw}  (malformed)", style=palette.FAIL)
+            else:
+                value = _status(False, s.get("required", True))
             rows.append((s["name"], value))
         parts += [Text("secrets", style="bold"), _kv_table(rows), Text()]
 
@@ -177,7 +181,7 @@ def entry_detail(
             line.append(summary, style=palette.FG)
             tsec = t.get("secrets") or {}
             if tsec:
-                line.append("  " + ", ".join(f"{k}→{_env_name(v)}" for k, v in tsec.items()), style=palette.OK)
+                line.append("  " + ", ".join(f"{k}→{env_var_name(v) or v}" for k, v in tsec.items()), style=palette.OK)
             parts.append(line)
         parts.append(Text())
 

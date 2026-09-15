@@ -8,9 +8,9 @@ import json
 from pathlib import Path
 from typing import Dict, Optional
 
-import yaml
 from jsonschema import Draft202012Validator
 
+from framework import yaml_io
 from framework.contract import (
     ConfigField,
     EvidenceSet,
@@ -65,7 +65,7 @@ def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
             if not yaml_path.exists():
                 continue
 
-            data = yaml.safe_load(yaml_path.read_text())
+            data = yaml_io.load_path(yaml_path)
             errors = list(validator.iter_errors(data))
             if errors:
                 detail = "\n".join(f"  {e.message}" for e in errors)
@@ -180,7 +180,7 @@ def discover_platforms(repo_root: Path) -> Dict[str, PlatformSpec]:
 
     for yaml_path in sorted(categories_dir.glob("*.yaml")):
         category = yaml_path.stem
-        data = yaml.safe_load(yaml_path.read_text()) or {}
+        data = yaml_io.load_path(yaml_path) or {}
         errors = list(validator.iter_errors(data))
         if errors:
             detail = "\n".join(f"  {e.message}" for e in errors)

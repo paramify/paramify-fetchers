@@ -36,6 +36,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     basename,
     build_payload,
     classify_failure_code,
@@ -48,7 +49,7 @@ from azure_common import (  # noqa: E402
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    write_status,
+    report_failure,
 )
 
 logger = logging.getLogger("azure_container_registry_configuration")
@@ -355,7 +356,7 @@ def collect_registries(subscription_id, cred, collector: Collector) -> list[dict
         from azure.mgmt.containerregistry import ContainerRegistryManagementClient
 
         return ContainerRegistryManagementClient(
-            credential=cred, subscription_id=subscription_id
+            credential=cred, subscription_id=subscription_id, **arm_client_kwargs()
         )
 
     client = collector.guard(
@@ -383,7 +384,7 @@ def _attach_diagnostic_settings(
     def _monitor_client():
         from azure.mgmt.monitor import MonitorManagementClient  # lazy
 
-        client = MonitorManagementClient(credential=cred, subscription_id=subscription_id)
+        client = MonitorManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
         # azure-mgmt-monitor 7.0.0 dropped the operation group entirely; say so
         # instead of letting an AttributeError name a missing attribute.
         if getattr(client, "diagnostic_settings", None) is None:
@@ -479,10 +480,7 @@ def main() -> int:
     path = write_evidence(output_dir, filename, evidence)
 
     if not collector.ok:
-        logger.error(
-            "Encountered %d Azure API failure(s) during collection", len(collector.failures)
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1

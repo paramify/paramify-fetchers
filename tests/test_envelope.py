@@ -165,3 +165,23 @@ def test_no_evidence_set_block_when_fetcher_declares_none(tmp_path):
     env = _wrap_one(tmp_path, {"k": 1})   # default fetcher has evidence_set=None
     assert "evidence_set" not in env["metadata"]
     assert not list(_VALIDATOR.iter_errors(env))   # still valid (evidence_set is optional)
+
+
+def test_target_with_a_yaml_date_does_not_abort_the_run(tmp_path):
+    """An unquoted YAML date in a target must not kill wrap_outputs.
+
+    `since: 2026-01-01` in a manifest target is valid YAML and parses to a
+    datetime.date, which json.dumps cannot serialize. Before default=str this
+    raised TypeError out of wrap_outputs — past the invocation's own exit 0,
+    caught by nothing in run_cmd — aborting the manifest with the collected
+    file left unenveloped and no _run_metadata.json written.
+    """
+    import datetime
+
+    env = _wrap_one(
+        tmp_path,
+        {"finding": "x"},
+        result=make_result(target={"since": datetime.date(2026, 1, 1)}),
+    )
+    assert env["metadata"]["target"] == {"since": "2026-01-01"}
+    _VALIDATOR.validate(env)

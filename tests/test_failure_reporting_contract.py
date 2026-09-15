@@ -295,6 +295,18 @@ def _fetchers(suffix: str):
     return sorted(FETCHERS.glob(f"*/*/fetcher.{suffix}"))
 
 
+def _shared_shell_libs():
+    """The per-category _shared/*.sh a fetcher sources.
+
+    These have to be scanned too. When the AWS epilogue moved out of all 80
+    fetchers into aws_finish, the `exit 1` moved with it — and the per-fetcher
+    scan below stopped seeing it, because its glob only matches fetcher.sh.
+    Coverage went from 80 files to 3 without a single test failing. An
+    extraction must not be able to empty this check out.
+    """
+    return sorted(FETCHERS.glob("*/_shared/*.sh"))
+
+
 @pytest.mark.parametrize("path", _fetchers("py"), ids=lambda p: f"{p.parent.parent.name}/{p.parent.name}")
 def test_python_fetcher_reports_why_it_failed(path):
     silent = [ln for ln in silent_python_exits(path.read_text())
@@ -320,10 +332,27 @@ def test_bash_fetcher_reports_why_it_failed(path):
     )
 
 
+@pytest.mark.parametrize("path", _shared_shell_libs(),
+                         ids=lambda p: f"{p.parent.parent.name}/{p.name}")
+def test_shared_shell_lib_reports_why_it_exits(path):
+    """A helper that exits non-zero owes the same explanation a fetcher does.
+
+    aws_finish is the case in point: it is the last line of all 80 AWS
+    fetchers, and its `exit 1` is now the only one most of them have.
+    """
+    silent = [ln for ln in silent_bash_exits(path.read_text())
+              if (str(path.relative_to(FETCHERS)), ln) not in _ALLOWED]
+    assert not silent, (
+        f"{path.relative_to(REPO_ROOT)} exits non-zero at line(s) {silent} without "
+        "reporting why. Every fetcher sourcing this inherits that silence."
+    )
+
+
 def test_the_scan_actually_covered_the_fetcher_tree():
     """A glob that silently matches nothing would make every test above vacuous."""
     assert len(_fetchers("py")) >= 30
     assert len(_fetchers("sh")) >= 80
+    assert len(_shared_shell_libs()) >= 2
 
 
 # --------------------------------------------------------------------------- #
@@ -408,3 +437,42 @@ def test_allowlist_entries_still_exist():
             f"allowlisted {rel}:{line} is not a non-zero exit any more — it reads "
             f"{target.strip()!r}. The code moved; re-verify and re-point or drop the entry."
         )
+
+
+# --------------------------------------------------------------------------- #
+# One spelling of the failure path
+# --------------------------------------------------------------------------- #
+
+def test_no_fetcher_reports_through_the_old_write_status_alias():
+    """`report_failure` is the contract name; `write_status` was an alias.
+
+    azure_common and gcp_common each aliased write_status = report_failure with
+    a comment saying it was kept "until they are moved over". All 46 of their
+    fetchers still called the alias, so the migration never happened and the
+    corpus had two names for one function. The alias is now gone.
+    """
+    offenders = []
+    for p in list(_fetchers("py")) + _shared_shell_libs() + list(FETCHERS.glob("*/_shared/*.py")):
+        if re.search(r"\bwrite_status\b", p.read_text()):
+            offenders.append(str(p.relative_to(FETCHERS)))
+    assert not offenders, f"still using the removed write_status alias: {offenders}"
+
+
+def test_no_fetcher_logs_the_failure_reason_twice():
+    """report_failure logs the reason itself — callers must not log it first.
+
+    Its docstring says so explicitly, and the reason it gives matters: logging
+    inside report_failure is what guarantees the reason is the LAST thing on
+    stderr, which is where the runner's fallback reads from.
+
+    27 Azure fetchers logged a count with no cause ("Encountered N Azure API
+    failure(s)") and 19 GCP fetchers logged the identical reason string, both
+    immediately before the call. The count was redundant too: failure_reason()
+    already begins "N Azure API failure(s); first: ...".
+    """
+    dupe = re.compile(r"logger\.error\((?:[^()]|\([^()]*\))*\)\s*\n\s*report_failure\(", re.M)
+    offenders = [str(p.relative_to(FETCHERS)) for p in _fetchers("py")
+                 if dupe.search(p.read_text())]
+    assert not offenders, (
+        f"these log the reason before report_failure, which logs it again: {offenders}"
+    )

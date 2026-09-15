@@ -62,7 +62,7 @@ azure = [
     "azure-mgmt-web>=11.0.1,<12",
     "azure-mgmt-databricks>=3.0.0,<4",
     # Exact: PolicyClient's new home publishes only pre-releases.
-    "azure-mgmt-resource-policy==1.0.0b3",
+    "azure-mgmt-resource-policy==1.0.0b4",
 ]
 # GCP category (fetchers/gcp/*). Auth is Application Default Credentials, so
 # google-auth arrives transitively and there is no key file to install. Majors

@@ -183,6 +183,13 @@ class RunPage(Vertical):
         elif etype == "log_line":
             log.write(f"    {ev.get('fetcher', '')}: {ev.get('line', '')}")
 
+        elif etype == "fetcher_note":
+            # Worth surfacing here above all: this is the screen the manifest was
+            # built on, and the note names a credential that manifest asks for
+            # but the environment does not supply.
+            log.write(Text(f"    ⓘ {ev.get('fetcher', '')}: {ev.get('note', '')}",
+                           style=palette.WARN))
+
         elif etype == "fetcher_result":
             self._apply_result(ev, log)
 

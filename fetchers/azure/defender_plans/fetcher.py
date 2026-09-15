@@ -19,6 +19,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import (  # noqa: E402
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -28,7 +29,7 @@ from azure_common import (  # noqa: E402
     resolve_subscription,
     sanitize_for_filename,
     write_evidence,
-    write_status,
+    report_failure,
 )
 
 logger = logging.getLogger("azure_defender_plans")
@@ -171,7 +172,9 @@ def collect_pricings(subscription_id, cred, collector: Collector) -> tuple[list[
     from azure.mgmt.security import SecurityCenter
 
     def _client():
-        return SecurityCenter(credential=cred, subscription_id=subscription_id)
+        return SecurityCenter(
+            credential=cred, subscription_id=subscription_id, **arm_client_kwargs()
+        )
 
     client = collector.guard("security.SecurityCenter (init)", _client)
     if client is None:
@@ -246,10 +249,7 @@ def main() -> int:
     path = write_evidence(output_dir, filename, evidence)
 
     if not collector.ok:
-        logger.error(
-            "Encountered %d Azure API failure(s) during collection", len(collector.failures)
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1

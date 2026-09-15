@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 from typing import List
 
-import yaml
 from jsonschema import Draft202012Validator
 
+from framework import yaml_io
 from framework.contract import Manifest, ManifestEntry, PlatformConfig, TargetInstance
 
 
@@ -66,7 +66,7 @@ def load_manifest(path: Path, repo_root: Path) -> Manifest:
 
     Raises ValueError if the file is schema-invalid.
     """
-    data = yaml.safe_load(path.read_text())
+    data = yaml_io.load_path(path)
     errors = schema_errors(data, repo_root)
     if errors:
         detail = "\n".join(f"  {e}" for e in errors)

@@ -10,7 +10,14 @@ from __future__ import annotations
 
 import pytest
 
-from framework.secret_resolver import SecretResolutionError, resolve, resolve_dict
+from framework.secret_resolver import (
+    SecretResolutionError,
+    UnsetSecretError,
+    env_var_name,
+    is_env_ref_attempt,
+    resolve,
+    resolve_dict,
+)
 
 
 def test_resolves_valid_reference_from_env(monkeypatch):
@@ -51,12 +58,83 @@ def test_resolve_dict_resolves_each_value(monkeypatch):
     assert resolve_dict({"a": "${env:A}", "b": "${env:B}"}) == {"a": "1", "b": "2"}
 
 
-def test_characterizes_silent_passthrough_of_malformed_refs(monkeypatch):
-    """CHARACTERIZATION (not an endorsement). A value that LOOKS like a reference
-    but doesn't match the strict ^${env:UPPER_SNAKE}$ form is passed through
-    verbatim — a lowercase var name, or an embedded reference. This is the known
-    hardening gap from the audit; pinning it here means a future fix flips this
-    deliberately instead of silently."""
+@pytest.mark.parametrize("bad", [
+    "${env:my_token}",   # lowercase var name — the common typo
+    "${env:MY-TOKEN}",   # hyphen is not a valid env var character
+    "${env:}",           # empty name
+    "${env:FOO",         # unclosed
+])
+def test_malformed_reference_raises_instead_of_passing_through(bad, monkeypatch):
+    """A broken reference must fail loudly, not become the credential.
+
+    This replaces a characterization test that pinned the old silent
+    passthrough. Passing it through handed the fetcher the literal string
+    "${env:my_token}" as its secret; the TUI rendered it as a correctly-set
+    variable named my_token, and redaction then added the literal to the secret
+    sink — so the 401 that echoed it back printed ***REDACTED*** exactly where
+    the bug's own name would have been. Three layers agreeing on a wrong answer.
+    """
     monkeypatch.setenv("my_token", "secret")
-    assert resolve("${env:my_token}") == "${env:my_token}"   # lowercase: NOT resolved to "secret"
-    assert resolve("prefix-${env:T}") == "prefix-${env:T}"    # embedded: NOT substituted
+    with pytest.raises(SecretResolutionError, match="Malformed secret reference"):
+        resolve(bad)
+
+
+def test_a_value_that_is_not_a_reference_is_still_a_literal(monkeypatch):
+    """Literal secrets are supported, so only a value that OPENS with the sigil
+    counts as an attempted reference. An embedded ${env:...} stays a literal —
+    substitution was never a feature, and a real password may contain anything."""
+    monkeypatch.setenv("T", "v")
+    assert resolve("prefix-${env:T}") == "prefix-${env:T}"
+    assert resolve("hunter2") == "hunter2"
+    assert resolve("https://host/path$notaref") == "https://host/path$notaref"
+
+
+def test_env_var_name_and_resolve_agree_on_what_is_valid(monkeypatch):
+    """The display path and the run path must not disagree — that disagreement
+    is what let the console show a malformed ref as set."""
+    monkeypatch.setenv("REAL_TOKEN", "v")
+    assert env_var_name("${env:REAL_TOKEN}") == "REAL_TOKEN"
+    assert resolve("${env:REAL_TOKEN}") == "v"
+
+    assert env_var_name("${env:my_token}") is None
+    assert is_env_ref_attempt("${env:my_token}") is True
+    with pytest.raises(SecretResolutionError):
+        resolve("${env:my_token}")
+
+    assert env_var_name("literal") is None
+    assert is_env_ref_attempt("literal") is False
+    assert resolve("literal") == "literal"
+
+
+# --- which error, and why it matters --------------------------------------- #
+# The runner lets an OPTIONAL secret fall through to ambient identity when its
+# env var is unset, but never when the reference itself is broken. That split is
+# only expressible if the two failures are distinguishable here.
+
+def test_unset_env_var_raises_the_distinct_unset_error(monkeypatch):
+    monkeypatch.delenv("MISSING_TOK", raising=False)
+    with pytest.raises(UnsetSecretError) as e:
+        resolve("${env:MISSING_TOK}")
+    assert e.value.env_var == "MISSING_TOK"
+
+
+def test_empty_env_value_also_raises_the_unset_error(monkeypatch):
+    monkeypatch.setenv("EMPTY_TOK", "")
+    with pytest.raises(UnsetSecretError):
+        resolve("${env:EMPTY_TOK}")
+
+
+def test_malformed_reference_is_not_an_unset_error(monkeypatch):
+    """A typo'd name must not qualify for the optional-secret fallback, or the
+    credential the operator meant to supply is silently dropped."""
+    monkeypatch.setenv("api_token", "v")
+    with pytest.raises(SecretResolutionError) as e:
+        resolve("${env:api_token}")
+    assert not isinstance(e.value, UnsetSecretError)
+
+
+def test_unset_error_is_catchable_as_the_base_error(monkeypatch):
+    """Callers that catch the base class keep working unchanged."""
+    monkeypatch.delenv("MISSING_TOK", raising=False)
+    with pytest.raises(SecretResolutionError):
+        resolve("${env:MISSING_TOK}")

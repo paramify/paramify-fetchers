@@ -24,15 +24,19 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Input, Label, Switch
 
+from framework.secret_resolver import env_var_name
+
 
 def env_name_from_ref(ref: Optional[str]) -> str:
-    """'${env:FOO}' -> 'FOO'. Returns the raw string for anything else, '' for None."""
+    """'${env:FOO}' -> 'FOO'. Returns the raw string for anything else, '' for None.
+
+    Delegates to secret_resolver so the form prefills the same name the runner
+    will look up. The loose startswith/endswith test this used to do accepted
+    '${env:foo}', which the runner rejects.
+    """
     if not ref:
         return ""
-    s = str(ref)
-    if s.startswith("${env:") and s.endswith("}"):
-        return s[len("${env:") : -1]
-    return s
+    return env_var_name(ref) or str(ref)
 
 
 class FieldRow(Vertical):

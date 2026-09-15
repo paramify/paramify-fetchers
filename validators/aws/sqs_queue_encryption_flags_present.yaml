@@ -1,0 +1,18 @@
+key: sqs_queue_encryption_flags_present
+name: SQS Queue Encryption Flags Were Read
+type: AUTOMATED
+role: integrity
+statement: Per-queue encryption flags are present in the evidence, so a zero count of unencrypted queues reflects posture rather than an unreadable payload.
+
+# Integrity partner to `sqs_no_unencrypted_queues`. Anchors one level up from the
+# violation: that validator counts `"encrypted": false`, this one proves the
+# `encrypted` key exists at all.
+regex: '"encrypted":\s*'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SQS-ENC

@@ -88,8 +88,8 @@ A repeated token is treated as a collection failure to prevent an infinite loop.
 ## Control mappings
 
 The runtime fetcher is network-independent apart from AWS API calls. Control
-mappings are vendored under [`control_mappings/`](control_mappings/) and are
-generated from the official AWS Config mapping tables:
+mappings are vendored under [`control_mappings/`](control_mappings/), derived
+from the official AWS Config mapping tables:
 
 - [FedRAMP Low](https://docs.aws.amazon.com/config/latest/developerguide/operational-best-practices-for-fedramp-low.html)
 - [FedRAMP Moderate](https://docs.aws.amazon.com/config/latest/developerguide/operational-best-practices-for-fedramp-moderate.html)
@@ -111,15 +111,14 @@ explicit aliases are used only as fallback. Custom rules and rules without an
 AWS-published mapping are retained with empty control arrays and `mapped: false`;
 the fetcher never invents a control relationship.
 
-To refresh the vendored mappings:
+These files are vendored data, not generated at build time. Each one records the
+AWS documentation page it was derived from in its own `source_url` field, along
+with AWS's disclaimer that the sample mappings do not by themselves establish
+compliance. They were retrieved on 2026-09-03.
 
-```bash
-python fetchers/aws/config_conformance_packs/sync_control_mappings.py
-```
-
-The sync script parses the AWS tables, builds both rule-to-control and
-control-to-rule indexes, validates that the tables are non-empty, and writes
-deterministic JSON files.
+AWS revises these tables occasionally. There is no automatic refresh and no drift
+check: if a mapping needs updating, re-derive it from the `source_url` in the
+file and update it deliberately, the same as any other reviewed change.
 
 ## Evidence output
 

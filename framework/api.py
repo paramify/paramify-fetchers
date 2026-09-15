@@ -35,6 +35,7 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 
+from framework import yaml_io
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import ConfigField, Secret, TargetField, effective_secrets
 from framework.envelope import is_enveloped, wrap_outputs
@@ -200,7 +201,7 @@ def catalog(root: Path) -> dict:
 
 def _load_ksi_reference(root: Path) -> dict:
     """Load the canonical FedRAMP KSI reference (the coverage denominator)."""
-    return yaml.safe_load((root / "framework" / "reference" / "ksis.yaml").read_text())
+    return yaml_io.load_path(root / "framework" / "reference" / "ksis.yaml")
 
 
 def ksi_coverage(root: Path) -> dict:
@@ -589,7 +590,7 @@ def upload_readiness(root: Path, config_path: Optional[Path] = None) -> dict:
     config: dict = {}
     if config_path is not None:
         try:
-            loaded = yaml.safe_load(Path(config_path).read_text())
+            loaded = yaml_io.load_path(Path(config_path))
             config = loaded if isinstance(loaded, dict) else {}
         except (OSError, yaml.YAMLError) as exc:
             return {
@@ -635,7 +636,7 @@ def read_manifest(path: Path) -> dict:
     p = Path(path)
     if not p.exists():
         return init_manifest()
-    data = yaml.safe_load(p.read_text())
+    data = yaml_io.load_path(p)
     return data if isinstance(data, dict) else init_manifest()
 
 
@@ -939,6 +940,11 @@ def run(
         def on_line(line: str, _use=entry.use) -> None:
             emit({"event": "log_line", "fetcher": _use, "line": line})
 
+        # Its own event, not a log_line: consumers drop log_line by default, and
+        # a dropped credential has to reach the operator.
+        def on_note(note: str, _use=entry.use) -> None:
+            emit({"event": "fetcher_note", "fetcher": _use, "note": note})
+
         try:
             results = run_entry(
                 fetcher,
@@ -947,6 +953,7 @@ def run(
                 platforms.get(fetcher.category or ""),
                 parsed.platforms.get(fetcher.category or ""),
                 on_line=on_line,
+                on_note=on_note,
             )
         except (RuntimeError, ValueError) as e:
             emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
@@ -1035,6 +1042,93 @@ def _load_paramify_uploader(root: Path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _load_paramify_validator_syncer(root: Path):
+    """Load the source-tree validator syncer without requiring uploaders/ to be packaged."""
+    path = Path(root) / "uploaders" / "paramify_validators" / "syncer.py"
+    if not path.exists():
+        raise RuntimeError(f"Paramify validator syncer not found at {path}")
+    spec = importlib.util.spec_from_file_location("paramify_validators_syncer", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load Paramify validator syncer from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def reference_ids_from_run(run_dir) -> set:
+    """The evidence-set reference_ids present in a run directory's envelopes.
+
+    Lets `upload --with-validators` scope the sync to exactly the sets this run
+    produced, rather than a manifest.
+    """
+    refs: set = set()
+    run_path = Path(run_dir)
+    if not run_path.is_dir():
+        return refs
+    for p in sorted(run_path.glob("*.json")):
+        if p.name in ("_run_metadata.json", "upload_log.json"):
+            continue
+        try:
+            env = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(env, dict):
+            continue
+        meta = env.get("metadata")
+        if not isinstance(meta, dict):
+            continue
+        es = meta.get("evidence_set")
+        if isinstance(es, dict) and es.get("reference_id"):
+            refs.add(es["reference_id"])
+    return refs
+
+
+def check_validators(root, select=None, mode="api-today") -> dict:
+    """Run the behaviour cases in validators/_cases/ and report what held.
+
+    An authoring aid, not a merge gate: a validator's failure modes are silent,
+    so the only way to know one works is to run it against evidence that should
+    fail as well as evidence that should pass. Needs `node` — Paramify evaluates
+    these with ECMAScript, so Python `re` would use the wrong engine.
+    """
+    from framework.validator_eval.cases import run_cases
+
+    return run_cases(Path(root), select=select, mode=mode)
+
+
+def sync_validators(
+    root: Path,
+    manifest_path: Optional[Path] = None,
+    config_path: Optional[Path] = None,
+    *,
+    reference_ids=None,
+    dry_run: bool = False,
+    update: bool = False,
+    lock_path: Optional[str] = None,
+    on_event: Optional[Callable[[dict], None]] = None,
+) -> dict:
+    """Sync registry validators to Paramify and associate them to evidence sets.
+
+    Scope precedence: explicit `reference_ids` > `manifest_path`'s fetchers'
+    sets > whole registry. Create-or-skip; associates on create only; `update`
+    opt-in patches existing. Fires sync_start / sync_validator / sync_complete.
+    Raises ValueError for setup errors; returns the syncer summary otherwise.
+    """
+    syncer = _load_paramify_validator_syncer(root)
+    validators = syncer.collect_validators(root, manifest_path, reference_ids)
+    config: dict = {}
+    if config_path:
+        config = yaml_io.load_path(Path(config_path)) or {}
+    return syncer.sync_validators(
+        validators,
+        config=config,
+        dry_run=dry_run,
+        update=update,
+        lock_path=lock_path,
+        on_event=on_event,
+    )
 
 
 def upload_preflight(
@@ -1522,7 +1616,7 @@ def _manifest_summary(path: Path, root: Path, fetchers=None, platforms=None) -> 
         "readable": True,
     }
     try:
-        raw = yaml.safe_load(path.read_text())
+        raw = yaml_io.load_path(path)
     except (OSError, yaml.YAMLError):
         summary["readable"] = False
         return summary

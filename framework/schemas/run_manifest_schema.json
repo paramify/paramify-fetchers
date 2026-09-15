@@ -2,11 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Run Manifest",
   "type": "object",
-  "required": ["run"],
+  "required": [
+    "run"
+  ],
   "properties": {
     "run": {
       "type": "object",
-      "required": ["fetchers"],
+      "required": [
+        "fetchers"
+      ],
       "properties": {
         "output_dir": {
           "type": "string",
@@ -27,7 +31,9 @@
                 "properties": {
                   "passthrough_env": {
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                      "type": "string"
+                    },
                     "description": "Ambient env vars the runner should let through its whitelist for this platform (e.g. AWS_WEB_IDENTITY_TOKEN_FILE for IRSA). Use for cloud-identity auth where there is no secret value to set."
                   }
                 }
@@ -39,7 +45,9 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["use"],
+            "required": [
+              "use"
+            ],
             "properties": {
               "use": {
                 "type": "string",
@@ -52,7 +60,20 @@
               "secrets": {
                 "type": "object",
                 "description": "Top-level secrets (for non-per_target secrets). Values are ${env:VAR_NAME} references.",
-                "additionalProperties": {"type": "string"}
+                "additionalProperties": {
+                  "type": "string",
+                  "anyOf": [
+                    {
+                      "not": {
+                        "pattern": "^\\s*\\$\\{env:"
+                      }
+                    },
+                    {
+                      "pattern": "^\\s*\\$\\{env:[A-Z_][A-Z0-9_]*\\}\\s*$"
+                    }
+                  ],
+                  "description": "A ${env:VAR_NAME} reference (VAR_NAME uppercase, digits, underscores) or a literal value. A string that opens with ${env: but is not a well-formed reference is rejected: it would reach the fetcher as that literal string."
+                }
               },
               "targets": {
                 "type": "array",
@@ -63,7 +84,20 @@
                     "secrets": {
                       "type": "object",
                       "description": "Per-target secret references. Values are ${env:VAR_NAME}.",
-                      "additionalProperties": {"type": "string"}
+                      "additionalProperties": {
+                        "type": "string",
+                        "anyOf": [
+                          {
+                            "not": {
+                              "pattern": "^\\s*\\$\\{env:"
+                            }
+                          },
+                          {
+                            "pattern": "^\\s*\\$\\{env:[A-Z_][A-Z0-9_]*\\}\\s*$"
+                          }
+                        ],
+                        "description": "A ${env:VAR_NAME} reference (VAR_NAME uppercase, digits, underscores) or a literal value. A string that opens with ${env: but is not a well-formed reference is rejected: it would reach the fetcher as that literal string."
+                      }
                     }
                   }
                 }

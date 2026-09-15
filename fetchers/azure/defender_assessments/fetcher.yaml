@@ -1,0 +1,53 @@
+name: azure_defender_assessments
+version: 0.1.0
+description: >
+  Every Microsoft Defender for Cloud security assessment result on the
+  subscription — one record per (resource, check) pair, each with its
+  Healthy/Unhealthy/NotApplicable status and severity. This is the per-resource
+  pass/fail detail behind the secure score, not the score itself: it shows
+  exactly which resources fail which checks. A subscription that never
+  registered the Microsoft.Security resource provider reports
+  provider_registration_status: not_registered, which is valid evidence ("not
+  in use") rather than a collection failure.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_defender_assessments.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-EIS      # Automated services persistently assess resource security — the per-check results themselves
+  - KSI-SVC-EIS      # Evaluate and improve security — unhealthy assessments are exactly what needs remediation
+
+evidence_set:
+  reference_id: EVD-AZURE-DEFENDER-ASSESSMENTS
+  name: Microsoft Defender for Cloud Security Assessments
+  instructions: >
+    Script: fetcher.py. Azure SDK call (azure-mgmt-security SecurityCenter):
+    assessments.list(scope="subscriptions/<subscription_id>") for every security
+    assessment result on the subscription.

@@ -31,7 +31,8 @@ from framework.contract import (
     TargetField,
     TargetInstance,
 )
-from framework.runner.executor import _apply_config, _build_env, run_entry
+from framework.runner.executor import _apply_config, _build_env, _emit_notes, run_entry
+from framework.secret_resolver import SecretResolutionError, UnsetSecretError
 
 # --------------------------------------------------------------------------- #
 # Builders
@@ -233,6 +234,104 @@ def test_build_env_optional_per_target_secret_without_target_does_not_raise(tmp_
         secrets=[Secret(name="tok", env="TOK", per_target=True, required=False)],
     )
     env = _build_env(fetcher, ManifestEntry(use="x"), None, tmp_path)
+    assert "TOK" not in env
+
+
+def test_build_env_optional_secret_with_unresolvable_ref_is_not_injected(tmp_path, monkeypatch):
+    """A reference the manifest carries but cannot resolve is an omission when the
+    secret is optional — the ambient-deployment case.
+
+    The TUI auto-wires every optional secret to its default env var on add, so a
+    manifest built there arrives in an ECS task / IRSA pod holding refs for keys
+    that deployment deliberately does not set. Raising would fail the entry at
+    setup, before the fetcher runs, over credentials it never needed.
+    """
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    fetcher = make_fetcher(
+        tmp_path,
+        secrets=[Secret(name="access_key_id", env="AWS_ACCESS_KEY_ID", required=False)],
+    )
+    entry = ManifestEntry(use="x", secrets={"access_key_id": "${env:AWS_ACCESS_KEY_ID}"})
+    env = _build_env(fetcher, entry, None, tmp_path)
+    assert "AWS_ACCESS_KEY_ID" not in env
+
+
+def test_build_env_skipped_optional_secret_is_recorded_for_the_operator(tmp_path, monkeypatch):
+    """The skip must not be silent: a typo'd var name is indistinguishable from an
+    ambient deployment, so the operator has to see which credential was dropped."""
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    fetcher = make_fetcher(
+        tmp_path,
+        secrets=[Secret(name="access_key_id", env="AWS_ACCESS_KEY_ID", required=False)],
+    )
+    entry = ManifestEntry(use="x", secrets={"access_key_id": "${env:AWS_ACCESS_KEY_ID}"})
+    notes = []
+    _build_env(fetcher, entry, None, tmp_path, note_sink=notes)
+    assert notes == [("access_key_id", "AWS_ACCESS_KEY_ID")]
+
+
+def test_emit_notes_coalesces_a_whole_credential_set_into_one_line(monkeypatch):
+    """A cloud category declares several static-key secrets and an ambient
+    deployment drops all of them at once. One line per invocation, or the run
+    output fills with text nobody reads."""
+    seen = []
+    _emit_notes(
+        [("access_key_id", "AWS_ACCESS_KEY_ID"),
+         ("secret_access_key", "AWS_SECRET_ACCESS_KEY"),
+         ("session_token", "AWS_SESSION_TOKEN")],
+        seen.append,
+    )
+    assert len(seen) == 1
+    assert "3 optional secrets" in seen[0]
+    for name in ("access_key_id", "secret_access_key", "session_token"):
+        assert name in seen[0]
+    assert "ambient identity" in seen[0]
+
+
+def test_emit_notes_says_nothing_when_no_secret_was_dropped():
+    """The channel stays quiet on a normal run."""
+    seen = []
+    _emit_notes([], seen.append)
+    assert seen == []
+
+
+def test_build_env_optional_secret_with_malformed_ref_still_raises(tmp_path):
+    """Optionality excuses an unset var, never a broken reference. A lowercase
+    name is the usual typo, and passing it through would hand the fetcher the
+    literal string as its credential."""
+    fetcher = make_fetcher(
+        tmp_path,
+        secrets=[Secret(name="access_key_id", env="AWS_ACCESS_KEY_ID", required=False)],
+    )
+    entry = ManifestEntry(use="x", secrets={"access_key_id": "${env:aws_access_key_id}"})
+    with pytest.raises(SecretResolutionError, match="Malformed secret reference"):
+        _build_env(fetcher, entry, None, tmp_path)
+
+
+def test_build_env_required_secret_with_unresolvable_ref_still_raises(tmp_path, monkeypatch):
+    """The fallback is scoped to optional secrets. A required credential that
+    cannot be resolved is still a hard failure before the fetcher runs."""
+    monkeypatch.delenv("API_TOKEN", raising=False)
+    fetcher = make_fetcher(tmp_path, secrets=[Secret(name="api_token", env="API_TOKEN")])
+    entry = ManifestEntry(use="x", secrets={"api_token": "${env:API_TOKEN}"})
+    # Re-raised as-is, not reclassified: the operator needs to see which var was
+    # empty, and UnsetSecretError carries it.
+    with pytest.raises(UnsetSecretError, match="could not be resolved") as e:
+        _build_env(fetcher, entry, None, tmp_path)
+    assert e.value.env_var == "API_TOKEN"
+
+
+def test_build_env_optional_per_target_secret_with_unresolvable_ref_is_skipped(tmp_path, monkeypatch):
+    """The per_target branch shares the fallback — add_target wires per-target
+    secrets the same way, so the same refs arrive on targets."""
+    monkeypatch.delenv("TOK", raising=False)
+    fetcher = make_fetcher(
+        tmp_path,
+        secrets=[Secret(name="tok", env="TOK", per_target=True, required=False)],
+    )
+    target = TargetInstance(values={}, secrets={"tok": "${env:TOK}"})
+    entry = ManifestEntry(use="x", targets=[target])
+    env = _build_env(fetcher, entry, target, tmp_path)
     assert "TOK" not in env
 
 
@@ -447,3 +546,96 @@ def test_no_status_file_written_is_not_an_error(tmp_path):
     r = run_entry(make_fetcher(fdir), ManifestEntry(use="t_fetcher"), tmp_path / "out")[0]
     assert r.exit_code == 1
     assert r.error is None and r.error_code is None
+
+
+# --------------------------------------------------------------------------- #
+# Timeout containment. The runner's own timeout is the only ceiling on a run,
+# so it has to hold when the process that is actually stuck is a grandchild —
+# which is the common shape here, since most fetchers are bash shelling out to
+# aws/curl/kubectl.
+# --------------------------------------------------------------------------- #
+
+def _bash_fetcher(tmp_path, script: str, timeout: int):
+    (tmp_path / "fetcher.sh").write_text(script)
+    out = tmp_path / "out"
+    out.mkdir(exist_ok=True)
+    return make_fetcher(
+        tmp_path, runtime_type="bash", runtime_entry="fetcher.sh",
+        runtime_timeout=timeout,
+    ), out
+
+
+def test_timeout_kills_the_whole_process_group(tmp_path):
+    """A hung grandchild must not outlive the timeout.
+
+    bash sleeps in the foreground with a child sleep of its own. Killing only
+    the direct child leaves the grandchild holding the inherited stdout pipe,
+    so the drain threads block on a pipe that never reaches EOF and the runner
+    waits out the full sleep instead of its own timeout.
+    """
+    import time
+
+    from framework.runner.executor import _invoke
+
+    fetcher, out = _bash_fetcher(tmp_path, "#!/bin/bash\nsleep 30\n", timeout=1)
+    started = time.monotonic()
+    result = _invoke(fetcher, {"PATH": "/usr/bin:/bin"}, None, out)
+    elapsed = time.monotonic() - started
+
+    assert result.exit_code == 124, "timeout should report the timeout exit code"
+    assert elapsed < 15, f"timeout did not bound the run: took {elapsed:.1f}s for a 1s timeout"
+
+
+def test_a_backgrounded_grandchild_does_not_hang_the_run(tmp_path, monkeypatch):
+    """A fetcher that exits 0 leaving a background child is still bounded.
+
+    No timeout fires here — bash exits immediately and successfully — so the
+    process-group kill never runs. The orphan still holds the stdout pipe, and
+    only the drain deadline stops the runner waiting on it indefinitely.
+
+    The deadline is shortened for the test: this path always waits it out, so at
+    the real 10s it would cost that on every CI leg to prove the same thing.
+    """
+    import time
+
+    from framework.runner import executor
+
+    monkeypatch.setattr(executor, "_DRAIN_JOIN_TIMEOUT", 1.0)
+
+    fetcher, out = _bash_fetcher(tmp_path, "#!/bin/bash\nsleep 30 &\nexit 0\n", timeout=60)
+    started = time.monotonic()
+    result = executor._invoke(fetcher, {"PATH": "/usr/bin:/bin"}, None, out)
+    elapsed = time.monotonic() - started
+
+    assert result.exit_code == 0
+    assert elapsed < 6, f"drain was not bounded: {elapsed:.1f}s"
+
+
+def test_a_raising_log_callback_does_not_fail_the_fetcher(tmp_path):
+    """The runner must not kill a healthy fetcher because its consumer raised.
+
+    _drain's finally closes the pipe, so an exception escaping on_line makes the
+    child die on its next write — and the run then reports a fetcher failure for
+    a failure the runner itself caused. The live case is the TUI, which forwards
+    each line as a Textual message; that raises once the screen is torn down, so
+    quitting mid-run would mark the running fetcher failed.
+    """
+    from framework.runner.executor import _invoke
+
+    fetcher, out = _bash_fetcher(
+        tmp_path,
+        '#!/bin/bash\nfor i in $(seq 1 200); do echo "line $i"; done\nexit 0\n',
+        timeout=60,
+    )
+
+    seen = []
+
+    def hostile(line):
+        seen.append(line)
+        raise RuntimeError("consumer is gone")
+
+    result = _invoke(fetcher, {"PATH": "/usr/bin:/bin"}, None, out, on_line=hostile)
+
+    assert result.exit_code == 0, "a healthy fetcher must survive a raising consumer"
+    assert result.stdout.count("line ") == 200, "every line must still reach the record"
+    assert len(seen) == 1, "forwarding stops after the consumer first raises"

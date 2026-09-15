@@ -42,7 +42,7 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 | `evidence_set` | object | Paramify evidence-set identity: `{reference_id, name, instructions?}`. Carried into envelope metadata and used by the uploader to get-or-create the set. `kind: evidence` only. |
 | `issue_report` | object | Paramify assessment-intake identity: `{assessment_type, title?}`. Required for, and only valid on, `kind: issue_report`. Carries no assessment id — that is per-customer and lives in the manifest. |
 | `ksis` | array | FedRAMP KSIs this fetcher's evidence speaks to (1+) — *suggested / related* mappings, not a claim that the fetcher alone satisfies the indicator. Intrinsic to the fetcher; per-customer control mappings stay Paramify-side. |
-| `validators` | array | Regex checks over the evidence payload that show the control is being implemented. Each entry: `{id, regex, proves?, failure_modes?}` (`id` + `regex` required); each regex matches the whole payload. |
+| `validators` | array | **Deprecated.** The legacy inline block (`{id, regex, proves?, failure_modes?}`); nothing reads it, and only `gitlab/significant_change_notifications` still carries one. Validators are now first-class objects in the central `validators/` registry, linked to a fetcher by its `evidence_set.reference_id` — see [`validators_design.md`](validators_design.md). |
 
 ---
 
@@ -86,7 +86,7 @@ The runner exec's the fetcher's entry script with a tightly controlled environme
 
 - **`EVIDENCE_DIR`** — output directory the fetcher writes to. The runner points this at `<run>/issue-reports/` for a `kind: issue_report` fetcher, so a fetcher always writes a bare filename into `EVIDENCE_DIR` and never builds a subdirectory itself
 - **`FETCHER_STATUS_FILE`** — path the fetcher reports its failure reason to (see [Output](#output)). Deliberately outside `EVIDENCE_DIR`, so it is never collected as evidence; it lives in a per-invocation temp dir that goes away with the invocation
-- **Declared secrets** — every entry from `secrets[]` resolved and set on the env var named in `secrets[].env`
+- **Declared secrets** — every entry from `secrets[]` resolved and set on the env var named in `secrets[].env`. An optional secret (`required: false`) whose reference cannot be resolved is skipped rather than injected, so the fetcher's own credential chain reaches ambient identity — see [Secret references](run_manifest_reference.md#secret-references)
 - **Target fields (fanout only)** — each `target_schema` field with an `env` mapping set to the target's value
 - **A minimal inherited env** — `PATH`, `HOME`, `LANG`, `LC_ALL`, `LC_CTYPE`, `USER`, `TZ`, `PYTHONUNBUFFERED=1`
 

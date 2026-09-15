@@ -1,4 +1,3 @@
-import importlib.util
 import os
 import shutil
 import subprocess
@@ -7,61 +6,18 @@ import tempfile
 from pathlib import Path
 
 
-SCRIPT = (
-    Path(__file__).parents[1]
-    / "fetchers"
-    / "aws"
-    / "config_conformance_packs"
-    / "sync_control_mappings.py"
+# The control mappings are vendored data with no generator in the tree, so these
+# tests are the only thing standing between a hand-edited mapping file and the
+# fetcher. Keep the consistency check below strict.
+FETCHER_DIR = (
+    Path(__file__).parents[1] / "fetchers" / "aws" / "config_conformance_packs"
 )
-
-
-def _load_module():
-    spec = importlib.util.spec_from_file_location("sync_control_mappings", SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_parse_mapping_builds_rule_and_control_indexes():
-    module = _load_module()
-    html = """
-    <table>
-      <tr><th>Control ID</th><th>Control Description</th><th>AWS Config Rule</th><th>Guidance</th></tr>
-      <tr><td>AC-2 (1)</td><td>Account management</td><td><a>iam-rule</a></td><td>One</td></tr>
-      <tr><td>AC-3</td><td>Access enforcement</td><td><a>iam-rule</a></td><td>Two</td></tr>
-      <tr><td>AC-2 (1)</td><td>Account management</td><td><a>second-rule</a></td><td>Three</td></tr>
-    </table>
-    """
-
-    result = module.parse_mapping(html, "test", "Test", "https://example.test")
-
-    assert result["rules"] == {
-        "iam-rule": ["AC-2(1)", "AC-3"],
-        "second-rule": ["AC-2(1)"],
-    }
-    assert result["controls"]["AC-2(1)"]["config_rules"] == ["iam-rule", "second-rule"]
-    assert result["rule_count"] == 2
-    assert result["control_count"] == 2
-
-
-def test_parse_mapping_includes_only_aliases_available_in_the_source():
-    module = _load_module()
-    html = """
-    <table>
-      <tr><th>Control ID</th><th>Control Description</th><th>AWS Config Rule</th><th>Guidance</th></tr>
-      <tr><td>AC-2</td><td>Account management</td><td>cloudtrail-enabled</td><td>One</td></tr>
-    </table>
-    """
-    result = module.parse_mapping(html, "test", "Test", "https://example.test")
-    assert result["aliases"] == {"cloud-trail-enabled": "cloudtrail-enabled"}
 
 
 def test_vendored_mappings_are_nonempty_and_internally_consistent():
     import json
 
-    mapping_dir = SCRIPT.parent / "control_mappings"
+    mapping_dir = FETCHER_DIR / "control_mappings"
     for path in sorted(mapping_dir.glob("*.json")):
         document = json.loads(path.read_text(encoding="utf-8"))
         assert document["rule_count"] == len(document["rules"])
@@ -105,7 +61,7 @@ def test_fetcher_contract_defaults_to_fedramp_low():
 
 
 def test_fetcher_does_not_require_bash_mapfile():
-    fetcher = SCRIPT.parent / "fetcher.sh"
+    fetcher = FETCHER_DIR / "fetcher.sh"
     source = fetcher.read_text(encoding="utf-8")
 
     assert "mapfile -t" not in source
@@ -229,8 +185,6 @@ esac
 
 
 if __name__ == "__main__":
-    test_parse_mapping_builds_rule_and_control_indexes()
-    test_parse_mapping_includes_only_aliases_available_in_the_source()
     test_vendored_mappings_are_nonempty_and_internally_consistent()
     test_fetcher_contract_defaults_to_fedramp_low()
     test_fetcher_does_not_require_bash_mapfile()
