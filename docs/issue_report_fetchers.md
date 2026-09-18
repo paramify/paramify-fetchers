@@ -306,4 +306,4 @@ Full operational detail — config, overrides, and what each error means — is 
 | The envelope skip | `wrap_outputs` in [`framework/envelope.py`](../framework/envelope.py) |
 | Assessment listing / selection | `list_assessments`, `set_assessment` in [`framework/api.py`](../framework/api.py) |
 | Intake | [`uploaders/paramify_issues/uploader.py`](../uploaders/paramify_issues/uploader.py) |
-| Endpoint contract | Paramify REST API v0 spec 0.6.0 — [API documentation](https://app.paramify.com/api/documentation/) |
+| Endpoint contract | Paramify REST API v0 spec 0.9.2 — [API documentation](https://app.paramify.com/api/documentation/) |
