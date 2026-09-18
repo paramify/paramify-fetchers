@@ -103,6 +103,6 @@ current one.
 | `listed in the index but not on disk` | The sidecar and the directory disagree; the run dir was edited after collection. |
 
 Per-file failures never abort the batch, and the command exits non-zero if any
-report failed. Endpoint contract per **Paramify REST API v0 spec 0.6.0** —
+report failed. Endpoint contract per **Paramify REST API v0 spec 0.9.2** —
 [API documentation](https://app.paramify.com/api/documentation/) (in the app:
 Help (?) → API Documentation).
