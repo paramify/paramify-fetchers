@@ -3,6 +3,12 @@
 Read at step 4 of `onboard-platform`. This is the brief for the research
 subagent and the standard its output is held to.
 
+**This file is instructions. It is never written to.** The subagent's output is
+a different file — `.onboarding/<platform>/research.md`, outside the skill,
+gitignored, one per platform. This file lives under `.claude/skills/` and is
+committed; nothing in the flow edits it. (It used to be named `research.md`
+too, which was asking for exactly the mix-up this paragraph now rules out.)
+
 ## Why this is delegated
 
 The reading is wide and most of it is wrong or irrelevant — three API versions,
@@ -41,9 +47,11 @@ Give the subagent, verbatim:
 > step 2>`, in service of this claim: `<the sentence from claim.md>`.
 >
 > **Your first tool call is a write, before any research.** Create
-> `.onboarding/<platform>/research.md` from the skeleton below — eight
-> headings, `TODO` under each. Do not fetch anything first. Do not plan first.
-> The skeleton goes on disk, then you start.
+> `.onboarding/<platform>/research.md` — that exact path, relative to the repo
+> root, a file that does not exist yet — from the skeleton below. Eight
+> headings, `TODO` under each. **Never write anything under `.claude/`**; that
+> is the skill's own committed source, not your output. Do not fetch anything
+> first. Do not plan first. The skeleton goes on disk, then you start.
 >
 > `<paste the skeleton from "The skeleton" below, with the claim and the ≤5
 > items filled in>`

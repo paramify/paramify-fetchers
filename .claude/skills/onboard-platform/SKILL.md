@@ -39,8 +39,8 @@ restate them.
 
 | File | When |
 |---|---|
-| `references/research.md` | Step 4 — the subagent brief, citation discipline |
-| `references/sandbox.md` | Step 5 — provisioning, cost, teardown-before-seed |
+| `references/researching.md` | Step 4 — the subagent brief, citation discipline |
+| `references/provisioning.md` | Step 5 — provisioning, cost, teardown-before-seed |
 | `references/state.md` | Any step — the `.onboarding/<platform>/` file shapes |
 
 ## Golden rules
@@ -197,7 +197,7 @@ for, and exactly what should not be in this session's context.
 
 **This is the step that hangs.** API research has no natural end — there is
 always another page — so an agent told to "research the platform" runs until
-something stops it. `references/research.md` has the brief; read it before
+something stops it. `references/researching.md` has the brief; read it before
 delegating, and do not paraphrase these four out of it:
 
 - **Its first tool call is a write, and it alternates from there.** The
@@ -229,7 +229,7 @@ say so and revise the claim before step 6, not after.
 
 **If it runs long or never returns, read the partial file rather than re-running
 it** — the second run is as open-ended as the first and buries the first one's
-findings. `references/research.md` § "When the subagent runs long" has the
+findings. `references/researching.md` § "When the subagent runs long" has the
 recovery.
 
 ---
@@ -242,7 +242,7 @@ has to hold real data.
 1. **Is there existing infra?** An account the team already has, a free tier, a
    trial. Cheapest path wins.
 2. **Can we build it?** CLI, Terraform, a seeder script. Read
-   `references/sandbox.md` before proposing anything.
+   `references/provisioning.md` before proposing anything.
 3. **State a cost estimate.** Dollars per month and who pays, out loud, before
    the plan is approved. "Probably free" is not an estimate.
 4. **Write `teardown.sh` first.** Before a single resource is created. Hand it

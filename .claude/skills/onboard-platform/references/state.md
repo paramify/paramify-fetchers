@@ -54,7 +54,7 @@ nobody can later tell whether it came from the workspace or from a guess.
 ## research.md
 
 Step 4's deliverable, written by the subagent. Structure and standard are in
-`references/research.md`. The one invariant: every factual claim carries a
+`references/researching.md`. The one invariant: every factual claim carries a
 fetched URL or the literal marker `UNVERIFIED`.
 
 ## slate.md
