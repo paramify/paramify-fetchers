@@ -194,6 +194,14 @@ attached. By hand:
 2. Read the platform's API docs and write `research.md` — including *what has to
    exist in a tenant for each call to return something non-empty*. That answer
    is what step 5 is built on and it is the one most often left thin.
+
+   **Give yourself a budget and take two passes.** This is the step that eats a
+   day, because API research has no natural end — there is always another page.
+   Answer every heading badly first, then deepen what matters for the claim,
+   and mark anything you didn't confirm `UNVERIFIED` rather than chasing it. A
+   thin-but-complete file is something step 6 can cut a slate from; one
+   exhaustive heading and seven empty ones is not. Most of what you skip
+   resolves itself at step 7, when a real call either works or it doesn't.
 3. Stand up the sandbox. Write the teardown before you create anything. Record
    the tenant in `sandbox.json`.
 4. Write the slate, get it cut, record who approved it.

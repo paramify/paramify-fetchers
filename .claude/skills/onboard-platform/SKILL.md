@@ -59,9 +59,12 @@ restate them.
   and you discover the fetcher never collected it at validator-authoring
   time — after N siblings have been cloned from the same shape.
 - **State lives on disk because subagents cannot read this session.** Every
-  delegated step writes its findings to `.onboarding/<platform>/`; the main
-  session reads them and runs the gates. A finding that exists only in a
-  subagent's reply is a finding you will re-derive.
+  delegated step writes its findings to `.onboarding/<platform>/` **as it goes,
+  not at the end** — the main session reads them and runs the gates. A finding
+  that exists only in a subagent's reply is a finding you will re-derive, and
+  an agent that stalls before its single final write produced nothing at all.
+  Writing incrementally is what makes a delegated step recoverable instead of
+  restartable.
 - **Bail after 3 failed attempts on one fetcher**, write the diagnosis into
   `slate.md`, and continue the slate. One stuck fetcher does not stall the rest.
 
@@ -192,18 +195,39 @@ The API, the CLI, the SDK: what can actually be read, with what permission, at
 what rate limit. This is wide, disposable reading — exactly what a subagent is
 for, and exactly what should not be in this session's context.
 
-Brief the subagent from `references/research.md`. Two things are not negotiable
-and belong in the brief verbatim:
+**This is the step that hangs.** API research has no natural end — there is
+always another page — so an agent told to "research the platform" runs until
+something stops it. `references/research.md` has the brief; read it before
+delegating, and do not paraphrase these four out of it:
 
-- **Every claim is cited to a URL that was actually fetched, or marked
-  `UNVERIFIED`.** An uncited API shape is how a fetcher gets built against an
-  endpoint that does not exist.
-- **It writes `.onboarding/$PLATFORM/research.md` and reports only a summary.**
-  The file is the deliverable.
+- **It writes `.onboarding/$PLATFORM/research.md` from its first finding, not
+  at the end.** Headings with `TODO` under them created up front, filled in as
+  it goes. A run that stalls having written nothing produced nothing; the same
+  run writing as it goes leaves a usable partial. This is the fix for the hang,
+  not the budget.
+- **Breadth before depth.** Every heading answered badly before any heading is
+  answered well, so running out of budget leaves a thin-but-complete file
+  rather than one exhaustive heading and seven empty ones.
+- **A budget, and permission to stop.** ~25 fetches, and stopping at it with
+  gaps named is **a success**. Say that explicitly — an agent will not hand
+  back incomplete work unless the brief says incomplete is expected.
+- **Every claim cited to a URL actually fetched, or marked `UNVERIFIED`** — and
+  `UNVERIFIED` is cheap, to be used rather than spending fetches to be sure.
+  An uncited API shape is how a fetcher gets built against an endpoint that
+  does not exist.
+
+**Hand it at most five items** from step 2, chosen for the claim, with the rest
+named as out of scope. Step 2 produces a wide list on purpose; passing all of
+it is a dozen research jobs in one prompt.
 
 Read the file when it lands. If a finding invalidates the step-3 claim — the
 data is not exposed, the endpoint needs an admin grant nobody will approve —
 say so and revise the claim before step 6, not after.
+
+**If it runs long or never returns, read the partial file rather than re-running
+it** — the second run is as open-ended as the first and buries the first one's
+findings. `references/research.md` § "When the subagent runs long" has the
+recovery.
 
 ---
 
@@ -334,6 +358,16 @@ next session on this platform a resume rather than a restart.
 - Offering teardown after the resources exist.
 - Letting a subagent report findings only in its reply. It writes to
   `.onboarding/`, or the finding is lost and re-derived.
+- **Briefing a research agent with no budget and no permission to stop.** The
+  step-4 hang, every time. It will not hand back partial work unless told
+  partial work is the expected outcome.
+- Letting it write the research file at the end. A run that stalls at minute
+  forty having written nothing has produced nothing.
+- Re-running a step-4 agent that ran long. The second run is as open-ended as
+  the first, costs the same again, and buries the partial file. Read the
+  partial and re-brief narrowly for the named gaps.
+- Passing all of step 2's list to one research agent. Five items, the rest
+  named out of scope.
 - Restating `create-fetcher` / `wire-manifest` / `suggest-validator` mechanics
   here. Call them. Three copies of the fetcher contract drift apart.
 - Opening step 1 with an example of a good answer. It gets answered instead of
