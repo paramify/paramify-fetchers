@@ -138,9 +138,19 @@ paramify capabilities show <id>                  # the narratives it claims
 Two things make the naive call fail, both measured against a live workspace on
 2026-09-21:
 
-- **Narrow before you look.** A workspace holds hundreds of capabilities (591 on
-  the workspace measured). Listing them all and reading is not a plan; filter by
-  `--family` to the handful that could plausibly relate to this platform.
+- **Narrow twice before you look.** A workspace holds hundreds of capabilities
+  (591 across 17 families on the workspace measured). `--family` alone is not
+  enough — the families run 18 to 80 capabilities each, so the largest ones
+  barely narrow at all. Filter by family, then **narrow again on `subfamily`**,
+  which gets you to ~20 or fewer:
+  ```bash
+  paramify capabilities list --json \
+    | jq -r '.capabilities[] | select(.family=="Logical Identity & Access")
+             | "\(.subfamily)\t\(.name)\t\(.id)"' | sort
+  ```
+  There is no `--subfamily` flag; the field is in the JSON, so filter it
+  yourself. Reading 80 capability names to find the three about session
+  timeouts is the thing this avoids.
 - **Resolve by id, never by name.** Names are duplicated freely — three separate
   "Access Agreements" on the workspace measured — and `capabilities show <name>`
   refuses an ambiguous one outright: *"matches 2 capabilitys by name; use the id

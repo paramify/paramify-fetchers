@@ -103,8 +103,10 @@ Both measurements are real. So the flow **attempts the call and degrades**:
 
 Two operational notes, both measured, both of which break the naive call:
 
-- **Narrow before you look.** Hundreds of capabilities in a workspace. Filter
-  by `--family` to the handful that could relate to the platform.
+- **Narrow twice before you look.** 591 capabilities across 17 families on the
+  workspace measured, and the families run 18 to 80 each — so `--family` alone
+  barely narrows the big ones. Filter by family, then again on `subfamily`
+  (no flag for it; the field is in `--json`), which gets you to ~20 or fewer.
 - **Resolve by id, never by name.** Names are duplicated freely — three
   separate "Access Agreements" on the workspace measured — and
   `capabilities show <name>` refuses an ambiguous one:
