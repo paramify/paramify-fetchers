@@ -20,6 +20,18 @@ The golden rules below are for an **evidence** fetcher, the default and the
 common case. Phase 0 checks whether you're actually writing an issue report,
 which has its own contract in `docs/issue_report_fetchers.md`.
 
+**Is this a whole new platform?** If nothing under `fetchers/` covers this tool
+yet and the goal is a slate rather than one fetcher, you want
+`onboard-platform` — it researches the API, stands up a sandbox with real data
+in it, and calls this skill per fetcher with the control claim already
+established. This skill on its own is the right entry point for adding a
+fetcher to a platform that already has some.
+
+**Called from `onboard-platform`?** The claim is already on disk at
+`.onboarding/<platform>/claim.md`. Read it and start Phase 2 from that control,
+not from "what evidence" — and note that skill owns the populated-evidence gate
+this one cannot reach (Phase 4).
+
 **Golden rules**
 - One fetcher = one evidence set. Directory is `fetchers/<category>/<short_name>/`;
   the `name:` field is the globally-unique `<category>_<short_name>`.
@@ -220,6 +232,12 @@ The skill verifies **wiring**, not data — it can't hit the user's real tenant.
    collects correct data — that's the user's real-tenant run to confirm. Once
    that run produces real evidence, the `suggest-validator` skill can read it and
    propose a regex validator for the field that proves the control.
+
+   A green smoke test on an **empty** payload looks identical to one on a real
+   one, which is why "exit 0" is not the bar anywhere downstream. If you were
+   called from `onboard-platform`, hand back here — that skill runs against the
+   sandbox in `sandbox.json` and gates on *populated* evidence plus a validator
+   proven to fail.
 
 5. **Wire it into a manifest.** A fetcher on disk does not run until it's in a
    manifest's `run.fetchers:`. To add it and fill in the secrets/config/targets
