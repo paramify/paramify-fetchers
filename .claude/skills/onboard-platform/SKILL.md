@@ -200,11 +200,14 @@ always another page — so an agent told to "research the platform" runs until
 something stops it. `references/research.md` has the brief; read it before
 delegating, and do not paraphrase these four out of it:
 
-- **It writes `.onboarding/$PLATFORM/research.md` from its first finding, not
-  at the end.** Headings with `TODO` under them created up front, filled in as
-  it goes. A run that stalls having written nothing produced nothing; the same
-  run writing as it goes leaves a usable partial. This is the fix for the hang,
-  not the budget.
+- **Its first tool call is a write, and it alternates from there.** The
+  skeleton — eight headings, `TODO` under each — goes to
+  `.onboarding/$PLATFORM/research.md` *before* the first fetch. Then one fetch,
+  one edit, repeat: **never two fetches in a row without an edit between
+  them.** "Write as you go" is not enough to say; an agent given that still
+  batches six fetches and then writes. Give it the cadence, not the aspiration.
+  A run that stalls having written nothing produced nothing — this is the fix
+  for the hang, and the budget is secondary to it.
 - **Breadth before depth.** Every heading answered badly before any heading is
   answered well, so running out of budget leaves a thin-but-complete file
   rather than one exhaustive heading and seven empty ones.
@@ -363,6 +366,9 @@ next session on this platform a resume rather than a restart.
   partial work is the expected outcome.
 - Letting it write the research file at the end. A run that stalls at minute
   forty having written nothing has produced nothing.
+- Telling a subagent to "write as you go" and stopping there. Without a
+  cadence — one fetch, one edit, never two fetches in a row — it batches, and
+  batching is the same failure with extra words.
 - Re-running a step-4 agent that ran long. The second run is as open-ended as
   the first, costs the same again, and buries the partial file. Read the
   partial and re-brief narrowly for the named gaps.

@@ -40,11 +40,25 @@ Give the subagent, verbatim:
 > Research `<platform>`'s API, CLI, and SDK for collecting: `<the data from
 > step 2>`, in service of this claim: `<the sentence from claim.md>`.
 >
-> **Write to `.onboarding/<platform>/research.md` as you go, starting with your
-> first finding — do not wait until the end.** Create the file with all the
-> headings below and `TODO` under each before you fetch anything, then fill
-> them in as you learn. The file is the deliverable; your reply is a summary of
-> it. If you stop early for any reason, the file is still what you produced.
+> **Your first tool call is a write, before any research.** Create
+> `.onboarding/<platform>/research.md` from the skeleton below — eight
+> headings, `TODO` under each. Do not fetch anything first. Do not plan first.
+> The skeleton goes on disk, then you start.
+>
+> `<paste the skeleton from "The skeleton" below, with the claim and the ≤5
+> items filled in>`
+>
+> **Then alternate: fetch, write, fetch, write.** After each page you read,
+> edit the file — replace the relevant `TODO` with what you just learned and
+> its URL — *before* you fetch the next one. **Never make two fetches in a row
+> without an edit between them.** Not "write it up at the end", not "batch a
+> few and then save": one fetch, one edit, repeat.
+>
+> This is not bookkeeping, it is the deliverable being produced incrementally.
+> The file is what you are making; your reply is only a summary of it. **If you
+> are stopped at any moment — budget, error, a timeout, someone kills the
+> session — whatever is in the file at that instant is what you produced.**
+> Work so that instant is never expensive.
 >
 > **Two passes, in this order.** First pass: answer *every* heading in one or
 > two sentences, even poorly — `UNVERIFIED`, or "not found in 10 minutes", are
@@ -106,8 +120,46 @@ being your guess about what they wanted.
 
 ## What research.md must answer
 
-Structure it under these headings. An empty heading with "not found" under it
-is a finding; a missing heading is a gap.
+### The skeleton — hand this to the agent to write first
+
+This is the literal first write, before any fetching. Eight headings, `TODO`
+under each, so every later edit is a replacement rather than a decision about
+where something goes:
+
+```markdown
+# Research — <platform>
+
+**Claim:** <the sentence from claim.md>
+**Researching:** <the ≤5 items from step 2>
+**Out of scope this pass:** <the rest>
+
+## Access surface
+TODO
+## Auth model
+TODO
+## Endpoints that carry the data
+TODO
+## Pagination, rate limits, cost
+TODO
+## Fanout
+TODO
+## Evidence or issue report
+TODO
+## What the sandbox needs
+TODO
+## Contradictions and gaps
+TODO
+```
+
+A heading still reading `TODO` at the end is itself the finding that nothing
+was learned there — which is why the skeleton is written up front rather than
+grown. A file that grows heading by heading cannot distinguish "not researched"
+from "researched and empty", and those call for different next steps.
+
+### What goes under each
+
+An empty heading with "not found" under it is a finding; a missing heading is
+a gap.
 
 **Access surface.** Is there a first-class CLI? An official SDK, in which
 languages? A plain REST API? This decides `runtime:` — bash when the tool ships
