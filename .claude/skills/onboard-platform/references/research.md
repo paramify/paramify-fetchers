@@ -26,6 +26,28 @@ Give the subagent, verbatim:
 > ambiguous, say they are ambiguous. An uncited API shape is how a fetcher gets
 > built against an endpoint that does not exist.
 
+### When step 1 produced only a platform name
+
+Step 1 allows one follow-up and then moves on, so you will sometimes get here
+with the platform named and its surfaces not. That is a legitimate handoff, not
+a skipped step — a user onboarding a platform they don't yet know well cannot
+invent the surface list, and guessing on their behalf is worse than looking.
+
+Add to the brief:
+
+> The surfaces were not established up front. Before researching in depth,
+> **enumerate what `<platform>` exposes that is security- or
+> compliance-relevant** — identity and access, authentication events, network
+> controls, encryption settings, audit logging, configuration baselines — and
+> say for each whether it is readable via API, CLI, or not at all. Put that
+> enumeration first in the file, under "Surfaces". Then research the two or
+> three that most plausibly serve the claim, in the depth the headings below
+> ask for.
+
+Bring the enumeration back to the user before step 5. It is the list step 1
+could not produce, and cutting it with them is how the slate at step 6 stops
+being your guess about what they wanted.
+
 ## What research.md must answer
 
 Structure it under these headings. An empty heading with "not found" under it

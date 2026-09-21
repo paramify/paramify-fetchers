@@ -66,6 +66,13 @@ its findings to disk.
 Steps 1–3 are one conversation, not three rounds. Step 3's output is a claim
 **to test** — step 4 can invalidate it, and step 6 is where it becomes binding.
 
+Step 1 has a granularity bar worth knowing before you hit it: naming the
+platform is not yet an answer, because it doesn't say which pages of the API
+docs step 4 should open. "Snowflake" fails that test; "Snowflake's role grants
+and its login history" passes. If you don't know the platform well enough to
+name its surfaces, say so — step 4 enumerates what it exposes and brings the
+list back, which is a supported path rather than a skipped step.
+
 ## Where the claim comes from
 
 This is the part the design turns on, and the part that measured differently

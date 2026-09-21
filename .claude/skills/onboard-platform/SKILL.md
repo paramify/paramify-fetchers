@@ -86,9 +86,35 @@ Say which step you are resuming at. File shapes are in `references/state.md`.
 Run as an interview in this session. Keep it short; these three questions are
 one conversation, not three rounds.
 
-**1. Which service.** What is the platform, and what part of it? "Snowflake" is
-not yet an answer — "Snowflake's access control and its query audit log" is.
-Derive the `<category>` name here; it is the directory every fetcher lands in.
+**1. Which service.** Ask plainly and openly — *"which platform, and which
+parts of it?"* — and do **not** lead with an example. An example given up front
+gets answered instead of the question, and you will get its surfaces back
+rather than the ones the user actually cares about.
+
+Then judge what comes back against one test: **could you now say which pages of
+that platform's API docs step 4 should open?** "Snowflake" fails it. "Snowflake's
+role grants and its login history" passes.
+
+If the answer is too thin, the gap is almost never unwillingness — most people
+don't know how fine-grained an answer is useful until they see one. So show
+them, once, built from **their** platform rather than a stock one:
+
+> Snowflake's a big surface — which parts matter here? Something like "role
+> grants and login history" or "network policies and session timeouts" is the
+> altitude I'm after. What's on your list?
+
+That is an illustration of the *granularity*, not a menu. Do not turn it into
+options to pick from: the point is to show the shape so they can supply their
+own, and a list invites picking one and stopping.
+
+**One follow-up, then move on.** If they still can't name the surfaces, they
+may genuinely not know the platform well enough yet — that is what step 4 is
+for. Say so, take the platform name alone, and brief the research subagent to
+**enumerate what the platform exposes** so step 6's slate can be cut from a
+real list. Do not keep asking; it reads as a quiz the user is failing.
+
+Derive the `<category>` name here either way; it is the directory every fetcher
+lands in.
 
 **2. What data is worth gathering.** What does this platform know that an
 assessor would want to see? Do not converge yet — step 4 will invalidate some
@@ -300,6 +326,10 @@ next session on this platform a resume rather than a restart.
   `.onboarding/`, or the finding is lost and re-derived.
 - Restating `create-fetcher` / `wire-manifest` / `suggest-validator` mechanics
   here. Call them. Three copies of the fetcher contract drift apart.
+- Opening step 1 with an example of a good answer. It gets answered instead of
+  the question, and you learn the example's surfaces rather than the user's.
+- Asking step 1 a third time. One follow-up, then hand the enumeration to
+  step 4 — past that it reads as a quiz the user is failing.
 - Listing all 591 capabilities and reading them. Narrow by family first.
 - Looking a capability up by name. Names are duplicated; resolve by id.
 - Walking all ten steps to add one more fetcher to a platform that already has
