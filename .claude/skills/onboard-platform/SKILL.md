@@ -45,10 +45,17 @@ restate them.
 
 ## Golden rules
 
-- **Success is populated evidence, not exit 0.** Non-empty *measured* values in
-  the payload. A green fake-cred smoke test is what `create-fetcher` can prove
-  on its own; closing the gap between that and real data is the entire reason
-  this skill owns a sandbox.
+- **Success is populated *and complete* evidence, not exit 0.** Non-empty
+  *measured* values in the payload — and *all* of them. A green fake-cred smoke
+  test is what `create-fetcher` can prove on its own; closing the gap between
+  that and real data is the entire reason this skill owns a sandbox. But a
+  payload holding 30 of 133 objects is populated too, and it is the more
+  dangerous failure, because nothing about it looks wrong. See step 7.
+- **Correct a superseded fact where it lives.** When a later measurement
+  overturns something an earlier state file says, fix that file and mark it
+  corrected — do not just note the correction somewhere newer. A state
+  directory whose files contradict each other is worse than one that is merely
+  out of date: a subagent handed the stale one has no way to know.
 - **Teardown is written before anything is seeded** and handed back alongside
   the provisioning plan — not offered afterwards.
 - **Nothing is seeded into a tenant that is not recorded in
@@ -267,12 +274,25 @@ has to hold real data.
 4. **Write `teardown.sh` first.** Before a single resource is created. Hand it
    back *with* the provisioning plan.
 
-5. **Verify it, then record what you measured.** Once it is up, call the
-   endpoints step 4 said the fetchers would call, and write the answers into a
-   `verified` block in `sandbox.json` — version, the field that carries the
-   measured value, what a real response looked like. "I provisioned a sandbox"
-   and "I confirmed the sandbox answers the calls the fetchers will make" are
-   different claims, and only the second is worth anything at step 6.
+5. **Verify it, then reconcile research against it in `measured.md`.** Once
+   it is up, call the endpoints step 4 said the fetchers would call. Step 4 ran
+   before the sandbox existed, so `research.md` is docs-only by construction —
+   this is the first moment anything can be `MEASURED`. Write
+   `.onboarding/$PLATFORM/measured.md` as a **reconciliation pass over
+   `research.md`**: every line either *confirms* a research finding, *corrects*
+   one, or *closes* an `UNVERIFIED`. That framing is the point — it forces the
+   docs and the server to be compared line by line, which is where the
+   silent-truncation traps in step 7.5 were found on the first real run.
+
+   Measure **the true count of every collection** here, through a path
+   independent of the one the fetcher will use — `paging.total`, a second
+   endpoint, the UI. Step 7.5 compares the fetcher against it.
+
+   Put a short summary in a `verified` block in `sandbox.json` — version, the
+   field that carries the measured value, whether a failure case exists — and
+   the detail in `measured.md`. "I provisioned a sandbox" and "I confirmed the
+   sandbox answers the calls the fetchers will make" are different claims, and
+   only the second is worth anything at step 6.
 
    **Look specifically for a failure case that already exists.** A platform's
    defaults usually supply one — on the run this was written from, Splunk ships
@@ -304,16 +324,36 @@ parked state below. A row marked *no* that gets built anyway is a fetcher that
 will be green on an empty payload, which is the failure this whole skill exists
 to prevent.
 
-### PARKED is a state, and it is not BAILED
+### A row that isn't built is one of four things
 
-**Bailed** = built, failed three times, diagnosed. **Parked** = not attempted,
-because the sandbox cannot prove it — and it stays on the slate with **what
-would unpark it** written next to it. Collapsing the two loses the distinction
-between "this is broken" and "this is fine but unprovable here", which are
-opposite signals about whether to try again.
+Each means something different about whether to try again, so the slate names
+which:
 
-When parking removes the only fetcher that proved part of the claim, **say so
-as a standing consequence**: *"the 280-day archival half of `claim.md` is
+| State | Means | Carries |
+|---|---|---|
+| **Bailed** | Built, failed three times | the diagnosis |
+| **Parked** | Not attempted — this sandbox cannot prove it | what would unpark it |
+| **Cut** | A human removed it at Gate 1 — a scope decision | what it would have covered |
+| **Reassigned** | The clause is not this platform's to evidence at all | which platform owns it |
+
+Collapsing them loses the signal. Bailed says *broken*; parked says *fine but
+unprovable here*; cut says *deliberately not wanted*; reassigned says *wrong
+platform*. Only the first is a failure.
+
+**Reassigned** is the one easiest to miss, because it first looks like
+parked. On the first real run, Splunk's 280-day archival clause was parked as
+"no Splunk Cloud stack to prove it on" — until research showed Splunk stops
+tracking data entirely once it freezes, so the archival duration lives in the
+**storage provider's lifecycle policy**, not in Splunk. No Splunk sandbox, of
+any kind, could ever prove it. That is not a deferral, it is a different
+owner: the gap needs a fetcher in another category (S3, GCS, Azure blob
+lifecycle). The capability narrative had said so all along — it attributed
+archival to *[Cloud Storage]*, not the SIEM. **Read who the narrative says
+does each thing before assuming it is all this platform's.**
+
+Whenever any of the four removes the only fetcher that proved part of the
+claim, **say so as a standing consequence** — a cut included, since a human
+choosing not to build something does not make the clause it covered evidenced: *"the 280-day archival half of `claim.md` is
 currently UNEVIDENCED, and no fetcher on this slate proves it."* A claim
 half-covered without anyone noticing is how a slate looks finished while the
 narrative it was built for is not actually substantiated.
@@ -373,22 +413,66 @@ whole approach works before it is repeated N times.
    ```bash
    python .claude/skills/suggest-validator/scripts/find_evidence.py <fetcher_name>
    ```
-5. **Author its validator** — invoke `suggest-validator`, working from
-   `claim.md` as the narrative.
-6. **Prove the validator can fail.** Its Phase 5 direction 2. A validator that
-   has never failed has demonstrated nothing.
+5. **Confirm it is complete — the count matches an independent count.** Take
+   the number of objects the fetcher collected and compare it against the
+   platform's own figure from `measured.md`: a `paging.total`, a count from a
+   second endpoint, the number the UI shows. **They must be equal.** Measured on
+   the first real run, both of these returned populated, well-formed evidence
+   and were wrong: a default page size of 30 silently truncated 133 saved
+   searches to 30, and a plain `/services/` path returned 7 where the
+   namespaced `/servicesNS/-/-/` path returned all 133. Neither raises an error.
+   Both pass step 4.
 
-> **GATE 3 — fetcher #1 produced populated evidence, and a validator that was
-> proven to fail.** The slate does not fan out until both are true. If the
-> evidence is empty, the problem is the sandbox (step 5) or the research
-> (step 4) — go back rather than fanning out and discovering it eight more
-> times.
+   Build the check into the shared client, not into each fetcher's good
+   intentions: request everything (`count=0` or the platform's equivalent),
+   compare against the reported total, and **fail the collection on a
+   mismatch** rather than publish it. Truncated evidence published as complete
+   is a finding nobody can see.
+6. **Check that no field reads as compliant while meaning the opposite.** For
+   each field the validator will key on, ask what it means when the field next
+   to it is empty. On the first real run, Splunk's `frozenTimePeriodInSecs`
+   reads exactly like "retained for N days" — but with `coldToFrozenDir` empty,
+   the data is **deleted** at N days, not archived. Evidence carrying only the
+   first field would read as compliant while describing deletion. Where that
+   is possible, **emit the fields together** and make it part of the fetcher's
+   contract, so no validator can be written against one without the other.
+7. **Never default TLS verification off because the sandbox needs it.** A
+   self-signed sandbox cert makes `verify_ssl=false` tempting as the default;
+   that default ships to every customer. Verification defaults **on**, and the
+   sandbox opts out per target in its own manifest entry.
+8. **Author its validator** — invoke `suggest-validator`, working from
+   `claim.md` as the narrative.
+9. **Prove the validator can fail.** Its Phase 5 direction 2. A validator that
+   has never failed has demonstrated nothing.
+10. **Run it against the real evidence, and predict the verdict first.** The
+    synthetic cases prove the validator *can* fail; the sandbox evidence says
+    whether it *does*, which is a finding about the tenant. Before scoring,
+    write down the verdict `measured.md` predicts — the sandbox has known
+    failure cases, so you usually know. Then score it
+    (`suggest-validator`'s `scripts/score_evidence.py`) and record the set
+    verdict on this fetcher's slate row.
+
+    **FAIL is a legitimate outcome here**, not a defect — on the first real
+    run, role access and alerting both FAILED on the sandbox, exactly as
+    predicted, because the stock tenant really is non-compliant there. What
+    matters is whether it matches the prediction. A surprise in either
+    direction means the tenant, the evidence, or the validator is not what you
+    think, and that gets resolved before the slate fans out — a validator that
+    unexpectedly passes a tenant you know is broken is the worst thing to
+    clone.
+
+> **GATE 3 — fetcher #1 produced populated, complete evidence, and a validator
+> that was proven to fail — whose verdict on the real evidence matched the
+> prediction.** The slate does not fan out until all of that is true. If the
+> evidence is empty or short, the problem is the sandbox (step 5) or the
+> research (step 4) — go back rather than fanning out and discovering it eight
+> more times.
 
 ---
 
 ## Step 8 — Loop the rest of the slate  (delegate, one at a time)
 
-One subagent per fetcher, each taken **fully through** steps 7.1–7.4 before the
+One subagent per fetcher, each taken **fully through** steps 7.1–7.7 before the
 next begins. Not a fan-out: a parallel slate built from the same wrong shape is
 eight fetchers to fix instead of one.
 
@@ -446,15 +530,46 @@ Then verify the registry gate:
 
 ---
 
-## Closing out
+## Closing out — the slate is not done until the sandbox has a decision
 
-Report: what was built, what bailed and why, the coverage delta from
-`paramify ksi`, and **whether the sandbox is still running and what it costs**.
-Point at `teardown.sh`. Ask whether to run it now or leave it up — do not decide
-that on the user's behalf, and do not leave it unsaid.
+> **GATE 4 — the sandbox's fate is decided and recorded.** The onboarding is
+> not complete while a sandbox is running with nobody having said it should
+> be. This is a gate, not a courtesy: it was the one instruction the first
+> complete run skipped — every fetcher built, every validator proven, the
+> slate marked COMPLETE, and the container still up with nothing on disk
+> saying whether that was intended. On a laptop it cost nothing. On a paid
+> cloud tenant it is the bill this whole section exists to prevent.
+
+1. **Check it, don't remember it.** Is the sandbox actually still running?
+   (`docker ps`, the cloud console, whatever `provisioned_by` says.) What does
+   it cost per month right now — not what step 5 estimated?
+2. **Ask, with `teardown.sh` in hand.** Run it now, or leave it up? Leaving it
+   up is often right — a later session resumes against it, and rebuilding has
+   its own cost. But it is the user's call, not yours, and it is never left
+   unsaid.
+3. **Record the answer in `sandbox.json`** as `teardown_decision`:
+   `{"decision": "torn down" | "left running", "by": ..., "at": ..., "why": ...,
+   "review_by": <date>}`. A left-running sandbox gets a `review_by` date — the
+   trial expiry, if there is one. The next session reads this instead of
+   guessing, and "left running on purpose until 11-21" is a very different
+   state from "nobody checked".
+
+Then report: what was built; what was bailed, parked, cut, or reassigned, and
+why; the coverage delta from `paramify ksi`; each fetcher's real-evidence
+verdict; and every standing consequence — each clause of the claim nothing on
+the slate evidences.
 
 `.onboarding/<platform>/` is gitignored and safe to keep; it is what makes the
 next session on this platform a resume rather than a restart.
+
+### Say what is uncommitted
+
+An onboarding leaves a lot of new files in the working tree: fetchers,
+validators, case files, a category file, sometimes a shared validator it
+extended. **List them for the user and leave committing to them.** Do not fold
+them into an unrelated commit — a `git add -A` in a later step will sweep all
+of it in without anyone having decided to, and it is easy to miss in a large
+diff.
 
 ---
 
@@ -484,6 +599,21 @@ next session on this platform a resume rather than a restart.
   every step-8 subagent read; detail belongs in `notes/<fetcher>.md`.
 - **Building the third sibling before lifting the shared client into
   `_shared/`.** The copies drift, silently, and nobody chose the difference.
+  Lift every helper two fetchers share, not only the client class — the first
+  complete run lifted the client and still cloned a timestamp helper that
+  drifted into two versions.
+- **Treating populated as complete.** A default page size or a user-scoped
+  path returns real, well-formed, *partial* data with no error. Compare every
+  collected count against an independent true count from `measured.md`.
+- **Collecting a field whose meaning depends on one you didn't collect.** A
+  retention period with no archive destination reads as "kept" and means
+  "deleted".
+- **Noting a correction in a newer file and leaving the old one wrong.** Fix it
+  where it lives.
+- **Marking the slate COMPLETE with the sandbox still running and no decision
+  recorded.** Gate 4.
+- **Parking a clause that belongs to another platform.** If no sandbox of this
+  platform could ever prove it, it is reassigned, not parked.
 - Restating `create-fetcher` / `wire-manifest` / `suggest-validator` mechanics
   here. Call them. Three copies of the fetcher contract drift apart.
 - Opening step 1 with an example of a good answer. It gets answered instead of

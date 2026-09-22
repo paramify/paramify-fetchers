@@ -56,12 +56,13 @@ its findings to disk.
 | 2 | What data is worth gathering | main |
 | 3 | What claim would support a control | main |
 | 4 | Research the API / CLI / SDK | sub |
-| 5 | Sandbox: what exists, what we can build | main |
+| 5 | Sandbox: what exists, what we can build; measure it | main → **Gate 2** |
 | 6 | State the plan — the slate | main → **Gate 1** |
 | 7 | Build fetcher #1 end to end | main → **Gate 3** |
 | 8 | Loop the rest of the slate, one at a time | sub |
 | 9 | Validators for the remainder | sub |
 | 10 | Sweep the validator pass over all new evidence | sub |
+| — | Close out: decide the sandbox's fate | main → **Gate 4** |
 
 Steps 1–3 are one conversation, not three rounds. Step 3's output is a claim
 **to test** — step 4 can invalidate it, and step 6 is where it becomes binding.
@@ -131,7 +132,7 @@ before spending a turn on it.
 
 ## The gates
 
-Three, and they are the point of the flow. It is not designed to run unattended.
+Four, and they are the point of the flow. It is not designed to run unattended.
 
 **Gate 1 — after step 6, the slate.** The human cuts, adds, and reorders before
 anything is built. The approval and its date are recorded in `slate.md`; a
@@ -141,9 +142,16 @@ slate with no recorded approval has not passed.
 seeder execution is approved individually* — not the plan once and then a free
 hand. Teardown is already written and handed back alongside the plan.
 
-**Gate 3 — end of step 7.** Fetcher #1 produced **populated evidence** and a
-validator that was **proven to fail**. The slate does not fan out until both
-are true.
+**Gate 3 — end of step 7.** Fetcher #1 produced **populated and complete
+evidence** — its collected count matches an independent count of the same
+objects — and a validator that was **proven to fail**, whose verdict on the
+real sandbox evidence matched what was predicted. The slate does not fan out
+until all of that is true.
+
+**Gate 4 — close-out.** The sandbox's fate is decided by a human and recorded
+in `sandbox.json` as a `teardown_decision`: torn down, or left running with a
+reason and a review date. The onboarding is not complete while a sandbox is up
+with nobody having said it should be.
 
 Gate 3 is the expensive one to skip. From building the GCP and Azure libraries:
 a validator keys on a specific field, and you find out the fetcher never
@@ -151,15 +159,38 @@ collected it at validator-authoring time — after N siblings have been cloned
 from the same shape. Proving one fetcher all the way through first turns that
 into one fix instead of N.
 
+**"Complete" was added to Gate 3 after the first complete run.** Two Splunk
+calls returned populated, well-formed evidence that was wrong: a default page
+size of 30 silently cut 133 saved searches to 30, and a user-scoped path
+returned 7 of the same 133. Neither raised an error, and both passed the
+populated check. Truncated evidence published as complete is the failure no
+one sees, so the count is now checked against a true count measured at step 5,
+and the shared client fails the collection on a mismatch.
+
+**Gate 4 was added for the same reason in the other direction:** the same run
+built every fetcher, proved every validator, marked the slate complete — and
+left the sandbox running with nothing recording whether that was intended.
+
 ## The constraints
 
-- **Success is populated evidence, not exit 0.** Non-empty *measured* values.
+- **Success is populated and complete evidence, not exit 0.** Non-empty
+  *measured* values, and all of them — a count matching an independent count.
+- **No field that reads as compliant while meaning the opposite.** A retention
+  period with no archive destination means the data is deleted at that age,
+  not kept; emit fields like that together so no validator can use one alone.
+- **TLS verification defaults on.** A self-signed sandbox opts out per target;
+  that convenience must never become the default shipped to customers.
 - **Teardown is written before seed**, handed back with the plan.
 - **Nothing is seeded into a tenant absent from the approved-sandbox registry.**
   Being named "test" is not approval. The registry is
   `.onboarding/<platform>/sandbox.json`, and a tenant gets in through Gate 2.
-- **Seed the failure case too.** A uniformly compliant sandbox gives a validator
-  nothing to fail against, so Gate 3 cannot be honestly passed.
+- **Seed the failure case too — if the defaults don't already supply one.** A
+  uniformly compliant sandbox gives a validator nothing to fail against, so
+  Gate 3 cannot be honestly passed. Check the stock tenant first; the first
+  complete run found three pre-existing failure cases and needed no seeding at
+  all, which it recorded as a decision rather than leaving `seed.sh` absent.
+- **Teardown removes only what it names.** Never a prune or a wildcard; the
+  machine or account it runs on holds other things.
 - **Bail after 3 attempts on one fetcher**, write the diagnosis, continue the
   slate.
 
@@ -173,10 +204,13 @@ everything they find is on disk when they finish. It is also what makes the flow
 ```
 .onboarding/<platform>/          gitignored, one per platform
   claim.md        the narrative or pasted claim, with provenance
-  research.md     step 4 output, every claim cited to a fetched URL
-  slate.md        the plan, its approval, and per-fetcher outcomes
-  sandbox.json    tenant id, cost estimate, approval — the registry
-  teardown.sh     written before seed, executable, idempotent
+  research.md     step 4 output, docs-only, every claim marked
+  measured.md     step 5, the live sandbox reconciled against research.md
+  slate.md        the plan, its approval, and a status per fetcher
+  sandbox.json    tenant id, cost, approval, teardown decision — the registry
+  seed.sh         only if the platform's defaults don't supply the data
+  teardown.sh     written before provisioning, idempotent, names what it removes
+  notes/          per-fetcher build detail, so slate.md stays scannable
 ```
 
 Field shapes and worked examples are in

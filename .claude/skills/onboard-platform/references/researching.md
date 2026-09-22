@@ -93,8 +93,12 @@ Give the subagent, verbatim:
 > - **`MEASURED`** — you called the live sandbox and this is what it returned.
 >   **The strongest evidence there is**, stronger than any doc citation,
 >   because it is the server's own answer for the version actually in front of
->   you. Prefer it whenever the sandbox is already up: one real call settles
->   what three doc pages leave ambiguous. Record the call alongside the answer.
+>   you. Record the call alongside the answer. **On a fresh onboarding you will
+>   rarely have it:** step 5 builds the sandbox *after* this step, so there is
+>   usually nothing to call yet. That is expected — leave the question
+>   `UNVERIFIED` and name it as something to measure. Step 5 reconciles every
+>   one of them in `measured.md`. Use `MEASURED` here only when a sandbox
+>   already exists, such as a resumed onboarding.
 > - **A fetched URL** — you read it on a page. Good, and the only option before
 >   the sandbox exists. Do not write down an endpoint shape, a field name, a
 >   rate limit, or a permission scope you did not read somewhere. If the docs
@@ -107,6 +111,15 @@ Give the subagent, verbatim:
 > which of the three it was. **When `MEASURED` and the docs disagree, the
 > measurement wins** — and say so in the file, since a documented behaviour the
 > server does not exhibit is itself worth knowing.
+>
+> **Flag every count that could be silently truncated.** Wherever the docs
+> describe a default page size, a per-user or per-app scope, or a result
+> limit, say so under the heading — `UNVERIFIED` is fine. These are the calls
+> that return populated, well-formed, *incomplete* data without an error, and
+> step 5 has to check each against a true count. On the first complete run,
+> research predicted exactly this as "the single most likely correctness bug
+> in this slate", step 5 measured it — a default page size of 30 truncating 133
+> objects — and the prediction is why it was measured rather than missed.
 >
 > **Say what the measurement is *of*.** A sandbox is often not the production
 > target — a container instead of the hosted product, one edition instead of

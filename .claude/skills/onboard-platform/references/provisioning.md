@@ -34,6 +34,21 @@ A sandbox nobody remembered to tear down is the bill this rule prevents.
 Make it safe to run twice and safe to run against an already-empty account —
 it will be run by someone who is not sure whether it already ran.
 
+**It removes only what it names.** Every container, volume, network, bucket or
+role it deletes is listed by exact name at the top of the script, and nothing
+else is touched. Never a bare `docker system prune`, a `--filter` wide enough
+to match unrelated resources, a tag-based sweep, or a wildcard delete. The
+person running teardown is on a machine or account that holds other things,
+and a teardown that cleans up by pattern is one surprise match away from
+deleting someone's work. The first complete run wrote this rule into its own
+script header — *"never runs a bare docker prune, so it cannot touch
+containers, volumes or networks belonging to anything else"* — which is the
+right instinct and is now the requirement.
+
+Write teardown **before provisioning**, not merely before seeding. They are
+often the same moment; when they are not, provisioning is the one that creates
+something to clean up.
+
 **State a cost estimate, in dollars.** Per month, and who is paying. "Probably
 free" is not an estimate; neither is a number with no idea what the unit is.
 If you genuinely cannot tell, say that and give the worst case you can bound.
@@ -47,8 +62,17 @@ real tenant with "sandbox" in its display name.
 and then a free hand. Each `terraform apply`, each seed script, each re-run
 after a fix. The approval is for that execution.
 
-**The seeder is a file, `seed.sh`, not a sequence of ad-hoc commands.** It sits
-next to `teardown.sh` in the state directory and is re-runnable. The gate above
+**Seed only what the defaults don't already give you.** Check first: a stock
+tenant frequently has both populated surfaces and a failure case out of the
+box — the first complete run needed no seeding at all, with three failure
+cases pre-existing. When that is the case, write `"seeding": "NOT REQUIRED"`
+with the reason into `sandbox.json` and skip `seed.sh` entirely. Seeding you
+didn't need is still resources created, still a gate opened, still something
+teardown has to know about.
+
+**When seeding is needed, the seeder is a file, `seed.sh`, not a sequence of
+ad-hoc commands.** It sits next to `teardown.sh` in the state directory and is
+re-runnable. The gate above
 is on *executing* it, which presumes there is a reviewable thing to approve —
 a pasted block of commands cannot be re-read later to answer "what is actually
 in this sandbox", and that question gets asked every time a fetcher returns
