@@ -134,6 +134,8 @@ def summarize(rows: List[Dict[str, Any]], sample_size: int = 25) -> Dict[str, An
 def body(client: WizClient) -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     match = os.environ.get("WIZ_HOST_BENCHMARK_MATCH", "").strip() or "DISA"
+    # The nested benchmark mapping makes each page heavy for Wiz; start small.
+    client.page_size = min(client.page_size, env_int("WIZ_HOST_PAGE_SIZE", 25))
     raw = client.paginate("hostConfigurationRuleAssessments", ASSESSMENTS_QUERY,
                           "hostConfigurationRuleAssessments", max_records=env_int("WIZ_MAX_RECORDS", 50000))
 
@@ -147,14 +149,19 @@ def body(client: WizClient) -> Dict[str, Any]:
         for n in matched:
             rows.append(slim(a, n, now))
 
+    if client.api_failures:
+        empty = ("Collection did not complete (see api_failures), so an empty or short result here "
+                 "does NOT mean there are no matching assessments.")
+    else:
+        empty = (f"No host configuration assessments belong to a benchmark matching {match!r}. "
+                 "See scope.assessments_by_benchmark for what Wiz did assess.")
     include = os.environ.get("WIZ_INCLUDE_RAW_FINDINGS", "true").strip().lower() not in {"false", "0", "no"}
     return evidence(
         client=client,
         operations=["hostConfigurationRuleAssessments"],
         records=rows,
         analysis=summarize(rows),
-        empty_message=f"No host configuration assessments belong to a benchmark matching {match!r}. "
-                      "See scope.assessments_by_benchmark for what Wiz did assess.",
+        empty_message=empty,
         include_records=include,
         scope={"benchmark_match": match, "assessments_in_tenant_query": len(raw),
                "assessments_by_benchmark": dict(all_benchmarks.most_common())},

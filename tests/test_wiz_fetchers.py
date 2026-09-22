@@ -397,3 +397,29 @@ def test_host_config_filters_to_disa(fake, tmp_path):
     assert a["assessments_evaluated"] == 3 and a["hosts_assessed"] == 2
     assert a["benchmarks"][rhel]["pass_rate_pct"] == 33.3
     assert a["open_failures_past_window_by_severity"] == {"HIGH": 1}
+
+
+def test_internal_error_is_retried_then_page_shrinks(fake, tmp_path, monkeypatch):
+    rhel = "DISA Red Hat Enterprise Linux 9 STIG Benchmark v002.009"
+    fake.pages["hostConfigurationRuleAssessments"] = [[_host(1, "PASS", "HIGH", rhel)], [_host(2, "FAIL", "HIGH", rhel)]]
+    real = fake.__call__
+    state = {"bad": 0}
+
+    def flaky(url, data=None, json=None, headers=None, timeout=None):
+        # page 2 fails with Wiz's internal error until the page size drops below 25
+        if url == API and json["variables"].get("after") == "1" and json["variables"]["first"] >= 25:
+            state["bad"] += 1
+            return FakeResponse(200, {"data": None, "errors": [{"message": "oops! an internal error has occurred."}]})
+        return real(url, data=data, json=json, headers=headers, timeout=timeout)
+
+    wiz_client.requests.post = flaky
+    code, ev = run("host_configuration_posture", tmp_path)
+    assert code == 0, ev["api_failures"]
+    assert ev["analysis"]["assessments_evaluated"] == 2
+    assert state["bad"] == wiz_client.MAX_RETRIES + 1   # retried at 25, then shrank to 12
+
+
+def test_host_failure_message_does_not_claim_empty(fake, tmp_path):
+    fake.errors["hostConfigurationRuleAssessments"] = "oops! an internal error has occurred."
+    code, ev = run("host_configuration_posture", tmp_path)
+    assert code == 1 and "does NOT mean" in ev["message"]
