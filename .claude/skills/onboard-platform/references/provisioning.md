@@ -47,6 +47,13 @@ real tenant with "sandbox" in its display name.
 and then a free hand. Each `terraform apply`, each seed script, each re-run
 after a fix. The approval is for that execution.
 
+**The seeder is a file, `seed.sh`, not a sequence of ad-hoc commands.** It sits
+next to `teardown.sh` in the state directory and is re-runnable. The gate above
+is on *executing* it, which presumes there is a reviewable thing to approve —
+a pasted block of commands cannot be re-read later to answer "what is actually
+in this sandbox", and that question gets asked every time a fetcher returns
+something surprising.
+
 **Seed the failure case too.** Research told you what has to exist for a call to
 return something non-empty. It also has to return something *non-compliant*, or
 step 7's validator has nothing to fail against and Gate 3 cannot be honestly

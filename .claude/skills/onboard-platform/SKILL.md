@@ -312,10 +312,36 @@ One subagent per fetcher, each taken **fully through** steps 7.1–7.4 before th
 next begins. Not a fan-out: a parallel slate built from the same wrong shape is
 eight fetchers to fix instead of one.
 
-Each subagent gets `claim.md`, `research.md`, `sandbox.json`, and its own line
-from `slate.md`, and appends its outcome to `slate.md` — built, or bailed with
-the diagnosis. Read it between fetchers; a second failure with the same cause is
-a signal to stop the loop and fix the cause.
+Each subagent gets `claim.md`, `research.md`, `sandbox.json`, and its own row
+from `slate.md`. It writes its build notes to
+`.onboarding/$PLATFORM/notes/<fetcher>.md` and updates **only its own row's
+status** in `slate.md` — built, or bailed with a one-line diagnosis pointing at
+its notes file. Read the status column between fetchers; a second failure with
+the same cause is a signal to stop the loop and fix the cause.
+
+> **`slate.md` is a plan, not a build log.** Keep it to the header, the status
+> table, and a few lines per bail — page or two, readable at a glance. Build
+> detail goes in `notes/`. Measured on the first real run: letting each fetcher
+> append its findings grew the slate to **1,749 lines / 99 KB across 74
+> headings** by fetcher five. That breaks this step specifically — you cannot
+> hand a subagent "its own row" out of a 99 KB file without spending its whole
+> context on the other four, which is the thing delegation was for.
+
+### Share the client before the second fetcher, not after the fifth
+
+The moment fetcher #2 needs the same auth or the same request helper as #1,
+stop and lift the shared parts into `fetchers/<category>/_shared/` — before
+building #2, not as a cleanup pass later. `create-fetcher` Phase 3 says to make
+that directory; at step 8 it stops being optional, because you are about to
+write the fourth copy.
+
+Measured on the first real run, which skipped this: five sibling fetchers
+carried **seven duplicated helpers** each, and they had already drifted by the
+time the slate finished — `get_json` with `timeout=120` in two of them and
+`timeout=60` in three, `to_int` in three different versions, with nothing
+recording which was intended. Nobody chose that; it is what cloning produces.
+A behavioural difference between siblings that no one decided is worse than
+either value.
 
 **Bail rule: 3 attempts on one fetcher, then write the diagnosis and move on.**
 
@@ -374,6 +400,10 @@ next session on this platform a resume rather than a restart.
   partial and re-brief narrowly for the named gaps.
 - Passing all of step 2's list to one research agent. Five items, the rest
   named out of scope.
+- **Letting `slate.md` become the build log.** It is the file the gates and
+  every step-8 subagent read; detail belongs in `notes/<fetcher>.md`.
+- **Building the third sibling before lifting the shared client into
+  `_shared/`.** The copies drift, silently, and nobody chose the difference.
 - Restating `create-fetcher` / `wire-manifest` / `suggest-validator` mechanics
   here. Call them. Three copies of the fetcher contract drift apart.
 - Opening step 1 with an example of a good answer. It gets answered instead of
