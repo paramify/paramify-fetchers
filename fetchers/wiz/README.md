@@ -1,16 +1,18 @@
 # Wiz
 
 Read-only evidence fetchers for the Wiz cloud security platform (commercial and
-Wiz for Government). All four share one GraphQL client (`_shared/wiz_client.py`)
+Wiz for Government). All six share one GraphQL client (`_shared/wiz_client.py`)
 and one pair of secrets. None of them writes to Wiz: the client refuses to send
 a GraphQL mutation.
 
 | Fetcher | Evidence | Wiz scopes |
 |---|---|---|
-| `wiz_scan_coverage` | Cloud accounts Wiz is connected to, their status and last scan time, connector status | `read:cloud_accounts`, `read:connectors` |
+| `wiz_scan_coverage` | Cloud accounts Wiz is connected to, their status and last scan time, connector status, open system health issues | `read:cloud_accounts`, `read:connectors`, `read:system_health_issues` |
 | `wiz_posture_issues` | Open cloud-configuration / toxic-combination issues by severity and age, ticket linkage, resolved in window | `read:issues` |
 | `wiz_infrastructure_vulnerabilities` | Open vulnerability findings on hosts and other non-container assets | `read:vulnerabilities` |
 | `wiz_container_vulnerabilities` | Open vulnerability findings on container images and containers | `read:vulnerabilities` |
+| `wiz_cloud_configuration_posture` | Cloud configuration rule pass/fail against one framework (default NIST SP 800-53 Rev 5) | `read:cloud_configuration`, `read:security_frameworks` |
+| `wiz_host_configuration_posture` | OS benchmark pass/fail per benchmark and host (default DISA STIG) | `read:host_configuration` |
 
 Read the vulnerability and issue evidence together with `wiz_scan_coverage`:
 zero findings only means something if every account in the boundary is being
@@ -42,6 +44,8 @@ Per-fetcher settings (remediation windows, statuses, look-back) are listed by
 - Tokens last **900 seconds**, not the 24 hours older public docs describe. The
   client renews a minute early, so long pulls do not fail mid-walk.
 - The root queries and node fields these fetchers select exist.
-- Not yet verified: the exact filter input fields (`status`, `type`,
-  `statusChangedAt`). A wrong filter comes back as a GraphQL error, which the
-  fetcher records and exits non-zero on, so it cannot pass silently.
+- Filter inputs used here (`status`, `type`, `statusChangedAt`, `securityFramework`,
+  `result`) were read from the tenant's own schema.
+- DISA STIG benchmarks in Wiz are operating-system benchmarks. Cloud
+  control-plane checks map to NIST 800-53 / FedRAMP, which is why the two
+  configuration fetchers default to different frameworks.

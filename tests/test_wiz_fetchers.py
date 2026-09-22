@@ -61,6 +61,7 @@ class FakeWiz:
         self.token_calls = 0
         self.graphql_calls: List[Dict[str, Any]] = []
         self.fail_once_429 = False
+        self.health_count = 0
 
     def __call__(self, url: str, data: Any = None, json: Any = None, headers: Any = None, timeout: Any = None):
         if url == AUTH:
@@ -76,7 +77,10 @@ class FakeWiz:
             self.fail_once_429 = False
             return FakeResponse(429, {}, {"Retry-After": "0"})
         query = json["query"]
-        root = next(r for r in ("cloudAccounts", "connectors", "issuesV2", "vulnerabilityFindings") if r + "(" in query)
+        if "systemHealthIssues(" in query:
+            return FakeResponse(200, {"data": {"systemHealthIssues": {"totalCount": self.health_count}}})
+        root = next(r for r in ("cloudAccounts", "connectors", "issuesV2", "vulnerabilityFindings", "securityFrameworks",
+                                "configurationFindings", "hostConfigurationRuleAssessments") if r + "(" in query)
         if root in self.errors:
             return FakeResponse(200, {"data": None, "errors": [{"message": self.errors[root]}]})
         pages = self.pages.get(root, [[]])
@@ -313,3 +317,83 @@ def test_posture_issues_summary(fake, tmp_path):
     assert a["overdue_by_due_date_count"] == 1
     assert a["resolved_in_window"] == 1 and a["median_days_to_resolve"] == 6
     assert ev["filter"]["types"] == ["CLOUD_CONFIGURATION", "TOXIC_COMBINATION"]
+
+
+def test_scan_coverage_reports_system_health(fake, tmp_path):
+    fake.health_count = 19
+    fake.pages["cloudAccounts"] = [[{"id": "a", "name": "prod", "status": "CONNECTED", "lastScannedAt": iso(0)}]]
+    code, ev = run("scan_coverage", tmp_path)
+    assert code == 0 and ev["analysis"]["system_health_issue_count"] == 19
+
+
+# --- cloud configuration posture -------------------------------------------
+
+
+def _cfg(i, result, sev, status, age, account="prod"):
+    return {"id": f"c{i}", "name": f"rule {i % 3}", "result": result, "severity": sev, "status": status,
+            "firstSeenAt": iso(age), "analyzedAt": iso(0),
+            "rule": {"id": f"r{i % 3}", "shortId": f"R-{i % 3}", "name": f"rule {i % 3}"},
+            "resource": {"id": f"res{i}", "name": f"res{i}", "type": "BUCKET", "nativeType": "s3",
+                         "region": "us-gov-west-1", "cloudPlatform": "AWS",
+                         "subscription": {"name": account, "externalId": "123"}}}
+
+
+def test_cloud_config_posture(fake, tmp_path):
+    fake.pages["securityFrameworks"] = [[{"id": "wf-id-39", "name": "FedRAMP (High, Moderate, and Low levels)", "enabled": False},
+                                          {"id": "wf-id-4", "name": "NIST SP 800-53 Revision 5", "enabled": False}]]
+    fake.pages["configurationFindings"] = [[
+        _cfg(1, "PASS", "HIGH", "RESOLVED", 1), _cfg(2, "PASS", "LOW", "RESOLVED", 1),
+        _cfg(3, "FAIL", "HIGH", "OPEN", 45), _cfg(4, "FAIL", "MEDIUM", "OPEN", 5, account="dev"),
+    ]]
+    code, ev = run("cloud_configuration_posture", tmp_path)
+    a = ev["analysis"]
+    assert code == 0
+    assert ev["framework"] == {"requested": "NIST SP 800-53 Revision 5", "id": "wf-id-4",
+                               "name": "NIST SP 800-53 Revision 5", "enabled_in_tenant": False}
+    cfg_call = [c for c in fake.graphql_calls if "configurationFindings(" in c["query"]][0]
+    assert cfg_call["variables"]["filterBy"] == {"securityFramework": "wf-id-4", "result": ["PASS", "FAIL"]}
+    assert a["pass_rate_pct"] == 50.0 and a["open_failures"] == 2
+    assert a["open_failures_past_window_by_severity"] == {"HIGH": 1}
+    assert a["by_account"]["dev"] == {"FAIL": 1}
+
+
+def test_cloud_config_unknown_framework_fails_loudly(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("WIZ_SECURITY_FRAMEWORK", "No Such Framework")
+    fake.pages["securityFrameworks"] = [[{"id": "wf-id-4", "name": "NIST SP 800-53 Revision 5", "enabled": True}]]
+    code, ev = run("cloud_configuration_posture", tmp_path)
+    assert code == 1 and ev["api_failures"][0]["type"] == "FrameworkNotFound"
+
+
+def test_cloud_config_10k_cap_flagged(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("WIZ_PAGE_SIZE", "500")
+    fake.pages["securityFrameworks"] = [[{"id": "wf-id-4", "name": "NIST SP 800-53 Revision 5", "enabled": True}]]
+    fake.pages["configurationFindings"] = [[_cfg(i, "PASS", "LOW", "RESOLVED", 1) for i in range(500)]] * 20
+    code, ev = run("cloud_configuration_posture", tmp_path)
+    assert code == 1 and ev["api_failures"][-1]["type"] == "WizRowCapReached"
+
+
+# --- host configuration posture --------------------------------------------
+
+
+def _host(i, result, sev, bench, host="vm-1", age=2):
+    return {"id": f"h{i}", "result": result, "severity": sev, "status": "OPEN" if result == "FAIL" else "RESOLVED",
+            "firstSeen": iso(age), "analyzedAt": iso(0),
+            "rule": {"id": f"hr{i}", "name": f"host rule {i}", "shortName": "x", "externalId": f"V-{i}",
+                     "securitySubCategories": [{"category": {"framework": {"name": bench}}}]},
+            "resource": {"id": host, "name": host, "type": "VIRTUAL_MACHINE"}}
+
+
+def test_host_config_filters_to_disa(fake, tmp_path):
+    rhel = "DISA Red Hat Enterprise Linux 9 STIG Benchmark v002.009"
+    fake.pages["hostConfigurationRuleAssessments"] = [[
+        _host(1, "PASS", "HIGH", rhel), _host(2, "FAIL", "HIGH", rhel, age=40), _host(3, "FAIL", "LOW", rhel, host="vm-2"),
+        _host(4, "FAIL", "HIGH", "CIS Red Hat Enterprise Linux 9 Benchmark"),
+    ]]
+    code, ev = run("host_configuration_posture", tmp_path)
+    a = ev["analysis"]
+    assert code == 0
+    assert ev["scope"]["assessments_in_tenant_query"] == 4
+    assert ev["scope"]["assessments_by_benchmark"] == {rhel: 3, "CIS Red Hat Enterprise Linux 9 Benchmark": 1}
+    assert a["assessments_evaluated"] == 3 and a["hosts_assessed"] == 2
+    assert a["benchmarks"][rhel]["pass_rate_pct"] == 33.3
+    assert a["open_failures_past_window_by_severity"] == {"HIGH": 1}

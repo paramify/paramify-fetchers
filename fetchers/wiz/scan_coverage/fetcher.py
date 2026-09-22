@@ -56,6 +56,13 @@ query WizConnectors($first: Int, $after: String) {
 """
 
 
+HEALTH_QUERY = """
+query WizSystemHealthIssues {
+  systemHealthIssues(first: 1) { totalCount }
+}
+"""
+
+
 def summarize(accounts: List[Dict[str, Any]], connectors: Optional[List[Dict[str, Any]]],
               stale_days: int, now: Optional[datetime] = None) -> Dict[str, Any]:
     now = now or datetime.now(timezone.utc)
@@ -112,9 +119,14 @@ def body(client: WizClient) -> Dict[str, Any]:
     connectors = [{"id": c.get("id"), "name": c.get("name"), "enabled": c.get("enabled"),
                    "status": c.get("status")} for c in raw_connectors]
     result = summarize(accounts, connectors, stale_days)
+    # System health issues are Wiz's own "your scanning is degraded" signals
+    # (missing permissions, failed scans). Only the count is taken here.
+    health = client.graphql("systemHealthIssues", HEALTH_QUERY)
+    if health is not None:
+        result["analysis"]["system_health_issue_count"] = (health.get("systemHealthIssues") or {}).get("totalCount")
     return evidence(
         client=client,
-        operations=["cloudAccounts", "connectors"],
+        operations=["cloudAccounts", "connectors", "systemHealthIssues"],
         records=result["accounts"],
         analysis=result["analysis"],
         empty_message="Wiz returned no cloud accounts. Either no cloud is connected to this tenant, "
