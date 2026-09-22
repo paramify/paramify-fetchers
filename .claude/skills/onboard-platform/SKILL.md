@@ -179,6 +179,25 @@ designing a fetcher against a guess.
 "pasted by user, <date>". Every later step and every subagent asserts against
 that one sentence, and they can only do that if it is on disk.
 
+**When several capabilities fit, prefer the one whose narrative carries a
+number.** "Retains 90 days searchable and 280 days archival" gives a validator
+something to key on and something a single misconfigured object can falsify;
+"logs are centrally managed and reviewed" does not. Gate 3 needs a validator
+*proven to fail*, and a prose-only claim makes that hard at exactly the moment
+you least want extra difficulty. Say which criterion you used, so a human
+disagreeing with the pick can see what it turned on.
+
+**Keep the runners-up.** Write the other candidate capabilities into `claim.md`
+as an adjacent-claims table — name, id, narrative in one line. They are the raw
+material for the rest of the slate at step 6, and recovering them later means
+re-querying and re-reading the workspace. Note where a name resolved to several
+ids, and which one you took.
+
+**Name the coverage gap you are aiming at.** `paramify ksi` lists the open
+ones; say which this platform could plausibly close. That turns into step 6's
+second ordering criterion, and it is the argument for why this onboarding is
+worth doing at all.
+
 Also capture the KSI side while you are here. `framework/reference/ksis.yaml` is
 the local copy `paramify ksi` joins against; there is no KSI endpoint to fetch.
 **Ask whether the user has a newer release** — if theirs differs, take it.
@@ -248,9 +267,24 @@ has to hold real data.
 4. **Write `teardown.sh` first.** Before a single resource is created. Hand it
    back *with* the provisioning plan.
 
-Record the tenant/account id, the cost estimate, and the teardown path in
-`.onboarding/$PLATFORM/sandbox.json`. That file is the approved-sandbox
-registry: the seed step in step 7 refuses any tenant not in it.
+5. **Verify it, then record what you measured.** Once it is up, call the
+   endpoints step 4 said the fetchers would call, and write the answers into a
+   `verified` block in `sandbox.json` — version, the field that carries the
+   measured value, what a real response looked like. "I provisioned a sandbox"
+   and "I confirmed the sandbox answers the calls the fetchers will make" are
+   different claims, and only the second is worth anything at step 6.
+
+   **Look specifically for a failure case that already exists.** A platform's
+   defaults usually supply one — on the run this was written from, Splunk ships
+   `_dsphonehome` at 7 days against a 90-day claim, so a non-compliant index
+   existed before `seed.sh` ran at all. Finding it here is what lets step 6
+   order the slate by "can clear Gate 3 today", and it is cheaper to notice now
+   than to discover at step 7 that every object in the sandbox is compliant and
+   the validator has nothing to fail against.
+
+Record the tenant/account id, the cost estimate, the teardown path, and that
+`verified` block in `.onboarding/$PLATFORM/sandbox.json`. That file is the
+approved-sandbox registry: the seed step in step 7 refuses any tenant not in it.
 
 > **GATE — every seeder execution is approved individually.** Not the plan once,
 > then a free hand. Each `terraform apply`, each seed script, each time.
@@ -259,12 +293,58 @@ registry: the seed step in step 7 refuses any tenant not in it.
 
 ## Step 6 — State the plan
 
-Write `.onboarding/$PLATFORM/slate.md`: the fetchers to build, what each
-gathers, and which KSI each serves. One line per fetcher, ordered — the order is
-the build order, so put the one that proves the most of the platform first.
+Write `.onboarding/$PLATFORM/slate.md`: one row per fetcher, ordered, with what
+it gathers, which KSI it serves, whether it is evidence or an issue report
+(different contracts — `create-fetcher` Phase 0 routes on it), and:
 
-Mark which are evidence fetchers and which are issue reports; they have
-different contracts and `create-fetcher` Phase 0 routes on it.
+**A "provable on this sandbox?" column.** Yes / partially / no, answered from
+`sandbox.json` and step 4 — not from hope. This is the column that makes step 5
+pay off at planning time instead of at build time, and it is what produces the
+parked state below. A row marked *no* that gets built anyway is a fetcher that
+will be green on an empty payload, which is the failure this whole skill exists
+to prevent.
+
+### PARKED is a state, and it is not BAILED
+
+**Bailed** = built, failed three times, diagnosed. **Parked** = not attempted,
+because the sandbox cannot prove it — and it stays on the slate with **what
+would unpark it** written next to it. Collapsing the two loses the distinction
+between "this is broken" and "this is fine but unprovable here", which are
+opposite signals about whether to try again.
+
+When parking removes the only fetcher that proved part of the claim, **say so
+as a standing consequence**: *"the 280-day archival half of `claim.md` is
+currently UNEVIDENCED, and no fetcher on this slate proves it."* A claim
+half-covered without anyone noticing is how a slate looks finished while the
+narrative it was built for is not actually substantiated.
+
+### Ordering
+
+The order is the build order. Two criteria, in this order:
+
+1. **First: whichever can clear Gate 3 today.** Not the most interesting or the
+   most central — the one that runs against the sandbox now, returns populated
+   values, and **already has a failure case** so its validator can be proven to
+   fail. Best of all is a failure case that exists *before* `seed.sh` runs; the
+   platform's own defaults often supply one. #1 also sets the auth path, the
+   paging convention and the envelope shape every sibling inherits, so it should
+   be a fetcher whose shape you want copied.
+2. **Then: whichever closes a coverage gap.** `paramify ksi` names the open
+   ones. A fetcher that closes a named gap is worth more than a second fetcher
+   in a family already covered, and the gap is the argument for building it.
+
+### Settle the platform-wide decisions once, here
+
+Before the rows, record the decisions that apply to every fetcher in the
+category, with the reason: **runtime** (bash vs python), **auth model**, the
+**hosts/base URLs**, and **fanout** — `supports_targets`, the proposed
+`target_schema`, `aggregation`. Step 4 has the answers; this is where they stop
+being research and become the contract the slate is built against.
+
+Fanout especially: **decide it here even when you are unsure, and prefer
+`true`.** Retrofitting fanout means rewriting the entry script of every fetcher
+already built, while an unused `targets:` on a single-deployment org costs
+nothing.
 
 > **GATE 1 — the human cuts, adds, and orders.** Present the slate and stop.
 > Nothing is built until they have edited it. Record the approval and its date
