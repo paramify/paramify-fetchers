@@ -87,14 +87,31 @@ Give the subagent, verbatim:
 > mirror. A named blocker is a finding the main session can act on; a silent
 > forty-minute search for a workaround is not.
 >
-> **Every factual claim is cited to a URL you actually fetched, or marked
-> `UNVERIFIED`.** Do not write down an endpoint shape, a field name, a rate
-> limit, or a permission scope you did not read on a page. If the docs are
-> ambiguous, say they are ambiguous. An uncited API shape is how a fetcher gets
-> built against an endpoint that does not exist. **`UNVERIFIED` is cheap — use
-> it rather than spending fetches to be sure.** The marker is what makes an
-> unconfirmed claim safe to write down, so it is the release valve on the
-> citation rule, not an admission of failure.
+> **Every factual claim carries one of three markers.** Nothing goes in the
+> file unmarked:
+>
+> - **`MEASURED`** — you called the live sandbox and this is what it returned.
+>   **The strongest evidence there is**, stronger than any doc citation,
+>   because it is the server's own answer for the version actually in front of
+>   you. Prefer it whenever the sandbox is already up: one real call settles
+>   what three doc pages leave ambiguous. Record the call alongside the answer.
+> - **A fetched URL** — you read it on a page. Good, and the only option before
+>   the sandbox exists. Do not write down an endpoint shape, a field name, a
+>   rate limit, or a permission scope you did not read somewhere. If the docs
+>   are ambiguous, say they are ambiguous.
+> - **`UNVERIFIED`** — you did not confirm it. **Cheap, and meant to be used**
+>   rather than spending fetches to be sure. It is the release valve on the
+>   rule above, not an admission of failure.
+>
+> An unmarked claim is the dangerous one, because a later reader cannot tell
+> which of the three it was. **When `MEASURED` and the docs disagree, the
+> measurement wins** — and say so in the file, since a documented behaviour the
+> server does not exhibit is itself worth knowing.
+>
+> **Say what the measurement is *of*.** A sandbox is often not the production
+> target — a container instead of the hosted product, one edition instead of
+> another — and a `MEASURED` line inherits that gap. Name it once at the top of
+> the file rather than qualifying every line.
 
 **Cap what you hand it.** Step 2 deliberately produces a wide list, and "per
 item from step 2" against fifteen items is fifteen research jobs in one. Pass
