@@ -51,10 +51,3 @@ validation_rules:
 evidence_sets:
   - EVD-LB-ENC-STATUS
   - EVD-SQS-ENC
-  # The Splunk slate. One collection-health validator covers all five sets;
-  # copying it per set would be five files drifting apart.
-  - EVD-SPLUNK-INDEX-RETENTION
-  - EVD-SPLUNK-ROLE-INDEX-ACCESS
-  - EVD-SPLUNK-SAVED-SEARCH-ALERTS
-  - EVD-SPLUNK-AUDIT-EVENT-TYPES
-  - EVD-SPLUNK-DATA-INPUTS
