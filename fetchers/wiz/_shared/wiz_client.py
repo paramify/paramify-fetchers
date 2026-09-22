@@ -88,6 +88,12 @@ MAX_RETRIES = 4
 BACKOFF_BASE_SECONDS = 2
 MAX_BACKOFF_SECONDS = 60
 MAX_PAGES = 2000
+MIN_PAGE_SIZE = 10
+
+def _is_transient(errors: List[Any]) -> bool:
+    text = " ".join(str((e or {}).get("message", e)) for e in errors).lower()
+    return "internal error" in text or "timeout" in text or "temporarily unavailable" in text
+
 
 _MUTATION = re.compile(r"^\s*mutation\b", re.IGNORECASE | re.MULTILINE)
 
@@ -343,6 +349,13 @@ class WizClient:
                 break
 
             errors = payload.get("errors") or []
+            if errors and payload.get("data") is None and attempt < MAX_RETRIES and _is_transient(errors):
+                # Wiz answers some overloaded queries with HTTP 200 and
+                # "an internal error has occurred". It is usually transient.
+                delay = self._retry_delay(None, attempt)
+                logger.warning("%s returned a Wiz internal error; retrying in %.1fs", operation, delay)
+                time.sleep(delay)
+                continue
             if errors:
                 self._record(operation, "GraphQLError", "; ".join(
                     str(e.get("message", e)) for e in errors[:3]), response.status_code,
@@ -385,12 +398,23 @@ class WizClient:
         after: Optional[str] = None
         seen: set = set()
 
+        size = self.page_size
         for _ in range(MAX_PAGES):
             page_vars = dict(variables or {})
-            page_vars["first"] = self.page_size
+            page_vars["first"] = size
             page_vars["after"] = after
+            failures_before = len(self.api_failures)
             data = self.graphql(operation, query, page_vars)
             if data is None:
+                # A heavy nested page can keep failing server-side at one size
+                # and succeed at a smaller one. Halve and retry the same cursor
+                # before giving up; the failure is only kept if even the
+                # smallest page fails.
+                if size > MIN_PAGE_SIZE and len(self.api_failures) > failures_before:
+                    del self.api_failures[failures_before:]
+                    size = max(MIN_PAGE_SIZE, size // 2)
+                    logger.warning("%s failed; retrying the same page with first=%d", operation, size)
+                    continue
                 return nodes
             conn = data.get(root) or {}
             page = conn.get("nodes") or []
