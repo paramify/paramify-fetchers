@@ -34,6 +34,7 @@ import vuln_summary  # noqa: E402
 API = "https://api.us2.app.wiz.us/graphql"
 AUTH = "https://auth.app.wiz.us/oauth/token"
 NOW = datetime.now(timezone.utc)
+SECRET = "s3cr3t-value-that-must-never-appear-7f1c"
 
 
 def iso(days_ago: int) -> str:
@@ -64,7 +65,9 @@ class FakeWiz:
         self.health_count = 0
         self.rules: Dict[str, List[str]] = {}   # host rule id -> framework names
 
-    def __call__(self, url: str, data: Any = None, json: Any = None, headers: Any = None, timeout: Any = None):
+    def __call__(self, url: str, data: Any = None, json: Any = None, headers: Any = None, timeout: Any = None,
+                 allow_redirects: Any = True):
+        assert allow_redirects is False, "credentials must never follow a redirect"
         if url == AUTH:
             self.token_calls += 1
             if self.auth_status != 200:
@@ -117,12 +120,16 @@ class FakeWiz:
 def fake(monkeypatch, tmp_path) -> FakeWiz:
     f = FakeWiz()
     monkeypatch.setattr(wiz_client.requests, "post", f)
-    monkeypatch.setattr(wiz_client.time, "sleep", lambda s: None)
+    def no_sleep(seconds):
+        # time.sleep raises on negative or NaN input; keep the fake as strict.
+        assert seconds >= 0, seconds
+
+    monkeypatch.setattr(wiz_client.time, "sleep", no_sleep)
     # run_fetcher calls load_dotenv(), which walks up to a real repo-root .env
     # and would refill any variable a test deliberately removed.
     monkeypatch.setattr(wiz_client, "load_dotenv", lambda *a, **k: False)
     monkeypatch.setenv("WIZ_CLIENT_ID", "id")
-    monkeypatch.setenv("WIZ_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("WIZ_CLIENT_SECRET", SECRET)
     monkeypatch.setenv("WIZ_API_ENDPOINT_URL", "https://api.us2.app.wiz.us")  # no /graphql on purpose
     monkeypatch.setenv("WIZ_AUTH_URL", AUTH)
     monkeypatch.setenv("WIZ_MIN_REQUEST_INTERVAL", "0")
@@ -192,7 +199,7 @@ def test_bad_auth_is_clean_error(fake, tmp_path):
     fake.auth_status = 401
     code, ev = run("scan_coverage", tmp_path)
     assert code == 1 and ev["status"] == "error" and ev["error_code"] == "auth_failed"
-    assert "secret" not in json.dumps(ev)
+    assert SECRET not in json.dumps(ev)
 
 
 def test_missing_config_is_bad_config(fake, tmp_path, monkeypatch):
@@ -208,7 +215,7 @@ def test_all_pages_collected_and_stalled_cursor_flagged(fake):
     assert [n["id"] for n in client.paginate("cloudAccounts", q, "cloudAccounts")] == ["1", "2", "3"]
     assert client.api_failures == []
 
-    def stalled(url, data=None, json=None, headers=None, timeout=None):
+    def stalled(url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
         if url == AUTH:
             return FakeResponse(200, {"access_token": "tokX", "expires_in": 900})
         return FakeResponse(200, {"data": {"cloudAccounts": {"nodes": [{"id": "x"}],
@@ -318,14 +325,14 @@ def test_posture_issues_summary(fake, tmp_path):
     resolved_page = [_issue(9, "HIGH", 20, status="RESOLVED", resolved_after=6)]
     real = fake.__call__
 
-    def routed(url, data=None, json=None, headers=None, timeout=None):
+    def routed(url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
         if url == API and "issuesV2" in json["query"]:
             calls["n"] += 1
             statuses = json["variables"]["filterBy"]["status"]
             nodes = resolved_page if statuses == ["RESOLVED"] else open_page
             return FakeResponse(200, {"data": {"issuesV2": {"nodes": nodes,
                                        "pageInfo": {"hasNextPage": False, "endCursor": None}}}})
-        return real(url, data=data, json=json, headers=headers, timeout=timeout)
+        return real(url, data=data, json=json, headers=headers, timeout=timeout, allow_redirects=allow_redirects)
 
     wiz_client.requests.post = routed
     code, ev = run("posture_issues", tmp_path)
@@ -449,11 +456,11 @@ def test_host_page_recovered_with_lighter_query(fake, tmp_path):
                                                       [_host(2, "PASS", "HIGH", RHEL_STIG, fake=fake)]]
     real = fake.__call__
 
-    def heavy_fails(url, data=None, json=None, headers=None, timeout=None):
+    def heavy_fails(url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
         # page 2 fails whenever the host type is requested, at any page size
         if url == API and json["variables"].get("after") == "1" and "resource { id name type }" in json["query"]:
             return FakeResponse(200, {"data": None, "errors": [{"message": "oops! an internal error has occurred."}]})
-        return real(url, data=data, json=json, headers=headers, timeout=timeout)
+        return real(url, data=data, json=json, headers=headers, timeout=timeout, allow_redirects=allow_redirects)
 
     wiz_client.requests.post = heavy_fails
     code, ev = run("host_configuration_posture", tmp_path)
@@ -468,12 +475,12 @@ def test_internal_error_is_retried_then_page_shrinks(fake, tmp_path, monkeypatch
     real = fake.__call__
     state = {"bad": 0}
 
-    def flaky(url, data=None, json=None, headers=None, timeout=None):
+    def flaky(url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
         # page 2 fails with Wiz's internal error until the page size drops below 25
         if url == API and json["variables"].get("after") == "1" and json["variables"]["first"] >= 25:
             state["bad"] += 1
             return FakeResponse(200, {"data": None, "errors": [{"message": "oops! an internal error has occurred."}]})
-        return real(url, data=data, json=json, headers=headers, timeout=timeout)
+        return real(url, data=data, json=json, headers=headers, timeout=timeout, allow_redirects=allow_redirects)
 
     wiz_client.requests.post = flaky
     code, ev = run("host_configuration_posture", tmp_path)
@@ -497,8 +504,8 @@ def test_host_unreadable_assessment_is_isolated_and_reported(fake, tmp_path):
     ]
     real = fake.__call__
 
-    def poison(url, data=None, json=None, headers=None, timeout=None):
-        resp = real(url, data=data, json=json, headers=headers, timeout=timeout)
+    def poison(url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
+        resp = real(url, data=data, json=json, headers=headers, timeout=timeout, allow_redirects=allow_redirects)
         nodes = (((resp._body or {}).get("data") or {}).get("hostConfigurationRuleAssessments") or {}).get("nodes") or []
         if any(n.get("id") == "h3" for n in nodes):
             return FakeResponse(200, {"data": None, "errors": [{"message": "oops! an internal error has occurred."}]})
@@ -513,3 +520,123 @@ def test_host_unreadable_assessment_is_isolated_and_reported(fake, tmp_path):
     assert sc["assessments_not_read"] == 1
     assert [u["filter"] for u in sc["unreadable_slices"]] == [{"result": "FAIL", "severity": "HIGH", "status": "OPEN"}]
     assert ev["analysis"]["assessments_evaluated"] == 3   # h4 recovered by splitting on severity
+
+
+
+# --- security hardening ---------------------------------------------------
+
+
+@pytest.mark.parametrize("doc", [
+    "mutation M { deleteIssue(id: 1) { id } }",
+    ",mutation M { deleteIssue(id: 1) { id } }",
+    "\ufeffmutation M { deleteIssue(id: 1) { id } }",
+    "query Q { a } mutation M { deleteIssue(id: 1) { id } }",
+    "subscription S { issueCreated { id } }",
+    "# harmless\nMUTATION M { x }",
+    "query A { a } query B { b }",
+])
+def test_read_only_guard_blocks_bypasses(doc):
+    with pytest.raises(ValueError):
+        wiz_client.WizClient._assert_read_only(doc)
+
+
+def test_read_only_guard_allows_real_queries():
+    # a field or string literal named like an operation is not an operation
+    wiz_client.WizClient._assert_read_only(
+        'query Q($f: F) { configurationFindings(filterBy: $f) { nodes { resource { subscription { name } } } } }')
+    wiz_client.WizClient._assert_read_only('query { issuesV2(filterBy: {search: "mutation"}) { nodes { id } } }')
+    for name in ("scan_coverage", "posture_issues", "cloud_configuration_posture", "host_configuration_posture"):
+        module = load(name)
+        for value in vars(module).values():
+            if isinstance(value, str) and value.lstrip().startswith("query"):
+                wiz_client.WizClient._assert_read_only(value)
+    wiz_client.WizClient._assert_read_only(vuln_summary.VULN_QUERY)
+
+
+@pytest.mark.parametrize("env,value", [
+    ("WIZ_AUTH_URL", "https://evil.example/oauth/token"),
+    ("WIZ_AUTH_URL", "http://auth.app.wiz.us/oauth/token"),
+    ("WIZ_API_ENDPOINT_URL", "https://api.us2.app.wiz.us.evil.example/graphql"),
+    ("WIZ_API_ENDPOINT_URL", "https://user:pw@api.us2.app.wiz.us/graphql"),
+    ("WIZ_API_ENDPOINT_URL", "https://evil.example/graphql"),
+])
+def test_credentials_only_go_to_wiz(fake, tmp_path, monkeypatch, env, value):
+    monkeypatch.setenv(env, value)
+    code, ev = run("scan_coverage", tmp_path)
+    assert code == 1 and fake.token_calls == 0 and not fake.graphql_calls
+    assert SECRET not in json.dumps(ev)
+
+
+def test_custom_endpoint_needs_explicit_opt_in_and_https(fake, monkeypatch):
+    monkeypatch.setenv("WIZ_ALLOW_CUSTOM_ENDPOINTS", "true")
+    wiz_client.check_endpoint("https://wiz-proxy.internal/graphql", "WIZ_API_ENDPOINT_URL")
+    with pytest.raises(wiz_client.WizConfigError):
+        wiz_client.check_endpoint("http://wiz-proxy.internal/graphql", "WIZ_API_ENDPOINT_URL")
+
+
+def test_auth_redirect_is_refused(fake, tmp_path):
+    fake.auth_status = 307
+    code, ev = run("scan_coverage", tmp_path)
+    assert code == 1 and fake.token_calls == 1 and "307" in json.dumps(ev)
+
+
+def test_malformed_token_is_refused(fake, monkeypatch):
+    real = fake.__call__
+
+    def bad_token(url, **kw):
+        if url == AUTH:
+            return FakeResponse(200, {"access_token": "tok-abc\ninjected", "expires_in": 900})
+        return real(url, **kw)
+
+    wiz_client.requests.post = bad_token
+    with pytest.raises(wiz_client.WizAuthError) as e:
+        wiz_client.build_client()
+    assert "tok-abc" not in str(e.value)
+
+
+def test_request_errors_do_not_echo_details(fake, tmp_path):
+    real = fake.__call__
+
+    def boom(url, **kw):
+        if url == API:
+            raise wiz_client.requests.exceptions.InvalidHeader("Invalid header value 'Bearer tok-leak\\n'")
+        return real(url, **kw)
+
+    wiz_client.requests.post = boom
+    code, ev = run("scan_coverage", tmp_path)
+    assert code == 1 and "tok-leak" not in json.dumps(ev)
+    assert ev["api_failures"][0]["message"] == "InvalidHeader"
+
+
+@pytest.mark.parametrize("value", ["-1", "nan", "inf", "junk"])
+def test_bad_retry_after_is_clamped(fake, tmp_path, value):
+    fake.pages["cloudAccounts"] = [[{"id": "a", "name": "p", "cloudProvider": "AWS", "status": "CONNECTED",
+                                     "lastScannedAt": iso(0), "resourceCount": 1}]]
+    real = fake.__call__
+    state = {"n": 0}
+
+    def limited(url, **kw):
+        if url == API and state["n"] == 0:
+            state["n"] += 1
+            return FakeResponse(429, {}, {"Retry-After": value})
+        return real(url, **kw)
+
+    wiz_client.requests.post = limited
+    code, ev = run("scan_coverage", tmp_path)
+    assert code == 0, ev["api_failures"]
+
+
+def test_token_renewal_failure_mid_run_keeps_collected_rows(fake, monkeypatch):
+    client = wiz_client.build_client()
+    fake.auth_status = 500
+    client._token_expires_at = 0
+    assert client.graphql("cloudAccounts", "query { cloudAccounts(first: 1) { nodes { id } } }") is None
+    assert client.api_failures[-1]["type"] == "AuthError"
+
+
+def test_empty_page_with_next_is_a_failure(fake, tmp_path):
+    fake.pages["cloudAccounts"] = [[], [{"id": "a"}]]
+    client = wiz_client.build_client()
+    client.paginate("cloudAccounts", "query($first: Int, $after: String) { cloudAccounts(first: $first, after: $after) "
+                    "{ nodes { id } pageInfo { hasNextPage endCursor } } }", "cloudAccounts")
+    assert client.api_failures[-1]["type"] == "PaginationEmptyPage"
