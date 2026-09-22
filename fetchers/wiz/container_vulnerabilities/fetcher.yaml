@@ -1,0 +1,114 @@
+name: wiz_container_vulnerabilities
+version: 0.1.0
+description: >-
+  Summarizes open Wiz vulnerability findings on container images and running
+  containers by severity, CISA KEV exposure, fix availability and age against
+  remediation windows.
+category: wiz
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: wiz_container_vulnerabilities.json
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read-only scopes).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov) or
+      https://api.us17.app.wiz.io/graphql (commercial).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: >-
+      Token URL from Tenant Info > Authentication URL. Defaults to Wiz for Gov.
+      Commercial tenants use https://auth.app.wiz.io/oauth/token.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  page_size:
+    type: integer
+    required: false
+    env: WIZ_PAGE_SIZE
+    default: 100
+    description: Records per GraphQL page (max 500).
+  sla_critical_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_CRITICAL_DAYS
+    default: 30
+    description: Remediation window reported for CRITICAL findings.
+  sla_high_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_HIGH_DAYS
+    default: 30
+    description: Remediation window reported for HIGH findings.
+  sla_medium_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_MEDIUM_DAYS
+    default: 90
+    description: Remediation window reported for MEDIUM findings.
+  sla_low_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_LOW_DAYS
+    default: 180
+    description: Remediation window reported for LOW findings.
+  max_records:
+    type: integer
+    required: false
+    env: WIZ_MAX_RECORDS
+    default: 50000
+    description: Safety cap on records pulled. Hitting it is reported as a failure, never silent truncation.
+  vuln_statuses:
+    type: string
+    required: false
+    env: WIZ_VULN_STATUSES
+    default: OPEN
+    description: Comma-separated finding statuses to collect.
+  include_raw_findings:
+    type: boolean
+    required: false
+    env: WIZ_INCLUDE_RAW_FINDINGS
+    default: true
+    description: Include every finding in the evidence. Set false on large estates to keep only the summary.
+
+evidence_set:
+  reference_id: EVD-WIZ-CONTAINER-VULNS
+  name: Wiz Container Vulnerabilities
+  instructions: >-
+    Script: fetcher.py. Read-only service account (scope read:vulnerabilities).
+    Pages vulnerabilityFindings filtered to open status, keeps findings whose
+    vulnerable asset is a container image or container, and summarizes by
+    severity, KEV, fix availability, asset count and age against remediation
+    windows.
+  description: >-
+    Wiz container image vulnerability findings, evidencing container scanning
+    and remediation of critical CVEs.
+
+ksis:
+  - KSI-SVC-EIS

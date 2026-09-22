@@ -1,0 +1,7 @@
+---
+description: >
+  Wiz cloud security platform (CNAPP), commercial and Wiz for Government.
+  Read-only GraphQL fetchers that collect cloud account scan coverage, posture
+  issues, and host and container vulnerability findings, authenticated with a
+  Wiz service account (OAuth2 client credentials). Every fetcher is an
+  evidence fetcher; none writes to Wiz.
