@@ -195,6 +195,14 @@ class PlatformSpec:
     config_schema: Dict[str, ConfigField] = field(default_factory=dict)
     secrets: List["Secret"] = field(default_factory=list)
     passthrough_env: List[str] = field(default_factory=list)
+    #: Env vars that constitute an explicit identity CHOICE when a target sets
+    #: one (AWS_PROFILE). Setting one supersedes `credential_env` for that
+    #: invocation — see executor._drop_superseded_credentials.
+    selector_env: List[str] = field(default_factory=list)
+    #: Static credential vars a selector displaces. Listed separately from
+    #: passthrough_env because they stay passable for ambient (target-less)
+    #: collection; they are only dropped when a target names an identity.
+    credential_env: List[str] = field(default_factory=list)
     requires: "Requires" = field(default_factory=lambda: Requires())
     description: Optional[str] = None
 

@@ -31,7 +31,13 @@ from framework.contract import (
     TargetField,
     TargetInstance,
 )
-from framework.runner.executor import _apply_config, _build_env, _emit_notes, run_entry
+from framework.runner.executor import (
+    _apply_config,
+    _build_env,
+    _emit_notes,
+    _emit_shadowed,
+    run_entry,
+)
 from framework.secret_resolver import SecretResolutionError, UnsetSecretError
 
 # --------------------------------------------------------------------------- #
@@ -639,3 +645,104 @@ def test_a_raising_log_callback_does_not_fail_the_fetcher(tmp_path):
     assert result.exit_code == 0, "a healthy fetcher must survive a raising consumer"
     assert result.stdout.count("line ") == 200, "every line must still reach the record"
     assert len(seen) == 1, "forwarding stops after the consumer first raises"
+
+
+# --------------------------------------------------------------------------- #
+# Target selectors supersede static credentials (executor._build_env)
+# --------------------------------------------------------------------------- #
+
+def _aws_like_spec() -> PlatformSpec:
+    """A category shaped like fetchers/_categories/aws.yaml: static keys are
+    passable ambiently, but a target-set profile supersedes them."""
+    return PlatformSpec(
+        category="testcloud",
+        passthrough_env=["CLOUD_PROFILE", "CLOUD_ACCESS_KEY_ID", "CLOUD_SECRET_ACCESS_KEY"],
+        selector_env=["CLOUD_PROFILE"],
+        credential_env=["CLOUD_ACCESS_KEY_ID", "CLOUD_SECRET_ACCESS_KEY"],
+    )
+
+
+def _profile_fetcher(tmp_path):
+    return make_fetcher(
+        tmp_path,
+        supports_targets=True,
+        target_schema={"profile": TargetField(name="profile", type="string", required=False, env="CLOUD_PROFILE")},
+    )
+
+
+def test_target_profile_drops_ambient_static_keys(tmp_path, monkeypatch):
+    """A stale key pair in the runner's environment reaches every fetcher and
+    outranks the profile, so a correct multi-account fanout fails on every
+    target at once. A target that names an identity must win."""
+    monkeypatch.setenv("CLOUD_ACCESS_KEY_ID", "AKIASTALEKEY")
+    monkeypatch.setenv("CLOUD_SECRET_ACCESS_KEY", "stale-secret")
+    fetcher = _profile_fetcher(tmp_path)
+    target = TargetInstance(values={"profile": "Audit"}, secrets={})
+
+    env = _build_env(fetcher, ManifestEntry(use="x"), target, tmp_path, _aws_like_spec())
+
+    assert env["CLOUD_PROFILE"] == "Audit"
+    assert "CLOUD_ACCESS_KEY_ID" not in env
+    assert "CLOUD_SECRET_ACCESS_KEY" not in env
+
+
+def test_target_profile_drops_keys_declared_as_manifest_secrets(tmp_path, monkeypatch):
+    """Same rule regardless of SOURCE. Keys named in the manifest's secrets block
+    are injected by a different code path than passthrough, and were the other
+    half of the same trap."""
+    monkeypatch.setenv("SRC_KEY", "AKIASTALEKEY")
+    spec = _aws_like_spec()
+    spec.secrets = [Secret(name="access_key_id", env="CLOUD_ACCESS_KEY_ID", required=False)]
+    fetcher = _profile_fetcher(tmp_path)
+    entry = ManifestEntry(use="x", secrets={"access_key_id": "${env:SRC_KEY}"})
+    target = TargetInstance(values={"profile": "Audit"}, secrets={})
+
+    env = _build_env(fetcher, entry, target, tmp_path, spec)
+
+    assert "CLOUD_ACCESS_KEY_ID" not in env
+
+
+def test_ambient_collection_keeps_static_keys(tmp_path, monkeypatch):
+    """No target means "collect here" — the static-key path stays intact, which
+    is how local dev and non-AWS runners authenticate."""
+    monkeypatch.setenv("CLOUD_ACCESS_KEY_ID", "AKIALIVEKEY")
+    fetcher = make_fetcher(tmp_path)
+
+    env = _build_env(fetcher, ManifestEntry(use="x"), None, tmp_path, _aws_like_spec())
+
+    assert env["CLOUD_ACCESS_KEY_ID"] == "AKIALIVEKEY"
+
+
+def test_target_without_selector_keeps_static_keys(tmp_path, monkeypatch):
+    """A target that scopes only the region has not chosen an identity, so it
+    must not disturb the credential chain."""
+    monkeypatch.setenv("CLOUD_ACCESS_KEY_ID", "AKIALIVEKEY")
+    fetcher = make_fetcher(
+        tmp_path,
+        supports_targets=True,
+        target_schema={"region": TargetField(name="region", type="string", required=False, env="CLOUD_REGION")},
+    )
+    target = TargetInstance(values={"region": "us-east-2"}, secrets={})
+
+    env = _build_env(fetcher, ManifestEntry(use="x"), target, tmp_path, _aws_like_spec())
+
+    assert env["CLOUD_REGION"] == "us-east-2"
+    assert env["CLOUD_ACCESS_KEY_ID"] == "AKIALIVEKEY"
+
+
+def test_shadowed_credentials_are_reported(tmp_path, monkeypatch):
+    """A silent drop would hide that a stale key is still in the deployment,
+    waiting to break every entry whose target does not name a profile."""
+    monkeypatch.setenv("CLOUD_ACCESS_KEY_ID", "AKIASTALEKEY")
+    fetcher = _profile_fetcher(tmp_path)
+    target = TargetInstance(values={"profile": "Audit"}, secrets={})
+    shadowed: list = []
+
+    _build_env(fetcher, ManifestEntry(use="x"), target, tmp_path, _aws_like_spec(),
+               shadow_sink=shadowed)
+
+    assert shadowed == [("CLOUD_ACCESS_KEY_ID", "CLOUD_PROFILE")]
+
+    seen: list = []
+    _emit_shadowed(shadowed, seen.append)
+    assert "CLOUD_ACCESS_KEY_ID" in seen[0] and "CLOUD_PROFILE" in seen[0]
