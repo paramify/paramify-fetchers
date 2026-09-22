@@ -134,6 +134,25 @@ before spending a turn on it.
 
 Four, and they are the point of the flow. It is not designed to run unattended.
 
+**Each gate is checked by a script, not by memory:**
+
+```bash
+python .claude/skills/onboard-platform/scripts/check_onboarding.py <platform>                  # every stage
+python .claude/skills/onboard-platform/scripts/check_onboarding.py <platform> --through slate  # up to Gate 1
+```
+
+A gate is passed when the checker reports clean through its stage. It checks
+what can be decided mechanically — the approval is recorded, the collected
+count equals the true count, the unbuilt rows each have their section, no TLS
+default is off, the teardown names what it removes, the sandbox has a
+recorded fate — and reports the first stage it blocks on, which is also where
+a resumed onboarding picks up. It cannot judge whether a decision was right;
+that is still a person reading the files.
+
+It exists because the instructions alone did not hold. The first complete run
+skipped a close-out step the skill spelled out, and marked the slate complete
+anyway.
+
 **Gate 1 — after step 6, the slate.** The human cuts, adds, and reorders before
 anything is built. The approval and its date are recorded in `slate.md`; a
 slate with no recorded approval has not passed.
@@ -246,6 +265,12 @@ attached. By hand:
    ```
 6. Author its validator and prove it fails on a non-compliant artifact. Only
    then build the rest.
+
+The checker works just as well without an agent — run it at each gate. The
+conventions it reads (the three gate lines at the top of each
+`notes/<fetcher>.md`, the `## <State> — <category>/<fetcher>` headings on the
+slate, `fixed in:` on every correction) are documented in
+`.claude/skills/onboard-platform/references/state.md`.
 
 ## Non-goals
 

@@ -43,6 +43,28 @@ restate them.
 | `references/provisioning.md` | Step 5 — provisioning, cost, teardown-before-seed |
 | `references/state.md` | Any step — the `.onboarding/<platform>/` file shapes |
 
+## The gates are checked, not remembered
+
+Every rule below that can be decided mechanically — a decision recorded, two
+counts equal, a section present, a default not off — is checked by one script:
+
+```bash
+python .claude/skills/onboard-platform/scripts/check_onboarding.py $PLATFORM                    # all stages
+python .claude/skills/onboard-platform/scripts/check_onboarding.py $PLATFORM --through slate    # up to Gate 1
+```
+
+**A gate is not passed until the checker reports clean through its stage.**
+Run it at every gate below, fix every FAIL, and read every WARN. This exists
+because the instructions alone did not hold: the first complete run skipped a
+close-out step the skill spelled out explicitly, and marked the slate COMPLETE
+anyway. Prose tells the agent what matters; the checker catches it when the
+agent is sure it's done.
+
+It checks that things were **recorded**, not that they were **right**. A clean
+run means every decision is on disk in a checkable shape — whether the claim was
+the right one, or the teardown the right call, is still read and judged by a
+person. The conventions it reads are in `references/state.md`.
+
 ## Golden rules
 
 - **Success is populated *and complete* evidence, not exit 0.** Non-empty
@@ -87,7 +109,9 @@ mkdir -p .onboarding/$PLATFORM
 Gitignored, one directory per platform onboarding, alongside the existing
 `.paramify/` local-state convention. It survives across sessions — if it
 already exists, **read what is there and resume** rather than starting over.
-Say which step you are resuming at. File shapes are in `references/state.md`.
+Say which step you are resuming at — run the checker with no `--through`, and
+its "Clean through:" line tells you: resume at the first stage it blocks on.
+File shapes are in `references/state.md`.
 
 ---
 
@@ -306,8 +330,10 @@ Record the tenant/account id, the cost estimate, the teardown path, and that
 `verified` block in `.onboarding/$PLATFORM/sandbox.json`. That file is the
 approved-sandbox registry: the seed step in step 7 refuses any tenant not in it.
 
-> **GATE — every seeder execution is approved individually.** Not the plan once,
-> then a free hand. Each `terraform apply`, each seed script, each time.
+> **GATE 2 — every seeder execution is approved individually.** Not the plan
+> once, then a free hand. Each `terraform apply`, each seed script, each time.
+> Before moving to step 6: `check_onboarding.py $PLATFORM --through sandbox`
+> reports clean.
 
 ---
 
@@ -386,7 +412,10 @@ Fanout especially: **decide it here even when you are unsure, and prefer
 already built, while an unused `targets:` on a single-deployment org costs
 nothing.
 
-> **GATE 1 — the human cuts, adds, and orders.** Present the slate and stop.
+> **GATE 1 — the human cuts, adds, and orders.** Run
+> `check_onboarding.py $PLATFORM --through slate` and fix what it flags *before*
+> presenting, so the human is judging the plan rather than its formatting.
+> Present the slate and stop.
 > Nothing is built until they have edited it. Record the approval and its date
 > in `slate.md`; a slate with no recorded approval has not passed this gate.
 >
@@ -461,12 +490,27 @@ whole approach works before it is repeated N times.
     unexpectedly passes a tenant you know is broken is the worst thing to
     clone.
 
+**Record the gate facts as three lines at the top of `notes/<short_name>.md`**,
+so they are checkable rather than buried in prose:
+
+```
+completeness: collected=133 true=133 source=measured.md true counts (paging.total)
+predicted_verdict: FAIL
+real_verdict: FAIL
+```
+
+One `completeness:` line per collection the fetcher reads. Where there is
+genuinely nothing to count — a single settings object — write
+`completeness: n/a <why>`, which the checker surfaces for a human rather than
+passing silently. If the verdict surprised you and you resolved it, add
+`surprise_resolved: <what it turned out to be>`.
+
 > **GATE 3 — fetcher #1 produced populated, complete evidence, and a validator
 > that was proven to fail — whose verdict on the real evidence matched the
 > prediction.** The slate does not fan out until all of that is true. If the
 > evidence is empty or short, the problem is the sandbox (step 5) or the
 > research (step 4) — go back rather than fanning out and discovering it eight
-> more times.
+> more times. `check_onboarding.py $PLATFORM --through build` reports clean.
 
 ---
 
@@ -478,9 +522,12 @@ eight fetchers to fix instead of one.
 
 Each subagent gets `claim.md`, `research.md`, `sandbox.json`, and its own row
 from `slate.md`. It writes its build notes to
-`.onboarding/$PLATFORM/notes/<fetcher>.md` and updates **only its own row's
+`.onboarding/$PLATFORM/notes/<fetcher>.md` — **starting with the three gate
+lines from step 7**, which go in the brief verbatim — and updates **only its own row's
 status** in `slate.md` — built, or bailed with a one-line diagnosis pointing at
-its notes file. Read the status column between fetchers; a second failure with
+its notes file. Between fetchers, run `check_onboarding.py $PLATFORM --through
+build`: a sibling that skipped its completeness check or cloned a helper shows
+up there, before the next one copies it. Read the status column; a second failure with
 the same cause is a signal to stop the loop and fix the cause.
 
 > **`slate.md` is a plan, not a build log.** Keep it to the header, the status
@@ -543,16 +590,26 @@ Then verify the registry gate:
 1. **Check it, don't remember it.** Is the sandbox actually still running?
    (`docker ps`, the cloud console, whatever `provisioned_by` says.) What does
    it cost per month right now — not what step 5 estimated?
-2. **Ask, with `teardown.sh` in hand.** Run it now, or leave it up? Leaving it
+2. **Reconcile the state files against what was learned.** Reread
+   `sandbox.json`, `claim.md` and `slate.md` against every correction in
+   `measured.md` and every `notes/` file. Anything an earlier file still says
+   that a later measurement overturned gets fixed where it lives, and the
+   correction in `measured.md` names the file with `fixed in: <file>`. The
+   first complete run corrected a measurement in `measured.md` and left
+   `sandbox.json` saying the opposite — "alerting requires seeding" beside
+   "seeding not required". Nothing downstream could have known which to trust.
+3. **Ask, with `teardown.sh` in hand.** Run it now, or leave it up? Leaving it
    up is often right — a later session resumes against it, and rebuilding has
    its own cost. But it is the user's call, not yours, and it is never left
    unsaid.
-3. **Record the answer in `sandbox.json`** as `teardown_decision`:
+4. **Record the answer in `sandbox.json`** as `teardown_decision`:
    `{"decision": "torn down" | "left running", "by": ..., "at": ..., "why": ...,
    "review_by": <date>}`. A left-running sandbox gets a `review_by` date — the
    trial expiry, if there is one. The next session reads this instead of
    guessing, and "left running on purpose until 11-21" is a very different
    state from "nobody checked".
+5. **Run `check_onboarding.py $PLATFORM`** — every stage — and it reports
+   clean. It also lists the onboarding files still uncommitted — see below.
 
 Then report: what was built; what was bailed, parked, cut, or reassigned, and
 why; the coverage delta from `paramify ksi`; each fetcher's real-evidence

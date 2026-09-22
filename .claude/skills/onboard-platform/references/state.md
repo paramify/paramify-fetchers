@@ -102,6 +102,7 @@ Cloud; every line inherits that gap.
 ## Corrected
 - research said `/services/saved/searches` lists every saved search. It
   returns 7; `/servicesNS/-/-/saved/searches` returns 133.
+  fixed in: sandbox.json (verified.empty_surface), research.md
 
 ## Closed an UNVERIFIED
 - envelope shape `{entry:[{name, content{}, acl{}}], paging:{total}}` — as
@@ -118,6 +119,11 @@ one the fetcher uses — otherwise both undercount together and agree.
 When a later step overturns a line here, **edit this file and mark it
 corrected**. Noting the correction somewhere newer leaves two files that
 disagree, and a subagent handed the old one cannot know.
+
+**Every `## Corrected` bullet ends with `fixed in:`** naming each file that
+held the superseded fact and has now been fixed — or `fixed in: n/a (only
+here)`. It is the one part of "correct it where it lives" a script can check:
+the checker warns on any correction that doesn't say where it was fixed.
 
 ## slate.md
 
@@ -156,14 +162,50 @@ Not attempted. Needs an Enterprise-tier account; the sandbox is Standard.
 nothing on this slate proves it.
 ```
 
-**Bailed and parked are different states.** Bailed was attempted and failed;
-parked was never attempted because the sandbox cannot prove it. A park always
-carries what would unpark it, and — when it is the only row that covered part
-of the claim — a standing consequence saying so.
+**Bailed and parked are different states**, and so are cut and reassigned —
+see step 6 for all four. Bailed was attempted and failed; parked was never
+attempted because the sandbox cannot prove it. A park always carries what would
+unpark it, and — when it is the only row that covered part of the claim — a
+standing consequence saying so.
+
+**Each unbuilt row gets a section headed by its state and its fetcher**:
+`## Bail — <category>/<fetcher>`, `## Park — …`, `## Cut — …`,
+`## Reassigned — …`. The checker finds the section by exactly that — a
+heading starting with the state word and naming the fetcher — so a
+reassignment written up under "The archival half is not a Splunk fetcher at
+all" reads to it as missing. The heading can carry more after the name; it
+cannot lead with something else.
 
 **A slate with no recorded approval has not passed Gate 1.** The approval line
 is how a later session, or a subagent, can tell the difference between a
 proposal and a plan.
+
+## notes/<fetcher>.md
+
+One per fetcher, written during its build (step 7 for #1, step 8 for the
+rest). Mostly free-form build detail — endpoints called, field-shape surprises,
+decisions a sibling should copy. **But it opens with the gate facts**, one per
+line, because Gate 3 is decided by them and the checker reads them:
+
+```
+completeness: collected=133 true=133 source=measured.md true counts (paging.total)
+completeness: collected=13 true=13 source=GET data/indexes paging.total
+predicted_verdict: FAIL
+real_verdict: FAIL
+surprise_resolved: <only if predicted and real differed — what it turned out to be>
+```
+
+- **`completeness:`** — one per collection the fetcher reads. `collected` is
+  what the fetcher emitted; `true` is the independent count from `measured.md`.
+  They must be equal. `completeness: n/a <why>` is allowed where there is
+  nothing to count, and is shown to a human rather than passed.
+- **`predicted_verdict:` / `real_verdict:`** — the set verdict you expected
+  from `measured.md`, written *before* scoring, then the verdict the real
+  evidence got. A mismatch blocks Gate 3 until `surprise_resolved:` explains it.
+
+Written as plain lines rather than prose because prose was what the second run
+produced — "**Real evidence: set verdict FAIL.**" in paragraph four — and prose
+is not something a gate can be checked against.
 
 ## sandbox.json
 
@@ -228,7 +270,9 @@ close-out, which is the moment someone decides whether the sandbox stays up.
 ## Resuming
 
 If `.onboarding/<platform>/` already exists, read it and resume — do not start
-over. Which step you are at reads off the files:
+over. `check_onboarding.py <platform>` reports "Clean through: <stage>", and the
+first stage it blocks on is where to resume. By hand, the step reads off the
+files:
 
 | Present | Resume at |
 |---|---|
