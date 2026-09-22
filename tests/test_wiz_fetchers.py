@@ -86,6 +86,9 @@ class FakeWiz:
         if root in self.errors:
             return FakeResponse(200, {"data": None, "errors": [{"message": self.errors[root]}]})
         filter_by = (json.get("variables") or {}).get("filterBy") or {}
+
+        def keep(n):
+            return all(n.get(k) == filter_by[k] for k in ("result", "severity", "status") if k in filter_by)
         if root == "hostConfigurationRules":
             ids = filter_by.get("id") or []
             nodes = [{"id": i, "securitySubCategories": [{"category": {"framework": {"name": n}}} for n in self.rules[i]]}
@@ -93,12 +96,17 @@ class FakeWiz:
             return FakeResponse(200, {"data": {root: {"nodes": nodes,
                                                       "pageInfo": {"hasNextPage": False, "endCursor": None}}}})
         pages = self.pages.get(root, [[]])
+        if root == "hostConfigurationRuleAssessments" and "totalCount" not in query:
+            # Wiz filters server-side, so a filtered slice has no empty pages.
+            pages = [[n for n in page if keep(n)] for page in pages]
+            pages = [page for page in pages if page] or [[]]
         after = json["variables"].get("after")
         idx = int(after) if after else 0
         has_next = idx + 1 < len(pages)
+        if root == "hostConfigurationRuleAssessments" and "totalCount" in query:
+            total = sum(1 for page in pages for n in page if keep(n))
+            return FakeResponse(200, {"data": {root: {"totalCount": total}}})
         nodes = pages[idx]
-        if root == "hostConfigurationRuleAssessments" and "result" in filter_by:
-            nodes = [n for n in nodes if n.get("result") == filter_by["result"]]
         return FakeResponse(200, {"data": {root: {
             "nodes": nodes,
             "pageInfo": {"hasNextPage": has_next, "endCursor": str(idx + 1) if has_next else None},
@@ -479,3 +487,29 @@ def test_host_failure_message_does_not_claim_empty(fake, tmp_path):
     fake.errors["hostConfigurationRuleAssessments"] = "oops! an internal error has occurred."
     code, ev = run("host_configuration_posture", tmp_path)
     assert code == 1 and "does NOT mean" in ev["message"]
+
+
+def test_host_unreadable_assessment_is_isolated_and_reported(fake, tmp_path):
+    # Wiz errors on any page that would include h3 (FAIL, HIGH, OPEN), at any size or query.
+    fake.pages["hostConfigurationRuleAssessments"] = [
+        [_host(1, "PASS", "HIGH", RHEL_STIG, fake=fake), _host(2, "FAIL", "LOW", RHEL_STIG, fake=fake)],
+        [_host(3, "FAIL", "HIGH", RHEL_STIG, fake=fake), _host(4, "FAIL", "MEDIUM", RHEL_STIG, fake=fake)],
+    ]
+    real = fake.__call__
+
+    def poison(url, data=None, json=None, headers=None, timeout=None):
+        resp = real(url, data=data, json=json, headers=headers, timeout=timeout)
+        nodes = (((resp._body or {}).get("data") or {}).get("hostConfigurationRuleAssessments") or {}).get("nodes") or []
+        if any(n.get("id") == "h3" for n in nodes):
+            return FakeResponse(200, {"data": None, "errors": [{"message": "oops! an internal error has occurred."}]})
+        return resp
+
+    wiz_client.requests.post = poison
+    code, ev = run("host_configuration_posture", tmp_path)
+    sc = ev["scope"]
+    assert code == 1                                   # incomplete evidence never passes as complete
+    assert ev["api_failures"][-1]["type"] == "WizUnreadableAssessments"
+    assert sc["assessments_reported_by_wiz"] == 4 and sc["assessments_in_tenant_query"] == 3
+    assert sc["assessments_not_read"] == 1
+    assert [u["filter"] for u in sc["unreadable_slices"]] == [{"result": "FAIL", "severity": "HIGH", "status": "OPEN"}]
+    assert ev["analysis"]["assessments_evaluated"] == 3   # h4 recovered by splitting on severity

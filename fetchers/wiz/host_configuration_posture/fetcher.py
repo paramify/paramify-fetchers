@@ -76,6 +76,20 @@ query WizHostConfigurationRuleBenchmarks($first: Int, $after: String, $filterBy:
 
 RESULTS = ["PASS", "FAIL", "ERROR", "NOT_ASSESSED"]
 
+COUNT_QUERY = """
+query WizHostConfigurationAssessmentCount($filterBy: HostConfigurationRuleAssessmentFilters) {
+  hostConfigurationRuleAssessments(first: 1, filterBy: $filterBy) { totalCount }
+}
+"""
+
+# When a slice still fails after page shrinking and lighter queries, it is
+# split again on these filters (values from the tenant's schema) so that one
+# assessment Wiz cannot serve costs as few neighbouring rows as possible.
+SPLITS = [
+    ("severity", ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL"]),
+    ("status", ["OPEN", "IN_PROGRESS", "RESOLVED", "REJECTED"]),
+]
+
 SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL", "NONE"]
 
 
@@ -191,21 +205,75 @@ def summarize(rows: List[Dict[str, Any]], sample_size: int = 25) -> Dict[str, An
     }
 
 
+def total_count(client: WizClient, filter_by: Dict[str, Any]) -> Any:
+    """Wiz's own count for a filter, so the evidence can state what was not read.
+    Best effort: a failed count is not a collection failure."""
+    before = len(client.api_failures)
+    data = client.graphql("hostConfigurationRuleAssessments", COUNT_QUERY, {"filterBy": filter_by})
+    del client.api_failures[before:]
+    return ((data or {}).get("hostConfigurationRuleAssessments") or {}).get("totalCount")
+
+
+def fetch_slice(client: WizClient, filter_by: Dict[str, Any], depth: int, cap: int,
+                found: Dict[str, Dict[str, Any]], unreadable: List[Dict[str, Any]]) -> None:
+    """
+    Read one filter slice into ``found`` (keyed by assessment id). If Wiz still
+    fails on it, keep what came back, split the slice on the next filter in
+    SPLITS and read each part; only a slice that cannot be split further is
+    recorded as unreadable.
+    """
+    before = len(client.api_failures)
+    nodes = client.paginate("hostConfigurationRuleAssessments", ASSESSMENTS_QUERY,
+                            "hostConfigurationRuleAssessments", variables={"filterBy": dict(filter_by)},
+                            max_records=cap, fallback_queries=FALLBACK_QUERIES)
+    for n in nodes:
+        if n.get("id"):
+            found.setdefault(n["id"], n)
+    new_failures = client.api_failures[before:]
+    if not new_failures:
+        return
+    # Only Wiz's own "internal error" is worth routing around; auth, rate
+    # limits, caps and cursor problems are reported exactly as they happened.
+    hard = [f for f in new_failures if "internal error" in str(f.get("message", "")).lower()]
+    if len(hard) != len(new_failures) or depth >= len(SPLITS):
+        if len(hard) == len(new_failures):
+            del client.api_failures[before:]
+            unreadable.append({"filter": dict(filter_by), "records_read_before_error": len(nodes),
+                               "wiz_errors": [f.get("message") for f in hard][:3]})
+        return  # caps, stalled cursors and the like stay as ordinary failures
+    del client.api_failures[before:]
+    field, values = SPLITS[depth]
+    logger.warning("slice %s kept failing; splitting on %s", filter_by, field)
+    for v in values:
+        fetch_slice(client, {**filter_by, field: v}, depth + 1, cap, found, unreadable)
+
+
 def body(client: WizClient) -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     needles = [x.lower() for x in env_list("WIZ_HOST_BENCHMARK_MATCH", ["DISA", "STIG"]) if x]
     client.page_size = min(client.page_size, env_int("WIZ_HOST_PAGE_SIZE", 25))
     cap = env_int("WIZ_MAX_RECORDS", 50000)
 
+    expected = total_count(client, {})
     # One pass per result value, so a page Wiz cannot serve only affects that slice.
-    raw: List[Dict[str, Any]] = []
+    found: Dict[str, Dict[str, Any]] = {}
+    unreadable: List[Dict[str, Any]] = []
     by_result_fetched: Dict[str, int] = {}
     for result in RESULTS:
-        part = client.paginate("hostConfigurationRuleAssessments", ASSESSMENTS_QUERY,
-                               "hostConfigurationRuleAssessments", variables={"filterBy": {"result": result}},
-                               max_records=cap, fallback_queries=FALLBACK_QUERIES)
-        by_result_fetched[result] = len(part)
-        raw.extend(part)
+        before = len(found)
+        fetch_slice(client, {"result": result}, 0, cap, found, unreadable)
+        by_result_fetched[result] = len(found) - before
+    raw = list(found.values())
+    missing = (expected - len(raw)) if expected is not None else None
+    if unreadable:
+        client.api_failures.append({
+            "operation": "hostConfigurationRuleAssessments",
+            "type": "WizUnreadableAssessments",
+            "message": (f"Wiz returned an internal error for {len(unreadable)} filter slice(s) even at the "
+                        f"smallest page and lightest query; {missing if missing is not None else 'an unknown number of'} "
+                        f"of {expected if expected is not None else '?'} assessments could not be read. "
+                        "See scope.unreadable_slices for the filters and Wiz request ids."),
+        })
 
     rule_ids = sorted({(a.get("rule") or {}).get("id") for a in raw if (a.get("rule") or {}).get("id")})
     lookup_on = os.environ.get("WIZ_HOST_RULE_LOOKUP", "true").strip().lower() not in {"false", "0", "no"}
@@ -238,7 +306,10 @@ def body(client: WizClient) -> Dict[str, Any]:
         scope={
             "benchmark_match": needles,
             "assessments_in_tenant_query": len(raw),
+            "assessments_reported_by_wiz": expected,
+            "assessments_not_read": missing,
             "assessments_by_result_fetched": by_result_fetched,
+            "unreadable_slices": unreadable,
             "assessments_by_benchmark": dict(all_benchmarks.most_common()),
             "pages_served_by_lighter_query": client.fallback_pages,
             "lighter_query_note": ("Pages Wiz could not serve with host type included were re-read without it; "
