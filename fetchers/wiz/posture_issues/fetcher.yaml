@@ -1,0 +1,115 @@
+name: wiz_posture_issues
+version: 0.1.0
+description: >-
+  Summarizes open Wiz cloud-configuration and toxic-combination Issues by
+  severity, age against remediation windows, and ticket linkage, plus issues
+  resolved in a recent window.
+category: wiz
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: wiz_posture_issues.json
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read-only scopes).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov) or
+      https://api.us17.app.wiz.io/graphql (commercial).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: >-
+      Token URL from Tenant Info > Authentication URL. Defaults to Wiz for Gov.
+      Commercial tenants use https://auth.app.wiz.io/oauth/token.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  page_size:
+    type: integer
+    required: false
+    env: WIZ_PAGE_SIZE
+    default: 100
+    description: Records per GraphQL page (max 500).
+  sla_critical_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_CRITICAL_DAYS
+    default: 30
+    description: Remediation window reported for CRITICAL findings.
+  sla_high_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_HIGH_DAYS
+    default: 30
+    description: Remediation window reported for HIGH findings.
+  sla_medium_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_MEDIUM_DAYS
+    default: 90
+    description: Remediation window reported for MEDIUM findings.
+  sla_low_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_LOW_DAYS
+    default: 180
+    description: Remediation window reported for LOW findings.
+  max_records:
+    type: integer
+    required: false
+    env: WIZ_MAX_RECORDS
+    default: 50000
+    description: Safety cap on records pulled. Hitting it is reported as a failure, never silent truncation.
+  issue_types:
+    type: string
+    required: false
+    env: WIZ_ISSUE_TYPES
+    default: CLOUD_CONFIGURATION,TOXIC_COMBINATION
+    description: Comma-separated Wiz issue types. THREAT_DETECTION also needs read:threat_issues.
+  resolved_window_days:
+    type: integer
+    required: false
+    env: WIZ_RESOLVED_WINDOW_DAYS
+    default: 90
+    description: Look-back window for resolved issues and time-to-resolve.
+
+evidence_set:
+  reference_id: EVD-WIZ-POSTURE-ISSUES
+  name: Wiz Posture Issues
+  instructions: >-
+    Script: fetcher.py. Read-only service account (scope read:issues). Pages
+    issuesV2 twice: open issues (status OPEN, IN_PROGRESS) and issues resolved
+    within the window. Summarizes open issues by severity, type and age against
+    remediation windows, overdue due dates, the share of CRITICAL/HIGH issues
+    linked to a service ticket, top rules, and median days to resolve.
+  description: >-
+    Wiz posture issues, evidencing that misconfigurations are detected
+    continuously, prioritized by severity and tracked to closure.
+
+ksis:
+  - KSI-CNA-EIS
+  - KSI-SVC-EIS
