@@ -62,6 +62,7 @@ class FakeWiz:
         self.graphql_calls: List[Dict[str, Any]] = []
         self.fail_once_429 = False
         self.health_count = 0
+        self.rules: Dict[str, List[str]] = {}   # host rule id -> framework names
 
     def __call__(self, url: str, data: Any = None, json: Any = None, headers: Any = None, timeout: Any = None):
         if url == AUTH:
@@ -80,15 +81,26 @@ class FakeWiz:
         if "systemHealthIssues(" in query:
             return FakeResponse(200, {"data": {"systemHealthIssues": {"totalCount": self.health_count}}})
         root = next(r for r in ("cloudAccounts", "connectors", "issuesV2", "vulnerabilityFindings", "securityFrameworks",
-                                "configurationFindings", "hostConfigurationRuleAssessments") if r + "(" in query)
+                                "configurationFindings", "hostConfigurationRuleAssessments", "hostConfigurationRules")
+                    if r + "(" in query)
         if root in self.errors:
             return FakeResponse(200, {"data": None, "errors": [{"message": self.errors[root]}]})
+        filter_by = (json.get("variables") or {}).get("filterBy") or {}
+        if root == "hostConfigurationRules":
+            ids = filter_by.get("id") or []
+            nodes = [{"id": i, "securitySubCategories": [{"category": {"framework": {"name": n}}} for n in self.rules[i]]}
+                     for i in ids if i in self.rules]
+            return FakeResponse(200, {"data": {root: {"nodes": nodes,
+                                                      "pageInfo": {"hasNextPage": False, "endCursor": None}}}})
         pages = self.pages.get(root, [[]])
         after = json["variables"].get("after")
         idx = int(after) if after else 0
         has_next = idx + 1 < len(pages)
+        nodes = pages[idx]
+        if root == "hostConfigurationRuleAssessments" and "result" in filter_by:
+            nodes = [n for n in nodes if n.get("result") == filter_by["result"]]
         return FakeResponse(200, {"data": {root: {
-            "nodes": pages[idx],
+            "nodes": nodes,
             "pageInfo": {"hasNextPage": has_next, "endCursor": str(idx + 1) if has_next else None},
         }}})
 
@@ -375,33 +387,76 @@ def test_cloud_config_10k_cap_flagged(fake, tmp_path, monkeypatch):
 # --- host configuration posture --------------------------------------------
 
 
-def _host(i, result, sev, bench, host="vm-1", age=2):
+def _host(i, result, sev, bench, host="vm-1", age=2, short="x", fake=None):
+    if fake is not None and bench:
+        fake.rules[f"hr{i}"] = [bench]
     return {"id": f"h{i}", "result": result, "severity": sev, "status": "OPEN" if result == "FAIL" else "RESOLVED",
             "firstSeen": iso(age), "analyzedAt": iso(0),
-            "rule": {"id": f"hr{i}", "name": f"host rule {i}", "shortName": "x", "externalId": f"V-{i}",
-                     "securitySubCategories": [{"category": {"framework": {"name": bench}}}]},
+            "rule": {"id": f"hr{i}", "name": f"host rule {i}", "shortName": short, "externalId": f"V-{i}"},
             "resource": {"id": host, "name": host, "type": "VIRTUAL_MACHINE"}}
 
 
+RHEL_STIG = "DISA Red Hat Enterprise Linux 9 STIG Benchmark v002.009"
+
+
 def test_host_config_filters_to_disa(fake, tmp_path):
-    rhel = "DISA Red Hat Enterprise Linux 9 STIG Benchmark v002.009"
     fake.pages["hostConfigurationRuleAssessments"] = [[
-        _host(1, "PASS", "HIGH", rhel), _host(2, "FAIL", "HIGH", rhel, age=40), _host(3, "FAIL", "LOW", rhel, host="vm-2"),
-        _host(4, "FAIL", "HIGH", "CIS Red Hat Enterprise Linux 9 Benchmark"),
+        _host(1, "PASS", "HIGH", RHEL_STIG, fake=fake), _host(2, "FAIL", "HIGH", RHEL_STIG, age=40, fake=fake),
+        _host(3, "FAIL", "LOW", RHEL_STIG, host="vm-2", fake=fake),
+        _host(4, "FAIL", "HIGH", "CIS Red Hat Enterprise Linux 9 Benchmark", fake=fake),
     ]]
     code, ev = run("host_configuration_posture", tmp_path)
     a = ev["analysis"]
-    assert code == 0
+    assert code == 0, ev["api_failures"]
     assert ev["scope"]["assessments_in_tenant_query"] == 4
-    assert ev["scope"]["assessments_by_benchmark"] == {rhel: 3, "CIS Red Hat Enterprise Linux 9 Benchmark": 1}
+    assert ev["scope"]["assessments_by_result_fetched"] == {"PASS": 1, "FAIL": 3, "ERROR": 0, "NOT_ASSESSED": 0}
+    assert ev["scope"]["assessments_by_benchmark"] == {RHEL_STIG: 3, "CIS Red Hat Enterprise Linux 9 Benchmark": 1}
     assert a["assessments_evaluated"] == 3 and a["hosts_assessed"] == 2
-    assert a["benchmarks"][rhel]["pass_rate_pct"] == 33.3
+    assert a["benchmarks"][RHEL_STIG]["pass_rate_pct"] == 33.3
     assert a["open_failures_past_window_by_severity"] == {"HIGH": 1}
+    # the assessments query no longer asks for the nested framework mapping
+    host_queries = [c["query"] for c in fake.graphql_calls if "hostConfigurationRuleAssessments(" in c["query"]]
+    assert host_queries and all("securitySubCategories" not in q for q in host_queries)
+
+
+def test_host_benchmark_falls_back_to_short_name(fake, tmp_path):
+    fake.errors["hostConfigurationRules"] = "Field 'id' has wrong type"
+    fake.pages["hostConfigurationRuleAssessments"] = [[
+        _host(1, "FAIL", "HIGH", None, short="RedHatEnterpriseLinux8.DISA.STIG.V1R12/RHEL-08-010010"),
+        _host(2, "PASS", "LOW", None, short="RedHatEnterpriseLinux5.CIS.V2.2.0.1/1.1.14"),
+    ]]
+    code, ev = run("host_configuration_posture", tmp_path)
+    assert code == 0, ev["api_failures"]     # a failed lookup never fails the run
+    assert ev["scope"]["rule_lookup_errors"]
+    assert ev["scope"]["benchmark_source"] == "rule shortName prefix"
+    assert ev["scope"]["assessments_by_benchmark"] == {
+        "RedHatEnterpriseLinux8.DISA.STIG.V1R12": 1, "RedHatEnterpriseLinux5.CIS.V2.2.0.1": 1}
+    assert ev["analysis"]["assessments_evaluated"] == 1
+    # the lookup stops after its first outright failure instead of repeating it
+    assert sum(1 for c in fake.graphql_calls if "hostConfigurationRules(" in c["query"]) <= wiz_client.MAX_RETRIES + 3
+
+
+def test_host_page_recovered_with_lighter_query(fake, tmp_path):
+    fake.pages["hostConfigurationRuleAssessments"] = [[_host(1, "PASS", "HIGH", RHEL_STIG, fake=fake)],
+                                                      [_host(2, "PASS", "HIGH", RHEL_STIG, fake=fake)]]
+    real = fake.__call__
+
+    def heavy_fails(url, data=None, json=None, headers=None, timeout=None):
+        # page 2 fails whenever the host type is requested, at any page size
+        if url == API and json["variables"].get("after") == "1" and "resource { id name type }" in json["query"]:
+            return FakeResponse(200, {"data": None, "errors": [{"message": "oops! an internal error has occurred."}]})
+        return real(url, data=data, json=json, headers=headers, timeout=timeout)
+
+    wiz_client.requests.post = heavy_fails
+    code, ev = run("host_configuration_posture", tmp_path)
+    assert code == 0, ev["api_failures"]
+    assert ev["analysis"]["assessments_evaluated"] == 2
+    assert ev["scope"]["pages_served_by_lighter_query"] == 1
 
 
 def test_internal_error_is_retried_then_page_shrinks(fake, tmp_path, monkeypatch):
-    rhel = "DISA Red Hat Enterprise Linux 9 STIG Benchmark v002.009"
-    fake.pages["hostConfigurationRuleAssessments"] = [[_host(1, "PASS", "HIGH", rhel)], [_host(2, "FAIL", "HIGH", rhel)]]
+    fake.pages["hostConfigurationRuleAssessments"] = [[_host(1, "PASS", "HIGH", RHEL_STIG, fake=fake)],
+                                                      [_host(2, "PASS", "HIGH", RHEL_STIG, fake=fake)]]
     real = fake.__call__
     state = {"bad": 0}
 
@@ -417,6 +472,7 @@ def test_internal_error_is_retried_then_page_shrinks(fake, tmp_path, monkeypatch
     assert code == 0, ev["api_failures"]
     assert ev["analysis"]["assessments_evaluated"] == 2
     assert state["bad"] == wiz_client.MAX_RETRIES + 1   # retried at 25, then shrank to 12
+    assert ev["scope"]["pages_served_by_lighter_query"] == 0
 
 
 def test_host_failure_message_does_not_claim_empty(fake, tmp_path):
