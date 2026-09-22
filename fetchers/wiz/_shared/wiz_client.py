@@ -211,6 +211,7 @@ class WizClient:
         self._token_expires_at = 0.0
         self._last_request_at = 0.0
         self.api_failures: List[Dict[str, Any]] = []
+        self.fallback_pages = 0
         self.request_count = 0
         self.token_lifetime_seconds: Optional[int] = None
 
@@ -384,6 +385,7 @@ class WizClient:
         root: str,
         variables: Optional[Dict[str, Any]] = None,
         max_records: Optional[int] = None,
+        fallback_queries: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Walk a Relay connection (``first``/``after`` + ``pageInfo``) and return
@@ -393,6 +395,13 @@ class WizClient:
         as failures: a truncated list that reports success looks exactly like a
         small healthy estate, which is the most dangerous shape a compliance
         error can take.
+
+        ``fallback_queries`` are lighter versions of ``query`` (same root, fewer
+        nested fields). When a page still fails at the smallest page size, each
+        fallback is tried for that same page before giving up, and the next
+        page goes back to the full query. Pages served by a fallback are
+        counted in ``fallback_pages`` so the evidence can say which rows are
+        missing detail.
         """
         nodes: List[Dict[str, Any]] = []
         after: Optional[str] = None
@@ -415,7 +424,20 @@ class WizClient:
                     size = max(MIN_PAGE_SIZE, size // 2)
                     logger.warning("%s failed; retrying the same page with first=%d", operation, size)
                     continue
-                return nodes
+                for fallback in fallback_queries or []:
+                    logger.warning("%s failed at first=%d; retrying the same page with a lighter query",
+                                   operation, size)
+                    fb_before = len(self.api_failures)
+                    data = self.graphql(operation, fallback, page_vars)
+                    if data is not None:
+                        # The page was recovered; drop the failures that led here.
+                        del self.api_failures[failures_before:]
+                        self.fallback_pages += 1
+                        break
+                    del self.api_failures[fb_before:]  # keep only the full query's failure
+                if data is None:
+                    return nodes
+                size = self.page_size
             conn = data.get(root) or {}
             page = conn.get("nodes") or []
             nodes.extend(page)

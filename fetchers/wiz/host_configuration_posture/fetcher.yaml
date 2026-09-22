@@ -94,19 +94,30 @@ config_schema:
     type: string
     required: false
     env: WIZ_HOST_BENCHMARK_MATCH
-    default: DISA
+    default: DISA,STIG
     description: >-
-      Case-insensitive text a benchmark name must contain to be included, e.g.
-      "DISA" for DISA STIG benchmarks or "CIS" for CIS benchmarks.
+      Comma-separated, case-insensitive text. An assessment is kept when its
+      benchmark name or rule short name contains any of them, e.g. "DISA,STIG"
+      for DISA STIG benchmarks or "CIS" for CIS benchmarks.
+  host_rule_lookup:
+    type: boolean
+    required: false
+    env: WIZ_HOST_RULE_LOOKUP
+    default: true
+    description: >-
+      Look up each assessed rule's Wiz framework names in a second, read-only
+      query. Best effort: if it fails the benchmark comes from the rule short
+      name and the run still succeeds.
 
 evidence_set:
   reference_id: EVD-WIZ-HOST-CONFIG-POSTURE
   name: Wiz Host Configuration Posture (OS STIG)
   instructions: >-
     Script: fetcher.py. Read-only service account (scope
-    read:host_configuration). Pages hostConfigurationRuleAssessments with each
-    rule's benchmark mapping, keeps assessments whose benchmark name matches the
-    configured text (default DISA), and summarizes pass rate per benchmark and
+    read:host_configuration). Pages hostConfigurationRuleAssessments once per
+    result value, looks up each rule's benchmark, keeps assessments whose
+    benchmark or rule short name matches the configured text (default
+    DISA,STIG), and summarizes pass rate per benchmark and
     per host, open failures by severity and age, and top failing rules. Counts
     every assessed benchmark so none is dropped silently.
   description: >-
