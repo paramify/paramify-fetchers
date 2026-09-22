@@ -49,3 +49,14 @@ Per-fetcher settings (remediation windows, statuses, look-back) are listed by
 - DISA STIG benchmarks in Wiz are operating-system benchmarks. Cloud
   control-plane checks map to NIST 800-53 / FedRAMP, which is why the two
   configuration fetchers default to different frameworks.
+
+## Security
+
+- Credentials are only sent to Wiz: `WIZ_AUTH_URL` must be one of Wiz's token
+  endpoints and `WIZ_API_ENDPOINT_URL` must be `https://api.<dc>.app.wiz.us` or
+  `.wiz.io`. A trusted test double needs `WIZ_ALLOW_CUSTOM_ENDPOINTS=true`, and
+  https is required even then. Redirects are never followed.
+- The client refuses any GraphQL document containing a mutation or
+  subscription operation, or more than one operation.
+- Network errors are recorded by type only, so headers (and the bearer token)
+  never reach evidence, logs or the status file.

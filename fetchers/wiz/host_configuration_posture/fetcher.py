@@ -107,7 +107,7 @@ def frameworks_by_rule(client: WizClient, rule_ids: List[str]) -> Tuple[Dict[str
     """
     mapping: Dict[str, List[str]] = {}
     errors: List[Dict[str, Any]] = []
-    chunk = env_int("WIZ_HOST_RULE_LOOKUP_CHUNK", 20)
+    chunk = max(1, env_int("WIZ_HOST_RULE_LOOKUP_CHUNK", 20))
     for i in range(0, len(rule_ids), chunk):
         ids = rule_ids[i:i + chunk]
         before = len(client.api_failures)
@@ -251,7 +251,7 @@ def fetch_slice(client: WizClient, filter_by: Dict[str, Any], depth: int, cap: i
 def body(client: WizClient) -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     needles = [x.lower() for x in env_list("WIZ_HOST_BENCHMARK_MATCH", ["DISA", "STIG"]) if x]
-    client.page_size = min(client.page_size, env_int("WIZ_HOST_PAGE_SIZE", 25))
+    client.page_size = max(1, min(client.page_size, env_int("WIZ_HOST_PAGE_SIZE", 25)))
     cap = env_int("WIZ_MAX_RECORDS", 50000)
 
     expected = total_count(client, {})

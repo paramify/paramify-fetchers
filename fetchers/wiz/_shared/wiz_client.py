@@ -43,6 +43,7 @@ load-bearing:
 
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -95,7 +96,71 @@ def _is_transient(errors: List[Any]) -> bool:
     return "internal error" in text or "timeout" in text or "temporarily unavailable" in text
 
 
-_MUTATION = re.compile(r"^\s*mutation\b", re.IGNORECASE | re.MULTILINE)
+_NAME = re.compile(r"[_A-Za-z][_0-9A-Za-z]*")
+_FORBIDDEN_OPERATIONS = {"mutation", "subscription"}
+
+# Hosts a Wiz credential may be sent to. Anything else needs
+# WIZ_ALLOW_CUSTOM_ENDPOINTS=true (test doubles, proxies), and even then https.
+_WIZ_API_HOST = re.compile(r"^api\.[a-z0-9-]+\.app\.wiz\.(us|io)$")
+
+
+def operation_keywords(document: str) -> List[str]:
+    """
+    Names that appear at the top level of a GraphQL document (outside every
+    selection set and argument list), with comments and strings removed.
+    That is where "query" / "mutation" / "subscription" / "fragment" live, so a
+    field that happens to be called ``subscription`` is not mistaken for one.
+    Commas and a byte-order mark are insignificant in GraphQL and are ignored
+    here the same way.
+    """
+    text = re.sub(r'"""[\s\S]*?"""|"(?:\\.|[^"\\])*"', " ", document)
+    text = re.sub(r"#[^\n\r]*", " ", text)
+    names: List[str] = []
+    braces = parens = 0
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "{":
+            braces += 1
+        elif ch == "}":
+            braces -= 1
+        elif ch == "(":
+            parens += 1
+        elif ch == ")":
+            parens -= 1
+        elif braces == 0 and parens == 0:
+            m = _NAME.match(text, i)
+            if m:
+                names.append(m.group(0))
+                i = m.end()
+                continue
+        i += 1
+    return names
+
+
+def check_endpoint(url: str, setting: str, allowed_exact: Optional[Dict[str, str]] = None) -> None:
+    """
+    Refuse to send a Wiz credential anywhere but Wiz. The client secret goes to
+    the auth URL and the bearer token to the API URL, so a mistyped or
+    tampered value in a manifest must stop the run, not leak the credential.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise WizConfigError(f"{setting} must use https://")
+    if parsed.username or parsed.password or "@" in parsed.netloc:
+        raise WizConfigError(f"{setting} must not contain a user name or password")
+    if os.environ.get("WIZ_ALLOW_CUSTOM_ENDPOINTS", "").strip().lower() in {"true", "1", "yes"}:
+        return
+    host = (parsed.hostname or "").lower()
+    if allowed_exact is not None:
+        if url not in allowed_exact:
+            raise WizConfigError(
+                f"{setting} is not a known Wiz token endpoint (expected one of: {', '.join(sorted(allowed_exact))}). "
+                "Set WIZ_ALLOW_CUSTOM_ENDPOINTS=true only for a trusted test double.")
+    elif not _WIZ_API_HOST.match(host) or parsed.port not in (None, 443):
+        raise WizConfigError(
+            f"{setting} host must look like api.<data-center>.app.wiz.us or api.<data-center>.app.wiz.io. "
+            "Set WIZ_ALLOW_CUSTOM_ENDPOINTS=true only for a trusted test double.")
 
 
 class WizAuthError(RuntimeError):
@@ -201,6 +266,8 @@ class WizClient:
     ) -> None:
         self.api_url = normalize_api_url(api_url)
         self.auth_url = auth_url.strip()
+        check_endpoint(self.api_url, "WIZ_API_ENDPOINT_URL")
+        check_endpoint(self.auth_url, "WIZ_AUTH_URL", allowed_exact=KNOWN_AUTH_URLS)
         self.audience = audience
         self.timeout = timeout
         self.min_interval = max(min_interval, 0.0)
@@ -237,6 +304,9 @@ class WizClient:
                 },
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 timeout=30,
+                # A redirect would re-send the form body, secret included, to
+                # whatever host the Location header names.
+                allow_redirects=False,
             )
         except requests.exceptions.RequestException as e:
             raise WizAuthError(f"token request to {self.auth_url} failed: {type(e).__name__}") from e
@@ -253,8 +323,12 @@ class WizClient:
             raise WizAuthError(f"token response from {self.auth_url} was not JSON") from e
 
         token = payload.get("access_token")
-        if not token:
+        if not isinstance(token, str) or not token.strip():
             raise WizAuthError(f"token response from {self.auth_url} contained no access_token")
+        token = token.strip()
+        if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in token):
+            # requests would quote the whole header, token included, in its error.
+            raise WizAuthError(f"token response from {self.auth_url} contained a malformed access_token")
 
         # Our gov tenant issues 900 s tokens. Renew a minute early so a long
         # paginated pull never sends an expired token mid-walk.
@@ -277,8 +351,11 @@ class WizClient:
 
     @staticmethod
     def _assert_read_only(query: str) -> None:
-        if _MUTATION.search(query):
-            raise ValueError("wiz_client only sends GraphQL queries; refusing a mutation")
+        keywords = operation_keywords(query)
+        if _FORBIDDEN_OPERATIONS.intersection(k.lower() for k in keywords):
+            raise ValueError("wiz_client only sends GraphQL queries; refusing a mutation or subscription")
+        if keywords.count("query") > 1:
+            raise ValueError("wiz_client sends one operation per request; refusing a multi-operation document")
 
     def _throttle(self) -> None:
         wait = self.min_interval - (time.monotonic() - self._last_request_at)
@@ -293,9 +370,11 @@ class WizClient:
             retry_after = (getattr(response, "headers", {}) or {}).get("Retry-After")
         if retry_after:
             try:
-                return min(float(retry_after), MAX_BACKOFF_SECONDS)
+                delay = float(retry_after)
             except (TypeError, ValueError):
-                pass
+                delay = None
+            if delay is not None and math.isfinite(delay):
+                return max(0.0, min(delay, MAX_BACKOFF_SECONDS))
         return min(BACKOFF_BASE_SECONDS ** (attempt + 1), MAX_BACKOFF_SECONDS)
 
     def graphql(self, operation: str, query: str, variables: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
@@ -314,13 +393,20 @@ class WizClient:
         reauthed = False
 
         for attempt in range(MAX_RETRIES + 1):
-            headers = self._headers()
+            try:
+                headers = self._headers()
+            except WizAuthError as e:
+                # A failed renewal mid-run is one failed call, not a lost run.
+                self._record(operation, "AuthError", str(e), None)
+                return None
             self._throttle()
             self.request_count += 1
             try:
-                response = requests.post(self.api_url, headers=headers, json=body, timeout=self.timeout)
+                response = requests.post(self.api_url, headers=headers, json=body, timeout=self.timeout,
+                                         allow_redirects=False)
             except requests.exceptions.RequestException as e:
-                last_error, last_response = f"{type(e).__name__}: {e}", None
+                # Only the type: some requests errors quote the headers, and so the token.
+                last_error, last_response = type(e).__name__, None
                 if attempt < MAX_RETRIES:
                     time.sleep(self._retry_delay(None, attempt))
                     continue
@@ -451,7 +537,12 @@ class WizClient:
                 return nodes
 
             info = conn.get("pageInfo") or {}
-            if not info.get("hasNextPage") or not page:
+            if not info.get("hasNextPage"):
+                return nodes
+            if not page:
+                self.api_failures.append({"operation": operation, "type": "PaginationEmptyPage",
+                                          "message": f"empty page with hasNextPage after {len(nodes)} records; "
+                                                     "evidence may be incomplete"})
                 return nodes
             after = info.get("endCursor")
             if not after:
