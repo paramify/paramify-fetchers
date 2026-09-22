@@ -1,0 +1,119 @@
+name: wiz_host_configuration_posture
+version: 0.1.0
+description: >-
+  Summarizes Wiz host configuration (OS benchmark) assessments for benchmarks
+  matching a name filter, DISA STIG by default: pass rate per benchmark and
+  per host, open failures by severity and age, top failing rules.
+category: wiz
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: wiz_host_configuration_posture.json
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read-only scopes).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov) or
+      https://api.us17.app.wiz.io/graphql (commercial).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: >-
+      Token URL from Tenant Info > Authentication URL. Defaults to Wiz for Gov.
+      Commercial tenants use https://auth.app.wiz.io/oauth/token.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  page_size:
+    type: integer
+    required: false
+    env: WIZ_PAGE_SIZE
+    default: 100
+    description: Records per GraphQL page (max 500).
+  sla_critical_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_CRITICAL_DAYS
+    default: 30
+    description: Remediation window reported for CRITICAL findings.
+  sla_high_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_HIGH_DAYS
+    default: 30
+    description: Remediation window reported for HIGH findings.
+  sla_medium_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_MEDIUM_DAYS
+    default: 90
+    description: Remediation window reported for MEDIUM findings.
+  sla_low_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_LOW_DAYS
+    default: 180
+    description: Remediation window reported for LOW findings.
+  max_records:
+    type: integer
+    required: false
+    env: WIZ_MAX_RECORDS
+    default: 50000
+    description: Safety cap on records pulled. Hitting it is reported as a failure, never silent truncation.
+  include_raw_findings:
+    type: boolean
+    required: false
+    env: WIZ_INCLUDE_RAW_FINDINGS
+    default: true
+    description: Include every result row in the evidence. Set false on large estates to keep only the summary.
+  host_benchmark_match:
+    type: string
+    required: false
+    env: WIZ_HOST_BENCHMARK_MATCH
+    default: DISA
+    description: >-
+      Case-insensitive text a benchmark name must contain to be included, e.g.
+      "DISA" for DISA STIG benchmarks or "CIS" for CIS benchmarks.
+
+evidence_set:
+  reference_id: EVD-WIZ-HOST-CONFIG-POSTURE
+  name: Wiz Host Configuration Posture (OS STIG)
+  instructions: >-
+    Script: fetcher.py. Read-only service account (scope
+    read:host_configuration). Pages hostConfigurationRuleAssessments with each
+    rule's benchmark mapping, keeps assessments whose benchmark name matches the
+    configured text (default DISA), and summarizes pass rate per benchmark and
+    per host, open failures by severity and age, and top failing rules. Counts
+    every assessed benchmark so none is dropped silently.
+  description: >-
+    Wiz operating-system benchmark results (DISA STIG by default), evidencing
+    that hosts are continuously assessed against a secure configuration
+    baseline.
+
+ksis:
+  - KSI-SVC-ACM
+  - KSI-MLA-EVC
