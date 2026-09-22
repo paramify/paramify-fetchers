@@ -18,11 +18,12 @@ local-state convention:
 ```
 .onboarding/<platform>/
   claim.md        the narrative or pasted claim, with provenance
-  research.md     step 4 output, every claim cited
+  research.md     step 4 output, docs-only, every claim marked
+  measured.md     step 5, the live sandbox reconciled against research.md
   slate.md        the step 6 plan, its approval, and a status per fetcher
   sandbox.json    tenant ids, cost, approval — the approved-sandbox registry
-  seed.sh         makes the data the fetchers need exist (step 5, gated)
-  teardown.sh     written before seed, executable
+  seed.sh         only if the platform's defaults don't supply the data (gated)
+  teardown.sh     written before provisioning, executable
   notes/          one <fetcher>.md of build detail per fetcher, written at step 8
 ```
 
@@ -81,7 +82,42 @@ nobody can later tell whether it came from the workspace or from a guess.
 
 Step 4's deliverable, written by the subagent. Structure and standard are in
 `references/researching.md`. The one invariant: every factual claim carries a
-fetched URL or the literal marker `UNVERIFIED`.
+marker — a fetched URL, `UNVERIFIED`, or (rarely, since the sandbox usually
+does not exist yet at step 4) `MEASURED`.
+
+## measured.md
+
+Step 5's deliverable, written by the main session once the sandbox is up. It
+is a **reconciliation pass over `research.md`**, and its three sections say so:
+
+```markdown
+# MEASURED against the live sandbox — 2026-09-22
+Target: https://localhost:8089, splunk/splunk:9.4.2 — a container, not Splunk
+Cloud; every line inherits that gap.
+
+## Confirmed from research.md
+- `count` defaults to 30; `count=0` returns all. paging.total=133, default
+  request returned 30, count=0 returned 133.
+
+## Corrected
+- research said `/services/saved/searches` lists every saved search. It
+  returns 7; `/servicesNS/-/-/saved/searches` returns 133.
+
+## Closed an UNVERIFIED
+- envelope shape `{entry:[{name, content{}, acl{}}], paging:{total}}` — as
+  predicted.
+
+## True counts (for step 7.5)
+- saved searches 133 · indexes 13 · roles 5 · data inputs 70
+```
+
+**The true-counts section is load-bearing.** Step 7.5 compares every fetcher's
+collected count against it, and it has to come from a path independent of the
+one the fetcher uses — otherwise both undercount together and agree.
+
+When a later step overturns a line here, **edit this file and mark it
+corrected**. Noting the correction somewhere newer leaves two files that
+disagree, and a subagent handed the old one cannot know.
 
 ## slate.md
 
@@ -147,6 +183,14 @@ that is not in here.
   "approved_by": "connor",
   "approved_at": "2026-09-22",
   "notes": "Trial expires 2026-10-20 — slate must finish before then.",
+  "seeding": "NOT REQUIRED — every surface populated on a stock account, and a failure case pre-exists (see verified). No seed.sh written, so the seeding gate never opened.",
+  "teardown_decision": {
+    "decision": "left running",
+    "by": "connor",
+    "at": "2026-09-23",
+    "why": "resuming the parked row next week",
+    "review_by": "2026-10-20"
+  },
   "verified_at": "2026-09-22",
   "verified": {
     "version": "8.40.3",
@@ -167,6 +211,14 @@ object is compliant and the validator has nothing to fail against.
 `approved_by` and `approved_at` are what make this a registry rather than a
 note. Absent either, the tenant is not approved, whatever else the file says.
 
+**`seeding`** records the decision either way. "Not required" is a fine
+answer — the platform's defaults often supply both populated data and a
+failure case — but it is written down, with the reason, so nobody later
+mistakes the missing `seed.sh` for a skipped step.
+
+**`teardown_decision`** is written at close-out (Gate 4) and nowhere else. A
+sandbox with no `teardown_decision` is one nobody has decided about.
+
 ## teardown.sh
 
 Written at step 5 **before** anything is provisioned, executable, idempotent,
@@ -183,9 +235,10 @@ over. Which step you are at reads off the files:
 | nothing | step 0 |
 | `claim.md` only | step 4 |
 | `+ research.md` | step 5 |
-| `+ sandbox.json` | step 6 |
+| `+ sandbox.json` and `measured.md` | step 6 |
 | `slate.md` with an approval line | step 7, or step 8 if row 1 is built |
-| every row has a status (parked counts) | step 9 |
+| every row has a status (bailed, parked, cut and reassigned all count) | step 9 |
+| `sandbox.json` has a `teardown_decision` | done |
 
 Say which step you are resuming at before doing anything, so the user can
 correct you cheaply.
