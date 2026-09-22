@@ -1,0 +1,101 @@
+name: wiz_threat_detections
+version: 0.1.0
+description: >-
+  Summarizes Wiz Defend detections in a look-back window and the Threat issues
+  that group them: severity, rules, resources and ticket linkage. NOT YET RUN
+  against a tenant with this Wiz module's data; fields are checked against the
+  tenant schema at run time and any missing field is listed in
+  scope.fields_not_available.
+category: wiz
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1200
+
+output:
+  type: json
+  path: wiz_threat_detections.json
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read-only scopes).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov) or
+      https://api.us17.app.wiz.io/graphql (commercial).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: >-
+      Token URL from Tenant Info > Authentication URL. Defaults to Wiz for Gov.
+      Commercial tenants use https://auth.app.wiz.io/oauth/token.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  page_size:
+    type: integer
+    required: false
+    env: WIZ_PAGE_SIZE
+    default: 100
+    description: Records per GraphQL page (max 500).
+  window_days:
+    type: integer
+    required: false
+    env: WIZ_DETECTION_WINDOW_DAYS
+    default: 30
+    description: Look-back window in days.
+  severities:
+    type: string
+    required: false
+    env: WIZ_DETECTION_SEVERITIES
+    default: ""
+    description: Optional comma-separated severities to keep (default all).
+  include_threat_issues:
+    type: boolean
+    required: false
+    env: WIZ_INCLUDE_THREAT_ISSUES
+    default: true
+    description: Also read THREAT_DETECTION issues (needs read:threat_issues).
+  include_raw_findings:
+    type: boolean
+    required: false
+    env: WIZ_INCLUDE_RAW_FINDINGS
+    default: true
+    description: Include every detection row, not just the summary.
+
+evidence_set:
+  reference_id: EVD-WIZ-THREAT-DETECTIONS
+  name: Wiz Threat Detections
+  instructions: >-
+    Script: fetcher.py. Read-only service account (read:detections,
+    read:threat_issues; Wiz Defend license). Pages the detections GraphQL
+    connection for the look-back window and THREAT_DETECTION issues (open, and
+    resolved in the window). Summarizes detections by severity, type, origin and
+    rule, resources affected, and open Threats with and without a linked ticket.
+    Descriptions and raw event payloads are not collected.
+  description: >-
+    Wiz Defend detections and Threats, evidencing that suspicious activity is
+    detected and routed for triage.
+
+ksis:
+  - KSI-MLA-OSM
+  - KSI-IAM-SUS
+  - KSI-INR-RPI

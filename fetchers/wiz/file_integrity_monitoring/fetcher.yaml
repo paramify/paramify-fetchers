@@ -1,0 +1,93 @@
+name: wiz_file_integrity_monitoring
+version: 0.1.0
+description: >-
+  Wiz Runtime Sensor coverage (sensors, status, last check-in) and detections
+  from file-integrity rules in a look-back window. Detection only; not
+  evidence that changes were blocked. NOT YET RUN against a tenant with this
+  Wiz module's data; fields are checked against the tenant schema at run time
+  and any missing field is listed in scope.fields_not_available.
+category: wiz
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1200
+
+output:
+  type: json
+  path: wiz_file_integrity_monitoring.json
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read-only scopes).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov) or
+      https://api.us17.app.wiz.io/graphql (commercial).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: >-
+      Token URL from Tenant Info > Authentication URL. Defaults to Wiz for Gov.
+      Commercial tenants use https://auth.app.wiz.io/oauth/token.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  page_size:
+    type: integer
+    required: false
+    env: WIZ_PAGE_SIZE
+    default: 100
+    description: Records per GraphQL page (max 500).
+  window_days:
+    type: integer
+    required: false
+    env: WIZ_DETECTION_WINDOW_DAYS
+    default: 30
+    description: Look-back window in days for file-integrity detections.
+  fim_rule_match:
+    type: string
+    required: false
+    env: WIZ_FIM_RULE_MATCH
+    default: "file integrity,file modification,FIM"
+    description: Comma-separated, case-insensitive text a detection rule name must contain.
+  stale_sensor_days:
+    type: integer
+    required: false
+    env: WIZ_STALE_SENSOR_DAYS
+    default: 3
+    description: Days since a sensor last checked in before it is listed as stale.
+
+evidence_set:
+  reference_id: EVD-WIZ-FILE-INTEGRITY
+  name: Wiz File Integrity Monitoring
+  instructions: >-
+    Script: fetcher.py. Read-only service account (read:sensors,
+    read:detections; Wiz Runtime Sensor). Pages the sensors connection and the
+    detections connection for the look-back window, keeping detections whose
+    rule name matches the configured text. Summarizes sensor count, status,
+    version and stale sensors, and file-integrity detections by severity, rule
+    and resource.
+  description: >-
+    Wiz Runtime Sensor file integrity monitoring coverage and detections.
+
+ksis:
+  - KSI-SVC-VRI
+  - KSI-MLA-OSM

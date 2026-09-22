@@ -64,6 +64,8 @@ class FakeWiz:
         self.fail_once_429 = False
         self.health_count = 0
         self.rules: Dict[str, List[str]] = {}   # host rule id -> framework names
+        self.types: Dict[str, Dict[str, Any]] = {}   # GraphQL type name -> {"fields": {name: child type}, "inputs": [...]}
+        self.singles: Dict[str, Any] = {}
 
     def __call__(self, url: str, data: Any = None, json: Any = None, headers: Any = None, timeout: Any = None,
                  allow_redirects: Any = True):
@@ -81,10 +83,25 @@ class FakeWiz:
             self.fail_once_429 = False
             return FakeResponse(429, {}, {"Retry-After": "0"})
         query = json["query"]
+        if "__type(" in query:
+            name = query.split('__type(name: "', 1)[1].split('"', 1)[0]
+            t = self.types.get(name)
+            if t is None:
+                return FakeResponse(200, {"data": {"__type": None}})
+            as_fields = [{"name": k, "type": {"kind": "OBJECT" if v else "SCALAR", "name": v or "String"}}
+                         for k, v in t.get("fields", {}).items()]
+            as_inputs = [{"name": k, "type": {"kind": "SCALAR", "name": "String"}} for k in t.get("inputs", [])]
+            return FakeResponse(200, {"data": {"__type": {"fields": as_fields, "inputFields": as_inputs}}})
+        for single in ("ipRestrictions", "portalInactivityTimeoutSettings"):
+            if single + " {" in query:
+                if single in self.errors:
+                    return FakeResponse(200, {"data": None, "errors": [{"message": self.errors[single]}]})
+                return FakeResponse(200, {"data": {single: self.singles.get(single)}})
         if "systemHealthIssues(" in query:
             return FakeResponse(200, {"data": {"systemHealthIssues": {"totalCount": self.health_count}}})
         root = next(r for r in ("cloudAccounts", "connectors", "issuesV2", "vulnerabilityFindings", "securityFrameworks",
-                                "configurationFindings", "hostConfigurationRuleAssessments", "hostConfigurationRules")
+                                "configurationFindings", "hostConfigurationRuleAssessments", "hostConfigurationRules",
+                                "detections", "sensors", "attackSurfaceFindings", "sastFindings")
                     if r + "(" in query)
         if root in self.errors:
             return FakeResponse(200, {"data": None, "errors": [{"message": self.errors[root]}]})
@@ -640,3 +657,94 @@ def test_empty_page_with_next_is_a_failure(fake, tmp_path):
     client.paginate("cloudAccounts", "query($first: Int, $after: String) { cloudAccounts(first: $first, after: $after) "
                     "{ nodes { id } pageInfo { hasNextPage endCursor } } }", "cloudAccounts")
     assert client.api_failures[-1]["type"] == "PaginationEmptyPage"
+
+
+
+# --- modules not yet exercised on a live tenant ---------------------------
+
+
+def _det(i, sev, rule, age=1, resource="vm-1", issue=None):
+    return {"id": f"d{i}", "type": "GENERATED_THREAT", "severity": sev, "createdAt": iso(age),
+            "origins": ["WIZ_SENSOR"], "primaryResource": {"id": resource, "name": resource, "type": "VIRTUAL_MACHINE"},
+            "issue": {"id": issue} if issue else None, "ruleMatch": {"rule": {"id": f"r-{rule}", "name": rule}}}
+
+
+def test_threat_detections_summary(fake, tmp_path):
+    fake.pages["detections"] = [[_det(1, "HIGH", "Suspicious process", issue="t1"), _det(2, "LOW", "Port scan"),
+                                 _det(3, "HIGH", "Suspicious process", age=90)]]
+    fake.pages["issuesV2"] = [[{"id": "t1", "type": "THREAT_DETECTION", "status": "OPEN", "severity": "HIGH",
+                                "createdAt": iso(1), "serviceTickets": []}]]
+    code, ev = run("threat_detections", tmp_path)
+    a = ev["analysis"]
+    assert code == 0, ev["api_failures"]
+    # schema unknown in the fake, so the 30-day window is applied locally
+    assert a["detections_in_window"] == 2 and a["detections_by_severity"] == {"HIGH": 1, "LOW": 1}
+    assert a["open_threats"] >= 1 and a["open_threats_with_ticket"] == 0
+    assert ev["scope"]["schema_checked"] is True and "not yet run" in ev["scope"]["validation_status"]
+    assert all("description" not in c["query"] for c in fake.graphql_calls if "detections(" in c["query"])
+
+
+def test_schema_drops_missing_fields_and_reports_them(fake, tmp_path):
+    fake.types["Detection"] = {"fields": {"id": None, "severity": None, "createdAt": None,
+                                          "primaryResource": "GraphEntity", "ruleMatch": "DetectionRuleMatch"}}
+    fake.types["GraphEntity"] = {"fields": {"id": None, "name": None}}
+    fake.types["DetectionRuleMatch"] = {"fields": {"rule": "DetectionRule"}}
+    fake.types["DetectionRule"] = {"fields": {"id": None, "name": None}}
+    fake.types["DetectionFilters"] = {"fields": {}, "inputs": ["createdAt", "severity"]}
+    fake.pages["detections"] = [[_det(1, "HIGH", "x")]]
+    code, ev = run("threat_detections", tmp_path)
+    q = next(c for c in fake.graphql_calls if "detections(" in c["query"])
+    assert "origins" not in q["query"] and "region" not in q["query"]
+    assert "createdAt" in json.dumps(q["variables"]["filterBy"])
+    missing = ev["scope"]["fields_not_available"]
+    assert "type" in missing and "origins" in missing and "primaryResource.type" in missing
+
+
+def test_file_integrity_monitoring(fake, tmp_path):
+    fake.pages["sensors"] = [[{"id": "s1", "name": "vm-1", "status": "CONNECTED"},
+                              {"id": "s2", "name": "vm-2", "status": "DISCONNECTED"}]]
+    fake.pages["detections"] = [[_det(1, "MEDIUM", "File integrity: /etc/passwd modified"),
+                                 _det(2, "HIGH", "Crypto miner")]]
+    code, ev = run("file_integrity_monitoring", tmp_path)
+    a = ev["analysis"]
+    assert code == 0, ev["api_failures"]
+    assert a["sensor_count"] == 2 and a["sensors_not_healthy"] == [{"name": "vm-2", "status": "DISCONNECTED"}]
+    assert a["fim_detections_in_window"] == 1 and "blocked" in a["prevention_note"]
+    q = next(c for c in fake.graphql_calls if "sensors(" in c["query"])
+    assert "lastSeen" not in q["query"]           # unknown schema: only the safe fallback fields
+
+
+def test_attack_surface_and_code_findings(fake, tmp_path):
+    fake.pages["attackSurfaceFindings"] = [[
+        {"id": "a1", "name": "Exposed admin panel", "severity": "HIGH", "status": "OPEN",
+         "resource": {"id": "ep1", "name": "app.example", "type": "ENDPOINT"}, "technologies": [{"name": "nginx"}]},
+        {"id": "a2", "name": "Old TLS", "severity": "LOW", "status": "RESOLVED"}]]
+    code, ev = run("attack_surface_findings", tmp_path)
+    assert code == 0 and ev["analysis"]["open_findings"] == 1
+    assert ev["analysis"]["exposed_resources_with_open_findings"] == 1
+
+    fake.pages["sastFindings"] = [[
+        {"id": "c1", "name": "SQL injection", "severity": "HIGH", "status": "OPEN", "createdAt": iso(45),
+         "repository": {"name": "api"}, "filePath": "app/db.py", "startLine": 10, "weaknesses": [{"name": "CWE-89"}]}]]
+    code, ev = run("code_findings", tmp_path)
+    a = ev["analysis"]
+    assert code == 0 and a["open_findings"] == 1 and a["open_past_window_by_severity"] == {"HIGH": 1}
+    q = next(c for c in fake.graphql_calls if "sastFindings(" in c["query"])
+    assert "snippet" not in q["query"] and "description" not in q["query"]
+
+
+def test_tenant_security_settings(fake, tmp_path):
+    fake.singles["ipRestrictions"] = {"userIPAllowlist": [{"value": "10.0.0.0/8", "description": "vpn"}],
+                                      "serviceAccountIPAllowlist": [], "scimIPAllowlist": []}
+    fake.singles["portalInactivityTimeoutSettings"] = {"isEnabled": True, "inactivityTimeoutMinutes": 15}
+    code, ev = run("tenant_security_settings", tmp_path)
+    a = ev["analysis"]
+    assert code == 0
+    assert a["unrestricted_access_paths"] == ["service_accounts", "scim"]
+    assert a["portal_inactivity_timeout_minutes"] == 15 and "SCG-ENH" in a["scope_note"]
+
+
+def test_missing_module_scope_is_a_failure_not_empty(fake, tmp_path):
+    fake.errors["sensors"] = "Unauthorized: missing read:sensors"
+    code, ev = run("file_integrity_monitoring", tmp_path)
+    assert code == 1 and ev["api_failures"]
