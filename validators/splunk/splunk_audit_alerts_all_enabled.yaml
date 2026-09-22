@@ -1,0 +1,52 @@
+key: splunk_audit_alerts_all_enabled
+name: Splunk Audit Alerts Are All Enabled
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every saved search configured as an alert in the apps named as holding the
+  organization's audit alerting is ENABLED — scheduled, and not disabled. Reads
+  `audit_scope.every_configured_alert_is_enabled`, which the fetcher computes as
+  `bool(alerts) and enabled == configured` and then ANDs with
+  `scope_is_assessable`, so an empty scope evaluates false rather than vacuously
+  true. Substantiates the alerting half of the "Audit Log Collection and Alerts"
+  capability (3c6f3e41-2b79-4d4a-bea2-319826278b68) and KSI-MLA-RVL: an alert
+  that exists but is switched off produces nothing for anyone to review.
+
+  Does NOT assert: **that anyone reviews or resolves these alerts.** That is the
+  other half of the same narrative — "collated on a SIEM dashboard, reviewed and
+  resolved by @InfoSec Admin" — and it is a workflow record (alert-manager
+  triage state, a ticket system, a dashboard's own audit trail) which the
+  saved-search configuration this evidence reads does not contain. The payload's
+  `review_evidence_boundary` block says the same thing in the artifact itself.
+  Also does NOT assert that the enabled alerts COVER the audit events the
+  control cares about (this records the alerts that exist, not the ones that
+  ought to), that any alert has ever fired or ever run successfully, that the
+  right apps were named as in scope (see splunk_audit_alert_scope_is_assessable),
+  or that an enabled alert notifies anyone (see
+  splunk_audit_alerts_have_notification_action).
+
+# Fenced to the `audit_scope` block on purpose. The identical key
+# `every_configured_alert_is_enabled` also appears in the all-deployment
+# `summary` roll-up, which is emitted FIRST in the payload. That summary covers
+# all 174 of Splunk's own saved searches, whose alerting configuration is the
+# vendor's business and not the customer's — it is false on a healthy
+# deployment for reasons the control does not care about. MATCH_GROUP reads the
+# FIRST match only, so without the fence this validator would read the summary
+# figure and speak to the wrong population in both directions.
+regex: '"audit_scope":\s*\{[\s\S]*?"every_configured_alert_is_enabled":\s*(?<every_configured_alert_is_enabled>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true
+validation_rules:
+  # Presence, and load-bearing rather than ceremonial: a MATCH_GROUP comparison
+  # over a regex that never matched compares nothing to nothing and evaluates
+  # TRUE, so without this rule a renamed key — or an unconfigured scope, where
+  # the fetcher omits the whole summarize() block from audit_scope — reads as
+  # compliant.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-SPLUNK-SAVED-SEARCH-ALERTS

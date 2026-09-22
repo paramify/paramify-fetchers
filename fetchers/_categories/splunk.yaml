@@ -1,0 +1,42 @@
+---
+# Splunk fetchers are python (requests) against the splunkd REST API on :8089.
+# Every one is fanned out per Splunk deployment: a token's reach is one
+# deployment, and on Splunk Cloud the stack name is baked into the ACS host, so
+# one connection is always one stack. A failure on one must not take the rest
+# down with it.
+description: >-
+  Splunk logging and SIEM evidence. Index retention and capacity, role-based
+  access to log data, alerting saved searches, audit event types, and configured
+  data inputs. Fanned out per deployment, each target carrying its own host and
+  credential.
+
+requires:
+  python_packages:
+    - requests
+    - python-dotenv
+
+# Splunk accepts either a bearer token (the only practical option on Splunk
+# Cloud) or HTTP basic auth (Enterprise, and the local sandbox). Both are
+# declared optional because supplying either one is sufficient; the fetchers
+# check at runtime that at least one arrived and report `bad_config` if not.
+# Declaring either mandatory would fail `paramify validate` for every manifest
+# that authenticates the other way.
+secrets:
+  - name: token
+    env: SPLUNK_TOKEN
+    required: false
+    per_target: true
+    description: >-
+      Splunk bearer authentication token. Preferred, and effectively required on
+      Splunk Cloud. Mint under Settings > Tokens; needs the `edit_tokens_own`
+      capability. Supply this OR username+password.
+  - name: username
+    env: SPLUNK_USERNAME
+    required: false
+    per_target: true
+    description: Splunk username for HTTP basic auth. Supply with SPLUNK_PASSWORD, or use SPLUNK_TOKEN instead.
+  - name: password
+    env: SPLUNK_PASSWORD
+    required: false
+    per_target: true
+    description: Splunk password for HTTP basic auth. Supply with SPLUNK_USERNAME, or use SPLUNK_TOKEN instead.

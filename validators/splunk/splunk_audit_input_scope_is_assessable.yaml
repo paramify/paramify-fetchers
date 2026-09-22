@@ -1,0 +1,38 @@
+key: splunk_audit_input_scope_is_assessable
+name: Splunk Audit Input Scope Is Assessable
+type: AUTOMATED
+role: integrity
+statement: >-
+  The index-keyed ingest roll-up had something to assess: the collection
+  returned a non-empty input inventory AND at least one named audit index
+  survived the exclusion of Splunk-internal indexes. This is the vacuity guard
+  for splunk_audit_indexes_have_an_enabled_input, whose assertion is POSITIVE
+  ("every assessed audit index has an enabled input") and therefore vacuously
+  true over an empty scope. Without this validator, a deployment scoped to
+  `_audit` alone — or one where the input inventory came back empty — would
+  read as fully compliant on the strength of having measured nothing.
+
+  Does NOT assert: that the RIGHT indexes were named as in scope, which is an
+  operator's configuration choice this evidence cannot second-guess (fetcher
+  #1's splunk_audit_scope_complete asserts the naming); nor that any of them is
+  actually fed, which is the partner validator's job.
+
+# Fenced to `audit_scope`, and here the fence is not defensive — it is the whole
+# validator. `scope_is_assessable` appears in BOTH roll-ups, and `summary`'s
+# copy is serialized FIRST. `summary.scope_is_assessable` is merely "some inputs
+# were returned"; `audit_scope.scope_is_assessable` additionally requires a
+# non-empty ASSESSED index set. They diverge exactly in the case this validator
+# exists to catch — inputs present, every named audit index internal — and an
+# unfenced pattern would read the permissive one and pass.
+regex: '"audit_scope":\s*\{[\s\S]*?"scope_is_assessable":\s*(?<scope_is_assessable>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-SPLUNK-DATA-INPUTS

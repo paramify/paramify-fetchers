@@ -1,0 +1,60 @@
+validator: splunk_privileged_commands_logged_with_full_text
+cases:
+  # Direction 1 — compliant. Every artifact in this file carries the `summary`
+  # block's not-assessed STUB for `privileged_command_text` as well, because the
+  # stub is what the outer fence has to step over: it is emitted first and has no
+  # coverage keys at all, so a validator that started there would read nothing
+  # and pass vacuously.
+  - name: every_privileged_event_type_carries_its_command_text
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","assessed":false,"not_assessed_because":"assessed in privileged_command_scope"},"identity":{"narrative_term":"associated identities","assessed":true,"every_event_type_fully_covered":true}},"all_assessed_elements_fully_covered":true,"scope_is_assessable":true},"privileged_command_scope":{"privileged_event_types_configured":true,"event_types_in_scope":["edit_roles","search"],"events_observed":360,"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","read_from_fields":["search","object"],"requires":"meaningful","assessed":true,"events_covered":360,"events_total":360,"event_types_fully_covered":2,"event_types_total":2,"every_event_type_fully_covered":true,"every_event_is_covered":true},"identity":{"narrative_term":"associated identities","requires":"meaningful","assessed":true,"every_event_type_fully_covered":true}},"scope_is_assessable":true,"command_text_max_length":4430}}}'
+
+  # Direction 2 — non-compliant, and the shape the real sandbox is in: `edit_roles`,
+  # `create_index`, `CREATE_PASSWORD` and `GET_PASSWORD` are audited as having
+  # happened without recording what was run.
+  - name: some_privileged_event_types_carry_no_command_text
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","assessed":false,"not_assessed_because":"assessed in privileged_command_scope"},"identity":{"narrative_term":"associated identities","assessed":true,"every_event_type_fully_covered":true}},"all_assessed_elements_fully_covered":true,"scope_is_assessable":true},"privileged_command_scope":{"privileged_event_types_configured":true,"event_types_in_scope":["edit_roles","search"],"events_observed":360,"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","read_from_fields":["search","object"],"requires":"meaningful","assessed":true,"events_covered":103,"events_total":360,"event_types_fully_covered":1,"event_types_total":2,"event_types_not_covered_names":["edit_roles"],"every_event_type_fully_covered":false,"every_event_is_covered":false},"identity":{"narrative_term":"associated identities","requires":"meaningful","assessed":true,"every_event_type_fully_covered":true}},"scope_is_assessable":true,"command_text_max_length":4430}}}'
+
+  # PRESENT vs MEANINGFUL, inside this scope. The `search` field exists on all
+  # 360 in-scope records but holds a placeholder on 257 of them, so the element
+  # is scored 103/360 on the MEANINGFUL counter and the verdict is false. A
+  # validator keyed on presence would read 360 of 360 and report that the full
+  # text of every privileged command was captured.
+  - name: command_field_present_on_every_record_but_meaningful_on_few
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","assessed":false,"not_assessed_because":"assessed in privileged_command_scope"},"identity":{"narrative_term":"associated identities","assessed":true,"every_event_type_fully_covered":true}},"all_assessed_elements_fully_covered":true,"scope_is_assessable":true},"privileged_command_scope":{"privileged_event_types_configured":true,"event_types_in_scope":["edit_roles","search"],"events_observed":360,"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","read_from_fields":["search","object"],"requires":"meaningful","assessed":true,"events_with_field_present":360,"events_covered":103,"events_total":360,"every_event_type_fully_covered":false,"every_event_is_covered":false},"identity":{"narrative_term":"associated identities","requires":"meaningful","assessed":true,"every_event_type_fully_covered":true}},"scope_is_assessable":true}}}'
+
+  # Direction 3 — the element's verdict key renamed upstream. THIS is the case
+  # the tempered INNER fence exists for. The `identity` element that follows
+  # carries an identically-named flag reading `true`; an untempered
+  # `[\s\S]*?` between the element and its verdict would bind to it and report
+  # the identity element's result as though it were the command-text element's.
+  - name: command_text_verdict_key_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","assessed":false,"not_assessed_because":"assessed in privileged_command_scope"},"identity":{"narrative_term":"associated identities","assessed":true,"every_event_type_fully_covered":true}},"all_assessed_elements_fully_covered":true,"scope_is_assessable":true},"privileged_command_scope":{"privileged_event_types_configured":true,"event_types_in_scope":["edit_roles","search"],"events_observed":360,"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","read_from_fields":["search","object"],"requires":"meaningful","assessed":true,"events_covered":103,"events_total":360,"all_event_types_covered":false},"identity":{"narrative_term":"associated identities","requires":"meaningful","assessed":true,"every_event_type_fully_covered":true}},"scope_is_assessable":true}}}'
+
+  # Direction 3, the outer-fence variant: the whole scope block is gone and only
+  # the summary's not-assessed stub remains. A validator anchored on
+  # `privileged_command_text` alone would find the stub, read no verdict, and
+  # pass vacuously.
+  - name: privileged_scope_block_missing_only_summary_stub_remains
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","assessed":false,"not_assessed_because":"assessed in privileged_command_scope"},"identity":{"narrative_term":"associated identities","assessed":true,"every_event_type_fully_covered":true}},"all_assessed_elements_fully_covered":true,"scope_is_assessable":true}}}'
+
+  # The knob is unset, so the fetcher emits no `elements` block inside the scope
+  # at all and the element is simply never measured. That is UNKNOWN, not
+  # compliant, and it must not read as a pass.
+  - name: no_privileged_event_types_configured
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","assessed":false,"not_assessed_because":"assessed in privileged_command_scope"},"identity":{"narrative_term":"associated identities","assessed":true,"every_event_type_fully_covered":true}},"all_assessed_elements_fully_covered":true,"scope_is_assessable":true},"privileged_command_scope":{"privileged_event_types_configured":false,"privileged_event_type_patterns":[],"event_types_in_scope":[],"scope_is_assessable":false}}}'
+
+  # The vacuity trap in its sharpest form here: patterns ARE configured, they
+  # matched no observed event type, and "every in-scope event type carries its
+  # command text" is therefore true of nothing. The second rule —
+  # `scope_is_assessable` — is what refuses it. Without that rule this artifact
+  # would be a silent pass on a deployment where no privileged command was ever
+  # audited.
+  - name: patterns_configured_but_nothing_in_scope
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","assessed":false,"not_assessed_because":"assessed in privileged_command_scope"},"identity":{"narrative_term":"associated identities","assessed":true,"every_event_type_fully_covered":true}},"all_assessed_elements_fully_covered":true,"scope_is_assessable":true},"privileged_command_scope":{"privileged_event_types_configured":true,"privileged_event_type_patterns":["delete_*"],"patterns_matching_nothing_observed":["delete_*"],"event_types_in_scope":[],"events_observed":0,"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","read_from_fields":["search","object"],"requires":"meaningful","assessed":true,"events_covered":0,"events_total":0,"every_event_type_fully_covered":true,"every_event_is_covered":false},"identity":{"narrative_term":"associated identities","requires":"meaningful","assessed":true,"every_event_type_fully_covered":true}},"scope_is_assessable":false}}}'

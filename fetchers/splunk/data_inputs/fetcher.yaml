@@ -1,0 +1,146 @@
+name: splunk_data_inputs
+version: 0.1.0
+description: >-
+  FedRAMP KSI-MLA-LET evidence. Reads every configured data input on a Splunk
+  deployment — file and directory monitors, scripted and modular inputs, the
+  forwarder receiving ports, raw TCP/UDP listeners and the HTTP Event Collector
+  — and records, per input, the index it writes to, its sourcetype, its host,
+  the app that owns it and whether it is actually ENABLED. This is the INGEST
+  side of an audit-logging claim: it proves which components ship logs INTO
+  Splunk, complementing splunk_audit_event_types, which proves what arrived.
+  Configured is distinguished from shipping throughout — a disabled input is
+  configured and sends nothing, and an `index` of "default" names no
+  destination. Separately measures whether any REMOTE component ships at all,
+  from the forwarders currently connected to the receiving port, the deployment
+  server's client census and the HEC token inventory, because a deployment
+  whose only live inputs are its own local files is not log management on all
+  production components. No credential value is ever written to the evidence:
+  HEC tokens and any other credential-shaped field are recorded as present or
+  absent and never by value. Single deployment per invocation; runner does
+  fanout.
+category: splunk
+
+supports_targets: true
+
+target_schema:
+  name:
+    type: string
+    required: false
+    env: SPLUNK_TARGET_NAME
+    description: Label for this deployment in the evidence, e.g. "prod-us-east". Defaults to the host.
+  host:
+    type: string
+    required: true
+    env: SPLUNK_HOST
+    description: splunkd management URI, e.g. https://splunk.example.com:8089
+  verify_ssl:
+    type: string
+    required: false
+    default: "true"
+    env: SPLUNK_VERIFY_SSL
+    description: >-
+      Set to "false" ONLY for a sandbox with a self-signed certificate. Any
+      deployment holding real audit data must leave this true.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: splunk_data_inputs.json
+  aggregation: per_target
+
+secrets:
+- name: token
+  env: SPLUNK_TOKEN
+  required: false
+  per_target: true
+  description: Splunk bearer token. Supply this OR username+password.
+- name: username
+  env: SPLUNK_USERNAME
+  required: false
+  per_target: true
+  description: Username for HTTP basic auth. Supply with SPLUNK_PASSWORD, or use SPLUNK_TOKEN.
+- name: password
+  env: SPLUNK_PASSWORD
+  required: false
+  per_target: true
+  description: Password for HTTP basic auth. Supply with SPLUNK_USERNAME, or use SPLUNK_TOKEN.
+
+config_schema:
+  audit_indexes:
+    type: string
+    required: false
+    env: SPLUNK_AUDIT_INDEXES
+    description: >-
+      Comma-separated names of the indexes that hold audit and security data,
+      e.g. "_audit,audit_prod,security_events". The SAME knob the
+      splunk_index_retention, splunk_role_index_access,
+      splunk_saved_search_alerts and splunk_audit_event_types fetchers take,
+      and deliberately so — this is its fifth consumer. Here it drives the
+      `audit_scope` roll-up, which is keyed on the INDEX rather than on the
+      input: for each named audit index it reports which inputs write to it and
+      whether any of them is enabled. An index configured with 365 days of
+      retention that nothing writes to proves nothing about log management, and
+      this is the only fetcher on the slate that can say so. Names beginning
+      with an underscore are reported but NOT assessed: `_audit`, `_internal`
+      and the other Splunk-internal indexes are written by splunkd directly and
+      never have a data input, so scoring them as missing one would report a
+      platform fact as a finding. Leave unset and only the all-inputs `summary`
+      is produced, and `audit_scope.scope_is_assessable` stays false — this
+      roll-up asserts POSITIVES (inputs exist, are enabled, and target the
+      audit indexes), which are vacuously true of an empty set, so an
+      unconfigured scope must never read as a pass.
+
+  vendor_input_apps:
+    type: string
+    required: false
+    env: SPLUNK_VENDOR_INPUT_APPS
+    description: >-
+      Comma-separated Splunk app names, or shell-style globs, whose inputs are
+      the VENDOR's own rather than the organization's — Splunk ships dozens of
+      inputs that monitor its own logs and phone telemetry home
+      (`splunk_instrumentation`, `splunk_secure_gateway`,
+      `python_upgrade_readiness_app`, `SplunkDeploymentServerConfig`, the
+      `system` app …). Defaults to a built-in pattern set covering Splunk's own
+      apps. This is an ANNOTATION knob: it populates `is_vendor_app` per input
+      and a `customer_authored_inputs` count in the summary, so a reader can
+      see at a glance whether a deployment's inputs are all vendor defaults.
+      Deliberately, NO roll-up verdict depends on it — the verdict lives in the
+      index-keyed `audit_scope`, which is inclusion-shaped and cannot be
+      green-washed by widening an exclusion list. Matching is by app name only
+      and is a heuristic, stated as such in the payload.
+
+ksis:
+  - KSI-MLA-LET
+
+evidence_set:
+  reference_id: EVD-SPLUNK-DATA-INPUTS
+  name: Splunk Data Inputs and Log Ingest Coverage
+  instructions: >-
+    Calls GET /services/data/inputs/all?output_mode=json&count=0 on the splunkd
+    management port for the whole input inventory across every input type, and
+    records per input: its kind (from eai:type), the index it writes to, its
+    sourcetype, its host, the owning app/owner/sharing from the entry's acl
+    block, its polling interval and source where present, and its `disabled`
+    state. Every field is taken from an explicit allowlist — the raw content
+    block is never copied wholesale — so no credential can reach the evidence;
+    any credential-shaped key found on an input is recorded by NAME in
+    `credential_fields_present` and never by value. Because
+    /services/data/inputs/all does not cover the HTTP Event Collector, GET
+    /services/data/inputs/http?count=0 and GET /services/data/inputs/http/http
+    are called separately for the HEC token inventory and the HEC global
+    stanza. Remote ingest is measured from GET
+    /services/data/inputs/tcp/cooked?count=0 plus GET
+    /services/data/inputs/tcp/cooked/<port>/connections per receiving port,
+    which is a live census of the forwarders currently connected, and from GET
+    /services/deployment/server/clients. Also calls GET
+    /services/authentication/current-context and GET /services/server/info.
+    Distinguishes throughout between a field being PRESENT and its carrying a
+    meaningful value — an `index` of "default" or "" names no destination and a
+    `host` of "$decideOnStartup" identifies no component — and between an input
+    being CONFIGURED and being ENABLED. Rolls up over all inputs and,
+    separately, over the named audit indexes, reporting for each which inputs
+    target it and whether any of them is enabled, with an anti-vacuity guard
+    because every verdict asserts a positive. Writes JSON.

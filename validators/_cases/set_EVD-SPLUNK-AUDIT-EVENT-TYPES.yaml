@@ -1,0 +1,36 @@
+evidence_set: EVD-SPLUNK-AUDIT-EVENT-TYPES
+# Set-level cases. Paramify passes an evidence set only when EVERY validator on
+# it passes, and these combine the four the way it does: collection_succeeded
+# plus the three Splunk audit-event-type validators.
+cases:
+  # The whole set green: collection succeeded, every deployment-wide element is
+  # covered on every observed event type, every present identity names a real
+  # principal, and every privileged event type carries the full text of its
+  # command over an assessable scope.
+  - name: whole_set_compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"event_types_observed":4,"events_observed":900,"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","assessed":false,"not_assessed_because":"assessed in privileged_command_scope"},"identity":{"narrative_term":"associated identities","requires":"meaningful","assessed":true,"every_event_type_fully_covered":true}},"all_assessed_elements_fully_covered":true,"identity_field_present_events":900,"identity_meaningful_events":900,"scope_is_assessable":true},"privileged_command_scope":{"privileged_event_types_configured":true,"event_types_in_scope":["edit_roles","search"],"events_observed":360,"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","requires":"meaningful","assessed":true,"events_covered":360,"events_total":360,"every_event_type_fully_covered":true},"identity":{"narrative_term":"associated identities","requires":"meaningful","assessed":true,"every_event_type_fully_covered":true}},"identity_field_present_events":360,"identity_meaningful_events":360,"scope_is_assessable":true}}}'
+
+  # THE case the present-vs-meaningful distinction exists for, at set level.
+  #
+  # `user` is present on 12,434 of 12,434 records and names a real principal on
+  # 1,679 of them — Splunk writes the literal `n/a` where there was no
+  # principal. In this artifact the ROLL-UP CLAIMS FULL COVERAGE ANYWAY
+  # (`all_assessed_elements_fully_covered: true`), which is what a future
+  # upstream change scoring identity on presence, or dropping `identity` from
+  # the assessed element map, would produce. Everything else reads clean, so the
+  # ONLY validator failing here is splunk_audit_identities_are_named_principals,
+  # reading the two raw counters rather than a verdict the fetcher computed.
+  #
+  # Sanity-check this case by deleting that validator: the set must go green,
+  # which is what proves the case fails for the right reason.
+  - name: roll_up_claims_coverage_while_identities_are_mostly_placeholders
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"event_types_observed":38,"events_observed":12434,"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","assessed":false,"not_assessed_because":"assessed in privileged_command_scope"},"identity":{"narrative_term":"associated identities","requires":"present","assessed":true,"every_event_type_fully_covered":true}},"all_assessed_elements_fully_covered":true,"identity_field_present_events":12434,"identity_meaningful_events":1679,"scope_is_assessable":true},"privileged_command_scope":{"privileged_event_types_configured":true,"event_types_in_scope":["edit_roles","search"],"events_observed":360,"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","requires":"meaningful","assessed":true,"events_covered":360,"events_total":360,"every_event_type_fully_covered":true},"identity":{"narrative_term":"associated identities","requires":"meaningful","assessed":true,"every_event_type_fully_covered":true}},"identity_field_present_events":360,"identity_meaningful_events":360,"scope_is_assessable":true}}}'
+
+  # A failed collection must never read as a compliance verdict, however good
+  # the payload left over from a partial run looks. collection_succeeded is the
+  # validator failing here.
+  - name: collection_failed_but_payload_reads_clean
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"error":"target_unreachable"},"payload":{"summary":{"event_types_observed":4,"events_observed":900,"all_assessed_elements_fully_covered":true,"identity_field_present_events":900,"identity_meaningful_events":900,"scope_is_assessable":true},"privileged_command_scope":{"privileged_event_types_configured":true,"events_observed":360,"elements":{"privileged_command_text":{"narrative_term":"full-text of privileged commands","requires":"meaningful","assessed":true,"events_covered":360,"events_total":360,"every_event_type_fully_covered":true},"identity":{"narrative_term":"associated identities","requires":"meaningful","assessed":true,"every_event_type_fully_covered":true}},"scope_is_assessable":true}}}'

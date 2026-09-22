@@ -1,0 +1,43 @@
+# Set-level: every validator naming EVD-SPLUNK-SAVED-SEARCH-ALERTS, combined the
+# way Paramify combines them (ERROR > FAIL > PASS). This is where the
+# anti-vacuity assertion actually lands: each configuration validator reads a
+# single boolean and cannot, on its own, tell a true verdict from a true verdict
+# over an empty population.
+evidence_set: EVD-SPLUNK-SAVED-SEARCH-ALERTS
+cases:
+  - name: scoped_alerts_configured_enabled_and_notifying
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"alerts_configured":15,"alerts_enabled":7,"every_configured_alert_is_enabled":false,"alerts_with_notification_action":0,"every_enabled_alert_notifies":false},"audit_scope":{"alert_apps_configured":true,"alert_apps_named":["security_alerting"],"alert_apps_named_but_absent":[],"saved_searches_in_scope":9,"alerts_configured":4,"alerts_enabled":4,"any_alert_enabled":true,"every_configured_alert_is_enabled":true,"alerts_with_notification_action":4,"every_enabled_alert_notifies":true,"notification_actions_in_use":["email","pagerduty"],"scope_is_assessable":true}}}'
+
+  - name: the_sandbox_posture_every_scoped_alert_disabled
+    expect: FAIL
+    note: >
+      What the approved Splunk sandbox actually looks like, reduced to the
+      roll-up keys. The scope resolves to splunk_monitoring_console — a Splunk
+      built-in named only so the scoped roll-up is assessable rather than empty,
+      which is a sandbox-shaped choice and not a production default. It ships
+      eight DMC alerts, all disabled, none notifying anything. Both
+      configuration validators fail; the assessability guard passes, which is
+      what makes this a real failure rather than an empty one.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"alerts_configured":15,"alerts_enabled":7,"every_configured_alert_is_enabled":false,"alerts_with_notification_action":0,"every_enabled_alert_notifies":false},"audit_scope":{"alert_apps_configured":true,"alert_apps_named":["splunk_monitoring_console"],"alert_apps_named_but_absent":[],"saved_searches_in_scope":13,"alerts_configured":8,"alerts_enabled":0,"any_alert_enabled":false,"every_configured_alert_is_enabled":false,"alerts_with_notification_action":0,"every_enabled_alert_notifies":false,"notification_actions_in_use":[],"scope_is_assessable":true}}}'
+
+  - name: vacuous_verdicts_over_an_empty_alert_scope
+    expect: FAIL
+    note: >
+      The case the integrity role exists for here, and the one the positive
+      polarity of this evidence set makes dangerous. The two configuration
+      validators each read one boolean, and both booleans say true — so ALONE
+      they both report PASS on a scope containing no alerts whatsoever.
+      splunk_audit_alert_scope_is_assessable is what fails, because its pattern
+      requires audit_scope.alerts_configured to match [1-9][0-9]* and 0 does
+      not. Delete that validator and this case goes green over a deployment with
+      no audit alerting at all — which is exactly the silent false pass.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"alerts_configured":15,"alerts_enabled":7,"every_configured_alert_is_enabled":false,"every_enabled_alert_notifies":false},"audit_scope":{"alert_apps_configured":true,"alert_apps_named":["security_alerting"],"alert_apps_named_but_absent":[],"saved_searches_in_scope":3,"alerts_configured":0,"alerts_configured_names":[],"alerts_enabled":0,"any_alert_enabled":true,"every_configured_alert_is_enabled":true,"alerts_with_notification_action":0,"every_enabled_alert_notifies":true,"notification_actions_in_use":[],"scope_is_assessable":true}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict, but the API discards disposition,
+      so FAIL is the best reachable answer today. What matters is that a failed
+      collection does not read as a clean alerting verdict.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"401 Unauthorized from splunkd"},"payload":{}}'

@@ -1,0 +1,52 @@
+key: splunk_log_access_exemptions_unwidened
+name: Splunk Log Access Role Exemptions Are Unwidened
+type: AUTOMATED
+role: integrity
+statement: >-
+  The set of roles exempted from the log-access assessment is exactly Splunk's
+  three shipped built-ins — admin, power, splunk-system-role — and has not been
+  widened.
+
+  Why this exists: SPLUNK_EXEMPT_ROLES is operator-configurable, and the three
+  KSI-MLA-ALA verdicts (splunk_log_access_least_privileged,
+  splunk_log_access_attribute_scoped, splunk_log_access_time_bounded) range over
+  `roles_in_scope`, which is the non-exempt roles that can reach audit data. The
+  fetcher's own `scope_is_assessable` guard does NOT close this: it requires
+  `non_exempt_roles_evaluated` to be non-zero, which counts every non-exempt role
+  including those with no index access at all. Measured on a live deployment,
+  adding the two offending roles (`user`, `data_management_admin`) to the exempt
+  list leaves six non-exempt roles evaluated — so the guard still reads true —
+  while `roles_in_scope` empties and all three verdicts go vacuously true,
+  because `all([])` is True. Widening the exemption list is therefore a direct
+  path from three red validators to four green ones with the posture unchanged.
+  This is the same class of hole that splunk_audit_retention_floor_is_ninety
+  closes for the retention floor, and it is closed the same way: by pinning the
+  yardstick rather than the measurement.
+
+  Does NOT assert: that the exemption list is the RIGHT one for this
+  organization, or anything about the roles it exempts. It asserts only that
+  nobody moved the goalposts. Deliberately NOT asserted instead: that
+  `roles_in_scope` is non-empty — a deployment on which no non-exempt role can
+  reach log data is the ideal posture under this KSI, and a validator demanding
+  a role in scope would fail exactly the deployments that have got it right.
+
+# `exempt_roles_named` is emitted once, inside audit_scope, so no fence is
+# needed. The list is written through sorted(), so the order below is stable
+# rather than incidental.
+#
+# The whole array is matched as one literal pattern, and MATCH_COUNT is the rule:
+# a MATCH_GROUP capture of the array's interior would have to be compared against
+# a string carrying the pretty-printer's newlines and indentation, which is
+# exactly the brittle byte-position anchoring the authoring guide warns off.
+# Adding a role appends `,\n    "user"` before the bracket and the pattern stops
+# matching; removing one does the same. Either way the count goes to 0 and this
+# fails, which is the intent — this pins an exact list, not a floor.
+regex: '"exempt_roles_named":\s*\[\s*"admin",\s*"power",\s*"splunk-system-role"\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ROLE-INDEX-ACCESS

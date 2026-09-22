@@ -1,0 +1,65 @@
+key: splunk_audit_alert_scope_is_assessable
+name: Splunk Audit Alert Scope Is Assessable
+type: AUTOMATED
+role: integrity
+statement: >-
+  At least one saved search classified as an alert was found in the apps named
+  as holding the organization's audit alerting, and the deployment-wide guard
+  the fetcher derives from that (`audit_scope.scope_is_assessable`) holds —
+  apps were named, every named app exists on the deployment, the saved-search
+  list came back whole, and the in-scope alert count is greater than zero.
+
+  Why this exists: the two assertions it guards are POSITIVE ones — every
+  configured alert is enabled, every enabled alert notifies something. A
+  positive over an empty set is VACUOUSLY TRUE, and a vacuous truth reads as a
+  pass. An unset `SPLUNK_ALERT_APPS`, an app renamed or uninstalled, or a
+  truncated saved-search list would otherwise hand back a clean verdict over
+  nothing at all. This validator makes each of those read as the failure it is,
+  and is the anti-vacuity partner for splunk_audit_alerts_all_enabled and
+  splunk_audit_alerts_have_notification_action.
+
+  Does NOT assert: that the RIGHT apps were named. Naming an app whose alerts
+  happen to be healthy, and omitting the app that carries the real audit
+  alerting, still passes — choosing the scope is an operator judgement this
+  evidence cannot check. Nor does it assert anything about review: no field in
+  this payload, and no rule in this validator, bears on whether a person read,
+  triaged or resolved an alert.
+
+# Fenced to the `audit_scope` block on purpose, and this one is NOT optional
+# decoration. `alerts_configured` also appears in the all-deployment `summary`
+# roll-up, which is emitted FIRST in the payload and counts Splunk's own
+# built-in and telemetry jobs (15 on the sandbox) as alerts. MATCH_GROUP and
+# the match position both take the FIRST hit, so an unfenced pattern would
+# score the vendor's saved searches and call an unconfigured scope assessable.
+#
+# `[1-9][0-9]*` encodes the non-zero threshold in the PATTERN rather than in a
+# criteria comparison: the operators are not documented as numeric, and a
+# string comparison against "0" is not a threshold. A scope with
+# `alerts_configured: 0` simply does not match, MATCH_COUNT is 0, and rule 1
+# fails — which is the vacuity guard doing its job.
+#
+# Both keys are inside the same object and `alerts_configured` is emitted before
+# `scope_is_assessable`, so the lazy span stays within audit_scope on this
+# fetcher's output. If either key is renamed upstream the pattern finds no
+# second candidate later in the document and matches zero times.
+regex: '"audit_scope":\s*\{[\s\S]*?"alerts_configured":\s*(?<alerts_configured>[1-9][0-9]*)[\s\S]*?"scope_is_assessable":\s*(?<scope_is_assessable>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS true
+validation_rules:
+  # Presence, and load-bearing rather than ceremonial. This rule carries the
+  # whole non-zero-alert assertion (see the `[1-9][0-9]*` note above), and a
+  # MATCH_GROUP comparison over a regex that never matched compares nothing to
+  # nothing and evaluates TRUE — so without this rule an empty scope, or a
+  # renamed audit_scope block, would read as compliant.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  # Group 2 is `scope_is_assessable`. Group 1 is asserted by the pattern itself.
+  # False here means apps were named but one of them is absent from the
+  # deployment, or the saved-search list came back short — either way the
+  # scoped roll-up is measuring a population that is not the one claimed.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-SPLUNK-SAVED-SEARCH-ALERTS

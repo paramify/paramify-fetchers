@@ -1,0 +1,21 @@
+validator: splunk_audit_indexes_meet_retention
+cases:
+  - name: all_audit_indexes_above_floor
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"all_indexes_meet_requirement":true},"audit_scope":{"configured":true,"searchable_retention_days_required":90,"all_indexes_meet_requirement":true}}}'
+  # The fence is the whole point of this validator's regex. Splunk's internal
+  # indexes sit below any audit floor by design, so the all-index summary reads
+  # false on a perfectly healthy deployment. MATCH_GROUP takes the first match,
+  # so an unfenced pattern would read that false and fail here.
+  - name: summary_false_but_audit_scope_true
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"all_indexes_meet_requirement":false,"indexes_below_requirement_names":["_internal","_thefishbucket"]},"audit_scope":{"configured":true,"searchable_retention_days_required":90,"all_indexes_meet_requirement":true}}}'
+  - name: one_audit_index_below_floor
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"all_indexes_meet_requirement":true},"audit_scope":{"configured":true,"searchable_retention_days_required":90,"indexes_below_requirement_names":["app_debug"],"all_indexes_meet_requirement":false}}}'
+  - name: compliance_key_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"all_indexes_meet_requirement":true},"audit_scope":{"configured":true,"searchable_retention_days_required":90,"all_idx_meet":true}}}'
+  - name: audit_scope_block_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"all_indexes_meet_requirement":true},"auditScope":{"configured":true,"all_indexes_meet_requirement":true}}}'

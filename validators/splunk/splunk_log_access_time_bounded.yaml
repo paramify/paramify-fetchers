@@ -1,0 +1,64 @@
+key: splunk_log_access_time_bounded
+name: Splunk Log Access Is Time Bounded
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every non-exempt Splunk role that can reach the configured audit indexes
+  carries a bounded search time window (`srchTimeWin` or `srchTimeEarliest`,
+  direct or imported), and the scope that verdict was computed over was itself
+  assessable. Substantiates the JUST-IN-TIME element of KSI-MLA-ALA
+  ("Authorizing Log Access", si-11) as far as Splunk's role model can express
+  it: a role with no time bound can search the whole retained history of the
+  audit indexes on any day, which is the standing, unbounded reach the KSI is
+  written against. Splunk's "unlimited" sentinels (`-1`, and `0` on
+  `srchTimeWin`) are normalised by the fetcher to "no limit".
+
+  Does NOT assert: just-in-time access in the full sense. A standing time window
+  bounds HOW FAR BACK a role may search; it is not an approval workflow that
+  grants log access for a window and revokes it afterwards, and Splunk's role
+  API exposes no such workflow. Read a pass here as "reach is time-bounded", not
+  as "access is granted on request". Nor does it assert the window is SHORT
+  ENOUGH for the organisation's data sensitivity — any positive bound passes.
+  Nor that any human account is assigned these roles;
+  /services/authentication/users is unread, so this proves the access MODEL, not
+  its membership. Nor the "persistently reviewed" clause of the KSI. Nor the
+  least-privilege and attribute-based elements (see
+  splunk_log_access_least_privileged and splunk_log_access_attribute_scoped),
+  nor that the collection succeeded (see collection_succeeded).
+
+# Fenced to `audit_scope`, and the fence is load-bearing: the identical key
+# `every_role_with_access_has_search_time_limit` also appears in the all-roles
+# `summary` block written EARLIER in the payload, where Splunk's own built-ins
+# drag it false on any healthy deployment. MATCH_GROUP reads the FIRST match
+# only, so an unfenced pattern silently reads the wrong block.
+#
+# Group 2 is the anti-vacuity guard and here it is NOT optional. This key is NOT
+# pre-AND-ed with `scope_is_assessable` by the fetcher: it is `all(...)` over the
+# in-scope roles, and `all([])` is true, so an unassessable or empty scope reads
+# as a clean pass on its own. `scope_is_assessable` is true only when audit
+# indexes were named, the role list came back whole
+# (roles_reported_total == roles_returned), at least one non-exempt role was
+# evaluated, and no named exempt role was absent.
+#
+# The span depends on the time-limit verdict preceding the guard inside the
+# block, which it does — the fetcher writes the roll-up first and appends the
+# guard last. Drop or rename either key and the pattern matches nothing,
+# MATCH_COUNT is 0, and rule 1 fails: the safe direction.
+regex: '"audit_scope":\s*\{[\s\S]*?"every_role_with_access_has_search_time_limit":\s*(?<every_role_with_access_has_search_time_limit>true|false)[\s\S]*?"scope_is_assessable":\s*(?<scope_is_assessable>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS true
+validation_rules:
+  # Presence, and load-bearing rather than ceremonial: a MATCH_GROUP comparison
+  # over a regex that never matched compares nothing to nothing and evaluates
+  # TRUE, so without this rule a renamed key reads as compliant.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-SPLUNK-ROLE-INDEX-ACCESS

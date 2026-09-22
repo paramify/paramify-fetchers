@@ -1,0 +1,37 @@
+validator: splunk_inputs_name_a_collection_host
+cases:
+  - name: enabled_inputs_name_their_collection_hosts
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"inputs":[{"name":"monitor:///var/log/audit","enabled":true,"host_field_present":true,"host_raw":"prod-app-01","host_named":"prod-app-01","identifies_a_host":true}],"summary":{"inputs_configured":12,"inputs_enabled":8,"inputs_with_index_field_present":12,"inputs_identifying_a_host":8,"scope_is_assessable":true}}}'
+
+  # THE present-vs-meaningful case, and the reason this validator reads the
+  # meaningful count. Every input carries a `host` field and every one of them
+  # says "$decideOnStartup", which names no component. A validator keyed on
+  # `inputs_with_index_field_present` — or on any per-input `host_field_present`
+  # — would report 69/69 host attribution on this artifact. The meaningful count
+  # is 0, and this must fail.
+  - name: host_field_present_on_all_but_meaningful_on_none
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"inputs":[{"name":"9997","enabled":true,"host_field_present":true,"host_raw":"$decideOnStartup","host_named":null,"identifies_a_host":false}],"summary":{"inputs_configured":69,"inputs_enabled":33,"inputs_with_index_field_present":69,"inputs_identifying_a_host":0,"scope_is_assessable":true}}}'
+
+  # The near-miss: meaningful almost nowhere rather than nowhere. One input in 69
+  # names a host, which is thin but is a real, demonstrable component. The
+  # assertion is deliberately "at least one", because an input inventory cannot
+  # enumerate the fleet — see the statement.
+  - name: exactly_one_input_names_a_host
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":69,"inputs_enabled":33,"inputs_with_index_field_present":69,"inputs_identifying_a_host":1,"scope_is_assessable":true}}}'
+
+  # Direction 3. The meaningful count renamed upstream leaves only the presence
+  # count behind — the exact drift that would otherwise turn this validator into
+  # a presence check by accident. MATCH_COUNT goes to zero and it fails.
+  - name: meaningful_count_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":69,"inputs_enabled":33,"inputs_with_index_field_present":69,"inputs_with_a_host_field":69,"scope_is_assessable":true}}}'
+
+  # Vacuity: no inputs at all. A non-zero count cannot be produced by an empty
+  # population, so this form needs no separate guard — but the case is here to
+  # show that, not to be assumed.
+  - name: no_inputs_returned_at_all
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"inputs":[],"summary":{"inputs_configured":0,"inputs_enabled":0,"inputs_with_index_field_present":0,"inputs_identifying_a_host":0,"scope_is_assessable":false}}}'

@@ -1,0 +1,39 @@
+key: splunk_audit_scope_complete
+name: Splunk Audit Index Scope Was Configured And Complete
+type: AUTOMATED
+role: integrity
+statement: >-
+  The set of indexes holding audit and security data was explicitly configured,
+  and every index named in it exists on the Splunk deployment.
+
+  Why this exists: splunk_audit_indexes_meet_retention asserts that every index
+  in scope meets the floor, and an EMPTY scope satisfies that vacuously. So does
+  a scope naming indexes that were deleted or misspelled — nothing below the
+  floor, because nothing is there. This validator makes both read as a failure
+  instead of a pass, and is the integrity partner for that assertion.
+
+  Does NOT assert: that the RIGHT indexes were named. Naming only a compliant
+  index and omitting the noncompliant one still passes — choosing the scope is
+  an operator judgement this evidence cannot check.
+
+# Two keys, one object. `configured` appears only inside audit_scope, so the
+# lazy span cannot bridge in from elsewhere in the payload.
+regex: '"audit_scope":\s*\{[\s\S]*?"configured":\s*(?<configured>true|false)[\s\S]*?"indexes_named_but_absent":\s*\[(?<indexes_named_but_absent>[^\]]*)\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS ""
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  # An unconfigured scope means only the all-index summary was produced, and
+  # that summary is not what the narrative is about.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  # Empty array captures as the empty string. A named-but-absent index is a hole
+  # in the claim, not a pass — it cannot be retaining anything.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "" }
+
+evidence_sets:
+  - EVD-SPLUNK-INDEX-RETENTION

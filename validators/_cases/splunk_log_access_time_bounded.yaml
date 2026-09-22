@@ -1,0 +1,30 @@
+validator: splunk_log_access_time_bounded
+cases:
+  - name: every_in_scope_role_has_time_window
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"roles_with_search_time_limit":1,"every_role_with_access_has_search_time_limit":true},"audit_scope":{"audit_indexes_configured":true,"roles_in_scope":["svc_soc_reader"],"roles_without_search_time_limit_names":[],"every_role_with_access_has_search_time_limit":true,"scope_is_assessable":true}}}'
+  # The fence is load-bearing. Splunk ships every built-in role with
+  # srchTimeWin = -1 ("unlimited"), so the all-roles summary reads false on a
+  # healthy deployment. MATCH_GROUP takes the first match and `summary` is
+  # written first, so an unfenced pattern would read that false and fail here.
+  - name: summary_false_but_audit_scope_true
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"roles_with_search_time_limit":1,"roles_without_search_time_limit_names":["admin","power"],"every_role_with_access_has_search_time_limit":false},"audit_scope":{"audit_indexes_configured":true,"roles_exempted":["admin","power","splunk-system-role"],"roles_in_scope":["svc_soc_reader"],"roles_without_search_time_limit_names":[],"every_role_with_access_has_search_time_limit":true,"scope_is_assessable":true}}}'
+  - name: in_scope_role_can_search_all_history
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"roles_with_search_time_limit":1,"every_role_with_access_has_search_time_limit":true},"audit_scope":{"audit_indexes_configured":true,"roles_in_scope":["user","svc_soc_reader"],"roles_without_search_time_limit_names":["user"],"every_role_with_access_has_search_time_limit":false,"scope_is_assessable":true}}}'
+  # Anti-vacuity, and REACHABLE here: this key is all(...) over the in-scope
+  # roles and all([]) is true, so an unassessable scope reads compliant on the
+  # verdict alone. Group 2 is the only thing that fails this case.
+  - name: scope_assessed_nothing
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"roles_with_search_time_limit":0,"every_role_with_access_has_search_time_limit":false},"audit_scope":{"audit_indexes_configured":true,"non_exempt_roles_evaluated":0,"roles_in_scope":[],"roles_without_search_time_limit_names":[],"every_role_with_access_has_search_time_limit":true,"scope_is_assessable":false}}}'
+  - name: verdict_key_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"every_role_with_access_has_search_time_limit":true},"audit_scope":{"audit_indexes_configured":true,"roles_in_scope":["svc_soc_reader"],"all_have_time_window":true,"scope_is_assessable":true}}}'
+  - name: assessability_guard_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"every_role_with_access_has_search_time_limit":true},"audit_scope":{"audit_indexes_configured":true,"roles_in_scope":["svc_soc_reader"],"every_role_with_access_has_search_time_limit":true,"assessable":true}}}'
+  - name: audit_scope_block_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"every_role_with_access_has_search_time_limit":true},"auditScope":{"audit_indexes_configured":true,"every_role_with_access_has_search_time_limit":true,"scope_is_assessable":true}}}'

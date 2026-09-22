@@ -1,0 +1,33 @@
+validator: splunk_audit_input_scope_is_assessable
+cases:
+  - name: inputs_returned_and_an_assessable_index_named
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":12,"scope_is_assessable":true},"audit_scope":{"configured":true,"indexes_internal_not_assessed":["_audit"],"indexes_assessed":["audit_prod"],"indexes_assessed_count":1,"scope_is_assessable":true,"every_assessed_audit_index_has_an_enabled_input":true}}}'
+
+  # THE case this validator's fence exists for, and the one that distinguishes
+  # the two `scope_is_assessable` keys. Inputs were returned, so the input-keyed
+  # `summary.scope_is_assessable` (serialized FIRST) is true — but every named
+  # audit index is Splunk-internal, so the assessed set is empty and the
+  # index-keyed scope is NOT assessable. An unfenced pattern reads summary's
+  # true and passes, certifying a scope that measured nothing.
+  - name: summary_assessable_but_assessed_index_set_is_empty
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":69,"scope_is_assessable":true},"audit_scope":{"configured":true,"indexes_named":["_audit","_internal"],"indexes_internal_not_assessed":["_audit","_internal"],"indexes_assessed":[],"indexes_assessed_count":0,"scope_is_assessable":false,"every_assessed_audit_index_has_an_enabled_input":false}}}'
+
+  # The other empty half: indexes named, but the inputs API returned nothing, so
+  # "no index has an input" is unreadable rather than false.
+  - name: no_inputs_returned_at_all
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":0,"scope_is_assessable":false},"audit_scope":{"configured":true,"indexes_assessed":["audit_prod"],"indexes_assessed_count":1,"scope_is_assessable":false,"every_assessed_audit_index_has_an_enabled_input":false}}}'
+
+  - name: audit_index_list_never_configured
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":69,"scope_is_assessable":true},"audit_scope":{"configured":false,"indexes_named":[],"scope_is_assessable":false,"every_assessed_audit_index_has_an_enabled_input":false}}}'
+
+  - name: scope_key_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":12},"audit_scope":{"configured":true,"indexes_assessed":["audit_prod"],"scope_assessable":true,"every_assessed_audit_index_has_an_enabled_input":true}}}'
+
+  - name: audit_scope_block_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":12,"scope_is_assessable":true},"auditScope":{"configured":true,"scope_is_assessable":true}}}'

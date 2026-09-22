@@ -1,0 +1,47 @@
+# Set-level: every validator naming EVD-SPLUNK-DATA-INPUTS, combined the way
+# Paramify combines them. Two assertions here are only reachable at set level,
+# because no single validator can carry them.
+evidence_set: EVD-SPLUNK-DATA-INPUTS
+cases:
+  - name: healthy_ingest_posture
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"inputs":[{"name":"monitor:///var/log/audit","enabled":true,"index_named":"audit_prod","targets_a_named_index":true,"host_named":"prod-app-01","identifies_a_host":true}],"summary":{"inputs_configured":12,"inputs_enabled":8,"inputs_with_index_field_present":12,"inputs_identifying_a_host":8,"any_input_enabled":true,"scope_is_assessable":true},"audit_scope":{"configured":true,"indexes_named":["_audit","audit_prod","security_events"],"indexes_internal_not_assessed":["_audit"],"indexes_assessed":["audit_prod","security_events"],"indexes_assessed_count":2,"indexes_with_an_enabled_input":2,"indexes_without_an_enabled_input":[],"scope_is_assessable":true,"every_assessed_audit_index_has_an_enabled_input":true}}}'
+
+  # The measured sandbox posture, in miniature. Indexes named and retained,
+  # nothing feeding them, and no input naming a host. Two validators fail; that
+  # is the finding, not a defect.
+  - name: audit_indexes_configured_but_unfed
+    expect: FAIL
+    note: >
+      The real 2026-09-22 sandbox reading. Corroborates EVD-SPLUNK-AUDIT-EVENT-TYPES,
+      which reached the same conclusion about the same four indexes through a
+      different API.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"inputs_configured":69,"inputs_enabled":33,"inputs_with_index_field_present":69,"inputs_identifying_a_host":0,"any_input_enabled":true,"scope_is_assessable":true},"audit_scope":{"configured":true,"indexes_internal_not_assessed":["_audit"],"indexes_assessed":["app_debug","audit_prod","network_flows","security_events"],"indexes_assessed_count":4,"indexes_with_an_enabled_input":0,"indexes_without_an_enabled_input":["app_debug","audit_prod","network_flows","security_events"],"scope_is_assessable":true,"every_assessed_audit_index_has_an_enabled_input":false}}}'
+
+  # THE VACUITY CASE, and the reason splunk_audit_input_scope_is_assessable is a
+  # separate validator rather than a comment. The fetcher currently AND-s
+  # scope_is_assessable into the verdict, so this artifact cannot arise today —
+  # it models that pre-AND being dropped upstream. The assessed index set is
+  # EMPTY (every named index is Splunk-internal) and the POSITIVE verdict is
+  # therefore vacuously true. splunk_audit_indexes_have_an_enabled_input passes
+  # on its own; everything else is deliberately compliant so that the ONLY
+  # failing validator is the scope guard. Delete that validator and this case
+  # goes green while the evidence has measured nothing at all.
+  - name: empty_assessed_scope_makes_the_verdict_vacuous
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"summary":{"inputs_configured":69,"inputs_enabled":33,"inputs_with_index_field_present":69,"inputs_identifying_a_host":8,"any_input_enabled":true,"scope_is_assessable":true},"audit_scope":{"configured":true,"indexes_named":["_audit","_internal"],"indexes_internal_not_assessed":["_audit","_internal"],"indexes_assessed":[],"per_index":[],"indexes_assessed_count":0,"indexes_with_an_enabled_input":0,"indexes_without_an_enabled_input":[],"scope_is_assessable":false,"every_assessed_audit_index_has_an_enabled_input":true}}}'
+
+  # Present-vs-meaningful at set level: the ingest half is genuinely healthy and
+  # the ONLY failing validator is splunk_inputs_name_a_collection_host, because
+  # the host field is present on all 69 inputs and meaningful on none of them.
+  - name: host_field_present_everywhere_meaningful_nowhere
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"inputs":[{"name":"9997","enabled":true,"index_named":"audit_prod","host_field_present":true,"host_raw":"$decideOnStartup","host_named":null,"identifies_a_host":false}],"summary":{"inputs_configured":69,"inputs_enabled":33,"inputs_with_index_field_present":69,"inputs_identifying_a_host":0,"any_input_enabled":true,"scope_is_assessable":true},"audit_scope":{"configured":true,"indexes_internal_not_assessed":["_audit"],"indexes_assessed":["audit_prod"],"indexes_assessed_count":1,"indexes_with_an_enabled_input":1,"indexes_without_an_enabled_input":[],"scope_is_assessable":true,"every_assessed_audit_index_has_an_enabled_input":true}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict, but the API discards disposition,
+      so FAIL is the best reachable answer today. What matters is that a failed
+      collection never reads as a clean ingest verdict.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"401 Unauthorized"},"payload":{}}'

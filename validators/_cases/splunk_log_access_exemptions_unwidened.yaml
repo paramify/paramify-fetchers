@@ -1,0 +1,22 @@
+validator: splunk_log_access_exemptions_unwidened
+cases:
+  - name: exemptions_are_the_three_builtins
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"audit_scope":{"exempt_roles_named":["admin","power","splunk-system-role"],"roles_in_scope":["user"],"non_exempt_roles_evaluated":6,"scope_is_assessable":true,"no_role_has_wildcard_index_access":false}}}'
+  # The attack this validator exists to stop, modelled exactly: the two roles
+  # that were failing the KSI are added to the exempt list. roles_in_scope
+  # empties, all three verdicts go vacuously true, scope_is_assessable still
+  # reads true because six non-exempt roles were still evaluated — and without
+  # this validator the whole set would turn green with nothing remediated.
+  - name: offending_roles_added_to_exempt_list
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"audit_scope":{"exempt_roles_named":["admin","data_management_admin","power","splunk-system-role","user"],"roles_in_scope":[],"non_exempt_roles_evaluated":6,"scope_is_assessable":true,"no_role_has_wildcard_index_access":true}}}'
+  - name: one_builtin_dropped_from_exempt_list
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"audit_scope":{"exempt_roles_named":["admin","power"],"roles_in_scope":["user"],"non_exempt_roles_evaluated":7,"scope_is_assessable":true}}}'
+  - name: exemptions_never_configured
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"audit_scope":{"exempt_roles_named":[],"roles_in_scope":["user"],"non_exempt_roles_evaluated":9,"scope_is_assessable":true}}}'
+  - name: exempt_key_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"audit_scope":{"exempted":["admin","power","splunk-system-role"],"roles_in_scope":["user"],"scope_is_assessable":true}}}'

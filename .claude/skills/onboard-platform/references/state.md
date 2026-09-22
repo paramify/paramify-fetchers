@@ -19,10 +19,18 @@ local-state convention:
 .onboarding/<platform>/
   claim.md        the narrative or pasted claim, with provenance
   research.md     step 4 output, every claim cited
-  slate.md        the step 6 plan, its approval, and per-fetcher outcomes
+  slate.md        the step 6 plan, its approval, and a status per fetcher
   sandbox.json    tenant ids, cost, approval — the approved-sandbox registry
+  seed.sh         makes the data the fetchers need exist (step 5, gated)
   teardown.sh     written before seed, executable
+  notes/          one <fetcher>.md of build detail per fetcher, written at step 8
 ```
+
+**`slate.md` stays small and `notes/` absorbs the detail.** They are read by
+different things: the main session and the gates read `slate.md` and need it
+scannable, while `notes/` is written once and read only when someone picks that
+fetcher back up. Collapsing them grew the slate to 1,749 lines on the first
+real run — see the warning at step 8.
 
 **Never put credentials here.** Gitignored is a backstop against accidents, not
 a keystore. Secrets are `${env:VAR}` refs resolved from the environment.

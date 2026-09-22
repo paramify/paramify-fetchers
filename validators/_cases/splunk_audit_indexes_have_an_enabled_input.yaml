@@ -1,0 +1,52 @@
+validator: splunk_audit_indexes_have_an_enabled_input
+cases:
+  - name: every_assessed_audit_index_is_fed
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":12,"scope_is_assessable":true},"audit_scope":{"configured":true,"indexes_internal_not_assessed":["_audit"],"indexes_assessed":["audit_prod","security_events"],"indexes_assessed_count":2,"indexes_with_an_enabled_input":2,"indexes_without_an_enabled_input":[],"scope_is_assessable":true,"every_assessed_audit_index_has_an_enabled_input":true}}}'
+
+  # Direction 1, hard mode: this is what the `audit_scope` fence buys. `summary`
+  # is serialized FIRST and shares key names with `audit_scope`; MATCH_GROUP
+  # reads the FIRST match only. Here the input-keyed roll-up carries a false
+  # verdict of the same name while the index-keyed one is true. An unfenced
+  # pattern reads the false one and fails a compliant deployment.
+  - name: summary_verdict_false_but_audit_scope_true
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":12,"scope_is_assessable":true,"every_assessed_audit_index_has_an_enabled_input":false},"audit_scope":{"configured":true,"indexes_assessed":["audit_prod"],"indexes_assessed_count":1,"indexes_without_an_enabled_input":[],"scope_is_assessable":true,"every_assessed_audit_index_has_an_enabled_input":true}}}'
+
+  # Direction 2. The real sandbox posture, in miniature: indexes named, retention
+  # configured, and nothing writing to them.
+  - name: no_audit_index_has_an_input
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":69,"scope_is_assessable":true},"audit_scope":{"configured":true,"indexes_internal_not_assessed":["_audit"],"indexes_assessed":["app_debug","audit_prod","network_flows","security_events"],"per_index":[{"index":"audit_prod","inputs_targeting_count":0,"has_enabled_input":false}],"indexes_assessed_count":4,"indexes_with_an_enabled_input":0,"indexes_without_an_enabled_input":["app_debug","audit_prod","network_flows","security_events"],"scope_is_assessable":true,"every_assessed_audit_index_has_an_enabled_input":false}}}'
+
+  - name: one_audit_index_has_no_input
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":12,"scope_is_assessable":true},"audit_scope":{"configured":true,"indexes_assessed":["audit_prod","security_events"],"indexes_assessed_count":2,"indexes_with_an_enabled_input":1,"indexes_without_an_enabled_input":["security_events"],"scope_is_assessable":true,"every_assessed_audit_index_has_an_enabled_input":false}}}'
+
+  # Direction 2b: an input exists for the index but is DISABLED. The fetcher's
+  # has_enabled_input is enabled-aware; a validator keyed on inputs_targeting
+  # rather than on the enabled-aware verdict would pass this.
+  - name: only_disabled_inputs_target_the_index
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":12,"scope_is_assessable":true},"audit_scope":{"configured":true,"indexes_assessed":["audit_prod"],"per_index":[{"index":"audit_prod","inputs_targeting":["monitor:///var/log/audit"],"inputs_targeting_count":1,"enabled_inputs_targeting_count":0,"has_enabled_input":false}],"indexes_assessed_count":1,"indexes_with_an_enabled_input":0,"indexes_without_an_enabled_input":["audit_prod"],"scope_is_assessable":true,"every_assessed_audit_index_has_an_enabled_input":false}}}'
+
+  # Direction 3, form 1: the verdict key renamed upstream. MATCH_COUNT goes to
+  # zero and the MATCH_GROUP rule would otherwise compare nothing to nothing and
+  # hold, so the presence rule is what fails here.
+  - name: verdict_key_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":12,"scope_is_assessable":true},"audit_scope":{"configured":true,"indexes_assessed":["audit_prod"],"scope_is_assessable":true,"all_audit_indexes_fed":true}}}'
+
+  # Direction 3, form 2: the block itself renamed. The fence stops matching, so
+  # the same presence rule catches it.
+  - name: audit_scope_block_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":12,"scope_is_assessable":true},"auditScope":{"configured":true,"scope_is_assessable":true,"every_assessed_audit_index_has_an_enabled_input":true}}}'
+
+  # Vacuity guard, as the fetcher ships it: the verdict is pre-AND-ed with
+  # audit_scope.scope_is_assessable, so an empty assessed scope reports false
+  # rather than a vacuous true. See set_EVD-SPLUNK-DATA-INPUTS.yaml for the case
+  # where that pre-AND is assumed GONE, which only the set can catch.
+  - name: empty_assessed_scope_is_not_a_pass
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"inputs_configured":69,"scope_is_assessable":true},"audit_scope":{"configured":true,"indexes_named":["_audit"],"indexes_internal_not_assessed":["_audit"],"indexes_assessed":[],"per_index":[],"indexes_assessed_count":0,"indexes_with_an_enabled_input":0,"indexes_without_an_enabled_input":[],"scope_is_assessable":false,"every_assessed_audit_index_has_an_enabled_input":false}}}'

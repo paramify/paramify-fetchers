@@ -1,0 +1,60 @@
+key: splunk_audit_alerts_have_notification_action
+name: Splunk Audit Alerts Carry A Notification Action
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every ENABLED alert in the apps named as holding the organization's audit
+  alerting carries at least one action that notifies something outside Splunk —
+  email, webhook, script, RSS, or an app-installed action such as Slack,
+  PagerDuty, ServiceNow or a SOAR hook. Reads
+  `audit_scope.every_enabled_alert_notifies`, which the fetcher computes as
+  `bool(enabled) and notifying == enabled` and then ANDs with
+  `scope_is_assessable`, so neither an empty scope nor a scope with nothing
+  enabled evaluates vacuously true. Notification actions are identified by
+  EXCLUSION (anything not in outputtelemetry / populate_lookup / summary_index,
+  which write results back into Splunk and tell no one), because a real SIEM's
+  alert actions carry app-defined names an allowlist would miss.
+
+  Why this is the second assertion rather than a refinement of the first: an
+  enabled alert with no notifying action fires into nothing. It is the narrowest
+  configuration fact that bears on the capability's "alerts collated on a SIEM
+  dashboard" clause, because an alert that notifies nobody cannot be collated or
+  routed anywhere. It was picked over the weaker alternatives —
+  `alerts_with_notification_action > 0`, or `fired_alerts.any_alert_has_ever_fired`
+  — because the count admits a scope where most alerts are silent, and firing is
+  a property of the data volume rather than of the control.
+
+  Does NOT assert: **that anyone reviewed or resolved anything.** This validator
+  reaches the delivery path and stops there. It does not assert that the
+  notification recipients are the accountable role (@InfoSec Admin), that anyone
+  reads what is sent, that the alerts are collated onto a dashboard or onto
+  WHICH dashboard, or that a notification was ever actually delivered. Those are
+  workflow records on surfaces this evidence does not read, and the payload's
+  `review_evidence_boundary` block names the same limit in the artifact itself.
+  Also does NOT assert that a disabled alert notifies anything — it is silent
+  about alerts that are switched off, which is
+  splunk_audit_alerts_all_enabled's job.
+
+# Fenced to the `audit_scope` block on purpose. The identical key
+# `every_enabled_alert_notifies` also appears in the all-deployment `summary`
+# roll-up, emitted FIRST in the payload, where it covers Splunk's own telemetry
+# jobs — searches that carry a real `alert_type` and deliberately notify nobody.
+# MATCH_GROUP reads the FIRST match only, so without the fence this validator
+# would score the vendor's phone-home jobs instead of the customer's alerting.
+regex: '"audit_scope":\s*\{[\s\S]*?"every_enabled_alert_notifies":\s*(?<every_enabled_alert_notifies>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true
+validation_rules:
+  # Presence, and load-bearing rather than ceremonial: a MATCH_GROUP comparison
+  # over a regex that never matched compares nothing to nothing and evaluates
+  # TRUE, so without this rule a renamed key — or an unconfigured scope, where
+  # the fetcher omits the whole summarize() block from audit_scope — reads as
+  # compliant.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-SPLUNK-SAVED-SEARCH-ALERTS

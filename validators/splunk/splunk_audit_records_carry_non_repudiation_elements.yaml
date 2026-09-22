@@ -1,0 +1,65 @@
+key: splunk_audit_records_carry_non_repudiation_elements
+name: Splunk Audit Records Carry All Non-Repudiation Elements
+type: AUTOMATED
+role: configuration
+statement: >-
+  Across every event type actually observed in the Splunk audit indexes, every
+  non-repudiation element the fetcher assessed deployment-wide — event type
+  (`action`), when (`timestamp`), where (`host`/`splunk_server`), source
+  (`clientip`/`src`), outcome (`info`) and associated identities (`user`) — is
+  carried by every record of every one of those event types. Substantiates the
+  Audit Logging Criteria capability's claim that audit records enforce
+  non-repudiation. Each element is scored on the counter the element actually
+  requires: identity, source, outcome and event type on the MEANINGFUL count,
+  which excludes the placeholder values Splunk writes when there is nothing to
+  record (notably the literal `n/a` in `user`); only `when` is scored on
+  presence, because a timestamp's value is not a placeholder question.
+
+  Does NOT assert: the seventh element, full text of privileged commands — it is
+  reported `assessed: false` in this block, because a filesystem-change record
+  has no command to quote, and it is asserted separately by
+  splunk_privileged_commands_logged_with_full_text. Nor does it assert that the
+  event types observed are the ones that OUGHT to be logged (absence over a
+  window is not absence of capability), that a component silent during the
+  window is logging at all, that the recorded values are accurate, that the
+  records are protected from modification, or that the observed window is as
+  long as the window requested — `window_requested_earliest` and
+  `window_observed_earliest` are both in the payload precisely because they
+  differ, and nothing here reads either.
+
+# Reads the DEPLOYMENT-WIDE `summary` roll-up, not `privileged_command_scope`.
+# Both blocks carry a key named `all_assessed_elements_fully_covered`, and
+# `summary` is emitted FIRST, so the fence names the block it means rather than
+# relying on document order.
+#
+# The fence is TEMPERED — `(?:(?!"privileged_command_scope")[\s\S])*?` rather
+# than a plain `[\s\S]*?` — and that is the load-bearing part. A plain lazy span
+# anchored only at its start will happily run PAST the end of the summary block:
+# if the key were renamed upstream inside `summary`, the span would carry on and
+# bind to the identically-named key in `privileged_command_scope`, and the
+# validator would report on the wrong population without a single match being
+# lost. Tempering the span so it cannot cross into the next roll-up makes a
+# renamed key produce zero matches, which the presence rule below turns into a
+# failure.
+#
+# NON-VACUITY: no separate `scope_is_assessable` rule is needed here, because
+# the fetcher pre-ANDs it into this very key (`summary["all_assessed_..."] =
+# bool(...) and summary["scope_is_assessable"]`), and `scope_is_assessable`
+# requires event types AND events to have actually been observed. A deployment
+# where the search returned nothing — a misspelled index, a role without
+# `srchIndexesAllowed` over `_audit` — reads `false` here, not `true`.
+regex: '"summary":\s*\{(?:(?!"privileged_command_scope")[\s\S])*?"all_assessed_elements_fully_covered":\s*(?<all_assessed_elements_fully_covered>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true
+validation_rules:
+  # Presence, and load-bearing rather than ceremonial: a MATCH_GROUP comparison
+  # over a regex that never matched compares nothing to nothing and evaluates
+  # TRUE, so without this rule a renamed summary key reads as compliant.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-SPLUNK-AUDIT-EVENT-TYPES

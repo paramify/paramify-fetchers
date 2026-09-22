@@ -1,0 +1,63 @@
+key: splunk_log_access_attribute_scoped
+name: Splunk Log Access Is Attribute Scoped
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every non-exempt Splunk role that can reach the configured audit indexes
+  carries a non-trivial search filter (`srchFilter`, direct or imported), and
+  the scope that verdict was computed over was itself assessable. Substantiates
+  the ATTRIBUTE-BASED element of KSI-MLA-ALA ("Authorizing Log Access", si-11):
+  role membership alone decides WHICH indexes a principal reaches, and only a
+  search filter narrows WHICH RECORDS within them. Both `""` and `"*"` are
+  normalised by the fetcher to "no filter", because a filter matching everything
+  filters nothing — Splunk writes `*` on the built-in admin role.
+
+  Does NOT assert: that the filter is the RIGHT filter. It says a filter exists,
+  not that it encodes the organisation's defined data sensitivity, and a filter
+  such as `index=*` satisfies this validator while restricting nothing beyond
+  the trivial cases the fetcher already normalises away. Nor that the filter
+  cannot be widened by a role the principal also holds — Splunk unions search
+  filters across roles. Nor that any human account is assigned these roles;
+  /services/authentication/users is unread, so this proves the access MODEL,
+  not its membership. Nor the "persistently reviewed" clause of the KSI, which
+  no Splunk endpoint exposes. Nor the least-privilege and just-in-time elements
+  (see splunk_log_access_least_privileged and splunk_log_access_time_bounded),
+  nor that the collection succeeded (see collection_succeeded).
+
+# Fenced to `audit_scope`, and the fence is load-bearing: the identical key
+# `every_role_with_access_has_search_filter` also appears in the all-roles
+# `summary` block written EARLIER in the payload, where Splunk's own built-ins
+# drag it false on any healthy deployment. MATCH_GROUP reads the FIRST match
+# only, so an unfenced pattern silently reads the wrong block.
+#
+# Group 2 is the anti-vacuity guard and here it is NOT optional. Unlike
+# `no_role_has_wildcard_index_access`, this key is NOT pre-AND-ed with
+# `scope_is_assessable` by the fetcher: it is `all(...)` over the in-scope
+# roles, and `all([])` is true, so an unassessable or empty scope reads as a
+# clean pass on its own. `scope_is_assessable` is true only when audit indexes
+# were named, the role list came back whole
+# (roles_reported_total == roles_returned), at least one non-exempt role was
+# evaluated, and no named exempt role was absent.
+#
+# The span depends on the filter verdict preceding the guard inside the block,
+# which it does — the fetcher writes the roll-up first and appends the guard
+# last. Drop or rename either key and the pattern matches nothing, MATCH_COUNT
+# is 0, and rule 1 fails: the safe direction.
+regex: '"audit_scope":\s*\{[\s\S]*?"every_role_with_access_has_search_filter":\s*(?<every_role_with_access_has_search_filter>true|false)[\s\S]*?"scope_is_assessable":\s*(?<scope_is_assessable>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS true
+validation_rules:
+  # Presence, and load-bearing rather than ceremonial: a MATCH_GROUP comparison
+  # over a regex that never matched compares nothing to nothing and evaluates
+  # TRUE, so without this rule a renamed key reads as compliant.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-SPLUNK-ROLE-INDEX-ACCESS

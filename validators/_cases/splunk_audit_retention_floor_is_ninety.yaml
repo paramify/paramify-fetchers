@@ -1,0 +1,13 @@
+validator: splunk_audit_retention_floor_is_ninety
+cases:
+  - name: floor_is_ninety
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"searchable_retention_days_required":90},"audit_scope":{"configured":true,"searchable_retention_days_required":90,"all_indexes_meet_requirement":true}}}'
+  # The attack this validator exists to stop: drop the floor and everything goes
+  # green while retention got worse.
+  - name: floor_lowered_to_one
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"searchable_retention_days_required":1},"audit_scope":{"configured":true,"searchable_retention_days_required":1,"all_indexes_meet_requirement":true}}}'
+  - name: floor_key_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"audit_scope":{"configured":true,"required_days":90,"all_indexes_meet_requirement":true}}}'

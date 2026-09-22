@@ -1,0 +1,84 @@
+key: splunk_privileged_commands_logged_with_full_text
+name: Splunk Privileged Commands Logged With Full Command Text
+type: AUTOMATED
+role: configuration
+statement: >-
+  Within the event types named as privileged commands, every record of every
+  in-scope event type carries the full text of the command it performed — read
+  from `search` (the executed SPL) or `object` (the configuration object a
+  privileged change acted on) — and the scope is assessable, meaning at least
+  one in-scope event type was actually observed with events in it.
+  Substantiates the "full-text of privileged commands" element of the Audit
+  Logging Criteria narrative, which is the one element the deployment-wide
+  roll-up cannot speak to: it is reported `assessed: false` there on purpose,
+  because a filesystem-change record has no command to quote and scoring it
+  against that element would report a misleading coverage figure rather than a
+  strict one.
+
+  Scored on the MEANINGFUL counter, not the presence counter — a `search` field
+  holding a placeholder is a record of a command whose text was not captured,
+  which is precisely the failure the element names.
+
+  Does NOT assert: that the set of event types treated as privileged is correct
+  or complete — that comes from the `SPLUNK_PRIVILEGED_EVENT_TYPES` knob, and
+  `patterns_matching_nothing_observed` in the payload reports which configured
+  patterns matched nothing so a stale knob is visible rather than silent. Nor
+  does it assert that the captured text is UNTRUNCATED (the payload's
+  `command_text_max_length` is what shows that, and this validator does not read
+  it), that the command text is accurate or tamper-proof, that the commands
+  themselves were authorised, or anything about the other six elements inside
+  the scope or anywhere else. It also says nothing about the deployment-wide
+  population: an event type outside the privileged scope is not counted here at
+  all.
+
+# TWO deliberate fences, both necessary.
+#
+# 1. OUTER — `"privileged_command_scope":\s*\{`. The key `privileged_command_text`
+#    also appears in the `summary` roll-up, where it is the not-assessed stub
+#    (`assessed: false`, no coverage keys at all), and `summary` is emitted
+#    FIRST. MATCH_GROUP reads the first match only, so without this fence the
+#    pattern would start in the wrong block. This fence needs no tempering:
+#    `privileged_command_scope` is the LAST roll-up in the payload, so a lazy
+#    span running past its end reaches nothing that could be mistaken for it.
+#
+# 2. INNER — `(?:(?!"narrative_term")[\s\S])*?` between the element and its
+#    verdict. Every element block inside `elements` carries an identically-named
+#    `every_event_type_fully_covered` flag, and `identity` is emitted
+#    immediately after `privileged_command_text`. A plain lazy span would, if
+#    the flag were renamed inside this element, silently bind to the NEXT
+#    element's flag and report on the wrong element. Tempering on
+#    `"narrative_term"` — the first key of every element block — confines the
+#    span to one element. The element's OWN `narrative_term` is consumed by the
+#    anchor before the tempered span starts, which is why it is written out.
+#
+# NON-VACUITY: `every_event_type_fully_covered` is locally guarded in the
+# fetcher (`bool(event_types) and ...`), so an empty scope reads false rather
+# than vacuously true — but that guard alone does not distinguish "no privileged
+# event types configured" from "configured and all covered". The second group
+# therefore reads the block's own `scope_is_assessable`, which additionally
+# requires patterns to be configured AND at least one in-scope type AND events
+# in it. Both are asserted. If the knob is unset the fetcher emits no `elements`
+# block at all, the pattern finds nothing, and the presence rule fails the
+# validator rather than passing it.
+regex: '"privileged_command_scope":\s*\{[\s\S]*?"privileged_command_text":\s*\{\s*"narrative_term"(?:(?!"narrative_term")[\s\S])*?"every_event_type_fully_covered":\s*(?<privileged_command_text_fully_covered>true|false)[\s\S]*?"scope_is_assessable":\s*(?<scope_is_assessable>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS true
+validation_rules:
+  # Presence. A MATCH_GROUP comparison over a regex that never matched compares
+  # nothing to nothing and evaluates TRUE, so a renamed key — or a run with no
+  # privileged scope configured at all — would otherwise read as compliant.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  # The element itself: every in-scope event type carries command text on every
+  # one of its records.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  # The anti-vacuity half, asserted explicitly rather than assumed: the scope
+  # had privileged event types in it with events to measure.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-SPLUNK-AUDIT-EVENT-TYPES

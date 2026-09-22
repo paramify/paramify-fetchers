@@ -1,0 +1,48 @@
+validator: splunk_audit_alerts_all_enabled
+# `summary` before `audit_scope`, as the fetcher emits them. The summary values
+# are the ones the sandbox actually produced over all 174 Splunk-shipped saved
+# searches, which is what makes the fence testable.
+cases:
+  # The fence is load-bearing in this direction too: the all-deployment summary
+  # is false on a perfectly healthy deployment, because Splunk's own DMC alerts
+  # ship disabled and the customer has no reason to turn them on. MATCH_GROUP
+  # takes the first match, so an unfenced pattern would read that false and fail
+  # a compliant tenant.
+  - name: every_scoped_alert_enabled_though_summary_false
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"alerts_configured":15,"alerts_enabled":7,"alerts_disabled":8,"every_configured_alert_is_enabled":false},"audit_scope":{"alert_apps_configured":true,"alert_apps_named":["security_alerting"],"alert_apps_named_but_absent":[],"alerts_configured":4,"alerts_enabled":4,"any_alert_enabled":true,"alerts_disabled":0,"every_configured_alert_is_enabled":true,"alerts_with_notification_action":4,"every_enabled_alert_notifies":true,"scope_is_assessable":true}}}'
+
+  # The real sandbox posture, in miniature: the scoped app ships alerts and every
+  # one of them is switched off. This is the case that must fail, and does.
+  - name: scoped_alerts_all_disabled
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"alerts_configured":15,"alerts_enabled":7,"every_configured_alert_is_enabled":false},"audit_scope":{"alert_apps_configured":true,"alert_apps_named":["splunk_monitoring_console"],"alert_apps_named_but_absent":[],"alerts_configured":8,"alerts_enabled":0,"any_alert_enabled":false,"alerts_disabled":8,"every_configured_alert_is_enabled":false,"alerts_with_notification_action":0,"every_enabled_alert_notifies":false,"scope_is_assessable":true}}}'
+
+  - name: one_scoped_alert_disabled
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"alerts_configured":15,"every_configured_alert_is_enabled":true},"audit_scope":{"alert_apps_configured":true,"alert_apps_named":["security_alerting"],"alert_apps_named_but_absent":[],"alerts_configured":4,"alerts_enabled":3,"any_alert_enabled":true,"alerts_disabled":1,"alerts_disabled_names":["Audit Config Changed"],"every_configured_alert_is_enabled":false,"every_enabled_alert_notifies":true,"scope_is_assessable":true}}}'
+
+  # Vacuity, as the FETCHER emits it: with no alerts in scope the verdict is
+  # computed as `bool(alerts) and ...` and then ANDed with scope_is_assessable,
+  # so it is false rather than vacuously true. Note the summary says true here —
+  # unfenced, this empty scope would pass. The forged variant, where the verdict
+  # itself reads true over zero alerts, is covered at set level by
+  # splunk_audit_alert_scope_is_assessable; see set_EVD-SPLUNK-SAVED-SEARCH-ALERTS.
+  - name: scope_contains_no_alerts_at_all
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"alerts_configured":15,"every_configured_alert_is_enabled":true},"audit_scope":{"alert_apps_configured":true,"alert_apps_named":["security_alerting"],"alert_apps_named_but_absent":[],"saved_searches_in_scope":3,"alerts_configured":0,"alerts_enabled":0,"any_alert_enabled":false,"every_configured_alert_is_enabled":false,"every_enabled_alert_notifies":false,"scope_is_assessable":false}}}'
+
+  # SPLUNK_ALERT_APPS unset: the fetcher omits the summarize() roll-up from
+  # audit_scope entirely, so the verdict key is simply not there.
+  - name: alert_scope_never_configured
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"alerts_configured":15,"every_configured_alert_is_enabled":true},"audit_scope":{"alert_apps_configured":false,"alert_apps_named":[],"alert_apps_named_but_absent":[],"saved_searches_in_scope":0,"scope_is_assessable":false}}}'
+
+  # Direction 3: envelope intact, compliance key renamed upstream.
+  - name: enabled_verdict_key_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"alerts_configured":15,"every_configured_alert_is_enabled":true},"audit_scope":{"alert_apps_configured":true,"alert_apps_named":["security_alerting"],"alerts_configured":4,"alerts_enabled":4,"all_alerts_enabled":true,"every_enabled_alert_notifies":true,"scope_is_assessable":true}}}'
+
+  - name: audit_scope_block_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"alerts_configured":15,"every_configured_alert_is_enabled":true},"auditScope":{"alert_apps_configured":true,"alerts_configured":4,"every_configured_alert_is_enabled":true,"scope_is_assessable":true}}}'

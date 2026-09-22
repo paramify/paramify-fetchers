@@ -1,0 +1,55 @@
+key: splunk_inputs_name_a_collection_host
+name: Splunk Inputs Identify A Collection Host
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one enabled Splunk data input names the host it collects from.
+  Substantiates the "on all production components" half of the Audit Log
+  Collection and Alerts capability: a claim that log management covers named
+  production components is only evidenced by an input inventory that can name a
+  component at all.
+
+  This reads the MEANINGFUL count, not the presence count, and the distinction
+  is the point. splunkd stores `host: "$decideOnStartup"` on inputs that defer
+  the host to whatever machine starts them, so the `host` FIELD is present on
+  effectively every input while identifying nothing. The fetcher reports both —
+  `inputs_with_index_field_present` style presence counts alongside
+  `inputs_identifying_a_host` — and a validator on a presence count would report
+  complete host attribution on a deployment with none. On this sandbox the field
+  is present on 69 of 69 inputs and meaningful on 0.
+
+  Does NOT assert: that EVERY input names a host, nor that every production
+  component is covered — neither is readable from an input inventory, which
+  enumerates collection configuration rather than fleet membership. Nor does it
+  assert that collected EVENTS lack host attribution: `$decideOnStartup` is
+  resolved at runtime by the collecting instance, so events from such an input
+  can still carry a host even though the input names none. What fails here is
+  the ability to demonstrate component coverage FROM THE INPUT CONFIGURATION,
+  which is what an assessor reading this evidence set is being shown.
+
+# No `summary` fence is needed: `inputs_identifying_a_host` appears in exactly
+# one roll-up, unlike `scope_is_assessable`. Left unfenced deliberately rather
+# than by omission.
+#
+# No separate vacuity guard is needed either, and that is a property of the
+# assertion rather than an oversight: this is a COUNT required to be non-zero,
+# and a non-zero count cannot be produced by an empty population. The vacuity
+# trap applies to universally-quantified verdicts ("every X ..."), not to this
+# form.
+regex: '"inputs_identifying_a_host":\s*(?<inputs_identifying_a_host>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] NOT_EQUALS 0
+validation_rules:
+  # Splits "the key is gone" from "the count is genuinely zero" in the trace.
+  # Both fail, but only the first one means the evidence became unreadable, and
+  # a rule that read nothing would otherwise hold silently.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  # NOT_EQUALS is safe under either a numeric or a lexicographic reading of the
+  # operator: the two agree for "0" against any other integer json.dumps emits.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-DATA-INPUTS
