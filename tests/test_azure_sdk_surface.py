@@ -280,6 +280,21 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list"],
         "azure/defender_plans",
     ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "assessments",
+        ["list"],
+        "azure/defender_assessments",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "assessments_metadata",
+        ["list_by_subscription"],
+        "azure/defender_assessments — the only source of severity; "
+        "assessments.list returns no metadata",
+    ),
     # --- RBAC ----------------------------------------------------------------
     (
         "azure.mgmt.authorization",

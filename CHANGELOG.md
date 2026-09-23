@@ -118,6 +118,17 @@ schemas and the `paramify` CLI — not the internal code.
   in the schema, marked deprecated, so that fetcher's data remains shape-checked
   until it migrates to the registry. New validators belong in `validators/`.
 
+### Fixed
+
+- **`azure_defender_assessments` collects again, with severity** (fetcher
+  0.1.1). A missing import made every run fail with a `NameError`, so the
+  evidence set published zero assessments and reported the provider as
+  `unknown`. Behind that, `assessments.list` returns no metadata, so severity,
+  categories and assessment type were null on every record and
+  `unhealthy_by_severity` was always empty. It now reads each check's metadata
+  from `assessments_metadata.list_by_subscription()` — one extra call, joined on
+  the assessment name.
+
 ## [0.5.1-beta] - 2026-09-02
 
 ### Fixed

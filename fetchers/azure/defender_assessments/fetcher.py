@@ -25,7 +25,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import (  # noqa: E402
     Collector,           # accumulates API failures without crashing the run
-    build_payload,        # assembles the final evidence dict (metadata + results + summary)
+    arm_client_kwargs,   # sovereign-cloud ARM endpoint + credential scopes for SDK clients
+    build_payload,       # assembles the final evidence dict (metadata + results + summary)
     classify_failure_code,  # maps a failure onto a stable error "code" for the status file
     coverage_percentage,  # integer percentage helper, 0-safe on an empty denominator
     credential,            # returns azure.identity.DefaultAzureCredential()
@@ -81,8 +82,14 @@ def _enum_list(values: Any) -> list:
     return [v.value if hasattr(v, "value") else v for v in (values or [])]
 
 
-def project_assessment(assessment) -> dict:
+def project_assessment(assessment, metadata_by_name: Optional[dict] = None) -> dict:
     """Read one `SecurityAssessmentResponse` model's attributes into a flat dict.
+
+    `assessments.list` does not return `metadata` (only `get` takes
+    `expand=metadata`), so severity/categories/type would all be null. The caller
+    passes the subscription's assessment definitions keyed by `name` — the GUID
+    the assessment and its metadata share — and they fill the gap in one call
+    instead of one `get` per assessment.
 
     `resource_details`, `status`, and `metadata` are nested models (sub-objects),
     so each needs its own `model_attr` reads rather than one flat pass over
@@ -97,7 +104,9 @@ def project_assessment(assessment) -> dict:
     # dict below doesn't repeat the same three model_attr(assessment, ...) calls.
     resource_details = model_attr(assessment, "resource_details")
     status = model_attr(assessment, "status")
-    metadata = model_attr(assessment, "metadata")
+    metadata = model_attr(assessment, "metadata") or (metadata_by_name or {}).get(
+        model_attr(assessment, "name")
+    )
 
     return {
         # --- identity: which check, on which resource ---
@@ -203,10 +212,10 @@ def collect_assessments(subscription_id, cred, collector: Collector) -> tuple[li
     # keeps every record from the pages already fetched, instead of discarding
     # them all — this call can span many pages on a subscription with thousands
     # of assessment results, where a mid-pagination throttle/timeout is real.
-    assessments: list[dict] = []
+    raw: list = []
     try:
         for assessment in client.assessments.list(scope=f"subscriptions/{subscription_id}"):
-            assessments.append(project_assessment(assessment))
+            raw.append(assessment)
     except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
         if is_provider_not_registered(exc):
             # Deliberately NOT collector.record(): Defender not being in use is the
@@ -222,7 +231,18 @@ def collect_assessments(subscription_id, cred, collector: Collector) -> tuple[li
         # a real collection failure — record it so the run exits non-zero, but
         # keep whatever assessments earlier pages already yielded.
         collector.record("security.assessments.list", exc)
-        return assessments, UNKNOWN
+        return [project_assessment(a) for a in raw], UNKNOWN
+
+    # Fetched only after the list succeeded, so an unregistered subscription is
+    # still classified above instead of being recorded as a metadata failure. A
+    # failure here is recorded: without it every severity is null and the
+    # unhealthy_by_severity summary silently reads as "nothing severe".
+    metadata_by_name = collector.guard(
+        "security.assessments_metadata.list_by_subscription",
+        lambda: {model_attr(m, "name"): m for m in client.assessments_metadata.list_by_subscription()},
+        default={},
+    )
+    assessments = [project_assessment(a, metadata_by_name) for a in raw]
 
     # Sorted for a deterministic, diffable evidence file — otherwise the API's
     # own ordering (not guaranteed stable) would shuffle the JSON between runs.
