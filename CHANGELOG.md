@@ -52,6 +52,15 @@ schemas and the `paramify` CLI — not the internal code.
   `--dry-run` previews without writing. The per-instance Paramify id is resolved
   at sync time and cached in a gitignored `.paramify/` lock — never written back
   to the shared registry.
+- **`azure_resource_inventory`** — an automatically generated inventory of every
+  resource in the subscription, from one Azure Resource Graph query over the
+  `Resources` table: id, name, type, location, resource group, tags, SKU, kind and
+  provisioning state, with counts by type and by location and the number of
+  untagged resources. The per-service fetchers each see only their own resource
+  types, so nothing listed the subscription as a whole. The query is paged to the
+  end; a truncated result, or a page count that disagrees with Resource Graph's own
+  total, is a collection failure rather than a shorter inventory. Adds the
+  `azure-mgmt-resourcegraph` dependency to the `azure` extra.
 
 ### Changed
 

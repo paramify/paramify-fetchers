@@ -478,6 +478,14 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list_properties_of_keys", "get_key_rotation_policy"],
         "azure/key_vault_key_rotation — rotation policy is data-plane only",
     ),
+    # --- Resource Graph: the inventory query sits on the client itself --------
+    (
+        "azure.mgmt.resourcegraph",
+        "ResourceGraphClient",
+        None,
+        ["resources"],
+        "azure/resource_inventory",
+    ),
     # --- app platform --------------------------------------------------------
     (
         "azure.mgmt.web",
@@ -599,6 +607,19 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["properties"],
         "azure/key_vault_configuration — azure-mgmt-keyvault 14 stopped "
         "flattening `properties` onto the vault",
+    ),
+    (
+        "azure.mgmt.resourcegraph.models",
+        "QueryRequestOptions",
+        ["skip_token", "top", "result_format"],
+        "azure/resource_inventory — paging; without skip_token the inventory "
+        "stops at the first 1000 resources",
+    ),
+    (
+        "azure.mgmt.resourcegraph.models",
+        "QueryResponse",
+        ["skip_token", "total_records", "result_truncated", "data"],
+        "azure/resource_inventory — the page loop and its completeness check",
     ),
 ]
 

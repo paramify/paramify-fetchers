@@ -35,12 +35,13 @@ dev = ["pytest", "ruff", "mypy"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
 # out in requirements.txt: six breaking changes across azure-mgmt majors, every
 # one producing wrong or empty evidence rather than an error. Keep the two files
-# in step. Deliberately NOT folded into `all` — 23 packages is heavier than
+# in step. Deliberately NOT folded into `all` — 24 packages is heavier than
 # everything else here combined, and it only matters if you run Azure fetchers.
 azure = [
     "azure-identity>=1.25.3,<2",
     "azure-mgmt-subscription>=3.1.1,<4",
     "azure-mgmt-resource>=26.0.0,<27",
+    "azure-mgmt-resourcegraph>=8.0.1,<9",
     "azure-mgmt-storage>=25.1.0,<26",
     "azure-mgmt-network>=31.0.1,<34",
     "azure-mgmt-security>=7.0.0,<8",

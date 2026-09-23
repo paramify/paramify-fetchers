@@ -46,6 +46,8 @@ azure-mgmt-subscription>=3.1.1,<4
 # distinguishable from "in use but empty" — Azure returns an empty list, not an
 # error, for an unregistered provider.
 azure-mgmt-resource>=26.0.0,<27
+# Resource Graph: one query over every ARM resource, for the subscription inventory.
+azure-mgmt-resourcegraph>=8.0.1,<9
 
 # Storage, networking, Defender for Cloud.
 azure-mgmt-storage>=25.1.0,<26
