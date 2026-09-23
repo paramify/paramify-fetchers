@@ -1,0 +1,60 @@
+name: azure_log_analytics_workspaces
+version: 0.1.0
+description: >
+  Every Log Analytics workspace in the subscription with the configuration that
+  decides how long log data is kept and who can read it: the pricing SKU, the
+  workspace retention (retention_in_days) and daily ingestion cap, public network
+  access for ingestion and for query, the access control mode
+  (enableLogAccessUsingOnlyResourcePermissions — resource-or-workspace permissions
+  versus workspace permissions only), whether shared-key (local) authentication is
+  disabled, and any dedicated cluster link. Per-table retention is summarized rather
+  than dumped — a workspace carries hundreds of built-in tables — as counts by plan
+  and by interactive / total retention, the minimum retention across tables, and the
+  tables whose retention differs from the workspace default or that are custom
+  tables, listed by name. Also each workspace's data export rules and whether
+  Microsoft Sentinel is onboarded (the SecurityInsights solution is enabled).
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_log_analytics_workspaces.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-MLA-OSM      # Operating SIEM capability — the log store, its retention, and Sentinel onboarding
+  - KSI-MLA-ALA      # Authorizing log access — the access control mode, local-auth, and public query access
+
+evidence_set:
+  reference_id: EVD-AZURE-LOG-ANALYTICS
+  name: Azure Log Analytics Workspaces
+  instructions: >
+    Script: fetcher.py. Azure SDK calls (azure-mgmt-loganalytics
+    LogAnalyticsManagementClient): workspaces.list(), then per workspace
+    tables.list_by_workspace(resource_group, workspace),
+    data_exports.list_by_workspace(resource_group, workspace) and
+    intelligence_packs.list(resource_group, workspace). Reader is sufficient — all
+    GETs, and no log data is queried.

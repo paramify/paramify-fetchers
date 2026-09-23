@@ -83,6 +83,7 @@ requires:
     - azure-mgmt-cosmosdb
     - azure-mgmt-databricks
     - azure-mgmt-keyvault
+    - azure-mgmt-loganalytics
     - azure-mgmt-monitor
     - azure-mgmt-network
     - azure-mgmt-policyinsights
@@ -92,6 +93,7 @@ requires:
     - azure-mgmt-recoveryservicesbackup
     - azure-mgmt-resource
     - azure-mgmt-resource-policy
+    - azure-mgmt-resourcegraph
     - azure-mgmt-security
     - azure-mgmt-sql
     - azure-mgmt-storage

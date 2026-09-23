@@ -107,6 +107,26 @@ schemas and the `paramify` CLI — not the internal code.
   with P1. Needs `Policy.Read.All` and `Directory.Read.All`. An `az login`
   session cannot read the methods policy, because the Azure CLI's client is not
   pre-authorized for `Policy.Read.All`.
+- **`azure_resource_inventory`** — an automatically generated inventory of every
+  resource in the subscription, from one Azure Resource Graph query over the
+  `Resources` table: id, name, type, location, resource group, tags, SKU, kind and
+  provisioning state, with counts by type and by location and the number of
+  untagged resources. The per-service fetchers each see only their own resource
+  types, so nothing listed the subscription as a whole. The query is paged to the
+  end; a truncated result, or a page count that disagrees with Resource Graph's own
+  total, is a collection failure rather than a shorter inventory. Adds the
+  `azure-mgmt-resourcegraph` dependency to the `azure` extra.
+- **`azure_log_analytics_workspaces`** — every Log Analytics workspace with its
+  SKU, workspace retention, daily ingestion cap, public network access for
+  ingestion and query, access control mode
+  (`enableLogAccessUsingOnlyResourcePermissions`), and whether shared-key auth is
+  disabled. Per-table retention is summarized as counts by plan and retention
+  plus the minimum across tables, with only the tables that override the
+  workspace default, or are custom, listed by name — a workspace carries several
+  hundred built-in tables. Also the workspace's data export rules and whether
+  Microsoft Sentinel is onboarded (the SecurityInsights solution is enabled).
+  Nothing in the Azure category recorded where logs are kept or for how long.
+  Adds the `azure-mgmt-loganalytics` dependency to the `azure` extra.
 
 ### Changed
 
@@ -158,6 +178,18 @@ schemas and the `paramify` CLI — not the internal code.
   `audit_effect_only_assignments`, `assignments_by_effect_class`,
   `member_policy_effect_counts` and others; the existing `audit_only_assignments`
   still means DoNotEnforce. Also mapped to `KSI-CNA-IBP` and `KSI-MLA-EVC`.
+- **`azure_key_vault_configuration` 0.2.0 records each vault's audit logging.**
+  A vault's data-plane operations — who read or changed which key, secret or
+  certificate — are logged only if a diagnostic setting exports the `AuditEvent`
+  category, and the evidence did not say whether one did. Each vault now carries
+  its diagnostic settings, `audit_logging_enabled` (true when a setting with a
+  destination exports `AuditEvent` directly or through the `audit` / `allLogs`
+  group), and the destinations the audit events reach. The summary adds
+  `vaults_with_audit_logging`, `vaults_without_audit_logging`,
+  `vaults_audit_logging_unknown` (the read failed — neither logged nor unlogged)
+  and `audit_logging_percentage`. Existing fields are unchanged. The fetcher now
+  also maps to `KSI-MLA-LET`, and to `KSI-CNA-MAT`, `KSI-CNA-RNT` and
+  `KSI-SVC-SIN`, which its network and SKU fields already evidenced.
 - **The TUI saves manifest edits as they are made.** Adding a fetcher, editing an
   entry, adding / editing / removing a target, picking an assessment, removing an
   entry, and changing the output dir all write the file immediately. Edits used

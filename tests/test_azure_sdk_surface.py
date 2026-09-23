@@ -209,7 +209,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "diagnostic_settings",
         ["list"],
         "azure/diagnostic_settings, azure/container_registry_configuration, "
-        "azure/app_service_configuration",
+        "azure/app_service_configuration, azure/key_vault_configuration",
     ),
     (
         "azure.mgmt.monitor",
@@ -525,6 +525,43 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         None,
         ["list_properties_of_keys", "get_key_rotation_policy"],
         "azure/key_vault_key_rotation — rotation policy is data-plane only",
+    ),
+    # --- Log Analytics ---------------------------------------------------------
+    (
+        "azure.mgmt.loganalytics",
+        "LogAnalyticsManagementClient",
+        "workspaces",
+        ["list"],
+        "azure/log_analytics_workspaces",
+    ),
+    (
+        "azure.mgmt.loganalytics",
+        "LogAnalyticsManagementClient",
+        "tables",
+        ["list_by_workspace"],
+        "azure/log_analytics_workspaces — per-table retention",
+    ),
+    (
+        "azure.mgmt.loganalytics",
+        "LogAnalyticsManagementClient",
+        "data_exports",
+        ["list_by_workspace"],
+        "azure/log_analytics_workspaces",
+    ),
+    (
+        "azure.mgmt.loganalytics",
+        "LogAnalyticsManagementClient",
+        "intelligence_packs",
+        ["list"],
+        "azure/log_analytics_workspaces — Sentinel onboarding (SecurityInsights)",
+    ),
+    # --- Resource Graph: the inventory query sits on the client itself --------
+    (
+        "azure.mgmt.resourcegraph",
+        "ResourceGraphClient",
+        None,
+        ["resources"],
+        "azure/resource_inventory",
     ),
     # --- app platform --------------------------------------------------------
     (
@@ -888,6 +925,72 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "ServicePlanInfo",
         ["service_plan_name", "provisioning_status"],
         "azure/entra_authentication_policy — the Entra ID P1/P2 licence check",
+    ),
+    (
+        "azure.mgmt.resourcegraph.models",
+        "QueryRequestOptions",
+        ["skip_token", "top", "result_format"],
+        "azure/resource_inventory — paging; without skip_token the inventory "
+        "stops at the first 1000 resources",
+    ),
+    (
+        "azure.mgmt.resourcegraph.models",
+        "QueryResponse",
+        ["skip_token", "total_records", "result_truncated", "data"],
+        "azure/resource_inventory — the page loop and its completeness check",
+    ),
+    (
+        "azure.mgmt.loganalytics.models",
+        "Workspace",
+        ["properties"],
+        "azure/log_analytics_workspaces — azure-mgmt-loganalytics 14 keeps "
+        "`properties` nested, as keyvault 14 does",
+    ),
+    (
+        "azure.mgmt.loganalytics.models",
+        "WorkspaceProperties",
+        [
+            "sku",
+            "retention_in_days",
+            "workspace_capping",
+            "public_network_access_for_ingestion",
+            "public_network_access_for_query",
+            "features",
+        ],
+        "azure/log_analytics_workspaces",
+    ),
+    (
+        "azure.mgmt.loganalytics.models",
+        "WorkspaceFeatures",
+        ["enable_log_access_using_only_resource_permissions", "disable_local_auth"],
+        "azure/log_analytics_workspaces — the access control mode; a rename "
+        "reads every workspace as 'workspace permissions only'",
+    ),
+    (
+        "azure.mgmt.loganalytics.models",
+        "TableProperties",
+        [
+            "plan",
+            "retention_in_days",
+            "total_retention_in_days",
+            "retention_in_days_as_default",
+            "total_retention_in_days_as_default",
+        ],
+        "azure/log_analytics_workspaces — per-table retention",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "DiagnosticSettingsResource",
+        ["storage_account_id", "workspace_id", "event_hub_authorization_rule_id", "logs"],
+        "azure/key_vault_configuration, azure/diagnostic_settings — monitor 6.x "
+        "flattens `properties`; an unflattened release reads every vault as "
+        "having no audit-log destination",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "LogSettings",
+        ["category", "category_group", "enabled"],
+        "azure/key_vault_configuration — the AuditEvent / audit-group match",
     ),
 ]
 
