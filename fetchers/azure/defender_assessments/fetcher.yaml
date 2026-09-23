@@ -1,5 +1,5 @@
 name: azure_defender_assessments
-version: 0.1.0
+version: 0.1.1
 description: >
   Every Microsoft Defender for Cloud security assessment result on the
   subscription — one record per (resource, check) pair, each with its
@@ -48,6 +48,8 @@ evidence_set:
   reference_id: EVD-AZURE-DEFENDER-ASSESSMENTS
   name: Microsoft Defender for Cloud Security Assessments
   instructions: >
-    Script: fetcher.py. Azure SDK call (azure-mgmt-security SecurityCenter):
+    Script: fetcher.py. Azure SDK calls (azure-mgmt-security SecurityCenter):
     assessments.list(scope="subscriptions/<subscription_id>") for every security
-    assessment result on the subscription.
+    assessment result on the subscription, and
+    assessments_metadata.list_by_subscription() for each check's severity,
+    categories and type (the list call does not return metadata).
