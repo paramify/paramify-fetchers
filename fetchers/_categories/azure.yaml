@@ -85,6 +85,7 @@ requires:
     - azure-mgmt-keyvault
     - azure-mgmt-monitor
     - azure-mgmt-network
+    - azure-mgmt-policyinsights
     - azure-mgmt-postgresqlflexibleservers
     - azure-mgmt-rdbms
     - azure-mgmt-recoveryservices

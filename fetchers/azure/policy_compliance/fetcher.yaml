@@ -1,0 +1,70 @@
+name: azure_policy_compliance
+version: 0.1.0
+description: >
+  Azure Policy compliance state on the subscription — the result of evaluating the
+  assigned policies, not the assignments themselves. The service's own
+  subscription-wide counts of non-compliant resources and policies, the same per
+  policy assignment with its non-compliant member policies itemized, a bounded list
+  of the non-compliant (resource, policy) records, and every policy remediation task
+  with its deployment counts. Reads the latest policy states over the service's
+  default evaluation window, which is recorded. A subscription that never registered
+  Microsoft.PolicyInsights reports provider_registration_status: not_registered,
+  which is valid evidence rather than a collection failure.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_policy_compliance.json
+  aggregation: per_target
+
+config_schema:
+  max_non_compliant_resources:
+    type: integer
+    required: false
+    default: 1000
+    env: AZURE_POLICY_MAX_NON_COMPLIANT
+    description: >
+      How many non-compliant (resource, policy) records to itemize. The summary
+      counts are complete regardless; this bounds only the list, and
+      non_compliant_states_truncated says when it was reached. 0 skips the list.
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-ACM      # configuration is continuously checked against the assigned policy baseline
+  - KSI-CNA-EIS      # drift from intended state, per resource, and the remediation tasks that correct it
+  - KSI-MLA-EVC      # the evaluation results themselves
+
+evidence_set:
+  reference_id: EVD-AZURE-POLICY-COMPLIANCE
+  name: Azure Policy Compliance State
+  instructions: >
+    Script: fetcher.py. Azure SDK calls (azure-mgmt-policyinsights
+    PolicyInsightsClient): resource.providers.get("Microsoft.PolicyInsights"), then
+    policy_states.summarize_for_subscription("latest", <subscription_id>),
+    policy_states.list_query_results_for_subscription("latest", <subscription_id>,
+    query_options=QueryOptions(filter="complianceState eq 'NonCompliant'", top=N+1)),
+    and remediations.list_for_subscription(). Reader on the subscription.

@@ -298,10 +298,31 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
     (
         "azure.mgmt.security",
         "SecurityCenter",
+        "regulatory_compliance_standards",
+        ["list"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
         "assessments_metadata",
         ["list_by_subscription"],
         "azure/defender_assessments — the only source of severity; "
         "assessments.list returns no metadata",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "regulatory_compliance_controls",
+        ["list"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "regulatory_compliance_assessments",
+        ["list"],
+        "azure/defender_regulatory_compliance",
     ),
     # --- RBAC ----------------------------------------------------------------
     (
@@ -542,8 +563,9 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure.mgmt.resource.policy",
         "PolicyClient",
         "policy_definitions",
-        ["get_built_in", "get_at_management_group", "get"],
-        "azure/policy_assignments — definition names are resolved for display",
+        ["get_built_in", "get_at_management_group", "get", "list_built_in"],
+        "azure/policy_assignments — definition names are resolved for display, and "
+        "initiative members' effects from one list_built_in",
     ),
     (
         "azure.mgmt.resource.policy",
@@ -551,6 +573,21 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "policy_set_definitions",
         ["get_built_in", "get_at_management_group", "get"],
         "azure/policy_assignments",
+    ),
+    # --- policy compliance ---------------------------------------------------
+    (
+        "azure.mgmt.policyinsights",
+        "PolicyInsightsClient",
+        "policy_states",
+        ["summarize_for_subscription", "list_query_results_for_subscription"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights",
+        "PolicyInsightsClient",
+        "remediations",
+        ["list_for_subscription"],
+        "azure/policy_compliance",
     ),
 ]
 
@@ -694,6 +731,102 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["network_security_group", "virtual_machine", "ip_configurations"],
         "azure/network_security_groups — a renamed NSG field would read as "
         "'NIC unprotected'",
+    ),
+    # --- policy effects: a missing field reads as an unresolved effect ------
+    # The model_base generation declares these on the *Properties models and
+    # flattens them onto PolicyDefinition / PolicySetDefinition for attribute
+    # access, so the Properties models are the honest thing to pin.
+    (
+        "azure.mgmt.resource.policy.models",
+        "PolicyDefinitionProperties",
+        ["policy_rule", "parameters", "display_name", "policy_type"],
+        "azure/policy_assignments — the effect is policyRule.then.effect, often a "
+        "parameter reference resolved against `parameters`",
+    ),
+    (
+        "azure.mgmt.resource.policy.models",
+        "PolicySetDefinitionProperties",
+        ["policy_definitions", "parameters", "display_name", "policy_type"],
+        "azure/policy_assignments — initiative members and the defaults they inherit",
+    ),
+    (
+        "azure.mgmt.resource.policy.models",
+        "PolicyDefinitionReference",
+        ["policy_definition_id", "policy_definition_reference_id", "parameters"],
+        "azure/policy_assignments — the value an initiative passes each member",
+    ),
+    (
+        "azure.mgmt.resource.policy.models",
+        "ParameterDefinitionsValue",
+        ["default_value"],
+        "azure/policy_assignments — the default an unset effect parameter falls back to",
+    ),
+    # --- Defender regulatory compliance: a renamed count reads as 0 failed ---
+    (
+        "azure.mgmt.security.models",
+        "RegulatoryComplianceStandard",
+        ["name", "state", "passed_controls", "failed_controls", "skipped_controls",
+         "unsupported_controls"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security.models",
+        "RegulatoryComplianceControl",
+        ["name", "description", "state", "passed_assessments", "failed_assessments",
+         "skipped_assessments"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security.models",
+        "RegulatoryComplianceAssessment",
+        ["name", "description", "state", "passed_resources", "failed_resources",
+         "skipped_resources", "unsupported_resources"],
+        "azure/defender_regulatory_compliance",
+    ),
+    # --- policy compliance: a renamed count reads as "0 non-compliant" -------
+    (
+        "azure.mgmt.policyinsights.models",
+        "SummaryResults",
+        ["non_compliant_resources", "non_compliant_policies", "resource_details",
+         "policy_details", "query_results_uri"],
+        "azure/policy_compliance — the headline counts",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyAssignmentSummary",
+        ["policy_assignment_id", "policy_set_definition_id", "results", "policy_definitions"],
+        "azure/policy_compliance — per-assignment compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyDefinitionSummary",
+        ["policy_definition_id", "policy_definition_reference_id", "effect", "results"],
+        "azure/policy_compliance — non-compliant initiative members",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "ComplianceDetail",
+        ["compliance_state", "count"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyState",
+        ["resource_id", "compliance_state", "policy_assignment_id",
+         "policy_definition_id", "policy_definition_action", "timestamp"],
+        "azure/policy_compliance — the itemized non-compliant records",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "Remediation",
+        ["policy_assignment_id", "provisioning_state", "deployment_status"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "RemediationDeploymentSummary",
+        ["total_deployments", "successful_deployments", "failed_deployments"],
+        "azure/policy_compliance",
     ),
 ]
 
