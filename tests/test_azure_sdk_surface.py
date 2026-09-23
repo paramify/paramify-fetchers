@@ -228,6 +228,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list_all"],
         "azure/network_security_groups",
     ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "network_interfaces",
+        ["list_all"],
+        "azure/network_security_groups — NIC-level NSG association",
+    ),
     # --- backup: PR #58 widens this to <12 ----------------------------------
     (
         "azure.mgmt.recoveryservices",
@@ -599,6 +606,30 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["properties"],
         "azure/key_vault_configuration — azure-mgmt-keyvault 14 stopped "
         "flattening `properties` onto the vault",
+    ),
+    # azure-mgmt-network 31 is a TypeSpec SDK: these fields are declared on the
+    # nested *PropertiesFormat model and flattened onto the resource for attribute
+    # access, so the properties model is where a rename would show.
+    (
+        "azure.mgmt.network.models",
+        "NetworkSecurityGroupPropertiesFormat",
+        ["security_rules", "default_security_rules"],
+        "azure/network_security_groups — default rules carry the platform's "
+        "AllowInternetOutBound; losing them reads as 'no egress allowed'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "SecurityRulePropertiesFormat",
+        ["priority", "destination_address_prefix", "destination_address_prefixes"],
+        "azure/network_security_groups — outbound rules are evaluated in "
+        "priority order against their destination",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "NetworkInterfacePropertiesFormat",
+        ["network_security_group", "virtual_machine", "ip_configurations"],
+        "azure/network_security_groups — a renamed NSG field would read as "
+        "'NIC unprotected'",
     ),
 ]
 

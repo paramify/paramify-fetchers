@@ -55,6 +55,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_network_security_groups` shows outbound posture and NIC coverage**
+  (0.1.0 → 0.2.0). Only an NSG's custom rules were read, so the platform's
+  default AllowInternetOutBound — which permits all Internet egress unless a
+  custom rule overrides it — never appeared, and every NSG looked like it said
+  nothing about outbound traffic. Each NSG now also carries its
+  `default_security_rules`, and the summary adds outbound counts, including
+  `unrestricted_internet_outbound_groups` (rules evaluated in priority order).
+  Network interfaces are now listed too, with the NSG on the NIC or inherited
+  from its subnet; `nics_without_any_nsg` counts the ones with neither, which
+  subnet coverage alone could not show. Rules gain `priority` and destination
+  address fields. Existing fields and summary keys are unchanged.
+
 - **The TUI saves manifest edits as they are made.** Adding a fetcher, editing an
   entry, adding / editing / removing a target, picking an assessment, removing an
   entry, and changing the output dir all write the file immediately. Edits used
