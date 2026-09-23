@@ -96,6 +96,12 @@ person. The conventions it reads are in `references/state.md`.
   restartable.
 - **Bail after 3 failed attempts on one fetcher**, write the diagnosis into
   `slate.md`, and continue the slate. One stuck fetcher does not stall the rest.
+- **Comments are rare and one line, in every script this flow writes** —
+  fetchers, `_shared/`, category files, `provision.sh`, `seed.sh`,
+  `teardown.sh`. The derivation of each field goes in the fetcher's
+  `evidence_set.instructions`, where an assessor reads it; the build story goes
+  in `notes/`. The third run wrote 45–74-line module docstrings restating both.
+  Committed code never cites `.onboarding/`, which is gitignored.
 
 ---
 
@@ -431,7 +437,8 @@ whole approach works before it is repeated N times.
 1. **Build it** — invoke `create-fetcher`. It owns scaffolding, the contract,
    and the wiring verification; do not restate its phases. Hand it the claim
    from `claim.md` so its interview starts from the control, not from "what
-   evidence".
+   evidence". Its comment rule (Phase 3) holds here: one-line docstrings,
+   comments only where a line would mislead.
 2. **Make it run** — invoke `wire-manifest`.
 3. **Run it against the sandbox.** Not fake creds. The tenant must be the one in
    `sandbox.json`.
@@ -523,7 +530,8 @@ eight fetchers to fix instead of one.
 Each subagent gets `claim.md`, `research.md`, `sandbox.json`, and its own row
 from `slate.md`. It writes its build notes to
 `.onboarding/$PLATFORM/notes/<fetcher>.md` — **starting with the three gate
-lines from step 7**, which go in the brief verbatim — and updates **only its own row's
+lines from step 7**, which go in the brief verbatim, as does the comment rule
+from the golden rules — and updates **only its own row's
 status** in `slate.md` — built, or bailed with a one-line diagnosis pointing at
 its notes file. Between fetchers, run `check_onboarding.py $PLATFORM --through
 build`: a sibling that skipped its completeness check or cloned a helper shows
@@ -611,6 +619,14 @@ Then verify the registry gate:
 5. **Run `check_onboarding.py $PLATFORM`** — every stage — and it reports
    clean. It also lists the onboarding files still uncommitted — see below.
 
+**Re-provisioning after Gate 4 reopens Gates 2 and 4.** Rebuilding a torn-down
+sandbox — to re-run the fetchers, to demo the evidence — is a new sandbox: move
+the old `teardown_decision` into a `history` list, get the rebuild and each
+seed run approved, re-verify and rewrite `verified` and `verified_at`, and
+record a fresh `teardown_decision` before the session ends. The third run
+re-provisioned for a demo, kept the previous day's `verified` block, and left
+the new containers running with only the old decision on file.
+
 Then report: what was built; what was bailed, parked, cut, or reassigned, and
 why; the coverage delta from `paramify ksi`; each fetcher's real-evidence
 verdict; and every standing consequence — each clause of the claim nothing on
@@ -668,7 +684,9 @@ diff.
 - **Noting a correction in a newer file and leaving the old one wrong.** Fix it
   where it lives.
 - **Marking the slate COMPLETE with the sandbox still running and no decision
-  recorded.** Gate 4.
+  recorded.** Gate 4. The same goes for a sandbox re-provisioned afterwards.
+- Docstrings that restate the evidence contract. It lives in
+  `evidence_set.instructions`; the code gets one line.
 - **Parking a clause that belongs to another platform.** If no sandbox of this
   platform could ever prove it, it is reassigned, not parked.
 - Restating `create-fetcher` / `wire-manifest` / `suggest-validator` mechanics

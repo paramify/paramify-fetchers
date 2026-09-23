@@ -261,6 +261,12 @@ mistakes the missing `seed.sh` for a skipped step.
 **`teardown_decision`** is written at close-out (Gate 4) and nowhere else. A
 sandbox with no `teardown_decision` is one nobody has decided about.
 
+**Re-provisioned?** Move the previous decision into
+`"history": [{"provisioned": <date>, "teardown_decision": {...}}]`, then treat
+the rebuild as new: fresh approval, fresh `verified` and `verified_at`, and its
+own `teardown_decision` at the end. The checker fails a `verified_at` older
+than `approved_at`.
+
 ## teardown.sh
 
 Written at step 5 **before** anything is provisioned, executable, idempotent,

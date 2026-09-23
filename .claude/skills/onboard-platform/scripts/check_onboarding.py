@@ -1,29 +1,7 @@
 #!/usr/bin/env python3
-"""Check an onboarding's state directory against the gates it claims to have passed.
+"""Check .onboarding/<platform>/ and its fetchers against the gates they claim to have passed.
 
-The onboard-platform skill decides its gates by what is on disk in
-`.onboarding/<platform>/`, not by what anyone remembers. This reads that
-directory, plus the fetchers it produced, and reports per stage what is
-recorded, what is missing, and what contradicts the rules.
-
-    python .claude/skills/onboard-platform/scripts/check_onboarding.py splunk
-    python .claude/skills/onboard-platform/scripts/check_onboarding.py splunk --through slate
-    python .claude/skills/onboard-platform/scripts/check_onboarding.py splunk --json
-
-Stages run in the order the flow reaches them, and each includes the ones
-before it:
-
-    claim     step 3            claim.md and its provenance
-    sandbox   step 5 / Gate 2   research, sandbox.json, teardown, measured.md
-    slate     step 6 / Gate 1   the approved plan and every unbuilt row's state
-    build     steps 7-8 / Gate 3 each built fetcher's completeness and verdict
-    close     Gate 4            the sandbox's fate, and what is uncommitted
-
-A stage passes when it reports no FAIL. WARN is for a human to look at and
-never blocks; INFO is context. This checks what can be decided mechanically —
-that a decision was recorded, that two counts match, that a file exists. It
-cannot tell you the decision was right, and a clean run is not a substitute for
-reading the files.
+Stages: claim, sandbox (Gate 2), slate (Gate 1), build (Gate 3), close (Gate 4). FAIL blocks; WARN and INFO never do.
 """
 
 from __future__ import annotations
@@ -36,8 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-# scripts/ -> onboard-platform/ -> skills/ -> .claude/ -> repo root. Overridable
-# with --repo, which is how the checker is exercised against a fixture tree.
+# scripts/ -> onboard-platform/ -> skills/ -> .claude/ -> repo root; --repo overrides.
 REPO = Path(__file__).resolve().parents[4]
 
 STAGES = ["claim", "sandbox", "slate", "build", "close"]
@@ -48,8 +25,7 @@ LABEL = {
     "build": "steps 7-8 · Gate 3",
     "close": "Gate 4",
 }
-# A slate row's state is the earliest of these words in its Status cell, since
-# the cell leads with it and prose after it may mention another state.
+# A row's state is the earliest of these words in its Status cell.
 STATE_WORDS = {
     "built": r"\bbuilt\b",
     "bailed": r"\bbail(?:ed)?\b",
@@ -58,11 +34,11 @@ STATE_WORDS = {
     "reassigned": r"\breassign(?:ed)?\b",
 }
 NOT_BUILT = ("bailed", "parked", "cut", "reassigned")
-# Per-fetcher by nature, so a shared name across fetchers is not duplication.
 PER_FETCHER = {"main", "collect"}
-# A small helper that exists in two versions has almost certainly drifted; a
-# large one with the same name is more likely legitimate per-fetcher logic.
-SMALL_HELPER_LINES = 12
+SMALL_HELPER_LINES = 12  # two versions of a helper this small have drifted, not diverged on purpose
+MAX_DOCSTRING_LINES = 3
+MAX_COMMENT_RUN = 2
+MIN_LINES_PER_COMMENT = 20
 SECRET_KEY = re.compile(r"(?:^|_)(password|passwd|secret|token|api_?key)$", re.I)
 ENV_REF = re.compile(r"^(\$\{env:[A-Za-z_][A-Za-z0-9_]*\}|[A-Z][A-Z0-9_]*)$")
 
@@ -240,7 +216,44 @@ def tls_off_defaults(category: str) -> list[str]:
     return hits
 
 
-# ---------------------------------------------------------------------------
+def comment_problems(path: Path) -> list[str]:
+    src = read(path)
+    lines = src.splitlines()
+    out = []
+    if path.suffix == ".py":
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            tree = None
+        for node in ast.walk(tree) if tree else []:
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                doc = ast.get_docstring(node, clean=True)
+                if doc and len(doc.splitlines()) > MAX_DOCSTRING_LINES:
+                    out.append(f"{getattr(node, 'name', 'module')} docstring is {len(doc.splitlines())} lines")
+    comments, run, longest = 0, 0, 0
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("#") and not (i == 0 and line.startswith("#!")):
+            comments, run = comments + 1, run + 1
+            longest = max(longest, run)
+        else:
+            run = 0
+    if longest > MAX_COMMENT_RUN:
+        out.append(f"a {longest}-line comment block")
+    if comments > 2 and len(lines) / comments < MIN_LINES_PER_COMMENT:
+        out.append(f"{comments} comment lines in {len(lines)}")
+    return out
+
+
+def check_comments(r: Report, stage: str, files: list[Path]) -> None:
+    flagged = 0
+    for f in files:
+        probs = comment_problems(f)
+        if probs:
+            flagged += 1
+            hint = "; the derivation belongs in evidence_set.instructions" if f.name == "fetcher.py" else ""
+            r.warn(stage, f"{f.relative_to(REPO)}: {'; '.join(probs)} — comments are rare and one line{hint}")
+    if files and not flagged:
+        r.ok(stage, f"comments concise in {len(files)} file(s)")
 
 
 def check_claim(r: Report, st: Path) -> None:
@@ -317,6 +330,11 @@ def check_sandbox(r: Report, st: Path) -> None:
         else:
             r.fail("sandbox", "sandbox.json has no verified.failure_case_present — without one, no validator "
                               "can be proven to fail at Gate 3")
+        approved, checked = str(sb.get("approved_at") or "")[:10], str(sb.get("verified_at") or "")[:10]
+        if approved and checked and checked < approved:
+            r.fail("sandbox", f"verified_at {checked} predates approved_at {approved} — a re-provisioned sandbox "
+                              "is re-verified and its `verified` block rewritten, not inherited")
+    check_comments(r, "sandbox", sorted(st.glob("*.sh")))
 
     measured = read(st / "measured.md")
     if not measured:
@@ -369,7 +387,6 @@ def check_slate(r: Report, st: Path) -> tuple[list[dict], str]:
     for i, row in enumerate(rows, 1):
         state, fid = row["_state"], row["_fetcher"]
         if not fid:
-            # Never skip a row silently: an unreadable name means nothing below was checked for it.
             r.fail("slate", f"slate row {i}: cannot read a `<category>/<fetcher>` name in its Fetcher cell, "
                             "so nothing about it can be checked")
             continue
@@ -468,6 +485,14 @@ def check_category(r: Report, cat: str, n_built: int) -> None:
         elif max(c[1] for c in copies) <= SMALL_HELPER_LINES:
             r.warn("build", f"{cat}: `{fn}` exists in {variants} versions across {where} — a small helper that "
                             "has drifted; lift one version into _shared/")
+    committed = sorted(p for p in root.rglob("*") if p.suffix in (".py", ".sh", ".yaml") and p.is_file())
+    committed.append(REPO / "fetchers" / "_categories" / f"{cat}.yaml")
+    check_comments(r, "build", [p for p in committed if p.is_file()])
+    committed += sorted((REPO / "validators" / cat).glob("*.yaml"))
+    for p in committed:
+        if p.is_file() and ".onboarding/" in read(p):
+            r.fail("build", f"{p.relative_to(REPO)} references .onboarding/, which is gitignored — "
+                            "state the fact inline or drop it")
     tls = tls_off_defaults(cat)
     if tls:
         for t in tls:
@@ -483,8 +508,9 @@ def check_close(r: Report, st: Path, cats: set[str]) -> None:
         sb = {}
     td = sb.get("teardown_decision")
     if not isinstance(td, dict) or not td.get("decision"):
-        r.fail("close", "no teardown_decision in sandbox.json — check whether the sandbox is running, ask the "
-                        "user, then record {decision, by, at, why, review_by}")
+        prior = " (the one in history[] was for the previous sandbox)" if sb.get("history") else ""
+        r.fail("close", f"no teardown_decision in sandbox.json{prior} — check whether the sandbox is running, "
+                        "ask the user, then record {decision, by, at, why, review_by}")
     else:
         d = str(td["decision"]).lower()
         if d not in ("torn down", "left running"):
