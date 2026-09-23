@@ -24,13 +24,13 @@ selects only fields that exist; anything missing is listed in the evidence under
 unverified. A missing scope or licence is reported as a failure, never as an
 empty result.
 
-| Fetcher | Evidence | Wiz module | Wiz scopes | Validation |
-|---|---|---|---|---|
-| `wiz_threat_detections` | Detections in a look-back window and Threat issues, ticket linkage | Wiz Defend | `read:detections`, `read:threat_issues` | Ran live 2026-09-23: every field exists in the schema; tenant had no detections |
-| `wiz_file_integrity_monitoring` | Runtime Sensor coverage and file-integrity detections (detection, not prevention) | Runtime Sensor | `read:sensors`, `read:detections` | Ran live 2026-09-23: query valid; tenant had no sensors, so sensor fields are unverified |
-| `wiz_attack_surface_findings` | External / web application findings by severity, rule, technology | Attack Surface Management | `read:attack_surface` | Ran live 2026-09-23: query valid; tenant returned no findings |
-| `wiz_code_findings` | SAST findings by severity, repository, CWE (no snippets) | Wiz Code | `read:sast_findings` | Live-tested 2026-09-23 with real data |
-| `wiz_tenant_security_settings` | The Wiz tenant's IP allowlists and portal inactivity timeout | core | `read:security_settings` | Live-tested 2026-09-23 with real data |
+| Fetcher | Evidence | Wiz module | Wiz scopes |
+|---|---|---|---|
+| `wiz_threat_detections` | Detections in a look-back window and Threat issues, ticket linkage | Wiz Defend | `read:detections`, `read:threat_issues` |
+| `wiz_file_integrity_monitoring` | Runtime Sensor coverage and file-integrity detections (detection, not prevention) | Runtime Sensor | `read:sensors`, `read:detections` |
+| `wiz_attack_surface_findings` | External / web application findings by severity, rule, technology | Attack Surface Management | `read:attack_surface` |
+| `wiz_code_findings` | SAST findings by severity, repository, CWE (no snippets) | Wiz Code | `read:sast_findings` |
+| `wiz_tenant_security_settings` | The Wiz tenant's IP allowlists and portal inactivity timeout | core | `read:security_settings` |
 
 `wiz_tenant_security_settings` describes the Wiz tenant itself. It is not
 evidence that the organization's own service offers customers security-settings
@@ -60,17 +60,6 @@ type **Custom Integration (GraphQL API)**, all projects, `read:` scopes only
 
 Per-fetcher settings (remediation windows, statuses, look-back) are listed by
 `paramify describe <fetcher>`.
-
-## Things verified against a live Wiz for Gov tenant (2026-09-22)
-
-- Tokens last **900 seconds**, not the 24 hours older public docs describe. The
-  client renews a minute early, so long pulls do not fail mid-walk.
-- The root queries and node fields these fetchers select exist.
-- Filter inputs used here (`status`, `type`, `statusChangedAt`, `securityFramework`,
-  `result`) were read from the tenant's own schema.
-- DISA STIG benchmarks in Wiz are operating-system benchmarks. Cloud
-  control-plane checks map to NIST 800-53 / FedRAMP, which is why the two
-  configuration fetchers default to different frameworks.
 
 ## Security
 
