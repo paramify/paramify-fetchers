@@ -75,6 +75,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_key_vault_configuration` 0.2.0 records each vault's audit logging.**
+  A vault's data-plane operations — who read or changed which key, secret or
+  certificate — are logged only if a diagnostic setting exports the `AuditEvent`
+  category, and the evidence did not say whether one did. Each vault now carries
+  its diagnostic settings, `audit_logging_enabled` (true when a setting with a
+  destination exports `AuditEvent` directly or through the `audit` / `allLogs`
+  group), and the destinations the audit events reach. The summary adds
+  `vaults_with_audit_logging`, `vaults_without_audit_logging`,
+  `vaults_audit_logging_unknown` (the read failed — neither logged nor unlogged)
+  and `audit_logging_percentage`. Existing fields are unchanged. The fetcher now
+  also maps to `KSI-MLA-LET`, and to `KSI-CNA-MAT`, `KSI-CNA-RNT` and
+  `KSI-SVC-SIN`, which its network and SKU fields already evidenced.
+
 - **The TUI saves manifest edits as they are made.** Adding a fetcher, editing an
   entry, adding / editing / removing a target, picking an assessment, removing an
   entry, and changing the output dir all write the file immediately. Edits used

@@ -7,6 +7,11 @@ Ported from prowler/providers/azure/services/keyvault/keyvault_service.py
 model. `enable_rbac_authorization` decides how the rest reads — Azure returns an empty
 `access_policies` list for an RBAC vault. Management plane only: no key material,
 secret value or certificate is read.
+
+Each vault's diagnostic settings are read too (azure-mgmt-monitor<7, one
+diagnostic_settings.list per vault), because a vault's data-plane audit trail — who
+read or changed which key or secret — exists only if a setting exports the AuditEvent
+category somewhere. Without one, those operations are not recorded at all.
 """
 
 import logging
@@ -24,6 +29,7 @@ from azure_common import (  # noqa: E402
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
+    basename,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -52,6 +58,17 @@ PUBLIC_NETWORK_ACCESS_DEFAULT = "Enabled"
 # ARM omits networkAcls entirely on a vault that was never firewalled, and the
 # service default for defaultAction is Allow.
 NETWORK_ACL_DEFAULT_ACTION = "Allow"
+
+# The Key Vault log category that records data-plane operations. The "audit" and
+# "allLogs" category groups both include it; most portal-created settings use a group.
+AUDIT_LOG_CATEGORY = "AuditEvent"
+AUDIT_CATEGORY_GROUPS = ("audit", "allLogs")
+
+# Destination kinds, as azure_diagnostic_settings names them.
+DESTINATION_STORAGE_ACCOUNT = "storage_account"
+DESTINATION_LOG_ANALYTICS = "log_analytics_workspace"
+DESTINATION_EVENT_HUB = "event_hub"
+DESTINATION_PARTNER_SOLUTION = "partner_solution"
 
 
 # --- projection: the only code that touches an azure-mgmt model ---
@@ -177,6 +194,30 @@ def project_vault(vault) -> dict:
     }
 
 
+def project_diagnostic_setting(setting) -> dict:
+    """Read a `DiagnosticSettingsResource` model — azure-mgmt-monitor 6.x flattens
+    `properties.*` onto it, as azure_diagnostic_settings documents."""
+    return {
+        "id": model_attr(setting, "id"),
+        "name": model_attr(setting, "name") or basename(model_attr(setting, "id")),
+        "storage_account_id": model_attr(setting, "storage_account_id"),
+        "workspace_id": model_attr(setting, "workspace_id"),
+        "event_hub_name": model_attr(setting, "event_hub_name"),
+        "event_hub_authorization_rule_id": model_attr(
+            setting, "event_hub_authorization_rule_id"
+        ),
+        "marketplace_partner_id": model_attr(setting, "marketplace_partner_id"),
+        "logs": [
+            {
+                "category": model_attr(log, "category"),
+                "category_group": model_attr(log, "category_group"),
+                "enabled": model_attr(log, "enabled"),
+            }
+            for log in (model_attr(setting, "logs") or [])
+        ],
+    }
+
+
 # --- pure transforms (flat snake_case dicts in, evidence records out) ---
 
 def vault_record(vault: dict) -> dict:
@@ -237,11 +278,107 @@ def vault_record(vault: dict) -> dict:
     }
 
 
+def diagnostic_destinations(setting: dict) -> list[str]:
+    """Which sinks a setting exports to, in a stable order. ARM omits unused ones."""
+    found = []
+    if setting.get("storage_account_id"):
+        found.append(DESTINATION_STORAGE_ACCOUNT)
+    if setting.get("workspace_id"):
+        found.append(DESTINATION_LOG_ANALYTICS)
+    if setting.get("event_hub_authorization_rule_id") or setting.get("event_hub_name"):
+        found.append(DESTINATION_EVENT_HUB)
+    if setting.get("marketplace_partner_id"):
+        found.append(DESTINATION_PARTNER_SOLUTION)
+    return found
+
+
+def diagnostic_setting_record(setting: dict) -> dict:
+    """Normalize one projected setting and decide whether it captures AuditEvent.
+
+    `enabled` is coerced: ARM omits it on a category never selected, and absent is off.
+    A setting with no destination captures nothing, whatever its categories say.
+    """
+    logs = [
+        {
+            "category": log.get("category"),
+            "category_group": log.get("category_group"),
+            "enabled": bool(log.get("enabled") or False),
+        }
+        for log in (setting.get("logs") or [])
+    ]
+    destinations = diagnostic_destinations(setting)
+    captures_audit = bool(destinations) and any(
+        log["enabled"]
+        and (
+            log["category"] == AUDIT_LOG_CATEGORY
+            or log["category_group"] in AUDIT_CATEGORY_GROUPS
+        )
+        for log in logs
+    )
+    return {
+        "id": setting.get("id"),
+        "name": setting.get("name"),
+        "storage_account_id": setting.get("storage_account_id"),
+        "workspace_id": setting.get("workspace_id"),
+        "event_hub_name": setting.get("event_hub_name"),
+        "event_hub_authorization_rule_id": setting.get("event_hub_authorization_rule_id"),
+        "marketplace_partner_id": setting.get("marketplace_partner_id"),
+        "destinations": destinations,
+        "logs": logs,
+        "captures_audit_events": captures_audit,
+    }
+
+
+def with_audit_logging(vault: dict, settings) -> dict:
+    """Add the vault's diagnostic settings and its audit-logging verdict.
+
+    `settings` is None when the read failed (recorded as an API failure): the verdict
+    is then None — unknown — rather than a false that would read as "not logged".
+    """
+    if settings is None:
+        return {
+            **vault,
+            "diagnostic_settings_status": "unavailable",
+            "monitor_diagnostic_settings": None,
+            "audit_logging_enabled": None,
+            "audit_log_destinations": [],
+        }
+    records = sorted(
+        (diagnostic_setting_record(s) for s in settings), key=lambda r: r.get("id") or ""
+    )
+    auditing = [r for r in records if r["captures_audit_events"]]
+    return {
+        **vault,
+        "diagnostic_settings_status": "collected",
+        "monitor_diagnostic_settings": records,
+        "audit_logging_enabled": bool(auditing),
+        # Each sink AuditEvent reaches, with the resource it lands in.
+        "audit_log_destinations": sorted(
+            (
+                {"type": kind, "resource_id": resource_id}
+                for r in auditing
+                for kind, resource_id in (
+                    (DESTINATION_STORAGE_ACCOUNT, r["storage_account_id"]),
+                    (DESTINATION_LOG_ANALYTICS, r["workspace_id"]),
+                    (
+                        DESTINATION_EVENT_HUB,
+                        r["event_hub_authorization_rule_id"] or r["event_hub_name"],
+                    ),
+                    (DESTINATION_PARTNER_SOLUTION, r["marketplace_partner_id"]),
+                )
+                if resource_id
+            ),
+            key=lambda d: (d["type"], d["resource_id"] or ""),
+        ),
+    }
+
+
 def summarize(vaults: list[dict]) -> dict:
     """RBAC adoption and recoverability are the headlines."""
     total = len(vaults)
     rbac = sum(1 for v in vaults if v["rbac_authorization_enabled"])
     recoverable = sum(1 for v in vaults if v["recoverable"])
+    audited = sum(1 for v in vaults if v.get("audit_logging_enabled") is True)
     return {
         "total_key_vaults": total,
         "rbac_authorization_vaults": rbac,
@@ -260,6 +397,19 @@ def summarize(vaults: list[dict]) -> dict:
             1 for v in vaults if str((v["sku"] or {}).get("name") or "").lower() == "premium"
         ),
         "total_access_policies": sum(v["access_policy_count"] for v in vaults),
+        # --- data-plane audit logging (diagnostic settings) ---
+        "vaults_with_diagnostic_settings": sum(
+            1 for v in vaults if v.get("monitor_diagnostic_settings")
+        ),
+        "vaults_with_audit_logging": audited,
+        "vaults_without_audit_logging": sum(
+            1 for v in vaults if v.get("audit_logging_enabled") is False
+        ),
+        # Vaults whose diagnostic-settings read failed: neither logged nor unlogged.
+        "vaults_audit_logging_unknown": sum(
+            1 for v in vaults if v.get("audit_logging_enabled") is None
+        ),
+        "audit_logging_percentage": coverage_percentage(audited, total),
     }
 
 
@@ -281,7 +431,59 @@ def collect_key_vaults(subscription_id, cred, collector: Collector) -> list[dict
         return [vault_record(project_vault(v)) for v in client.vaults.list_by_subscription()]
 
     vaults = collector.guard("keyvault.vaults.list_by_subscription", _list, default=[])
+    if vaults:
+        vaults = attach_diagnostic_settings(subscription_id, cred, collector, vaults)
     return sorted(vaults, key=lambda r: r.get("id") or "")
+
+
+def attach_diagnostic_settings(
+    subscription_id, cred, collector: Collector, vaults: list[dict]
+) -> list[dict]:
+    """One diagnostic_settings.list(resource_uri=<vault id>) per vault.
+
+    A failed read (client or per vault) is recorded and leaves that vault's verdict
+    unknown. The call is a GET, so it works on a read-only (disabled) subscription.
+    """
+
+    def _monitor_client():
+        from azure.mgmt.monitor import MonitorManagementClient  # lazy
+
+        client = MonitorManagementClient(
+            credential=cred, subscription_id=subscription_id, **arm_client_kwargs()
+        )
+        # azure-mgmt-monitor 7.0.0 dropped the operation group entirely; say so
+        # instead of letting an AttributeError name a missing attribute.
+        if getattr(client, "diagnostic_settings", None) is None:
+            raise RuntimeError(
+                "installed azure-mgmt-monitor has no diagnostic_settings operation "
+                "group (removed in 7.0.0) — pin azure-mgmt-monitor>=6.0.2,<7"
+            )
+        return client
+
+    monitor = collector.guard("monitor.MonitorManagementClient (init)", _monitor_client)
+    enriched = []
+    for vault in vaults:
+        resource_id, name = vault.get("id"), vault.get("name")
+        settings = None
+        if monitor is not None and resource_id:
+            settings = collector.guard(
+                f"monitor.diagnostic_settings.list ({name})",
+                lambda resource_id=resource_id: [
+                    project_diagnostic_setting(setting)
+                    # No leading slash: the SDK substitutes the URI unquoted into
+                    # "/{resourceUri}/providers/Microsoft.Insights/diagnosticSettings".
+                    for setting in monitor.diagnostic_settings.list(
+                        resource_uri=resource_id.lstrip("/")
+                    )
+                ],
+            )
+        elif monitor is not None:
+            collector.record(
+                "monitor.diagnostic_settings.list",
+                RuntimeError(f"key vault {name!r} has no resource id"),
+            )
+        enriched.append(with_audit_logging(vault, settings))
+    return enriched
 
 
 def main() -> int:

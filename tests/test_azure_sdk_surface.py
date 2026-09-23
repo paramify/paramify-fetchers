@@ -204,7 +204,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "MonitorManagementClient",
         "diagnostic_settings",
         ["list"],
-        "azure/diagnostic_settings, azure/container_registry_configuration",
+        "azure/diagnostic_settings, azure/container_registry_configuration, "
+        "azure/key_vault_configuration",
     ),
     (
         "azure.mgmt.monitor",
@@ -688,6 +689,20 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
             "total_retention_in_days_as_default",
         ],
         "azure/log_analytics_workspaces — per-table retention",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "DiagnosticSettingsResource",
+        ["storage_account_id", "workspace_id", "event_hub_authorization_rule_id", "logs"],
+        "azure/key_vault_configuration, azure/diagnostic_settings — monitor 6.x "
+        "flattens `properties`; an unflattened release reads every vault as "
+        "having no audit-log destination",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "LogSettings",
+        ["category", "category_group", "enabled"],
+        "azure/key_vault_configuration — the AuditEvent / audit-group match",
     ),
 ]
 
