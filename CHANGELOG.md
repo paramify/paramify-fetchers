@@ -66,6 +66,19 @@ schemas and the `paramify` CLI — not the internal code.
   Every existing key is still computed over the subscription-and-above set and
   means what it did. Also mapped to `KSI-CNA-DFP`, `KSI-IAM-JIT` and
   `KSI-MLA-ALA`.
+- **`azure_policy_assignments` 0.2.0 resolves each assignment's policy effect.**
+  `enforced` only ever meant enforcementMode Default, so an enforced assignment of
+  an audit-only initiative read the same as one that denies. Each assignment now
+  carries `policy_effects` — the effect of its definition, or of every member of
+  its initiative, with `[parameters('effect')]`-style effects followed through the
+  assignment's parameter value, then the initiative's default, then the
+  definition's default, and the source of each recorded — plus `effect_class`
+  (`enforcing` / `audit_only` / `disabled` / `unresolved`) and `actually_enforces`
+  (an enforcing effect — deny, denyAction, modify, deployIfNotExists, append — under
+  enforcementMode Default). New summary keys: `actually_enforcing_assignments`,
+  `audit_effect_only_assignments`, `assignments_by_effect_class`,
+  `member_policy_effect_counts` and others; the existing `audit_only_assignments`
+  still means DoNotEnforce. Also mapped to `KSI-CNA-IBP` and `KSI-MLA-EVC`.
 - **The TUI saves manifest edits as they are made.** Adding a fetcher, editing an
   entry, adding / editing / removing a target, picking an assessment, removing an
   entry, and changing the output dir all write the file immediately. Edits used

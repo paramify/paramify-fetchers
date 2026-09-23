@@ -511,8 +511,9 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure.mgmt.resource.policy",
         "PolicyClient",
         "policy_definitions",
-        ["get_built_in", "get_at_management_group", "get"],
-        "azure/policy_assignments — definition names are resolved for display",
+        ["get_built_in", "get_at_management_group", "get", "list_built_in"],
+        "azure/policy_assignments — definition names are resolved for display, and "
+        "initiative members' effects from one list_built_in",
     ),
     (
         "azure.mgmt.resource.policy",
@@ -599,6 +600,35 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["properties"],
         "azure/key_vault_configuration — azure-mgmt-keyvault 14 stopped "
         "flattening `properties` onto the vault",
+    ),
+    # --- policy effects: a missing field reads as an unresolved effect ------
+    # The model_base generation declares these on the *Properties models and
+    # flattens them onto PolicyDefinition / PolicySetDefinition for attribute
+    # access, so the Properties models are the honest thing to pin.
+    (
+        "azure.mgmt.resource.policy.models",
+        "PolicyDefinitionProperties",
+        ["policy_rule", "parameters", "display_name", "policy_type"],
+        "azure/policy_assignments — the effect is policyRule.then.effect, often a "
+        "parameter reference resolved against `parameters`",
+    ),
+    (
+        "azure.mgmt.resource.policy.models",
+        "PolicySetDefinitionProperties",
+        ["policy_definitions", "parameters", "display_name", "policy_type"],
+        "azure/policy_assignments — initiative members and the defaults they inherit",
+    ),
+    (
+        "azure.mgmt.resource.policy.models",
+        "PolicyDefinitionReference",
+        ["policy_definition_id", "policy_definition_reference_id", "parameters"],
+        "azure/policy_assignments — the value an initiative passes each member",
+    ),
+    (
+        "azure.mgmt.resource.policy.models",
+        "ParameterDefinitionsValue",
+        ["default_value"],
+        "azure/policy_assignments — the default an unset effect parameter falls back to",
     ),
 ]
 
