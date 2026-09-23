@@ -66,7 +66,11 @@ class _FakeCredential:
 
 
 def _import(module: str, name: str) -> object:
-    return getattr(importlib.import_module(module), name)
+    """`name` may be dotted, for a class nested inside another (kiota's query params)."""
+    obj: object = importlib.import_module(module)
+    for part in name.split("."):
+        obj = getattr(obj, part)
+    return obj
 
 
 def _build(module: str, client_name: str) -> object:
@@ -204,7 +208,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "MonitorManagementClient",
         "diagnostic_settings",
         ["list"],
-        "azure/diagnostic_settings, azure/container_registry_configuration",
+        "azure/diagnostic_settings, azure/container_registry_configuration, "
+        "azure/app_service_configuration, azure/key_vault_configuration",
     ),
     (
         "azure.mgmt.monitor",
@@ -227,6 +232,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "virtual_networks",
         ["list_all"],
         "azure/network_security_groups",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "network_interfaces",
+        ["list_all"],
+        "azure/network_security_groups — NIC-level NSG association",
     ),
     # --- backup: PR #58 widens this to <12 ----------------------------------
     (
@@ -279,6 +291,42 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "pricings",
         ["list"],
         "azure/defender_plans",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "assessments",
+        ["list"],
+        "azure/defender_assessments",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "regulatory_compliance_standards",
+        ["list"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "assessments_metadata",
+        ["list_by_subscription"],
+        "azure/defender_assessments — the only source of severity; "
+        "assessments.list returns no metadata",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "regulatory_compliance_controls",
+        ["list"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "regulatory_compliance_assessments",
+        ["list"],
+        "azure/defender_regulatory_compliance",
     ),
     # --- RBAC ----------------------------------------------------------------
     (
@@ -478,6 +526,43 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list_properties_of_keys", "get_key_rotation_policy"],
         "azure/key_vault_key_rotation — rotation policy is data-plane only",
     ),
+    # --- Log Analytics ---------------------------------------------------------
+    (
+        "azure.mgmt.loganalytics",
+        "LogAnalyticsManagementClient",
+        "workspaces",
+        ["list"],
+        "azure/log_analytics_workspaces",
+    ),
+    (
+        "azure.mgmt.loganalytics",
+        "LogAnalyticsManagementClient",
+        "tables",
+        ["list_by_workspace"],
+        "azure/log_analytics_workspaces — per-table retention",
+    ),
+    (
+        "azure.mgmt.loganalytics",
+        "LogAnalyticsManagementClient",
+        "data_exports",
+        ["list_by_workspace"],
+        "azure/log_analytics_workspaces",
+    ),
+    (
+        "azure.mgmt.loganalytics",
+        "LogAnalyticsManagementClient",
+        "intelligence_packs",
+        ["list"],
+        "azure/log_analytics_workspaces — Sentinel onboarding (SecurityInsights)",
+    ),
+    # --- Resource Graph: the inventory query sits on the client itself --------
+    (
+        "azure.mgmt.resourcegraph",
+        "ResourceGraphClient",
+        None,
+        ["resources"],
+        "azure/resource_inventory",
+    ),
     # --- app platform --------------------------------------------------------
     (
         "azure.mgmt.web",
@@ -490,7 +575,15 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
             "list_host_keys",
             "list_application_settings",
         ],
-        "azure/app_service_configuration, azure/function_app_configuration",
+        "azure/app_service_configuration, azure/function_app_configuration, "
+        "azure/app_service_plans",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "app_service_plans",
+        ["list"],
+        "azure/app_service_plans",
     ),
     (
         "azure.mgmt.databricks",
@@ -511,8 +604,9 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure.mgmt.resource.policy",
         "PolicyClient",
         "policy_definitions",
-        ["get_built_in", "get_at_management_group", "get"],
-        "azure/policy_assignments — definition names are resolved for display",
+        ["get_built_in", "get_at_management_group", "get", "list_built_in"],
+        "azure/policy_assignments — definition names are resolved for display, and "
+        "initiative members' effects from one list_built_in",
     ),
     (
         "azure.mgmt.resource.policy",
@@ -520,6 +614,21 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "policy_set_definitions",
         ["get_built_in", "get_at_management_group", "get"],
         "azure/policy_assignments",
+    ),
+    # --- policy compliance ---------------------------------------------------
+    (
+        "azure.mgmt.policyinsights",
+        "PolicyInsightsClient",
+        "policy_states",
+        ["summarize_for_subscription", "list_query_results_for_subscription"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights",
+        "PolicyInsightsClient",
+        "remediations",
+        ["list_for_subscription"],
+        "azure/policy_compliance",
     ),
 ]
 
@@ -600,6 +709,289 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/key_vault_configuration — azure-mgmt-keyvault 14 stopped "
         "flattening `properties` onto the vault",
     ),
+    # azure-mgmt-network 31 is a TypeSpec SDK: these fields are declared on the
+    # nested *PropertiesFormat model and flattened onto the resource for attribute
+    # access, so the properties model is where a rename would show.
+    (
+        "azure.mgmt.network.models",
+        "NetworkSecurityGroupPropertiesFormat",
+        ["security_rules", "default_security_rules"],
+        "azure/network_security_groups — default rules carry the platform's "
+        "AllowInternetOutBound; losing them reads as 'no egress allowed'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "SecurityRulePropertiesFormat",
+        ["priority", "destination_address_prefix", "destination_address_prefixes"],
+        "azure/network_security_groups — outbound rules are evaluated in "
+        "priority order against their destination",
+    ),
+    # SiteConfigResource (get_configuration) nests these under `properties`,
+    # a SiteConfig; the resource flattens it for attribute access.
+    (
+        "azure.mgmt.web.models",
+        "SiteConfig",
+        [
+            "ip_security_restrictions",
+            "ip_security_restrictions_default_action",
+            "scm_ip_security_restrictions",
+            "scm_ip_security_restrictions_default_action",
+            "scm_ip_security_restrictions_use_main",
+        ],
+        "azure/app_service_configuration — a renamed restriction field reads as "
+        "'no rules', which evaluates to 'allows all traffic'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "IpSecurityRestriction",
+        ["ip_address", "action", "priority", "vnet_subnet_resource_id", "headers"],
+        "azure/app_service_configuration — access-restriction rule evaluation",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "AppServicePlanProperties",
+        ["zone_redundant", "number_of_workers", "per_site_scaling", "elastic_scale_enabled"],
+        "azure/app_service_plans — a renamed zone_redundant reads as 'not zone "
+        "redundant' on a plan that is",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SkuDescription",
+        ["name", "tier", "capacity"],
+        "azure/app_service_plans — sku.capacity is the plan's instance count",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteProperties",
+        ["server_farm_id", "redundancy_mode"],
+        "azure/app_service_plans — server_farm_id is how sites join their plan",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "NetworkInterfacePropertiesFormat",
+        ["network_security_group", "virtual_machine", "ip_configurations"],
+        "azure/network_security_groups — a renamed NSG field would read as "
+        "'NIC unprotected'",
+    ),
+    # --- policy effects: a missing field reads as an unresolved effect ------
+    # The model_base generation declares these on the *Properties models and
+    # flattens them onto PolicyDefinition / PolicySetDefinition for attribute
+    # access, so the Properties models are the honest thing to pin.
+    (
+        "azure.mgmt.resource.policy.models",
+        "PolicyDefinitionProperties",
+        ["policy_rule", "parameters", "display_name", "policy_type"],
+        "azure/policy_assignments — the effect is policyRule.then.effect, often a "
+        "parameter reference resolved against `parameters`",
+    ),
+    (
+        "azure.mgmt.resource.policy.models",
+        "PolicySetDefinitionProperties",
+        ["policy_definitions", "parameters", "display_name", "policy_type"],
+        "azure/policy_assignments — initiative members and the defaults they inherit",
+    ),
+    (
+        "azure.mgmt.resource.policy.models",
+        "PolicyDefinitionReference",
+        ["policy_definition_id", "policy_definition_reference_id", "parameters"],
+        "azure/policy_assignments — the value an initiative passes each member",
+    ),
+    (
+        "azure.mgmt.resource.policy.models",
+        "ParameterDefinitionsValue",
+        ["default_value"],
+        "azure/policy_assignments — the default an unset effect parameter falls back to",
+    ),
+    # --- Defender regulatory compliance: a renamed count reads as 0 failed ---
+    (
+        "azure.mgmt.security.models",
+        "RegulatoryComplianceStandard",
+        ["name", "state", "passed_controls", "failed_controls", "skipped_controls",
+         "unsupported_controls"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security.models",
+        "RegulatoryComplianceControl",
+        ["name", "description", "state", "passed_assessments", "failed_assessments",
+         "skipped_assessments"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security.models",
+        "RegulatoryComplianceAssessment",
+        ["name", "description", "state", "passed_resources", "failed_resources",
+         "skipped_resources", "unsupported_resources"],
+        "azure/defender_regulatory_compliance",
+    ),
+    # --- policy compliance: a renamed count reads as "0 non-compliant" -------
+    (
+        "azure.mgmt.policyinsights.models",
+        "SummaryResults",
+        ["non_compliant_resources", "non_compliant_policies", "resource_details",
+         "policy_details", "query_results_uri"],
+        "azure/policy_compliance — the headline counts",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyAssignmentSummary",
+        ["policy_assignment_id", "policy_set_definition_id", "results", "policy_definitions"],
+        "azure/policy_compliance — per-assignment compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyDefinitionSummary",
+        ["policy_definition_id", "policy_definition_reference_id", "effect", "results"],
+        "azure/policy_compliance — non-compliant initiative members",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "ComplianceDetail",
+        ["compliance_state", "count"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyState",
+        ["resource_id", "compliance_state", "policy_assignment_id",
+         "policy_definition_id", "policy_definition_action", "timestamp"],
+        "azure/policy_compliance — the itemized non-compliant records",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "Remediation",
+        ["policy_assignment_id", "provisioning_state", "deployment_status"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "RemediationDeploymentSummary",
+        ["total_deployments", "successful_deployments", "failed_deployments"],
+        "azure/policy_compliance",
+    ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        [
+            "service_principal_type",
+            "app_owner_organization_id",
+            "alternative_names",
+            "password_credentials",
+            "key_credentials",
+        ],
+        "azure/entra_service_principals — a missing field reads as None, so every "
+        "principal would look credential-free or of unknown ownership",
+    ),
+    (
+        "msgraph.generated.models.application",
+        "Application",
+        ["federated_identity_credentials"],
+        "azure/entra_service_principals — the $expand target; without it every "
+        "application reads as non-federated",
+    ),
+    (
+        "msgraph.generated.applications.applications_request_builder",
+        "ApplicationsRequestBuilder.ApplicationsRequestBuilderGetQueryParameters",
+        ["select", "expand"],
+        "azure/entra_service_principals — federated credentials arrive only via $expand",
+    ),
+    (
+        "msgraph.generated.models.authentication_methods_policy",
+        "AuthenticationMethodsPolicy",
+        ["authentication_method_configurations", "policy_migration_state", "registration_enforcement"],
+        "azure/entra_authentication_policy — a missing field reads as no methods "
+        "configured, i.e. SMS looks disabled",
+    ),
+    (
+        "msgraph.generated.models.authentication_method_configuration",
+        "AuthenticationMethodConfiguration",
+        ["state", "exclude_targets"],
+        "azure/entra_authentication_policy — `state` is the enabled/disabled fact",
+    ),
+    (
+        "msgraph.generated.models.identity_security_defaults_enforcement_policy",
+        "IdentitySecurityDefaultsEnforcementPolicy",
+        ["is_enabled"],
+        "azure/entra_authentication_policy — security defaults on/off",
+    ),
+    (
+        "msgraph.generated.models.group_setting",
+        "GroupSetting",
+        ["template_id", "values"],
+        "azure/entra_authentication_policy — password protection settings",
+    ),
+    (
+        "msgraph.generated.models.service_plan_info",
+        "ServicePlanInfo",
+        ["service_plan_name", "provisioning_status"],
+        "azure/entra_authentication_policy — the Entra ID P1/P2 licence check",
+    ),
+    (
+        "azure.mgmt.resourcegraph.models",
+        "QueryRequestOptions",
+        ["skip_token", "top", "result_format"],
+        "azure/resource_inventory — paging; without skip_token the inventory "
+        "stops at the first 1000 resources",
+    ),
+    (
+        "azure.mgmt.resourcegraph.models",
+        "QueryResponse",
+        ["skip_token", "total_records", "result_truncated", "data"],
+        "azure/resource_inventory — the page loop and its completeness check",
+    ),
+    (
+        "azure.mgmt.loganalytics.models",
+        "Workspace",
+        ["properties"],
+        "azure/log_analytics_workspaces — azure-mgmt-loganalytics 14 keeps "
+        "`properties` nested, as keyvault 14 does",
+    ),
+    (
+        "azure.mgmt.loganalytics.models",
+        "WorkspaceProperties",
+        [
+            "sku",
+            "retention_in_days",
+            "workspace_capping",
+            "public_network_access_for_ingestion",
+            "public_network_access_for_query",
+            "features",
+        ],
+        "azure/log_analytics_workspaces",
+    ),
+    (
+        "azure.mgmt.loganalytics.models",
+        "WorkspaceFeatures",
+        ["enable_log_access_using_only_resource_permissions", "disable_local_auth"],
+        "azure/log_analytics_workspaces — the access control mode; a rename "
+        "reads every workspace as 'workspace permissions only'",
+    ),
+    (
+        "azure.mgmt.loganalytics.models",
+        "TableProperties",
+        [
+            "plan",
+            "retention_in_days",
+            "total_retention_in_days",
+            "retention_in_days_as_default",
+            "total_retention_in_days_as_default",
+        ],
+        "azure/log_analytics_workspaces — per-table retention",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "DiagnosticSettingsResource",
+        ["storage_account_id", "workspace_id", "event_hub_authorization_rule_id", "logs"],
+        "azure/key_vault_configuration, azure/diagnostic_settings — monitor 6.x "
+        "flattens `properties`; an unflattened release reads every vault as "
+        "having no audit-log destination",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "LogSettings",
+        ["category", "category_group", "enabled"],
+        "azure/key_vault_configuration — the AuditEvent / audit-group match",
+    ),
 ]
 
 
@@ -632,6 +1024,11 @@ GRAPH_BUILDERS = [
     ("users", "azure/entra_mfa_status"),
     ("directory_roles", "azure/entra_privileged_roles"),
     ("identity", "azure/entra_conditional_access_policies"),
+    ("service_principals", "azure/entra_service_principals"),
+    ("policies", "azure/entra_authentication_policy"),
+    ("group_settings", "azure/entra_authentication_policy"),
+    ("group_setting_templates", "azure/entra_authentication_policy"),
+    ("subscribed_skus", "azure/entra_authentication_policy"),
 ]
 
 

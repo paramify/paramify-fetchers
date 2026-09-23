@@ -1,5 +1,5 @@
 name: azure_rbac_role_assignments
-version: 0.1.0
+version: 0.2.0
 description: >
   Every Azure RBAC role assignment that applies at the subscription scope or above,
   with its scope classified (tenant root / management group / subscription / resource
@@ -8,7 +8,9 @@ description: >
   built-in roles — Owner, Contributor, User Access Administrator and Role Based Access
   Control Administrator — are flagged, as are the ones that let the holder grant
   access to itself, and ABAC conditions are reported since they narrow a broad role's
-  real reach.
+  real reach. Assignments made below the subscription — on a resource group or a
+  single resource — are collected as a separate list with their own counts by scope
+  level, so the subscription-and-above counts keep their meaning.
 category: azure
 
 supports_targets: true
@@ -43,6 +45,9 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 ksis:
   - KSI-IAM-ELP
+  - KSI-CNA-DFP      # who holds which privileges, at every scope down to one resource
+  - KSI-IAM-JIT      # standing grants, including the resource-level ones, are what JIT access replaces
+  - KSI-MLA-ALA      # resource-scoped grants on log stores are who can read or change the logs
 
 evidence_set:
   reference_id: EVD-AZURE-RBAC-ASSIGNMENTS
@@ -51,5 +56,7 @@ evidence_set:
     Script: fetcher.py. Azure SDK calls (azure-mgmt-authorization
     AuthorizationManagementClient):
     role_definitions.list(scope="/subscriptions/{id}"),
-    role_assignments.list_for_subscription(filter="atScope()"), and
-    resource.providers.get for Microsoft.Authorization.
+    role_assignments.list_for_subscription(filter="atScope()") for the
+    subscription scope and above, role_assignments.list_for_subscription() unfiltered
+    for the resource-group and resource grants below it (the unfiltered result minus
+    the atScope() set), and resource.providers.get for Microsoft.Authorization.

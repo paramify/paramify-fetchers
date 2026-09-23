@@ -46,6 +46,8 @@ azure-mgmt-subscription>=3.1.1,<4
 # distinguishable from "in use but empty" — Azure returns an empty list, not an
 # error, for an unregistered provider.
 azure-mgmt-resource>=26.0.0,<27
+# Resource Graph: one query over every ARM resource, for the subscription inventory.
+azure-mgmt-resourcegraph>=8.0.1,<9
 
 # Storage, networking, Defender for Cloud.
 azure-mgmt-storage>=25.1.0,<26
@@ -75,6 +77,8 @@ azure-mgmt-containerregistry>=15.0.0,<16
 azure-mgmt-keyvault>=14.0.1,<15
 azure-keyvault-keys>=4.11.1,<5
 azure-mgmt-monitor>=6.0.2,<7
+# Log Analytics workspaces: retention, access mode, table retention, data exports.
+azure-mgmt-loganalytics>=14.0.0,<15
 azure-mgmt-recoveryservices>=4.1.0,<5
 azure-mgmt-recoveryservicesbackup>=10.0.0,<12
 
@@ -85,6 +89,8 @@ azure-mgmt-recoveryservicesbackup>=10.0.0,<12
 azure-mgmt-web>=11.0.1,<12
 azure-mgmt-databricks>=3.0.0,<4
 azure-mgmt-resource-policy==1.0.0b4
+# Policy compliance state (policy_states, remediations).
+azure-mgmt-policyinsights>=1.0.1,<2
 
 # GCP category (fetchers/gcp/*) — official Google Cloud client libraries. Auth is
 # Application Default Credentials (google-auth is pulled in transitively); no

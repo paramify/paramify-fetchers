@@ -12,6 +12,38 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_app_service_plans`** — every App Service plan with its SKU name and
+  tier, instance count (`sku.capacity`), zone redundancy and scaling settings,
+  plus the web apps and function apps running on it (joined by
+  `server_farm_id`). App Service availability is a property of the plan, not the
+  app, so nothing in the existing Azure evidence showed whether an app survives
+  losing an instance or a zone. The summary counts zone-redundant plans,
+  multi-instance plans, single-instance plans, and plans on a no-SLA tier (Free,
+  Shared); consumption and elastic plans are flagged `platform_scaled`, since
+  their capacity is not a fixed instance count. Reader-only; evidence set
+  `EVD-AZURE-APPSVC-PLANS`.
+
+- **`azure_defender_regulatory_compliance`** (`EVD-AZURE-DEFENDER-REG-COMPLIANCE`)
+  — Defender for Cloud's regulatory compliance grading, nested standard → control
+  → assessment with passed / failed / skipped counts at each level, and headline
+  keys for the Microsoft cloud security benchmark (`mcsb_failed_controls`,
+  `mcsb_failed_control_names`, ...). `azure_defender_assessments` has the same
+  results flat, one row per resource and check; this groups them by benchmark
+  control. A subscription with Microsoft.Security unregistered, or with no
+  Standard-tier Defender plan (the service refuses regulatory compliance on the
+  free tier), reports it as `regulatory_compliance_status` and exits 0.
+
+- **`azure_policy_compliance`** (`EVD-AZURE-POLICY-COMPLIANCE`) — what the assigned
+  Azure Policies found, where `azure_policy_assignments` only says what is
+  assigned. From `azure-mgmt-policyinsights` (a new pinned dependency of the
+  `azure` extra): the subscription-wide and per-assignment counts of
+  non-compliant resources and policies from `policy_states` summarize, a bounded
+  list of the non-compliant (resource, policy) records
+  (`max_non_compliant_resources`, default 1000, with a truncation flag), and the
+  remediation tasks with their deployment counts. The evaluation window the
+  service applied is recorded, and `resources_evaluated` tells "nothing
+  non-compliant" from "nothing evaluated".
+
 - **A fanout target editor in the TUI** (`t` on the Manifest tab). A fanout
   fetcher runs once per target, so its targets are the run plan — but the page
   showed only how many there were, and there was no way to change one: fixing a
@@ -52,9 +84,112 @@ schemas and the `paramify` CLI — not the internal code.
   `--dry-run` previews without writing. The per-instance Paramify id is resolved
   at sync time and cached in a gitignored `.paramify/` lock — never written back
   to the shared registry.
+- **`azure_entra_service_principals`**, the tenant's non-user accounts. The
+  Azure category saw app registrations but not service principals, so a managed
+  identity, a principal for another tenant's app, or a secret held directly on a
+  service principal was invisible. Every service principal is now reported with
+  its type, its owner (Microsoft first-party, this tenant, or another tenant) and
+  every credential it can present, including federated identity credentials on
+  this tenant's applications. The summary counts managed-identity, federated,
+  certificate-based and secret-based principals, and credentials that are
+  expired, expire within 30 days, or never expire. It makes two paged Graph reads
+  per tenant, never one per principal, and needs `Application.Read.All`.
+- **`azure_entra_authentication_policy`** shows which sign-in methods the tenant
+  allows. `azure_entra_mfa_status` shows what users have registered, but not
+  whether the tenant still accepts SMS alongside the FIDO2 keys they registered.
+  Every method in the authentication methods policy is reported with its state,
+  targets and settings. SMS and Voice are flagged weak, and FIDO2 (passkeys
+  included) and X.509 certificates phishing-resistant. The fetcher also reports
+  the registration campaign, the policy's migration state (legacy MFA/SSPR
+  policies still apply until it completes), security defaults, and Entra password
+  protection (custom banned-password list, smart lockout). It reports the Entra
+  ID licence tier too, because a custom banned-password list is only enforced
+  with P1. Needs `Policy.Read.All` and `Directory.Read.All`. An `az login`
+  session cannot read the methods policy, because the Azure CLI's client is not
+  pre-authorized for `Policy.Read.All`.
+- **`azure_resource_inventory`** — an automatically generated inventory of every
+  resource in the subscription, from one Azure Resource Graph query over the
+  `Resources` table: id, name, type, location, resource group, tags, SKU, kind and
+  provisioning state, with counts by type and by location and the number of
+  untagged resources. The per-service fetchers each see only their own resource
+  types, so nothing listed the subscription as a whole. The query is paged to the
+  end; a truncated result, or a page count that disagrees with Resource Graph's own
+  total, is a collection failure rather than a shorter inventory. Adds the
+  `azure-mgmt-resourcegraph` dependency to the `azure` extra.
+- **`azure_log_analytics_workspaces`** — every Log Analytics workspace with its
+  SKU, workspace retention, daily ingestion cap, public network access for
+  ingestion and query, access control mode
+  (`enableLogAccessUsingOnlyResourcePermissions`), and whether shared-key auth is
+  disabled. Per-table retention is summarized as counts by plan and retention
+  plus the minimum across tables, with only the tables that override the
+  workspace default, or are custom, listed by name — a workspace carries several
+  hundred built-in tables. Also the workspace's data export rules and whether
+  Microsoft Sentinel is onboarded (the SecurityInsights solution is enabled).
+  Nothing in the Azure category recorded where logs are kept or for how long.
+  Adds the `azure-mgmt-loganalytics` dependency to the `azure` extra.
 
 ### Changed
 
+- **`azure_network_security_groups` shows outbound posture and NIC coverage**
+  (0.1.0 → 0.2.0). Only an NSG's custom rules were read, so the platform's
+  default AllowInternetOutBound — which permits all Internet egress unless a
+  custom rule overrides it — never appeared, and every NSG looked like it said
+  nothing about outbound traffic. Each NSG now also carries its
+  `default_security_rules`, and the summary adds outbound counts, including
+  `unrestricted_internet_outbound_groups` (rules evaluated in priority order).
+  Network interfaces are now listed too, with the NSG on the NIC or inherited
+  from its subnet; `nics_without_any_nsg` counts the ones with neither, which
+  subnet coverage alone could not show. Rules gain `priority` and destination
+  address fields. Existing fields and summary keys are unchanged.
+
+- **`azure_app_service_configuration` shows access restrictions and diagnostic
+  settings** (0.1.0 → 0.2.0). The access-restriction rules for the main site and
+  the SCM (deployment) site were already returned by the per-app configuration
+  call but dropped from the evidence, so nothing showed whether an app accepts
+  traffic from anywhere. Each app's `configuration` now carries both rule lists,
+  their default actions, `scm_ip_security_restrictions_use_main`, and an
+  evaluated `main_site_allows_all_traffic` / `scm_site_allows_all_traffic`; the
+  summary counts the apps where either site lets every caller through. Each app
+  also gains `monitor_diagnostic_settings` (one `diagnostic_settings.list` per
+  app, still Reader-only), counted as `apps_with_diagnostic_settings` and
+  `apps_with_enabled_logs`. Existing fields and summary keys are unchanged.
+
+- **`azure_rbac_role_assignments` 0.2.0 collects resource-group and resource-level
+  grants.** The fetcher listed with `atScope()`, which returns only assignments at
+  the subscription scope and above, so a role granted on one resource group or one
+  resource — a Contributor on a single Key Vault, a data role on a storage account —
+  never reached the evidence. A second, unfiltered listing now fills
+  `results.role_assignments_below_subscription` (the unfiltered result minus the
+  `atScope()` set, same record shape), with new `below_subscription_*` and
+  `all_scopes_*` summary keys, including `all_scopes_assignments_by_scope_level`.
+  Every existing key is still computed over the subscription-and-above set and
+  means what it did. Also mapped to `KSI-CNA-DFP`, `KSI-IAM-JIT` and
+  `KSI-MLA-ALA`.
+- **`azure_policy_assignments` 0.2.0 resolves each assignment's policy effect.**
+  `enforced` only ever meant enforcementMode Default, so an enforced assignment of
+  an audit-only initiative read the same as one that denies. Each assignment now
+  carries `policy_effects` — the effect of its definition, or of every member of
+  its initiative, with `[parameters('effect')]`-style effects followed through the
+  assignment's parameter value, then the initiative's default, then the
+  definition's default, and the source of each recorded — plus `effect_class`
+  (`enforcing` / `audit_only` / `disabled` / `unresolved`) and `actually_enforces`
+  (an enforcing effect — deny, denyAction, modify, deployIfNotExists, append — under
+  enforcementMode Default). New summary keys: `actually_enforcing_assignments`,
+  `audit_effect_only_assignments`, `assignments_by_effect_class`,
+  `member_policy_effect_counts` and others; the existing `audit_only_assignments`
+  still means DoNotEnforce. Also mapped to `KSI-CNA-IBP` and `KSI-MLA-EVC`.
+- **`azure_key_vault_configuration` 0.2.0 records each vault's audit logging.**
+  A vault's data-plane operations — who read or changed which key, secret or
+  certificate — are logged only if a diagnostic setting exports the `AuditEvent`
+  category, and the evidence did not say whether one did. Each vault now carries
+  its diagnostic settings, `audit_logging_enabled` (true when a setting with a
+  destination exports `AuditEvent` directly or through the `audit` / `allLogs`
+  group), and the destinations the audit events reach. The summary adds
+  `vaults_with_audit_logging`, `vaults_without_audit_logging`,
+  `vaults_audit_logging_unknown` (the read failed — neither logged nor unlogged)
+  and `audit_logging_percentage`. Existing fields are unchanged. The fetcher now
+  also maps to `KSI-MLA-LET`, and to `KSI-CNA-MAT`, `KSI-CNA-RNT` and
+  `KSI-SVC-SIN`, which its network and SKU fields already evidenced.
 - **The TUI saves manifest edits as they are made.** Adding a fetcher, editing an
   entry, adding / editing / removing a target, picking an assessment, removing an
   entry, and changing the output dir all write the file immediately. Edits used
@@ -117,6 +252,21 @@ schemas and the `paramify` CLI — not the internal code.
   it and only `gitlab/significant_change_notifications` still carries one; it stays
   in the schema, marked deprecated, so that fetcher's data remains shape-checked
   until it migrates to the registry. New validators belong in `validators/`.
+
+### Fixed
+
+- **`azure_defender_assessments` collects again, with severity** (fetcher
+  0.1.1). A missing import made every run fail with a `NameError`, so the
+  evidence set published zero assessments and reported the provider as
+  `unknown`. Behind that, `assessments.list` returns no metadata, so severity,
+  categories and assessment type were null on every record and
+  `unhealthy_by_severity` was always empty. It now reads each check's metadata
+  from `assessments_metadata.list_by_subscription()` — one extra call, joined on
+  the assessment name. And `resource_id` / `resource_source` were null on every
+  record, so the evidence couldn't say *which* resource failed a check: the
+  service returns `resourceDetails` with PascalCase keys the SDK doesn't
+  deserialize. Both are now read from the raw payload, with the assessed
+  resource's id taken from the assessment id as a last resort.
 
 ## [0.5.1-beta] - 2026-09-02
 
