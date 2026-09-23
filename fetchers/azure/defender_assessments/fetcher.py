@@ -82,6 +82,29 @@ def _enum_list(values: Any) -> list:
     return [v.value if hasattr(v, "value") else v for v in (values or [])]
 
 
+ASSESSMENT_ID_MARKER = "/providers/microsoft.security/assessments/"
+
+
+def _raw_detail(resource_details, key: str) -> Any:
+    """A `resource_details` field the SDK failed to deserialize.
+
+    The service returns resourceDetails with PascalCase keys (`Source`, `Id`), so
+    the SDK can't find its `source` discriminator, falls back to the base
+    `ResourceDetails` class, and parks every field in `additional_properties` —
+    leaving `.source`/`.id` None on every record.
+    """
+    extra = getattr(resource_details, "additional_properties", None) or {}
+    return extra.get(key)
+
+
+def _resource_id_from_assessment_id(assessment_id: Optional[str]) -> Optional[str]:
+    """The assessed resource is the ARM id in front of `/providers/Microsoft.Security/assessments/<guid>`."""
+    if not assessment_id:
+        return None
+    cut = assessment_id.lower().rfind(ASSESSMENT_ID_MARKER)
+    return assessment_id[:cut] if cut > 0 else None
+
+
 def project_assessment(assessment, metadata_by_name: Optional[dict] = None) -> dict:
     """Read one `SecurityAssessmentResponse` model's attributes into a flat dict.
 
@@ -115,15 +138,20 @@ def project_assessment(assessment, metadata_by_name: Optional[dict] = None) -> d
         "display_name": model_attr(assessment, "display_name"),  # human-readable check name
 
         # --- what was assessed ---
-        "resource_source": model_attr(resource_details, "source"),  # "Azure" or "OnPremise"
+        "resource_source": (  # "Azure" or "OnPremise"
+            model_attr(resource_details, "source") or _raw_detail(resource_details, "Source")
+        ),
         # `id` only exists on the Azure-resource subtype of resource_details — the
         # OnPremise/OnPremiseSql subtypes (Arc-connected machines) have no `id` at
         # all, only machine_name/vmuuid/workspace_id. Without this fallback every
-        # on-prem assessment's resource_id would be silently null.
+        # on-prem assessment's resource_id would be silently null. The last two
+        # fallbacks cover the undeserialized PascalCase payload (see _raw_detail).
         "resource_id": (
             model_attr(resource_details, "id")
             or model_attr(resource_details, "machine_name")
             or model_attr(resource_details, "vmuuid")
+            or _raw_detail(resource_details, "Id")
+            or _resource_id_from_assessment_id(model_attr(assessment, "id"))
         ),
 
         # --- the pass/fail result itself ---

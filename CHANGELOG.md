@@ -127,7 +127,11 @@ schemas and the `paramify` CLI — not the internal code.
   categories and assessment type were null on every record and
   `unhealthy_by_severity` was always empty. It now reads each check's metadata
   from `assessments_metadata.list_by_subscription()` — one extra call, joined on
-  the assessment name.
+  the assessment name. And `resource_id` / `resource_source` were null on every
+  record, so the evidence couldn't say *which* resource failed a check: the
+  service returns `resourceDetails` with PascalCase keys the SDK doesn't
+  deserialize. Both are now read from the raw payload, with the assessed
+  resource's id taken from the assessment id as a last resort.
 
 ## [0.5.1-beta] - 2026-09-02
 
