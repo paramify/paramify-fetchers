@@ -15,13 +15,13 @@ python tools/gen_ksi_mapping.py
 
 ## Coverage
 
-**32 of 36** config-evidenceable indicators covered — **88.9%**. Plus 10 organizational indicators (evidenced by HR, training or process, not cloud config), for 46 total.
+**33 of 36** config-evidenceable indicators covered — **91.7%**. Plus 10 organizational indicators (evidenced by HR, training or process, not cloud config), for 46 total.
 
 | Family | | Covered | Gaps |
 |---|---|---|---|
 | `CNA` | Cloud Native Architecture | `██████████` 8/8 | — |
 | `SVC` | Service Configuration | `████████░░` 5/6 | `KSI-SVC-VCM` |
-| `MLA` | Monitoring, Logging, and Auditing | `████████░░` 4/5 | `KSI-MLA-ALA` |
+| `MLA` | Monitoring, Logging, and Auditing | `██████████` 5/5 | — |
 | `IAM` | Identity and Access Management | `██████████` 6/6 | — |
 | `CMT` | Change Management | `██████████` 3/3 | — |
 | `RPL` | Recovery Planning | `█████░░░░░` 1/2 | `KSI-RPL-TRC` |
@@ -162,15 +162,15 @@ python tools/gen_ksi_mapping.py
 
 *4 fetchers:* [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration), [`azure_vm_hardening_status`](../fetchers/azure/vm_hardening_status), [`gcp_compute_instance_configuration`](../fetchers/gcp/compute_instance_configuration), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration)
 
-### MLA — Monitoring, Logging, and Auditing  (4/5)
+### MLA — Monitoring, Logging, and Auditing  (5/5)
 
-#### ❌ `KSI-MLA-ALA` — Authorizing Log Access *(optional at Low)*
+#### ✅ `KSI-MLA-ALA` — Authorizing Log Access *(optional at Low)*
 
 > A least-privileged, role and attribute-based, and just-in-time access authorization model is used and persistently reviewed for access to log data based on organizationally defined data sensitivity.
 
 *Controls:* `si-11`
 
-*No fetcher covers this yet — a capability gap, not a mapping gap.*
+*1 fetcher:* [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces)
 
 #### ✅ `KSI-MLA-EVC` — Evaluating Configurations
 
@@ -194,7 +194,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-17.1`, `ac-20.1`, `au-2`, `au-3`, `au-3.1`, `au-4`, `au-5`, `au-6.1`, `au-6.3`, `au-7`, `au-7.1`, `au-8`, `au-9`, `au-11`, `ir-4.1`, `si-4.2`, `si-4.4`, `si-7.7`
 
-*6 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_securityhub_status`](../fetchers/aws/securityhub_status), [`datadog_log_archives`](../fetchers/datadog/log_archives), [`datadog_siem_configuration`](../fetchers/datadog/siem_configuration), [`datadog_siem_detection_rules`](../fetchers/datadog/siem_detection_rules), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration)
+*7 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_securityhub_status`](../fetchers/aws/securityhub_status), [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`datadog_log_archives`](../fetchers/datadog/log_archives), [`datadog_siem_configuration`](../fetchers/datadog/siem_configuration), [`datadog_siem_detection_rules`](../fetchers/datadog/siem_detection_rules), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration)
 
 #### ✅ `KSI-MLA-RVL` — Reviewing Logs
 
@@ -418,18 +418,17 @@ python tools/gen_ksi_mapping.py
 
 ## Open gaps
 
-4 config-evidenceable indicators that nothing covers. Each is a **fetcher backlog item** — the evidence does not exist yet, rather than existing and being unmapped.
+3 config-evidenceable indicators that nothing covers. Each is a **fetcher backlog item** — the evidence does not exist yet, rather than existing and being unmapped.
 
 | Indicator | | What would be needed |
 |---|---|---|
 | `KSI-SVC-VCM` | Validating Communications | The authenticity and integrity of communications between machine-based information resources is persistently validated using automation. |
-| `KSI-MLA-ALA` | Authorizing Log Access | A least-privileged, role and attribute-based, and just-in-time access authorization model is used and persistently reviewed for access to log data based on organizationally defined data sensitivity. |
 | `KSI-RPL-TRC` | Testing Recovery Capabilities | The capability to recover from incidents and contingencies aligned with defined recovery objectives is persistently tested. |
 | `KSI-SCR-MIT` | Mitigating Supply Chain Risk | Persistently identify, review, and mitigate potential supply chain risks. |
 
 ## By fetcher
 
-180 of 183 fetchers carry a mapping.
+181 of 184 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -516,7 +515,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (29)
+### azure  (30)
 
 | Fetcher | Indicators |
 |---|---|
@@ -538,6 +537,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_function_app_configuration`](../fetchers/azure/function_app_configuration) | `KSI-CNA-MAT`, `KSI-SVC-SIN` |
 | [`azure_key_vault_configuration`](../fetchers/azure/key_vault_configuration) | `KSI-IAM-ELP` |
 | [`azure_key_vault_key_rotation`](../fetchers/azure/key_vault_key_rotation) | `KSI-SVC-ASM` |
+| [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces) | `KSI-MLA-ALA`, `KSI-MLA-OSM` |
 | [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration) | `KSI-CNA-MAT`, `KSI-CNA-OFA`, `KSI-MLA-LET`, `KSI-RPL-ABO`, `KSI-SVC-SIN` |
 | [`azure_network_security_groups`](../fetchers/azure/network_security_groups) | `KSI-CNA-MAT`, `KSI-CNA-RNT` |
 | [`azure_policy_assignments`](../fetchers/azure/policy_assignments) | `KSI-CNA-EIS`, `KSI-SVC-ACM` |

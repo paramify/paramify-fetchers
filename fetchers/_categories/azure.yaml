@@ -83,6 +83,7 @@ requires:
     - azure-mgmt-cosmosdb
     - azure-mgmt-databricks
     - azure-mgmt-keyvault
+    - azure-mgmt-loganalytics
     - azure-mgmt-monitor
     - azure-mgmt-network
     - azure-mgmt-postgresqlflexibleservers

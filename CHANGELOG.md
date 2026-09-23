@@ -61,6 +61,17 @@ schemas and the `paramify` CLI — not the internal code.
   end; a truncated result, or a page count that disagrees with Resource Graph's own
   total, is a collection failure rather than a shorter inventory. Adds the
   `azure-mgmt-resourcegraph` dependency to the `azure` extra.
+- **`azure_log_analytics_workspaces`** — every Log Analytics workspace with its
+  SKU, workspace retention, daily ingestion cap, public network access for
+  ingestion and query, access control mode
+  (`enableLogAccessUsingOnlyResourcePermissions`), and whether shared-key auth is
+  disabled. Per-table retention is summarized as counts by plan and retention
+  plus the minimum across tables, with only the tables that override the
+  workspace default, or are custom, listed by name — a workspace carries several
+  hundred built-in tables. Also the workspace's data export rules and whether
+  Microsoft Sentinel is onboarded (the SecurityInsights solution is enabled).
+  Nothing in the Azure category recorded where logs are kept or for how long.
+  Adds the `azure-mgmt-loganalytics` dependency to the `azure` extra.
 
 ### Changed
 

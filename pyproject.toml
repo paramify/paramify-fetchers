@@ -35,7 +35,7 @@ dev = ["pytest", "ruff", "mypy"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
 # out in requirements.txt: six breaking changes across azure-mgmt majors, every
 # one producing wrong or empty evidence rather than an error. Keep the two files
-# in step. Deliberately NOT folded into `all` — 24 packages is heavier than
+# in step. Deliberately NOT folded into `all` — 25 packages is heavier than
 # everything else here combined, and it only matters if you run Azure fetchers.
 azure = [
     "azure-identity>=1.25.3,<2",
@@ -58,6 +58,7 @@ azure = [
     "azure-keyvault-keys>=4.11.1,<5",
     # <7 is load-bearing: 7.0.0 ships no diagnostic_settings operations at all.
     "azure-mgmt-monitor>=6.0.2,<7",
+    "azure-mgmt-loganalytics>=14.0.0,<15",
     "azure-mgmt-recoveryservices>=4.1.0,<5",
     "azure-mgmt-recoveryservicesbackup>=10.0.0,<12",
     "azure-mgmt-web>=11.0.1,<12",

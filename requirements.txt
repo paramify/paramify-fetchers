@@ -77,6 +77,8 @@ azure-mgmt-containerregistry>=15.0.0,<16
 azure-mgmt-keyvault>=14.0.1,<15
 azure-keyvault-keys>=4.11.1,<5
 azure-mgmt-monitor>=6.0.2,<7
+# Log Analytics workspaces: retention, access mode, table retention, data exports.
+azure-mgmt-loganalytics>=14.0.0,<15
 azure-mgmt-recoveryservices>=4.1.0,<5
 azure-mgmt-recoveryservicesbackup>=10.0.0,<12
 
