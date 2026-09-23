@@ -204,7 +204,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "MonitorManagementClient",
         "diagnostic_settings",
         ["list"],
-        "azure/diagnostic_settings, azure/container_registry_configuration",
+        "azure/diagnostic_settings, azure/container_registry_configuration, "
+        "azure/app_service_configuration",
     ),
     (
         "azure.mgmt.monitor",
@@ -227,6 +228,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "virtual_networks",
         ["list_all"],
         "azure/network_security_groups",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "network_interfaces",
+        ["list_all"],
+        "azure/network_security_groups — NIC-level NSG association",
     ),
     # --- backup: PR #58 widens this to <12 ----------------------------------
     (
@@ -505,7 +513,15 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
             "list_host_keys",
             "list_application_settings",
         ],
-        "azure/app_service_configuration, azure/function_app_configuration",
+        "azure/app_service_configuration, azure/function_app_configuration, "
+        "azure/app_service_plans",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "app_service_plans",
+        ["list"],
+        "azure/app_service_plans",
     ),
     (
         "azure.mgmt.databricks",
@@ -614,6 +630,70 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["properties"],
         "azure/key_vault_configuration — azure-mgmt-keyvault 14 stopped "
         "flattening `properties` onto the vault",
+    ),
+    # azure-mgmt-network 31 is a TypeSpec SDK: these fields are declared on the
+    # nested *PropertiesFormat model and flattened onto the resource for attribute
+    # access, so the properties model is where a rename would show.
+    (
+        "azure.mgmt.network.models",
+        "NetworkSecurityGroupPropertiesFormat",
+        ["security_rules", "default_security_rules"],
+        "azure/network_security_groups — default rules carry the platform's "
+        "AllowInternetOutBound; losing them reads as 'no egress allowed'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "SecurityRulePropertiesFormat",
+        ["priority", "destination_address_prefix", "destination_address_prefixes"],
+        "azure/network_security_groups — outbound rules are evaluated in "
+        "priority order against their destination",
+    ),
+    # SiteConfigResource (get_configuration) nests these under `properties`,
+    # a SiteConfig; the resource flattens it for attribute access.
+    (
+        "azure.mgmt.web.models",
+        "SiteConfig",
+        [
+            "ip_security_restrictions",
+            "ip_security_restrictions_default_action",
+            "scm_ip_security_restrictions",
+            "scm_ip_security_restrictions_default_action",
+            "scm_ip_security_restrictions_use_main",
+        ],
+        "azure/app_service_configuration — a renamed restriction field reads as "
+        "'no rules', which evaluates to 'allows all traffic'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "IpSecurityRestriction",
+        ["ip_address", "action", "priority", "vnet_subnet_resource_id", "headers"],
+        "azure/app_service_configuration — access-restriction rule evaluation",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "AppServicePlanProperties",
+        ["zone_redundant", "number_of_workers", "per_site_scaling", "elastic_scale_enabled"],
+        "azure/app_service_plans — a renamed zone_redundant reads as 'not zone "
+        "redundant' on a plan that is",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SkuDescription",
+        ["name", "tier", "capacity"],
+        "azure/app_service_plans — sku.capacity is the plan's instance count",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteProperties",
+        ["server_farm_id", "redundancy_mode"],
+        "azure/app_service_plans — server_farm_id is how sites join their plan",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "NetworkInterfacePropertiesFormat",
+        ["network_security_group", "virtual_machine", "ip_configurations"],
+        "azure/network_security_groups — a renamed NSG field would read as "
+        "'NIC unprotected'",
     ),
 ]
 

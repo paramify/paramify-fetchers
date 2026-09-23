@@ -12,6 +12,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_app_service_plans`** — every App Service plan with its SKU name and
+  tier, instance count (`sku.capacity`), zone redundancy and scaling settings,
+  plus the web apps and function apps running on it (joined by
+  `server_farm_id`). App Service availability is a property of the plan, not the
+  app, so nothing in the existing Azure evidence showed whether an app survives
+  losing an instance or a zone. The summary counts zone-redundant plans,
+  multi-instance plans, single-instance plans, and plans on a no-SLA tier (Free,
+  Shared); consumption and elastic plans are flagged `platform_scaled`, since
+  their capacity is not a fixed instance count. Reader-only; evidence set
+  `EVD-AZURE-APPSVC-PLANS`.
 - **A fanout target editor in the TUI** (`t` on the Manifest tab). A fanout
   fetcher runs once per target, so its targets are the run plan — but the page
   showed only how many there were, and there was no way to change one: fixing a
@@ -54,6 +64,30 @@ schemas and the `paramify` CLI — not the internal code.
   to the shared registry.
 
 ### Changed
+
+- **`azure_network_security_groups` shows outbound posture and NIC coverage**
+  (0.1.0 → 0.2.0). Only an NSG's custom rules were read, so the platform's
+  default AllowInternetOutBound — which permits all Internet egress unless a
+  custom rule overrides it — never appeared, and every NSG looked like it said
+  nothing about outbound traffic. Each NSG now also carries its
+  `default_security_rules`, and the summary adds outbound counts, including
+  `unrestricted_internet_outbound_groups` (rules evaluated in priority order).
+  Network interfaces are now listed too, with the NSG on the NIC or inherited
+  from its subnet; `nics_without_any_nsg` counts the ones with neither, which
+  subnet coverage alone could not show. Rules gain `priority` and destination
+  address fields. Existing fields and summary keys are unchanged.
+
+- **`azure_app_service_configuration` shows access restrictions and diagnostic
+  settings** (0.1.0 → 0.2.0). The access-restriction rules for the main site and
+  the SCM (deployment) site were already returned by the per-app configuration
+  call but dropped from the evidence, so nothing showed whether an app accepts
+  traffic from anywhere. Each app's `configuration` now carries both rule lists,
+  their default actions, `scm_ip_security_restrictions_use_main`, and an
+  evaluated `main_site_allows_all_traffic` / `scm_site_allows_all_traffic`; the
+  summary counts the apps where either site lets every caller through. Each app
+  also gains `monitor_diagnostic_settings` (one `diagnostic_settings.list` per
+  app, still Reader-only), counted as `apps_with_diagnostic_settings` and
+  `apps_with_enabled_logs`. Existing fields and summary keys are unchanged.
 
 - **The TUI saves manifest edits as they are made.** Adding a fetcher, editing an
   entry, adding / editing / removing a target, picking an assessment, removing an

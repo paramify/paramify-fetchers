@@ -9,6 +9,9 @@ with two deviations. Auth settings come from the GET
 the resource group is parsed from the ARM id: `Site.resource_group`, which Prowler
 reads, does not exist on azure-mgmt-web 11.x and reads as None, silently breaking
 every per-app GET. Function apps are a separate evidence set.
+
+Beyond Prowler: the access restrictions (main and SCM site) that `config/web` already
+returns, and each app's diagnostic settings from azure-mgmt-monitor.
 """
 
 import logging
@@ -25,6 +28,7 @@ from azure_common import (  # noqa: E402
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
+    basename,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -54,6 +58,11 @@ MODERN_TLS_VERSIONS = ("1.2", "1.3")
 # ftpsState: "AllAllowed" (plaintext FTP accepted), "FtpsOnly", "Disabled".
 FTP_DISABLED_STATES = ("Disabled",)
 FTP_ENCRYPTED_STATES = ("Disabled", "FtpsOnly")
+
+# An access-restriction `ip_address` that matches every caller. "Any" is what ARM
+# writes into the synthetic "Allow all" rule on an app with no restrictions (seen
+# live); "Internet" is the service tag for the whole public Internet.
+ALL_ADDRESSES = ("any", "*", "0.0.0.0/0", "::/0", "internet")
 
 
 # --- projection: the only azure-mgmt model access ---
@@ -106,6 +115,60 @@ def project_site_config(config) -> dict:
         "remote_debugging_enabled": model_attr(config, "remote_debugging_enabled"),
         "always_on": model_attr(config, "always_on"),
         "http_logging_enabled": model_attr(config, "http_logging_enabled"),
+        # --- access restrictions ---
+        "ip_security_restrictions": [
+            project_ip_restriction(r)
+            for r in (model_attr(config, "ip_security_restrictions") or [])
+        ],
+        "ip_security_restrictions_default_action": model_attr(
+            config, "ip_security_restrictions_default_action"
+        ),
+        "scm_ip_security_restrictions": [
+            project_ip_restriction(r)
+            for r in (model_attr(config, "scm_ip_security_restrictions") or [])
+        ],
+        "scm_ip_security_restrictions_default_action": model_attr(
+            config, "scm_ip_security_restrictions_default_action"
+        ),
+        "scm_ip_security_restrictions_use_main": model_attr(
+            config, "scm_ip_security_restrictions_use_main"
+        ),
+    }
+
+
+def project_ip_restriction(rule) -> dict:
+    """Read an `IpSecurityRestriction` — one access-restriction rule."""
+    return {
+        "name": model_attr(rule, "name"),
+        "priority": model_attr(rule, "priority"),
+        "action": model_attr(rule, "action"),
+        "tag": model_attr(rule, "tag"),
+        "ip_address": model_attr(rule, "ip_address"),
+        "subnet_mask": model_attr(rule, "subnet_mask"),
+        "vnet_subnet_resource_id": model_attr(rule, "vnet_subnet_resource_id"),
+        "headers": model_attr(rule, "headers"),
+        "description": model_attr(rule, "description"),
+    }
+
+
+def project_diagnostic_setting(setting) -> dict:
+    """Read a `DiagnosticSettingsResource` — one log/metric export target. Same
+    projection as azure_container_registry_configuration's.
+    """
+    return {
+        "id": model_attr(setting, "id"),
+        "name": model_attr(setting, "name") or basename(model_attr(setting, "id")),
+        "storage_account_id": model_attr(setting, "storage_account_id"),
+        "workspace_id": model_attr(setting, "workspace_id"),
+        "event_hub_name": model_attr(setting, "event_hub_name"),
+        "logs": [
+            {
+                "category": model_attr(log, "category"),
+                "category_group": model_attr(log, "category_group"),
+                "enabled": model_attr(log, "enabled"),
+            }
+            for log in (model_attr(setting, "logs") or [])
+        ],
     }
 
 
@@ -197,6 +260,8 @@ def web_app_record(site: dict) -> dict:
         "managed_identity_enabled": str(identity_type or "None").lower() != "none",
         "configuration": None,
         "authentication": None,
+        # None until the diagnostic-settings enrichment; [] means collected, none set.
+        "monitor_diagnostic_settings": None,
     }
 
 
@@ -216,7 +281,113 @@ def configuration_record(config: dict) -> dict:
         "remote_debugging_enabled": bool(config.get("remote_debugging_enabled") or False),
         "always_on": bool(config.get("always_on") or False),
         "http_logging_enabled": bool(config.get("http_logging_enabled") or False),
+        **access_restrictions_record(config),
     }
+
+
+def ip_restriction_record(rule: dict) -> dict:
+    """Normalize one access-restriction rule."""
+    return {
+        "name": rule.get("name"),
+        "priority": rule.get("priority"),
+        "action": rule.get("action"),
+        "tag": rule.get("tag"),
+        "ip_address": rule.get("ip_address"),
+        "subnet_mask": rule.get("subnet_mask"),
+        "vnet_subnet_resource_id": rule.get("vnet_subnet_resource_id"),
+        "has_header_conditions": bool(rule.get("headers")),
+        "description": rule.get("description"),
+    }
+
+
+def _matches_all_callers(rule: dict) -> bool:
+    """Does a rule match every caller? An address of "Any" (or 0.0.0.0/0, or the
+    Internet tag) with no VNet scope and no header condition narrowing it.
+    """
+    return (
+        str(rule.get("ip_address") or "").strip().lower() in ALL_ADDRESSES
+        and not rule.get("vnet_subnet_resource_id")
+        and not rule.get("has_header_conditions")
+    )
+
+
+def allows_all_traffic(rules: list[dict], default_action) -> bool:
+    """Does this site's access-restriction list let every caller through?
+
+    Rules evaluate in priority order (lowest number first); the first one matching
+    every caller decides. If none does, unmatched traffic gets the default action,
+    and ARM leaves that unset on most apps: then an app with no rules allows all,
+    and an app with any rule denies the rest (App Service's implicit "Deny all").
+    Whether the site is reachable at all is a separate fact —
+    `public_network_access` — which this does not read.
+    """
+    ordered = sorted(
+        rules,
+        key=lambda r: r["priority"] if isinstance(r.get("priority"), int) else 1 << 31,
+    )
+    for rule in ordered:
+        if _matches_all_callers(rule):
+            return str(rule.get("action") or "Allow").lower() == "allow"
+    if default_action:
+        return str(default_action).lower() == "allow"
+    return not rules
+
+
+def access_restrictions_record(config: dict) -> dict:
+    """The main and SCM (Kudu / deployment) sites' access restrictions.
+
+    With `scm_ip_security_restrictions_use_main` set, the SCM site enforces the main
+    site's rules, so its effective answer is the main site's.
+    """
+    main_rules = [ip_restriction_record(r) for r in (config.get("ip_security_restrictions") or [])]
+    scm_rules = [
+        ip_restriction_record(r) for r in (config.get("scm_ip_security_restrictions") or [])
+    ]
+    main_default = config.get("ip_security_restrictions_default_action")
+    scm_default = config.get("scm_ip_security_restrictions_default_action")
+    use_main = bool(config.get("scm_ip_security_restrictions_use_main") or False)
+    main_open = allows_all_traffic(main_rules, main_default)
+    return {
+        "ip_security_restrictions": main_rules,
+        "ip_security_restrictions_default_action": main_default,
+        "scm_ip_security_restrictions": scm_rules,
+        "scm_ip_security_restrictions_default_action": scm_default,
+        "scm_ip_security_restrictions_use_main": use_main,
+        "main_site_allows_all_traffic": main_open,
+        "scm_site_allows_all_traffic": (
+            main_open if use_main else allows_all_traffic(scm_rules, scm_default)
+        ),
+    }
+
+
+def diagnostic_setting_record(setting: dict) -> dict:
+    """Normalize one projected diagnostic setting, coercing the per-category enables."""
+    return {
+        "id": setting.get("id"),
+        "name": setting.get("name"),
+        "storage_account_id": setting.get("storage_account_id"),
+        "workspace_id": setting.get("workspace_id"),
+        "event_hub_name": setting.get("event_hub_name"),
+        "logs": [
+            {
+                "category": log.get("category"),
+                "category_group": log.get("category_group"),
+                "enabled": bool(log.get("enabled") or False),
+            }
+            for log in (setting.get("logs") or [])
+        ],
+    }
+
+
+def has_enabled_log(app: dict) -> bool:
+    """Does the app export at least one ENABLED log category? A setting can exist
+    with every category switched off, so settings alone are not enough.
+    """
+    return any(
+        log["enabled"]
+        for setting in (app.get("monitor_diagnostic_settings") or [])
+        for log in (setting.get("logs") or [])
+    )
 
 
 def authentication_record(settings: dict) -> dict:
@@ -290,6 +461,27 @@ def summarize(apps: list[dict]) -> dict:
                 )
             )
         ),
+        # --- access restrictions (None configuration = not collected, not counted) ---
+        "main_site_allows_all_traffic_apps": sum(
+            1 for a in apps if dig(a, "configuration", "main_site_allows_all_traffic")
+        ),
+        "scm_site_allows_all_traffic_apps": sum(
+            1 for a in apps if dig(a, "configuration", "scm_site_allows_all_traffic")
+        ),
+        "any_site_allows_all_traffic_apps": sum(
+            1
+            for a in apps
+            if dig(a, "configuration", "main_site_allows_all_traffic")
+            or dig(a, "configuration", "scm_site_allows_all_traffic")
+        ),
+        "scm_uses_main_site_restrictions_apps": sum(
+            1 for a in apps if dig(a, "configuration", "scm_ip_security_restrictions_use_main")
+        ),
+        # --- diagnostic settings ---
+        "apps_with_diagnostic_settings": sum(
+            1 for a in apps if a.get("monitor_diagnostic_settings")
+        ),
+        "apps_with_enabled_logs": sum(1 for a in apps if has_enabled_log(a)),
     }
 
 
@@ -345,7 +537,53 @@ def collect_web_apps(subscription_id, cred, collector: Collector) -> list[dict]:
         if settings is not None:
             app["authentication"] = authentication_record(settings)
 
+    if apps:
+        _attach_diagnostic_settings(subscription_id, cred, collector, apps)
+
     return sorted(apps, key=lambda r: r.get("id") or "")
+
+
+def _attach_diagnostic_settings(subscription_id, cred, collector: Collector, apps) -> None:
+    """Fill each app's `monitor_diagnostic_settings` in place: one Reader GET per app
+    on Microsoft.Insights, a second SDK because the settings are not a Microsoft.Web
+    resource. A failed call leaves the app's value None ("not collected").
+    """
+
+    def _monitor_client():
+        from azure.mgmt.monitor import MonitorManagementClient  # lazy
+
+        client = MonitorManagementClient(
+            credential=cred, subscription_id=subscription_id, **arm_client_kwargs()
+        )
+        # azure-mgmt-monitor 7.0.0 dropped the operation group entirely.
+        if getattr(client, "diagnostic_settings", None) is None:
+            raise RuntimeError(
+                "installed azure-mgmt-monitor has no diagnostic_settings operation "
+                "group (removed in 7.0.0) — pin azure-mgmt-monitor>=6.0.2,<7"
+            )
+        return client
+
+    monitor = collector.guard("monitor.MonitorManagementClient (init)", _monitor_client)
+    if monitor is None:
+        return
+
+    for app in apps:
+        resource_id, name = app.get("id"), app.get("name")
+        if not resource_id:
+            continue
+        # resource_uri is substituted unquoted after a "/", so no leading slash.
+        app["monitor_diagnostic_settings"] = collector.guard(
+            f"monitor.diagnostic_settings.list ({name})",
+            lambda resource_id=resource_id: sorted(
+                (
+                    diagnostic_setting_record(project_diagnostic_setting(setting))
+                    for setting in monitor.diagnostic_settings.list(
+                        resource_uri=resource_id.lstrip("/")
+                    )
+                ),
+                key=lambda r: r.get("id") or "",
+            ),
+        )
 
 
 def main() -> int:
