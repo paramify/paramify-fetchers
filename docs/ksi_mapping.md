@@ -48,7 +48,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ca-2.1`, `ca-7.1`
 
-*5 fetchers:* [`azure_defender_assessments`](../fetchers/azure/defender_assessments), [`azure_defender_plans`](../fetchers/azure/defender_plans), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`crowdstrike_prevention_policies`](../fetchers/crowdstrike/prevention_policies), [`sentinelone_agents`](../fetchers/sentinelone/agents)
+*6 fetchers:* [`azure_defender_assessments`](../fetchers/azure/defender_assessments), [`azure_defender_plans`](../fetchers/azure/defender_plans), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`azure_policy_compliance`](../fetchers/azure/policy_compliance), [`crowdstrike_prevention_policies`](../fetchers/crowdstrike/prevention_policies), [`sentinelone_agents`](../fetchers/sentinelone/agents)
 
 #### ✅ `KSI-CNA-IBP` — Implementing Best Practices
 
@@ -104,7 +104,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2.4`, `cm-2`, `cm-2.2`, `cm-2.3`, `cm-6`, `cm-7.1`, `pl-9`, `pl-10`, `sa-5`, `si-5`, `sr-10`
 
-*3 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`azure_policy_assignments`](../fetchers/azure/policy_assignments)
+*4 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`azure_policy_compliance`](../fetchers/azure/policy_compliance)
 
 #### ✅ `KSI-SVC-ASM` — Automating Secret Management
 
@@ -178,7 +178,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ca-7`, `cm-2`, `cm-6`, `si-7.7`
 
-*7 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_config_conformance_packs`](../fetchers/aws/config_conformance_packs), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`checkov_kubernetes`](../fetchers/checkov/kubernetes), [`checkov_terraform`](../fetchers/checkov/terraform), [`datadog_infra_agent_checks`](../fetchers/datadog/infra_agent_checks)
+*8 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_config_conformance_packs`](../fetchers/aws/config_conformance_packs), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`azure_policy_compliance`](../fetchers/azure/policy_compliance), [`checkov_kubernetes`](../fetchers/checkov/kubernetes), [`checkov_terraform`](../fetchers/checkov/terraform), [`datadog_infra_agent_checks`](../fetchers/datadog/infra_agent_checks)
 
 #### ✅ `KSI-MLA-LET` — Logging Event Types
 
@@ -428,7 +428,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-179 of 182 fetchers carry a mapping.
+180 of 183 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -515,7 +515,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (28)
+### azure  (29)
 
 | Fetcher | Indicators |
 |---|---|
@@ -540,6 +540,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration) | `KSI-CNA-MAT`, `KSI-CNA-OFA`, `KSI-MLA-LET`, `KSI-RPL-ABO`, `KSI-SVC-SIN` |
 | [`azure_network_security_groups`](../fetchers/azure/network_security_groups) | `KSI-CNA-MAT`, `KSI-CNA-RNT` |
 | [`azure_policy_assignments`](../fetchers/azure/policy_assignments) | `KSI-CNA-EIS`, `KSI-CNA-IBP`, `KSI-MLA-EVC`, `KSI-SVC-ACM` |
+| [`azure_policy_compliance`](../fetchers/azure/policy_compliance) | `KSI-CNA-EIS`, `KSI-MLA-EVC`, `KSI-SVC-ACM` |
 | [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration) | `KSI-CNA-OFA`, `KSI-CNA-RNT`, `KSI-IAM-APM`, `KSI-MLA-LET`, `KSI-RPL-ABO`, `KSI-SVC-SIN` |
 | [`azure_rbac_custom_roles`](../fetchers/azure/rbac_custom_roles) | `KSI-IAM-ELP` |
 | [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments) | `KSI-CNA-DFP`, `KSI-IAM-ELP`, `KSI-IAM-JIT`, `KSI-MLA-ALA` |

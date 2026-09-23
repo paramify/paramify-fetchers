@@ -12,6 +12,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_policy_compliance`** (`EVD-AZURE-POLICY-COMPLIANCE`) — what the assigned
+  Azure Policies found, where `azure_policy_assignments` only says what is
+  assigned. From `azure-mgmt-policyinsights` (a new pinned dependency of the
+  `azure` extra): the subscription-wide and per-assignment counts of
+  non-compliant resources and policies from `policy_states` summarize, a bounded
+  list of the non-compliant (resource, policy) records
+  (`max_non_compliant_resources`, default 1000, with a truncation flag), and the
+  remediation tasks with their deployment counts. The evaluation window the
+  service applied is recorded, and `resources_evaluated` tells "nothing
+  non-compliant" from "nothing evaluated".
+
 - **A fanout target editor in the TUI** (`t` on the Manifest tab). A fanout
   fetcher runs once per target, so its targets are the run plan — but the page
   showed only how many there were, and there was no way to change one: fixing a
