@@ -66,7 +66,11 @@ class _FakeCredential:
 
 
 def _import(module: str, name: str) -> object:
-    return getattr(importlib.import_module(module), name)
+    """`name` may be dotted, for a class nested inside another (kiota's query params)."""
+    obj: object = importlib.import_module(module)
+    for part in name.split("."):
+        obj = getattr(obj, part)
+    return obj
 
 
 def _build(module: str, client_name: str) -> object:
@@ -600,6 +604,32 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/key_vault_configuration — azure-mgmt-keyvault 14 stopped "
         "flattening `properties` onto the vault",
     ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        [
+            "service_principal_type",
+            "app_owner_organization_id",
+            "alternative_names",
+            "password_credentials",
+            "key_credentials",
+        ],
+        "azure/entra_service_principals — a missing field reads as None, so every "
+        "principal would look credential-free or of unknown ownership",
+    ),
+    (
+        "msgraph.generated.models.application",
+        "Application",
+        ["federated_identity_credentials"],
+        "azure/entra_service_principals — the $expand target; without it every "
+        "application reads as non-federated",
+    ),
+    (
+        "msgraph.generated.applications.applications_request_builder",
+        "ApplicationsRequestBuilder.ApplicationsRequestBuilderGetQueryParameters",
+        ["select", "expand"],
+        "azure/entra_service_principals — federated credentials arrive only via $expand",
+    ),
 ]
 
 
@@ -632,6 +662,7 @@ GRAPH_BUILDERS = [
     ("users", "azure/entra_mfa_status"),
     ("directory_roles", "azure/entra_privileged_roles"),
     ("identity", "azure/entra_conditional_access_policies"),
+    ("service_principals", "azure/entra_service_principals"),
 ]
 
 

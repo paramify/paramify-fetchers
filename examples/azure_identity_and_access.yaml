@@ -10,7 +10,7 @@
 #
 # TWO DIFFERENT SCOPES, and this is the thing to get right in this manifest:
 #
-#   * The four `azure_entra_*` fetchers read MICROSOFT GRAPH, which is TENANT-scoped.
+#   * The five `azure_entra_*` fetchers read MICROSOFT GRAPH, which is TENANT-scoped.
 #     Their fanout unit is the tenant — one target per Entra tenant, keyed by
 #     `tenant_id`. Listing two subscriptions from the same tenant would collect
 #     byte-identical evidence twice under one filename.
@@ -24,17 +24,20 @@
 #   ARM (both azure_rbac_* fetchers):
 #     - the built-in **Reader** role on each subscription in `targets`.
 #
-#   Microsoft Graph (all four azure_entra_* fetchers) — APPLICATION permissions on the
+#   Microsoft Graph (all five azure_entra_* fetchers) — APPLICATION permissions on the
 #   app registration or managed identity the credential resolves to, each needing
 #   admin consent. Delegated permissions from an `az login` session are NOT enough
 #   for the reports endpoints.
 #     - Directory.Read.All   — users, directory roles and their members, app registrations
+#     - Application.Read.All — service principals and federated identity credentials
+#                              (azure_entra_service_principals; Directory.Read.All
+#                              also covers it)
 #     - AuditLog.Read.All    — signInActivity on users (silently null without it)
 #     - Reports.Read.All     — the authentication-methods registration report (MFA capability)
 #     - Policy.Read.All      — Conditional Access policies
 #     - Organization.Read.All— the tenant id / verified domain recorded as provenance
 #   A denied Organization.Read.All degrades gracefully: the tenant identity falls back
-#   to AZURE_TENANT_ID and the run still succeeds. The other four do not — a denied
+#   to AZURE_TENANT_ID and the run still succeeds. The others do not — a denied
 #   read is recorded as an API failure and the fetcher exits non-zero, by design, so a
 #   permission gap can never be mistaken for an empty tenant.
 #
@@ -85,6 +88,11 @@ run:
           environment: preprod
 
     - use: azure_entra_app_registrations
+      targets:
+        - tenant_id: 11111111-1111-1111-1111-111111111111
+          environment: preprod
+
+    - use: azure_entra_service_principals
       targets:
         - tenant_id: 11111111-1111-1111-1111-111111111111
           environment: preprod

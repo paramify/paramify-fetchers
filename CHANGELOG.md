@@ -52,6 +52,16 @@ schemas and the `paramify` CLI — not the internal code.
   `--dry-run` previews without writing. The per-instance Paramify id is resolved
   at sync time and cached in a gitignored `.paramify/` lock — never written back
   to the shared registry.
+- **`azure_entra_service_principals`**, the tenant's non-user accounts. The
+  Azure category saw app registrations but not service principals, so a managed
+  identity, a principal for another tenant's app, or a secret held directly on a
+  service principal was invisible. Every service principal is now reported with
+  its type, its owner (Microsoft first-party, this tenant, or another tenant) and
+  every credential it can present, including federated identity credentials on
+  this tenant's applications. The summary counts managed-identity, federated,
+  certificate-based and secret-based principals, and credentials that are
+  expired, expire within 30 days, or never expire. It makes two paged Graph reads
+  per tenant, never one per principal, and needs `Application.Read.All`.
 
 ### Changed
 
