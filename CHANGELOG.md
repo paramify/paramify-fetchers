@@ -12,6 +12,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_app_service_plans`** — every App Service plan with its SKU name and
+  tier, instance count (`sku.capacity`), zone redundancy and scaling settings,
+  plus the web apps and function apps running on it (joined by
+  `server_farm_id`). App Service availability is a property of the plan, not the
+  app, so nothing in the existing Azure evidence showed whether an app survives
+  losing an instance or a zone. The summary counts zone-redundant plans,
+  multi-instance plans, single-instance plans, and plans on a no-SLA tier (Free,
+  Shared); consumption and elastic plans are flagged `platform_scaled`, since
+  their capacity is not a fixed instance count. Reader-only; evidence set
+  `EVD-AZURE-APPSVC-PLANS`.
 - **A fanout target editor in the TUI** (`t` on the Manifest tab). A fanout
   fetcher runs once per target, so its targets are the run plan — but the page
   showed only how many there were, and there was no way to change one: fixing a

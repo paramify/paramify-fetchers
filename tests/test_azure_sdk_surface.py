@@ -498,7 +498,15 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
             "list_host_keys",
             "list_application_settings",
         ],
-        "azure/app_service_configuration, azure/function_app_configuration",
+        "azure/app_service_configuration, azure/function_app_configuration, "
+        "azure/app_service_plans",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "app_service_plans",
+        ["list"],
+        "azure/app_service_plans",
     ),
     (
         "azure.mgmt.databricks",
@@ -645,6 +653,25 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "IpSecurityRestriction",
         ["ip_address", "action", "priority", "vnet_subnet_resource_id", "headers"],
         "azure/app_service_configuration — access-restriction rule evaluation",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "AppServicePlanProperties",
+        ["zone_redundant", "number_of_workers", "per_site_scaling", "elastic_scale_enabled"],
+        "azure/app_service_plans — a renamed zone_redundant reads as 'not zone "
+        "redundant' on a plan that is",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SkuDescription",
+        ["name", "tier", "capacity"],
+        "azure/app_service_plans — sku.capacity is the plan's instance count",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteProperties",
+        ["server_farm_id", "redundancy_mode"],
+        "azure/app_service_plans — server_farm_id is how sites join their plan",
     ),
     (
         "azure.mgmt.network.models",
