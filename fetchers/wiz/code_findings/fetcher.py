@@ -111,7 +111,7 @@ def body(client: WizClient) -> Dict[str, Any]:
             "open_statuses": open_statuses,
             "fields_not_available": missing,
             "schema_checked": not schema.unavailable,
-            "validation_status": "Query follows Wiz's published reference; not yet run with read:sast_findings.",
+            "validation_status": "Live-tested against a Wiz for Gov tenant with Wiz Code data (2026-09-23).",
         },
     )
 
