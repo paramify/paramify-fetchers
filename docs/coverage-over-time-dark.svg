@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="448" viewBox="0 0 880 448" role="img" aria-label="Fetcher and service counts over time. Fetchers rise from 56 to 181, and services from 7 to 14, between June 2026 and September 2026.">
+<rect x="0" y="0" width="880" height="448" fill="#1a1a19"/>
+<text x="24" y="32" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="16" font-weight="600" fill="#ffffff" text-anchor="start">Coverage over time</text>
+<line x1="24" y1="56" x2="40" y2="56" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/><circle cx="32" cy="56" r="3.5" fill="#3987e5" stroke="#1a1a19" stroke-width="1.5"/>
+<text x="48" y="60" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">Fetchers · fetcher.yaml directories</text>
+<line x1="54" y1="206" x2="762" y2="206" stroke="#383835" stroke-width="1"/>
+<text x="44" y="210" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="end">0</text>
+<line x1="54" y1="173.5" x2="762" y2="173.5" stroke="#2c2c2a" stroke-width="1"/>
+<text x="44" y="177.5" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="end">50</text>
+<line x1="54" y1="141" x2="762" y2="141" stroke="#2c2c2a" stroke-width="1"/>
+<text x="44" y="145" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="end">100</text>
+<line x1="54" y1="108.5" x2="762" y2="108.5" stroke="#2c2c2a" stroke-width="1"/>
+<text x="44" y="112.5" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="end">150</text>
+<line x1="54" y1="76" x2="762" y2="76" stroke="#2c2c2a" stroke-width="1"/>
+<text x="44" y="80" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="end">200</text>
+<text x="54" y="226" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">Jun 2026</text>
+<text x="248.86" y="226" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">Jul</text>
+<text x="450.22" y="226" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">Aug</text>
+<text x="651.58" y="226" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">Sep</text>
+<path d="M54,169.6 L73.49,169.6 L73.49,168.3 L157.93,168.3 L157.93,136.45 L300.83,136.45 L300.83,135.8 L346.29,135.8 L346.29,127.35 L469.71,127.35 L469.71,125.4 L534.66,125.4 L534.66,107.85 L554.15,107.85 L554.15,95.5 L560.64,95.5 L560.64,94.85 L651.58,94.85 L651.58,90.3 L671.06,90.3 L671.06,89 L703.54,89 L703.54,88.35 L762,88.35 L762,206 L54,206 Z" fill="#3987e5" fill-opacity="0.10" stroke="none"/>
+<path d="M54,169.6 L73.49,169.6 L73.49,168.3 L157.93,168.3 L157.93,136.45 L300.83,136.45 L300.83,135.8 L346.29,135.8 L346.29,127.35 L469.71,127.35 L469.71,125.4 L534.66,125.4 L534.66,107.85 L554.15,107.85 L554.15,95.5 L560.64,95.5 L560.64,94.85 L651.58,94.85 L651.58,90.3 L671.06,90.3 L671.06,89 L703.54,89 L703.54,88.35 L762,88.35" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="762" cy="88.35" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="773" y="90.35" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" font-weight="600" fill="#ffffff" text-anchor="start">181</text>
+<text x="773" y="106.35" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="start">fetchers</text>
+<line x1="24" y1="258" x2="40" y2="258" stroke="#d95926" stroke-width="2" stroke-linecap="round"/><circle cx="32" cy="258" r="3.5" fill="#d95926" stroke="#1a1a19" stroke-width="1.5"/>
+<text x="48" y="262" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">Services · top-level categories</text>
+<line x1="54" y1="408" x2="762" y2="408" stroke="#383835" stroke-width="1"/>
+<text x="44" y="412" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="end">0</text>
+<line x1="54" y1="364.67" x2="762" y2="364.67" stroke="#2c2c2a" stroke-width="1"/>
+<text x="44" y="368.67" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="end">5</text>
+<line x1="54" y1="321.33" x2="762" y2="321.33" stroke="#2c2c2a" stroke-width="1"/>
+<text x="44" y="325.33" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="end">10</text>
+<line x1="54" y1="278" x2="762" y2="278" stroke="#2c2c2a" stroke-width="1"/>
+<text x="44" y="282" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="end">15</text>
+<text x="54" y="428" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">Jun 2026</text>
+<text x="248.86" y="428" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">Jul</text>
+<text x="450.22" y="428" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">Aug</text>
+<text x="651.58" y="428" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">Sep</text>
+<path d="M54,347.33 L73.49,347.33 L73.49,338.67 L346.29,338.67 L346.29,330 L469.71,330 L469.71,321.33 L534.66,321.33 L534.66,312.67 L554.15,312.67 L554.15,304 L651.58,304 L651.58,295.33 L671.06,295.33 L671.06,286.67 L762,286.67 L762,408 L54,408 Z" fill="#d95926" fill-opacity="0.10" stroke="none"/>
+<path d="M54,347.33 L73.49,347.33 L73.49,338.67 L346.29,338.67 L346.29,330 L469.71,330 L469.71,321.33 L534.66,321.33 L534.66,312.67 L554.15,312.67 L554.15,304 L651.58,304 L651.58,295.33 L671.06,295.33 L671.06,286.67 L762,286.67" fill="none" stroke="#d95926" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="762" cy="286.67" r="4.5" fill="#d95926" stroke="#1a1a19" stroke-width="2"/>
+<text x="773" y="288.67" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" font-weight="600" fill="#ffffff" text-anchor="start">14</text>
+<text x="773" y="304.67" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="start">services</text>
+</svg>

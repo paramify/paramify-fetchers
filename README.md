@@ -54,6 +54,16 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | **Checkov** | 2 | IaC scans over cloned Terraform / Kubernetes source |
 | **ServiceNow** | 2 | Customer service cases and ITSM change records |
 
+<!-- BEGIN:fetcher-chart -->
+<div align="center">
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/coverage-over-time-dark.svg"><img src="docs/coverage-over-time.svg" alt="Coverage over time: fetcher and service counts, generated from this repo's git history" width="880"></picture>
+
+</div>
+
+Generated from this repo's git history by `python tools/generate_chart.py`, and refreshed by CI whenever a fetcher lands.
+<!-- END:fetcher-chart -->
+
 ### Coming soon
 
 More integrations are in progress. To request a fetcher or upvote what should be prioritized next, visit [Paramify Community Feature Requests](https://support.paramify.com/hc/en-us/community/topics/31851789568275-Feature-Requests).
