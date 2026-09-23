@@ -58,14 +58,3 @@ type **Custom Integration (GraphQL API)**, all projects, `read:` scopes only
 
 Per-fetcher settings (remediation windows, statuses, look-back) are listed by
 `paramify describe <fetcher>`.
-
-## Security
-
-- Credentials are only sent to Wiz: `WIZ_AUTH_URL` must be one of Wiz's token
-  endpoints and `WIZ_API_ENDPOINT_URL` must be `https://api.<dc>.app.wiz.us` or
-  `.wiz.io`. A trusted test double needs `WIZ_ALLOW_CUSTOM_ENDPOINTS=true`, and
-  https is required even then. Redirects are never followed.
-- The client refuses any GraphQL document containing a mutation or
-  subscription operation, or more than one operation.
-- Network errors are recorded by type only, so headers (and the bearer token)
-  never reach evidence, logs or the status file.
