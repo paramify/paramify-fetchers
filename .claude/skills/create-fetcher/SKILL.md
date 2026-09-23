@@ -175,6 +175,11 @@ single confirmation before building.
    Keep status output to one `logger.info`/`log_info` "Evidence saved to …"
    line on success. Mirror the reference fetcher's shape.
 
+   **Comments are rare and one line.** A one-line module docstring saying what
+   is collected; a comment only where the code would otherwise mislead (a
+   measured platform quirk, a non-obvious guard). What each field means and how
+   it is derived goes in `evidence_set.instructions`, not a docstring.
+
 5. **Wire failure → exit code** per `docs/authoring_a_fetcher.md` §"Detecting
    collection failures": track collection failures, exit non-zero if any
    occurred (Python: an `api_failures` list; bash: a temp-file counter).
@@ -259,3 +264,4 @@ ones that bite most often:
 - A CLI arg parser for `--output-dir`/`--profile`/`--region` → read everything
   from env.
 - Forgetting `chmod +x` on a bash entry script.
+- A multi-paragraph docstring restating `evidence_set.instructions` → one line.

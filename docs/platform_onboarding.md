@@ -212,6 +212,10 @@ left the sandbox running with nothing recording whether that was intended.
   machine or account it runs on holds other things.
 - **Bail after 3 attempts on one fetcher**, write the diagnosis, continue the
   slate.
+- **Comments are rare and one line.** Field derivations belong in
+  `evidence_set.instructions`; committed code never cites `.onboarding/`.
+- **A re-provisioned sandbox is a new sandbox.** It is approved, verified and
+  given a teardown decision again.
 
 ## State on disk
 

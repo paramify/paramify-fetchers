@@ -32,7 +32,9 @@ Not after the resources exist, and not "I can clean that up for you later".
 A sandbox nobody remembered to tear down is the bill this rule prevents.
 
 Make it safe to run twice and safe to run against an already-empty account —
-it will be run by someone who is not sure whether it already ran.
+it will be run by someone who is not sure whether it already ran. The named
+arrays at the top are its documentation; a header comment repeating them is
+not needed.
 
 **It removes only what it names.** Every container, volume, network, bucket or
 role it deletes is listed by exact name at the top of the script, and nothing
