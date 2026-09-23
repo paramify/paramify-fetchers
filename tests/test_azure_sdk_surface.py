@@ -630,6 +630,37 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["select", "expand"],
         "azure/entra_service_principals — federated credentials arrive only via $expand",
     ),
+    (
+        "msgraph.generated.models.authentication_methods_policy",
+        "AuthenticationMethodsPolicy",
+        ["authentication_method_configurations", "policy_migration_state", "registration_enforcement"],
+        "azure/entra_authentication_policy — a missing field reads as no methods "
+        "configured, i.e. SMS looks disabled",
+    ),
+    (
+        "msgraph.generated.models.authentication_method_configuration",
+        "AuthenticationMethodConfiguration",
+        ["state", "exclude_targets"],
+        "azure/entra_authentication_policy — `state` is the enabled/disabled fact",
+    ),
+    (
+        "msgraph.generated.models.identity_security_defaults_enforcement_policy",
+        "IdentitySecurityDefaultsEnforcementPolicy",
+        ["is_enabled"],
+        "azure/entra_authentication_policy — security defaults on/off",
+    ),
+    (
+        "msgraph.generated.models.group_setting",
+        "GroupSetting",
+        ["template_id", "values"],
+        "azure/entra_authentication_policy — password protection settings",
+    ),
+    (
+        "msgraph.generated.models.service_plan_info",
+        "ServicePlanInfo",
+        ["service_plan_name", "provisioning_status"],
+        "azure/entra_authentication_policy — the Entra ID P1/P2 licence check",
+    ),
 ]
 
 
@@ -663,6 +694,10 @@ GRAPH_BUILDERS = [
     ("directory_roles", "azure/entra_privileged_roles"),
     ("identity", "azure/entra_conditional_access_policies"),
     ("service_principals", "azure/entra_service_principals"),
+    ("policies", "azure/entra_authentication_policy"),
+    ("group_settings", "azure/entra_authentication_policy"),
+    ("group_setting_templates", "azure/entra_authentication_policy"),
+    ("subscribed_skus", "azure/entra_authentication_policy"),
 ]
 
 

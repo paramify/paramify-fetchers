@@ -10,7 +10,7 @@
 #
 # TWO DIFFERENT SCOPES, and this is the thing to get right in this manifest:
 #
-#   * The five `azure_entra_*` fetchers read MICROSOFT GRAPH, which is TENANT-scoped.
+#   * The six `azure_entra_*` fetchers read MICROSOFT GRAPH, which is TENANT-scoped.
 #     Their fanout unit is the tenant — one target per Entra tenant, keyed by
 #     `tenant_id`. Listing two subscriptions from the same tenant would collect
 #     byte-identical evidence twice under one filename.
@@ -24,17 +24,21 @@
 #   ARM (both azure_rbac_* fetchers):
 #     - the built-in **Reader** role on each subscription in `targets`.
 #
-#   Microsoft Graph (all five azure_entra_* fetchers) — APPLICATION permissions on the
+#   Microsoft Graph (all six azure_entra_* fetchers) — APPLICATION permissions on the
 #   app registration or managed identity the credential resolves to, each needing
 #   admin consent. Delegated permissions from an `az login` session are NOT enough
-#   for the reports endpoints.
-#     - Directory.Read.All   — users, directory roles and their members, app registrations
+#   for the reports endpoints, nor for the authentication methods policy and security
+#   defaults: the Azure CLI's client is not pre-authorized for Policy.Read.All, so
+#   those reads return 403 however privileged the signed-in user is.
+#     - Directory.Read.All   — users, directory roles and their members, app registrations,
+#                              directory settings (password protection) and subscribed SKUs
 #     - Application.Read.All — service principals and federated identity credentials
 #                              (azure_entra_service_principals; Directory.Read.All
 #                              also covers it)
 #     - AuditLog.Read.All    — signInActivity on users (silently null without it)
 #     - Reports.Read.All     — the authentication-methods registration report (MFA capability)
-#     - Policy.Read.All      — Conditional Access policies
+#     - Policy.Read.All      — Conditional Access policies, the authentication methods
+#                              policy and security defaults
 #     - Organization.Read.All— the tenant id / verified domain recorded as provenance
 #   A denied Organization.Read.All degrades gracefully: the tenant identity falls back
 #   to AZURE_TENANT_ID and the run still succeeds. The others do not — a denied
@@ -46,6 +50,9 @@
 # policies at all — Graph answers with `[]` rather than an error. `total_policies: 0`
 # therefore means either "no policies configured" or "not licensed", and this fetcher
 # does not read the tenant's license state to tell them apart.
+# azure_entra_authentication_policy DOES read it (subscribedSkus, as `entra_id_tier`),
+# because a custom banned-password list is only enforced with P1: on a Free tenant it
+# reports `custom_banned_password_list_enforced: false` whatever the setting says.
 #
 # Replace the tenant and subscription ids below with your own.
 run:
@@ -93,6 +100,11 @@ run:
           environment: preprod
 
     - use: azure_entra_service_principals
+      targets:
+        - tenant_id: 11111111-1111-1111-1111-111111111111
+          environment: preprod
+
+    - use: azure_entra_authentication_policy
       targets:
         - tenant_id: 11111111-1111-1111-1111-111111111111
           environment: preprod
