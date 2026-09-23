@@ -204,7 +204,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "MonitorManagementClient",
         "diagnostic_settings",
         ["list"],
-        "azure/diagnostic_settings, azure/container_registry_configuration",
+        "azure/diagnostic_settings, azure/container_registry_configuration, "
+        "azure/app_service_configuration",
     ),
     (
         "azure.mgmt.monitor",
@@ -623,6 +624,27 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["priority", "destination_address_prefix", "destination_address_prefixes"],
         "azure/network_security_groups — outbound rules are evaluated in "
         "priority order against their destination",
+    ),
+    # SiteConfigResource (get_configuration) nests these under `properties`,
+    # a SiteConfig; the resource flattens it for attribute access.
+    (
+        "azure.mgmt.web.models",
+        "SiteConfig",
+        [
+            "ip_security_restrictions",
+            "ip_security_restrictions_default_action",
+            "scm_ip_security_restrictions",
+            "scm_ip_security_restrictions_default_action",
+            "scm_ip_security_restrictions_use_main",
+        ],
+        "azure/app_service_configuration — a renamed restriction field reads as "
+        "'no rules', which evaluates to 'allows all traffic'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "IpSecurityRestriction",
+        ["ip_address", "action", "priority", "vnet_subnet_resource_id", "headers"],
+        "azure/app_service_configuration — access-restriction rule evaluation",
     ),
     (
         "azure.mgmt.network.models",

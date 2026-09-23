@@ -1,5 +1,5 @@
 name: azure_app_service_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   For each App Service web app in the subscription, reports the transport and
   identity posture — HTTPS-only, minimum TLS version, HTTP/2, FTP/FTPS deployment
@@ -8,7 +8,10 @@ description: >
   rejected, managed identity, VNet integration and public network access — together
   with the declared language runtime versions (linux_fx_version, windows_fx_version,
   java / php / python / node / .NET), which is what a supported-runtime control is
-  evidenced from. Function apps are excluded; they are collected by
+  evidenced from. Also the access restrictions on the main site and the SCM
+  (deployment) site — every rule, the default action, whether SCM inherits the main
+  site's rules, and whether each site lets every caller through — and each app's
+  diagnostic settings (which log categories are exported, and where). Function apps are excluded; they are collected by
   azure_function_app_configuration, whose calls need more than Reader.
 category: azure
 
@@ -47,6 +50,9 @@ ksis:
   - KSI-CNA-MAT   # public network access and VNet integration
   - KSI-IAM-SNU   # managed identity
   - KSI-SVC-EIS   # declared runtime versions — the supported-runtime control
+  - KSI-CNA-RNT   # access restrictions on the main and SCM sites
+  - KSI-CNA-ULN   # VNet-scoped access-restriction rules and VNet integration
+  - KSI-MLA-LET   # per-app diagnostic settings: which log categories are exported
 
   # No SVC-VCM: client certificate mode is mTLS-adjacent, but this reports the
   # setting, not automated validation of communications. Left an honest gap.
@@ -57,4 +63,6 @@ evidence_set:
   instructions: >
     Script: fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Web"), then
     azure-mgmt-web WebSiteManagementClient web_apps.list(), get_configuration() and
-    get_auth_settings_v2_without_secrets() per web app. Reader is sufficient — all GETs.
+    get_auth_settings_v2_without_secrets() per web app (access restrictions come from
+    get_configuration()), and azure-mgmt-monitor MonitorManagementClient
+    diagnostic_settings.list(resource_uri) per web app. Reader is sufficient — all GETs.

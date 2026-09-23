@@ -67,6 +67,18 @@ schemas and the `paramify` CLI — not the internal code.
   subnet coverage alone could not show. Rules gain `priority` and destination
   address fields. Existing fields and summary keys are unchanged.
 
+- **`azure_app_service_configuration` shows access restrictions and diagnostic
+  settings** (0.1.0 → 0.2.0). The access-restriction rules for the main site and
+  the SCM (deployment) site were already returned by the per-app configuration
+  call but dropped from the evidence, so nothing showed whether an app accepts
+  traffic from anywhere. Each app's `configuration` now carries both rule lists,
+  their default actions, `scm_ip_security_restrictions_use_main`, and an
+  evaluated `main_site_allows_all_traffic` / `scm_site_allows_all_traffic`; the
+  summary counts the apps where either site lets every caller through. Each app
+  also gains `monitor_diagnostic_settings` (one `diagnostic_settings.list` per
+  app, still Reader-only), counted as `apps_with_diagnostic_settings` and
+  `apps_with_enabled_logs`. Existing fields and summary keys are unchanged.
+
 - **The TUI saves manifest edits as they are made.** Adding a fetcher, editing an
   entry, adding / editing / removing a target, picking an assessment, removing an
   entry, and changing the output dir all write the file immediately. Edits used
