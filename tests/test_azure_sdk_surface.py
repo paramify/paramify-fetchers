@@ -66,7 +66,11 @@ class _FakeCredential:
 
 
 def _import(module: str, name: str) -> object:
-    return getattr(importlib.import_module(module), name)
+    """`name` may be dotted, for a class nested inside another (kiota's query params)."""
+    obj: object = importlib.import_module(module)
+    for part in name.split("."):
+        obj = getattr(obj, part)
+    return obj
 
 
 def _build(module: str, client_name: str) -> object:
@@ -828,6 +832,63 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["total_deployments", "successful_deployments", "failed_deployments"],
         "azure/policy_compliance",
     ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        [
+            "service_principal_type",
+            "app_owner_organization_id",
+            "alternative_names",
+            "password_credentials",
+            "key_credentials",
+        ],
+        "azure/entra_service_principals — a missing field reads as None, so every "
+        "principal would look credential-free or of unknown ownership",
+    ),
+    (
+        "msgraph.generated.models.application",
+        "Application",
+        ["federated_identity_credentials"],
+        "azure/entra_service_principals — the $expand target; without it every "
+        "application reads as non-federated",
+    ),
+    (
+        "msgraph.generated.applications.applications_request_builder",
+        "ApplicationsRequestBuilder.ApplicationsRequestBuilderGetQueryParameters",
+        ["select", "expand"],
+        "azure/entra_service_principals — federated credentials arrive only via $expand",
+    ),
+    (
+        "msgraph.generated.models.authentication_methods_policy",
+        "AuthenticationMethodsPolicy",
+        ["authentication_method_configurations", "policy_migration_state", "registration_enforcement"],
+        "azure/entra_authentication_policy — a missing field reads as no methods "
+        "configured, i.e. SMS looks disabled",
+    ),
+    (
+        "msgraph.generated.models.authentication_method_configuration",
+        "AuthenticationMethodConfiguration",
+        ["state", "exclude_targets"],
+        "azure/entra_authentication_policy — `state` is the enabled/disabled fact",
+    ),
+    (
+        "msgraph.generated.models.identity_security_defaults_enforcement_policy",
+        "IdentitySecurityDefaultsEnforcementPolicy",
+        ["is_enabled"],
+        "azure/entra_authentication_policy — security defaults on/off",
+    ),
+    (
+        "msgraph.generated.models.group_setting",
+        "GroupSetting",
+        ["template_id", "values"],
+        "azure/entra_authentication_policy — password protection settings",
+    ),
+    (
+        "msgraph.generated.models.service_plan_info",
+        "ServicePlanInfo",
+        ["service_plan_name", "provisioning_status"],
+        "azure/entra_authentication_policy — the Entra ID P1/P2 licence check",
+    ),
 ]
 
 
@@ -860,6 +921,11 @@ GRAPH_BUILDERS = [
     ("users", "azure/entra_mfa_status"),
     ("directory_roles", "azure/entra_privileged_roles"),
     ("identity", "azure/entra_conditional_access_policies"),
+    ("service_principals", "azure/entra_service_principals"),
+    ("policies", "azure/entra_authentication_policy"),
+    ("group_settings", "azure/entra_authentication_policy"),
+    ("group_setting_templates", "azure/entra_authentication_policy"),
+    ("subscribed_skus", "azure/entra_authentication_policy"),
 ]
 
 

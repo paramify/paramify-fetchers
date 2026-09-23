@@ -84,6 +84,29 @@ schemas and the `paramify` CLI — not the internal code.
   `--dry-run` previews without writing. The per-instance Paramify id is resolved
   at sync time and cached in a gitignored `.paramify/` lock — never written back
   to the shared registry.
+- **`azure_entra_service_principals`**, the tenant's non-user accounts. The
+  Azure category saw app registrations but not service principals, so a managed
+  identity, a principal for another tenant's app, or a secret held directly on a
+  service principal was invisible. Every service principal is now reported with
+  its type, its owner (Microsoft first-party, this tenant, or another tenant) and
+  every credential it can present, including federated identity credentials on
+  this tenant's applications. The summary counts managed-identity, federated,
+  certificate-based and secret-based principals, and credentials that are
+  expired, expire within 30 days, or never expire. It makes two paged Graph reads
+  per tenant, never one per principal, and needs `Application.Read.All`.
+- **`azure_entra_authentication_policy`** shows which sign-in methods the tenant
+  allows. `azure_entra_mfa_status` shows what users have registered, but not
+  whether the tenant still accepts SMS alongside the FIDO2 keys they registered.
+  Every method in the authentication methods policy is reported with its state,
+  targets and settings. SMS and Voice are flagged weak, and FIDO2 (passkeys
+  included) and X.509 certificates phishing-resistant. The fetcher also reports
+  the registration campaign, the policy's migration state (legacy MFA/SSPR
+  policies still apply until it completes), security defaults, and Entra password
+  protection (custom banned-password list, smart lockout). It reports the Entra
+  ID licence tier too, because a custom banned-password list is only enforced
+  with P1. Needs `Policy.Read.All` and `Directory.Read.All`. An `az login`
+  session cannot read the methods policy, because the Azure CLI's client is not
+  pre-authorized for `Policy.Read.All`.
 
 ### Changed
 
