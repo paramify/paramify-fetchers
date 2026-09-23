@@ -280,6 +280,27 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list"],
         "azure/defender_plans",
     ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "regulatory_compliance_standards",
+        ["list"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "regulatory_compliance_controls",
+        ["list"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "regulatory_compliance_assessments",
+        ["list"],
+        "azure/defender_regulatory_compliance",
+    ),
     # --- RBAC ----------------------------------------------------------------
     (
         "azure.mgmt.authorization",
@@ -644,6 +665,28 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "ParameterDefinitionsValue",
         ["default_value"],
         "azure/policy_assignments — the default an unset effect parameter falls back to",
+    ),
+    # --- Defender regulatory compliance: a renamed count reads as 0 failed ---
+    (
+        "azure.mgmt.security.models",
+        "RegulatoryComplianceStandard",
+        ["name", "state", "passed_controls", "failed_controls", "skipped_controls",
+         "unsupported_controls"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security.models",
+        "RegulatoryComplianceControl",
+        ["name", "description", "state", "passed_assessments", "failed_assessments",
+         "skipped_assessments"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security.models",
+        "RegulatoryComplianceAssessment",
+        ["name", "description", "state", "passed_resources", "failed_resources",
+         "skipped_resources", "unsupported_resources"],
+        "azure/defender_regulatory_compliance",
     ),
     # --- policy compliance: a renamed count reads as "0 non-compliant" -------
     (

@@ -1,0 +1,56 @@
+name: azure_defender_regulatory_compliance
+version: 0.1.0
+description: >
+  Microsoft Defender for Cloud regulatory compliance on the subscription — every
+  compliance standard Defender grades it against (the Microsoft cloud security
+  benchmark by default), each standard's controls, and the assessments behind each
+  control, with passed / failed / skipped counts at every level. This is the
+  benchmark-control view of the Defender results. A subscription that never
+  registered Microsoft.Security, or has no Standard-tier Defender plan (regulatory
+  compliance is not offered on the free tier), reports that as
+  regulatory_compliance_status — valid "not in use" evidence rather than a
+  collection failure.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_defender_regulatory_compliance.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-IBP      # graded against the Microsoft cloud security benchmark, control by control
+
+evidence_set:
+  reference_id: EVD-AZURE-DEFENDER-REG-COMPLIANCE
+  name: Microsoft Defender for Cloud Regulatory Compliance
+  instructions: >
+    Script: fetcher.py. Azure SDK calls (azure-mgmt-security SecurityCenter):
+    regulatory_compliance_standards.list(), then per standard
+    regulatory_compliance_controls.list(<standard>), then per control
+    regulatory_compliance_assessments.list(<standard>, <control>). Security Reader
+    (or Reader) on the subscription.

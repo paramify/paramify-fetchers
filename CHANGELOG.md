@@ -12,6 +12,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_defender_regulatory_compliance`** (`EVD-AZURE-DEFENDER-REG-COMPLIANCE`)
+  — Defender for Cloud's regulatory compliance grading, nested standard → control
+  → assessment with passed / failed / skipped counts at each level, and headline
+  keys for the Microsoft cloud security benchmark (`mcsb_failed_controls`,
+  `mcsb_failed_control_names`, ...). `azure_defender_assessments` has the same
+  results flat, one row per resource and check; this groups them by benchmark
+  control. A subscription with Microsoft.Security unregistered, or with no
+  Standard-tier Defender plan (the service refuses regulatory compliance on the
+  free tier), reports it as `regulatory_compliance_status` and exits 0.
+
 - **`azure_policy_compliance`** (`EVD-AZURE-POLICY-COMPLIANCE`) — what the assigned
   Azure Policies found, where `azure_policy_assignments` only says what is
   assigned. From `azure-mgmt-policyinsights` (a new pinned dependency of the

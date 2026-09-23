@@ -56,7 +56,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-17.3`, `cm-2`, `pl-10`
 
-*5 fetchers:* [`aws_config_conformance_packs`](../fetchers/aws/config_conformance_packs), [`aws_securityhub_status`](../fetchers/aws/securityhub_status), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`crowdstrike_zero_trust_assessment`](../fetchers/crowdstrike/zero_trust_assessment), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration)
+*6 fetchers:* [`aws_config_conformance_packs`](../fetchers/aws/config_conformance_packs), [`aws_securityhub_status`](../fetchers/aws/securityhub_status), [`azure_defender_regulatory_compliance`](../fetchers/azure/defender_regulatory_compliance), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`crowdstrike_zero_trust_assessment`](../fetchers/crowdstrike/zero_trust_assessment), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration)
 
 #### ✅ `KSI-CNA-MAT` — Minimizing Attack Surface
 
@@ -428,7 +428,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-180 of 183 fetchers carry a mapping.
+181 of 184 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -515,7 +515,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (29)
+### azure  (30)
 
 | Fetcher | Indicators |
 |---|---|
@@ -528,6 +528,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_databricks_workspace_configuration`](../fetchers/azure/databricks_workspace_configuration) | `KSI-CNA-MAT`, `KSI-CNA-ULN`, `KSI-SVC-ASM`, `KSI-SVC-SIN` |
 | [`azure_defender_assessments`](../fetchers/azure/defender_assessments) | `KSI-CNA-EIS`, `KSI-SVC-EIS` |
 | [`azure_defender_plans`](../fetchers/azure/defender_plans) | `KSI-CNA-EIS`, `KSI-SVC-EIS` |
+| [`azure_defender_regulatory_compliance`](../fetchers/azure/defender_regulatory_compliance) | `KSI-CNA-IBP` |
 | [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings) | `KSI-CMT-LMC`, `KSI-MLA-LET` |
 | [`azure_disk_encryption_status`](../fetchers/azure/disk_encryption_status) | `KSI-SVC-SIN` |
 | [`azure_entra_app_registrations`](../fetchers/azure/entra_app_registrations) | `KSI-IAM-SNU`, `KSI-SVC-ASM` |
