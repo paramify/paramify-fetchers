@@ -17,12 +17,10 @@ a GraphQL mutation.
 ### Fetchers for Wiz modules with limited live data
 
 These follow Wiz's published API reference (docs.wiz.us, WIN Integration
-APIs) but have **not yet been run against a tenant that has the module's data**.
-Each checks the tenant's own schema at run time (`_shared/schema_fields.py`) and
-selects only fields that exist; anything missing is listed in the evidence under
-`scope.fields_not_available`, and `scope.validation_status` says the fetcher is
-unverified. A missing scope or licence is reported as a failure, never as an
-empty result.
+APIs). Each checks the tenant's own schema at run time
+(`_shared/schema_fields.py`) and selects only fields that exist; anything
+missing is listed in the evidence under `scope.fields_not_available`. A missing
+scope or licence is reported as a failure, never as an empty result.
 
 | Fetcher | Evidence | Wiz module | Wiz scopes |
 |---|---|---|---|
