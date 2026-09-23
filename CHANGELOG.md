@@ -55,6 +55,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_rbac_role_assignments` 0.2.0 collects resource-group and resource-level
+  grants.** The fetcher listed with `atScope()`, which returns only assignments at
+  the subscription scope and above, so a role granted on one resource group or one
+  resource — a Contributor on a single Key Vault, a data role on a storage account —
+  never reached the evidence. A second, unfiltered listing now fills
+  `results.role_assignments_below_subscription` (the unfiltered result minus the
+  `atScope()` set, same record shape), with new `below_subscription_*` and
+  `all_scopes_*` summary keys, including `all_scopes_assignments_by_scope_level`.
+  Every existing key is still computed over the subscription-and-above set and
+  means what it did. Also mapped to `KSI-CNA-DFP`, `KSI-IAM-JIT` and
+  `KSI-MLA-ALA`.
 - **The TUI saves manifest edits as they are made.** Adding a fetcher, editing an
   entry, adding / editing / removing a target, picking an assessment, removing an
   entry, and changing the output dir all write the file immediately. Edits used
