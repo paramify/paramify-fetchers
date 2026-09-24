@@ -56,6 +56,7 @@ def cloud(i, result, controls, fw_id="wf-id-305"):
         "id": f"cf-{i}", "result": result, "severity": "MEDIUM", "status": "OPEN" if result == "FAIL" else "RESOLVED",
         "firstSeenAt": "2026-09-01T00:00:00Z", "analyzedAt": "2026-09-23T00:00:00Z",
         "rule": {"id": f"r{i}", "shortId": f"OKTA-{i:03}", "name": f"Okta rule {i}",
+                 "remediationInstructions": f"Fix rule {i} in the Okta admin console.",
                  "securitySubCategories": [sub(c, t, fw_id) for c, t in controls]},
         "resource": {"id": "okta-1", "name": "paramify.okta.com", "type": "TENANT", "nativeType": "oktaOrg",
                      "region": None, "cloudPlatform": "Okta",
@@ -71,6 +72,7 @@ class FakeWiz:
         self.host_rules: Dict[str, List[Dict[str, Any]]] = {}
         self.errors: Dict[str, str] = {}
         self.fail_subcats = False
+        self.reject_remediation = False
         self.calls: List[Dict[str, Any]] = []
 
     def __call__(self, url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
@@ -85,6 +87,9 @@ class FakeWiz:
                                 "hostConfigurationRules") if r + "(" in q)
         if root in self.errors:
             return Resp(200, {"data": None, "errors": [{"message": self.errors[root]}]})
+        if self.reject_remediation and "remediationInstructions" in q:
+            return Resp(200, {"data": None, "errors": [{"message":
+                    'Cannot query field "remediationInstructions" on type "CloudConfigurationRule".'}]})
         if root == "securityFrameworks":
             return page(root, [self.frameworks], v)
         if root == "configurationFindings":
@@ -97,7 +102,11 @@ class FakeWiz:
             assert isinstance(want, str)
             return page(root, [[n for n in self.host if n["result"] == want]], v)
         ids = v["filterBy"]["id"]
-        nodes = [{"id": i, "securitySubCategories": self.host_rules[i]} for i in ids if i in self.host_rules]
+        nodes = [{"id": i, "securitySubCategories": self.host_rules[i], "remediationInstructions": f"Fix {i}"}
+                 for i in ids if i in self.host_rules]
+        if "remediationInstructions" not in q:
+            for n in nodes:
+                n.pop("remediationInstructions")
         return page(root, [nodes], v)
 
 
@@ -244,5 +253,36 @@ def test_missing_framework_setting(fake, tmp_path, monkeypatch):
 
 def test_every_query_is_read_only():
     for q in [fetcher.FRAMEWORKS_QUERY, fetcher.CLOUD_QUERY, fetcher.HOST_QUERY, fetcher.HOST_RULES_QUERY,
+              fetcher.CLOUD_QUERY_WITH_REMEDIATION, fetcher.HOST_RULES_QUERY_WITH_REMEDIATION,
               *fetcher.CLOUD_FALLBACKS, *fetcher.HOST_FALLBACKS]:
         wiz_client.WizClient._assert_read_only(q)  # raises on a mutation
+
+
+def test_remediation_column_is_filled(fake, tmp_path):
+    fake.cloud_pages = [[cloud(1, "FAIL", [("V-1", "a")])]]
+    assert fetcher.main() == 0
+    r = rows(tmp_path)[0]
+    assert r["Remediation"] == "Fix rule 1 in the Okta admin console."
+    assert fetcher.COLUMNS.index("Remediation") == fetcher.COLUMNS.index("Rule Name") + 1
+
+
+def test_rejected_remediation_field_leaves_column_blank_not_failed(fake, tmp_path):
+    fake.reject_remediation = True
+    f = cloud(1, "FAIL", [("V-1", "a")])
+    del f["rule"]["remediationInstructions"]
+    fake.cloud_pages = [[f]]
+    assert fetcher.main() == 0
+    assert rows(tmp_path)[0]["Remediation"] == ""
+    assert not (tmp_path / "status.json").exists() or "error" not in status(tmp_path)
+
+
+def test_host_rows_carry_remediation(fake, tmp_path):
+    fake.cloud_pages = [[cloud(1, "PASS", [("V-1", "a")])]]
+    fake.host = [{"id": "h1", "result": "FAIL", "severity": "HIGH", "status": "OPEN", "firstSeen": None,
+                  "analyzedAt": None, "rule": {"id": "hr1", "name": "SSH root login", "shortName": "x",
+                                               "externalId": "RHEL-08-010550"},
+                  "resource": {"id": "i-1", "name": "node-a", "type": "VIRTUAL_MACHINE"}}]
+    fake.host_rules = {"hr1": [sub("V-230296", "SRG-OS-000109", "wf-id-305")]}
+    assert fetcher.main() == 0
+    host = [r for r in rows(tmp_path) if r["Rule Type"] == "Host Configuration"]
+    assert host[0]["Remediation"] == "Fix hr1"

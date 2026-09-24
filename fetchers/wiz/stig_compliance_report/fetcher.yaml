@@ -1,5 +1,5 @@
 name: wiz_stig_compliance_report
-version: 0.1.0
+version: 0.2.0
 description: >-
   STIG checklist results from Wiz as a CSV for a Paramify CONFIGURATION
   assessment: one row per STIG control, per rule, per resource, with the
