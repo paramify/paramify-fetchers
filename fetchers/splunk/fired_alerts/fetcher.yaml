@@ -1,0 +1,101 @@
+name: splunk_fired_alerts
+version: 0.1.0
+description: >-
+  Pulls the alerts that have actually triggered on a Splunk deployment, with
+  their saved search, severity and trigger time — evidencing that scheduled log
+  review produced output, not merely that it was configured.
+category: splunk
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: splunk_fired_alerts.json
+
+# Either a token, or a username and password. All three are optional secrets:
+# the fetcher needs one of the two mechanisms, and the runner injects only what
+# the manifest supplies.
+#
+# The token is the credential to prefer — it carries the creating user's roles,
+# can be given an expiry, and is revocable without changing anyone's password.
+# The username/password path exists because token authentication is **off by
+# default** in Splunk Enterprise (Settings > Tokens > Enable Token
+# Authentication), so a fresh install cannot use a token until someone turns it
+# on. The fetcher prefers the token when both are supplied.
+secrets:
+  - name: token
+    env: SPLUNK_TOKEN
+    required: false
+    description: >-
+      Splunk authentication token (a JWT). Preferred. Create at
+      Settings > Tokens; token auth must be enabled there first.
+  - name: username
+    env: SPLUNK_USERNAME
+    required: false
+    description: >-
+      Username for the session-login fallback. Use with password when token
+      authentication is not enabled on the deployment.
+  - name: password
+    env: SPLUNK_PASSWORD
+    required: false
+    description: Password for the session-login fallback. Use with username.
+
+config_schema:
+  base_url:
+    type: string
+    required: false
+    env: SPLUNK_BASE_URL
+    description: >-
+      Splunk management API base URL, including the port — the management port
+      is 8089, not the 8000 web UI. Defaults to https://localhost:8089.
+  ca_bundle:
+    type: string
+    required: false
+    env: SPLUNK_CA_BUNDLE
+    description: >-
+      Path to the CA bundle that signed the Splunk certificate. Splunk ships a
+      self-signed certificate, so set this to verify it properly.
+  verify_ssl:
+    type: boolean
+    required: false
+    env: SPLUNK_VERIFY_SSL
+    description: >-
+      Set false to skip TLS verification against a self-signed Splunk
+      certificate. Whichever way this resolves is recorded in the evidence.
+  max_alert_searches:
+    type: integer
+    required: false
+    env: SPLUNK_MAX_ALERT_SEARCHES
+    description: >-
+      Firing detail costs one call per saved search that has fired, so the
+      number of searches followed is bounded. Defaults to 200. Hitting the cap
+      is recorded in the evidence rather than silently truncating.
+
+evidence_set:
+  reference_id: EVD-SPLK-FIRED-ALERTS
+  name: Splunk Fired Alerts
+  instructions: >-
+    Script: fetcher.py. Authenticates with a bearer token (SPLUNK_TOKEN), or
+    by POST /services/auth/login when only a username and password are set.
+    Pages GET /servicesNS/-/-/alerts/fired_alerts for the saved searches that
+    have triggered, then GET /servicesNS/-/-/alerts/fired_alerts/{name} for each
+    one's individual firings. The collection includes a rollup entry named "-"
+    carrying the total across all alerts; it is excluded from the per-search
+    counts and used as a cross-check instead. Extracts per firing:
+    savedsearch_name, severity, trigger_time and expiration_time. Summarizes
+    firings by search and by severity, and how recent the newest and oldest
+    retained firings are. NOTE - Splunk deletes a triggered alert after
+    alert.expires (24 hours by default), so this evidence is a rolling window
+    rather than a complete history; the caveat travels in the evidence body.
+  description: >-
+    Alerts that have triggered on a Splunk deployment within its alert retention
+    window, evidencing that automated log review is producing output rather than
+    only being scheduled.
+
+ksis:
+  - KSI-MLA-RVL
