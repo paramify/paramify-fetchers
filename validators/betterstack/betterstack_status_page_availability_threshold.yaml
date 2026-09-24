@@ -1,0 +1,50 @@
+key: betterstack_status_page_availability_threshold
+name: Status Page Availability Meets Baseline
+type: AUTOMATED
+role: configuration
+statement: Every component published on the status page met an effective availability of at least 0.999 over the history window the page reports, counting degraded time as unavailable.
+
+# WHY `effective_availability` AND NOT THE PAGE'S OWN `availability`.
+# Better Stack's reported `availability` counts only days whose status is
+# "downtime". A day the page itself marks "degraded" carries a
+# downtime_duration in the same history row and contributes nothing to that
+# figure, and neither does maintenance time. Asserting on the reported number
+# would therefore pass a component that spent whole days degraded. The fetcher
+# recomputes 1 - (downtime_seconds + degraded_seconds) / (history_days * 86400)
+# into `availability_derived[].effective_availability`, and that is what this
+# reads.
+#
+# WHY READING ONE GROUP ASSERTS SOMETHING ABOUT EVERY COMPONENT.
+# MATCH_GROUP reads the FIRST match only, so a group comparison normally speaks
+# for one item in a list. The fetcher orders `availability_derived` WORST FIRST
+# (ascending effective_availability), so the first entry is the page's weakest
+# component: if it clears the baseline, every component does. That ordering is a
+# documented guarantee of the fetcher (see its evidence_set.instructions) and is
+# what this validator depends on — change the ordering and this assertion
+# silently narrows to whichever component happens to come first.
+#
+# GENERIC ACROSS STATUS PAGES. The anchor is the `availability_derived` block
+# and its first entry, not any component's name, so this holds for a page with
+# one component or fifty and for any customer. `public_name` is captured only so
+# the reader (and a failure message) can see WHICH component was compared;
+# nothing asserts on it. `[^}]*?` rather than `[\s\S]*?` keeps the match inside
+# that first entry, so a component whose effective_availability could not be
+# computed can never let the pattern slide onto a healthier one below it.
+regex: '"availability_derived":\s*\[\s*\{[^}]*?"public_name":\s*"(?<public_name>[^"]*)"[^}]*?"effective_availability":\s*(?<effective_availability>[0-9.]+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] GREATER_THAN_OR_EQUAL_TO 0.999
+validation_rules:
+  # Presence, and load-bearing rather than ceremonial: a MATCH_GROUP comparison
+  # over a regex that did not match compares nothing to nothing and evaluates
+  # TRUE, so without this rule a renamed block or a dropped derivation reads as
+  # compliant.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  # The baseline. 0.999 over a 90-day window is about 130 minutes of allowed
+  # unavailability; tune it in Paramify to whatever the service's own SLO says.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # effective_availability
+    criteria: GREATER_THAN_OR_EQUAL_TO
+    value: { type: CUSTOM_TEXT, customText: "0.999" }
+
+evidence_sets:
+  - EVD-BETTERSTACK-PUBLIC-STATUS-PAGE

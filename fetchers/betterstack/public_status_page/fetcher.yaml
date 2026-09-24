@@ -1,0 +1,135 @@
+name: betterstack_public_status_page
+version: 0.1.0
+description: >-
+  Collects a Better Stack public status page's own `/index.json` document — the
+  page identity, every published component with its reported availability and
+  90-day status history, and the published status reports and their updates —
+  and records, per component, the downtime, degraded and maintenance seconds
+  that history actually contains plus an effective availability recomputed from
+  them. Credential-free: it reads only what the status page publishes to the
+  public internet.
+category: betterstack
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: betterstack_public_status_page.json
+  aggregation: per_target
+
+target_schema:
+  # One target per status page. The fanout unit is the page, not the component:
+  # a page's /index.json carries every component it publishes in one response.
+  name:
+    type: string
+    required: true
+    env: BETTERSTACK_TARGET_NAME
+    description: >
+      Label for this status page, used as the discriminator in the evidence
+      filename (sanitized to [A-Za-z0-9_-]). Not read from the page itself, so
+      two targets pointing at different pages must carry different names.
+  status_page_url:
+    type: string
+    required: true
+    env: BETTERSTACK_STATUS_PAGE_URL
+    description: >
+      Base URL of the Better Stack status page, e.g. https://status.paramify.com
+      (a *.betteruptime.com / *.betterstack.com subdomain works identically).
+      The fetcher appends /index.json when the URL does not already end in it, so
+      either form may be given. Must be http or https.
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: BETTERSTACK_VERIFY_SSL
+    description: >
+      Verify the status page's TLS certificate. Defaults to true and should stay
+      true; set it false only for a page behind a corporate TLS-inspecting proxy
+      whose CA is not in the runner's trust store.
+
+secrets: []          # A public status page needs no credential — see _categories/betterstack.yaml
+
+ksis:
+  # Optimizing for Availability — the page publishes per-component availability
+  # and an incident history, which is the operator's own availability record.
+  - KSI-CNA-OFA
+
+evidence_set:
+  reference_id: EVD-BETTERSTACK-PUBLIC-STATUS-PAGE
+  name: Better Stack Public Status Page
+  instructions: >
+    Script: fetcher.py. One unauthenticated HTTP GET against
+    <status_page_url>/index.json — the JSON:API document the hosted Better Stack
+    status page renders itself from. No credential is sent and none is needed;
+    the request is exactly what any member of the public can make. The response
+    is recorded VERBATIM: `data` (the status_page object with its
+    company_name, subdomain, custom_domain, aggregate_state, timezone,
+    created_at, updated_at and its relationships to sections, resources and
+    status_reports) and `included` (the status_page_section,
+    status_page_resource, status_report and status_update objects) are copied
+    into the evidence unchanged, with nothing removed, renamed or flattened.
+    Alongside them the fetcher records `source_url` (the URL actually fetched,
+    after /index.json was appended), `status_page_url`, `target_name`,
+    `http_status` and `collected_at`.
+
+    One additive block, `availability_derived`, sits beside the verbatim
+    document. For each component (status_page_resource) it carries
+    `history_days` (the number of rows the page returned in that component's
+    status_history — 90 at the time of writing, but read from the response
+    rather than assumed), `downtime_seconds` (the sum of downtime_duration over
+    history days whose status is "downtime"), `degraded_seconds` (the sum of
+    downtime_duration over days whose status is "degraded"),
+    `maintenance_seconds` (the sum of maintenance_duration over all days), and
+    `effective_availability`, computed as
+    1 - (downtime_seconds + degraded_seconds) / (history_days * 86400) and
+    rounded to six decimal places. The component's own `availability`, `status`,
+    `public_name`, `explanation` and full `status_history` remain in the
+    verbatim document and are not duplicated or altered here.
+
+    Why the recomputation exists: Better Stack's reported `availability` counts
+    ONLY days whose status is "downtime". Days the page itself marks "degraded"
+    carry a downtime_duration in the same history rows and are excluded from the
+    reported figure, as is maintenance time. Verified by arithmetic against a
+    real response: a component reporting 0.999915 over 90 days is exactly
+    1 - 660.420754 / (90 * 86400) — its single downtime day — while two degraded
+    days totalling 28,800 seconds in the same window contribute nothing to that
+    number. `effective_availability` counts degraded time as unavailable and
+    still excludes maintenance (planned and announced), but
+    `maintenance_seconds` is reported so a reader who disagrees can add it back.
+    The entries in `availability_derived` are ordered WORST FIRST (ascending
+    `effective_availability`), so the first entry is the page's weakest
+    component; a validator reading one capture group therefore reads the
+    component that is hardest to pass rather than an arbitrary one.
+
+    Completeness is enforced, not assumed. Every id listed under
+    `data.relationships.sections`, `data.relationships.resources` and
+    `data.relationships.status_reports`, and every status_update referenced by
+    an included status_report, must be present in `included`. Any shortfall
+    fails the collection (non-zero exit, reason in the envelope's
+    metadata.error) rather than producing an evidence file that is populated but
+    partial. A non-200 response, a body that is not JSON, and a body that is not
+    a Better Stack status_page document each fail the same way.
+
+    WHAT THIS EVIDENCE DOES NOT PROVE. (1) /index.json carries no monitor
+    configuration. It does not show check frequency, which URL or host is
+    actually probed, the monitoring regions used, or the expected status codes.
+    A component's `explanation` (e.g. "app.paramify.com") is operator-typed
+    display text, not proof of what is monitored. The "real-time" half of a
+    claim that availability is monitored continuously is therefore NOT fully
+    substantiated by this evidence set alone; substantiating it needs a
+    token-authenticated monitor-configuration fetcher. (2) It carries no access
+    posture for the page itself — whether the page is published, password or
+    SSO gated, or IP allowlisted. It shows only that the endpoint answered
+    publicly at collection time. (3) Better Stack's own `availability` excludes
+    both degraded and maintenance time, which is why the derived figure exists.
+    (4) A service that was never added to the status page is invisible here;
+    this evidence proves nothing about coverage of the operator's estate. (5)
+    The endpoint returns only the most recent status reports (three in the
+    response this fetcher was written against) and the history window the page
+    is configured for. Pagination behaviour for older reports is UNVERIFIED, so
+    the report list must be read as "the most recent reports the page returned",
+    not as a complete incident history.

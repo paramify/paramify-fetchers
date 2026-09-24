@@ -53,6 +53,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | **Paramify** | 3 | FedRAMP 20x vulnerability reporting — accepted vulnerability info, vulnerability detail, and historical VER activity |
 | **Checkov** | 2 | IaC scans over cloned Terraform / Kubernetes source |
 | **ServiceNow** | 2 | Customer service cases and ITSM change records |
+| **Better Stack** | 1 | Public status page identity, published components with their reported and recomputed availability and 90-day status history, and published status reports and updates |
 
 <!-- BEGIN:fetcher-chart -->
 <div align="center">
