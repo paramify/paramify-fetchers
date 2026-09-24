@@ -21,7 +21,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import requests
 from dotenv import load_dotenv
@@ -82,10 +82,14 @@ def resolve_index_url(status_page_url: str) -> str:
             f"BETTERSTACK_STATUS_PAGE_URL is not an http(s) URL: {status_page_url!r}",
             "bad_config",
         )
+    # Rebuild from the parsed parts rather than string-appending: a page URL
+    # carrying a query or fragment (https://status.example.com?preview=1) would
+    # otherwise become ".../?preview=1/index.json", which is a different and
+    # non-existent path.
     path = parsed.path.rstrip("/")
-    if path.endswith("/index.json") or path == "/index.json":
-        return cleaned.rstrip("/")
-    return f"{cleaned.rstrip('/')}/index.json"
+    if not path.endswith("/index.json"):
+        path = f"{path}/index.json"
+    return urlunparse(parsed._replace(path=path))
 
 
 def sanitize_for_filename(value: str) -> str:
@@ -276,9 +280,11 @@ def derive_availability(document: Dict[str, Any]) -> List[Dict[str, Any]]:
             }
         )
 
-    # Worst first; `position` breaks ties so the order is deterministic across
-    # runs of an unchanged page. A component with no history sorts last — there
-    # is nothing to fail a threshold with.
+    # Worst first; the resource id breaks ties so the order is deterministic
+    # across runs of an unchanged page. A component whose availability could not
+    # be computed (no history rows at all) sorts last — there is nothing there
+    # to fail a threshold with, and putting it first would hide a real component
+    # from the validator that reads the first entry.
     derived.sort(
         key=lambda row: (
             row["effective_availability"] is None,
@@ -322,6 +328,43 @@ def write_evidence(output_dir: Path, target_name: str, evidence: Dict[str, Any])
     return path
 
 
+def _failure_evidence(
+    *,
+    target_name: str,
+    status_page_url: str,
+    source_url: str,
+    http_status: int,
+    reason: str,
+    code: str,
+) -> Dict[str, Any]:
+    """An honest evidence file for a run that collected nothing.
+
+    Written on every failure path, so the file on disk says why rather than
+    being absent or — worse — present and empty. Shape per the contract's
+    payload ledger (docs/fetcher_contract.md § Output).
+    """
+    return {
+        "collected_at": current_timestamp(),
+        "target_name": target_name,
+        "status_page_url": status_page_url,
+        "source_url": source_url,
+        "http_status": http_status,
+        "availability_derived": [],
+        "data": None,
+        "included": [],
+        "metadata": {
+            "partial_failure": True,
+            "api_failures": [
+                {
+                    "operation": f"GET {source_url or status_page_url}",
+                    "type": code,
+                    "message": reason,
+                }
+            ],
+        },
+    }
+
+
 def main() -> int:
     logging.basicConfig(
         level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -339,6 +382,10 @@ def main() -> int:
     source_url = status_page_url
     http_status = 0
 
+    # Everything that can fail is inside one try, the write included. Anything
+    # escaping it would exit non-zero with no $FETCHER_STATUS_FILE and no
+    # evidence file, leaving the runner to report a traceback's last line as the
+    # reason — which is the failure mode report_failure exists to prevent.
     try:
         target_name = get_env("BETTERSTACK_TARGET_NAME")
         status_page_url = get_env("BETTERSTACK_STATUS_PAGE_URL")
@@ -348,50 +395,54 @@ def main() -> int:
         document, http_status = fetch_index(source_url, verify_ssl)
         assert_is_status_page(document, source_url)
         assert_included_is_complete(document, source_url)
-    except CollectionError as exc:
-        # Still write a valid evidence file: the contract's payload ledger is
-        # what a reader of the file sees, and an unreadable file would hide the
-        # failure from everyone who is not looking at the envelope.
-        failed = {
-            "collected_at": current_timestamp(),
-            "target_name": target_name,
-            "status_page_url": status_page_url,
-            "source_url": source_url,
-            "http_status": http_status,
-            "availability_derived": [],
-            "data": None,
-            "included": [],
-            "metadata": {
-                "partial_failure": True,
-                "api_failures": [
-                    {
-                        "operation": f"GET {source_url or status_page_url}",
-                        "type": exc.code,
-                        "message": str(exc),
-                    }
-                ],
-            },
-        }
-        path = write_evidence(output_dir, target_name, failed)
-        logger.info("Evidence saved to %s", path)
-        # report_failure logs too, and logging LAST is what makes the reason —
-        # not the line above — the tail of stderr the runner falls back to.
-        report_failure(str(exc), exc.code)
-        return 1
-    except Exception as exc:  # noqa: BLE001 - anything unexpected is still reportable
-        report_failure(f"Unexpected error collecting {source_url or status_page_url}: {exc}", "internal_error")
-        return 1
 
-    evidence = build_evidence(
-        document,
-        target_name=target_name,
-        status_page_url=status_page_url,
-        source_url=source_url,
-        http_status=http_status,
-    )
-    path = write_evidence(output_dir, target_name, evidence)
-    logger.info("Evidence saved to %s", path)
-    return 0
+        evidence = build_evidence(
+            document,
+            target_name=target_name,
+            status_page_url=status_page_url,
+            source_url=source_url,
+            http_status=http_status,
+        )
+        path = write_evidence(output_dir, target_name, evidence)
+    except CollectionError as exc:
+        reason, code = str(exc), exc.code
+    except Exception as exc:  # noqa: BLE001 - anything unexpected is still reportable
+        # A malformed history row (a duration that is not a number), an
+        # unwritable EVIDENCE_DIR, anything unforeseen. It is still a failed
+        # collection and still has to be reported through the contract's
+        # channels rather than as a stack trace.
+        reason = (
+            f"Unexpected error collecting {source_url or status_page_url}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        code = "internal_error"
+    else:
+        logger.info("Evidence saved to %s", path)
+        return 0
+
+    try:
+        path = write_evidence(
+            output_dir,
+            target_name,
+            _failure_evidence(
+                target_name=target_name,
+                status_page_url=status_page_url,
+                source_url=source_url,
+                http_status=http_status,
+                reason=reason,
+                code=code,
+            ),
+        )
+        logger.info("Evidence saved to %s", path)
+    except OSError as exc:
+        # The exit code and the status file are the authoritative signals; not
+        # being able to write the file must not replace the real reason.
+        logger.info("Could not write the failure evidence file: %s", exc)
+    # report_failure logs too, and logging LAST is what makes the reason — not
+    # the "Evidence saved" line above — the tail of stderr the runner falls
+    # back to when no status file was written.
+    report_failure(reason, code)
+    return 1
 
 
 if __name__ == "__main__":
