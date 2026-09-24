@@ -1,0 +1,25 @@
+key: splunk_access_rows_present
+name: Splunk User and Role Access Verdicts Were Read
+type: AUTOMATED
+role: integrity
+statement: >-
+  The payload holds at least one user row carrying its
+  can_search_all_non_internal and delete_by_keyword verdicts, and at least one
+  non-internal role row (splunk_internal: false) carrying its
+  grants_all_non_internal verdict. Integrity partner for
+  splunk_no_unapproved_full_index_readers,
+  splunk_no_user_holds_delete_by_keyword and
+  splunk_no_unapproved_full_index_roles: without it, an empty user list or a
+  renamed key or flag would read as zero violations. Does NOT assert any
+  posture.
+
+# One match per artifact: both lookaheads scan the payload once, in either order.
+regex: '"payload":\s*\{(?=[\s\S]*?"name":\s*"[^"]+",\s*"type":\s*"[^"]*",[^{}]*?"can_search_all_non_internal":\s*(?:true|false),[^{}]*?"delete_by_keyword":\s*(?:true|false))(?=[\s\S]*?"name":\s*"[^"]+",\s*"splunk_internal":\s*false,[^{}]*?"grants_all_non_internal":\s*(?:true|false))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ROLE-INDEX-ACCESS

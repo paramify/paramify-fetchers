@@ -1,0 +1,25 @@
+key: splunk_input_and_stream_rows_present
+name: Splunk Data Input And Received Stream Rows Were Read
+type: AUTOMATED
+role: integrity
+statement: >-
+  The payload holds at least one inputs[] row carrying stanza, type and
+  enabled in that order (enabled a bare boolean directly after type), and at
+  least one received[] row carrying host, index, internal, max_silence_minutes
+  and silent. Integrity partner for splunk_forwarder_receiving_tls_only and
+  splunk_silence_window_within_policy on EVD-SPLUNK-DATA-INPUTS: without it,
+  an empty list, a renamed type or enabled key, the two keys pulled apart, or
+  a renamed max_silence_minutes would read as zero violations. Requires
+  inputs[] to be non-empty, so on a search head with no local inputs it fails
+  the set — drop the first lookahead there. Does NOT assert any posture.
+
+# One match per artifact: both lookaheads scan the payload once, in either order.
+regex: '"payload":\s*\{(?=[\s\S]*?"stanza":\s*"[^"]+",\s*"type":\s*"[^"]+",\s*"enabled":\s*(?:true|false)\s*[,}])(?=[\s\S]*?"host":\s*"[^"]+",\s*"index":\s*"[^"]+",\s*"internal":\s*(?:true|false),[^{}]*?"max_silence_minutes":\s*[0-9]+,\s*"silent":\s*(?:true|false))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-DATA-INPUTS

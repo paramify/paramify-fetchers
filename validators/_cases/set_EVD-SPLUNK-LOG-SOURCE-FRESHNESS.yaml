@@ -1,0 +1,24 @@
+# Set-level: every validator naming EVD-SPLUNK-LOG-SOURCE-FRESHNESS, combined as Paramify combines them.
+evidence_set: EVD-SPLUNK-LOG-SOURCE-FRESHNESS
+cases:
+  - name: all_sources_reporting
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"max_silence_minutes":60,"partial_failure":false,"api_failures":[]},"hosts":[{"host":"web-01","last_indexed":"2026-01-01T00:00:00Z","minutes_since_last_indexed":2,"max_silence_minutes":60,"silent":false}],"forwarders":[{"hostname":"web-01","fwd_type":"uf","minutes_since_last_connected":1,"max_silence_minutes":60,"silent":false}]}}'
+  - name: one_forwarder_silent
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"max_silence_minutes":60,"partial_failure":false,"api_failures":[]},"hosts":[{"host":"web-01","last_indexed":"2026-01-01T00:00:00Z","minutes_since_last_indexed":2,"max_silence_minutes":60,"silent":false}],"forwarders":[{"hostname":"web-01","fwd_type":"uf","minutes_since_last_connected":1,"max_silence_minutes":60,"silent":false},{"hostname":"web-02","fwd_type":"uf","minutes_since_last_connected":95,"max_silence_minutes":60,"silent":true}]}}'
+  - name: silent_key_renamed_hides_a_dead_host
+    expect: FAIL
+    note: splunk_no_silent_log_sources alone passes this; only splunk_silence_verdicts_present fails it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"max_silence_minutes":60,"partial_failure":false,"api_failures":[]},"hosts":[{"host":"web-02","last_indexed":"2026-01-01T00:00:00Z","minutes_since_last_indexed":95,"max_silence_minutes":60,"is_silent":true}],"forwarders":[]}}'
+  - name: window_widened_to_hide_silence
+    expect: FAIL
+    note: The dead host reads silent=false under a 600-minute window; only splunk_silence_window_within_policy fails it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"max_silence_minutes":600,"partial_failure":false,"api_failures":[]},"hosts":[{"host":"web-01","last_indexed":"2026-01-01T00:00:00Z","minutes_since_last_indexed":2,"max_silence_minutes":600,"silent":false}],"forwarders":[{"hostname":"web-01","fwd_type":"uf","minutes_since_last_connected":1,"max_silence_minutes":600,"silent":false}]}}'
+  - name: window_key_renamed
+    expect: FAIL
+    note: splunk_silence_window_within_policy alone passes this; splunk_silence_verdicts_present fails it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"silence_window":600,"partial_failure":false,"api_failures":[]},"hosts":[{"host":"web-01","last_indexed":"2026-01-01T00:00:00Z","minutes_since_last_indexed":2,"silence_window":600,"silent":false}],"forwarders":[]}}'
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"success"},"payload":{"metadata":{"max_silence_minutes":60,"partial_failure":false,"api_failures":[]},"hosts":[{"host":"web-01","last_indexed":"2026-01-01T00:00:00Z","minutes_since_last_indexed":2,"max_silence_minutes":60,"silent":false}],"forwarders":[{"hostname":"web-01","fwd_type":"uf","minutes_since_last_connected":1,"max_silence_minutes":60,"silent":false}]}}'

@@ -1,0 +1,108 @@
+name: splunk_alert_rules
+version: 0.1.0
+description: >-
+  Every alert rule on a Splunk deployment — each scheduled saved search Splunk
+  classes as an alert — with its schedule, owner, trigger, actions and email
+  recipients, whether it is tracked on the Triggered Alerts page, and how often
+  it ran and fired over a lookback window. One Splunk deployment per target.
+category: splunk
+
+supports_targets: true
+
+target_schema:
+  name:
+    type: string
+    required: true
+    env: SPLUNK_TARGET_NAME
+    description: Label for this Splunk deployment, used in the evidence filename.
+  base_url:
+    type: string
+    required: true
+    env: SPLUNK_BASE_URL
+    description: Management URL of the search head or standalone instance, e.g. https://splunk.example.com:8089
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: SPLUNK_VERIFY_SSL
+    description: Verify the management port's TLS certificate. Set false only for a self-signed test instance.
+
+config_schema:
+  alert_lookback_days:
+    type: integer
+    default: 30
+    env: SPLUNK_ALERT_LOOKBACK_DAYS
+    description: >-
+      How far back to count scheduler runs (index=_internal, default retention
+      30 days) and alert fires (index=_audit) per alert.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: splunk_alert_rules.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-MLA-OSM
+  - KSI-MLA-RVL
+
+evidence_set:
+  reference_id: EVD-SPLUNK-ALERT-RULES
+  name: Splunk Alert Rules
+  instructions: >-
+    Reads a Splunk deployment's management REST API (port 8089) with a bearer
+    token whose role holds `search` on indexes `_audit` and `_internal` and the
+    `admin_all_objects` capability. Without `admin_all_objects` Splunk hides
+    every saved search whose ACL grants read only to admin (on a stock install,
+    every Monitoring Console alert) while reporting the filtered count as the
+    total, so the collection fails naming the capability rather than publish a
+    partial list. Every saved search in every app and namespace is read from
+    `/servicesNS/-/-/saved/searches?count=0&add_orphan_field=1`, and the
+    collected count must equal paging.total. An alert is what Splunk Web
+    itself lists as one, the filter in `metadata.alert_definition`: scheduled
+    (`is_scheduled`) and either `alert_type` is not "always", or
+    `alert_track` is "true", or both dispatch times are real-time ("rt…") with
+    at least one action. Every scheduled row carries `is_alert` and the fields
+    that decide it, and the collection fails unless Splunk's server-side
+    evaluation of the same filter names exactly the same alerts. `alerts[]`
+    are those rows; `other_scheduled_searches[]` are the scheduled searches
+    that are not alerts (asset builders, most telemetry). By Splunk's rule
+    some telemetry searches are alerts (alert_type "number of events" with
+    only the outputtelemetry action); `has_notification_action` separates
+    them: true when the alert has at least one action other than logevent,
+    lookup, outputtelemetry, populate_lookup, rss, studio_snapshot,
+    summary_index or summary_metric_index, so an app-supplied action counts,
+    and `actions` lists every action for a stricter reading. It means an
+    action is configured, not that anything was delivered. `email_recipients`
+    are the email action's to, cc and bcc addresses, empty unless email is one
+    of `actions`. `enabled` is the inverse of `disabled`; `orphan` is true
+    when the owner no longer exists, which stops the scheduler running it.
+    `alert_track` is alert.track as configured ("true", "false" or "auto",
+    read from `configs/conf-savedsearches` because saved/searches reports
+    "auto" as false). `tracked` is whether fires are collated on Splunk's
+    Triggered Alerts page: "true", or "auto" on an alert that is not
+    alert_type "always" and has an action whose `track_alert` is set in
+    `alerts/alert_actions` (email and script on a stock install).
+    `severity` is alert.severity (1-6, default 3); `throttled` and
+    `throttle_period` are alert.suppress. Run and fire history covers the last
+    `lookback_days`, emitted on every row: `runs_in_window`,
+    `skipped_in_window`, `last_run`, `last_run_status` (the scheduler's
+    status for the search, not for its actions) and `last_run_as` (the user
+    the scheduler actually dispatched it as — an alert owned by `nobody` runs
+    as `nobody`) come from `index=_internal sourcetype=scheduler` keyed on
+    savedsearch_id; `fired_in_window` and `last_fired` come from
+    `index=_audit action=alert_fired`, the durable record.
+    `triggered_unexpired` is the alert's instances on the Triggered Alerts
+    page (`/servicesNS/-/-/alerts/fired_alerts/-`), which expire after
+    `alert_expires`; it is null for an untracked alert with none there. Every
+    history field is null, never 0, when the call behind it failed, and the
+    collection fails unless the token can search `_audit` and `_internal`.
+    Fires that match no alert are listed in `summary.fired_unmatched`.
+    `description` and `search` (the SPL) come last in each row. Splunk core
+    records no acknowledgement, owner or resolution for a fired alert, so
+    nothing here shows that an alert was reviewed.

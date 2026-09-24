@@ -1,0 +1,26 @@
+key: splunk_customer_indexes_all_receiving
+name: Splunk Every Customer Index Receiving Data
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every enabled non-internal index (name not starting with "_") received data
+  within the evidence's max_silence_minutes window — no such row reads "stale":
+  true, or "stale": null (not judged). Strict: an index holding no data counts
+  as not receiving, so stock indexes nobody uses (history, summary) fail it
+  unless disabled, and no name is exempt. Substantiates "the indexes … receiving
+  that data" for the "Audit Log Collection and Alerts" narrative (KSI-MLA-OSM).
+  Does NOT assert anything about disabled or internal indexes
+  (splunk_internal_and_audit_indexes_receiving covers _internal and _audit),
+  that every production source sends (EVD-SPLUNK-LOG-SOURCE-FRESHNESS), nor
+  that the window is reasonable (splunk_silence_window_within_policy).
+
+# Violation count; splunk_index_verdicts_present proves the internal and stale keys were there to count.
+regex: '"enabled":\s*true,\s*"internal":\s*false,[^{}]*?"stale":\s*(?:true|null)'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-INDEX-ACTIVITY

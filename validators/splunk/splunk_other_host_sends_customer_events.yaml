@@ -1,0 +1,29 @@
+key: splunk_other_host_sends_customer_events
+name: Splunk Receives Customer Events From A Non-Splunk Host
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one received[] stream from a host other than the Splunk servers
+  themselves, into a non-internal index (internal: false), was indexed within
+  the evidence's silence window (silent: false), so log collection reaches
+  beyond the SIEM's own logs. SERVER (the Splunk instances' own host names,
+  not counted): paramify-splunk — tune it in the regex's opening
+  (?!(?:...)") list, names separated by |, with . escaped; the queried
+  instance's name is in metadata.server_host. Substantiates "configures [Log
+  Management] on all production components" (capability "Audit Log
+  Collection and Alerts") and KSI-MLA-LET's logged event types. Does NOT
+  assert that every production host sends, that the host value names a
+  forwarder rather than a host set inside the events, or that what arrives is
+  security-relevant. Self-guarding: a renamed host, index, internal or silent
+  key reads as no match and fails. splunk_silence_window_within_policy bounds
+  the window.
+
+regex: '"host":\s*"(?!(?:paramify-splunk)")[^"]+",\s*"index":\s*"[^"]+",\s*"internal":\s*false,[^{}]*?"silent":\s*false'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-DATA-INPUTS

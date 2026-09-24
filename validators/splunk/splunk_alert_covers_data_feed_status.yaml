@@ -1,0 +1,27 @@
+key: splunk_alert_covers_data_feed_status
+name: Splunk Alert Covers Data Feed Status
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one enabled alert with a notification action is named for data feed
+  status: its name, read case-insensitively, contains "data feed(s)", or
+  "feed(s)" directly followed by status, health, down, stopped, missing, fail,
+  failed, failure(s), delay(ed), lag(ging) or outage. "Silent", "log source",
+  "ingestion" and "missing data" are deliberately not accepted, so "Paramify -
+  Silent Log Source" does not count. Substantiates the "data feed status" item
+  of the Prepared Audit Queries narrative (capability 97e041ec). Coverage is
+  judged by alert name, not by what the search does. Does NOT assert that the
+  search detects a stopped or delayed data feed, that the alert runs (an
+  orphaned or never-scheduled alert still counts) or fires, or that its
+  notification is delivered.
+
+# Case-insensitive by [Xx] classes: the engine applies only the g and s flags.
+regex: '"name":\s*"[^"]*?(?:[Dd][Aa][Tt][Aa][ _-]*[Ff][Ee][Ee][Dd][Ss]?(?![A-Za-z])|(?<![A-Za-z])[Ff][Ee][Ee][Dd][Ss]?[ _-]*(?:[Ss][Tt][Aa][Tt][Uu][Ss]|[Hh][Ee][Aa][Ll][Tt][Hh]|[Dd][Oo][Ww][Nn]|[Ss][Tt][Oo][Pp][Pp][Ee][Dd]|[Mm][Ii][Ss][Ss][Ii][Nn][Gg]|[Ff][Aa][Ii][Ll](?:[Ee][Dd]|[Uu][Rr][Ee][Ss]?)?|[Dd][Ee][Ll][Aa][Yy](?:[Ee][Dd])?|[Ll][Aa][Gg](?:[Gg][Ii][Nn][Gg])?|[Oo][Uu][Tt][Aa][Gg][Ee])(?![A-Za-z]))[^"]*"[^{}]*?"enabled":\s*true,[^{}]*?"has_notification_action":\s*true,'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-RULES

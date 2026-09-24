@@ -1,0 +1,27 @@
+key: splunk_alert_covers_admin_activity
+name: Splunk Alert Covers Root And Admin Activity
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one enabled alert with a notification action is named for root or
+  admin activity: its name, read case-insensitively, contains root, admin,
+  admins, administrator(s), administrative, privileged, superuser(s) or sudo,
+  optionally followed by account(s) or user(s), directly followed by activity,
+  activities, action(s), login(s), log on(s), sign in(s), usage, command(s),
+  session(s) or access. "Root Disk Usage" and "Admin Password Expiring" do not
+  count. Substantiates the "root/admin activity" item of the Prepared Audit
+  Queries narrative (capability 97e041ec). Coverage is judged by alert name,
+  not by what the search does. Does NOT assert that the search detects root or
+  admin activity, that the alert runs (an orphaned or never-scheduled alert
+  still counts) or fires, or that its notification is delivered.
+
+# Case-insensitive by [Xx] classes: the engine applies only the g and s flags.
+regex: '"name":\s*"[^"]*?(?:(?:(?<![A-Za-z])[Rr][Oo][Oo][Tt]|[Aa][Dd][Mm][Ii][Nn](?:[Ii][Ss][Tt][Rr][Aa][Tt][Oo][Rr][Ss]?|[Ii][Ss][Tt][Rr][Aa][Tt][Ii][Vv][Ee]|[Ss])?|[Pp][Rr][Ii][Vv][Ii][Ll][Ee][Gg][Ee][Dd]|[Ss][Uu][Pp][Ee][Rr][Uu][Ss][Ee][Rr][Ss]?|(?<![A-Za-z])[Ss][Uu][Dd][Oo])[ _-]*(?:(?:[Aa][Cc][Cc][Oo][Uu][Nn][Tt][Ss]?|[Uu][Ss][Ee][Rr][Ss]?)[ _-]*)?(?:[Aa][Cc][Tt][Ii][Vv][Ii][Tt](?:[Yy]|[Ii][Ee][Ss])|[Aa][Cc][Tt][Ii][Oo][Nn][Ss]?|[Ll][Oo][Gg][Ii][Nn][Ss]?|[Ll][Oo][Gg][ _-]*[Oo][Nn][Ss]?|[Ss][Ii][Gg][Nn][ _-]*[Ii][Nn][Ss]?|[Uu][Ss][Aa][Gg][Ee]|[Cc][Oo][Mm][Mm][Aa][Nn][Dd][Ss]?|[Ss][Ee][Ss][Ss][Ii][Oo][Nn][Ss]?|[Aa][Cc][Cc][Ee][Ss][Ss])(?![A-Za-z]))[^"]*"[^{}]*?"enabled":\s*true,[^{}]*?"has_notification_action":\s*true,'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-RULES

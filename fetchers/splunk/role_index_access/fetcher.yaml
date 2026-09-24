@@ -1,0 +1,120 @@
+name: splunk_role_index_access
+version: 0.1.0
+description: >-
+  Every role and user on a Splunk deployment with the indexes each can
+  effectively search (own and inherited grants minus denials, as patterns and
+  as concrete index names), whether it can search every non-internal or every
+  internal index, whether it can delete events, and the time and filter
+  restrictions on its searches. One Splunk deployment per target.
+category: splunk
+
+supports_targets: true
+
+target_schema:
+  name:
+    type: string
+    required: true
+    env: SPLUNK_TARGET_NAME
+    description: Label for this Splunk deployment, used in the evidence filename.
+  base_url:
+    type: string
+    required: true
+    env: SPLUNK_BASE_URL
+    description: Management URL of the search head or standalone instance, e.g. https://splunk.example.com:8089
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: SPLUNK_VERIFY_SSL
+    description: Verify the management port's TLS certificate. Set false only for a self-signed test instance.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: splunk_role_index_access.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-MLA-ALA
+
+evidence_set:
+  reference_id: EVD-SPLUNK-ROLE-INDEX-ACCESS
+  name: Splunk Role and Index Access
+  instructions: >-
+    Reads a Splunk deployment's management REST API (port 8089) with a bearer
+    token whose role holds `search`, `list_all_roles`, `list_all_users` and
+    `rest_properties_get`. Without `list_all_roles` Splunk hides roles (on a
+    stock 10.4 install the 14 internal `_spl_*` roles, even from admin), and
+    without `list_all_users` a token sees only its own user; both times
+    paging.total reports the filtered count, so the collection fails naming
+    the capability rather than publish a partial list. Every role
+    (`authorization/roles`), user (`authentication/users`) and index
+    (`data/indexes?datatype=all`) is read with count=0, and each collected
+    count must equal paging.total. The index list must also equal the index
+    stanzas of indexes.conf (`properties/indexes`, less `default` and
+    `volume:`/`provider:` stanzas), and every index the token can search
+    across search peers (`| eventcount summarize=false index=* index=_*`)
+    must be in it, so a search head whose peers hold indexes it does not list
+    fails rather than expand grants against a partial list. A role or user
+    naming a role that is not listed fails the collection too. A role's
+    grant is its own `srchIndexesAllowed` plus `imported_srchIndexesAllowed`
+    (Splunk resolves imports transitively) minus its own and imported
+    `srchIndexesDisallowed`, which always win; a user's grant is the same
+    over all of its roles. `index_patterns_allowed` and
+    `index_patterns_disallowed` are those patterns and `effective_indexes`
+    the index names they expand to by the rule in
+    `metadata.index_wildcard_rule`: `*` alone is every non-internal index and
+    `_*` every internal (`_`-prefixed) one, and no pattern crosses between
+    the two. `effective_indexes` includes disabled indexes (marked in
+    `indexes[]`), which the grant covers once re-enabled.
+    `grants_all_non_internal` and `grants_all_internal` are true when
+    `effective_indexes` includes every index of that kind that exists (false
+    when none exists). `search_capability` is whether the `search`
+    capability is held, and `can_search_all_non_internal` and
+    `can_search_all_internal` require both it and the grant. A role's grant
+    reaches any user who holds it even when the role lacks `search`, because
+    `search` can come from another role, so a role is judged on `grants_*`
+    and a user on `can_search_*`. `delete_by_keyword` is the capability
+    behind the `delete` command, which makes events unsearchable;
+    `delete_indexes_allowed` is the role's own deleteIndexesAllowed (REST
+    reports no imported form). `log_privilege_capabilities` are the held
+    capabilities among change_authentication, delete_by_keyword, edit_roles,
+    edit_roles_grantable, edit_tokens_all, edit_user and indexes_edit, each
+    of which lets its holder change who can read log data or destroy it. A
+    user's `search_capability`, `delete_by_keyword` and
+    `log_privilege_capabilities` come from the capabilities Splunk reports
+    for that user; the collection fails unless those equal the union of its
+    roles' capabilities, and unless each role's imported capabilities and
+    index patterns equal the union of its inherited roles' own.
+    `search_time_window_seconds` and `search_time_earliest_seconds` merge
+    srchTimeWin and srchTimeEarliest (own and imported, across all roles
+    held) by Splunk's least-restrictive rule (0 is unlimited and wins, -1 is
+    unset, otherwise the largest); null means no limit.
+    `roles_with_search_filter` names the roles in the set whose own
+    srchFilter is set and not `*`; how filters combine
+    (srchFilterSelecting) is not evaluated, so a non-empty list does not by
+    itself mean searches are filtered; the raw `srch_filter` and
+    `imported_srch_filter` come last in each role row. On a role, `users` are
+    the users holding it directly or through a role that imports it, and
+    `imported_by` the roles importing it. `splunk_internal` marks roles named
+    `_spl_*`, Splunk's own sidecar and service roles, hidden from admin and
+    held by no listed user on a stock install: they are reported in full but
+    sit outside the population a role-level check judges, while a user who
+    holds one is judged in `users[]` like any other. Each `indexes[]` row
+    lists `users_can_search`, the users whose `search_capability` and
+    `effective_indexes` cover it. `type` is how a user authenticates
+    ("Splunk" for native accounts); `last_successful_login` is null when
+    Splunk records none. `metadata.collected_as` is the collecting user,
+    which itself needs `search` on every index. Not collected: SAML and LDAP
+    group-to-role mappings (`admin/SAML-groups`, `admin/LDAP-groups` need the
+    write-grade `change_authentication`), so an identity-provider user
+    appears with the roles of its last login and one who never logged in
+    does not appear; nor authentication tokens, which act with their user's
+    roles. Splunk core has no just-in-time elevation and records no access
+    review, so every grant here is standing and nothing here shows it was
+    reviewed.

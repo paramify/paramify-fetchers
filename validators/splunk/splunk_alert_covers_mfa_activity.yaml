@@ -1,0 +1,24 @@
+key: splunk_alert_covers_mfa_activity
+name: Splunk Alert Covers MFA Activity
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one enabled alert with a notification action is named for MFA
+  activity: its name, read case-insensitively, contains "MFA" or "2FA" as a
+  standalone token, or "multi-factor" or "two-factor" (space, hyphen,
+  underscore or nothing between). Substantiates the "MFA activity" item of the
+  Prepared Audit Queries narrative (capability 97e041ec). Coverage is judged
+  by alert name, not by what the search does. Does NOT assert that the search
+  detects MFA activity, that the alert runs (an orphaned or never-scheduled
+  alert still counts) or fires, or that its notification is delivered.
+
+# Case-insensitive by [Xx] classes: the engine applies only the g and s flags.
+regex: '"name":\s*"[^"]*?(?:(?<![A-Za-z])[Mm][Ff][Aa](?![A-Za-z])|[Mm][Uu][Ll][Tt][Ii][ _-]*[Ff][Aa][Cc][Tt][Oo][Rr]|(?<![A-Za-z])2[Ff][Aa](?![A-Za-z])|[Tt][Ww][Oo][ _-]*[Ff][Aa][Cc][Tt][Oo][Rr])[^"]*"[^{}]*?"enabled":\s*true,[^{}]*?"has_notification_action":\s*true,'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-RULES

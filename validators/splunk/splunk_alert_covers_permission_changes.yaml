@@ -1,0 +1,29 @@
+key: splunk_alert_covers_permission_changes
+name: Splunk Alert Covers Permission And Object Changes
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one enabled alert with a notification action is named for
+  permission or object changes: its name, read case-insensitively, contains
+  permission(s), privilege(s), ACL(s), role(s), capability/capabilities,
+  ownership, group membership(s) or object(s) directly followed by change(s),
+  changed, modified, modification(s), update(s), updated, grant(s), granted,
+  assignment(s), assigned or escalation(s); or change(s), changed, modified or
+  modification(s) followed by (to, in or of) (user, group or the) one of those
+  subjects. Password and configuration changes do not count. Substantiates the
+  "permission and object changes" item of the Prepared Audit Queries narrative
+  (capability 97e041ec). Coverage is judged by alert name, not by what the
+  search does. Does NOT assert that the search detects a permission or object
+  change, that the alert runs (an orphaned or never-scheduled alert still
+  counts) or fires, or that its notification is delivered.
+
+# Case-insensitive by [Xx] classes: the engine applies only the g and s flags.
+regex: '"name":\s*"[^"]*?(?:(?:[Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn][Ss]?|[Pp][Rr][Ii][Vv][Ii][Ll][Ee][Gg][Ee][Ss]?|[Aa][Cc][Ll][Ss]?|[Rr][Oo][Ll][Ee][Ss]?|[Cc][Aa][Pp][Aa][Bb][Ii][Ll][Ii][Tt](?:[Yy]|[Ii][Ee][Ss])|[Oo][Ww][Nn][Ee][Rr][Ss][Hh][Ii][Pp]|[Gg][Rr][Oo][Uu][Pp][ _-]*[Mm][Ee][Mm][Bb][Ee][Rr][Ss][Hh][Ii][Pp][Ss]?|[Oo][Bb][Jj][Ee][Cc][Tt][Ss]?)[ _-]*(?:[Cc][Hh][Aa][Nn][Gg][Ee][Ss]?|[Cc][Hh][Aa][Nn][Gg][Ee][Dd]|[Mm][Oo][Dd][Ii][Ff][Ii](?:[Ee][Dd]|[Cc][Aa][Tt][Ii][Oo][Nn][Ss]?)|[Uu][Pp][Dd][Aa][Tt][Ee][Ss]?|[Uu][Pp][Dd][Aa][Tt][Ee][Dd]|[Gg][Rr][Aa][Nn][Tt][Ss]?|[Gg][Rr][Aa][Nn][Tt][Ee][Dd]|[Aa][Ss][Ss][Ii][Gg][Nn][Mm][Ee][Nn][Tt][Ss]?|[Aa][Ss][Ss][Ii][Gg][Nn][Ee][Dd]|[Ee][Ss][Cc][Aa][Ll][Aa][Tt][Ii][Oo][Nn][Ss]?)(?![A-Za-z])|(?<![A-Za-z])(?:[Cc][Hh][Aa][Nn][Gg][Ee][Ss]?|[Cc][Hh][Aa][Nn][Gg][Ee][Dd]|[Mm][Oo][Dd][Ii][Ff][Ii](?:[Ee][Dd]|[Cc][Aa][Tt][Ii][Oo][Nn][Ss]?))[ _-]+(?:(?:[Tt][Oo]|[Ii][Nn]|[Oo][Ff])[ _-]+)?(?:(?:[Uu][Ss][Ee][Rr]|[Gg][Rr][Oo][Uu][Pp]|[Tt][Hh][Ee])[ _-]+)?(?:[Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn][Ss]?|[Pp][Rr][Ii][Vv][Ii][Ll][Ee][Gg][Ee][Ss]?|[Aa][Cc][Ll][Ss]?|[Rr][Oo][Ll][Ee][Ss]?|[Cc][Aa][Pp][Aa][Bb][Ii][Ll][Ii][Tt](?:[Yy]|[Ii][Ee][Ss])|[Oo][Ww][Nn][Ee][Rr][Ss][Hh][Ii][Pp]|[Gg][Rr][Oo][Uu][Pp][ _-]*[Mm][Ee][Mm][Bb][Ee][Rr][Ss][Hh][Ii][Pp][Ss]?|[Oo][Bb][Jj][Ee][Cc][Tt][Ss]?)(?![A-Za-z]))[^"]*"[^{}]*?"enabled":\s*true,[^{}]*?"has_notification_action":\s*true,'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-RULES

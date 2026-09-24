@@ -1,0 +1,26 @@
+key: splunk_no_unapproved_full_index_readers
+name: Splunk Only Approved Users Search All Non-Internal Indexes
+type: AUTOMATED
+role: configuration
+statement: >-
+  No Splunk user outside the approved list can search every non-internal
+  index (can_search_all_non_internal, from Splunk's own flattened roles and
+  imports). ALLOW (approved full-access accounts): admin, paramify_fetcher,
+  paramify_fetcher_full — tune it in the regex's opening (?!(?:...)") list,
+  names separated by |, with . escaped. Substantiates KSI-MLA-ALA's
+  least-privileged, role-based access to log data. Does NOT assert that
+  narrower grants match data sensitivity, that internal (_*) indexes are
+  restricted, that SAML/LDAP users who never logged in are covered, or that
+  access is reviewed or just-in-time. splunk_access_rows_present proves the
+  flag was there to count.
+
+# User rows only: role rows carry "splunk_internal" after the name, not "type".
+regex: '"name":\s*"(?!(?:admin|paramify_fetcher|paramify_fetcher_full)")[^"]+",\s*"type":[^{}]*?"can_search_all_non_internal":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ROLE-INDEX-ACCESS

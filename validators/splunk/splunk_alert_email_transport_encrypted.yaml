@@ -1,0 +1,28 @@
+key: splunk_alert_email_transport_encrypted
+name: Splunk Alert Email Transport Encrypted
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every [email] alert action stanza, and every email delivery row, has
+  transport_encrypted true (STARTTLS via use_tls or SMTPS via use_ssl), so a
+  per-alert action.email override cannot hide an unencrypted relay behind an
+  encrypted default, nor the reverse. An unknown value (null) fails it. The
+  transport protection behind "can be contacted via email and receives
+  alerts" (capability "Security Event Notifications"); the narrative names no
+  encryption, and this reading was the user's choice. Does NOT assert SMTP
+  authentication, that the server's certificate is verified, that a local
+  relay forwards onward over TLS, or anything about webhook or other modular
+  deliveries. A row's value is as configured now, not as it was at each
+  attempt. splunk_email_transport_settings_present and
+  splunk_delivery_outcomes_present prove the flag was there to count.
+
+# Branch 1: email delivery rows (webhook rows carry null and are not email). Branch 2: [email] stanzas.
+regex: '"action":\s*"email",[^{}]*?"transport_encrypted":\s*(?:false|null)|"enabled":\s*(?:true|false),\s*"mailserver":\s*(?:"[^"]*"|null),\s*"transport_encrypted":\s*(?:false|null)'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-DELIVERY

@@ -1,0 +1,20 @@
+key: splunk_silence_verdicts_present
+name: Splunk Log Source Verdicts Carry Their Window
+type: AUTOMATED
+role: integrity
+statement: >-
+  At least one log-source row carries both its silence window and its silent
+  verdict, in the same object. Integrity partner for
+  splunk_no_silent_log_sources and splunk_silence_window_within_policy: without
+  it, a renamed key or an empty host list would read as zero violations. Does
+  NOT assert any posture.
+
+regex: '"max_silence_minutes":\s*[0-9]+[^{}]*?"silent":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-LOG-SOURCE-FRESHNESS

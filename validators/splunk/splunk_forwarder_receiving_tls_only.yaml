@@ -1,0 +1,26 @@
+key: splunk_forwarder_receiving_tls_only
+name: Splunk Receives Forwarded Data Over TLS Only
+type: AUTOMATED
+role: configuration
+statement: >-
+  No enabled inputs[] row is a plain splunktcp receiving port (type
+  "splunktcp", stanza splunktcp://<port> or splunktcp:<port>), so forwarders
+  can deliver to the queried instance only over splunktcp-ssl. Transport
+  protection for the collection in "configures [Log Management] on all
+  production components" (capability "Audit Log Collection and Alerts"); the
+  narrative names no encryption, and this reading was the user's choice. Does
+  NOT assert that certificates are verified (requireClientCert,
+  sslVerifyServerCert), that forwarders send over TLS on their side, anything
+  about HEC, raw tcp or udp inputs, or anything about instances other than the
+  queried one. splunk_input_and_stream_rows_present proves type and enabled
+  were there to count.
+
+regex: '"type":\s*"splunktcp",\s*"enabled":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-DATA-INPUTS
