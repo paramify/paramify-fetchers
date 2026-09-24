@@ -85,3 +85,24 @@ condition = "AND"
 paths = ['''tests/test_gcp_platform_fetchers\.py$''']
 regexes = ['''(?m)^\s*"(?:key_algorithm|keyAlgorithm)": "KEY_ALG_RSA_2048",\s*$''']
 regexTarget = "line"
+
+# --- False positive: Entra password-protection directory-setting template ---- #
+# `5cf42378-d67d-4f36-ba46-e8b86229381d` is Microsoft's PUBLISHED template id for
+# the "Password Rule Settings" directory setting (Entra password protection). Like
+# the Service Management API id above, it is a fixed, documented constant, the
+# same in every tenant; the entra_authentication_policy fetcher needs the literal
+# to find that setting among a tenant's directory settings.
+#
+# generic-api-key fires because the constant's name ends in `_ID` and a UUID
+# clears the rule's entropy threshold (3.81) — name-plus-entropy, not a leak.
+#
+# Scoped to that one fetcher path and the exact known-public GUID, so assigning
+# any OTHER value to this constant is still reported. `(?m)` is required for the
+# reason documented on the Service Management API entry.
+[[allowlists]]
+description = "Microsoft-published Entra password rule settings template id is a public constant"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''fetchers/azure/entra_authentication_policy/fetcher\.py$''']
+regexes = ['''(?m)^PASSWORD_RULE_TEMPLATE_ID = "5cf42378-d67d-4f36-ba46-e8b86229381d"\s*$''']
+regexTarget = "line"
