@@ -36,6 +36,7 @@ A rule mapped to several STIG controls produces one row per control.
 | Control Title | `SRG-APP-000025` | |
 | Rule Type | `Cloud Configuration` / `Host Configuration` | |
 | Rule ID, Rule Name | `OKTA-012`, `Okta User should not be inactive for more than 90 days` | |
+| Remediation | `In the Okta Admin Console, go to Security > ...` | Wiz's fix instructions for the rule. Map to the intake **Recommendation** field. Blank if the tenant does not expose `remediationInstructions` (probed once per run; never fails the run) |
 | Result | `PASS` / `FAIL` | |
 | Status, Severity | `OPEN`, `MEDIUM` | As Wiz reports them |
 | Resource ID, Resource Name, Resource Type | | Use Resource Name as the **asset identifier** |

@@ -60,6 +60,7 @@ COLUMNS = [
     "Rule Type",          # Cloud Configuration | Host Configuration
     "Rule ID",
     "Rule Name",
+    "Remediation",        # Wiz's fix instructions for the rule; blank if the tenant does not expose them
     "Result",             # PASS | FAIL (as Wiz reports it)
     "Status",
     "Severity",
@@ -100,6 +101,11 @@ query WizStigConfigurationFindings($first: Int, $after: String, $filterBy: Confi
   }
 }
 """
+# Remediation text lives on the rule. Not every tenant/rule type exposes the field,
+# so it is probed once per run (see supports_remediation) and dropped if rejected:
+# a missing fix-text column must never cost the pass/fail rows.
+REMEDIATION_FIELD = "remediationInstructions"
+CLOUD_QUERY_WITH_REMEDIATION = _CLOUD_TEMPLATE % (_SUBCATS + " " + REMEDIATION_FIELD)
 CLOUD_QUERY = _CLOUD_TEMPLATE % _SUBCATS
 # Used for a page only if the full query keeps failing. Rows read this way carry
 # no control mapping and are counted in the log, never silently written blank.
@@ -116,14 +122,16 @@ query WizStigHostAssessments($first: Int, $after: String, $filterBy: HostConfigu
 HOST_QUERY = _HOST_TEMPLATE % "rule { id name shortName externalId } resource { id name type }"
 HOST_FALLBACKS = [_HOST_TEMPLATE % "rule { id name shortName externalId } resource { id name }"]
 
-HOST_RULES_QUERY = """
+_HOST_RULES_TEMPLATE = """
 query WizStigHostRules($first: Int, $after: String, $filterBy: HostConfigurationRuleFilters) {
   hostConfigurationRules(first: $first, after: $after, filterBy: $filterBy) {
-    nodes { id securitySubCategories { externalId title category { framework { id } } } }
+    nodes { id securitySubCategories { externalId title category { framework { id } } } %s }
     pageInfo { hasNextPage endCursor }
   }
 }
 """
+HOST_RULES_QUERY_WITH_REMEDIATION = _HOST_RULES_TEMPLATE % REMEDIATION_FIELD
+HOST_RULES_QUERY = _HOST_RULES_TEMPLATE % ""
 
 
 class StigError(Exception):
@@ -192,15 +200,35 @@ def check(client: WizClient, before: int) -> None:
     raise StigError(f"Wiz read failed, no report written: {text}", code)
 
 
+def supports_remediation(client: WizClient, operation: str, query: str, root: str,
+                         variables: Dict[str, Any]) -> bool:
+    """One-row probe: does this tenant accept the remediation field on this query?
+
+    Only a rejection that names the field turns it off; any other error is left
+    for the real read to hit and report, so a probe can never hide a failure.
+    """
+    before = len(client.api_failures)
+    client.graphql(operation, query, {**variables, "first": 1, "after": None})
+    failures = client.api_failures[before:]
+    del client.api_failures[before:]
+    rejected = any(REMEDIATION_FIELD.lower() in str(f.get("message", "")).lower() for f in failures)
+    if rejected:
+        logger.warning("Wiz rejected %s on %s; the Remediation column will be blank", REMEDIATION_FIELD, root)
+    return not rejected
+
+
 # --------------------------------------------------------------------------- collection
 
 
 def cloud_rows(client: WizClient, fw: Dict[str, Any]) -> Tuple[List[Dict[str, str]], int]:
+    variables = {"filterBy": {"securityFramework": fw["id"], "result": RESULTS}}
+    with_fix = supports_remediation(client, "configurationFindings", CLOUD_QUERY_WITH_REMEDIATION,
+                                    "configurationFindings", variables)
     before = len(client.api_failures)
     fallback_before = client.fallback_pages
     nodes = client.paginate(
-        "configurationFindings", CLOUD_QUERY, "configurationFindings",
-        {"filterBy": {"securityFramework": fw["id"], "result": RESULTS}},
+        "configurationFindings", CLOUD_QUERY_WITH_REMEDIATION if with_fix else CLOUD_QUERY,
+        "configurationFindings", variables,
         max_records=env_int("WIZ_MAX_RECORDS", 50000), fallback_queries=CLOUD_FALLBACKS,
     )
     check(client, before)
@@ -224,7 +252,7 @@ def cloud_rows(client: WizClient, fw: Dict[str, Any]) -> Tuple[List[Dict[str, st
             continue
         for control_id, title in pairs:
             rows.append(row(fw, control_id, title, "Cloud Configuration", rule.get("shortId") or rule.get("id"),
-                            rule.get("name"), n, res.get("id"), res.get("name"),
+                            rule.get("name"), rule.get(REMEDIATION_FIELD), n, res.get("id"), res.get("name"),
                             res.get("nativeType") or res.get("type"), res.get("cloudPlatform"),
                             res.get("region"), sub.get("name"), sub.get("externalId"),
                             n.get("firstSeenAt"), n.get("analyzedAt")))
@@ -246,16 +274,22 @@ def host_rows(client: WizClient, fw: Dict[str, Any]) -> Tuple[List[Dict[str, str
 
     rule_ids = sorted({(n.get("rule") or {}).get("id") for n in nodes if (n.get("rule") or {}).get("id")})
     mapping: Dict[str, List[Tuple[str, str]]] = {}
+    fixes: Dict[str, str] = {}
     chunk = max(1, env_int("WIZ_HOST_RULE_LOOKUP_CHUNK", 20))
+    rules_query = HOST_RULES_QUERY
+    if rule_ids and supports_remediation(client, "hostConfigurationRules", HOST_RULES_QUERY_WITH_REMEDIATION,
+                                         "hostConfigurationRules", {"filterBy": {"id": rule_ids[:1]}}):
+        rules_query = HOST_RULES_QUERY_WITH_REMEDIATION
     for i in range(0, len(rule_ids), chunk):
         before = len(client.api_failures)
-        rules = client.paginate("hostConfigurationRules", HOST_RULES_QUERY, "hostConfigurationRules",
+        rules = client.paginate("hostConfigurationRules", rules_query, "hostConfigurationRules",
                                 {"filterBy": {"id": rule_ids[i:i + chunk]}})
         check(client, before)
         for r in rules:
             pairs = controls_for(r.get("securitySubCategories"), fw["id"])
             if pairs and r.get("id"):
                 mapping[r["id"]] = pairs
+                fixes[r["id"]] = r.get(REMEDIATION_FIELD) or ""
 
     rows: List[Dict[str, str]] = []
     for n in nodes:
@@ -264,12 +298,12 @@ def host_rows(client: WizClient, fw: Dict[str, Any]) -> Tuple[List[Dict[str, str
         for control_id, title in mapping.get(rule.get("id") or "", []):
             rows.append(row(fw, control_id, title, "Host Configuration",
                             rule.get("externalId") or rule.get("shortName") or rule.get("id"), rule.get("name"),
-                            n, res.get("id"), res.get("name"), res.get("type"), None, None, None, None,
+                            fixes.get(rule.get("id") or ""), n, res.get("id"), res.get("name"), res.get("type"), None, None, None, None,
                             n.get("firstSeen"), n.get("analyzedAt")))
     return rows, len(nodes)
 
 
-def row(fw, control_id, title, rule_type, rule_id, rule_name, node, res_id, res_name, res_type,
+def row(fw, control_id, title, rule_type, rule_id, rule_name, remediation, node, res_id, res_name, res_type,
         platform, region, sub_name, sub_id, first_seen, analyzed) -> Dict[str, str]:
     values = {
         "Record ID": f"{node.get('id')}:{control_id}",
@@ -279,6 +313,7 @@ def row(fw, control_id, title, rule_type, rule_id, rule_name, node, res_id, res_
         "Rule Type": rule_type,
         "Rule ID": rule_id,
         "Rule Name": rule_name,
+        "Remediation": remediation,
         "Result": node.get("result"),
         "Status": node.get("status"),
         "Severity": node.get("severity"),
