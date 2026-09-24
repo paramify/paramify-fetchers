@@ -1,0 +1,86 @@
+name: wiz_stig_compliance_report
+version: 0.1.0
+description: >-
+  STIG checklist results from Wiz as a CSV for a Paramify CONFIGURATION
+  assessment: one row per STIG control, per rule, per resource, with the
+  PASS/FAIL result, for one enabled framework (e.g. Okta IDaaS STIG, DISA
+  GPOS SRG, a CIS STIG benchmark). Read-only; never writes to Wiz.
+category: wiz
+
+kind: issue_report
+
+# One target per framework. Each target writes its own
+# wiz_stig_compliance_report_<framework>.csv, so several STIGs can run together.
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: csv
+  path: wiz_stig_compliance_report.csv
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read-only scopes).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+target_schema:
+  framework:
+    type: string
+    required: true
+    env: WIZ_STIG_FRAMEWORK
+    description: >-
+      Wiz framework to report on: its id (wf-id-305) or exact name ("Okta IDaaS
+      STIG (Ver 1, Rel 2)"). Must be enabled in Wiz.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: Token URL. Defaults to Wiz for Gov; commercial is https://auth.app.wiz.io/oauth/token.
+  include_host_configuration:
+    type: boolean
+    required: false
+    env: WIZ_STIG_INCLUDE_HOST
+    default: true
+    description: >-
+      Also read host configuration (OS benchmark) results and keep the ones
+      whose rule maps to the framework. Turn off for frameworks that are
+      cloud-only (Okta IDaaS STIG) to save API calls.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  page_size:
+    type: integer
+    required: false
+    env: WIZ_PAGE_SIZE
+    default: 100
+    description: Records per GraphQL page (max 500).
+  max_records:
+    type: integer
+    required: false
+    env: WIZ_MAX_RECORDS
+    default: 50000
+    description: Safety cap per query. Reaching it fails the run rather than writing a partial report.
+
+issue_report:
+  assessment_type: CONFIGURATION
+  title: Wiz STIG Compliance
