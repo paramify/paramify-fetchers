@@ -43,7 +43,7 @@
   <text class="t" x="46" y="124">Paramify API key</text>
   <text class="sub" x="46" y="146">Settings → API Keys</text>
   <text class="sub" x="46" y="164">saved in .env</text>
-  <text class="sub" x="46" y="182">stage first, then prod</text>
+  <text class="sub" x="46" y="182">app.paramify.com</text>
 
   <rect class="box" x="32" y="232" width="232" height="100" rx="8"/>
   <text class="t" x="46" y="260">Real, populated evidence</text>
@@ -55,7 +55,7 @@
 
   <!-- Lane 2: the skill -->
   <rect class="lane-skill" x="304" y="16" width="352" height="400" rx="10"/>
-  <text class="h" x="320" y="44">2 · /suggest-validator in Claude Code</text>
+  <text class="h" x="320" y="44">2 · /suggest-validator in your AI agent</text>
   <text class="sub" x="320" y="62">Phases 1–3 are an interview; 4–6 are mechanical</text>
 
   <rect class="box" x="320" y="78" width="320" height="44" rx="8"/>
@@ -84,7 +84,7 @@
   <rect class="you" x="696" y="96" width="232" height="100" rx="8"/>
   <text class="t" x="710" y="124">Upload + sync</text>
   <text class="sub" x="710" y="146">evidence first, then validators</text>
-  <text class="sub" x="710" y="164">ask Claude to do it,</text>
+  <text class="sub" x="710" y="164">ask the agent to do it,</text>
   <text class="sub" x="710" y="182">or run one command yourself</text>
 
   <rect class="box" x="696" y="232" width="232" height="100" rx="8"/>

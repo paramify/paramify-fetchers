@@ -10,7 +10,7 @@ check the results in the app.
 ![End-to-end flow: API key and real evidence, then the six skill phases, then upload, sync, and verify in Paramify](img/suggest_validator/flow.svg)
 
 **You need:** [the repo installed](../README.md#install) ·
-[Claude Code, run from the repo root](../README.md#drive-it-with-an-ai-agent) ·
+[an AI coding agent, run from the repo root](../README.md#drive-it-with-an-ai-agent) ·
 Node.js (Paramify runs validator regexes as JavaScript)
 
 ---
@@ -25,9 +25,8 @@ The permissions listed there leave out one this skill needs:
 ![The Create API Key dialog with View Solution Capabilities, View/Write Evidences, and View/Write Validators](img/suggest_validator/app-01-api-key.png)
 
 Put the key in `.env` at the repo root (`paramify` loads it automatically).
-Start on stage (`PARAMIFY_API_BASE_URL=https://stage.paramify.com/api/v0`),
-since syncing writes to the workspace. Stage and production keys are separate.
-To check the key works:
+It talks to `https://app.paramify.com/api/v0` by default. To check the key
+works:
 
 ![paramify capabilities list returning Data Protection capabilities](img/suggest_validator/01-key-check.png)
 
@@ -42,25 +41,25 @@ artifact from the workspace instead.
 
 ## 3. Run the skill
 
-In Claude Code, type `/suggest-validator <fetcher name>`, or just ask it to
-*"suggest validators for the SQS encryption evidence"*. Claude handles
+In your AI agent, run `/suggest-validator <fetcher name>`, or just ask it to
+*"suggest validators for the SQS encryption evidence"*. The agent handles
 everything that follows. The screenshots are an example session for
 `aws_sqs_encryption_status`.
 
-**Phases 1–2: evidence and claim.** Claude finds the newest populated run and
+**Phases 1–2: evidence and claim.** The agent finds the newest populated run and
 proposes the capability it should prove. Paramify's API doesn't link evidence
 sets to capabilities, so **you confirm the capability**. If it has no narrative
 yet, write one in Paramify first.
 
-![Example session: Claude reports the evidence file and proposes the Server-Side Encryption Protection narrative](img/suggest_validator/session-1-evidence.png)
+![Example session: the agent reports the evidence file and proposes the Server-Side Encryption Protection narrative](img/suggest_validator/session-1-evidence.png)
 
-**Phase 3: you choose.** Claude ranks the assertions that would back the
+**Phase 3: you choose.** The agent ranks the assertions that would back the
 claim, recommends a set, and names what the evidence can't cover.
 **You pick which ones to build.**
 
 ![Example session: three ranked assertions and a multi-select prompt](img/suggest_validator/session-2-choose.png)
 
-**Phases 4–5: build and prove.** Claude writes the validators and tests each
+**Phases 4–5: build and prove.** The agent writes the validators and tests each
 one three ways: good evidence (should pass), bad evidence (should fail), and a
 renamed field (should not pass). Then it scores your real evidence.
 
@@ -70,7 +69,7 @@ renamed field (should not pass). Then it scores your real evidence.
 > passes, a FAIL means your environment doesn't meet the narrative. That's a
 > finding to act on, not a broken validator.
 
-**Phase 6: hand-back.** Claude reports what each validator asserts and when it
+**Phase 6: hand-back.** The agent reports what each validator asserts and when it
 fails, then offers to sync. It never syncs on its own.
 
 ![Example session: summary table of validators, roles, and failure conditions, plus an offer to sync](img/suggest_validator/session-4-handback.png)
@@ -82,7 +81,7 @@ their `validators/_cases/` files.
 
 ## 4. Publish to Paramify
 
-Tell Claude to sync, or run it yourself (add `--dry-run` to preview first):
+Ask the agent to sync, or run it yourself (add `--dry-run` to preview first):
 
 ```bash
 paramify upload --with-validators
@@ -118,7 +117,7 @@ the sync has no result. Upload a fresh run to get one.
 ![Artifacts tab: the newer artifact shows Partial, the one uploaded before the sync shows nothing](img/suggest_validator/app-03-artifacts.png)
 
 **Click the result** to see each validator's verdict. It should match what
-Claude reported in phase 5.
+the agent reported in phase 5.
 
 ![The Partial badge expanded: two validators Fail, two Pass](img/suggest_validator/app-04-artifact-verdicts.png)
 
@@ -130,12 +129,12 @@ Claude reported in phase 5.
 |---|---|
 | 401/403, or "No Paramify API token" | Check the key's permissions ([step 1](#1-get-a-paramify-api-key)) and that `PARAMIFY_API_BASE_URL` matches the environment where the key was created. |
 | "No narrative written on this capability" | Write the narrative in Paramify, or pick another capability. |
-| Claude says the evidence is empty | Run the fetcher against real data. For findings-style fetchers (GuardDuty, vulnerability scans), tell Claude that zero findings is the compliant result. |
+| The agent says the evidence is empty | Run the fetcher against real data. For findings-style fetchers (GuardDuty, vulnerability scans), tell the agent that zero findings is the compliant result. |
 | Sync fails with HTTP 400 | That validator `name` is already used in the workspace. Rename it in the YAML. |
 | Sync shows `set_not_found=EVD-…` | Sync ran before the upload, so the validator was created without being attached. Attach it from the set's **Validators** tab → **Manage Selection**. |
 | A validator is missing from the set's Validators tab | Sync only attaches validators when it first creates them (`skipped_exists` means it didn't). Attach it via **Manage Selection**. |
 | An artifact has no Validation Result | It was uploaded before the validators were attached. Upload a fresh run. |
-| App verdicts differ from what Claude reported | The app copy was edited, or is out of date. `--update` overwrites it with the repo version ([sync options](../uploaders/paramify_validators/README.md#run-it)). |
+| App verdicts differ from what the agent reported | The app copy was edited, or is out of date. `--update` overwrites it with the repo version ([sync options](../uploaders/paramify_validators/README.md#run-it)). |
 
 **More detail:** [the skill](../.claude/skills/suggest-validator/SKILL.md) ·
 [validator design](validators_design.md) ·
