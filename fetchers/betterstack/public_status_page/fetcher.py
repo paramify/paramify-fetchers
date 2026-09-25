@@ -274,6 +274,13 @@ def lowest_reported_availability(document: Dict[str, Any]) -> Optional[Dict[str,
             (
                 availability,
                 _resource_id_sort_key(resource_id),
+                # KEY ORDER IS LOAD-BEARING. The registry validator
+                # (validators/betterstack/betterstack_status_page_availability_threshold.yaml)
+                # anchors on this block as `public_name`, then
+                # status_page_resource_id, then availability. Reorder these and
+                # the validator stops matching — it fails closed rather than
+                # passing wrongly, but it stops asserting anything. Change both
+                # together.
                 {
                     "public_name": attributes.get("public_name"),
                     "status_page_resource_id": resource_id,
