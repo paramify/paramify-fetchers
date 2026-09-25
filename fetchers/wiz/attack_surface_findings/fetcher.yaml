@@ -1,0 +1,86 @@
+name: wiz_attack_surface_findings
+version: 0.1.0
+description: >-
+  Summarizes Wiz Attack Surface Management findings on internet-facing
+  endpoints and web applications by severity, rule, technology and age. NOT
+  YET RUN against a tenant with this Wiz module's data; fields are checked
+  against the tenant schema at run time and any missing field is listed in
+  scope.fields_not_available.
+category: wiz
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1200
+
+output:
+  type: json
+  path: wiz_attack_surface_findings.json
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read-only scopes).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov) or
+      https://api.us17.app.wiz.io/graphql (commercial).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: >-
+      Token URL from Tenant Info > Authentication URL. Defaults to Wiz for Gov.
+      Commercial tenants use https://auth.app.wiz.io/oauth/token.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  page_size:
+    type: integer
+    required: false
+    env: WIZ_PAGE_SIZE
+    default: 100
+    description: Records per GraphQL page (max 500).
+  asm_open_statuses:
+    type: string
+    required: false
+    env: WIZ_ASM_OPEN_STATUSES
+    default: "OPEN,IN_PROGRESS"
+    description: Statuses counted as open.
+  include_raw_findings:
+    type: boolean
+    required: false
+    env: WIZ_INCLUDE_RAW_FINDINGS
+    default: true
+    description: Include every finding row, not just the summary.
+
+evidence_set:
+  reference_id: EVD-WIZ-ATTACK-SURFACE
+  name: Wiz Attack Surface Findings
+  instructions: >-
+    Script: fetcher.py. Read-only service account (read:attack_surface; Wiz ASM
+    license). Pages the attackSurfaceFindings connection. Summarizes findings by
+    status and severity, exposed resources with open findings, top rules and
+    technologies, and open findings past the remediation window.
+  description: >-
+    Wiz external attack surface and web application findings, evidencing that
+    exposed applications are scanned for weaknesses.
+
+ksis:
+  - KSI-CNA-MAT
+  - KSI-SVC-EIS

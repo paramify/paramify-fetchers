@@ -49,8 +49,12 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from framework.issue_reports import (  # noqa: E402
+    INTAKE_API_FIELD,
+    INTAKE_APIS,
     INTAKE_LOG_NAME,
     ISSUE_REPORTS_DIR,
+    PIPELINE_OPERATION_FIELD,
+    PIPELINE_OPERATIONS,
     SIDECAR_NAME,
 )
 from framework.paramify_auth import (  # noqa: E402
@@ -161,6 +165,61 @@ class ParamifyClient:
         if r.status_code not in (200, 201):
             raise ParamifyError(
                 f"intake of {filename} failed (HTTP {r.status_code}): {_error_message(r)}"
+            )
+        try:
+            return r.json()
+        except ValueError:
+            return {}
+
+    def submit_pipeline_intake(
+        self, pipeline_id: str, filename: str, content: bytes, content_type: str,
+        artifact_meta: Dict,
+    ) -> Dict:
+        """POST one report to a pipeline's current cycle. Returns {artifact, job}.
+
+        Opt-in (manifest `intake_api: pipeline`). A pipeline is identified by its
+        assessment id. Unlike the assessment endpoint the cycle is the pipeline's
+        current one, not the one the effective date falls in, and `operation` in
+        the metadata can queue processing in the same request.
+        """
+        files = {
+            "file": (quote(filename, safe=""), content, content_type),
+            "artifact": ("artifact.json", json.dumps(artifact_meta), "application/json"),
+        }
+        r = self.session.post(
+            f"{self.base_url}/pipelines/{pipeline_id}/intake",
+            files=files,
+            timeout=self.timeout,
+        )
+        if r.status_code == 501:
+            raise IntakeNotEnabled(
+                f"pipeline intake is not enabled for this workspace (HTTP 501): "
+                f"{_error_message(r)}"
+            )
+        if r.status_code == 404:
+            raise ParamifyError(
+                f"pipeline {pipeline_id} not found (HTTP 404); the assessment id may belong to "
+                f"another workspace, or it was deleted. {_error_message(r)}"
+            )
+        if r.status_code in (401, 403):
+            needs = "PIPELINE_INTAKE"
+            if artifact_meta.get("operation"):
+                needs += " + PIPELINE_PROCESS"
+            if artifact_meta.get("operation") == "PROCESS_CLOSE":
+                needs += " + PIPELINE_CLOSE"
+            raise ParamifyError(
+                f"Paramify rejected the token (HTTP {r.status_code}); for pipeline intake it "
+                f"needs {needs} on this assessment. {_error_message(r)}"
+            )
+        if r.status_code == 400:
+            raise ParamifyError(
+                f"pipeline intake of {filename} refused (HTTP 400): the assessment's file "
+                f"intake preset must be configured before the pipeline accepts files. "
+                f"{_error_message(r)}"
+            )
+        if r.status_code not in (200, 201, 202):
+            raise ParamifyError(
+                f"pipeline intake of {filename} failed (HTTP {r.status_code}): {_error_message(r)}"
             )
         try:
             return r.json()
@@ -456,15 +515,42 @@ def upload_run(
                             "artifact_id": already[key].get("artifact_id")})
                 continue
 
+            fetcher_override = overrides.get(record.get("fetcher_name"), {}) or {}
+            intake_api = (fetcher_override.get(INTAKE_API_FIELD)
+                          or record.get(INTAKE_API_FIELD) or "assessment")
+            operation = (fetcher_override.get(PIPELINE_OPERATION_FIELD)
+                         or record.get(PIPELINE_OPERATION_FIELD))
+            if intake_api not in INTAKE_APIS or (
+                    operation and (operation not in PIPELINE_OPERATIONS or intake_api != "pipeline")):
+                errors += 1
+                add_result({
+                    "file": name,
+                    "outcome": "error",
+                    "reason": (
+                        f"{INTAKE_API_FIELD}={intake_api!r} {PIPELINE_OPERATION_FIELD}={operation!r} "
+                        f"is not valid: {INTAKE_API_FIELD} is one of {', '.join(INTAKE_APIS)}, and "
+                        f"{PIPELINE_OPERATION_FIELD} ({', '.join(PIPELINE_OPERATIONS)}) needs "
+                        f"{INTAKE_API_FIELD}: pipeline"
+                    ),
+                })
+                continue
+
             meta = build_artifact_meta(record)
+            if operation:
+                meta["operation"] = operation
+            endpoint = (f"pipeline {assessment_id}" + (f" ({operation})" if operation else "")
+                        if intake_api == "pipeline" else f"assessment {assessment_id}")
             if dry_run:
                 logger.info(
-                    "would intake %s (%s, %s bytes) → assessment %s as %r",
-                    name, record.get("format"), record.get("bytes"), assessment_id,
+                    "would intake %s (%s, %s bytes) → %s as %r",
+                    name, record.get("format"), record.get("bytes"), endpoint,
                     meta["title"],
                 )
-                add_result({"file": name, "outcome": "would_upload",
-                            "assessment_id": assessment_id, "title": meta["title"]})
+                result = {"file": name, "outcome": "would_upload",
+                          "assessment_id": assessment_id, "title": meta["title"]}
+                if intake_api == "pipeline":
+                    result.update(intake_api="pipeline", operation=operation)
+                add_result(result)
                 continue
 
             size = path.stat().st_size
@@ -490,8 +576,16 @@ def upload_run(
             # would reorder keys and rewrite numbers, and the file is supposed to
             # be the vendor's own artifact.
             content = path.read_bytes()
-            resp = client.submit_intake(assessment_id, name, content, content_type, meta)
-            artifacts = resp.get("artifacts") or []
+            job_id = None
+            if intake_api == "pipeline":
+                resp = client.submit_pipeline_intake(assessment_id, name, content, content_type, meta)
+                artifact = resp.get("artifact")
+                artifacts = [artifact] if isinstance(artifact, dict) else []
+                job = resp.get("job")
+                job_id = job.get("id") if isinstance(job, dict) else None
+            else:
+                resp = client.submit_intake(assessment_id, name, content, content_type, meta)
+                artifacts = resp.get("artifacts") or []
             artifact_id = artifacts[0].get("id") if artifacts and isinstance(artifacts[0], dict) else None
             uploaded += 1
             already[key] = {
@@ -502,19 +596,25 @@ def upload_run(
                 "sha256": record.get("sha256"),
                 "uploaded_at": _utc_now(),
             }
+            if intake_api == "pipeline":
+                already[key].update(intake_api="pipeline", operation=operation, job_id=job_id)
             # Written per file, not once at the end: a batch that dies halfway
             # through must not re-send what it already sent.
             write_intake_log(run_dir, already)
             logger.info(
-                "intaken %s → assessment %s (%d artifact(s))", name, assessment_id, len(artifacts)
+                "intaken %s → %s (%d artifact(s)%s)", name, endpoint, len(artifacts),
+                f", job {job_id}" if job_id else "",
             )
-            add_result({
+            result = {
                 "file": name,
                 "outcome": "uploaded",
                 "assessment_id": assessment_id,
                 "artifact_id": artifact_id,
                 "artifact_count": len(artifacts),
-            })
+            }
+            if intake_api == "pipeline":
+                result.update(intake_api="pipeline", operation=operation, job_id=job_id)
+            add_result(result)
         except IntakeNotEnabled as e:
             # Workspace-wide, not per-file: every remaining report would fail
             # identically, so stop and say so once.

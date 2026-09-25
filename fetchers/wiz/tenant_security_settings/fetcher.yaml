@@ -1,0 +1,78 @@
+name: wiz_tenant_security_settings
+version: 0.1.0
+description: >-
+  Reads the Wiz tenant's own security settings (IP allowlists for users,
+  service accounts and SCIM; portal inactivity timeout). Evidence about the
+  Wiz tenant, not about the organization's own service.
+category: wiz
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 300
+
+output:
+  type: json
+  path: wiz_tenant_security_settings.json
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read-only scopes).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov) or
+      https://api.us17.app.wiz.io/graphql (commercial).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: >-
+      Token URL from Tenant Info > Authentication URL. Defaults to Wiz for Gov.
+      Commercial tenants use https://auth.app.wiz.io/oauth/token.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  page_size:
+    type: integer
+    required: false
+    env: WIZ_PAGE_SIZE
+    default: 100
+    description: Records per GraphQL page (max 500).
+  include_raw_findings:
+    type: boolean
+    required: false
+    env: WIZ_INCLUDE_RAW_FINDINGS
+    default: true
+    description: Include allowlist entries (IP ranges and descriptions), not just counts.
+
+evidence_set:
+  reference_id: EVD-WIZ-TENANT-SECURITY-SETTINGS
+  name: Wiz Tenant Security Settings
+  instructions: >-
+    Script: fetcher.py. Read-only service account (read:security_settings).
+    Reads ipRestrictions and portalInactivityTimeoutSettings. Reports which
+    access paths are IP-restricted and whether the portal inactivity timeout is
+    enabled.
+  description: >-
+    Security settings of the organization's Wiz tenant (IP allowlists, session
+    inactivity timeout).
+
+ksis:
+  - KSI-IAM-SNU
+  - KSI-CNA-RNT
