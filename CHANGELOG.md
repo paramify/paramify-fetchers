@@ -12,6 +12,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **A Jira category, and its first fetcher: `jira_site_inventory`.** One
+  evidence set covering a Jira Cloud site end to end: deployment info, every
+  project the account can browse (type, lead, issue types, issue count), the
+  issue types, priorities and statuses in use, Jira Service Management service
+  desks where the site has JSM, and every issue updated in the lookback window
+  (90 days, or an explicit `jql`) with rollups by project, type, status and
+  priority, time to resolution, and separate change and incident counts.
+  Account email + API token, declared once on the category; no Jira admin
+  needed. See [`fetchers/jira/README.md`](fetchers/jira/README.md).
 - **A fanout target editor in the TUI** (`t` on the Manifest tab). A fanout
   fetcher runs once per target, so its targets are the run plan — but the page
   showed only how many there were, and there was no way to change one: fixing a
