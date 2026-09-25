@@ -57,6 +57,16 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Default ambient env vars the runner lets through its whitelist for this platform. A manifest's platforms.<category>.auth.passthrough_env adds to this set."
+        },
+        "selector_env": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Env vars that represent an explicit identity choice (e.g. AWS_PROFILE). When a TARGET sets one, the runner drops every var in credential_env for that invocation, so ambient static keys cannot silently outrank the identity the manifest asked for."
+        },
+        "credential_env": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Static credential vars superseded by a target-set selector_env var. Still passed through for ambient (target-less) collection."
         }
       }
     }

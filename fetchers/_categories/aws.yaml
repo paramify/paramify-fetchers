@@ -72,3 +72,21 @@ auth:
     - AWS_ROLE_SESSION_NAME
     - AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
     - AWS_CONTAINER_CREDENTIALS_FULL_URI
+
+  # A target that names `profile:` has stated WHICH identity to collect as, so
+  # static keys must not travel with that invocation. botocore consults env
+  # credentials BEFORE a profile's assume-role config whenever the profile comes
+  # from AWS_PROFILE (the `--profile` FLAG suppresses them, the env var does
+  # not), so a single stale key in the deployment silently defeats an entire
+  # multi-account fanout: every profile goes unconsulted, the dead key signs
+  # every call, and the operator sees InvalidClientTokenId on targets whose
+  # ~/.aws/config is perfectly correct. Reproduced on ECS Fargate 2026-09-22.
+  # These stay in passthrough_env above: a target-LESS entry still collects with
+  # whatever the environment holds ("collect here"), which is the documented
+  # local-dev and non-AWS-runner path.
+  selector_env:
+    - AWS_PROFILE
+  credential_env:
+    - AWS_ACCESS_KEY_ID
+    - AWS_SECRET_ACCESS_KEY
+    - AWS_SESSION_TOKEN
