@@ -18,7 +18,14 @@ statement: Every component published on the status page reports a current status
 # ECMAScript: `g` and `s` are applied, `m` is not. The negative lookahead is
 # `(?!operational")` rather than `(?!operational)` so a future status value that
 # merely starts with the word is still counted as a violation.
-regex: '"availability":\s*[0-9.]+,\s*"status":\s*"(?!operational")[^"]*"'
+#
+# The availability pattern is `[0-9][0-9.eE+-]*` rather than `[0-9.]+` so that
+# exponent notation still matches. Python serializes a small float that way, so
+# a component at 1e-05 would slip past a digits-and-dots anchor entirely — and
+# a component this validator cannot see is a component whose non-operational
+# status is never counted. Measured: with `[0-9.]+` a degraded component at
+# 1e-05 scored PASS.
+regex: '"availability":\s*[0-9][0-9.eE+-]*,\s*"status":\s*"(?!operational")[^"]*"'
 rules_summary: MATCH_COUNT EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

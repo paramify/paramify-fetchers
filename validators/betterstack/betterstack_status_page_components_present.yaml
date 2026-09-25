@@ -13,7 +13,12 @@ statement: The status page evidence contains at least one published component ca
 # This one anchors one level up: the `public_name` / `availability` / `status`
 # triple of a status_page_resource. Generic by construction — it names no
 # component, so it holds for any customer's status page.
-regex: '"public_name":\s*"(?<public_name>[^"]*)",\s*"explanation":[\s\S]*?"availability":\s*(?<availability>[0-9.]+),\s*"status":\s*"(?<status>[^"]+)"'
+#
+# The availability pattern matches its partner's exactly, exponent notation
+# included. The two have to see the same set of components: if this one could
+# read a component that the violation count cannot, the integrity guard would
+# stop covering the thing it exists to cover.
+regex: '"public_name":\s*"(?<public_name>[^"]*)",\s*"explanation":[\s\S]*?"availability":\s*(?<availability>[0-9][0-9.eE+-]*),\s*"status":\s*"(?<status>[^"]+)"'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

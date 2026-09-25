@@ -49,3 +49,13 @@ cases:
       FAIL is the best reachable answer today. What matters is that it does not
       PASS. See docs/validators_design.md.
     artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"GET https://status.example.com/index.json failed at the network layer"},"payload":{}}'
+
+  - name: exponent_notation_availability
+    expect: FAIL
+    note: >
+      Both halves of the exponent-notation trap at once: an availability of
+      1e-05 on a degraded component. Before the regexes were hardened this
+      artifact scored PASS on the threshold check AND on the operational check
+      — two silent false passes on evidence showing a service that is
+      essentially never up.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":1e-05},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"downtime"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":0,"availability":1e-05,"status":"degraded","status_history":[{"day":"2026-09-24","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"Dashboard","explanation":"app.example.com","position":1,"availability":1,"status":"operational","status_history":[{"day":"2026-09-24","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'

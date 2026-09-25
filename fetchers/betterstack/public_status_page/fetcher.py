@@ -226,8 +226,12 @@ def _resource_id_sort_key(resource_id: str) -> Tuple[int, int, str]:
     Better Stack ids are numeric strings, so "451733" must sort below "8655373"
     rather than above it the way a plain string comparison would. A
     non-numeric id sorts after every numeric one, deterministically.
+
+    `isascii()` is not redundant beside `isdigit()`: `isdigit()` is true for
+    characters like "\u00b2" that `int()` then refuses, and this function must
+    never be the thing that raises.
     """
-    if resource_id.isdigit():
+    if resource_id.isascii() and resource_id.isdigit():
         return (0, int(resource_id), resource_id)
     return (1, 0, resource_id)
 
