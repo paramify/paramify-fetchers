@@ -7,3 +7,14 @@ cases:
   - name: below_baseline
     expect: FAIL
     artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":0.996211},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"status_page_section_id":1,"resource_id":10,"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":0,"availability":0.996211,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"status_page_section_id":1,"resource_id":20,"resource_type":"Monitor","public_name":"Dashboard","explanation":"app.example.com","position":1,"availability":1.0,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'
+
+  - name: availability_key_renamed_upstream
+    expect: FAIL
+    note: >
+      The renamed-key direction, and it does NOT pass vacuously. The regex
+      matches nothing, so MATCH_GROUP[2] reads nothing — but the comparison is
+      against a CUSTOM_TEXT rather than another group, so it is "" > "0.999",
+      which is false, and the verdict is FAIL. That is why this validator needs
+      no separate presence rule; a group-versus-group comparison would have
+      compared nothing to nothing and passed.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","note":"api.example.com","position":0,"uptime":0.996211,"status":"operational"}}]}}'
