@@ -2,43 +2,50 @@
 # combined the way Paramify combines them (ERROR > FAIL > PASS). The set has
 # two: the shared collection-health check in validators/common, and the
 # availability threshold in validators/betterstack.
-#
-# Note on what the availability rule actually reads: MATCH_GROUP takes the
-# FIRST match, so it compares the component at position 0, not the weakest
-# one. The cases below put the component under test first for that reason.
 evidence_set: EVD-BETTERSTACK-PUBLIC-STATUS-PAGE
 cases:
-  - name: availability_above_baseline
+  - name: lowest_component_above_baseline
     expect: PASS
     note: >
-      Collection succeeded and the first component reports 0.999961, above the
-      0.999 baseline. This is the shape of a real status page response, reduced
-      to two components.
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":0.999961},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"status_page_section_id":1,"resource_id":10,"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":0,"availability":0.999961,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"status_page_section_id":1,"resource_id":20,"resource_type":"Monitor","public_name":"Dashboard","explanation":"app.example.com","position":1,"availability":1.0,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'
+      The weakest component is deliberately NOT first in `included` — Homepage at
+      1.0 comes before API at 0.999961. Anchoring on lowest_reported_availability
+      is what makes the rule read API; the old per-component anchor read Homepage
+      and would have passed whatever API reported.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"2","availability":0.999961},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"Homepage","explanation":"www.example.com","position":0,"availability":1.0,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":1,"availability":0.999961,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'
 
-  - name: availability_below_baseline
+  - name: lowest_component_below_baseline
     expect: FAIL
     note: >
-      Same page, first component down to 0.996211. The figure compared is Better
-      Stack's own; nothing recomputes it on either side.
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":0.996211},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"status_page_section_id":1,"resource_id":10,"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":0,"availability":0.996211,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"status_page_section_id":1,"resource_id":20,"resource_type":"Monitor","public_name":"Dashboard","explanation":"app.example.com","position":1,"availability":1.0,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'
+      Same page, the weakest component down to 0.996211. The figure compared is
+      Better Stack's own; nothing recomputes it on either side.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"2","availability":0.996211},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"Homepage","explanation":"www.example.com","position":0,"availability":1.0,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":1,"availability":0.996211,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'
+
+  - name: availability_in_exponent_notation
+    expect: FAIL
+    note: >
+      Python serializes a small float in exponent form, so an availability of
+      1e-05 — 0.001% uptime — reaches the evidence as `1e-05`. A bare `[\d.]+`
+      captures "1" out of that and scores 1 > 0.999 PASS. The `[0-9][0-9.]*`
+      class plus the `(?![0-9.eE])` lookahead makes the pattern miss instead,
+      and a miss fails here rather than passing.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"2","availability":1e-05},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"Homepage","explanation":"www.example.com","position":0,"availability":1.0,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":1,"availability":1e-05,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'
 
   - name: availability_key_renamed_upstream
     expect: FAIL
     note: >
-      The regex anchors on `explanation`, `position` and `availability` together.
-      Rename any of them and it matches nothing — and a MATCH_GROUP comparison
-      over a regex that did not match compares nothing to nothing and passes
-      VACUOUSLY. `paramify validators check` reports that as a failed case even
-      when the verdict reads PASS, which is what keeps this honest: there is no
-      separate presence guard on this validator.
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":0.996211},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","note":"api.example.com","position":0,"uptime":0.996211,"status":"operational"}}]}}'
+      The regex matches nothing, so MATCH_GROUP[2] reads nothing — but the
+      comparison is against a CUSTOM_TEXT rather than another capture group, so
+      it is "" > "0.999", which is false, and the verdict is FAIL. That is why
+      this validator needs no separate presence rule; a group-versus-group
+      comparison would have compared nothing to nothing and passed.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"2","uptime":0.996211},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"Homepage","explanation":"www.example.com","position":0,"availability":1.0,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":1,"availability":0.996211,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'
 
   - name: collection_failed
     expect: FAIL
     note: >
       ERROR is the semantically right verdict, but the API discards disposition,
       so FAIL is the best reachable answer today. What matters is that it does
-      not PASS. Caught by validators/common/collection_succeeded.yaml — this
-      validator's own regex reads nothing here. See docs/validators_design.md.
+      not PASS. Caught by validators/common/collection_succeeded.yaml — the
+      availability validator's own regex reads nothing here.
+      See docs/validators_design.md.
     artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"GET https://status.example.com/index.json failed at the network layer"},"payload":{}}'
