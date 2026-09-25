@@ -12,6 +12,42 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **A Better Stack category and its first fetcher** —
+  `betterstack_public_status_page`, which GETs a public status page's own
+  `/index.json` and records it as evidence. No credential: a Better Stack status
+  page publishes that document to anyone who can reach the page, so the fetcher
+  sends nothing and the category declares no secrets. The response is kept
+  verbatim — `data` and `included` exactly as the page returns them, nothing
+  removed, renamed, recomputed or flattened — alongside the URL actually
+  fetched and a collection timestamp. The one field added to it,
+  `lowest_reported_availability`, is a selection rather than a calculation: it
+  names the component reporting the lowest availability and copies that value
+  out of the response unchanged, so the evidence carries the same figure the
+  status page UI shows (0.999915 reads there as "99.991% uptime"). It exists
+  because a Paramify `MATCH_GROUP` rule reads one capture group while the
+  number of components varies per page — naming the weakest component gives
+  such a rule one field to compare that still speaks for the whole page. Ties
+  break on the lowest resource id so an unchanged page selects the same
+  component every run, and the field is omitted rather than invented when no
+  component reports a numeric availability. Completeness is enforced rather
+  than assumed: every id named under `data.relationships` and every status
+  update a report references must be present in `included`, and a shortfall
+  fails the collection instead of producing a populated-looking partial
+  payload, as do a non-200, a body that is not JSON, and a body that is not a
+  status page document. The fetcher fans out per status page and is generic —
+  it knows nothing about any particular page — and `fetcher.yaml`'s
+  `evidence_set.instructions` states plainly what the evidence cannot show:
+  that Better Stack's `availability` counts hard downtime only, with degraded
+  and maintenance periods excluded from it, and that `/index.json` carries no
+  monitor configuration and so proves nothing about check frequency, what is
+  actually probed, or monitoring regions.
+- **A validator for the Better Stack status page set**
+  (`validators/betterstack/`, with behaviour cases under `validators/_cases/`).
+  One `configuration` check: a `MATCH_GROUP` rule comparing a component's
+  reported `availability` against a 0.999 baseline, anchored on the shape of a
+  status_page_resource rather than on any component's name, so it holds for any
+  customer's page. Collection health stays where it belongs, in the shared
+  `validators/common/collection_succeeded.yaml`, which the set is listed on.
 - **A fanout target editor in the TUI** (`t` on the Manifest tab). A fanout
   fetcher runs once per target, so its targets are the run plan — but the page
   showed only how many there were, and there was no way to change one: fixing a

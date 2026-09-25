@@ -1,0 +1,82 @@
+name: betterstack_public_status_page
+version: 0.1.0
+description: >-
+  Collects a Better Stack public status page's own `/index.json` — the page,
+  its components with the availability and status Better Stack reports for
+  each, and the published status reports. Credential-free: it reads only what
+  the page publishes publicly.
+
+category: betterstack
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: betterstack_public_status_page.json
+  aggregation: per_target
+
+target_schema:
+  # One target per status page. The fanout unit is the page, not the component:
+  # a page's /index.json carries every component it publishes in one response.
+  name:
+    type: string
+    required: true
+    env: BETTERSTACK_TARGET_NAME
+    description: >
+      Label for this status page, used as the discriminator in the evidence
+      filename (sanitized to [A-Za-z0-9_-]). Not read from the page itself, so
+      two targets pointing at different pages must carry different names.
+  status_page_url:
+    type: string
+    required: true
+    env: BETTERSTACK_STATUS_PAGE_URL
+    description: >
+      Base URL of the Better Stack status page, e.g. https://status.paramify.com
+      (a *.betteruptime.com / *.betterstack.com subdomain works identically).
+      The fetcher appends /index.json when the URL does not already end in it, so
+      either form may be given. Must be http or https.
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: BETTERSTACK_VERIFY_SSL
+    description: >
+      Verify the status page's TLS certificate. Defaults to true and should stay
+      true; set it false only for a page behind a corporate TLS-inspecting proxy
+      whose CA is not in the runner's trust store.
+
+secrets: []          # A public status page needs no credential — see _categories/betterstack.yaml
+
+ksis:
+  # Optimizing for Availability — the page publishes per-component availability
+  # and an incident history, which is the operator's own availability record.
+  - KSI-CNA-OFA
+
+evidence_set:
+  reference_id: EVD-BETTERSTACK-PUBLIC-STATUS-PAGE
+  name: Better Stack Public Status Page
+  instructions: >
+    Script: fetcher.py. One unauthenticated GET of <status_page_url>/index.json,
+    the JSON document the hosted Better Stack status page renders itself from.
+    No credential is sent and none is needed.
+
+    The response is recorded verbatim under `data` and `included`: the page
+    identity, every published component with its availability, current status
+    and daily status history, and the published status reports and their
+    updates. The fetcher also records the URL it fetched and when. It adds one
+    field, `lowest_reported_availability`, naming whichever component reports
+    the lowest figure — a selection, not a calculation.
+
+    The availability shown is Better Stack's own, exactly as the status page
+    UI displays it: 0.999915 is the "99.991% uptime" on the page. Note that it
+    counts hard downtime only — degraded and maintenance periods are excluded
+    from it. A reader who needs those has the full per-component status history
+    in the same evidence.
+
+    The collection fails rather than returning a partial page: a non-200, a
+    body that is not JSON, a body that is not a Better Stack status page, or
+    any object referenced by the page but missing from `included`.
