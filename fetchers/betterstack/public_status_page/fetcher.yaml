@@ -1,12 +1,10 @@
 name: betterstack_public_status_page
 version: 0.1.0
 description: >-
-  Collects a Better Stack public status page's own `/index.json` document — the
-  page identity, every published component with the availability and status the
-  page itself reports, its status history, and the published status reports and
-  their updates — and names the component with the lowest reported availability
-  so a single field can be compared against a baseline. Credential-free: it
-  reads only what the status page publishes to the public internet.
+  Collects a Better Stack public status page's own `/index.json` — the page,
+  its components with the availability and status Better Stack reports for
+  each, and the published status reports. Credential-free: it reads only what
+  the page publishes publicly.
 
 category: betterstack
 
@@ -62,65 +60,23 @@ evidence_set:
   reference_id: EVD-BETTERSTACK-PUBLIC-STATUS-PAGE
   name: Better Stack Public Status Page
   instructions: >
-    Script: fetcher.py. One unauthenticated HTTP GET against
-    <status_page_url>/index.json — the JSON:API document the hosted Better
-    Stack status page renders itself from. No credential is sent and none is
-    needed; the request is exactly what any member of the public can make. The
-    response is recorded VERBATIM: `data` (the status_page object with its
-    company_name, subdomain, custom_domain, aggregate_state, timezone,
-    created_at, updated_at and its relationships to sections, resources and
-    status_reports) and `included` (the status_page_section,
-    status_page_resource, status_report and status_update objects) are copied
-    into the evidence unchanged, with nothing removed, renamed, recomputed or
-    flattened. Alongside them the fetcher records `source_url` (the URL
-    actually fetched, after /index.json was appended), `status_page_url`,
-    `target_name`, `http_status` and `collected_at`.
+    Script: fetcher.py. One unauthenticated GET of <status_page_url>/index.json,
+    the JSON document the hosted Better Stack status page renders itself from.
+    No credential is sent and none is needed.
 
-    Each component carries the availability Better Stack reports for it over
-    the history window the page is configured for (90 days at the time of
-    writing) — the same figure the status page UI displays, where 0.999915
-    reads as "99.991% uptime". The fetcher does not recompute it. It adds one
-    field, `lowest_reported_availability`, holding the `public_name`,
-    `status_page_resource_id` and `availability` of whichever component reports
-    the lowest of those figures, with the value copied out of the response
-    unchanged. That is a selection, not a calculation: it exists so a single
-    field can be compared against an availability baseline and still speak for
-    every component on the page, since if the weakest component clears the
-    baseline they all do. Ties are broken by the lowest resource id so an
-    unchanged page selects the same component every run, and the field is
-    omitted entirely when no component reports a numeric availability.
+    The response is recorded verbatim under `data` and `included`: the page
+    identity, every published component with its availability, current status
+    and daily status history, and the published status reports and their
+    updates. The fetcher also records the URL it fetched and when. It adds one
+    field, `lowest_reported_availability`, naming whichever component reports
+    the lowest figure — a selection, not a calculation.
 
-    Completeness is enforced, not assumed. Every id listed under
-    `data.relationships.sections`, `data.relationships.resources` and
-    `data.relationships.status_reports`, and every status_update referenced by
-    an included status_report, must be present in `included`. Any shortfall
-    fails the collection (non-zero exit, reason in the envelope's
-    metadata.error) rather than producing an evidence file that is populated but
-    partial. A non-200 response, a body that is not JSON, and a body that is not
-    a Better Stack status_page document each fail the same way.
+    The availability shown is Better Stack's own, exactly as the status page
+    UI displays it: 0.999915 is the "99.991% uptime" on the page. Note that it
+    counts hard downtime only — degraded and maintenance periods are excluded
+    from it. A reader who needs those has the full per-component status history
+    in the same evidence.
 
-    WHAT THIS EVIDENCE DOES NOT PROVE. (1) The reported `availability` counts
-    HARD DOWNTIME ONLY. Days the page itself marks degraded carry a
-    downtime_duration in the same status_history rows and are excluded from the
-    figure, as is maintenance time — verified by arithmetic against a real
-    response, where a component reporting 0.999915 over 90 days is exactly its
-    one downtime day, while two degraded days totalling eight hours in the same
-    window count for nothing. A reader who needs degraded time included has to
-    read it out of that component's `status_history`, which is present in full
-    in this evidence. (2) /index.json carries no monitor configuration. It does
-    not show check frequency, which URL or host is actually probed, the
-    monitoring regions used, or the expected status codes. A component's
-    `explanation` (e.g. "app.paramify.com") is operator-typed display text, not
-    proof of what is monitored. The "real-time" half of a claim that
-    availability is monitored continuously is therefore NOT fully substantiated
-    by this evidence set alone; substantiating it needs a token-authenticated
-    monitor-configuration fetcher. (3) It carries no access posture for the page
-    itself — whether the page is published, password or SSO gated, or IP
-    allowlisted. It shows only that the endpoint answered publicly at collection
-    time. (4) A service that was never added to the status page is invisible
-    here; this evidence proves nothing about coverage of the operator's estate.
-    (5) The endpoint returns only the most recent status reports (three in the
-    response this fetcher was written against) and the history window the page
-    is configured for. Pagination behaviour for older reports is UNVERIFIED, so
-    the report list must be read as "the most recent reports the page returned",
-    not as a complete incident history.
+    The collection fails rather than returning a partial page: a non-200, a
+    body that is not JSON, a body that is not a Better Stack status page, or
+    any object referenced by the page but missing from `included`.

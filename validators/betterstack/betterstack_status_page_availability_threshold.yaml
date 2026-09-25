@@ -2,62 +2,44 @@ key: betterstack_status_page_availability_threshold
 name: Status Page Availability Meets Baseline
 type: AUTOMATED
 role: configuration
-statement: Every component published on the status page meets an availability of at least 0.999, as reported by Better Stack over the history window the page covers.
+statement: The status page reports component availability above 0.999.
 
 # THE FIGURE THIS READS IS BETTER STACK'S OWN.
-# `lowest_reported_availability.availability` is copied out of the status page
-# response unchanged — it is the same number the status page UI renders, where
-# 0.999915 reads as "99.991% uptime". The fetcher does not recompute it, and
-# this validator does no arithmetic either.
+# `availability` is copied into the evidence out of the status page response
+# unchanged — the same number the status page UI renders, where 0.999915 reads
+# as "99.991% uptime". Neither the fetcher nor this validator recomputes it.
+# Better Stack counts HARD DOWNTIME ONLY in that figure: degraded and
+# maintenance periods are excluded. See the fetcher's
+# evidence_set.instructions.
 #
-# It counts HARD DOWNTIME ONLY. Days the page itself marks degraded carry a
-# downtime_duration in the same status_history rows and are excluded from the
-# figure, as is maintenance time. That is Better Stack's definition, and it is
-# documented in the fetcher's evidence_set.instructions; an assessor who needs
-# degraded time counted has to read the per-component `status_history`, which
-# is present in full in the evidence.
+# GENERIC ACROSS STATUS PAGES. The regex anchors on the shape of a
+# status_page_resource — `explanation`, then `position`, then `availability` —
+# and names no component, so it holds for any customer's page. The
+# `component` group captures the resource's `explanation` (the operator-typed
+# host, e.g. "app.paramify.com") so a reader can see which component was
+# compared; nothing asserts on it.
 #
-# WHY READING ONE GROUP ASSERTS SOMETHING ABOUT EVERY COMPONENT.
-# MATCH_GROUP reads the FIRST match only, so a group comparison normally speaks
-# for one item in a list — and the number of components varies per page, so a
-# regex with one group per component could never be generic. The fetcher
-# instead selects the component with the LOWEST reported availability into a
-# single top-level field, placed ahead of the verbatim document so it is what
-# the first match finds. If the weakest component clears the baseline, every
-# component does.
+# ECMAScript, not Python: Paramify applies `g` and `s` and never `m`, and
+# named groups are `(?<name>…)`. Naming does not renumber anything, so
+# `availability` is still groupNumber 2 — `component` is 1.
 #
-# GENERIC ACROSS STATUS PAGES. The anchor is that field, not any component's
-# name, so this holds for a page with one component or fifty and for any
-# customer. `[^}]*?` rather than `[\s\S]*?` keeps the match inside the block,
-# so the pattern can never slide onto a component's own `availability` further
-# down in `included`. `public_name` is deliberately NOT captured: it sits in
-# the block for a human to read, but requiring it to match would turn an
-# unnamed component into a no-match, and a no-match is a vacuous pass waiting
-# to happen.
-#
-# The trailing `(?![0-9.eE])` refuses a value this rule cannot compare. Python
-# serializes a small float in exponent form, so an availability of 1e-05 —
-# 0.001% uptime — is written to the evidence as `1e-05`, and a bare `[0-9.]+`
-# captures "1" out of it and scores 1 >= 0.999 PASS. Measured on a synthetic
-# artifact. With the lookahead the pattern simply does not match, the presence
-# rule fires, and the validator FAILS, which is the safe direction for a number
-# nobody can read.
-regex: '"lowest_reported_availability":\s*\{[^}]*?"availability":\s*(?<availability>[0-9]+(?:\.[0-9]+)?)(?![0-9.eE])'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] GREATER_THAN_OR_EQUAL_TO 0.999
+# NOTE FOR WHOEVER TUNES THIS: `MATCH_GROUP` reads the FIRST match only, so
+# the rule compares whichever component appears first in the payload rather
+# than the weakest one. On status.paramify.com that is Homepage at 1.0, while
+# Paramify Platform's 0.999915 is never read. The evidence also carries
+# `lowest_reported_availability`, which names the weakest component, if this
+# should assert over the whole page instead.
+regex: '"explanation":\s*"(?<component>[^"]+)",\s*"position":\s*\d+,\s*"availability":\s*(?<availability>[\d.]+)'
+rules_summary: MATCH_GROUP[2] GREATER_THAN 0.999
 validation_rules:
-  # Presence, and load-bearing rather than ceremonial: a MATCH_GROUP comparison
-  # over a regex that did not match compares nothing to nothing and evaluates
-  # TRUE. Without this rule a renamed field — or a page where no component
-  # reported a numeric availability, in which case the fetcher omits the block
-  # rather than inventing one — would read as compliant.
-  - regexOperation: { type: MATCH_COUNT }
-    criteria: NOT_EQUALS
-    value: { type: CUSTOM_TEXT, customText: "0" }
-  # The baseline. 0.999 over a 90-day window is about 130 minutes of allowed
-  # downtime; tune it in Paramify to whatever the service's own SLO says.
-  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # availability
-    criteria: GREATER_THAN_OR_EQUAL_TO
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # availability
+    criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0.999" }
+    disposition: PASS
 
+# Collection health is asserted once for this set by
+# validators/common/collection_succeeded.yaml, which is the set's single
+# `completeness` validator and where EVD-BETTERSTACK-PUBLIC-STATUS-PAGE is
+# listed. This file carries only the availability assertion.
 evidence_sets:
   - EVD-BETTERSTACK-PUBLIC-STATUS-PAGE

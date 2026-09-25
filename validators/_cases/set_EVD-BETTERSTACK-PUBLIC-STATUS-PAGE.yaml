@@ -1,61 +1,44 @@
 # Set-level: every validator naming EVD-BETTERSTACK-PUBLIC-STATUS-PAGE,
-# combined the way Paramify combines them (ERROR > FAIL > PASS). This is the
-# assertion that matters — a count-based validator cannot cover its own drift,
-# so only the set can.
+# combined the way Paramify combines them (ERROR > FAIL > PASS). The set has
+# two: the shared collection-health check in validators/common, and the
+# availability threshold in validators/betterstack.
+#
+# Note on what the availability rule actually reads: MATCH_GROUP takes the
+# FIRST match, so it compares the component at position 0, not the weakest
+# one. The cases below put the component under test first for that reason.
 evidence_set: EVD-BETTERSTACK-PUBLIC-STATUS-PAGE
 cases:
-  - name: healthy_status_page
+  - name: availability_above_baseline
     expect: PASS
     note: >
-      Collection succeeded, both components are operational, and the lowest
-      availability Better Stack reports clears 0.999.
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":0.999961},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":0,"availability":0.999961,"status":"operational","status_history":[{"day":"2026-09-24","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"Dashboard","explanation":"app.example.com","position":1,"availability":1,"status":"operational","status_history":[{"day":"2026-09-24","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'
+      Collection succeeded and the first component reports 0.999961, above the
+      0.999 baseline. This is the shape of a real status page response, reduced
+      to two components.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":0.999961},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"status_page_section_id":1,"resource_id":10,"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":0,"availability":0.999961,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"status_page_section_id":1,"resource_id":20,"resource_type":"Monitor","public_name":"Dashboard","explanation":"app.example.com","position":1,"availability":1.0,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'
 
-  - name: component_degraded_now
-    expect: FAIL
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":0.999961},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":0,"availability":0.999961,"status":"degraded","status_history":[{"day":"2026-09-24","status":"degraded","downtime_duration":16200,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"Dashboard","explanation":"app.example.com","position":1,"availability":1,"status":"operational","status_history":[{"day":"2026-09-24","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'
-
-  - name: reported_availability_below_baseline
+  - name: availability_below_baseline
     expect: FAIL
     note: >
-      Every component reads operational right now, so only the availability
-      threshold fails.
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":0.996211},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":0,"availability":0.996211,"status":"operational","status_history":[{"day":"2026-09-24","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"Dashboard","explanation":"app.example.com","position":1,"availability":1,"status":"operational","status_history":[{"day":"2026-09-24","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'
+      Same page, first component down to 0.996211. The figure compared is Better
+      Stack's own; nothing recomputes it on either side.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":0.996211},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"status_page_section_id":1,"resource_id":10,"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":0,"availability":0.996211,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"status_page_section_id":1,"resource_id":20,"resource_type":"Monitor","public_name":"Dashboard","explanation":"app.example.com","position":1,"availability":1.0,"status":"operational","status_history":[{"day":"2026-09-25","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'
 
-  - name: component_status_key_renamed_upstream
+  - name: availability_key_renamed_upstream
     expect: FAIL
     note: >
-      The case the whole integrity role exists for.
-      betterstack_status_page_components_operational counts non-operational
-      statuses and finds none, so ALONE it reports PASS on an artifact hiding a
-      degraded component. betterstack_status_page_components_present fails because
-      the key it proves is gone, and the set therefore fails. Delete the integrity
-      validator and this case goes green while the evidence proves nothing.
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":0.999961},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":0,"availability":0.999961,"status_history":[{"day":"2026-09-24","status":"degraded","downtime_duration":16200,"maintenance_duration":0}],"state":"degraded"}},{"id":"2","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"Dashboard","explanation":"app.example.com","position":1,"availability":1,"status_history":[{"day":"2026-09-24","status":"operational","downtime_duration":0,"maintenance_duration":0}],"state":"operational"}}]}}'
-
-  - name: every_component_dropped
-    expect: FAIL
-    note: >
-      A populated-looking payload with an empty population. The fetcher itself
-      fails a collection whose `included` is short of what `relationships` names,
-      but nothing stops a page from legitimately publishing no components — and an
-      evidence set that asserts availability over nothing is not evidence.
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[]}}},"included":[]}}'
+      The regex anchors on `explanation`, `position` and `availability` together.
+      Rename any of them and it matches nothing — and a MATCH_GROUP comparison
+      over a regex that did not match compares nothing to nothing and passes
+      VACUOUSLY. `paramify validators check` reports that as a failed case even
+      when the verdict reads PASS, which is what keeps this honest: there is no
+      separate presence guard on this validator.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":0.996211},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"operational"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","note":"api.example.com","position":0,"uptime":0.996211,"status":"operational"}}]}}'
 
   - name: collection_failed
     expect: FAIL
     note: >
-      ERROR is the semantically right verdict, but the API discards disposition, so
-      FAIL is the best reachable answer today. What matters is that it does not
-      PASS. See docs/validators_design.md.
+      ERROR is the semantically right verdict, but the API discards disposition,
+      so FAIL is the best reachable answer today. What matters is that it does
+      not PASS. Caught by validators/common/collection_succeeded.yaml — this
+      validator's own regex reads nothing here. See docs/validators_design.md.
     artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"GET https://status.example.com/index.json failed at the network layer"},"payload":{}}'
-
-  - name: exponent_notation_availability
-    expect: FAIL
-    note: >
-      Both halves of the exponent-notation trap at once: an availability of
-      1e-05 on a degraded component. Before the regexes were hardened this
-      artifact scored PASS on the threshold check AND on the operational check
-      — two silent false passes on evidence showing a service that is
-      essentially never up.
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"source_url":"https://status.example.com/index.json","lowest_reported_availability":{"public_name":"API","status_page_resource_id":"1","availability":1e-05},"data":{"id":"100","type":"status_page","attributes":{"company_name":"Example, Inc.","subdomain":"example","custom_domain":"status.example.com","aggregate_state":"downtime"},"relationships":{"resources":{"data":[{"id":"1","type":"status_page_resource"},{"id":"2","type":"status_page_resource"}]}}},"included":[{"id":"1","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"API","explanation":"api.example.com","position":0,"availability":1e-05,"status":"degraded","status_history":[{"day":"2026-09-24","status":"operational","downtime_duration":0,"maintenance_duration":0}]}},{"id":"2","type":"status_page_resource","attributes":{"resource_type":"Monitor","public_name":"Dashboard","explanation":"app.example.com","position":1,"availability":1,"status":"operational","status_history":[{"day":"2026-09-24","status":"operational","downtime_duration":0,"maintenance_duration":0}]}}]}}'

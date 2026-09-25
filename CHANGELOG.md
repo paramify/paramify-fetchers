@@ -41,16 +41,13 @@ schemas and the `paramify` CLI — not the internal code.
   and maintenance periods excluded from it, and that `/index.json` carries no
   monitor configuration and so proves nothing about check frequency, what is
   actually probed, or monitoring regions.
-- **Validators for the Better Stack status page set** (`validators/betterstack/`,
-  with behaviour cases under `validators/_cases/`). One `configuration` check
-  compares the lowest reported availability against a 0.999 baseline through a
-  `MATCH_GROUP` numeric rule, one asserts that every published component
-  currently reads operational, and the `integrity` partner the second one
-  requires proves the component list and its `availability` / `status` keys
-  were actually present — a count of non-operational components passes on zero,
-  so on its own it cannot tell a healthy page from a renamed key. All three
-  anchor on structure rather than on any component's name, so they hold for any
-  customer's status page.
+- **A validator for the Better Stack status page set**
+  (`validators/betterstack/`, with behaviour cases under `validators/_cases/`).
+  One `configuration` check: a `MATCH_GROUP` rule comparing a component's
+  reported `availability` against a 0.999 baseline, anchored on the shape of a
+  status_page_resource rather than on any component's name, so it holds for any
+  customer's page. Collection health stays where it belongs, in the shared
+  `validators/common/collection_succeeded.yaml`, which the set is listed on.
 - **A fanout target editor in the TUI** (`t` on the Manifest tab). A fanout
   fetcher runs once per target, so its targets are the run plan — but the page
   showed only how many there were, and there was no way to change one: fixing a

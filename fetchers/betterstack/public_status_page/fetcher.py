@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""KSI-CNA-OFA: Better Stack public status page.
+"""Better Stack public status page.
 
 One unauthenticated GET against <status_page_url>/index.json — the JSON:API
 document a hosted Better Stack status page renders itself from — recorded
@@ -12,6 +12,9 @@ publishes is read out of the response.
 
 Single-target per invocation; fanout across pages happens at the runner layer
 (see fetcher.yaml: supports_targets: true).
+
+Speaks to KSI-CNA-OFA (Optimizing for Availability); the mapping itself lives
+in fetcher.yaml's `ksis:` field, which is what the framework reads.
 """
 
 import json
