@@ -34,6 +34,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 <a href="fetchers/checkov/"><img src="fetchers/logos/checkov.png" alt="Checkov" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/paramify/"><img src="fetchers/logos/paramify.svg" alt="Paramify" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/servicenow/"><img src="fetchers/logos/servicenow.png" alt="ServiceNow" width="56" height="56" style="margin: 20px;"></a>
+<a href="fetchers/betterstack/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/betterstack-dark.svg"><img src="fetchers/logos/betterstack.svg" alt="Better Stack" width="56" height="56" style="margin: 20px;"></picture></a>
 
 </div>
 
@@ -53,7 +54,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | **Paramify** | 3 | FedRAMP 20x vulnerability reporting — accepted vulnerability info, vulnerability detail, and historical VER activity |
 | **Checkov** | 2 | IaC scans over cloned Terraform / Kubernetes source |
 | **ServiceNow** | 2 | Customer service cases and ITSM change records |
-| **Better Stack** | 1 | Public status page identity, published components with their reported and recomputed availability and 90-day status history, and published status reports and updates |
+| **Better Stack** | 1 | Public status page components, their reported uptime and status history, and published incident reports |
 
 <!-- BEGIN:fetcher-chart -->
 <div align="center">

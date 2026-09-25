@@ -18,38 +18,39 @@ schemas and the `paramify` CLI — not the internal code.
   page publishes that document to anyone who can reach the page, so the fetcher
   sends nothing and the category declares no secrets. The response is kept
   verbatim — `data` and `included` exactly as the page returns them, nothing
-  removed, renamed or flattened — beside a small `availability_derived` block
-  that exists because Better Stack's own `availability` figure counts ONLY days
-  whose status is `downtime`. Days the page itself marks `degraded` carry a
-  `downtime_duration` in the same history rows and contribute nothing to the
-  reported number, and neither does maintenance time: on a real page one
-  component reported 0.999915, which is exactly its single downtime day, while
-  two degraded days totalling eight hours in the same 90-day window went
-  uncounted. So the block records `downtime_seconds`, `degraded_seconds`,
-  `maintenance_seconds` and `history_days` per component and recomputes
-  `effective_availability` with degraded time counted as unavailable — 0.996211
-  for that same component. Its entries are ordered worst first, which is what
-  lets a validator reading one capture group speak for every component on the
-  page. Completeness is enforced rather than assumed: every id named under
-  `data.relationships` and every status update a report references must be
-  present in `included`, and a shortfall fails the collection instead of
-  producing a populated-looking partial payload, as do a non-200, a body that
-  is not JSON, and a body that is not a status page document. The fetcher fans
-  out per status page and is generic — it knows nothing about any particular
-  page — and `fetcher.yaml`'s `evidence_set.instructions` states plainly what
-  the evidence cannot show, chiefly that `/index.json` carries no monitor
-  configuration and so proves nothing about check frequency, what is actually
-  probed, or monitoring regions.
+  removed, renamed, recomputed or flattened — alongside the URL actually
+  fetched and a collection timestamp. The one field added to it,
+  `lowest_reported_availability`, is a selection rather than a calculation: it
+  names the component reporting the lowest availability and copies that value
+  out of the response unchanged, so the evidence carries the same figure the
+  status page UI shows (0.999915 reads there as "99.991% uptime"). It exists
+  because a Paramify `MATCH_GROUP` rule reads one capture group while the
+  number of components varies per page — naming the weakest component gives
+  such a rule one field to compare that still speaks for the whole page. Ties
+  break on the lowest resource id so an unchanged page selects the same
+  component every run, and the field is omitted rather than invented when no
+  component reports a numeric availability. Completeness is enforced rather
+  than assumed: every id named under `data.relationships` and every status
+  update a report references must be present in `included`, and a shortfall
+  fails the collection instead of producing a populated-looking partial
+  payload, as do a non-200, a body that is not JSON, and a body that is not a
+  status page document. The fetcher fans out per status page and is generic —
+  it knows nothing about any particular page — and `fetcher.yaml`'s
+  `evidence_set.instructions` states plainly what the evidence cannot show:
+  that Better Stack's `availability` counts hard downtime only, with degraded
+  and maintenance periods excluded from it, and that `/index.json` carries no
+  monitor configuration and so proves nothing about check frequency, what is
+  actually probed, or monitoring regions.
 - **Validators for the Better Stack status page set** (`validators/betterstack/`,
   with behaviour cases under `validators/_cases/`). One `configuration` check
-  asserts the worst component's `effective_availability` against a 0.999
-  baseline through a `MATCH_GROUP` numeric comparison, one asserts that every
-  published component currently reads operational, and the `integrity` partner
-  the second one requires proves the component list and its `availability` /
-  `status` keys were actually present — a count of non-operational components
-  passes on zero, so on its own it cannot tell a healthy page from a renamed
-  key. All three anchor on structure rather than on any component's name, so
-  they hold for any customer's status page.
+  compares the lowest reported availability against a 0.999 baseline through a
+  `MATCH_GROUP` numeric rule, one asserts that every published component
+  currently reads operational, and the `integrity` partner the second one
+  requires proves the component list and its `availability` / `status` keys
+  were actually present — a count of non-operational components passes on zero,
+  so on its own it cannot tell a healthy page from a renamed key. All three
+  anchor on structure rather than on any component's name, so they hold for any
+  customer's status page.
 - **A fanout target editor in the TUI** (`t` on the Manifest tab). A fanout
   fetcher runs once per target, so its targets are the run plan — but the page
   showed only how many there were, and there was no way to change one: fixing a

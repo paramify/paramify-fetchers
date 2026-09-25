@@ -3,7 +3,8 @@
 
 One unauthenticated GET against <status_page_url>/index.json — the JSON:API
 document a hosted Better Stack status page renders itself from — recorded
-verbatim, plus one additive per-component availability block.
+verbatim, plus one selected component so a validator has a single field to
+compare.
 
 Generic by design: nothing here knows about any particular status page. The
 page URL and a label come from the target, and every component the page
@@ -20,7 +21,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse, urlunparse
 
 import requests
@@ -36,10 +37,6 @@ from fetcher_status import report_failure  # noqa: E402
 logger = logging.getLogger("betterstack_public_status_page")
 
 REQUEST_TIMEOUT = 30
-SECONDS_PER_DAY = 86400
-# Better Stack reports `availability` to six decimal places; the derived figure
-# is rounded the same way so the two are read on the same scale.
-AVAILABILITY_PRECISION = 6
 
 
 class CollectionError(Exception):
@@ -223,76 +220,65 @@ def assert_included_is_complete(document: Dict[str, Any], url: str) -> None:
         )
 
 
-def derive_availability(document: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """The one additive block: what each component's own history adds up to.
+def _resource_id_sort_key(resource_id: str) -> Tuple[int, int, str]:
+    """Order ids numerically where they are numeric, and never raise.
 
-    Better Stack's reported `availability` counts only days whose status is
-    "downtime". Degraded days carry a downtime_duration in the same rows and are
-    excluded from it, as is maintenance time — so the reported figure and the
-    history can disagree without either being wrong. This recomputes the number
-    with degraded time counted as unavailable, and reports the three totals it
-    is built from so a reader can redo the arithmetic or draw the line
-    elsewhere.
-
-    Ordered worst-first (ascending effective_availability), which is what lets a
-    validator reading the FIRST match assert a threshold for every component:
-    Paramify's validator engine reads capture groups from the first match only.
+    Better Stack ids are numeric strings, so "451733" must sort below "8655373"
+    rather than above it the way a plain string comparison would. A
+    non-numeric id sorts after every numeric one, deterministically.
     """
-    derived: List[Dict[str, Any]] = []
+    if resource_id.isdigit():
+        return (0, int(resource_id), resource_id)
+    return (1, 0, resource_id)
+
+
+def lowest_reported_availability(document: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The component with the lowest availability Better Stack itself reports.
+
+    A SELECTION, not a calculation. The `availability` value is copied out of
+    the response byte for byte — it is the same number the status page UI
+    renders (0.999915 shows as "99.991% uptime"), and nothing here recomputes,
+    rescales or rounds it.
+
+    It exists because a Paramify `MATCH_GROUP` rule reads one capture group
+    from the first match, while the number of components varies per page.
+    Naming the weakest component in one top-level field gives such a rule a
+    single field to compare that still speaks for the whole page: if the lowest
+    reported availability clears a threshold, every component does.
+
+    Ties go to the lowest resource id, so an unchanged page selects the same
+    component on every run. Returns None when no component reports a numeric
+    availability — better no field than an invented one, and the validators'
+    presence guard turns the absence into a FAIL rather than a silent pass.
+    """
+    candidates: List[Tuple[Any, Tuple[int, int, str], Dict[str, Any]]] = []
     for item in document.get("included") or []:
         if not isinstance(item, dict) or item.get("type") != "status_page_resource":
             continue
         attributes = item.get("attributes")
         if not isinstance(attributes, dict):
             continue
-        history = attributes.get("status_history")
-        history = history if isinstance(history, list) else []
-
-        downtime_seconds = 0.0
-        degraded_seconds = 0.0
-        maintenance_seconds = 0.0
-        for row in history:
-            if not isinstance(row, dict):
-                continue
-            status = row.get("status")
-            down = float(row.get("downtime_duration") or 0)
-            maintenance = float(row.get("maintenance_duration") or 0)
-            maintenance_seconds += maintenance
-            if status == "downtime":
-                downtime_seconds += down
-            elif status == "degraded":
-                degraded_seconds += down
-
-        history_days = len(history)
-        window = history_days * SECONDS_PER_DAY
-        unavailable = downtime_seconds + degraded_seconds
-        effective = round(1 - unavailable / window, AVAILABILITY_PRECISION) if window else None
-
-        derived.append(
-            {
-                "status_page_resource_id": str(item.get("id")),
-                "public_name": attributes.get("public_name"),
-                "history_days": history_days,
-                "downtime_seconds": round(downtime_seconds, 6),
-                "degraded_seconds": round(degraded_seconds, 6),
-                "maintenance_seconds": round(maintenance_seconds, 6),
-                "effective_availability": effective,
-            }
+        availability = attributes.get("availability")
+        # bool is an int subclass, and a JSON true here would be meaningless.
+        if isinstance(availability, bool) or not isinstance(availability, (int, float)):
+            continue
+        resource_id = str(item.get("id"))
+        candidates.append(
+            (
+                availability,
+                _resource_id_sort_key(resource_id),
+                {
+                    "public_name": attributes.get("public_name"),
+                    "status_page_resource_id": resource_id,
+                    # Verbatim from the response: the figure the page displays.
+                    "availability": availability,
+                },
+            )
         )
 
-    # Worst first; the resource id breaks ties so the order is deterministic
-    # across runs of an unchanged page. A component whose availability could not
-    # be computed (no history rows at all) sorts last — there is nothing there
-    # to fail a threshold with, and putting it first would hide a real component
-    # from the validator that reads the first entry.
-    derived.sort(
-        key=lambda row: (
-            row["effective_availability"] is None,
-            row["effective_availability"] if row["effective_availability"] is not None else 0,
-            row["status_page_resource_id"],
-        )
-    )
-    return derived
+    if not candidates:
+        return None
+    return min(candidates, key=lambda row: (row[0], row[1]))[2]
 
 
 def build_evidence(
@@ -307,18 +293,27 @@ def build_evidence(
 
     `data` and `included` are the response verbatim — same keys, same nesting,
     nothing removed or renamed — so an assessor is reading what the status page
-    publishes rather than this fetcher's opinion of it.
+    publishes rather than this fetcher's opinion of it. The one added field,
+    `lowest_reported_availability`, is a selection out of that same document
+    and carries no arithmetic.
     """
-    return {
+    evidence: Dict[str, Any] = {
         "collected_at": current_timestamp(),
         "target_name": target_name,
         "status_page_url": status_page_url,
         "source_url": source_url,
         "http_status": http_status,
-        "availability_derived": derive_availability(document),
-        "data": document.get("data"),
-        "included": document.get("included"),
     }
+    lowest = lowest_reported_availability(document)
+    if lowest is not None:
+        # Placed ahead of the verbatim document on purpose: a validator's
+        # MATCH_GROUP reads the FIRST match, and this block must be what it
+        # finds rather than whichever component happens to come first in
+        # `included`.
+        evidence["lowest_reported_availability"] = lowest
+    evidence["data"] = document.get("data")
+    evidence["included"] = document.get("included")
+    return evidence
 
 
 def write_evidence(output_dir: Path, target_name: str, evidence: Dict[str, Any]) -> Path:
@@ -349,7 +344,6 @@ def _failure_evidence(
         "status_page_url": status_page_url,
         "source_url": source_url,
         "http_status": http_status,
-        "availability_derived": [],
         "data": None,
         "included": [],
         "metadata": {
