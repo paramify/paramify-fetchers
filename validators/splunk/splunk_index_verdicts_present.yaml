@@ -1,0 +1,24 @@
+key: splunk_index_verdicts_present
+name: Splunk Index Rows Carry Their Window And Verdict
+type: AUTOMATED
+role: integrity
+statement: >-
+  At least one index row carries, in one object and in the emitted order, the
+  keys the index validators read: name, datatype, enabled, internal,
+  holds_data, minutes_since_last_received, max_silence_minutes and stale.
+  Integrity partner for splunk_customer_indexes_all_receiving and
+  splunk_silence_window_within_policy on EVD-SPLUNK-INDEX-ACTIVITY: without it,
+  an empty index list or a renamed internal, stale or max_silence_minutes key
+  would read as zero violations. Does NOT assert any posture, nor that every
+  index was collected (the fetcher's completeness guards and
+  collection_succeeded cover that).
+
+regex: '"name":\s*"[^"]+",\s*"datatype":\s*"(?:event|metric)",\s*"enabled":\s*(?:true|false),\s*"internal":\s*(?:true|false),\s*"holds_data":\s*(?:true|false|null),\s*"minutes_since_last_received":\s*(?:-?[0-9]+|null),\s*"max_silence_minutes":\s*[0-9]+,\s*"stale":\s*(?:true|false|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-INDEX-ACTIVITY

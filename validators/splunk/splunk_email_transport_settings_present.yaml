@@ -1,0 +1,21 @@
+key: splunk_email_transport_settings_present
+name: Splunk Email Alert Transport Settings Were Read
+type: AUTOMATED
+role: integrity
+statement: >-
+  At least one [email] alert action stanza row carries its mailserver and
+  transport_encrypted, in the same object. Integrity partner for the stanza
+  half of splunk_alert_email_transport_encrypted: without it, a renamed key or
+  an empty email_settings list would read as zero unencrypted stanzas, and an
+  unencrypted default would hide behind alerts that override it. Does NOT
+  assert any posture.
+
+regex: '"enabled":\s*(?:true|false),\s*"mailserver":\s*(?:"[^"]*"|null),\s*"transport_encrypted":\s*(?:true|false|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-DELIVERY

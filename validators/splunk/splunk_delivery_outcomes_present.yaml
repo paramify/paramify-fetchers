@@ -1,0 +1,23 @@
+key: splunk_delivery_outcomes_present
+name: Splunk Alert Delivery Outcomes Were Read
+type: AUTOMATED
+role: integrity
+statement: >-
+  At least one notifying delivery row carries its action and notifying flag
+  (adjacent), its last_outcome, and its transport_encrypted, in the same
+  object. Integrity partner for splunk_latest_notification_delivered and for
+  the delivery-row half of splunk_alert_email_transport_encrypted: without it,
+  a renamed key, an empty deliveries list, or a window in which only
+  record-keeping actions triggered would read as zero violations. So a window
+  in which no notifying alert triggered fails the set for want of delivery
+  evidence, as decided. Does NOT assert any posture.
+
+regex: '"action":\s*"[^"]+",\s*"notifying":\s*true,[^{}]*?"last_outcome":\s*(?:"[^"]*"|null),[^{}]*?"transport_encrypted":\s*(?:true|false|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-DELIVERY

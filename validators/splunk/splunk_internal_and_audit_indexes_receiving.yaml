@@ -1,0 +1,23 @@
+key: splunk_internal_and_audit_indexes_receiving
+name: Splunk Internal And Audit Indexes Receiving
+type: AUTOMATED
+role: configuration
+statement: >-
+  Splunk's own pipeline is up and indexing: the _internal (splunkd's logs) and
+  _audit (the audit trail) indexes are both enabled and received data within
+  the evidence's max_silence_minutes window — exactly two such rows read
+  "stale": false. Substantiates the SIEM-operating part of the "Audit Log
+  Collection and Alerts" narrative (KSI-MLA-OSM). Self-guarding: a missing row
+  or a renamed key reads as fewer than two. Does NOT assert that any customer
+  data arrives (splunk_customer_indexes_all_receiving), nor that the window is
+  reasonable (splunk_silence_window_within_policy).
+
+regex: '"name":\s*"(?:_internal|_audit)",[^{}]*?"enabled":\s*true,[^{}]*?"stale":\s*false'
+rules_summary: MATCH_COUNT EQUALS 2
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "2" }
+
+evidence_sets:
+  - EVD-SPLUNK-INDEX-ACTIVITY

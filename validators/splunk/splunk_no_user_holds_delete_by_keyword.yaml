@@ -1,0 +1,25 @@
+key: splunk_no_user_holds_delete_by_keyword
+name: Splunk No User Can Delete Indexed Events
+type: AUTOMATED
+role: configuration
+statement: >-
+  No Splunk user holds delete_by_keyword, the capability that lets a search
+  permanently remove indexed events (| delete), through any of its roles or
+  their imports. No ALLOW list: no account is exempt, admin included — to
+  exempt one, add (?!(?:name)") after the regex's opening "name":\s*". Judged
+  on users, so a stock role that holds it but is assigned to nobody
+  (can_delete) does not fail it. Substantiates KSI-MLA-ALA's least-privileged
+  access to log data (log integrity). Does NOT assert anything about other
+  log-privilege capabilities (indexes_edit, edit_roles, change_authentication;
+  see log_privilege_capabilities) or index retention. splunk_access_rows_present
+  proves the flag was there to count.
+
+regex: '"name":\s*"[^"]+",\s*"type":[^{}]*?"delete_by_keyword":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ROLE-INDEX-ACCESS

@@ -1,0 +1,25 @@
+key: splunk_config_change_auditing_enabled
+name: Splunk Audits Changes To Its Own Configuration
+type: AUTOMATED
+role: configuration
+statement: >-
+  The inputs[] row for the file-change monitor on Splunk's own configuration
+  tree (stanza fschange:$SPLUNK_HOME/etc, or fschange:/opt/splunk/etc) is
+  enabled, so edits to the instance's .conf files are recorded (signed into
+  _audit when signedaudit is on). Substantiates the event types that will be
+  audited (KSI-MLA-LET) and "configuration baselines" in capability "Prepared
+  Audit Queries". Does NOT assert that splunkd runs it — data/inputs does not
+  list fschange, so its enabled is inputs.conf's setting (listed_by_rest:
+  false) — nor that anyone reviews the records, nor anything about forwarders'
+  or other hosts' configuration. Self-guarding: a REST-only input list, or a
+  renamed stanza or enabled key, reads as no match and fails.
+
+regex: '"stanza":\s*"fschange:(?:\$SPLUNK_HOME|/opt/splunk)/etc/?",[^{}]*?"enabled":\s*true'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-DATA-INPUTS

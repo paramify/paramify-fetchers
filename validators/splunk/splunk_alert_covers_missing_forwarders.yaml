@@ -1,0 +1,29 @@
+key: splunk_alert_covers_missing_forwarders
+name: Splunk Alert Covers Missing Or Stopped Forwarders
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one enabled alert with a notification action is named for missing
+  or stopped forwarders: its name, read case-insensitively, contains
+  "forwarder(s)" directly preceded by missing, stopped, down, offline,
+  inactive, unreachable, not reporting or not connected (optionally with
+  universal, heavy or splunk between), or directly followed by one of them
+  (optionally after is, are, has or have). "Silent" and "log source" are
+  deliberately not accepted, so "Paramify - Silent Log Source" does not count;
+  a bare "forwarder" does not count either. Substantiates the "missing/stopped
+  forwarders" item of the Prepared Audit Queries narrative (capability
+  97e041ec). Coverage is judged by alert name, not by what the search does.
+  Does NOT assert that the search detects a missing forwarder, that the alert
+  runs (an orphaned or never-scheduled alert still counts) or fires, or that
+  its notification is delivered.
+
+# Case-insensitive by [Xx] classes: the engine applies only the g and s flags.
+regex: '"name":\s*"[^"]*?(?:(?<![A-Za-z])(?:[Mm][Ii][Ss][Ss][Ii][Nn][Gg]|[Ss][Tt][Oo][Pp][Pp][Ee][Dd]|[Dd][Oo][Ww][Nn]|[Oo][Ff][Ff][Ll][Ii][Nn][Ee]|[Ii][Nn][Aa][Cc][Tt][Ii][Vv][Ee]|[Uu][Nn][Rr][Ee][Aa][Cc][Hh][Aa][Bb][Ll][Ee]|[Nn][Oo][Tt][ _-]*[Rr][Ee][Pp][Oo][Rr][Tt][Ii][Nn][Gg]|[Nn][Oo][Tt][ _-]*[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ee][Dd])[ _-]*(?:(?:[Uu][Nn][Ii][Vv][Ee][Rr][Ss][Aa][Ll]|[Hh][Ee][Aa][Vv][Yy]|[Ss][Pp][Ll][Uu][Nn][Kk])[ _-]*)?[Ff][Oo][Rr][Ww][Aa][Rr][Dd][Ee][Rr][Ss]?|[Ff][Oo][Rr][Ww][Aa][Rr][Dd][Ee][Rr][Ss]?[ _-]*(?:(?:[Aa][Rr][Ee]|[Ii][Ss]|[Hh][Aa][Ss]|[Hh][Aa][Vv][Ee])[ _-]*)?(?:[Mm][Ii][Ss][Ss][Ii][Nn][Gg]|[Ss][Tt][Oo][Pp][Pp][Ee][Dd]|[Dd][Oo][Ww][Nn]|[Oo][Ff][Ff][Ll][Ii][Nn][Ee]|[Ii][Nn][Aa][Cc][Tt][Ii][Vv][Ee]|[Uu][Nn][Rr][Ee][Aa][Cc][Hh][Aa][Bb][Ll][Ee]|[Nn][Oo][Tt][ _-]*[Rr][Ee][Pp][Oo][Rr][Tt][Ii][Nn][Gg]|[Nn][Oo][Tt][ _-]*[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ee][Dd])(?![A-Za-z]))[^"]*"[^{}]*?"enabled":\s*true,[^{}]*?"has_notification_action":\s*true,'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-RULES

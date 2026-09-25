@@ -1,0 +1,113 @@
+name: splunk_data_inputs
+version: 0.1.0
+description: >-
+  Every data input configured on a Splunk instance (type, enabled, target
+  index, sourcetype, host, app), and every host, index and sourcetype the
+  deployment actually receives data for, with when each last arrived and
+  whether it has gone silent past the configured window. One Splunk
+  deployment per target.
+category: splunk
+
+supports_targets: true
+
+target_schema:
+  name:
+    type: string
+    required: true
+    env: SPLUNK_TARGET_NAME
+    description: Label for this Splunk deployment, used in the evidence filename.
+  base_url:
+    type: string
+    required: true
+    env: SPLUNK_BASE_URL
+    description: Management URL of the search head or standalone instance, e.g. https://splunk.example.com:8089
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: SPLUNK_VERIFY_SSL
+    description: Verify the management port's TLS certificate. Set false only for a self-signed test instance.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: splunk_data_inputs.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-MLA-LET
+
+evidence_set:
+  reference_id: EVD-SPLUNK-DATA-INPUTS
+  name: Splunk Data Inputs
+  instructions: >-
+    Reads a Splunk deployment's management REST API (port 8089) with a bearer
+    token whose role holds `search` on indexes `*` and `_*`, `list_inputs` and
+    `rest_properties_get`; a missing capability, a search warning or any
+    mismatch below fails the collection rather than publish a partial list.
+    Two collections answer "what is logged" from two sides. `inputs[]` is
+    what the queried instance is configured to collect: one row per input
+    stanza of its merged inputs.conf (`services/properties/inputs`, which is
+    not filtered by object permissions), every stanza whose form inputs.conf.spec
+    defines as an input (`<type>://<value>`, or `fschange:`, `tcp:`,
+    `tcp-ssl:`, `udp:`, `splunktcp:`, `splunktcp-ssl:`, `remote_queue:`
+    followed by a value) — not `[default]`, the bare per-type defaults
+    (`[script]`, `[http]` …), `[SSL]`, `[blacklist:…]` deny lists,
+    `[filter:…]` fschange filters or `[splunktcptoken://…]` forwarder tokens.
+    `stanza` is the stanza name and `type` its input type. Each stanza is
+    matched to its entry in `servicesNS/-/-/data/inputs/all` (count=0,
+    collected count equal to paging.total), splunkd's own list of the inputs
+    it runs; every entry there must match exactly one stanza. For a matched
+    row (`listed_by_rest: true`) `enabled`, `index`, `sourcetype`, `host`,
+    `host_resolved` and `app` come from that entry and `rest_collection` is
+    its REST collection; `enabled` is splunkd's state and can be false for a
+    stanza inputs.conf does not disable, when splunkd does not run it (stock
+    Splunk 10.4 does this for `batch://$SPLUNK_HOME/var/spool/splunk` and
+    `…/...stash_hec`). data/inputs lists `batch://` inputs under `monitor`;
+    `type` comes from the stanza, so they read `batch`. Input types that
+    data/inputs does not list at all — `fschange:` file-change monitors in
+    Splunk 10.4, which with `signedaudit = true` write signed change records
+    for a directory tree into `_audit` — are reported from the stanza's
+    merged keys (`properties/inputs/<stanza>`) with `listed_by_rest: false`:
+    their `enabled` is inputs.conf's setting, not splunkd's confirmation that
+    it runs them, `rest_collection` is null, `app` the one app defining the stanza among the
+    `configs/conf-inputs` entries the token may read (null if none or
+    several), and `host_resolved` the instance's host name when `host` is
+    `$decideOnStartup`. `index` is as configured; "default" means the
+    instance's default index (`metadata.default_index`, indexes.conf
+    `defaultDatabase`), which `index_resolved` substitutes; an fschange
+    input with `signedaudit = true` resolves to `_audit`, and a `splunktcp`
+    receiving port to null, since forwarded data keeps the index its
+    forwarder assigned (what forwarders send is in `received[]`). `sourcetype` is
+    null when the input sets none and Splunk assigns one per file or event.
+    Index and sourcetype are the input's own settings; props/transforms can
+    still route or rename events at parse time. In a distributed deployment
+    most inputs live on forwarders, whose inputs.conf the search head cannot
+    read, so `inputs[]` describes only the queried instance (its roles are in
+    `metadata.server_roles`). `received[]` is what the deployment actually
+    receives from every host, forwarders included: one row per host, index
+    and sourcetype holding events in any searchable event index, from
+    `| tstats count dc(source) min(_time) max(_time) max(_indextime) where
+    index=* OR index=_* by host index sourcetype` over all retained data.
+    The row count must equal the sum of an independent `| tstats
+    dc(sourcetype) … by host index` over the same time bound, and every
+    enabled index in `data/indexes?datatype=all` must be searchable by the
+    token, so no stream is hidden or cut off. `internal` is an index name
+    starting with `_`; `event_count` and `source_count` are events and
+    distinct sources; `first_event` and `last_event` are event timestamps;
+    `last_indexed` is when an indexer last wrote an event of that stream,
+    whatever the event's own timestamp says. `minutes_since_last_indexed` is
+    measured from `metadata.collected_at`, taken after the searches, and
+    `silent` is true when it exceeds `max_silence_minutes` (the category's
+    `max_silence_minutes`, emitted on every row). Stock Splunk writes many
+    sourcetypes once at startup or install (splunk_version,
+    splunk_first_install, splunkd_stderr …), which read silent an hour later;
+    which streams must keep arriving is a judgement over `host`, `index`,
+    `internal` and `sourcetype`, not something this evidence decides. Metric
+    indexes are not in `received[]` (see splunk/index_activity). A host or
+    event type that never sent anything does not appear.

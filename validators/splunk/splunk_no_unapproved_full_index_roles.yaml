@@ -1,0 +1,26 @@
+key: splunk_no_unapproved_full_index_roles
+name: Splunk Only Approved Roles Grant All Non-Internal Indexes
+type: AUTOMATED
+role: configuration
+statement: >-
+  No non-internal Splunk role outside the approved list grants every
+  non-internal index (grants_all_non_internal: own plus imported grants,
+  whether or not the role itself holds search), so a latent grant fails
+  before anyone is given it. ALLOW (approved roles): admin, paramify_fetcher,
+  paramify_fetcher_full, splunk-system-role — tune it in the regex's opening
+  (?!(?:...)") list, names separated by |, with . escaped. Splunk's own _spl_*
+  service roles (splunk_internal: true) are not judged; a user given one is
+  still judged by splunk_no_unapproved_full_index_readers. Substantiates
+  KSI-MLA-ALA's least-privileged, role-based access to log data. Does NOT
+  assert that anyone holds these roles, or anything about internal (_*)
+  indexes. splunk_access_rows_present proves the flag was there to count.
+
+regex: '"name":\s*"(?!(?:admin|paramify_fetcher|paramify_fetcher_full|splunk-system-role)")[^"]+",\s*"splunk_internal":\s*false,[^{}]*?"grants_all_non_internal":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ROLE-INDEX-ACCESS

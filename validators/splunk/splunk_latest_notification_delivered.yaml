@@ -1,0 +1,25 @@
+key: splunk_latest_notification_delivered
+name: Splunk Latest Notification Of Every Alert Delivered
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every notifying alert action that triggered in the lookback window had its
+  most recent triggered run delivered: the delivery row's last_outcome reads
+  "succeeded", meaning the mail server or webhook endpoint accepted it. A
+  latest run that failed, was not attempted, or has no delivery record (null,
+  e.g. a script action) fails it. Substantiates "receives alerts from [SIEM]"
+  (capability "Security Event Notifications"). Does NOT assert that anyone
+  read the message or that it reached the InfoSec Admin's inbox, that earlier
+  runs in the window succeeded, or anything about alerts that never triggered
+  (the Splunk Alert Rules set covers those). splunk_delivery_outcomes_present
+  proves the outcome was there to count.
+
+regex: '"action":\s*"[^"]+",\s*"notifying":\s*true,[^{}]*?"last_outcome":\s*(?:"(?!succeeded")[^"]*"|null)'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-DELIVERY

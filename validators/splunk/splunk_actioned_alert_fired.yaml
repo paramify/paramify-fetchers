@@ -1,0 +1,24 @@
+key: splunk_actioned_alert_fired
+name: Splunk Actioned Alert Fired In Lookback Window
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one enabled alert with a notification action fired within the
+  evidence's lookback window (lookback_days, 30 by default): its
+  fired_in_window, counted from index=_audit action=alert_fired, is 1 or more.
+  Substantiates "that alerts fire" in the Audit Log Collection and Alerts
+  claim (capability 32e0c9d3): the alerting is live, not only configured. A
+  null fired_in_window (the history search failed) does not count. Does NOT
+  assert that every alert fires (a quiet alert may be healthy), that the
+  lookback window is short, that the notification was delivered, or that
+  anyone reviewed or resolved the fire.
+
+regex: '"enabled":\s*true,[^{}]*?"has_notification_action":\s*true,[^{}]*?"fired_in_window":\s*[1-9]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-RULES

@@ -1,0 +1,14 @@
+validator: splunk_silence_verdicts_present
+cases:
+  - name: rows_with_window_and_verdict
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"max_silence_minutes":60,"partial_failure":false,"api_failures":[]},"hosts":[{"host":"web-01","last_indexed":"2026-01-01T00:00:00Z","minutes_since_last_indexed":2,"max_silence_minutes":60,"silent":false},{"host":"web-02","last_indexed":"2026-01-01T00:00:00Z","minutes_since_last_indexed":95,"max_silence_minutes":60,"silent":true}],"forwarders":[{"hostname":"web-01","fwd_type":"uf","minutes_since_last_connected":1,"max_silence_minutes":60,"silent":false}]}}'
+  - name: no_hosts_collected
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"max_silence_minutes":60,"partial_failure":false,"api_failures":[]},"hosts":[],"forwarders":[]}}'
+  - name: silent_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"max_silence_minutes":60,"partial_failure":false,"api_failures":[]},"hosts":[{"host":"web-02","last_indexed":"2026-01-01T00:00:00Z","minutes_since_last_indexed":95,"max_silence_minutes":60,"is_silent":true}],"forwarders":[]}}'
+  - name: window_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"silence_window":600,"partial_failure":false,"api_failures":[]},"hosts":[{"host":"web-01","last_indexed":"2026-01-01T00:00:00Z","minutes_since_last_indexed":2,"silence_window":600,"silent":false}],"forwarders":[]}}'

@@ -1,0 +1,28 @@
+key: splunk_alert_covers_connections
+name: Splunk Alert Covers External And Internal Connections
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one enabled alert with a notification action is named for external
+  or internal connections: its name, read case-insensitively, contains
+  "connection(s)" directly preceded by external, internal, inbound, outbound,
+  egress, ingress, remote or network (optionally with network, TCP, UDP, IP,
+  SSH, RDP or VPN between), or "connection(s) from/to" (a, an or the)
+  external, internal, remote, outside or untrusted. A bare "connection" (a
+  database connection pool, say) does not count. Substantiates the
+  "external/internal connections" item of the Prepared Audit Queries narrative
+  (capability 97e041ec). Coverage is judged by alert name, not by what the
+  search does. Does NOT assert that the search detects an unexpected
+  connection, that the alert runs (an orphaned or never-scheduled alert still
+  counts) or fires, or that its notification is delivered.
+
+# Case-insensitive by [Xx] classes: the engine applies only the g and s flags.
+regex: '"name":\s*"[^"]*?(?:(?:[Ee][Xx][Tt][Ee][Rr][Nn][Aa][Ll]|[Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll]|[Ii][Nn][Bb][Oo][Uu][Nn][Dd]|[Oo][Uu][Tt][Bb][Oo][Uu][Nn][Dd]|[Ee][Gg][Rr][Ee][Ss][Ss]|[Ii][Nn][Gg][Rr][Ee][Ss][Ss]|[Rr][Ee][Mm][Oo][Tt][Ee]|[Nn][Ee][Tt][Ww][Oo][Rr][Kk])[ _-]*(?:(?:[Nn][Ee][Tt][Ww][Oo][Rr][Kk]|[Tt][Cc][Pp]|[Uu][Dd][Pp]|[Ii][Pp]|[Ss][Ss][Hh]|[Rr][Dd][Pp]|[Vv][Pp][Nn])[ _-]*)?[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn][Ss]?(?![A-Za-z])|[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn][Ss]?[ _-]+(?:[Ff][Rr][Oo][Mm]|[Tt][Oo])[ _-]+(?:(?:[Aa][Nn]?|[Tt][Hh][Ee])[ _-]+)?(?:[Ee][Xx][Tt][Ee][Rr][Nn][Aa][Ll]|[Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll]|[Rr][Ee][Mm][Oo][Tt][Ee]|[Oo][Uu][Tt][Ss][Ii][Dd][Ee]|[Uu][Nn][Tt][Rr][Uu][Ss][Tt][Ee][Dd]))[^"]*"[^{}]*?"enabled":\s*true,[^{}]*?"has_notification_action":\s*true,'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-RULES

@@ -1,0 +1,26 @@
+key: splunk_alert_covers_failed_logins
+name: Splunk Alert Covers Failed Logins
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one enabled alert with a notification action is named for failed
+  logins: its name, read case-insensitively, contains fail, fails, failed,
+  failure(s) or failing as a word and, anywhere in the same name in either
+  order, login, logon, log in, log on, sign-in, sign-on, auth or
+  authentication as a word. Authorization failures do not count. Substantiates
+  the "failed logins" item of the Prepared Audit Queries narrative (capability
+  97e041ec). Coverage is judged by alert name, not by what the search does.
+  Does NOT assert that the search detects failed logins, that the alert runs
+  (an orphaned or never-scheduled alert still counts) or fires, or that its
+  notification is delivered.
+
+# Case-insensitive by [Xx] classes: the engine applies only the g and s flags.
+regex: '"name":\s*"[^"]*?(?:[Ff][Aa][Ii][Ll](?:[Ss]|[Ee][Dd]|[Uu][Rr][Ee][Ss]?|[Ii][Nn][Gg])?(?![A-Za-z])[^"]*?(?:[Ll][Oo][Gg][ _-]*(?:[Ii][Nn]|[Oo][Nn])[Ss]?|[Ss][Ii][Gg][Nn][ _-]*(?:[Ii][Nn]|[Oo][Nn])[Ss]?|[Aa][Uu][Tt][Hh](?:[Ee][Nn][Tt][Ii][Cc][Aa][Tt][Ii][Oo][Nn][Ss]?)?)(?![A-Za-z])|(?:[Ll][Oo][Gg][ _-]*(?:[Ii][Nn]|[Oo][Nn])[Ss]?|[Ss][Ii][Gg][Nn][ _-]*(?:[Ii][Nn]|[Oo][Nn])[Ss]?|[Aa][Uu][Tt][Hh](?:[Ee][Nn][Tt][Ii][Cc][Aa][Tt][Ii][Oo][Nn][Ss]?)?)(?![A-Za-z])[^"]*?[Ff][Aa][Ii][Ll](?:[Ss]|[Ee][Dd]|[Uu][Rr][Ee][Ss]?|[Ii][Nn][Gg])?(?![A-Za-z]))[^"]*"[^{}]*?"enabled":\s*true,[^{}]*?"has_notification_action":\s*true,'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-RULES

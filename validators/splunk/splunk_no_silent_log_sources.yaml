@@ -1,0 +1,24 @@
+key: splunk_no_silent_log_sources
+name: Splunk Log Sources All Reporting
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every host and forwarder Splunk knows about delivered data within the
+  evidence's silence window — no row reads "silent": true. Substantiates the
+  "configures [Log Management] on all production components" narrative
+  (capability "Audit Log Collection and Alerts") for the sources Splunk has
+  seen. Does NOT assert that every production component was ever onboarded (a
+  host that never sent data is absent, not silent), nor that the window is
+  reasonable — splunk_silence_window_within_policy covers that.
+
+# Violation count: any silent row fails. Zero matches is the pass condition, so
+# splunk_silence_verdicts_present proves the flag was there to count.
+regex: '"silent":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-LOG-SOURCE-FRESHNESS

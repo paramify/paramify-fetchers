@@ -1,0 +1,28 @@
+key: splunk_silence_window_within_policy
+name: Splunk Silence Window At Most 60 Minutes
+type: AUTOMATED
+role: configuration
+statement: >-
+  The silence window the evidence's verdicts were judged against — the
+  log-source or received-stream "silent" flags or the index "stale" flags — is
+  at most 60 minutes, so a source, stream or index counts as reporting only if
+  it delivered data in the last hour. Guards splunk_no_silent_log_sources,
+  splunk_customer_indexes_all_receiving,
+  splunk_internal_and_audit_indexes_receiving and
+  splunk_other_host_sends_customer_events against a widened window. The
+  60-minute ceiling is a policy choice (the narrative gives no number). Does
+  NOT assert anything about the sources, streams or indexes themselves.
+
+# Violation count over every occurrence (payload metadata and every row):
+# any value above 60 fails. Presence is proved per set by splunk_silence_verdicts_present / splunk_index_verdicts_present / splunk_input_and_stream_rows_present.
+regex: '"max_silence_minutes":\s*(?:6[1-9]|[7-9][0-9]|[1-9][0-9]{2,})(?![0-9])'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-LOG-SOURCE-FRESHNESS
+  - EVD-SPLUNK-INDEX-ACTIVITY
+  - EVD-SPLUNK-DATA-INPUTS

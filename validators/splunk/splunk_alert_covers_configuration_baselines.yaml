@@ -1,0 +1,26 @@
+key: splunk_alert_covers_configuration_baselines
+name: Splunk Alert Covers Configuration Baselines
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one enabled alert with a notification action is named for
+  configuration baselines: its name, read case-insensitively, contains
+  "configuration baseline", "config baseline", "configuration drift", "config
+  drift", "baseline configuration", "baseline drift", or a security, CIS, STIG
+  or hardening baseline. A bare "baseline" (a traffic baseline, say) does not
+  count. Substantiates the "configuration baselines" item of the Prepared
+  Audit Queries narrative (capability 97e041ec). Coverage is judged by alert
+  name, not by what the search does. Does NOT assert that the search detects a
+  baseline deviation, that the alert runs (an orphaned or never-scheduled
+  alert still counts) or fires, or that its notification is delivered.
+
+# Case-insensitive by [Xx] classes: the engine applies only the g and s flags.
+regex: '"name":\s*"[^"]*?(?:[Cc][Oo][Nn][Ff][Ii][Gg](?:[Uu][Rr][Aa][Tt][Ii][Oo][Nn])?[Ss]?[ _-]*(?:[Bb][Aa][Ss][Ee][Ll][Ii][Nn][Ee][Ss]?|[Dd][Rr][Ii][Ff][Tt])|[Bb][Aa][Ss][Ee][Ll][Ii][Nn][Ee][Ss]?[ _-]*(?:[Cc][Oo][Nn][Ff][Ii][Gg](?:[Uu][Rr][Aa][Tt][Ii][Oo][Nn])?[Ss]?|[Dd][Rr][Ii][Ff][Tt])|(?:[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]|[Cc][Ii][Ss]|[Ss][Tt][Ii][Gg]|[Hh][Aa][Rr][Dd][Ee][Nn][Ii][Nn][Gg])[ _-]*[Bb][Aa][Ss][Ee][Ll][Ii][Nn][Ee][Ss]?)[^"]*"[^{}]*?"enabled":\s*true,[^{}]*?"has_notification_action":\s*true,'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SPLUNK-ALERT-RULES

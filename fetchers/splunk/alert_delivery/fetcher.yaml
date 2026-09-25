@@ -1,0 +1,116 @@
+name: splunk_alert_delivery
+version: 0.1.0
+description: >-
+  Whether Splunk alerts reach anyone: the email alert action's mail server,
+  transport encryption and authentication, every installed alert action, and
+  for each alert that triggered an action over a lookback window how many
+  deliveries were attempted, succeeded and failed, with the last error. One
+  Splunk deployment per target.
+category: splunk
+
+supports_targets: true
+
+target_schema:
+  name:
+    type: string
+    required: true
+    env: SPLUNK_TARGET_NAME
+    description: Label for this Splunk deployment, used in the evidence filename.
+  base_url:
+    type: string
+    required: true
+    env: SPLUNK_BASE_URL
+    description: Management URL of the search head or standalone instance, e.g. https://splunk.example.com:8089
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: SPLUNK_VERIFY_SSL
+    description: Verify the management port's TLS certificate. Set false only for a self-signed test instance.
+
+config_schema:
+  delivery_lookback_days:
+    type: integer
+    default: 30
+    env: SPLUNK_DELIVERY_LOOKBACK_DAYS
+    description: >-
+      How far back to read triggered alert actions and their delivery records
+      in index=_internal (default retention 30 days).
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: splunk_alert_delivery.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-MLA-RVL
+
+evidence_set:
+  reference_id: EVD-SPLUNK-ALERT-DELIVERY
+  name: Splunk Alert Delivery
+  instructions: >-
+    Reads a Splunk deployment's management REST API (port 8089) with a bearer
+    token whose role holds `search` and `rest_properties_get`; the collection
+    fails unless the token can search `_internal`, so no attempts means none
+    were logged rather than hidden. `alert_actions[]` is every alert action
+    stanza in every app (`/servicesNS/-/-/configs/conf-alert_actions?count=0`,
+    collected count equal to paging.total): `notifying` is false only for
+    the stock record-keeping actions (logevent, lookup, outputtelemetry,
+    populate_lookup, rss, studio_snapshot, summary_index,
+    summary_metric_index), and `delivery_log` names the log that records each
+    delivery's outcome — "sendemail" for an action whose command runs
+    sendemail, "sendmodalert" for a modular action run by sendalert (webhook
+    and app-supplied actions), null when Splunk logs no outcome (script,
+    lookup, summary indexing). `email_settings[]` is every `[email]` stanza:
+    `mailserver` (host[:port]), `use_tls` (STARTTLS), `use_ssl` (SMTPS),
+    `transport_encrypted` (either), `auth_username_set` and
+    `oauth_client_id_set` (whether SMTP credentials are configured, read one
+    key at a time from `properties/alert_actions/email/<key>` because the
+    conf view omits them for a role without admin_all_objects; no password
+    or secret is read), `allowed_domains` (allowedDomainList; empty means
+    any recipient domain), and `from`. An alert can override the mail
+    server and TLS for itself (savedsearches `action.email.*`), so each
+    email delivery row carries its own `mailserver` and
+    `transport_encrypted` too. `deliveries[]` is one row per alert and
+    triggered action over
+    the last `lookback_days`, keyed (namespace user, app, name) from
+    `index=_internal sourcetype=scheduler` runs whose `alert_actions` names
+    the action: `triggered` counts those runs; `attempted` the runs with a
+    delivery record, joined on the run's sid; `succeeded` the runs whose
+    every record shows success; `failed` the runs with any record that does
+    not; `not_attempted` the triggered runs with no record at all (the
+    action failed before it could log one), so triggered = attempted +
+    not_attempted and attempted = succeeded + failed. A sendemail record is
+    a python.log "Sending email." line, logged at INFO only after the mail
+    server accepted the message and at ERROR on any failure; a sendmodalert
+    record is an "Invoking modular alert action" line (splunkd.log, with the
+    sid) and success is its "Alert action script completed ... exit code=0"
+    line on the same worker thread (`metadata.delivery_success_rule`).
+    Success means the mail server or endpoint accepted the delivery; Splunk
+    records nothing after that, so it does not show the message was read.
+    `last_outcome` is the outcome of the most recent triggered run;
+    `last_attempt` and `last_success` are times (`last_success` from runs
+    that succeeded); `mailserver` and `recipients` are from the latest
+    email attempt's log line; `transport_encrypted` is the alert's email
+    TLS/SSL as configured now (its own action.email.use_tls/use_ssl when
+    set, else its app's `[email]` stanza, read through
+    `properties/savedsearches` and `properties/alert_actions`), not as it
+    was at each attempt; `last_error` is the
+    error text of the most recent failed run (for email, sendemail's stderr
+    as splunkd.log ScriptRunner recorded it) and comes last. Counts are null,
+    never 0, when the action has no delivery log or the search behind them
+    failed. An alert appears only if it triggered an action in the window:
+    which alerts have an action configured, and how often they fired, is
+    the Splunk Alert Rules evidence set. Delivery records whose sid matches
+    no triggered scheduled run (ad-hoc sendemail, health-report emails, any
+    delivery the scheduler did not log) are listed in
+    `summary.attempts_unmatched` as
+    action;sid;label;outcome. `metadata.internal_earliest_event` is the
+    oldest event left in `_internal`; a window reaching past it covers less
+    than `lookback_days`.
