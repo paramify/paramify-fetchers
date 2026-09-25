@@ -1,0 +1,78 @@
+name: oci_network_exposure
+version: 0.1.0
+description: >
+  Every OCI VCN, subnet, security list and network security group in scope, with
+  each ingress and egress rule parsed into peer, protocol and port range — both
+  IPv4 and IPv6 internet peers, TCP and UDP, and every sensitive port reachable
+  from outside rather than only SSH and RDP. Egress is judged as well as
+  ingress, since the indicator covers outbound traffic. Because a rule nothing
+  can reach is not an exposure, the summary reports configured internet ingress
+  and actually-reachable internet ingress separately: a security list attached
+  to no subnet, a subnet with prohibit_internet_ingress, and a subnet whose
+  route table has no default route to an enabled internet gateway all mean the
+  rule governs nothing. Flow logs per subnet or VCN are included.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_network_exposure.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect networking from. Optional — omit to collect
+      from the tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — a VCN and the
+      subnets inside it can sit in different compartments, and reachability is
+      only correct when both are read.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-CNA-RNT      # Inbound AND outbound traffic limited — ingress and egress rules, with reachability
+  - KSI-CNA-MAT      # Minimal attack surface — sensitive ports reachable from the internet
+  - KSI-MLA-LET      # What is logged — VCN and subnet flow logs
+
+evidence_set:
+  reference_id: EVD-OCI-NETWORK-EXPOSURE
+  name: Network Traffic Rules and Internet Reachability
+  instructions: >
+    Script: fetcher.py. Ported from Prowler's OCI network service (Apache-2.0),
+    adding IPv6, every port, egress, UDP and reachability. OCI Python SDK calls
+    per compartment: virtual_network.list_vcns(), list_internet_gateways(),
+    list_route_tables(), list_subnets(), list_security_lists(),
+    list_network_security_groups() with list_network_security_group_security_rules()
+    per NSG, plus logging.list_log_groups()/list_logs() for flow logs. One
+    evidence file per target.

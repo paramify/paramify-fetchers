@@ -1,0 +1,76 @@
+name: oci_object_storage_buckets
+version: 0.1.0
+description: >
+  Every OCI Object Storage bucket in scope with its public access type, the key
+  encrypting it, versioning, retention rules (and whether a rule is locked),
+  replication policies and their destination regions, object-event emission, the
+  read and write logs configured against it, and every pre-authenticated request
+  granting access by URL. A PAR makes a bucket with NoPublicAccess readable by
+  anyone holding the link, so private-but-PAR-reachable buckets are counted as
+  their own finding. Read and write logging are reported separately. PAR secrets
+  (the access URI) are returned by OCI only at creation and are never read here.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_object_storage_buckets.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect buckets from. Optional — omit to collect from
+      the tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — buckets live
+      in the compartments of the workloads that write to them.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-SVC-SIN      # Encrypted and secured from unwanted access — key, public access, PARs
+  - KSI-IAM-ELP      # A pre-authenticated request is an access grant to whoever holds the link
+  - KSI-MLA-LET      # Which resources and event types are logged — per-bucket read/write logs
+
+evidence_set:
+  reference_id: EVD-OCI-OBJECT-STORAGE-BUCKETS
+  name: Bucket Access, Encryption and Data Logging
+  instructions: >
+    Script: fetcher.py. Ported from Prowler's OCI objectstorage service
+    (Apache-2.0), adding pre-authenticated requests, read logging, retention and
+    replication. OCI Python SDK calls: object_storage.get_namespace(), then per
+    compartment logging.list_log_groups()/list_logs() to find bucket logs,
+    list_buckets() with get_bucket() per bucket (the summary carries no access
+    type, key or versioning), then list_preauthenticated_requests(),
+    list_retention_rules() and list_replication_policies() per bucket. One
+    evidence file per target.

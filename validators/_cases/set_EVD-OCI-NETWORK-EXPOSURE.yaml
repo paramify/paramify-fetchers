@@ -1,0 +1,20 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them. A validator that reads a zero cannot prove the
+# zero was measured — only the set, with its integrity partner, can.
+evidence_set: EVD-OCI-NETWORK-EXPOSURE
+cases:
+  - name: open_rules_exist_but_unreachable
+    expect: PASS
+    note: >
+      The live tenancy: three internet ingress rules including SSH, none reachable because the list is attached to nothing and the VCN has no gateway. The set passes on reachability, which is the posture that matters.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_security_lists": 2, "internet_ingress_rules": 3, "reachable_internet_ingress_rules": 0}}}'
+
+  - name: an_open_rule_is_reachable
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_security_lists": 2, "internet_ingress_rules": 3, "reachable_internet_ingress_rules": 1}}}'
+
+  - name: no_security_lists_collected
+    expect: FAIL
+    note: >
+      Zero reachable rules because zero rules were read.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_security_lists": 0, "internet_ingress_rules": 0, "reachable_internet_ingress_rules": 0}}}'

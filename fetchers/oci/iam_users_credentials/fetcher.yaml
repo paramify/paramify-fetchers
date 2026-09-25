@@ -1,0 +1,45 @@
+name: oci_iam_users_credentials
+version: 0.1.0
+description: >
+  Every OCI IAM user with MFA status, console capability, last successful login
+  and group membership, and every standing credential each holds — API signing
+  keys, auth tokens, customer secret keys, SMTP credentials, database
+  credentials and OAuth2 client credentials — with each credential's age against
+  a 90-day rotation window. Flags console-capable users without MFA (separating
+  accounts that have never logged in), members of the tenancy Administrators
+  group, and administrators holding API keys. Secret material is never read.
+  Users are tenancy-scoped, so this collects from the tenancy root.
+  Covers every active identity domain: the Default domain through the IAM API,
+  every other domain through its own SCIM endpoint, since the IAM API answers
+  for the Default domain only. Each user records its domain; a secondary
+  domain's Domain_Administrators are reported as domain admins, not tenancy
+  admins.
+category: oci
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_iam_users_credentials.json
+
+secrets: []
+
+ksis:
+  - KSI-IAM-APM      # Strong passwords with MFA — console users without MFA
+  - KSI-IAM-SNU      # Non-user authentication secured and reviewed — API keys, tokens, secret keys and their ages
+  - KSI-IAM-ELP      # Least privilege — who is a tenancy administrator, and which of them hold API keys
+
+evidence_set:
+  reference_id: EVD-OCI-IAM-USERS-CREDENTIALS
+  name: User MFA and Standing Credentials
+  instructions: >
+    Script: fetcher.py. Ported from Prowler's OCI identity service (Apache-2.0).
+    OCI Python SDK calls, all against the tenancy root: identity.list_groups(),
+    list_users(), then per user list_user_group_memberships() and one list call
+    per credential type (list_api_keys, list_auth_tokens,
+    list_customer_secret_keys, list_smtp_credentials, list_db_credentials,
+    list_o_auth_client_credentials).

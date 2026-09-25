@@ -1,0 +1,26 @@
+key: oci_vault_keys_rotated
+name: OCI Vault Keys Rotated Within The Window
+type: AUTOMATED
+role: configuration
+statement: >
+  Every live Vault key has been rotated within 365 days, by automatic rotation
+  or by hand. Does NOT assert the rotation is AUTOMATED, which the indicator
+  asks for and the evidence reports separately as
+  keys_with_automatic_rotation — a DEFAULT (virtual) vault cannot do automatic
+  rotation at all, so requiring it here would fail tenancies for a vault-type
+  limitation no operator can clear. Does NOT assert anything about key
+  protection mode. Pairs with oci_key_inventory_present, without which a zero
+  here could mean no keys were collected. Fails when a key's current version is
+  older than the window, and when the summary key is renamed.
+regex: '"keys_not_rotated_within_window":\s*(?<keys_not_rotated_within_window>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-VAULT-KEYS

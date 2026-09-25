@@ -1,0 +1,15 @@
+validator: oci_security_list_inventory_present
+cases:
+  - name: security_lists_were_collected
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_security_lists": 3, "reachable_internet_ingress_rules": 0}}'
+
+  - name: no_security_lists_collected
+    expect: FAIL
+    note: >
+      The point of the validator: 'no reachable open rules' and 'no rules read' produce the same zero.
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_security_lists": 0, "reachable_internet_ingress_rules": 0}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"security_list_count": 3, "reachable_internet_ingress_rules": 0}}'

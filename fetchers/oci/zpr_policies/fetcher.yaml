@@ -1,0 +1,74 @@
+name: oci_zpr_policies
+version: 0.1.0
+description: >
+  Whether Zero Trust Packet Routing is enabled for the tenancy; every ZPR policy
+  in scope with each statement parsed into source, destination and protocol
+  condition; the security attribute namespaces and definitions statements can
+  reference; and which VCNs carry a ZPR attribute, in which mode, and whether
+  they run ZPR-only. Counts the permissive statement shapes Oracle accepts —
+  the internet or all-endpoints as a source, the internet or all-endpoints as a
+  destination, and no protocol restriction — and statements naming attributes
+  that are not defined, which match nothing. Statements the parser does not
+  recognise are kept verbatim and counted, never treated as restrictive.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_zpr_policies.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect policies and VCNs from. Optional — omit to
+      collect from the tenancy root. The ZPR configuration and the attribute
+      definitions are tenancy-wide and are read either way.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — VCNs live in
+      workload compartments, not the tenancy root.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-CNA-ULN      # Logical networking enforces traffic flow — ZPR is flow control by workload identity
+  - KSI-CNA-RNT      # Inbound/outbound traffic limited — the permissive-statement counts are the review
+
+evidence_set:
+  reference_id: EVD-OCI-ZPR
+  name: Zero Trust Network Flow Policy
+  instructions: >
+    Script: fetcher.py. OCI Python SDK calls: zpr.get_configuration() on the
+    tenancy; security_attribute.list_security_attribute_namespaces() across the
+    tenancy and list_security_attributes() per namespace; then per compartment
+    zpr.list_zpr_policies() and virtual_network.list_vcns(). Every policy
+    statement is parsed locally. One evidence file per target.

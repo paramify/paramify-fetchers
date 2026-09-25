@@ -1,0 +1,189 @@
+{
+ "interactions": [
+  {
+   "key": "GET audit/20190901/configuration?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"retentionPeriodDays\": 365}"
+  },
+  {
+   "key": "GET identity/20160918/compartments?accessLevel=ACCESSIBLE&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy&compartmentIdInSubtree=true&lifecycleState=ACTIVE",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"id\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"name\": \"fetcher-test\", \"description\": \"Scratch compartment for Paramify fetcher verification\", \"timeCreated\": \"2026-09-10T19:08:22.162Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-10T19:08:22.039Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"name\": \"fetcher-test-apps\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-21T19:21:42.963Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:21:42.895Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"id\": \"ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua\", \"name\": \"fetcher-test-web\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-21T19:21:54.020Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:21:53.946Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a\", \"name\": \"fetcher-test-zone\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-15T20:08:18.463Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:08:18.390Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}]"
+  },
+  {
+   "key": "GET logging/20200531/logGroups?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET notification/20181201/topics?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET events/20181201/rules?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"id\": \"ocid1.eventrule.oc1.phx.amaaaaaajt3ioqqawynhw6cvkbeoui6tqh4lapktbioemwbvf45dycyiykuq\", \"displayName\": \"fetcher-test-iam-user-changes\", \"description\": \"paramify fetcher test: users only, so the other IAM-change checks fail\", \"lifecycleState\": \"ACTIVE\", \"condition\": \"{\\\"eventType\\\":[\\\"com.oraclecloud.identitycontrolplane.createuser\\\",\\\"com.oraclecloud.identitycontrolplane.deleteuser\\\",\\\"com.oraclecloud.identitycontrolplane.updateuser\\\"]}\", \"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"isEnabled\": true, \"timeCreated\": \"2026-09-15T20:08:13.681Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:08:13.290Z\"}}, \"systemTags\": {}}]"
+  },
+  {
+   "key": "GET events/20181201/rules/ocid1.eventrule.oc1.phx.amaaaaaajt3ioqqawynhw6cvkbeoui6tqh4lapktbioemwbvf45dycyiykuq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"displayName\": \"fetcher-test-iam-user-changes\", \"description\": \"paramify fetcher test: users only, so the other IAM-change checks fail\", \"lifecycleState\": \"ACTIVE\", \"condition\": \"{\\\"eventType\\\":[\\\"com.oraclecloud.identitycontrolplane.createuser\\\",\\\"com.oraclecloud.identitycontrolplane.deleteuser\\\",\\\"com.oraclecloud.identitycontrolplane.updateuser\\\"]}\", \"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"isEnabled\": true, \"actions\": {\"actions\": [{\"actionType\": \"ONS\", \"id\": \"ocid1.eventaction.oc1.phx.abyhqljto6wm7dtznxvmg5ehfekcydjhv2rwjc4d25gljt3btb3hvnnar6ba\", \"lifecycleMessage\": null, \"lifecycleState\": \"ACTIVE\", \"isEnabled\": true, \"description\": null, \"topicId\": \"ocid1.onstopic.oc1.phx.amaaaaaajt3ioqqaq57ckpcyqlotnq764bgghw75amsjvjfvzc77dzi76dkq\"}]}, \"id\": \"ocid1.eventrule.oc1.phx.amaaaaaajt3ioqqawynhw6cvkbeoui6tqh4lapktbioemwbvf45dycyiykuq\", \"timeCreated\": \"2026-09-15T20:08:13.681Z\", \"lifecycleMessage\": null, \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:08:13.290Z\"}}, \"systemTags\": {}}"
+  },
+  {
+   "key": "GET logging/20200531/logGroups?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"id\": \"ocid1.loggroup.oc1.phx.amaaaaaajt3ioqqalopk4soapzdbke4yxmu5qcn7j7dmakruxpfqeihgc4xa\", \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"displayName\": \"fetcher-test-logs\", \"description\": null, \"timeCreated\": \"2026-09-15T20:08:11.228Z\", \"timeLastModified\": \"2026-09-15T20:08:11.228Z\", \"lifecycleState\": \"ACTIVE\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:08:11.182Z\"}}, \"systemTags\": {}}]"
+  },
+  {
+   "key": "GET logging/20200531/logGroups/ocid1.loggroup.oc1.phx.amaaaaaajt3ioqqalopk4soapzdbke4yxmu5qcn7j7dmakruxpfqeihgc4xa/logs",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"id\": \"ocid1.log.oc1.phx.amaaaaaajt3ioqqa35spu7jtfzvmiyu4qelrbbj5yqe4iwuqvaikfm2mh4aa\", \"logGroupId\": \"ocid1.loggroup.oc1.phx.amaaaaaajt3ioqqalopk4soapzdbke4yxmu5qcn7j7dmakruxpfqeihgc4xa\", \"displayName\": \"fetcher-test-public-flowlogs\", \"isEnabled\": true, \"lifecycleState\": \"ACTIVE\", \"logType\": \"SERVICE\", \"configuration\": {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"source\": {\"sourceType\": \"OCISERVICE\", \"service\": \"flowlogs\", \"resource\": \"ocid1.subnet.oc1.phx.aaaaaaaawaukxpqckvbagjfjd5cishmx72fpbomb5trldvydsbja2grv7zzq\", \"category\": \"all\", \"parameters\": {}}, \"archiving\": {\"isEnabled\": false}}, \"timeCreated\": \"2026-09-21T19:22:09.252Z\", \"timeLastModified\": \"2026-09-21T19:22:09.252Z\", \"retentionDuration\": 30, \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:22:09.138Z\"}}, \"systemTags\": {}}, {\"id\": \"ocid1.log.oc1.phx.amaaaaaajt3ioqqaxtpsersiocaqdp5sjrsfkfqnw6avqdzlyzi347hhck3q\", \"logGroupId\": \"ocid1.loggroup.oc1.phx.amaaaaaajt3ioqqalopk4soapzdbke4yxmu5qcn7j7dmakruxpfqeihgc4xa\", \"displayName\": \"fetcher-test-subnet-flowlogs\", \"isEnabled\": true, \"lifecycleState\": \"ACTIVE\", \"logType\": \"SERVICE\", \"configuration\": {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"source\": {\"sourceType\": \"OCISERVICE\", \"service\": \"flowlogs\", \"resource\": \"ocid1.subnet.oc1.phx.aaaaaaaak6mhabga4ymduzdmxuv66thvwnktc2g5zszdg2etbpbjd6j46q4a\", \"category\": \"all\", \"parameters\": {}}, \"archiving\": {\"isEnabled\": false}}, \"timeCreated\": \"2026-09-15T20:08:12.070Z\", \"timeLastModified\": \"2026-09-15T20:08:12.070Z\", \"retentionDuration\": 30, \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:08:11.994Z\"}}, \"systemTags\": {}}]"
+  },
+  {
+   "key": "GET notification/20181201/topics?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "opc-next-page": "AAAAAAAAAAJleUpyYVdRaU9pSTFOVEF3SWl3aVpXNWpJam9pUVRJMU5rZERUU0lzSW1Gc1p5STZJbVJwY2lKOS4ub1ZLOEF0Mk1fVEJUTk53OC4yS3FGbGdMU1VzbU55aTRIM0hQOXdRMnVJYlBDa3BRLWZ6czFEeXFKb2JqUHFRSnBlYnY3UzVnUDlCdk1JODhEdm96ekFrS3NxN3FKVm9aZU9EbjVWd1JaLVduMTQ4aEpEMVRNWm1YbExpZGJqd0xwRWFIdDZCRGVhTE9tZ2N0WGlSMnlYaUZrbnExeVE0QTZURlFJXzNTSGhBZDlwUGNYNGhlZG94bUpnSEl1UERZZzFMMFN3VE1qbmt4N21iQ01mSk9BWHgtSmpvVnBvRC1aMGpxa1ZjM2NtdFRrd09HVHBvZndKRXFvLXE2Ym45dVpGc01Ta0Rkd1pqYnhDRnh6djJ1S19ISHRmMnhZU3dFYjBFZ0pjb3lJbGk1V2RWcWJqWktvcFhhMXhyU0VIMlJzZmktTGl2RUtVMHRhZ2lkd05DVGtPMjNHajJmajVLcHZMT1F4elJ4SFN2dkxIMm96Z0ozSEdBZVdoY1I2UzZCejNHdHMtM0NsXzZnSEJaUVRFejZiWjRXQ2lfZDdod3Bsck9ucmxNY1hBRXlsRUF0bGNyamdCZnU3aGxFbk54RFFYN3AwbDVpbUIzd1ExWjdNZWVZZm93cUp0bmdHWTh4NWZXdmptcmlZMU1LdHVsa3BEcXFIcTlpazlYeXYxZ0dJVmlfV2JtbW55bzktQTBucUhzNDQ3ZFFBdzkyLWhhWlRMa0dZWmZkbTVZN0k0ZVY3YVU1cTQtNUR1NGhkMG5lWGNrcEFlZVJ4UUU5MmRYRkRpazdfTkdRWnh5aU4tTTdEcVNQUFlXdEwtSDk3Q2g0a0VSWWw2SmI0UDU2cDJ5U014TlB1LW9iTzdPX3ZJZVZfRU15NkdvTGUxV19LdERaRy1kNC5tZ2hnbm9HTURRN1dnc3NoVXpYT3V3",
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"name\": \"fetcher-test-topic\", \"id\": \"ocid1.onstopic.oc1.phx.amaaaaaajt3ioqqaq57ckpcyqlotnq764bgghw75amsjvjfvzc77dzi76dkq\", \"topicId\": \"ocid1.onstopic.oc1.phx.amaaaaaajt3ioqqaq57ckpcyqlotnq764bgghw75amsjvjfvzc77dzi76dkq\", \"shortTopicId\": null, \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"lifecycleState\": \"ACTIVE\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-15T20:08:12.725Z\", \"apiEndpoint\": \"https://cell1.notification.us-phoenix-1.oci.oraclecloud.com\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:08:12.647Z\"}}, \"systemTags\": {}, \"locks\": []}]"
+  },
+  {
+   "key": "GET notification/20181201/topics?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq&page=AAAAAAAAAAJleUpyYVdRaU9pSTFOVEF3SWl3aVpXNWpJam9pUVRJMU5rZERUU0lzSW1Gc1p5STZJbVJwY2lKOS4ub1ZLOEF0Mk1fVEJUTk53OC4yS3FGbGdMU1VzbU55aTRIM0hQOXdRMnVJYlBDa3BRLWZ6czFEeXFKb2JqUHFRSnBlYnY3UzVnUDlCdk1JODhEdm96ekFrS3NxN3FKVm9aZU9EbjVWd1JaLVduMTQ4aEpEMVRNWm1YbExpZGJqd0xwRWFIdDZCRGVhTE9tZ2N0WGlSMnlYaUZrbnExeVE0QTZURlFJXzNTSGhBZDlwUGNYNGhlZG94bUpnSEl1UERZZzFMMFN3VE1qbmt4N21iQ01mSk9BWHgtSmpvVnBvRC1aMGpxa1ZjM2NtdFRrd09HVHBvZndKRXFvLXE2Ym45dVpGc01Ta0Rkd1pqYnhDRnh6djJ1S19ISHRmMnhZU3dFYjBFZ0pjb3lJbGk1V2RWcWJqWktvcFhhMXhyU0VIMlJzZmktTGl2RUtVMHRhZ2lkd05DVGtPMjNHajJmajVLcHZMT1F4elJ4SFN2dkxIMm96Z0ozSEdBZVdoY1I2UzZCejNHdHMtM0NsXzZnSEJaUVRFejZiWjRXQ2lfZDdod3Bsck9ucmxNY1hBRXlsRUF0bGNyamdCZnU3aGxFbk54RFFYN3AwbDVpbUIzd1ExWjdNZWVZZm93cUp0bmdHWTh4NWZXdmptcmlZMU1LdHVsa3BEcXFIcTlpazlYeXYxZ0dJVmlfV2JtbW55bzktQTBucUhzNDQ3ZFFBdzkyLWhhWlRMa0dZWmZkbTVZN0k0ZVY3YVU1cTQtNUR1NGhkMG5lWGNrcEFlZVJ4UUU5MmRYRkRpazdfTkdRWnh5aU4tTTdEcVNQUFlXdEwtSDk3Q2g0a0VSWWw2SmI0UDU2cDJ5U014TlB1LW9iTzdPX3ZJZVZfRU15NkdvTGUxV19LdERaRy1kNC5tZ2hnbm9HTURRN1dnc3NoVXpYT3V3",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET notification/20181201/subscriptions?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq&topicId=ocid1.onstopic.oc1.phx.amaaaaaajt3ioqqaq57ckpcyqlotnq764bgghw75amsjvjfvzc77dzi76dkq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET events/20181201/rules?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET logging/20200531/logGroups?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"id\": \"ocid1.loggroup.oc1.phx.amaaaaaajt3ioqqa62gtckwgb6457lauu6okkk5lsl5iuhthct4baicctvba\", \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"displayName\": \"fetcher-test-apps-logs\", \"description\": null, \"timeCreated\": \"2026-09-21T19:25:24.239Z\", \"timeLastModified\": \"2026-09-21T19:25:24.239Z\", \"lifecycleState\": \"ACTIVE\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:25:24.183Z\"}}, \"systemTags\": {}}]"
+  },
+  {
+   "key": "GET logging/20200531/logGroups/ocid1.loggroup.oc1.phx.amaaaaaajt3ioqqa62gtckwgb6457lauu6okkk5lsl5iuhthct4baicctvba/logs",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"id\": \"ocid1.log.oc1.phx.amaaaaaajt3ioqqa4tvoxneoya3y65fwxw2ojtrovqhdr7a2aqci7nbsr3bq\", \"logGroupId\": \"ocid1.loggroup.oc1.phx.amaaaaaajt3ioqqa62gtckwgb6457lauu6okkk5lsl5iuhthct4baicctvba\", \"displayName\": \"fetcher-test-bucket-read\", \"isEnabled\": true, \"lifecycleState\": \"ACTIVE\", \"logType\": \"SERVICE\", \"configuration\": {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"source\": {\"sourceType\": \"OCISERVICE\", \"service\": \"objectstorage\", \"resource\": \"fetcher-test-bucket\", \"category\": \"read\", \"parameters\": {}}, \"archiving\": {\"isEnabled\": false}}, \"timeCreated\": \"2026-09-21T19:25:25.101Z\", \"timeLastModified\": \"2026-09-21T19:25:25.101Z\", \"retentionDuration\": 30, \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:25:25.027Z\"}}, \"systemTags\": {}}]"
+  },
+  {
+   "key": "GET notification/20181201/topics?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET events/20181201/rules?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET logging/20200531/logGroups?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET notification/20181201/topics?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET events/20181201/rules?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET logging/20200531/logGroups?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET notification/20181201/topics?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET events/20181201/rules?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET identity/20160918/tenancies/ocid1.tenancy.oc1..aaaaaaaatenancy/regionSubscriptions",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"regionKey\": \"PHX\", \"regionName\": \"us-phoenix-1\", \"status\": \"READY\", \"isHomeRegion\": true}]"
+  }
+ ]
+}

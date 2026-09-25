@@ -1,0 +1,15 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them.
+evidence_set: EVD-OCI-CERTIFICATES
+cases:
+  - name: all_renewable_certificates_automated
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_certificates": 2, "certificates_requiring_manual_renewal": 0}}}'
+
+  - name: one_manual
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_certificates": 2, "certificates_requiring_manual_renewal": 1}}}'
+
+  - name: no_certificates_collected
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_certificates": 0, "certificates_requiring_manual_renewal": 0}}}'

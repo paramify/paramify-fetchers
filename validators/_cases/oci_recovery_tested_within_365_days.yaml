@@ -1,0 +1,18 @@
+validator: oci_recovery_tested_within_365_days
+cases:
+  - name: drill_succeeded_this_year
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"recovery_tests_succeeded": 1, "tested_within_365_days": true}}'
+
+  - name: last_drill_is_older_than_a_year
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"recovery_tests_succeeded": 1, "tested_within_365_days": false}}'
+
+  - name: never_tested
+    expect: FAIL
+    note: null, not false — no successful drill exists at all, including a tenancy with no DR
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"recovery_tests_succeeded": 0, "tested_within_365_days": null}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"tested_within_a_year": true}}'

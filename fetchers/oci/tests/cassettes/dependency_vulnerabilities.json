@@ -1,0 +1,189 @@
+{
+ "interactions": [
+  {
+   "key": "GET identity/20160918/compartments?accessLevel=ACCESSIBLE&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy&compartmentIdInSubtree=true&lifecycleState=ACTIVE",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"id\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"name\": \"fetcher-test\", \"description\": \"Scratch compartment for Paramify fetcher verification\", \"timeCreated\": \"2026-09-10T19:08:22.162Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-10T19:08:22.039Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"name\": \"fetcher-test-apps\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-21T19:21:42.963Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:21:42.895Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"id\": \"ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua\", \"name\": \"fetcher-test-web\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-21T19:21:54.020Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:21:53.946Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a\", \"name\": \"fetcher-test-zone\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-15T20:08:18.463Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:08:18.390Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}]"
+  },
+  {
+   "key": "GET adm/20220421/knowledgeBases?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/vulnerabilityAudits?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/remediationRecipes?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/remediationRuns?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/knowledgeBases?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "opc-next-page": "AAAAAAAAAAJleUpyYVdRaU9pSXpNakExSWl3aVpXNWpJam9pUVRJMU5rZERUU0lzSW1Gc1p5STZJbVJwY2lKOS4uaEd4NGNKYkM3d0FtTTJaRC4yUGFqbnZibzJ2cVJOazBqMHU0QU5hNGZqX2xseTBHdEVibkR5WUcya24yWVp0R0RLcG41bktaMWpnTlRVTC01ZWV3MTN3Q0lzdHlEcGc0QnFOLUo3bVNXVFZ3YWxoTE1scE9aRG8wdnFHUXZPOU1rU2Z4WUYxY0ptaEFtaTZibXZROEM5TGMydjRBZnd2elhKMGFoRU5ncFlTeW5hVG1JaUtqdDdheTNOR3RQTXpCLVdmMFhIZUtvZEpvTUtiMXhXbG4zdzBkVFFzME5ib0xXdldtMWhpWnVNVlRWbzBlR3ZVV2ZyUWwxYkd6RktzM2NQSHBBY3h2TWxuM09FcXBYTDdWNjhWT1hSOVU4MEU5b283T1RCMDgzQnotQ0Z3WjZBT3ZKeFBJaGtsNDBhc1p5bUtqZWtlNENQU2lub0pWYjVQUXcxOFF4UFhqY0RQTUlZT25qd2NfMWxVMDgzSl9ROEdNWWs3QVRPMHNJNm44SjhrMnprblFOTm5JWXF6OVRRcnE1aV9YMnpFbHBvdXpTZV9rTEV1WXZXV3o1V3E5TUIxbjhyMk9iWHpRZ2txLVhQZEtfT0ZSa2FkRlg3VzlIU3FaUVc5TGhCTUgzNGZOdGRWLWFjYkw1ckR1dWFPUFNMbmExb0YzWU91bmZEVTgxdHk1cmdDb19ZWjMzaHJNUDNHZlF5WjJWSGozNXQtRFMyRGtYeW9USnYxckVUdFAycU85V3hxN2JSTkhvajVwQXk4Mm5NdTFNaTA0cFkyOU9uUHVhLW9KWXljckc3akxmU1JlRU9QVW5mcjlST2czaXRmd0xVa2NWUXdMMkdUTE1YdzFYNXh1eDFHbGdoRThqczBMdkk2NUppeHdQQWx5TWphSHhLLTlJb3NqTmJxM2UtVHl5MW9feVJyRWxNdHQxaGg1TU1FSG1pcUt3OXNXbUNBLl9UaFpXMW5SbTE1REdkSkRCWVo0dkE=",
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": [{\"id\": \"ocid1.admknowledgebase.oc1.phx.amaaaaaajt3ioqqa64c4uwqz7ezglmoxvxariugyzjevlyvmzu462kvdhxba\", \"displayName\": \"fetcher-test-kb\", \"timeCreated\": \"2026-09-21T19:15:04.766Z\", \"timeUpdated\": \"2026-09-21T19:15:50.528Z\", \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"lifecycleState\": \"ACTIVE\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:15:04.485Z\"}}, \"systemTags\": {\"orcl-cloud\": {\"free-tier-retained\": \"false\"}}}]}"
+  },
+  {
+   "key": "GET adm/20220421/knowledgeBases?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq&page=AAAAAAAAAAJleUpyYVdRaU9pSXpNakExSWl3aVpXNWpJam9pUVRJMU5rZERUU0lzSW1Gc1p5STZJbVJwY2lKOS4uaEd4NGNKYkM3d0FtTTJaRC4yUGFqbnZibzJ2cVJOazBqMHU0QU5hNGZqX2xseTBHdEVibkR5WUcya24yWVp0R0RLcG41bktaMWpnTlRVTC01ZWV3MTN3Q0lzdHlEcGc0QnFOLUo3bVNXVFZ3YWxoTE1scE9aRG8wdnFHUXZPOU1rU2Z4WUYxY0ptaEFtaTZibXZROEM5TGMydjRBZnd2elhKMGFoRU5ncFlTeW5hVG1JaUtqdDdheTNOR3RQTXpCLVdmMFhIZUtvZEpvTUtiMXhXbG4zdzBkVFFzME5ib0xXdldtMWhpWnVNVlRWbzBlR3ZVV2ZyUWwxYkd6RktzM2NQSHBBY3h2TWxuM09FcXBYTDdWNjhWT1hSOVU4MEU5b283T1RCMDgzQnotQ0Z3WjZBT3ZKeFBJaGtsNDBhc1p5bUtqZWtlNENQU2lub0pWYjVQUXcxOFF4UFhqY0RQTUlZT25qd2NfMWxVMDgzSl9ROEdNWWs3QVRPMHNJNm44SjhrMnprblFOTm5JWXF6OVRRcnE1aV9YMnpFbHBvdXpTZV9rTEV1WXZXV3o1V3E5TUIxbjhyMk9iWHpRZ2txLVhQZEtfT0ZSa2FkRlg3VzlIU3FaUVc5TGhCTUgzNGZOdGRWLWFjYkw1ckR1dWFPUFNMbmExb0YzWU91bmZEVTgxdHk1cmdDb19ZWjMzaHJNUDNHZlF5WjJWSGozNXQtRFMyRGtYeW9USnYxckVUdFAycU85V3hxN2JSTkhvajVwQXk4Mm5NdTFNaTA0cFkyOU9uUHVhLW9KWXljckc3akxmU1JlRU9QVW5mcjlST2czaXRmd0xVa2NWUXdMMkdUTE1YdzFYNXh1eDFHbGdoRThqczBMdkk2NUppeHdQQWx5TWphSHhLLTlJb3NqTmJxM2UtVHl5MW9feVJyRWxNdHQxaGg1TU1FSG1pcUt3OXNXbUNBLl9UaFpXMW5SbTE1REdkSkRCWVo0dkE=",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/vulnerabilityAudits?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": [{\"id\": \"ocid1.admvulnerabilityaudit.oc1.phx.amaaaaaajt3ioqqaxoxagnuxvudzcmezypliibcb5qqkr4ddbbg6oxwbqzwq\", \"displayName\": \"fetcher-test-audit-masked\", \"knowledgeBaseId\": \"ocid1.admknowledgebase.oc1.phx.amaaaaaajt3ioqqa64c4uwqz7ezglmoxvxariugyzjevlyvmzu462kvdhxba\", \"timeCreated\": \"2026-09-21T19:17:21.872Z\", \"timeUpdated\": \"2026-09-21T19:17:44.285Z\", \"lifecycleState\": \"ACTIVE\", \"maxObservedCvssV2Score\": null, \"maxObservedCvssV3Score\": null, \"maxObservedSeverity\": \"MEDIUM\", \"vulnerableArtifactsCount\": 1, \"maxObservedCvssV2ScoreWithIgnored\": 9.3, \"maxObservedCvssV3ScoreWithIgnored\": 10.0, \"maxObservedSeverityWithIgnored\": \"CRITICAL\", \"vulnerableArtifactsCountWithIgnored\": 3, \"isSuccess\": false, \"buildType\": \"MAVEN\", \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:17:21.824Z\"}}, \"systemTags\": {\"orcl-cloud\": {\"free-tier-retained\": \"false\"}}}, {\"id\": \"ocid1.admvulnerabilityaudit.oc1.phx.amaaaaaajt3ioqqaepmdpcv3agiccoshblpnuekroejndroaesbompr2qulq\", \"displayName\": \"fetcher-test-audit-suppressed\", \"knowledgeBaseId\": \"ocid1.admknowledgebase.oc1.phx.amaaaaaajt3ioqqa64c4uwqz7ezglmoxvxariugyzjevlyvmzu462kvdhxba\", \"timeCreated\": \"2026-09-21T19:16:26.964Z\", \"timeUpdated\": \"2026-09-21T19:16:43.296Z\", \"lifecycleState\": \"ACTIVE\", \"maxObservedCvssV2Score\": 7.5, \"maxObservedCvssV3Score\": 9.8, \"maxObservedSeverity\": \"CRITICAL\", \"vulnerableArtifactsCount\": 2, \"maxObservedCvssV2ScoreWithIgnored\": 9.3, \"maxObservedCvssV3ScoreWithIgnored\": 10.0, \"maxObservedSeverityWithIgnored\": \"CRITICAL\", \"vulnerableArtifactsCountWithIgnored\": 3, \"isSuccess\": false, \"buildType\": \"MAVEN\", \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:16:26.878Z\"}}, \"systemTags\": {\"orcl-cloud\": {\"free-tier-retained\": \"false\"}}}, {\"id\": \"ocid1.admvulnerabilityaudit.oc1.phx.amaaaaaajt3ioqqadnho4jfj3b6nlkrblunx2hewiyuxxrprzuccxa6g7fwa\", \"displayName\": \"fetcher-test-audit-plain\", \"knowledgeBaseId\": \"ocid1.admknowledgebase.oc1.phx.amaaaaaajt3ioqqa64c4uwqz7ezglmoxvxariugyzjevlyvmzu462kvdhxba\", \"timeCreated\": \"2026-09-21T19:15:54.131Z\", \"timeUpdated\": \"2026-09-21T19:16:12.560Z\", \"lifecycleState\": \"ACTIVE\", \"maxObservedCvssV2Score\": 9.3, \"maxObservedCvssV3Score\": 10.0, \"maxObservedSeverity\": \"CRITICAL\", \"vulnerableArtifactsCount\": 3, \"maxObservedCvssV2ScoreWithIgnored\": 9.3, \"maxObservedCvssV3ScoreWithIgnored\": 10.0, \"maxObservedSeverityWithIgnored\": \"CRITICAL\", \"vulnerableArtifactsCountWithIgnored\": 3, \"isSuccess\": false, \"buildType\": \"MAVEN\", \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:15:54.067Z\"}}, \"systemTags\": {\"orcl-cloud\": {\"free-tier-retained\": \"false\"}}}]}"
+  },
+  {
+   "key": "GET adm/20220421/remediationRecipes?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/remediationRuns?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/knowledgeBases?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/vulnerabilityAudits?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/remediationRecipes?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/remediationRuns?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/knowledgeBases?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/vulnerabilityAudits?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/remediationRecipes?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/remediationRuns?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/knowledgeBases?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/vulnerabilityAudits?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/remediationRecipes?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET adm/20220421/remediationRuns?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET identity/20160918/tenancies/ocid1.tenancy.oc1..aaaaaaaatenancy/regionSubscriptions",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"regionKey\": \"PHX\", \"regionName\": \"us-phoenix-1\", \"status\": \"READY\", \"isHomeRegion\": true}]"
+  }
+ ]
+}

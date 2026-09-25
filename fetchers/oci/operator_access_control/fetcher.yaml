@@ -1,0 +1,79 @@
+name: oci_operator_access_control
+version: 0.1.0
+description: >
+  Operator Access Control and Delegate Access Control — the approval gate on
+  Oracle's own staff reaching customer Exadata infrastructure and VM clusters.
+  Collects the controls (approvers, pre-approved actions, auto-approval during
+  maintenance), which resources each governs and whether it is always enforced
+  and forwarding operator session logs, and a year of access requests from
+  Oracle operators: whether each was granted (including since expired, revoked
+  or completed), is pending or was rejected, and whether it was auto-approved
+  with no person involved. These services govern Exadata resources only; a
+  tenancy with none reports empty lists with the services marked readable,
+  never a control in place. Record fields are verified against the SDK models,
+  not a populated live response.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_operator_access_control.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect from. Optional — omit to collect from the
+      tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — Exadata
+      infrastructure and its controls are rarely created in the tenancy root.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+# Credentials are declared once on _categories/oci.yaml, all `required: false`,
+# so an instance- or resource-principal deployment supplies none of them.
+secrets: []
+
+ksis:
+  - KSI-IAM-JIT
+  - KSI-SCR-MIT
+
+evidence_set:
+  reference_id: EVD-OCI-OPERATOR-ACCESS
+  name: Oracle Operator Access Controls
+  instructions: >
+    Script: fetcher.py. OCI Python SDK calls:
+    operator_access_control list_operator_controls(),
+    list_operator_control_assignments() and list_access_requests() (last 365
+    days), delegate_access_control list_delegation_controls() and
+    list_delegated_resource_access_requests(), walked over every accessible
+    compartment beneath the target, plus a get of each live control and
+    assignment for its approval settings. One evidence file per target.

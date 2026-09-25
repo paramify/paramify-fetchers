@@ -1,0 +1,19 @@
+validator: oci_console_users_all_have_mfa
+cases:
+  - name: every_console_user_has_mfa
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"mfa_percentage_of_console_users": 100, "console_capable_users": 4}}'
+
+  - name: one_of_two_without_mfa
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"mfa_percentage_of_console_users": 50, "console_capable_users": 2}}'
+
+  - name: no_console_users_at_all
+    expect: FAIL
+    note: >
+      A tenancy with no console-capable user reports 0%, not 100% — the percentage must not read a vacuous population as compliant.
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"mfa_percentage_of_console_users": 0, "console_capable_users": 0}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"mfa_pct_of_console_users": 100}}'

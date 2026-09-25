@@ -1,0 +1,15 @@
+validator: oci_no_severity_masked_by_suppression
+cases:
+  - name: suppression_left_the_headline_alone
+    expect: PASS
+    note: the live tenancy's excluded-Log4Shell audit — suppressed, still CRITICAL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"audits_with_suppressed_findings": 1, "audits_where_suppression_lowered_severity": 0}}'
+
+  - name: a_cvss_ceiling_hid_the_criticals
+    expect: FAIL
+    note: the live tenancy's masked audit — MEDIUM visible, CRITICAL underneath
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"audits_with_suppressed_findings": 2, "audits_where_suppression_lowered_severity": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"audits_masked": 0}}'

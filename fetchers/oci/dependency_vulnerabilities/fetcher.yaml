@@ -1,0 +1,73 @@
+name: oci_dependency_vulnerabilities
+version: 0.1.0
+description: >
+  Application Dependency Management knowledge bases, vulnerability audits,
+  remediation recipes and remediation runs — the third-party dependency risk in
+  scope, and what was done about it. Reports both the visible severity and the
+  severity including suppressed findings, so an audit whose headline reads clean
+  only because vulnerabilities were added to an ignore list is visible as such.
+  Remediation runs are reported by the stage they reached (DETECT, RECOMMEND,
+  APPLY, VERIFY), because only a run that reached VERIFY evidences a fix that
+  was applied and confirmed. Note that ADM scans Maven/Java dependency trees
+  only; the summary reports how many knowledge bases are configured so that "no
+  findings" is never read as "nothing was scanned".
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_dependency_vulnerabilities.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect from. Optional — omit to collect from the
+      tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — ADM knowledge
+      bases are normally created in a build or application compartment.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-SCR-MIT
+  - KSI-SCR-MON
+
+evidence_set:
+  reference_id: EVD-OCI-DEP-VULNS
+  name: Third-Party Dependency Vulnerabilities
+  instructions: >
+    Script: fetcher.py. OCI Python SDK calls: adm.list_knowledge_bases(),
+    list_vulnerability_audits(), list_remediation_recipes() and
+    list_remediation_runs(), walked over every accessible compartment beneath
+    the target. One evidence file per target.

@@ -1,0 +1,23 @@
+validator: oci_no_operator_access_auto_approved
+cases:
+  - name: no_requests_auto_approved
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"provider_access_requests": 4, "provider_requests_auto_approved": 0}}'
+
+  - name: no_exadata_nothing_to_govern
+    expect: PASS
+    note: empty tenancy, both services readable
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"provider_access_requests": 0, "provider_requests_auto_approved": 0}}'
+
+  - name: one_request_auto_approved
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"provider_access_requests": 4, "provider_requests_auto_approved": 1}}'
+
+  - name: ten_requests_auto_approved
+    expect: FAIL
+    note: a leading zero digit must not match as 0
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"provider_access_requests": 12, "provider_requests_auto_approved": 10}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"provider_auto_approved": 0}}'

@@ -1,0 +1,21 @@
+key: oci_no_operator_access_auto_approved
+name: OCI No Oracle Operator Access Auto-Approved
+type: AUTOMATED
+role: configuration
+statement: >
+  No access request from an Oracle operator, under Operator Access Control or
+  Delegate Access Control, was auto-approved in the 365-day window: every
+  request that went through had a customer approval or was rejected. Asserts
+  the fetcher's `provider_requests_auto_approved` is exactly 0. A tenancy
+  with no Exadata resources passes, which is correct: nothing Oracle-operated
+  was reachable. A service that could not be read fails the run, and
+  collection_succeeded, not this. Fails when the summary key is renamed.
+regex: '"provider_requests_auto_approved":\s*(?<auto_approved>0)\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-OPERATOR-ACCESS

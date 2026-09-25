@@ -1,0 +1,37 @@
+name: oci_iam_password_policy
+version: 0.1.0
+description: >
+  Every OCI identity domain's password policies — length, character classes,
+  expiry, history, lockout and group scope — judged against the CIS OCI
+  Foundations thresholds (minimum 14 characters, 24 passwords remembered, expiry
+  within 365 days) plus a bounded lockout, and the tenancy's legacy IAM
+  authentication policy. Oracle's built-in Standard and Simple template policies
+  are recorded but excluded from the judgement, because the domain's own
+  PasswordPolicy is the one in force. Identity domains are tenancy-scoped, so
+  this walks the whole tenancy.
+category: oci
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_iam_password_policy.json
+
+secrets: []
+
+ksis:
+  - KSI-IAM-APM      # Strong passwords where passwordless is not used — the password half; MFA is oci_iam_users_credentials
+
+evidence_set:
+  reference_id: EVD-OCI-IAM-PASSWORD-POLICY
+  name: Password Policy Strength
+  instructions: >
+    Script: fetcher.py. Ported from Prowler's OCI identity service (Apache-2.0),
+    adding lockout settings and SCIM paging. OCI Python SDK calls:
+    identity.get_authentication_policy() on the tenancy, list_domains() per
+    compartment, then identity_domains.list_password_policies() against each
+    domain's own endpoint, following every page.

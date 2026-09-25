@@ -1,0 +1,19 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them.
+evidence_set: EVD-OCI-BASTION-JIT
+cases:
+  - name: the_live_bastion
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_bastions": 1, "bastions_with_unreadable_detail": 0, "bastions_open_to_any_client_ip": 0}}}'
+
+  - name: detail_unread_so_zero_open_proves_nothing
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_bastions": 1, "bastions_with_unreadable_detail": 1, "bastions_open_to_any_client_ip": 0}}}'
+
+  - name: no_bastions
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_bastions": 0, "bastions_with_unreadable_detail": 0, "bastions_open_to_any_client_ip": 0}}}'
+
+  - name: open_to_any_client
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_bastions": 1, "bastions_with_unreadable_detail": 0, "bastions_open_to_any_client_ip": 1}}}'

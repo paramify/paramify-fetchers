@@ -1,0 +1,92 @@
+name: oci_audit_logging_events
+version: 0.1.0
+description: >
+  The OCI tenancy's audit retention, every log group and log with what it
+  captures and whether it is enabled, every Events rule with its condition
+  parsed into the event types it matches, and every notification topic with the
+  state of its subscriptions. Rules, actions and topics are joined end to end,
+  so a rule firing into a topic with no confirmed subscriber is reported as
+  notifying nobody, and a coverage matrix shows which change categories (IAM
+  policy, group and user changes, identity providers, VCN, route tables,
+  security lists, NSGs, gateways, Cloud Guard problems, local logins) are
+  monitored versus actually reaching a person. Wildcard and single-string event
+  type conditions are matched as Oracle defines them. A PENDING subscription is
+  not counted as a subscriber; Streaming and Functions actions are recorded but
+  are not notification.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_audit_logging_events.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect log groups, rules and topics from. Optional —
+      omit to collect from the tenancy root. Audit retention is tenancy-wide and
+      is read either way.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — an Events rule
+      and the topic it notifies can live in different compartments, and the
+      rule-to-subscriber join is only correct when both are read.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+  skip_audit_retention:
+    type: boolean
+    required: false
+    default: false
+    env: OCI_SKIP_AUDIT_RETENTION
+    description: >
+      Do not read the tenancy's audit retention period. Reading it needs the
+      {AUDIT_CONFIGURATION} permission, which also allows changing retention, so
+      a strictly read-only collector sets this. The call is then recorded in
+      metadata.skipped_calls and retention reported as null, and the run still
+      succeeds.
+
+secrets: []
+
+ksis:
+  - KSI-MLA-LET      # Which resources and event types are logged and monitored — the coverage matrix
+  - KSI-MLA-OSM      # Centralized audit trail and its retention
+
+evidence_set:
+  reference_id: EVD-OCI-AUDIT-LOGGING-EVENTS
+  name: Audit Retention, Logging Coverage and Change Monitoring
+  instructions: >
+    Script: fetcher.py. Ported from Prowler's OCI audit, logging and events
+    services (Apache-2.0), adding wildcard event-type matching, the
+    rule-to-topic-to-subscriber join, and subscription state. OCI Python SDK
+    calls: audit.get_configuration() on the tenancy, then per compartment
+    logging.list_log_groups()/list_logs(), ons.list_topics() with
+    list_subscriptions() per topic, and events.list_rules() with get_rule() per
+    rule because the list summary carries no actions. One evidence file per
+    target.

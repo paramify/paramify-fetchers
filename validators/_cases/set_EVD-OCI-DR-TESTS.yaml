@@ -1,0 +1,15 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them.
+evidence_set: EVD-OCI-DR-TESTS
+cases:
+  - name: drilled_this_year
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"recovery_tests_succeeded": 1, "tested_within_365_days": true}}}'
+
+  - name: never_drilled
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"recovery_tests_succeeded": 0, "tested_within_365_days": null}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 1, "status": "failed"}, "payload": {"summary": {"tested_within_365_days": true}}}'

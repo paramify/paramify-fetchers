@@ -1,0 +1,22 @@
+key: oci_recovery_tested_within_365_days
+name: OCI Disaster Recovery Tested Within 365 Days
+type: AUTOMATED
+role: configuration
+statement: >
+  A Full Stack DR drill (START_DRILL, not its STOP_DRILL cleanup and not a
+  precheck) ran to SUCCEEDED within the last 365 days. Asserts the fetcher's
+  `tested_within_365_days`, which is true only for a successful drill inside
+  the window: false when the last one is older, null when none ever
+  succeeded. Both of those fail here, so the validator carries its own
+  integrity — a tenancy with no DR at all cannot pass it. Does NOT judge
+  whether the drill covered every protection group; `drill_plans_never_tested`
+  is in the evidence for that. Fails when the summary key is renamed.
+regex: '"tested_within_365_days":\s*(?<tested_within_365_days>true)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-DR-TESTS

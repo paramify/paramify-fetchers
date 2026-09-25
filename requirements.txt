@@ -108,3 +108,7 @@ google-cloud-bigquery
 google-cloud-secret-manager
 google-cloud-kms
 google-cloud-api-keys
+
+# Oracle Cloud Infrastructure. One distribution covers every OCI service — the
+# SDK is generated from one spec and ships all clients in the single `oci` package.
+oci

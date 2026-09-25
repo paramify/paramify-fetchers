@@ -1,0 +1,107 @@
+description: >
+  Oracle Cloud Infrastructure evidence fetchers (python, the official `oci` SDK).
+  Each fetcher resolves one tenancy, walks the compartment tree beneath a chosen
+  root, and collects one evidence set. A manifest target scopes a run to a
+  specific compartment; when a target omits `compartment` the fetcher collects
+  from the tenancy root ("collect the whole tenancy").
+
+# AUTH — four paths, resolved in this order by _shared/oci_common.resolve_signer().
+#
+#   1. Handed-over API signing key, entirely from env. The runner injects these
+#      as secrets, so nothing is written to disk. This is the deployed path.
+#      OCI_PRIVATE_KEY carries the PEM *content*, not a path — the SDK supports
+#      it as `key_content` in a config DICT and explicitly REFUSES the same key
+#      in a config FILE (config.CONFIG_FILE_BLACKLISTED_KEYS), so a secret can
+#      never be smuggled in through a file.
+#   2. Instance principal — a compute instance's own identity, via the instance
+#      metadata service. No env var; selected with OCI_CLI_AUTH=instance_principal.
+#   3. Resource principal — Functions / OKE workload identity. Selected by the
+#      presence of OCI_RESOURCE_PRINCIPAL_VERSION, which the SDK reads itself.
+#   4. ~/.oci/config, the local dev loop. OCI_CONFIG_FILE relocates it.
+#
+# TRAP, verified against the SDK source: OCI_CLI_PROFILE is read by the *CLI*,
+# never by the Python SDK — oci.config.from_file() defaults to [DEFAULT] and takes
+# the profile as an argument. A tenancy whose config file has no [DEFAULT] section
+# would fail with the profile env var apparently set correctly. oci_common reads
+# OCI_CLI_PROFILE itself and passes it through, so the CLI's spelling works here.
+#
+# The runner strips ambient env by default; the non-sensitive selectors below opt
+# paths 2-4 back in. They only take effect when actually set, so listing them is
+# safe, and none is a secret.
+requires:
+  python_packages:
+    - oci
+
+# Declared here rather than per fetcher, and all `required: false`: a deployment
+# using an instance or resource principal supplies none of them, and declaring
+# them mandatory would fail `paramify validate` for every such manifest. The
+# lowercase `name` is what a manifest entry keys on; `env` is the variable the
+# runner sets, which is what fetchers/oci/_shared/oci_common.py reads (AWS and
+# Azure declare theirs the same way).
+secrets:
+  - name: private_key
+    env: OCI_PRIVATE_KEY
+    required: false
+    description: >
+      API signing key, PEM content (not a path). The only true secret here —
+      the OCIDs and fingerprint beside it are identifiers. Generate under
+      Profile -> API keys -> Add API key.
+  - name: private_key_passphrase
+    env: OCI_PRIVATE_KEY_PASSPHRASE
+    required: false
+    description: Passphrase, only if the signing key is encrypted.
+  - name: user_ocid
+    env: OCI_USER_OCID
+    required: false
+    description: OCID of the user the API key belongs to (ocid1.user.oc1..).
+  - name: tenancy_ocid
+    env: OCI_TENANCY_OCID
+    required: false
+    description: OCID of the tenancy to collect from (ocid1.tenancy.oc1..).
+  - name: fingerprint
+    env: OCI_FINGERPRINT
+    required: false
+    description: Fingerprint of the uploaded public key, as shown in the console.
+
+auth:
+  passthrough_env:
+    # Region for the API-key path, and the SDK's own region override.
+    - OCI_REGION
+    # Relocates the config file for the local-dev path — a path, not a secret.
+    - OCI_CONFIG_FILE
+    # CLI-only spelling; oci_common honours it (see the trap above).
+    - OCI_CLI_PROFILE
+    # Selects instance-principal / resource-principal / api_key explicitly.
+    - OCI_CLI_AUTH
+    # Resource-principal (Functions, OKE workload identity). The SDK reads these
+    # itself; they are listed so the runner does not strip them.
+    - OCI_RESOURCE_PRINCIPAL_VERSION
+    - OCI_RESOURCE_PRINCIPAL_RPST
+    - OCI_RESOURCE_PRINCIPAL_PRIVATE_PEM
+    - OCI_RESOURCE_PRINCIPAL_PRIVATE_PEM_PASSPHRASE
+    - OCI_RESOURCE_PRINCIPAL_REGION
+
+config_schema:
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect from. Optional — omit to collect from the
+      tenancy root. Set one target per compartment to fan out instead.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default: OCI resources
+      live in compartments, and a tenancy-root-only collection reports an empty
+      estate for almost every real tenancy.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. The runner's envelope carries no environment field.

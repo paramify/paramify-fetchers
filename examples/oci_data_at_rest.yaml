@@ -1,0 +1,92 @@
+# OCI data-at-rest evidence — whose key protects what, and who can reach it:
+#
+#   oci_vault_keys                 how each key is held (HSM / software /
+#                                  external) and whether it is ACTUALLY rotated
+#   oci_block_volume_encryption    the key on each volume AND on its backups,
+#                                  plus in-transit encryption
+#   oci_object_storage_buckets     bucket access including pre-authenticated
+#                                  requests, and data-event logging
+#   oci_data_service_exposure      managed databases, file systems and
+#                                  integration instances: reachability + key
+#   oci_certificates               certificate validity and whether renewal is
+#                                  automated
+#
+# Same auth as examples/oci_identity_and_access.yaml — see its header for the
+# five environment variables and the workload-identity alternative.
+#
+# Three things in this set read differently from the equivalent AWS/Azure/GCP
+# evidence, and are worth knowing before an assessor asks:
+#
+#   * A bucket with NoPublicAccess can still be readable by anyone holding a
+#     pre-authenticated request URL. PARs are listed here; most tools never list
+#     them at all.
+#   * On a managed database, `kms_key_id` can be the literal string
+#     "ORACLE_MANAGED_KEY". Reading it as "a customer key is set" is wrong, and
+#     the evidence distinguishes the two.
+#   * A key can carry a rotation INTERVAL with auto-rotation switched off. That
+#     is not rotation, and keys in a DEFAULT vault (where OCI refuses
+#     auto-rotation entirely) are counted apart so the summary never reports a
+#     finding an operator cannot clear.
+#
+# One entry per compartment to fan out; `include_subcompartments` is on by
+# default, so a single tenancy-root target collects the whole estate.
+run:
+  output_dir: ./evidence
+
+  platforms:
+    oci:
+      auth:
+        passthrough_env:
+          - OCI_REGION
+          - OCI_CLI_AUTH
+
+  fetchers:
+    - use: oci_vault_keys
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod
+
+    - use: oci_block_volume_encryption
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod
+
+    - use: oci_object_storage_buckets
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod
+
+    - use: oci_data_service_exposure
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod
+
+    - use: oci_certificates
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod

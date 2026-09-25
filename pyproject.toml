@@ -86,6 +86,16 @@ gcp = [
     "google-cloud-kms",
     "google-cloud-api-keys",
 ]
+# OCI category (fetchers/oci/*). One distribution covers every OCI service: the
+# SDK is generated from a single spec and ships all clients in the `oci` package,
+# so there is no per-service list to keep in step. Major is left open — the SDK is
+# generated and additive, and the fetchers read generated models whose field names
+# tools/oci_schema_check.py verifies against the installed version.
+#
+# Unlike the gcp extra, this one carries test signal: every tests/test_oci_*.py
+# opens with pytest.importorskip("oci"), so without it installed they SKIP rather
+# than fail. Out of `all` for the same reason as Azure and GCP.
+oci = ["oci"]
 # Convenience: every front-end + dev tooling in one install.
 all = ["textual>=8,<9", "checkov", "pytest", "ruff", "mypy"]
 

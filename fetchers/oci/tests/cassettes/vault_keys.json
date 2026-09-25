@@ -1,0 +1,151 @@
+{
+ "interactions": [
+  {
+   "key": "GET identity/20160918/compartments?accessLevel=ACCESSIBLE&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy&compartmentIdInSubtree=true&lifecycleState=ACTIVE",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"id\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"name\": \"fetcher-test\", \"description\": \"Scratch compartment for Paramify fetcher verification\", \"timeCreated\": \"2026-09-10T19:08:22.162Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-10T19:08:22.039Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"name\": \"fetcher-test-apps\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-21T19:21:42.963Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:21:42.895Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"id\": \"ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua\", \"name\": \"fetcher-test-web\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-21T19:21:54.020Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:21:53.946Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a\", \"name\": \"fetcher-test-zone\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-15T20:08:18.463Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:08:18.390Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}]"
+  },
+  {
+   "key": "GET kms/20180608/vaults?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET kms/20180608/vaults?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"cryptoEndpoint\": \"https://efvktjccaac6k-crypto.kms.us-phoenix-1.oraclecloud.com\", \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:02:10.106Z\"}}, \"displayName\": \"fetcher-test-vault\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"id\": \"ocid1.vault.oc1.phx.efvktjccaac6k.abyhqljrrlrnxnkdotx55jkmw2wb6sxh52x5prbgdc5ou67osydj7ezhy62a\", \"lifecycleState\": \"ACTIVE\", \"managementEndpoint\": \"https://efvktjccaac6k-management.kms.us-phoenix-1.oraclecloud.com\", \"timeCreated\": \"2026-09-15T20:02:10.877Z\", \"timeOfDeletion\": null, \"vaultType\": \"DEFAULT\", \"restoredFromVaultId\": null, \"wrappingkeyId\": \"\", \"replicaDetails\": null, \"isPrimary\": true, \"isVaultReplicable\": null, \"externalKeyManagerMetadataSummary\": null}]"
+  },
+  {
+   "key": "GET kms/20180608/vaults/ocid1.vault.oc1.phx.efvktjccaac6k.abyhqljrrlrnxnkdotx55jkmw2wb6sxh52x5prbgdc5ou67osydj7ezhy62a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"cryptoEndpoint\": \"https://efvktjccaac6k-crypto.kms.us-phoenix-1.oraclecloud.com\", \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:02:10.106Z\"}}, \"displayName\": \"fetcher-test-vault\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"id\": \"ocid1.vault.oc1.phx.efvktjccaac6k.abyhqljrrlrnxnkdotx55jkmw2wb6sxh52x5prbgdc5ou67osydj7ezhy62a\", \"lifecycleState\": \"ACTIVE\", \"managementEndpoint\": \"https://efvktjccaac6k-management.kms.us-phoenix-1.oraclecloud.com\", \"timeCreated\": \"2026-09-15T20:02:10.877Z\", \"timeOfDeletion\": null, \"vaultType\": \"DEFAULT\", \"restoredFromVaultId\": null, \"wrappingkeyId\": \"ocid1.key.oc1.phx.efvktjccaac6k.abyhqljrpvvfbvhpk2ewidydw5k7h23gyjmrbdskbs6uov3uoejm6txp5dga\", \"replicaDetails\": null, \"isPrimary\": true, \"isVaultReplicable\": true, \"externalKeyManagerMetadataSummary\": null}"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "opc-next-page": "AAAAAAAAAAJleUpyYVdRaU9pSXlOREl3SWl3aVpXNWpJam9pUVRJMU5rZERUU0lzSW1Gc1p5STZJbVJwY2lKOS4ueFZ5ZHZaOUd2d1V1Zk1FVC5hQlVnSW9yREh2aEVlTFFlZzZqUXpEY05LZW1VRUFtYjkxU2toa2FTdlUzSG1FaFNFX21lQ2UteXhlYnlYd3lZVDQ4cF84cU9FSm55MGd2RHBBQTliSUNJWldoV2kwX1U5NkVmdTB6VEZ1bTZXeDNvOENCcTV5cG05MWNKbkhOMWhOazV4dWk5RHVSY2V6V2pwdUNnN01oLUFBNkJrYmdnVnJGeENIeDRlQjc3XzUzZzVGS0NhOUhvTjJPZ0Z3YWk0aVVCMXNxUlQ2ZW1tRU1WUkxRcWdSa0RfS1A2MGtZb3piRWwtQU9EbkpiQzA5eHdmWm40V1NKaUw2dzRfbHBsZC11Tk9KQzZSVDdMN0xEdHRSQkR6bTd6UURUUFQyVFVnREVSV3dVMDFqeGZMa0pLajlpNzFLZW00M3pzUEhDNkh3OVZ5bi16cXlIQWxIWEJzYkhFMXhSbk5mb01nR0c4VEFFVVBHX19CYUhvX2FlX1pSVHVzRXdjTlo4NUFqSTJ3U0xteElYV3Fxa2xBcTZLUkN1eEthRUszdmVTUUpOci14cmVFbTNjLXBfMEotV29keTZKeFhYcmYtazhMTkc3Z1hQd05vbEI1ZmlaQVBXYjRtWUZOOUlYVjBCRXlsc3Jhd1dBRWtCNFJ5MHBDbGNiNzFqenRJdHpWaWMtbWQ3WGN3UnZlQWNsYVZDOG1ockk3UkNHbFBja0pjQnFoSHpQWkViaG82WWJhNzBURGdaN3ZLSUVxWFNUXzFLbG1VSVFwTHc2WTZUUUFwcXVpeUlRcW5mM2E0VExLdmdvU1pCUTBNdFdjNVN0UUJPZl9fQnBqaUJRTWFDV3BtZExTMVBlLV9kamZEdGVSZGo3WGxBUzUzUWp4Tm56dFhQOWxjemoyaFJOdGRIRklKTjl6ZUpZUVhCWVdHZDdWRTQ3V25IaERRMjBPMkdYSjZWMGNnZ21pRjhiOEd1dWstYU5GYXpSZEpqTmRxTTUyMFh0clRxWkxBTVJFQW9DeDZNSWlNQ0FJa2RKSkhqclVFQndrV3NTTGo2WU5nd0w5czhoWlA3a0otSWZ6OThYN3A2cXhpT2ZmQ1RaVkhWcmdYdEVmT2NqcTUwSzZCTlNwYnpCQUNKS0tZTUg4MXdCd2RTdk1hcFFhWHJtNmxMMEtBV2ZUYjJFWHZuNnREd012ejFRdHBuc09sV3JJMzRuQ3FyY1c4U25IbHhBcmlnWHhXY1lEdzR5ODljRUdDTTNEa0x2eURhOVJSUV9WVDVHcUhWUUdNWloyUVJLNnRRMGRBT2xHMmVEVTFkSnRzUzU1cDRCel9jNlJzZE9MMFIwU1QwWC1mLUtMaFBBaUV4YjdNWjZrZzNCZmZoY0V4aVBFZy5zbWtXU0ZVSHdTWUdGeHp2dndVYTh3",
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:03:55.428Z\"}}, \"displayName\": \"fetcher-test-key-rotating\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"id\": \"ocid1.key.oc1.phx.efvktjccaac6k.abyhqljtnl4gtnxn6ffalbldmanbzonrnsjqwzjuba4yuqebrlspb2all6ha\", \"lifecycleState\": \"ENABLED\", \"timeCreated\": \"2026-09-15T20:03:55.628Z\", \"vaultId\": \"ocid1.vault.oc1.phx.efvktjccaac6k.abyhqljrrlrnxnkdotx55jkmw2wb6sxh52x5prbgdc5ou67osydj7ezhy62a\", \"protectionMode\": \"HSM\", \"algorithm\": \"AES\", \"externalKeyReferenceDetails\": null, \"isAutoRotationEnabled\": false}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:04:59.834Z\"}}, \"displayName\": \"fetcher-test-key-static\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"id\": \"ocid1.key.oc1.phx.efvktjccaac6k.abyhqljs3v6vwdzufhqatt7yhuyqtdfcc7q4brxydgkql7evvxbsofgpl3ba\", \"lifecycleState\": \"ENABLED\", \"timeCreated\": \"2026-09-15T20:05:00.004Z\", \"vaultId\": \"ocid1.vault.oc1.phx.efvktjccaac6k.abyhqljrrlrnxnkdotx55jkmw2wb6sxh52x5prbgdc5ou67osydj7ezhy62a\", \"protectionMode\": \"HSM\", \"algorithm\": \"AES\", \"externalKeyReferenceDetails\": null, \"isAutoRotationEnabled\": false}]"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq&page=AAAAAAAAAAJleUpyYVdRaU9pSXlOREl3SWl3aVpXNWpJam9pUVRJMU5rZERUU0lzSW1Gc1p5STZJbVJwY2lKOS4ueFZ5ZHZaOUd2d1V1Zk1FVC5hQlVnSW9yREh2aEVlTFFlZzZqUXpEY05LZW1VRUFtYjkxU2toa2FTdlUzSG1FaFNFX21lQ2UteXhlYnlYd3lZVDQ4cF84cU9FSm55MGd2RHBBQTliSUNJWldoV2kwX1U5NkVmdTB6VEZ1bTZXeDNvOENCcTV5cG05MWNKbkhOMWhOazV4dWk5RHVSY2V6V2pwdUNnN01oLUFBNkJrYmdnVnJGeENIeDRlQjc3XzUzZzVGS0NhOUhvTjJPZ0Z3YWk0aVVCMXNxUlQ2ZW1tRU1WUkxRcWdSa0RfS1A2MGtZb3piRWwtQU9EbkpiQzA5eHdmWm40V1NKaUw2dzRfbHBsZC11Tk9KQzZSVDdMN0xEdHRSQkR6bTd6UURUUFQyVFVnREVSV3dVMDFqeGZMa0pLajlpNzFLZW00M3pzUEhDNkh3OVZ5bi16cXlIQWxIWEJzYkhFMXhSbk5mb01nR0c4VEFFVVBHX19CYUhvX2FlX1pSVHVzRXdjTlo4NUFqSTJ3U0xteElYV3Fxa2xBcTZLUkN1eEthRUszdmVTUUpOci14cmVFbTNjLXBfMEotV29keTZKeFhYcmYtazhMTkc3Z1hQd05vbEI1ZmlaQVBXYjRtWUZOOUlYVjBCRXlsc3Jhd1dBRWtCNFJ5MHBDbGNiNzFqenRJdHpWaWMtbWQ3WGN3UnZlQWNsYVZDOG1ockk3UkNHbFBja0pjQnFoSHpQWkViaG82WWJhNzBURGdaN3ZLSUVxWFNUXzFLbG1VSVFwTHc2WTZUUUFwcXVpeUlRcW5mM2E0VExLdmdvU1pCUTBNdFdjNVN0UUJPZl9fQnBqaUJRTWFDV3BtZExTMVBlLV9kamZEdGVSZGo3WGxBUzUzUWp4Tm56dFhQOWxjemoyaFJOdGRIRklKTjl6ZUpZUVhCWVdHZDdWRTQ3V25IaERRMjBPMkdYSjZWMGNnZ21pRjhiOEd1dWstYU5GYXpSZEpqTmRxTTUyMFh0clRxWkxBTVJFQW9DeDZNSWlNQ0FJa2RKSkhqclVFQndrV3NTTGo2WU5nd0w5czhoWlA3a0otSWZ6OThYN3A2cXhpT2ZmQ1RaVkhWcmdYdEVmT2NqcTUwSzZCTlNwYnpCQUNKS0tZTUg4MXdCd2RTdk1hcFFhWHJtNmxMMEtBV2ZUYjJFWHZuNnREd012ejFRdHBuc09sV3JJMzRuQ3FyY1c4U25IbHhBcmlnWHhXY1lEdzR5ODljRUdDTTNEa0x2eURhOVJSUV9WVDVHcUhWUUdNWloyUVJLNnRRMGRBT2xHMmVEVTFkSnRzUzU1cDRCel9jNlJzZE9MMFIwU1QwWC1mLUtMaFBBaUV4YjdNWjZrZzNCZmZoY0V4aVBFZy5zbWtXU0ZVSHdTWUdGeHp2dndVYTh3",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys/ocid1.key.oc1.phx.efvktjccaac6k.abyhqljtnl4gtnxn6ffalbldmanbzonrnsjqwzjuba4yuqebrlspb2all6ha",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"currentKeyVersion\": \"ocid1.keyversion.oc1.phx.efvktjccaac6k.akqznku2ngyaa.abyhqljscgnxbyeuwcn7z44tlvfgxyon2oskkm2kqfntaiq7vrekcim5rjka\", \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:03:55.428Z\"}}, \"displayName\": \"fetcher-test-key-rotating\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"id\": \"ocid1.key.oc1.phx.efvktjccaac6k.abyhqljtnl4gtnxn6ffalbldmanbzonrnsjqwzjuba4yuqebrlspb2all6ha\", \"keyShape\": {\"algorithm\": \"AES\", \"length\": 32, \"curveId\": null}, \"protectionMode\": \"HSM\", \"lifecycleState\": \"ENABLED\", \"timeCreated\": \"2026-09-15T20:03:55.628Z\", \"timeOfDeletion\": null, \"vaultId\": \"ocid1.vault.oc1.phx.efvktjccaac6k.abyhqljrrlrnxnkdotx55jkmw2wb6sxh52x5prbgdc5ou67osydj7ezhy62a\", \"restoredFromKeyId\": null, \"replicaDetails\": null, \"isPrimary\": true, \"isAutoRotationEnabled\": false, \"autoKeyRotationDetails\": null, \"externalKeyReferenceDetails\": null}"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys/ocid1.key.oc1.phx.efvktjccaac6k.abyhqljtnl4gtnxn6ffalbldmanbzonrnsjqwzjuba4yuqebrlspb2all6ha/keyVersions/ocid1.keyversion.oc1.phx.efvktjccaac6k.akqznku2ngyaa.abyhqljscgnxbyeuwcn7z44tlvfgxyon2oskkm2kqfntaiq7vrekcim5rjka",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.keyversion.oc1.phx.efvktjccaac6k.akqznku2ngyaa.abyhqljscgnxbyeuwcn7z44tlvfgxyon2oskkm2kqfntaiq7vrekcim5rjka\", \"keyId\": \"ocid1.key.oc1.phx.efvktjccaac6k.abyhqljtnl4gtnxn6ffalbldmanbzonrnsjqwzjuba4yuqebrlspb2all6ha\", \"publicKey\": null, \"lifecycleState\": \"ENABLED\", \"origin\": \"INTERNAL\", \"timeCreated\": \"2026-09-15T20:12:11.674Z\", \"timeOfDeletion\": null, \"vaultId\": \"ocid1.vault.oc1.phx.efvktjccaac6k.abyhqljrrlrnxnkdotx55jkmw2wb6sxh52x5prbgdc5ou67osydj7ezhy62a\", \"restoredFromKeyVersionId\": null, \"replicaDetails\": {\"replicationId\": null}, \"isPrimary\": true, \"externalKeyReferenceDetails\": null, \"isAutoRotated\": false}"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys/ocid1.key.oc1.phx.efvktjccaac6k.abyhqljtnl4gtnxn6ffalbldmanbzonrnsjqwzjuba4yuqebrlspb2all6ha/keyVersions",
+   "status": 200,
+   "headers": {
+    "opc-next-page": "AAAAAAAAAAJleUpyYVdRaU9pSXlOREl3SWl3aVpXNWpJam9pUVRJMU5rZERUU0lzSW1Gc1p5STZJbVJwY2lKOS4uN1BfNWc3dmJOaHRNMFBRZC5yejBlcW1OR3JaMGpDcFdsbE0ybDE3NXJjM0djeWZZVkJINkxJUzBaMS10R0Z6Q3p0Rmt1S2ZuZGF0SkhERUladXBIOW51aTZJYmpTOTRvdkRsWWdzLVFpLURNcEhUS3czdXEwaDVkNWNYU1hOTTVoQ2VpVktaUnNmeGwxVzd5TXpWNGpWXzMyZC1abFFrdHpVQXppc3dJNWFvZllXR3dWdWRUdVlkTUxfdXJuYkZlbmxGVGlyQk9ycHA1TjFfMEsySzhiYzM1dHRMMG5ZQ01EV2ZNQ2lRQ2VvdldEaWZYWk90alYteUJDWWVuUHBRRkUyd1I1ZE8zOFVnSVN6LUdGeFRHRERrRll3WFAwamx1UnJ6ME52TWVBblZkUE05ajBmZ0tiYWF5YUNIN3dEWmdYWmNFUXRody1TdS1tckNfNW1QVDI4Mjg1V0RKUG1oaXpoalBlV3BuRk9DYl9zUUFZcUtIYTVxdllfZUg0MHBEMHZ3WHY1T18tSmw2SVd6MXJwdUZOazkweEVCRHd3bWtLRURoYmZ5dVp6b2w1VF91Y0tfRzY0X094V0ItU3Y2V245RGotclVUV1NVbHZIRFFKVTQ0Wkx4dGt4OWlzWTlpQUEtMWsyMEFaVUJEdUY1N0NfVkYwWFFjVmk4NE5EYmpRUFdKQnV2eV9yU3QzTHhPSDhINU1NQlZQeGtLVFFiRmpmSWJKd0xGVWFWckVpcUxaUWUtdlVDbGdweTRoOFFTVDJ3TEhvblJzeE5zelVqMHRYeVRKOGVhUVp0cDczV0M3UFNsQ2U4S0lsWmRfOFVGeVJ3dFdOVXZOeUlkNHB2aWhfckRCNUpSb0J5Rk5od05xbG02REhpbnAyM29YV0xGWjBab3BIVm1RcC12VElFcG9QUVVYTlE4N0FyTDJKWklvQVMzbENiSGdpdk1paW1MWG9YUmZXN1ZYQ1B1TmxQMGRHckp0cGpqanBxcDd2b0ZIUW5vN0xCdDBnbHh2cnd5blY0eWgyR1pnaUxMZklnYldGU051T2dMYmE3UndZLVBVS216SWdBLmd0MkdmS1JzLUJWWXV5aUF6bzJORnc=",
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.keyversion.oc1.phx.efvktjccaac6k.akqznku2ngyaa.abyhqljscgnxbyeuwcn7z44tlvfgxyon2oskkm2kqfntaiq7vrekcim5rjka\", \"keyId\": \"ocid1.key.oc1.phx.efvktjccaac6k.abyhqljtnl4gtnxn6ffalbldmanbzonrnsjqwzjuba4yuqebrlspb2all6ha\", \"lifecycleState\": \"ENABLED\", \"origin\": \"INTERNAL\", \"timeCreated\": \"2026-09-15T20:12:11.674Z\", \"timeOfDeletion\": null, \"vaultId\": \"ocid1.vault.oc1.phx.efvktjccaac6k.abyhqljrrlrnxnkdotx55jkmw2wb6sxh52x5prbgdc5ou67osydj7ezhy62a\", \"externalKeyReferenceDetails\": null, \"isAutoRotated\": false}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.keyversion.oc1.phx.efvktjccaac6k.akylnku2jkyaa.abyhqljtnkw2kuhw6gikn7wr2hy55fuefbjd27yhkhh267hzp2mnx2wigzua\", \"keyId\": \"ocid1.key.oc1.phx.efvktjccaac6k.abyhqljtnl4gtnxn6ffalbldmanbzonrnsjqwzjuba4yuqebrlspb2all6ha\", \"lifecycleState\": \"ENABLED\", \"origin\": \"INTERNAL\", \"timeCreated\": \"2026-09-15T20:03:55.657Z\", \"timeOfDeletion\": null, \"vaultId\": \"ocid1.vault.oc1.phx.efvktjccaac6k.abyhqljrrlrnxnkdotx55jkmw2wb6sxh52x5prbgdc5ou67osydj7ezhy62a\", \"externalKeyReferenceDetails\": null, \"isAutoRotated\": false}]"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys/ocid1.key.oc1.phx.efvktjccaac6k.abyhqljtnl4gtnxn6ffalbldmanbzonrnsjqwzjuba4yuqebrlspb2all6ha/keyVersions?page=AAAAAAAAAAJleUpyYVdRaU9pSXlOREl3SWl3aVpXNWpJam9pUVRJMU5rZERUU0lzSW1Gc1p5STZJbVJwY2lKOS4uN1BfNWc3dmJOaHRNMFBRZC5yejBlcW1OR3JaMGpDcFdsbE0ybDE3NXJjM0djeWZZVkJINkxJUzBaMS10R0Z6Q3p0Rmt1S2ZuZGF0SkhERUladXBIOW51aTZJYmpTOTRvdkRsWWdzLVFpLURNcEhUS3czdXEwaDVkNWNYU1hOTTVoQ2VpVktaUnNmeGwxVzd5TXpWNGpWXzMyZC1abFFrdHpVQXppc3dJNWFvZllXR3dWdWRUdVlkTUxfdXJuYkZlbmxGVGlyQk9ycHA1TjFfMEsySzhiYzM1dHRMMG5ZQ01EV2ZNQ2lRQ2VvdldEaWZYWk90alYteUJDWWVuUHBRRkUyd1I1ZE8zOFVnSVN6LUdGeFRHRERrRll3WFAwamx1UnJ6ME52TWVBblZkUE05ajBmZ0tiYWF5YUNIN3dEWmdYWmNFUXRody1TdS1tckNfNW1QVDI4Mjg1V0RKUG1oaXpoalBlV3BuRk9DYl9zUUFZcUtIYTVxdllfZUg0MHBEMHZ3WHY1T18tSmw2SVd6MXJwdUZOazkweEVCRHd3bWtLRURoYmZ5dVp6b2w1VF91Y0tfRzY0X094V0ItU3Y2V245RGotclVUV1NVbHZIRFFKVTQ0Wkx4dGt4OWlzWTlpQUEtMWsyMEFaVUJEdUY1N0NfVkYwWFFjVmk4NE5EYmpRUFdKQnV2eV9yU3QzTHhPSDhINU1NQlZQeGtLVFFiRmpmSWJKd0xGVWFWckVpcUxaUWUtdlVDbGdweTRoOFFTVDJ3TEhvblJzeE5zelVqMHRYeVRKOGVhUVp0cDczV0M3UFNsQ2U4S0lsWmRfOFVGeVJ3dFdOVXZOeUlkNHB2aWhfckRCNUpSb0J5Rk5od05xbG02REhpbnAyM29YV0xGWjBab3BIVm1RcC12VElFcG9QUVVYTlE4N0FyTDJKWklvQVMzbENiSGdpdk1paW1MWG9YUmZXN1ZYQ1B1TmxQMGRHckp0cGpqanBxcDd2b0ZIUW5vN0xCdDBnbHh2cnd5blY0eWgyR1pnaUxMZklnYldGU051T2dMYmE3UndZLVBVS216SWdBLmd0MkdmS1JzLUJWWXV5aUF6bzJORnc=",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys/ocid1.key.oc1.phx.efvktjccaac6k.abyhqljs3v6vwdzufhqatt7yhuyqtdfcc7q4brxydgkql7evvxbsofgpl3ba",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"currentKeyVersion\": \"ocid1.keyversion.oc1.phx.efvktjccaac6k.akm7nku2j2yaa.abyhqljsbrf2hffn5ixuhvgy6ahxjzd2pb2pwgahzqsvi2jhf7tvjypfwcaa\", \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:04:59.834Z\"}}, \"displayName\": \"fetcher-test-key-static\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"id\": \"ocid1.key.oc1.phx.efvktjccaac6k.abyhqljs3v6vwdzufhqatt7yhuyqtdfcc7q4brxydgkql7evvxbsofgpl3ba\", \"keyShape\": {\"algorithm\": \"AES\", \"length\": 32, \"curveId\": null}, \"protectionMode\": \"HSM\", \"lifecycleState\": \"ENABLED\", \"timeCreated\": \"2026-09-15T20:05:00.004Z\", \"timeOfDeletion\": null, \"vaultId\": \"ocid1.vault.oc1.phx.efvktjccaac6k.abyhqljrrlrnxnkdotx55jkmw2wb6sxh52x5prbgdc5ou67osydj7ezhy62a\", \"restoredFromKeyId\": null, \"replicaDetails\": null, \"isPrimary\": true, \"isAutoRotationEnabled\": false, \"autoKeyRotationDetails\": null, \"externalKeyReferenceDetails\": null}"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys/ocid1.key.oc1.phx.efvktjccaac6k.abyhqljs3v6vwdzufhqatt7yhuyqtdfcc7q4brxydgkql7evvxbsofgpl3ba/keyVersions/ocid1.keyversion.oc1.phx.efvktjccaac6k.akm7nku2j2yaa.abyhqljsbrf2hffn5ixuhvgy6ahxjzd2pb2pwgahzqsvi2jhf7tvjypfwcaa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.keyversion.oc1.phx.efvktjccaac6k.akm7nku2j2yaa.abyhqljsbrf2hffn5ixuhvgy6ahxjzd2pb2pwgahzqsvi2jhf7tvjypfwcaa\", \"keyId\": \"ocid1.key.oc1.phx.efvktjccaac6k.abyhqljs3v6vwdzufhqatt7yhuyqtdfcc7q4brxydgkql7evvxbsofgpl3ba\", \"publicKey\": null, \"lifecycleState\": \"ENABLED\", \"origin\": \"INTERNAL\", \"timeCreated\": \"2026-09-15T20:05:00.033Z\", \"timeOfDeletion\": null, \"vaultId\": \"ocid1.vault.oc1.phx.efvktjccaac6k.abyhqljrrlrnxnkdotx55jkmw2wb6sxh52x5prbgdc5ou67osydj7ezhy62a\", \"restoredFromKeyVersionId\": null, \"replicaDetails\": {\"replicationId\": null}, \"isPrimary\": true, \"externalKeyReferenceDetails\": null, \"isAutoRotated\": false}"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys/ocid1.key.oc1.phx.efvktjccaac6k.abyhqljs3v6vwdzufhqatt7yhuyqtdfcc7q4brxydgkql7evvxbsofgpl3ba/keyVersions",
+   "status": 200,
+   "headers": {
+    "opc-next-page": "AAAAAAAAAAJleUpyYVdRaU9pSXlOREl3SWl3aVpXNWpJam9pUVRJMU5rZERUU0lzSW1Gc1p5STZJbVJwY2lKOS4uSVl3Uk50Z041LTFjTnJQZi5wcWFHOGhrY1NmN2ZpZWJfdXNGNGJXRHhpd29Fdkx5M1FwTnExY2VtUUNFMUxVbWNNbzU1RGFfRXZUZlVqSTRNLWx2enJRLU5lejlhZ2l5X2xtZm1zSURGQ3lObHFLWG02WTdPZkVsOWxkZnR3LTZzbkJlNWVIWkRMNFhfZ3lTb3lPcjZ4SEtYUEo1WGlEYmxIUmNaV05RWnJjNDZQVnpTclJsU1VEM0NsSlZTMFhRazktRnQwRnhxaGd2QkJ3Q2hqVWJQQ20tSEgtdF9pWnJWemljQkttTG1uTnZ6ZVdyY3A3S1ppTFRNX3BlanE0VW1tRGl2SnFqeHhwOUhFX2VQRUloUmhpd2pyQ18tR0tldmxYYy05ekJwYjV4THFyNDEyWC1sRFBTaGVGREJ6Z1ptaWV0VFR1aU5EVm5jSGF4RlItVF95QnVsM3owcGpNMnM5bVpMNFdXOGxEMFFQdldHQ2dyem5EZjZqU0syRl81MEthemF3a21ySGpZaDU1R3hUdnY3SEdKQ3ZtLVN3c1VTUURzRjc4RkdpdWdSMWVvV3ZsdVNrazZYRi1lWlJBM0RBbzY1dlRuMkFWRFR2eE1reE9MUzJvcTJ3SjVOamQtS0RMc2duYzNrdGtpSkIxV1VyTDlMSG5oVThTV0RHNDYxOVFTc09OQmJZajY3ZmtLUnhzbTFSUW92WTBoR0lQSE9yWVltSHJMaERpYk1RUWx4VDhZSkdVTWZBRGtoNmxEWlRSZWdhY1JVOHZ3b3RZdkp5MTRtUUZnV0s4T3MyU053dWF1MVFpbXZZVjZha0JTMko4RGNycW1sNVc1Ymw2UHRfWVlyWlE4Wkh0RHBCVlNwNFAxYlNLanBDRDlJN1RHdkkwNTF0cDMyWmN2MC11YnY5anFtMmsydWVOYS14Zy1od0FxRWNBV1NWSmxva0ZQWTBmUnQteXJIWVhDcDd6Wlp4VmtoRU1MdVdJeERiQWxtZlU3emIxOG53Y2JHVEtmMGNJV0c3UDhFVkFYMzdfMDZ4N040WXY3akVXQ1hZQ0w5QUVaMllRLmhnVGpGTWZiaTN5dk9TVE56UklGY1E=",
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.keyversion.oc1.phx.efvktjccaac6k.akm7nku2j2yaa.abyhqljsbrf2hffn5ixuhvgy6ahxjzd2pb2pwgahzqsvi2jhf7tvjypfwcaa\", \"keyId\": \"ocid1.key.oc1.phx.efvktjccaac6k.abyhqljs3v6vwdzufhqatt7yhuyqtdfcc7q4brxydgkql7evvxbsofgpl3ba\", \"lifecycleState\": \"ENABLED\", \"origin\": \"INTERNAL\", \"timeCreated\": \"2026-09-15T20:05:00.033Z\", \"timeOfDeletion\": null, \"vaultId\": \"ocid1.vault.oc1.phx.efvktjccaac6k.abyhqljrrlrnxnkdotx55jkmw2wb6sxh52x5prbgdc5ou67osydj7ezhy62a\", \"externalKeyReferenceDetails\": null, \"isAutoRotated\": false}]"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys/ocid1.key.oc1.phx.efvktjccaac6k.abyhqljs3v6vwdzufhqatt7yhuyqtdfcc7q4brxydgkql7evvxbsofgpl3ba/keyVersions?page=AAAAAAAAAAJleUpyYVdRaU9pSXlOREl3SWl3aVpXNWpJam9pUVRJMU5rZERUU0lzSW1Gc1p5STZJbVJwY2lKOS4uSVl3Uk50Z041LTFjTnJQZi5wcWFHOGhrY1NmN2ZpZWJfdXNGNGJXRHhpd29Fdkx5M1FwTnExY2VtUUNFMUxVbWNNbzU1RGFfRXZUZlVqSTRNLWx2enJRLU5lejlhZ2l5X2xtZm1zSURGQ3lObHFLWG02WTdPZkVsOWxkZnR3LTZzbkJlNWVIWkRMNFhfZ3lTb3lPcjZ4SEtYUEo1WGlEYmxIUmNaV05RWnJjNDZQVnpTclJsU1VEM0NsSlZTMFhRazktRnQwRnhxaGd2QkJ3Q2hqVWJQQ20tSEgtdF9pWnJWemljQkttTG1uTnZ6ZVdyY3A3S1ppTFRNX3BlanE0VW1tRGl2SnFqeHhwOUhFX2VQRUloUmhpd2pyQ18tR0tldmxYYy05ekJwYjV4THFyNDEyWC1sRFBTaGVGREJ6Z1ptaWV0VFR1aU5EVm5jSGF4RlItVF95QnVsM3owcGpNMnM5bVpMNFdXOGxEMFFQdldHQ2dyem5EZjZqU0syRl81MEthemF3a21ySGpZaDU1R3hUdnY3SEdKQ3ZtLVN3c1VTUURzRjc4RkdpdWdSMWVvV3ZsdVNrazZYRi1lWlJBM0RBbzY1dlRuMkFWRFR2eE1reE9MUzJvcTJ3SjVOamQtS0RMc2duYzNrdGtpSkIxV1VyTDlMSG5oVThTV0RHNDYxOVFTc09OQmJZajY3ZmtLUnhzbTFSUW92WTBoR0lQSE9yWVltSHJMaERpYk1RUWx4VDhZSkdVTWZBRGtoNmxEWlRSZWdhY1JVOHZ3b3RZdkp5MTRtUUZnV0s4T3MyU053dWF1MVFpbXZZVjZha0JTMko4RGNycW1sNVc1Ymw2UHRfWVlyWlE4Wkh0RHBCVlNwNFAxYlNLanBDRDlJN1RHdkkwNTF0cDMyWmN2MC11YnY5anFtMmsydWVOYS14Zy1od0FxRWNBV1NWSmxva0ZQWTBmUnQteXJIWVhDcDd6Wlp4VmtoRU1MdVdJeERiQWxtZlU3emIxOG53Y2JHVEtmMGNJV0c3UDhFVkFYMzdfMDZ4N040WXY3akVXQ1hZQ0w5QUVaMllRLmhnVGpGTWZiaTN5dk9TVE56UklGY1E=",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET kms/20180608/vaults?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET kms/20180608/vaults?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET kms/20180608/vaults?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET identity/20160918/tenancies/ocid1.tenancy.oc1..aaaaaaaatenancy/regionSubscriptions",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"regionKey\": \"PHX\", \"regionName\": \"us-phoenix-1\", \"status\": \"READY\", \"isHomeRegion\": true}]"
+  }
+ ]
+}

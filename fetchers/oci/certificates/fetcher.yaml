@@ -1,0 +1,74 @@
+name: oci_certificates
+version: 0.1.0
+description: >
+  Every certificate and certificate authority in scope with the facts that
+  decide whether machine-to-machine communications stay authenticated: the
+  subject identified, the validity window and distance to expiry, key and
+  signature algorithms, revocation state, and whether a renewal rule re-issues
+  the certificate automatically before it lapses. Certificates imported from
+  outside OCI are counted apart from internally-issued ones that simply have no
+  renewal rule, since only the second group is a gap. Certificate authority
+  expiry is reported separately from leaf expiry, because a lapsed CA
+  invalidates every certificate beneath it at once. Reads metadata only — no
+  certificate bundle or private key material is requested.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_certificates.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect from. Optional — omit to collect from the
+      tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — certificates
+      are issued into the compartment of the service they front.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-SVC-VCM
+  - KSI-SVC-SIN
+
+evidence_set:
+  reference_id: EVD-OCI-CERTIFICATES
+  name: Certificate Lifecycle and Automatic Renewal
+  instructions: >
+    Script: fetcher.py. OCI Python SDK calls:
+    certificates_management.list_certificates() and
+    list_certificate_authorities(), walked over every accessible compartment
+    beneath the target. Metadata only — no certificate bundle is retrieved. One
+    evidence file per target.

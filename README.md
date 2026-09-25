@@ -23,6 +23,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 <a href="fetchers/aws/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/aws-dark.svg"><img src="fetchers/logos/aws.svg" alt="AWS" width="56" height="56" style="margin: 20px;"></picture></a>
 <a href="fetchers/azure/"><img src="fetchers/logos/azure.svg" alt="Azure" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/gcp/"><img src="fetchers/logos/gcp.svg" alt="GCP" width="56" height="56" style="margin: 20px;"></a>
+<a href="fetchers/oci/"><img src="fetchers/logos/oracle.svg" alt="Oracle Cloud" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/datadog/"><img src="fetchers/logos/datadog.svg" alt="Datadog" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/okta/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/okta-dark.svg"><img src="fetchers/logos/okta.svg" alt="Okta" width="56" height="56" style="margin: 20px;"></picture></a>
 <a href="fetchers/sentinelone/"><img src="fetchers/logos/sentinelone.svg" alt="SentinelOne" width="56" height="56" style="margin: 20px;"></a>
@@ -42,6 +43,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | **AWS** | 80 | Encryption at rest and in transit, IAM and Organizations guardrails, threat detection and vulnerability scanning, logging and config drift, network segmentation, WAF and DDoS protection, backup and high availability, patch compliance, key and secret rotation, and CI/CD pipeline config |
 | **Azure** | 28 | Storage/disk/SQL encryption and CMK use, Entra identity + Conditional Access, RBAC assignments and custom roles, Azure Policy assignments, network security groups, Key Vault config and key rotation, Defender plans and per-resource assessments, VM hardening, the container and PaaS surface (AKS, Container Registry, App Service, Functions, Databricks), diagnostic settings and activity-log alerts, backup, and the managed databases |
 | **GCP** | 19 | Disk/bucket/Cloud SQL/BigQuery/Secret Manager encryption and CMEK use, IAM policy bindings, custom roles and service-account keys, KMS key rotation, GKE cluster and Compute Engine hardening, Cloud Logging sinks, Cloud SQL backups and network exposure, VPC/firewall/DNS segmentation, load-balancer TLS, and API keys |
+| **Oracle Cloud** | 17 | Recovery drills with measured duration, dependency-vulnerability audits, just-in-time Bastion access, customer approval of Oracle operator access, certificate renewal automation, Cloud Guard detectors/responders and Security Zones, Zero Trust Packet Routing policy, IAM users/credentials/policies/password rules, vault key rotation, volume and bucket encryption with pre-authenticated requests, network reachability, instance hardening, audit/logging/event coverage, and managed data service exposure |
 | **Datadog** | 13 | Cloud SIEM detection rules, signals and operational config, monitors, log pipelines/indexes/archives, host & container inventory, agent checks, APM services, and incidents with timelines |
 | **Okta** | 8 | Phishing-resistant MFA and passwordless authentication, authenticators, least privilege, just-in-time access, non-user account authentication, suspicious activity management, and account management |
 | **CrowdStrike** | 7 | Managed host inventory, Spotlight vulnerabilities, detections, prevention policies, Zero Trust Assessment, FileVantage file integrity, and host firewall policies and rules |
@@ -94,19 +96,21 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e '.[all]'      # '[all]' bundles the TUI; use `pip install -e .` for the headless CLI only
 ```
 
-Azure and GCP are the exceptions to the CLI rule above: both talk to their cloud
-through the official SDKs rather than a CLI, so each has its own extra and
-neither needs a cloud CLI at runtime.
+Azure, GCP and Oracle Cloud are the exceptions to the CLI rule above: all three
+talk to their cloud through the official SDKs rather than a CLI, so each has its
+own extra and none needs a cloud CLI at runtime.
 
 ```bash
 pip install -e '.[azure]'    # 23 packages; no `az` CLI at runtime
 pip install -e '.[gcp]'      # 12 packages; no `gcloud` at runtime
+pip install -e '.[oci]'      # 1 package;  no `oci` CLI at runtime
 ```
 
-Both are deliberately kept out of `[all]` — they are the heaviest extras here
-and only matter if you actually run those categories. Azure authenticates
-through `DefaultAzureCredential`, GCP through Application Default Credentials;
-neither takes a static key file.
+All three are deliberately kept out of `[all]` — they only matter if you
+actually run those categories. Azure authenticates through
+`DefaultAzureCredential`, GCP through Application Default Credentials; OCI
+through an API signing key the runner injects as a secret, or an instance or
+resource principal where it is deployed. None takes a static key *file*.
 
 There are three ways to drive it — an interactive **TUI**, an **AI agent**, or the **CLI** directly. All three go through one facade (`framework.api`), so they behave identically; pick whichever fits how you work.
 
@@ -563,6 +567,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`fetchers/okta/README.md`](fetchers/okta/README.md) | Okta API token + required admin role |
 | [`fetchers/gitlab/README.md`](fetchers/gitlab/README.md) | GitLab project access token setup |
 | [`fetchers/sentinelone/README.md`](fetchers/sentinelone/README.md) | SentinelOne service user + API token |
+| [`fetchers/oci/README.md`](fetchers/oci/README.md) | OCI credential setup (four auth paths), the read-only collector policy, and testing without a tenancy |
 | [`fetchers/crowdstrike/README.md`](fetchers/crowdstrike/README.md) | CrowdStrike Falcon API client, scopes, and cloud/GovCloud selection |
 | [`fetchers/knowbe4/README.md`](fetchers/knowbe4/README.md) | KnowBe4 Reporting API key |
 | [`fetchers/rippling/README.md`](fetchers/rippling/README.md) | Rippling Developer Hub token + scopes |

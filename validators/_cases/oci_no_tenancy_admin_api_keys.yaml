@@ -1,0 +1,13 @@
+validator: oci_no_tenancy_admin_api_keys
+cases:
+  - name: no_admin_holds_a_key
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"tenancy_admins": 2, "tenancy_admins_with_api_keys": 0}}'
+
+  - name: the_admin_holds_a_key
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"tenancy_admins": 1, "tenancy_admins_with_api_keys": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"tenancy_admins": 1, "admins_with_api_keys": 0}}'

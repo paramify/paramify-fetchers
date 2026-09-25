@@ -1,0 +1,13 @@
+validator: oci_no_buckets_reachable_by_par
+cases:
+  - name: no_live_par_on_a_private_bucket
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_buckets": 5, "buckets_private_but_reachable_by_par": 0}}'
+
+  - name: a_private_bucket_carries_a_live_par
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_buckets": 5, "buckets_private_but_reachable_by_par": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_buckets": 5, "buckets_reachable_by_par": 0}}'

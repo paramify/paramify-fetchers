@@ -1,0 +1,28 @@
+key: oci_no_internet_reachable_ingress
+name: OCI No Internet-Reachable Ingress Rules
+type: AUTOMATED
+role: configuration
+statement: >
+  No security-list rule admitting the internet (0.0.0.0/0 or ::/0) sits on a
+  subnet that traffic can actually arrive at — that is, attached to a subnet
+  which permits internet ingress and whose route table reaches an enabled
+  internet gateway. Deliberately asserts REACHABLE ingress rather than
+  configured ingress: an open rule on an unattached security list, or in a VCN
+  with no gateway, governs no traffic, and failing on it would report an
+  exposure that does not exist. The configured count is reported alongside in
+  the evidence for a reader who wants it. Does NOT cover network security
+  groups, which attach to VNICs rather than subnets and so cannot be resolved
+  to a route table. Fails when a reachable open rule exists, and when the
+  summary key is renamed.
+regex: '"reachable_internet_ingress_rules":\s*(?<reachable_internet_ingress_rules>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-NETWORK-EXPOSURE

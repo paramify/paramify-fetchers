@@ -1,0 +1,60 @@
+{
+ "interactions": [
+  {
+   "key": "GET identity/20160918/compartments?accessLevel=ACCESSIBLE&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy&compartmentIdInSubtree=true&lifecycleState=ACTIVE",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"id\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"name\": \"fetcher-test\", \"description\": \"Scratch compartment for Paramify fetcher verification\", \"timeCreated\": \"2026-09-10T19:08:22.162Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-10T19:08:22.039Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"name\": \"fetcher-test-apps\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-21T19:21:42.963Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:21:42.895Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"id\": \"ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua\", \"name\": \"fetcher-test-web\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-21T19:21:54.020Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:21:53.946Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a\", \"name\": \"fetcher-test-zone\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-15T20:08:18.463Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:08:18.390Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}]"
+  },
+  {
+   "key": "GET disaster-recovery/20220125/drProtectionGroups?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET disaster-recovery/20220125/drProtectionGroups?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET disaster-recovery/20220125/drProtectionGroups?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET disaster-recovery/20220125/drProtectionGroups?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET disaster-recovery/20220125/drProtectionGroups?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "{\"items\": []}"
+  },
+  {
+   "key": "GET identity/20160918/tenancies/ocid1.tenancy.oc1..aaaaaaaatenancy/regionSubscriptions",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"regionKey\": \"PHX\", \"regionName\": \"us-phoenix-1\", \"status\": \"READY\", \"isHomeRegion\": true}]"
+  }
+ ]
+}

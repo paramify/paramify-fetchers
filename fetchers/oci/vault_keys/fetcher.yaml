@@ -1,0 +1,76 @@
+name: oci_vault_keys
+version: 0.1.0
+description: >
+  Every OCI Vault in scope and every key inside it: protection mode (HSM,
+  software or external), algorithm and length, auto-rotation settings, the age
+  of the key version actually in use, whether that version arrived automatically
+  or by hand, key version count, and whether the key or its vault is scheduled
+  for deletion. Automatic rotation requires the auto-rotation flag to be on and
+  the interval within 365 days — an interval left behind after auto-rotation was
+  switched off is not rotation. Manual rotation is counted separately from
+  automatic, and keys in a DEFAULT vault (where OCI refuses auto-rotation
+  entirely) are counted apart so the summary never reports a finding an operator
+  cannot clear. Keys that are disabled or pending deletion are collected too.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_vault_keys.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect vaults and keys from. Optional — omit to
+      collect from the tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — vaults are
+      created alongside the workloads whose data they encrypt.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-SVC-ASM      # Rotation of keys is automated and persistently reviewed
+  - KSI-SVC-SIN      # Information secured — protection mode is how the key itself is held
+
+evidence_set:
+  reference_id: EVD-OCI-VAULT-KEYS
+  name: Key Protection and Rotation
+  instructions: >
+    Script: fetcher.py. Ported from Prowler's OCI kms service (Apache-2.0). OCI
+    Python SDK calls: key_management.list_vaults() per compartment with
+    get_vault() per vault (the summary omits time_of_deletion), then against
+    each ACTIVE vault's own management endpoint list_keys(), get_key() per key
+    (the summary omits auto_key_rotation_details and current_key_version),
+    get_key_version() for the version in use and list_key_versions() for the
+    count. One evidence file per target.

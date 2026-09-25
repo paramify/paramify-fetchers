@@ -1,0 +1,126 @@
+# OCI platform posture — the tenancy's own assessment of itself, what is
+# reachable, and whether recovery and supply-chain claims are TESTED:
+#
+#   oci_cloud_guard_posture        Oracle's own detector: is the tenancy
+#                                  continuously assessed, and does it enforce
+#   oci_network_exposure           what the rules allow, and whether anything
+#                                  can actually reach it
+#   oci_zpr_policies               Zero Trust Packet Routing: network intent as
+#                                  policy over workload labels
+#   oci_compute_instances          instance hardening, boot integrity, exposure
+#   oci_audit_logging_events       audit retention, log coverage, and which
+#                                  change categories actually notify a person
+#   oci_dr_plan_executions         recovery DRILLS, with outcome and measured
+#                                  duration
+#   oci_dependency_vulnerabilities Application Dependency Management audits, and
+#                                  whether findings were fixed or suppressed
+#
+# Same auth as examples/oci_identity_and_access.yaml — see its header.
+#
+# Cloud Guard is the reason this set is worth running first on a new tenancy: it
+# is an independent detector inside the same tenancy, so its problems can be read
+# against this evidence directly (tests/test_oci_cross_check.py does exactly that
+# against recorded responses).
+#
+# Two readings that differ from the obvious one:
+#
+#   * A rule nothing can reach is not an exposure. oci_network_exposure reports
+#     BOTH numbers — the ingress rules that allow the world, and how many are
+#     actually reachable through an attached subnet with a gateway and a route.
+#     A security list attached to no subnet is a configuration finding, not an
+#     exposure, and conflating them produces findings nobody can act on.
+#   * Boot-integrity counts run over shapes that CAN offer it. Shielded-instance
+#     fields are absent on shapes without the hardware, and counting that absence
+#     as "Secure Boot off" fails a control the hardware cannot satisfy.
+#
+# The last two are the ones no other category in this repo can evidence: OCI
+# records a recovery drill as a resource with an outcome and a measured
+# duration, and ADM records dependency findings with their remediation. ADM is
+# Maven/Java only, which is stated in the fetcher's docstring rather than papered
+# over. Both collect nothing on a tenancy that has never run one — and exit 0,
+# because "no drill has been run" is itself the evidence.
+run:
+  output_dir: ./evidence
+
+  platforms:
+    oci:
+      auth:
+        passthrough_env:
+          - OCI_REGION
+          - OCI_CLI_AUTH
+
+  fetchers:
+    - use: oci_cloud_guard_posture
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod
+
+    - use: oci_network_exposure
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod
+
+    - use: oci_zpr_policies
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod
+
+    - use: oci_compute_instances
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod
+
+    # The read-only collector policy in fetchers/oci/README.md cannot read audit
+    # retention, and the denied call fails the run. Uncomment the skip to record
+    # retention as skipped instead, or grant {AUDIT_CONFIGURATION} (the README
+    # says why that grant is not read-only).
+    - use: oci_audit_logging_events
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod
+          # skip_audit_retention: true
+
+    - use: oci_dr_plan_executions
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod
+
+    - use: oci_dependency_vulnerabilities
+      secrets:
+        tenancy_ocid: ${env:OCI_TENANCY_OCID}
+        user_ocid: ${env:OCI_USER_OCID}
+        fingerprint: ${env:OCI_FINGERPRINT}
+        private_key: ${env:OCI_PRIVATE_KEY}
+      targets:
+        - compartment_id: ocid1.compartment.oc1..replace-me
+          environment: preprod

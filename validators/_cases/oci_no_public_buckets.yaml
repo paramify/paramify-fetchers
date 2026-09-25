@@ -1,0 +1,13 @@
+validator: oci_no_public_buckets
+cases:
+  - name: no_bucket_is_public
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_buckets": 5, "public_buckets": 0}}'
+
+  - name: one_bucket_is_public
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_buckets": 5, "public_buckets": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_buckets": 5, "publicBuckets": 0}}'

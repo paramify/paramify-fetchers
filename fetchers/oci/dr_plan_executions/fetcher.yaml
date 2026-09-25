@@ -1,0 +1,74 @@
+name: oci_dr_plan_executions
+version: 0.1.0
+description: >
+  Full Stack Disaster Recovery protection groups, the recovery plans defined
+  against them, and every recorded execution of those plans — the type of
+  recovery run, whether it succeeded, when it ran, and the measured wall-clock
+  duration. Separates drills (a test of the capability) from switchovers and
+  failovers (an actual recovery), and prechecks (plan validation that moves
+  nothing) from executions that did, so "recovery has been tested" is never
+  inferred from a record that only proves the plan parses. Derives days since
+  the last successful drill and per-plan test coverage, so the annual
+  contingency-test question is answered from the summary.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_dr_plan_executions.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect from. Optional — omit to collect from the
+      tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — DR protection
+      groups are almost never created in the tenancy root.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+# Credentials are declared once on _categories/oci.yaml, all `required: false`,
+# so an instance- or resource-principal deployment supplies none of them.
+secrets: []
+
+ksis:
+  - KSI-RPL-TRC
+  - KSI-RPL-ABO
+
+evidence_set:
+  reference_id: EVD-OCI-DR-TESTS
+  name: Disaster Recovery Plan Executions
+  instructions: >
+    Script: fetcher.py. OCI Python SDK calls:
+    disaster_recovery.list_dr_protection_groups(), list_dr_plans() and
+    list_dr_plan_executions(), walked over every accessible compartment beneath
+    the target. One evidence file per target.

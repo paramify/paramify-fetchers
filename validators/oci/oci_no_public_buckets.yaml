@@ -1,0 +1,25 @@
+key: oci_no_public_buckets
+name: OCI No Publicly Accessible Buckets
+type: AUTOMATED
+role: configuration
+statement: >
+  No Object Storage bucket carries a public access type (ObjectRead or
+  ObjectReadWithoutList). Cloud Guard raises BUCKET_IS_PUBLIC for the same
+  condition. Does NOT assert the bucket is unreachable — a bucket with
+  NoPublicAccess is still readable by anyone holding a pre-authenticated
+  request URL, which is why oci_no_buckets_reachable_by_par exists alongside
+  it. Pairs with oci_bucket_inventory_present, without which a zero here could
+  mean no buckets were collected at all. Fails when any bucket is public, and
+  when the summary key is renamed.
+regex: '"public_buckets":\s*(?<public_buckets>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-OBJECT-STORAGE-BUCKETS

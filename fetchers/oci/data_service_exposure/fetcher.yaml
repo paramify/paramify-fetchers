@@ -1,0 +1,78 @@
+name: oci_data_service_exposure
+version: 0.1.0
+description: >
+  Every OCI Autonomous Database, DB system, File Storage file system with its
+  NFS exports and mount targets, and Integration instance in scope: the network
+  path that reaches it (public endpoint, access control list, private subnet,
+  NSG), whether mutual TLS is required, and whether a customer-managed key
+  encrypts it. A key counts as customer-managed only when it is a real OCID —
+  Oracle writes the literal "ORACLE_MANAGED_KEY" into the same field. An empty
+  access control list is the absence of a restriction, not a restriction, so a
+  database with no list and no subnet is reported as reachable from the whole
+  internet. NFS exports are judged on their client options (source CIDR, access
+  mode, identity squash), which is where File Storage is actually exposed.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_data_service_exposure.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect data services from. Optional — omit to collect
+      from the tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — managed data
+      services live in workload compartments.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-SVC-SIN      # Encrypted and secured from unwanted access — keys, mTLS, endpoints
+  - KSI-CNA-MAT      # Minimal attack surface — publicly reachable managed data services
+  - KSI-CNA-RNT      # Inbound traffic limited — access control lists and NFS export sources
+
+evidence_set:
+  reference_id: EVD-OCI-DATA-SERVICE-EXPOSURE
+  name: Managed Data Service Exposure and Encryption
+  instructions: >
+    Script: fetcher.py. Ported from Prowler's OCI database, filestorage and
+    integration services (Apache-2.0), adding mTLS, NFS export options, DB
+    systems and the ORACLE_MANAGED_KEY literal. OCI Python SDK calls per
+    compartment: database.list_autonomous_databases() and list_db_systems(),
+    integration.list_integration_instances(), then per availability domain
+    file_storage.list_mount_targets() and list_file_systems(), with
+    list_exports() and get_export() per export because the summary carries no
+    export options. One evidence file per target.

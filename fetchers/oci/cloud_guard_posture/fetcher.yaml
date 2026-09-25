@@ -1,0 +1,76 @@
+name: oci_cloud_guard_posture
+version: 0.1.0
+description: >
+  Whether Cloud Guard is enabled for the tenancy and in which reporting region;
+  every Cloud Guard target with the detector and responder rules actually in
+  force on it (enabled rules by detector and risk level, and which responder
+  rules remediate automatically rather than waiting for a human); every Security
+  Zone with the number of policies its recipe enforces; and every open problem
+  by risk level and age. A disabled Cloud Guard is recorded as evidence, not a
+  collection failure. Rules are counted from their own enabled flag and mode,
+  never from the presence of a recipe, and targets whose detail call failed are
+  counted separately rather than reading as unmonitored.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_cloud_guard_posture.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect from. Optional — omit to collect from the
+      tenancy root; set one target per compartment to fan out. Cloud Guard's
+      on/off configuration is tenancy-wide and is read either way.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — Security Zones
+      and problems live in the compartments they cover, not the tenancy root.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-CNA-EIS      # Persistently assess AND automatically enforce — detectors, auto-action responders, Security Zones
+  - KSI-MLA-EVC      # Configuration persistently evaluated — the configuration detector
+
+evidence_set:
+  reference_id: EVD-OCI-CLOUD-GUARD
+  name: Continuous Security Posture Assessment and Enforcement
+  instructions: >
+    Script: fetcher.py. OCI Python SDK calls: cloud_guard.get_configuration() on
+    the tenancy, stopping there when Cloud Guard is disabled; otherwise, in the
+    reporting region, list_security_recipes() and list_security_policies() once,
+    then per compartment
+    list_targets() with get_target() per target because the list summary omits
+    the recipe rules, list_security_zones(), and list_problems() filtered to
+    open problems. One evidence file per target.

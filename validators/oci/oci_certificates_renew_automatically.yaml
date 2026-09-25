@@ -1,0 +1,23 @@
+key: oci_certificates_renew_automatically
+name: OCI Certificates Renew Automatically
+type: AUTOMATED
+role: configuration
+statement: >
+  Every certificate OCI is able to renew carries a renewal rule — the "using
+  automation" half of SVC-VCM. Imported certificates and those issued from a
+  customer-held key are excluded: OCI has no renewal rule to turn on for them,
+  and failing on a setting nobody can change is not a finding. Certificates
+  being deleted are excluded. Pair with oci_certificate_inventory_present.
+  Fails when the summary key is renamed.
+regex: '"certificates_requiring_manual_renewal":\s*(?<certificates_requiring_manual_renewal>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-CERTIFICATES

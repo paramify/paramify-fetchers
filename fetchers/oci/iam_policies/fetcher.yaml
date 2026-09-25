@@ -1,0 +1,63 @@
+name: oci_iam_policies
+version: 0.1.0
+description: >
+  Every OCI IAM policy in scope with each statement parsed into subject, verb or
+  permission list, resource, location and condition, plus the tenancy's dynamic
+  groups. Counts manage all-resources grants outside Oracle's default tenant
+  admin policy (recognised by its content and location, not its name), grants
+  that let non-administrators manage users, groups or policies without excluding
+  the Administrators group, unconditional any-user or any-group grants (Oracle's
+  own conditioned service grants are counted apart), cross-tenancy statements,
+  and dynamic groups that give workloads keyless identities. Unrecognised
+  statements are kept and counted, never read as narrow.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_iam_policies.json
+  aggregation: per_target
+
+target_schema:
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect policies from. Optional — omit to collect from
+      the tenancy root. Dynamic groups are tenancy-scoped and read either way.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — policies can
+      be attached at any compartment and grant within it.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-IAM-ELP      # Least privilege — broad and unguarded grants, counted per statement
+  - KSI-IAM-SNU      # Non-user authentication — dynamic groups give workloads identities with no stored key
+
+evidence_set:
+  reference_id: EVD-OCI-IAM-POLICIES
+  name: IAM Policy Least Privilege Review
+  instructions: >
+    Script: fetcher.py. Ported from Prowler's OCI identity service (Apache-2.0),
+    parsing statements rather than matching substrings. OCI Python SDK calls:
+    identity.list_policies() per compartment beneath the target, and
+    list_dynamic_groups() on the tenancy root. One evidence file per target.

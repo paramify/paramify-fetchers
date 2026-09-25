@@ -1,0 +1,13 @@
+validator: oci_bastion_detail_read
+cases:
+  - name: every_detail_read
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_bastions": 1, "bastions_with_unreadable_detail": 0}}'
+
+  - name: a_detail_call_failed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_bastions": 2, "bastions_with_unreadable_detail": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"unreadable_bastions": 0}}'

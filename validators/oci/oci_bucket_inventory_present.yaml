@@ -1,0 +1,22 @@
+key: oci_bucket_inventory_present
+name: OCI Bucket Inventory Present
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one of the buckets this evidence set is about was actually
+  collected. Its partner validators conclude compliance from a zero — no
+  public buckets, no unrotated keys, no reachable open rules — and a zero is
+  equally what an empty collection produces. This asserts the population was
+  non-empty, so a passing zero means "none are bad" rather than "none were
+  read". Does NOT assert anything about posture. Fails when the summary key
+  is renamed and when the tenancy genuinely holds none, which is the correct
+  reading: there is nothing here to prove the control over.
+regex: '"total_buckets":\s*(?<total_buckets>[1-9][0-9]*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-OBJECT-STORAGE-BUCKETS

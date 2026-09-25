@@ -1,0 +1,76 @@
+name: oci_compute_instances
+version: 0.1.0
+description: >
+  Every OCI compute instance in scope with its metadata-service configuration
+  (legacy IMDS endpoints), boot integrity settings (secure boot, measured boot,
+  TPM, memory encryption), in-transit encryption, Oracle Cloud Agent and
+  per-plugin state, and every VNIC with its public IP, attached network security
+  groups and source/destination check. Boot-integrity findings are counted only
+  over shapes that support shielded instances, because platform_config is absent
+  on shapes that cannot offer the control at all. An instance whose agent or
+  plugins are disabled is counted, since it answers no agent-based check.
+  Instance metadata VALUES are never collected — only key names — because
+  user_data routinely carries bootstrap secrets.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_compute_instances.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect instances from. Optional — omit to collect
+      from the tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — instances live
+      in workload compartments, not the tenancy root.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-CNA-MAT      # Minimal attack surface — public IPs, legacy metadata endpoints, NSG coverage
+  - KSI-SVC-VRI      # Cryptographic validation of resource integrity — secure boot, measured boot, TPM
+  - KSI-SVC-SIN      # Information secured — in-transit encryption, memory encryption
+
+evidence_set:
+  reference_id: EVD-OCI-COMPUTE-INSTANCES
+  name: Instance Hardening and Exposure
+  instructions: >
+    Script: fetcher.py. Ported from Prowler's OCI compute service (Apache-2.0),
+    adding shape capability, measured boot / TPM / memory encryption, agent and
+    plugin state, and VNIC exposure. OCI Python SDK calls per compartment:
+    compute.list_instances(), compute.list_vnic_attachments() once, then
+    virtual_network.get_vnic() per attached VNIC because the attachment carries
+    no addresses. One evidence file per target.
