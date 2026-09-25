@@ -20,6 +20,13 @@ venv/
 # --- Customer-side sync state (validator key -> Paramify id); never commit ---
 .paramify/
 
+# --- Platform-onboarding working state (onboard-platform skill); never commit ---
+# One directory per platform: the claim, the cited research, the slate and its
+# approval, the approved-sandbox registry, and the teardown script. Local and
+# disposable — it exists so a delegated subagent and the next session can read
+# what this one found. Holds no secret values; credentials stay ${env:VAR}.
+.onboarding/
+
 # --- Generated collect output (runner writes evidence/run-<timestamp>/) ---
 /evidence/
 
