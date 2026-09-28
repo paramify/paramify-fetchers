@@ -101,6 +101,10 @@ paramify issues jobs --cancel <job-id>        # and every unfinished job queued 
 paramify issues close <assessment-id>         # close the current cycle; asks first
 ```
 
+In the TUI's Paramify tab, `i` sends a run's reports, `j` lists jobs (enter on a
+failed or queued one to retry or cancel it), and `C` closes one of the manifest's
+assessments' cycles, after a warning.
+
 Each assessment has one job queue, and a **failed job blocks every job queued
 behind it** until it is retried or cancelled. The uploader never does either on
 its own — which is right depends on why it failed — and reports a blocked job

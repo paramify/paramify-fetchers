@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 
 import yaml
 from rich.text import Text
-from textual import on
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -613,10 +613,27 @@ class ManifestPage(ButtonRowNav, Vertical):
             return
 
         assessment_type = (d.get("issue_report") or {}).get("assessment_type")
+        self.notify("Loading assessments…")
+        self._assessments_worker(use, assessment_type)
+
+    @work(thread=True, exclusive=True, group="assessments")
+    def _assessments_worker(self, use: str, assessment_type: Optional[str]) -> None:
+        # Off the UI thread: listing assessments is a network call, and a slow or
+        # unreachable workspace froze the whole app while it ran.
         try:
             assessments = api.list_assessments(assessment_type)
         except (RuntimeError, ValueError) as exc:
-            self.notify(f"Cannot list assessments: {exc}", severity="error", timeout=12)
+            self.app.call_from_thread(
+                self.notify, f"Cannot list assessments: {exc}", severity="error", timeout=12
+            )
+            return
+        self.app.call_from_thread(self._show_assessment_picker, use, assessment_type, assessments)
+
+    def _show_assessment_picker(
+        self, use: str, assessment_type: Optional[str], assessments: List[dict]
+    ) -> None:
+        m = self._manifest
+        if m is None:
             return
         if not assessments:
             scope = f" of type {assessment_type}" if assessment_type else ""
@@ -646,7 +663,7 @@ class ManifestPage(ButtonRowNav, Vertical):
             PickerModal(
                 f"Assessment for {use}",
                 options,
-                subtitle=f"{assessment_type or 'any type'} — its reports are intaken here",
+                subtitle=f"{assessment_type or 'any type'} — its reports are sent into this pipeline",
             ),
             done,
         )

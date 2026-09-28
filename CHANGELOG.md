@@ -19,6 +19,12 @@ schemas and the `paramify` CLI — not the internal code.
   assessment's current cycle on its own, after confirmation, for assessments
   whose cycle is filled by several runs, and prints how many open issues the
   close auto-closed.
+  The TUI's Paramify tab has both: `j` lists jobs and retries or cancels one,
+  `C` closes one of the manifest's assessments' cycles behind a warning. The
+  reports themselves are sent with `i`, which replaces `ctrl+i` (most terminals
+  send the same byte for ctrl+i and Tab, so it never fired). The run console
+  says when a run left issue reports to send, and the assessment picker no
+  longer blocks the app while it lists the workspace's assessments.
 - **`close_cycle`, a reserved config key on every issue-report entry** —
   `after_run` or `never`, with no default. Closing a cycle auto-closes every
   open issue the cycle never saw, so it states how the customer fills the

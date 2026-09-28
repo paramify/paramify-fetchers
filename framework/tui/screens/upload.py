@@ -29,11 +29,20 @@ from textual.widgets import Button, Checkbox, DataTable, RichLog, Static
 from framework import api
 from framework.tui import palette
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
-from framework.tui.modals import ConfirmModal
+from framework.tui.modals import ConfirmModal, PickerModal
 
 
 class UploadEvent(Message):
     """Carries one api.upload_run() event dict from the worker thread."""
+
+    def __init__(self, ev: dict) -> None:
+        self.ev = ev
+        super().__init__()
+
+
+class PipelineEvent(Message):
+    """Carries one result of a pipeline action (jobs, retry/cancel, close) from a
+    worker thread."""
 
     def __init__(self, ev: dict) -> None:
         self.ev = ev
@@ -82,12 +91,19 @@ def _job_text(job: dict) -> Text:
 
 
 class UploadPage(ButtonRowNav, Vertical):
-    HINTS = [("ctrl+u", "upload"), ("ctrl+i", "intake"), ("p", "preview"),
-             ("ctrl+s", "sync"), ("ctrl+r", "refresh")]
+    HINTS = [("ctrl+u", "upload"), ("i", "send reports"), ("j", "jobs"),
+             ("C", "close cycle"), ("p", "preview"), ("ctrl+s", "sync"),
+             ("ctrl+r", "refresh")]
 
     BINDINGS = [
         Binding("ctrl+u", "upload_run", "Upload"),
-        Binding("ctrl+i", "intake_issues", "Intake"),
+        # Not ctrl+i: most terminals send the same byte for ctrl+i and Tab, so
+        # the binding never fired. This page has no Input to eat a bare letter.
+        Binding("i", "intake_issues", "Send reports"),
+        Binding("j", "pipeline_jobs", "Jobs"),
+        # Shifted on purpose: a close auto-closes every open issue the cycle
+        # never saw, and cannot be undone.
+        Binding("C", "close_cycle", "Close cycle"),
         # p mirrors the Manifest tab's preview key (this page has no Input to eat
         # it); ctrl+p stays as an alias, which needs App.ENABLE_COMMAND_PALETTE
         # off — Textual's palette claims ctrl+p as a priority binding.
@@ -119,7 +135,9 @@ class UploadPage(ButtonRowNav, Vertical):
             yield RichLog(id="upload-log", markup=False, wrap=True, highlight=False)
             yield Static(
                 f"progress streams here — [bold {palette.ACCENT}]ctrl+u[/] upload · "
-                f"[bold {palette.ACCENT}]ctrl+i[/] intake · "
+                f"[bold {palette.ACCENT}]i[/] send reports · "
+                f"[bold {palette.ACCENT}]j[/] jobs · "
+                f"[bold {palette.ACCENT}]C[/] close cycle · "
                 f"[bold {palette.ACCENT}]ctrl+p[/] preview · [bold {palette.ACCENT}]ctrl+s[/] sync",
                 classes="empty-hint",
             )
@@ -615,6 +633,179 @@ class UploadPage(ButtonRowNav, Vertical):
         if ev.get("log_path"):
             msg.append(f"   {ev['log_path']}", style="dim")
         self._set_banner(msg)
+
+    # -- pipeline jobs and cycle close ----------------------------------- #
+
+    def action_pipeline_jobs(self) -> None:
+        """List recent pipeline jobs; enter on one offers retry or cancel."""
+        self.notify("Loading pipeline jobs…")
+        self._jobs_worker(self.app.root_path)
+
+    @work(thread=True, exclusive=True, group="pipeline")
+    def _jobs_worker(self, root) -> None:
+        try:
+            jobs = api.issues_jobs(root, limit=30)
+        except Exception as exc:
+            self.post_message(PipelineEvent({"event": "failed", "what": "list jobs",
+                                             "error": str(exc)}))
+            return
+        self.post_message(PipelineEvent({"event": "jobs", "jobs": jobs}))
+
+    def _show_jobs(self, jobs: list) -> None:
+        if not jobs:
+            self.notify("No pipeline jobs visible to this API key.")
+            return
+        by_id = {j["job_id"]: j for j in jobs}
+        options = []
+        for j in jobs:
+            counts = j.get("counts") or {}
+            done = ", ".join(
+                f"{counts[k]} {label}" for k, label in _COUNT_LABELS if counts.get(k) is not None
+            )
+            blocked = f"  blocked by {j['blocked_by']}" if j.get("blocked_by") else ""
+            options.append((j["job_id"], (
+                f"{(j.get('created_at') or '')[:16]}  {j.get('status') or '?':<11} "
+                f"{j.get('type') or '?':<13} {j.get('assessment_id') or ''}"
+                f"{'  ' + done if done else ''}{blocked}"
+            )))
+
+        def chosen(job_id):
+            if job_id is not None:
+                self._offer_job_actions(by_id[job_id])
+
+        self.app.push_screen(
+            PickerModal("Pipeline jobs", options,
+                        subtitle="newest first — enter on a failed or queued job to retry or cancel it"),
+            chosen,
+        )
+
+    def _offer_job_actions(self, job: dict) -> None:
+        status = job.get("status")
+        actions = []
+        if status == "FAILED":
+            actions.append(("retry", "retry — run it again; the jobs behind it follow"))
+        if status in ("FAILED", "QUEUED"):
+            actions.append((
+                "cancel", "cancel — also cancels every unfinished job queued behind it",
+            ))
+        if not actions:
+            self.app.push_screen(ConfirmModal(
+                f"Job {job['job_id']} is {status}; there is nothing to retry or cancel.\n\n"
+                f"{_job_text(job).plain.strip()}"
+            ))
+            return
+
+        def picked(action):
+            if action is None:
+                return
+
+            def go(ok: bool) -> None:
+                if ok:
+                    self._job_action_worker(self.app.root_path, job["job_id"], action)
+
+            self.app.push_screen(
+                ConfirmModal(f"{action.capitalize()} pipeline job {job['job_id']}?"), go
+            )
+
+        self.app.push_screen(
+            PickerModal(f"Job {job['job_id']} — {status}", actions), picked
+        )
+
+    @work(thread=True, exclusive=True, group="pipeline")
+    def _job_action_worker(self, root, job_id: str, action: str) -> None:
+        try:
+            job = api.issues_job_action(root, job_id, action)
+        except Exception as exc:
+            self.post_message(PipelineEvent({"event": "failed", "what": f"{action} {job_id}",
+                                             "error": str(exc)}))
+            return
+        self.post_message(PipelineEvent({"event": "job_done", "action": action, "job": job}))
+
+    def _manifest_assessments(self) -> list:
+        """(id, label) for every assessment the active manifest's issue-report
+        entries point at, entry config first, then platform config."""
+        run = (getattr(self.app, "manifest", None) or {}).get("run") or {}
+        seen: dict = {}
+        for cfg in [e.get("config") or {} for e in run.get("fetchers") or []] + [
+            (p or {}).get("config") or {} for p in (run.get("platforms") or {}).values()
+        ]:
+            aid = cfg.get("assessment_id")
+            if aid and aid not in seen:
+                seen[aid] = cfg.get("assessment_name") or aid
+        return list(seen.items())
+
+    def action_close_cycle(self) -> None:
+        """Close the current cycle of one of the manifest's assessments."""
+        if self._busy:
+            self.notify("A Paramify operation is already in progress.")
+            return
+        choices = self._manifest_assessments()
+        if not choices:
+            self.notify("No issue-report entry in this manifest points at an assessment.")
+            return
+
+        def chosen(aid):
+            if aid is None:
+                return
+            label = dict(choices)[aid]
+
+            def go(ok: bool) -> None:
+                if ok:
+                    self._uploading = True
+                    self._disable_actions()
+                    self._upload_kind = "cycle close"
+                    self._begin_log(Text(f"closing the current cycle of {label}...",
+                                         style=palette.WARN))
+                    self._close_worker(self.app.root_path, aid)
+
+            self.app.push_screen(ConfirmModal(
+                f"Close the current cycle of {label}?\n\n"
+                "Every open issue the cycle never saw will be auto-closed as resolved, "
+                "and the next upload opens a new cycle. This cannot be undone."
+            ), go)
+
+        self.app.push_screen(
+            PickerModal("Close which assessment's cycle?", choices,
+                        subtitle="for assessments filled by several runs (close_cycle: never)"),
+            chosen,
+        )
+
+    @work(thread=True, exclusive=True, group="pipeline")
+    def _close_worker(self, root, assessment_id: str) -> None:
+        try:
+            job = api.issues_close(root, assessment_id)
+        except Exception as exc:
+            self.post_message(PipelineEvent({"event": "failed", "what": "close",
+                                             "error": str(exc), "busy": True}))
+            return
+        self.post_message(PipelineEvent({"event": "closed", "job": job}))
+
+    def on_pipeline_event(self, message: PipelineEvent) -> None:
+        ev = message.ev
+        kind = ev.get("event")
+        log = self.query_one("#upload-log", RichLog)
+        if kind == "jobs":
+            self._show_jobs(ev["jobs"])
+        elif kind == "job_done":
+            log.write(Text(f"{ev['action']}:", style="bold"))
+            log.write(_job_text(ev["job"]))
+            self.notify(f"{ev['action']}: job {ev['job'].get('job_id')} is now "
+                        f"{ev['job'].get('status')}")
+        elif kind == "closed":
+            self._uploading = False
+            self._restore_actions()
+            job = ev["job"]
+            log.write(_job_text(job))
+            ok = job.get("status") == "COMPLETED"
+            self._set_banner(Text(
+                f"cycle close {job.get('status')}", style=palette.OK if ok else palette.FAIL,
+            ))
+        elif kind == "failed":
+            if ev.get("busy"):
+                self._uploading = False
+                self._restore_actions()
+            log.write(Text(f"{ev['what']} failed: {ev['error']}", style=f"bold {palette.FAIL}"))
+            self.notify(f"{ev['what']} failed: {ev['error']}", severity="error", timeout=12)
 
     # -- events: scripts sync -------------------------------------------- #
 
