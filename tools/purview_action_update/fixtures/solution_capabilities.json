@@ -1,0 +1,205 @@
+{
+  "solutionCapabilities": [
+    {
+      "id": "00000001-0000-4000-8000-000000000001",
+      "templateReferenceId": "SC-01",
+      "referenceId": null,
+      "name": "Enable security flags when compiling applications",
+      "implementationStatus": "IMPLEMENTED",
+      "family": "Access Control",
+      "subfamily": "Account Management",
+      "risk": "Unauthorized Access",
+      "riskFamily": "Identity and Access",
+      "mainComponent": {
+        "id": "b1e9a2c4-6f3d-4a17-9c58-2d0e7b4f81aa",
+        "referenceId": "RS-13-02",
+        "name": "Example Component",
+        "description": "Synthetic component"
+      },
+      "owner": {},
+      "functions": [
+        {
+          "type": "PROVIDER",
+          "name": "Capability Provider",
+          "narrative": "@Example Boundary enforces the control through platform policy, so the outcome does not depend on an individual remembering to apply it.",
+          "implementationStatus": "IMPLEMENTED"
+        }
+      ]
+    },
+    {
+      "id": "00000002-0000-4000-8000-000000000002",
+      "templateReferenceId": "SC-02",
+      "referenceId": null,
+      "name": "Establish and maintain central update server",
+      "implementationStatus": "PARTIALLY_IMPLEMENTED",
+      "family": "Access Control",
+      "subfamily": "Account Management",
+      "risk": "Unauthorized Access",
+      "riskFamily": "Identity and Access",
+      "mainComponent": {
+        "id": "b1e9a2c4-6f3d-4a17-9c58-2d0e7b4f81aa",
+        "referenceId": "RS-13-02",
+        "name": "Example Component",
+        "description": "Synthetic component"
+      },
+      "owner": {},
+      "functions": [
+        {
+          "type": "PROVIDER",
+          "name": "Capability Provider",
+          "narrative": "Partially rolled out.",
+          "implementationStatus": "PARTIALLY_IMPLEMENTED"
+        }
+      ]
+    },
+    {
+      "id": "00000003-0000-4000-8000-000000000003",
+      "templateReferenceId": "SC-03",
+      "referenceId": null,
+      "name": "Retain ePHI compliance supporting documentation",
+      "implementationStatus": "NOT_SET",
+      "family": "Access Control",
+      "subfamily": "Account Management",
+      "risk": "Unauthorized Access",
+      "riskFamily": "Identity and Access",
+      "mainComponent": {
+        "id": "b1e9a2c4-6f3d-4a17-9c58-2d0e7b4f81aa",
+        "referenceId": "RS-13-02",
+        "name": "Example Component",
+        "description": "Synthetic component"
+      },
+      "owner": {},
+      "functions": [
+        {
+          "type": "PROVIDER",
+          "name": "Capability Provider",
+          "narrative": "Draft narrative.",
+          "implementationStatus": "NOT_SET"
+        }
+      ]
+    },
+    {
+      "id": "00000004-0000-4000-8000-000000000004",
+      "templateReferenceId": "SC-04",
+      "referenceId": null,
+      "name": "Establish a security operations center",
+      "implementationStatus": "NOT_APPLICABLE",
+      "family": "Access Control",
+      "subfamily": "Account Management",
+      "risk": "Unauthorized Access",
+      "riskFamily": "Identity and Access",
+      "mainComponent": {
+        "id": "b1e9a2c4-6f3d-4a17-9c58-2d0e7b4f81aa",
+        "referenceId": "RS-13-02",
+        "name": "Example Component",
+        "description": "Synthetic component"
+      },
+      "owner": {},
+      "functions": [
+        {
+          "type": "PROVIDER",
+          "name": "Capability Provider",
+          "narrative": "Not applicable to this boundary.",
+          "implementationStatus": "NOT_APPLICABLE"
+        }
+      ]
+    },
+    {
+      "id": "00000005-0000-4000-8000-000000000005",
+      "templateReferenceId": "SC-05",
+      "referenceId": null,
+      "name": "Review threat protection status weekly",
+      "implementationStatus": "ALTERNATIVE_IMPLEMENTATION",
+      "family": "Access Control",
+      "subfamily": "Account Management",
+      "risk": "Unauthorized Access",
+      "riskFamily": "Identity and Access",
+      "mainComponent": {
+        "id": "b1e9a2c4-6f3d-4a17-9c58-2d0e7b4f81aa",
+        "referenceId": "RS-13-02",
+        "name": "Example Component",
+        "description": "Synthetic component"
+      },
+      "owner": {},
+      "functions": []
+    },
+    {
+      "id": "00000006-0000-4000-8000-000000000006",
+      "templateReferenceId": "SC-06",
+      "referenceId": null,
+      "name": "Create and distribute personal device use policy",
+      "implementationStatus": "NOT_IMPLEMENTED",
+      "family": "Access Control",
+      "subfamily": "Account Management",
+      "risk": "Unauthorized Access",
+      "riskFamily": "Identity and Access",
+      "mainComponent": {
+        "id": "b1e9a2c4-6f3d-4a17-9c58-2d0e7b4f81aa",
+        "referenceId": "RS-13-02",
+        "name": "Example Component",
+        "description": "Synthetic component"
+      },
+      "owner": {},
+      "functions": [
+        {
+          "type": "PROVIDER",
+          "name": "Capability Provider",
+          "narrative": "Regressed; remediation planned.",
+          "implementationStatus": "NOT_IMPLEMENTED"
+        }
+      ]
+    },
+    {
+      "id": "00000007-0000-4000-8000-000000000007",
+      "templateReferenceId": "SC-07",
+      "referenceId": null,
+      "name": "RETAIN NONCONFORMITY DETAILS",
+      "implementationStatus": "IMPLEMENTED",
+      "family": "Access Control",
+      "subfamily": "Account Management",
+      "risk": "Unauthorized Access",
+      "riskFamily": "Identity and Access",
+      "mainComponent": {
+        "id": "b1e9a2c4-6f3d-4a17-9c58-2d0e7b4f81aa",
+        "referenceId": "RS-13-02",
+        "name": "Example Component",
+        "description": "Synthetic component"
+      },
+      "owner": {},
+      "functions": [
+        {
+          "type": "PROVIDER",
+          "name": "Capability Provider",
+          "narrative": "Case-drift example.",
+          "implementationStatus": "IMPLEMENTED"
+        }
+      ]
+    },
+    {
+      "id": "00000008-0000-4000-8000-000000000008",
+      "templateReferenceId": "SC-08",
+      "referenceId": null,
+      "name": "A Capability With No Purview Action",
+      "implementationStatus": "IMPLEMENTED",
+      "family": "Access Control",
+      "subfamily": "Account Management",
+      "risk": "Unauthorized Access",
+      "riskFamily": "Identity and Access",
+      "mainComponent": {
+        "id": "b1e9a2c4-6f3d-4a17-9c58-2d0e7b4f81aa",
+        "referenceId": "RS-13-02",
+        "name": "Example Component",
+        "description": "Synthetic component"
+      },
+      "owner": {},
+      "functions": [
+        {
+          "type": "PROVIDER",
+          "name": "Capability Provider",
+          "narrative": "Orphan capability.",
+          "implementationStatus": "IMPLEMENTED"
+        }
+      ]
+    }
+  ]
+}

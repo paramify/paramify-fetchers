@@ -1,0 +1,106 @@
+{
+  "data": [
+    {
+      "id": "e1",
+      "timestamp": "2026-06-30T14:05:09.000Z",
+      "type": "HISTORY",
+      "actor": {
+        "kind": "USER",
+        "userId": "u1",
+        "name": "Example User",
+        "email": "user@example.test",
+        "workspaceUserType": "EDITOR"
+      },
+      "resource": {
+        "type": "SOLUTION_CAPABILITY",
+        "id": "00000001-0000-4000-8000-000000000001"
+      },
+      "action": {
+        "verb": "UPDATE",
+        "changes": [
+          {
+            "old": "NOT_SET",
+            "new": "IMPLEMENTED"
+          }
+        ]
+      }
+    },
+    {
+      "id": "e0",
+      "timestamp": "2026-01-02T09:00:00.000Z",
+      "type": "HISTORY",
+      "actor": {
+        "kind": "USER",
+        "userId": "u1",
+        "name": "Example User",
+        "email": "user@example.test",
+        "workspaceUserType": "EDITOR"
+      },
+      "resource": {
+        "type": "SOLUTION_CAPABILITY",
+        "id": "00000001-0000-4000-8000-000000000001"
+      },
+      "action": {
+        "verb": "UPDATE",
+        "changes": [
+          {
+            "old": "NOT_SET",
+            "new": "PLANNED"
+          }
+        ]
+      }
+    },
+    {
+      "id": "e2",
+      "timestamp": "2026-07-14T08:30:00.000Z",
+      "type": "HISTORY",
+      "actor": {
+        "kind": "USER",
+        "userId": "u2",
+        "name": "Example User Two",
+        "email": "user2@example.test",
+        "workspaceUserType": "EDITOR"
+      },
+      "resource": {
+        "type": "SOLUTION_CAPABILITY",
+        "id": "00000004-0000-4000-8000-000000000004"
+      },
+      "action": {
+        "verb": "UPDATE",
+        "changes": [
+          {
+            "field": "implementationStatus",
+            "old": "NOT_SET",
+            "new": "NOT_APPLICABLE"
+          }
+        ]
+      }
+    },
+    {
+      "id": "e3",
+      "timestamp": "2026-08-01T10:00:00.000Z",
+      "type": "HISTORY",
+      "actor": {
+        "kind": "USER",
+        "userId": "u1",
+        "name": "Example User",
+        "email": "user@example.test",
+        "workspaceUserType": "EDITOR"
+      },
+      "resource": {
+        "type": "ISSUE",
+        "id": "b144e4d8-5c1b-5515-a242-00856705e2eb"
+      },
+      "action": {
+        "verb": "UPDATE",
+        "changes": [
+          {
+            "old": "Open",
+            "new": "Closed"
+          }
+        ]
+      }
+    }
+  ],
+  "nextCursor": null
+}

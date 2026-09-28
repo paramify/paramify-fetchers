@@ -72,3 +72,8 @@ fetchers/demo/vuln_scan/
 
 # --- Manifests ---
 manifests/*
+.validator-work/
+.env.bak
+
+# purview_action_update run output (workbooks + reports; may contain client data)
+out/
