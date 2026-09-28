@@ -1,0 +1,40 @@
+validator: security_awareness_metrics_measurable
+cases:
+  # --- direction 1: compliant ---
+  - name: campaign_resolved
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"config_resolution":{"status":"resolved","measurable":true,"campaigns":{"requested":["2026 Annual"],"matched":["2026 Annual"],"unmatched":[]}},"summary":{"completion_rate":94}}}}'
+
+  - name: partial_resolution_still_measurable
+    expect: PASS
+    note: >-
+      one of two requested names matched. Deliberately passes — the figures are
+      real measurements of the campaign that did resolve. This validator does not
+      assert that every requested name matched.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"config_resolution":{"status":"partial","measurable":true,"campaigns":{"requested":["2026 Annual","Typo Campaign"],"matched":["2026 Annual"],"unmatched":["Typo Campaign"]}},"summary":{"completion_rate":94}}}}'
+
+  - name: measurable_but_zero_posture
+    expect: PASS
+    note: >-
+      a measured 0% passes this validator. Posture is the completion-rate
+      validator's job; conflating the two is what makes an unreadable payload
+      indistinguishable from a bad one.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"config_resolution":{"status":"resolved","measurable":true},"summary":{"completion_rate":0}}}}'
+
+  # --- direction 2: non-compliant ---
+  - name: placeholder_campaign_name
+    expect: FAIL
+    note: the live case — manifest still said REPLACE_ME, so nothing matched
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"config_resolution":{"status":"unresolved","measurable":false,"campaigns":{"requested":["REPLACE_ME"],"matched":[],"unmatched":["REPLACE_ME"]},"campaigns_present_in_tenant":["2026 Annual Security Awareness Training"]},"summary":{"total_users":89,"total_campaigns":0,"completion_rate":null}}}}'
+
+  # --- direction 3: unreadable ---
+  - name: measurable_key_renamed
+    expect: FAIL
+    note: >-
+      envelope intact, the structural key gone. The presence rule catches it —
+      the EQUALS true rule alone would read nothing and hold.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"config_resolution":{"status":"resolved","is_measurable":true},"summary":{"completion_rate":94}}}}'
+
+  - name: config_resolution_block_removed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"total_users":89,"completion_rate":94}}}}'

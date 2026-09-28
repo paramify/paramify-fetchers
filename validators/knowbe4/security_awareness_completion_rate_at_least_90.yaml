@@ -1,0 +1,39 @@
+key: security_awareness_completion_rate_at_least_90
+name: Security Awareness Training Completion Rate At Least 90 Percent
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least 90% of active users have completed the configured annual security
+  awareness training campaign. Substantiates the Security Awareness Training
+  capability narrative ("Security Awareness Training Validator proves the
+  completion rate of the KnowBe4 security training") and the general-training
+  limb of KSI-CED-RAT (at-2, at-4, ps-6).
+
+  DOES NOT ASSERT: that every employee completed — up to 10% may be past due or
+  never started and this still passes; that completions are current, since a
+  user who passed years ago still counts as completed (needs_retraining is a
+  separate metric this validator does not read); that the training content
+  covers the topics the narrative claims; or that the right campaign was
+  configured — security_awareness_metrics_measurable carries that.
+
+  CORRECTLY FAILS when the completion rate drops below 90, and when
+  completion_rate is null because the configured campaign name matched nothing
+  in the tenant (null does not match the digit pattern, so the presence rule
+  catches it rather than reading as zero).
+
+# The threshold lives in the regex, not in a comparison criterion: the operators
+# are not documented as numeric, and "8" >= "14" holds as a string. 90..100 is
+# spelled out, so MATCH_COUNT NOT_EQUALS 0 *is* the threshold assertion.
+# The trailing lookahead stops `100` matching the front of a longer number.
+regex: '"completion_rate":\s*(?<completion_rate>100|9[0-9])(?![0-9])'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  # A value in 90..100 was present. This single rule carries both jobs: the
+  # field existed (a rename or a null yields zero matches) and it cleared the
+  # bar (51 or 89 yields zero matches too).
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SECURITY-AWARENESS-TRAINING

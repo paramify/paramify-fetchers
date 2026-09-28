@@ -1,0 +1,39 @@
+# Set-level: every validator naming EVD-SECURITY-GROUPS, combined the way
+# Paramify combines them (ERROR > FAIL > PASS). This is the assertion that
+# matters — a count-based validator cannot cover its own drift, so only the set
+# can.
+evidence_set: EVD-SECURITY-GROUPS
+cases:
+  - name: only_https_open_to_internet
+    expect: PASS
+    note: >
+      The compliant shape the "Policy Enforcement Points: Amazon Security Groups"
+      capability describes. Both validators hold: no open non-443 inbound rule, and
+      the rule fields were readable.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-aaa","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":443,"CIDRs":"0.0.0.0/0"}]},{"GroupId":"sg-bbb","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":5432,"ToPort":5432,"CIDRs":"10.0.0.0/8"}]}]}}'
+
+  - name: ssh_open_to_the_world
+    expect: FAIL
+    note: the real posture collected from the demo account when these were authored
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-aaa","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":443,"CIDRs":"10.0.0.0/8"}]},{"GroupId":"sg-ccc","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CIDRs":"0.0.0.0/0"}]}]}}'
+
+  - name: rule_shape_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the whole integrity role exists for. sg_no_open_inbound_except_https
+      counts inbound rules admitting 0.0.0.0/0 and finds none, so ALONE it reports
+      PASS on an artifact that hides SSH open to the world.
+      sg_inbound_rule_fields_present fails because the key run it proves is gone,
+      and the set therefore fails. Delete the integrity validator and this case goes
+      green while the evidence proves nothing — exactly the silent false pass.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-aaa","Rules":[{"Dir":"INBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":443,"CIDRs":"10.0.0.0/8"}]},{"GroupId":"sg-ccc","Rules":[{"Dir":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CIDRs":"0.0.0.0/0"}]}]}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict, but the API discards disposition, so
+      FAIL is the best reachable answer today. What matters is that it does not
+      PASS. Here it is the integrity validator carrying that weight, because this
+      set has no completeness validator — see the handback note about adding
+      EVD-SECURITY-GROUPS to validators/common/collection_succeeded.yaml.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"ExpiredToken"},"payload":{"results":[]}}'

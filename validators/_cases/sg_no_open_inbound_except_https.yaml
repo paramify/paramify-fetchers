@@ -1,0 +1,56 @@
+validator: sg_no_open_inbound_except_https
+cases:
+  - name: only_https_open_to_internet
+    expect: PASS
+    note: >
+      The compliant shape the capability describes — 443 open to the world on the
+      public ALB group, everything else sourced from inside the VPC. This case is
+      the discriminator for reading a real-evidence FAIL: if it ever goes red,
+      the validator is broken rather than the tenant non-compliant.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-aaa","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":443,"CIDRs":"0.0.0.0/0"}]},{"GroupId":"sg-bbb","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":5432,"ToPort":5432,"CIDRs":"10.0.0.0/8"}]}]}}'
+
+  - name: ssh_open_to_the_world
+    expect: FAIL
+    note: the real posture collected from the demo account when these were authored
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-aaa","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":443,"CIDRs":"10.0.0.0/8"}]},{"GroupId":"sg-ccc","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CIDRs":"0.0.0.0/0"}]}]}}'
+
+  - name: port_range_spanning_443
+    expect: FAIL
+    note: >
+      443-8443 from 0.0.0.0/0 opens 8000 other ports. Starting at 443 must not buy
+      a pass — this is why the lookahead requires FromPort AND ToPort both be 443
+      rather than just testing FromPort.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-ddd","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":8443,"CIDRs":"0.0.0.0/0"}]}]}}'
+
+  - name: open_cidr_last_in_a_list
+    expect: FAIL
+    note: CIDRs is a ", "-joined list; a violation hiding at the end of one still counts.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-eee","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":3389,"ToPort":3389,"CIDRs":"192.168.0.0/16, 0.0.0.0/0"}]}]}}'
+
+  - name: similar_cidrs_are_not_violations
+    expect: PASS
+    note: >
+      Both "10.0.0.0/8" and "110.0.0.0/0" contain the literal substring 0.0.0.0/0.
+      Anchoring on list-element boundaries is what keeps them from counting, and a
+      false positive here would be a permanent red on a compliant tenant.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-fff","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CIDRs":"10.0.0.0/8"},{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CIDRs":"110.0.0.0/0"}]}]}}'
+
+  - name: outbound_open_is_out_of_scope
+    expect: PASS
+    note: >
+      Egress to 0.0.0.0/0 is not what this validator claims, and the capability's
+      outbound assertions have no validator at all (the fetcher drops them). Pinned
+      so a later broadening of the regex to cover outbound is a deliberate change
+      with a red case, not an accident.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-ggg","Rules":[{"Direction":"OUTBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CIDRs":"0.0.0.0/0"}]}]}}'
+
+  - name: direction_key_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate, and the reason `integrity` exists. Counting violations cannot
+      distinguish "no violations" from "the key I count is gone" — zero matches is
+      this validator's pass condition. On its own it reports PASS on an artifact
+      that hides SSH open to the world. Its partner sg_inbound_rule_fields_present
+      is what fails; see the set-level case in set_EVD-SECURITY-GROUPS.yaml, which
+      is the assertion that actually matters.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-ccc","Rules":[{"Dir":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CIDRs":"0.0.0.0/0"}]}]}}'

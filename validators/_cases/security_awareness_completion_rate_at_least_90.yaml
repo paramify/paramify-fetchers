@@ -1,0 +1,51 @@
+validator: security_awareness_completion_rate_at_least_90
+cases:
+  # --- direction 1: compliant ---
+  - name: at_threshold
+    expect: PASS
+    note: exactly 90 must clear the bar, since the assertion is "at least 90"
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"total_users":10,"completed_training":9,"past_due":1,"not_started":0,"completion_rate":90}}}}'
+
+  - name: full_completion
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"total_users":10,"completed_training":10,"past_due":0,"not_started":0,"completion_rate":100}}}}'
+
+  # --- direction 2: non-compliant ---
+  - name: just_below_threshold
+    expect: FAIL
+    note: 89 is the off-by-one that a lexicographic comparison would let through
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"total_users":100,"completed_training":89,"past_due":11,"not_started":0,"completion_rate":89}}}}'
+
+  - name: truncated_collection_understates_rate
+    expect: FAIL
+    note: >-
+      the shape of a real throttled run — a dropped enrollments page reported 51
+      where the clean run reported 94. Fails here on posture; collection_succeeded
+      is what identifies the cause.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"total_users":89,"completed_training":46,"past_due":3,"not_started":40,"completion_rate":51}}}}'
+
+  - name: single_digit_rate
+    expect: FAIL
+    note: guards the regex — 9[0-9] must not match a bare 9
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"total_users":100,"completed_training":9,"past_due":0,"not_started":91,"completion_rate":9}}}}'
+
+  - name: zero_rate
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"total_users":10,"completed_training":0,"past_due":0,"not_started":10,"completion_rate":0}}}}'
+
+  # --- direction 3: unreadable ---
+  - name: rollup_renamed
+    expect: FAIL
+    note: >-
+      envelope intact, compliance key renamed upstream. The presence rule is what
+      catches it; without it there would be nothing to read and the validator
+      would pass silently.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"total_users":10,"completed_training":10,"completion_pct":100}}}}'
+
+  - name: unresolved_campaign_nulls_the_metric
+    expect: FAIL
+    note: >-
+      the fetcher reports null, not 0, when the configured campaign name matches
+      nothing. null does not match the digit pattern, so this fails rather than
+      reading as a clean zero — the "uncountable must never read as zero" case.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"config_resolution":{"status":"unresolved","measurable":false},"summary":{"total_users":89,"total_campaigns":0,"completed_training":null,"past_due":null,"not_started":null,"needs_retraining":null,"completion_rate":null}}}}'

@@ -1,0 +1,37 @@
+validator: sg_inbound_rule_fields_present
+cases:
+  - name: inbound_rules_readable
+    expect: PASS
+    note: the ordinary shape — inbound rules present with their full field run intact
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-aaa","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":443,"CIDRs":"0.0.0.0/0"}]}]}}'
+
+  - name: direction_key_renamed
+    expect: FAIL
+    note: >
+      The drift this validator exists to catch. Its partner counts violations and
+      would report PASS here; this fails loudly instead.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-ccc","Rules":[{"Dir":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CIDRs":"0.0.0.0/0"}]}]}}'
+
+  - name: cidrs_key_renamed
+    expect: FAIL
+    note: >
+      Renaming any single key in the run breaks the partner's count, so the partner
+      must read the whole sequence rather than probe one key. CIDRs is the last
+      link and the one the violation regex reads for its value.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-ccc","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CidrIps":"0.0.0.0/0"}]}]}}'
+
+  - name: no_inbound_rules_at_all
+    expect: FAIL
+    note: >
+      Intended, not a false alarm. A payload with zero inbound rules is
+      indistinguishable from one whose Direction key was renamed, and "no bad
+      inbound rules" cannot be proved from evidence containing no inbound rules.
+      A genuinely locked-down account lands here and needs a human look.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-bbb","Rules":[]},{"GroupId":"sg-hhh","Rules":[{"Direction":"OUTBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":443,"CIDRs":"0.0.0.0/0"}]}]}}'
+
+  - name: collection_failed_empty_payload
+    expect: FAIL
+    note: >
+      An expired token yields an intact envelope and an empty results list. Nothing
+      was read, so the integrity assertion must not hold.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"ExpiredToken"},"payload":{"results":[]}}'

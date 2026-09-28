@@ -1,0 +1,48 @@
+# Set-level: every validator naming EVD-SECURITY-AWARENESS-TRAINING, combined
+# the way Paramify combines them (ERROR > FAIL > PASS). Neither compliance
+# validator on this set is count-based, so each already covers its own drift;
+# what only the set can show is the interaction between collection health and a
+# payload that still parses cleanly.
+evidence_set: EVD-SECURITY-AWARENESS-TRAINING
+cases:
+  - name: healthy_run_above_threshold
+    expect: PASS
+    note: the shape of the clean live run — 84 of 89 complete, campaign resolved
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"config_resolution":{"status":"resolved","measurable":true,"campaigns":{"requested":["2026 Annual"],"matched":["2026 Annual"],"unmatched":[]},"retraining_interval_days":365},"summary":{"total_users":89,"total_campaigns":1,"completed_training":84,"in_progress":0,"past_due":5,"not_started":0,"needs_retraining":0,"completion_rate":94}}}}'
+
+  - name: truncated_collection_looks_compliant_on_payload
+    expect: FAIL
+    note: >
+      The case this set exists for, taken from a real throttled run. A dropped
+      enrollments page truncates the data: the campaign still resolves
+      (measurable true) and needs_retraining still reads a clean 0, so both
+      payload-level signals look healthy. Only collection_succeeded fails, on
+      exit_code. Remove EVD-SECURITY-AWARENESS-TRAINING from
+      validators/common/collection_succeeded.yaml and this case goes green while
+      the artifact under-reports completion by 43 points.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"encountered 1 API failure(s) during collection"},"payload":{"results":{"config_resolution":{"status":"resolved","measurable":true,"campaigns":{"requested":["2026 Annual"],"matched":["2026 Annual"],"unmatched":[]},"retraining_interval_days":365},"summary":{"total_users":89,"total_campaigns":1,"completed_training":92,"in_progress":0,"past_due":3,"not_started":0,"needs_retraining":0,"completion_rate":92}}}}'
+
+  - name: placeholder_campaign_never_configured
+    expect: FAIL
+    note: >
+      The manifest still said REPLACE_ME. The run exits 0 and looks successful,
+      and every compliance metric is null rather than 0 — so the completion-rate
+      validator fails on the absent number and metrics_measurable names the
+      cause. Neither reads the nulls as a compliant zero.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"config_resolution":{"status":"unresolved","measurable":false,"campaigns":{"requested":["REPLACE_ME"],"matched":[],"unmatched":["REPLACE_ME"]},"retraining_interval_days":365,"campaigns_present_in_tenant":["2026 Annual Security Awareness Training"]},"summary":{"total_users":89,"total_campaigns":0,"completed_training":null,"in_progress":null,"past_due":null,"not_started":null,"needs_retraining":null,"completion_rate":null}}}}'
+
+  - name: below_threshold_but_healthy
+    expect: FAIL
+    note: >
+      Collection fine, config resolved, posture genuinely short of 90. Confirms
+      the set can distinguish a real compliance gap from a broken collection —
+      here it is only the completion-rate validator that fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"config_resolution":{"status":"resolved","measurable":true,"campaigns":{"requested":["2026 Annual"],"matched":["2026 Annual"],"unmatched":[]},"retraining_interval_days":365},"summary":{"total_users":100,"total_campaigns":1,"completed_training":72,"in_progress":0,"past_due":8,"not_started":20,"needs_retraining":0,"completion_rate":72}}}}'
+
+  - name: collection_failed_outright
+    expect: FAIL
+    note: >
+      ERROR is the semantically right verdict, but the API discards disposition,
+      so FAIL is the best reachable answer today. What matters is that it does
+      not PASS.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"KNOWBE4_API_KEY is not set"},"payload":{}}'

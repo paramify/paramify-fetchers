@@ -1,0 +1,39 @@
+key: security_awareness_metrics_measurable
+name: Security Awareness Training Metrics Are Measurable
+type: AUTOMATED
+role: integrity
+statement: >-
+  The configured training campaign name resolved against a campaign that
+  actually exists in the KnowBe4 tenant, so the completion figures in this
+  artifact are measured values rather than placeholders. The fetcher reports
+  every compliance metric as null (not 0) when no requested campaign name
+  matches, and sets config_resolution.measurable accordingly; this validator is
+  the readable statement of that condition.
+
+  DOES NOT ASSERT: anything about the posture — measurable evidence of a 0%
+  completion rate passes this validator; that the *right* campaign was named,
+  only that the named one exists; nor that every requested campaign matched, as
+  a partial resolution still reports measurable true.
+
+  CORRECTLY FAILS when the campaign name in the manifest is a placeholder or is
+  misspelled, renamed, or retired in KnowBe4 — the case that produced
+  measurable false and null metrics on a live run of this fetcher — and when
+  the config_resolution block is restructured away entirely.
+
+# Two rules rather than a bare match on `true`, so a vanished key and a false
+# value fail for visibly different reasons. `measurable` appears once, inside
+# config_resolution, and is payload-specific — not an envelope key.
+regex: '"measurable":\s*(?<measurable>true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true
+validation_rules:
+  # The field was there to read at all.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  # And the config resolved.
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-SECURITY-AWARENESS-TRAINING
