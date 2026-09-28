@@ -18,6 +18,7 @@ classifiers = [
 dependencies = [
     "python-dotenv",
     "requests",
+    "openpyxl",
     "pyyaml",
     "jsonschema",
     "typer>=0.12",

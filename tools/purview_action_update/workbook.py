@@ -10,7 +10,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterator
 
-import openpyxl
+try:
+    import openpyxl
+except ImportError as exc:  # pragma: no cover - dependency, not logic
+    raise SystemExit(
+        "openpyxl is required to read the Purview workbook.\n"
+        "    pip install -e .        (from the repo root)\n"
+        "    pip install openpyxl    (or just the one package)"
+    ) from exc
 
 from config import REQUIRED_COLUMNS, SHEET, WRITABLE_COLUMNS
 from mapping import RowPlan
