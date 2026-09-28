@@ -380,6 +380,7 @@ API_TO_CLI = {
     "issues_jobs": "issues jobs",
     "issues_job_action": "issues jobs",  # --retry / --cancel
     "issues_close": "issues close",
+    "latest_run": "upload",  # and `issues upload`: the run picked with no run-dir
     # Read-only label helper: how an assessment is named in the picker. The CLI
     # applies the same function to its own list output.
     "assessment_display_name": "<implicit: assessment label>",

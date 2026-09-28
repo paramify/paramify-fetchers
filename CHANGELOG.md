@@ -193,6 +193,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`paramify upload` and `paramify issues upload` pick the newest run of
+  their own kind** when no run is named, not simply the newest run: evidence
+  and pipeline manifests usually share an output directory, and each command
+  used to pick up the other's run (`issues upload` then failed with "this run
+  collected no issue reports" while the scan run sat beside it). Both take
+  `-f MANIFEST` to use only that manifest's runs, reading its output directory
+  when `--output-dir` is not given. The standalone uploaders and each panel of
+  the TUI's Paramify tab choose the same way; the TUI scopes to the active
+  manifest's runs once it has any.
 - **`paramify issues upload` sends reports into Paramify pipelines** instead of
   `POST /assessment/{id}/intake`, which it no longer calls. Per assessment it
   uploads each report bare to `POST /pipelines/{id}/intake`, then queues one

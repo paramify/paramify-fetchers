@@ -19,11 +19,18 @@ manifest needs.
 Run it after a run that included `kind: issue_report` fetchers:
 
 ```bash
-paramify issues upload                 # latest run
+paramify issues upload                 # newest run that collected issue reports
+paramify issues upload -f pipelines    # newest run that manifest produced
 paramify issues upload --dry-run       # resolve and report, including the operation; no API calls
 paramify issues upload --no-wait       # queue processing and exit
 paramify issues upload evidence/run-2026-08-21T15-53-26Z
 ```
+
+With no run named, it takes the newest run under the output directory that
+collected issue reports, skipping newer evidence-only runs — pipeline configs
+usually live in their own manifest, sharing the output directory with the
+evidence manifest. `-f` narrows that to one manifest's runs and reads the
+output directory from it.
 
 Or standalone, with no CLI:
 

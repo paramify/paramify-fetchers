@@ -1821,6 +1821,42 @@ def list_runs(output_dir) -> List[dict]:
     return runs
 
 
+RUN_KINDS = ("evidence", "issue_report")
+
+
+def run_has(run: dict, kind: str) -> bool:
+    """Whether a list_runs entry holds anything for this kind's upload."""
+    if kind == "issue_report":
+        return bool(run.get("issue_reports"))
+    if kind == "evidence":
+        return any(f.get("kind") == "evidence" for f in run.get("files") or [])
+    raise ValueError(f"unknown run kind {kind!r}; expected one of {RUN_KINDS}")
+
+
+def latest_run(
+    output_dir,
+    *,
+    kind: Optional[str] = None,
+    manifest_path=None,
+    root: Optional[Path] = None,
+) -> Optional[dict]:
+    """The newest run under output_dir worth uploading, or None.
+
+    `kind` skips runs with nothing of that kind: an evidence manifest and a
+    pipeline manifest usually share an output_dir, and "the newest run" alone
+    handed `paramify issues upload` an evidence-only run while the scan run sat
+    beside it. `manifest_path` keeps only runs that manifest produced (its
+    _manifest_id in the run metadata), for two manifests of the same kind.
+    """
+    runs = list_runs(output_dir)
+    if manifest_path is not None:
+        mid = _manifest_id(manifest_path, root or find_repo_root())
+        runs = [r for r in runs if r.get("manifest") == mid]
+    if kind is not None:
+        runs = [r for r in runs if run_has(r, kind)]
+    return runs[0] if runs else None
+
+
 def read_evidence(path) -> dict:
     """Read one evidence JSON file, normalized. Splits the standard envelope
     (schema_version/metadata/payload); a raw (un-enveloped) file comes back with

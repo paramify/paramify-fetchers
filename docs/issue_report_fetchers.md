@@ -280,7 +280,11 @@ paramify upload           # evidence  → evidence sets
 paramify issues upload    # reports   → assessment pipelines, processed
 ```
 
-A run containing both kinds needs both commands. `paramify issues upload` takes
+Pipeline configs usually live in their own manifest (scans run on a different
+schedule from evidence), and the two can share an output directory: with no run
+named, `paramify upload` takes the newest run holding evidence and `paramify
+issues upload` the newest holding issue reports, and `-f <manifest>` narrows
+either to one manifest's runs. A run containing both kinds needs both commands. `paramify issues upload` takes
 the same arguments as `paramify upload` (optional run dir, `--output-dir`,
 `--config`, `--dry-run`, `--json`) plus `--force` (re-send a report already in
 this run's intake log), `--no-wait` and `--wait-timeout`.

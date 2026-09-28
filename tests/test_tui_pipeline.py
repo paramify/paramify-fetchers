@@ -8,6 +8,7 @@ workers run for real.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -20,9 +21,19 @@ from framework import api  # noqa: E402
 from framework.tui.app import FetcherApp  # noqa: E402
 from framework.tui.modals import ConfirmModal, PickerModal  # noqa: E402
 from framework.tui.screens.run import RunPage  # noqa: E402
+from framework.tui.screens.upload import UploadPage  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SIZE = (180, 50)
+
+# Run fixtures shared with test_run_selection, loaded by path: tests/ is not a
+# package, so importing it by name depends on how pytest was launched.
+_spec = importlib.util.spec_from_file_location(
+    "run_selection_fixtures", Path(__file__).with_name("test_run_selection.py")
+)
+_fixtures = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_fixtures)
+evidence_run, issue_run = _fixtures.evidence_run, _fixtures.issue_run
 
 
 def _write_manifest(tmp_path: Path) -> Path:
@@ -160,5 +171,22 @@ def test_run_console_points_at_waiting_issue_reports(tmp_path):
         rendered = banner.render()
         text = rendered.plain if isinstance(rendered, Text) else str(rendered)
         assert "2 issue report(s) ready" in text
+
+    _run(body, _write_manifest(tmp_path))
+
+
+def test_each_panel_picks_the_newest_run_of_its_own_kind(tmp_path):
+    """An evidence manifest and a pipeline manifest share the output dir; the
+    issue-report panel must not go blank because the evidence run is newer."""
+    out = tmp_path / "evidence"
+    scans = issue_run(out, "2026-09-01T00-00-00Z")
+    evidence = evidence_run(out, "2026-09-02T00-00-00Z")
+
+    async def body(app, pilot):
+        await pilot.press("5")
+        await pilot.pause()
+        page = app.screen.query_one(UploadPage)
+        assert page._run_dir == str(evidence)
+        assert page._issues_run_dir == str(scans)
 
     _run(body, _write_manifest(tmp_path))

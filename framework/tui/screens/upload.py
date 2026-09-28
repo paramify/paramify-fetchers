@@ -147,6 +147,7 @@ class UploadPage(ButtonRowNav, Vertical):
         self._uploading = False
         self._syncing = False
         self._run_dir: str | None = None
+        self._issues_run_dir: str | None = None
         self._preflight: dict | None = None
         self._issues_preflight: dict | None = None
         self._scripts_preflight: dict | None = None
@@ -202,6 +203,23 @@ class UploadPage(ButtonRowNav, Vertical):
         entries = (manifest.get("run") or {}).get("fetchers") or []
         return {e.get("use") for e in entries if e.get("use")}
 
+    def _latest(self, kind: str) -> dict | None:
+        """The run a panel acts on: the newest one holding this kind.
+
+        Evidence and pipeline manifests usually share an output dir, so each
+        panel looks for its own kind rather than taking the newest run. Scoped
+        to the active manifest's runs once it has any, so a pipeline manifest's
+        evidence panel does not offer another manifest's evidence; runs from
+        before run attribution existed are the fallback.
+        """
+        out = self._output_dir()
+        path = getattr(self.app, "manifest_path", None)
+        if path is not None:
+            root = self.app.root_path
+            if api.latest_run(out, manifest_path=path, root=root) is not None:
+                return api.latest_run(out, kind=kind, manifest_path=path, root=root)
+        return api.latest_run(out, kind=kind)
+
     def rebuild(self) -> None:
         """Refresh readiness for both panels (cheap; no network). The scripts
         plan itself is populated on demand by Preview / Sync, not here."""
@@ -224,15 +242,16 @@ class UploadPage(ButtonRowNav, Vertical):
         out = self._output_dir()
         table.add_row("output dir", out)
         try:
-            runs = api.list_runs(out)
+            latest = self._latest("evidence")
         except Exception as exc:
             table.add_row("status", Text(f"cannot list runs: {exc}", style=palette.FAIL))
             return
-        if not runs:
-            table.add_row("status", Text("no runs found — collect in the Run tab first", style="dim"))
+        if latest is None:
+            table.add_row("status", Text(
+                "no run with evidence — collect in the Run tab first", style="dim",
+            ))
             return
 
-        latest = runs[0]
         self._run_dir = latest["dir"]
         table.add_row("selected run", latest["run_id"])
         table.add_row("result", self._result_text(latest))
@@ -261,35 +280,34 @@ class UploadPage(ButtonRowNav, Vertical):
                 table.add_row("preflight error", Text(err, style=palette.FAIL))
 
     def _rebuild_issues(self) -> None:
-        """Issue-report intake readiness for the same run the evidence panel shows.
+        """Issue-report readiness for the newest run that collected any.
 
-        Most runs collect no issue reports, so the common case is a panel that
-        says so and a disabled button — not an error. Preflight is only consulted
-        when there is something to send, which also keeps a run of pure evidence
-        from reporting a missing assessment it never needed.
+        Its own run, not the evidence panel's: a pipeline manifest's scan run and
+        an evidence manifest's run usually sit side by side. With none, the panel
+        says so and the button stays disabled — not an error. Preflight is only
+        consulted when there is something to send.
         """
         self._issues_preflight = None
+        self._issues_run_dir = None
         table = self.query_one("#issues-summary", DataTable)
         table.clear()
         submit = self.query_one("#issues-submit", Button)
         submit.disabled = True
 
-        if not self._run_dir:
-            table.add_row("status", Text("no run selected", style="dim"))
-            return
-
-        runs = [r for r in api.list_runs(self._output_dir()) if r["dir"] == self._run_dir]
-        count = runs[0].get("issue_reports", 0) if runs else 0
-        if not count:
-            table.add_row(
-                "status",
-                Text("this run collected no issue reports", style="dim"),
-            )
-            return
-
-        table.add_row("reports", str(count))
         try:
-            preflight = api.issues_upload_preflight(self._run_dir, self.app.root_path)
+            latest = self._latest("issue_report")
+        except Exception as exc:
+            table.add_row("status", Text(f"cannot list runs: {exc}", style=palette.FAIL))
+            return
+        if latest is None:
+            table.add_row("status", Text("no run collected issue reports", style="dim"))
+            return
+
+        self._issues_run_dir = latest["dir"]
+        table.add_row("selected run", latest["run_id"])
+        table.add_row("reports", str(latest.get("issue_reports", 0)))
+        try:
+            preflight = api.issues_upload_preflight(self._issues_run_dir, self.app.root_path)
         except Exception as exc:
             table.add_row("preflight", Text(str(exc), style=palette.FAIL))
             return
@@ -427,13 +445,14 @@ class UploadPage(ButtonRowNav, Vertical):
             self.notify("A Paramify operation is already in progress.")
             return
         pf = self._issues_preflight
-        if not self._run_dir or not pf or not pf.get("ok"):
-            self.notify("No issue reports ready to intake.")
+        run_dir = self._issues_run_dir
+        if not run_dir or not pf or not pf.get("ok"):
+            self.notify("No issue reports ready to send.")
             return
 
         def go(ok: bool) -> None:
             if ok:
-                self._start_intake(self._run_dir)
+                self._start_intake(run_dir)
 
         closing = [
             p for p in pf.get("assessments") or [] if p.get("operation") == "PROCESS_CLOSE"

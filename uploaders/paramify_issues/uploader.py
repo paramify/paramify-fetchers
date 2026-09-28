@@ -391,10 +391,12 @@ def wait_for_job(
 # Helpers
 # --------------------------------------------------------------------------- #
 def find_latest_run(output_dir: Path) -> Optional[Path]:
+    """The newest run that collected issue reports — not simply the newest run,
+    which is often an evidence manifest's sharing the same output dir."""
     if not output_dir.is_dir():
         return None
     runs = sorted((p for p in output_dir.glob("run-*") if p.is_dir()), reverse=True)
-    return runs[0] if runs else None
+    return next((r for r in runs if (r / ISSUE_REPORTS_DIR / SIDECAR_NAME).is_file()), None)
 
 
 def read_sidecar(run_dir: Path) -> Optional[dict]:

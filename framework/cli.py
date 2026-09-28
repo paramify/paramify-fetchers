@@ -51,8 +51,8 @@ every subcommand accepts --json, emitting {"ok", "path", "errors"}):
 Validate / run / launch:
   paramify validate <manifest> [--json]
   paramify run <manifest> [--json]
-  paramify upload [run-dir] [--output-dir DIR] [--config PATH] [--dry-run] [--json]
-  paramify issues upload [run-dir] [--output-dir DIR] [--config PATH] [--dry-run] [--no-wait] [--json]
+  paramify upload [run-dir] [-f MANIFEST] [--output-dir DIR] [--config PATH] [--dry-run] [--json]
+  paramify issues upload [run-dir] [-f MANIFEST] [--output-dir DIR] [--config PATH] [--dry-run] [--no-wait] [--json]
   paramify issues jobs [--assessment ID] [--retry JOB | --cancel JOB] [--json]
   paramify issues close <assessment-id> [--yes] [--json]
   paramify tui [--manifest PATH] [--at ROOT]   # interactive terminal UI
@@ -407,7 +407,7 @@ def _job_line(job: dict) -> str:
 def _upload_stage(
     *,
     run_dir: Optional[str],
-    output_dir: str,
+    output_dir: Optional[str],
     config: Optional[str],
     dry_run: bool,
     json_out: bool,
@@ -418,6 +418,8 @@ def _upload_stage(
     upload_kwargs: Optional[dict] = None,
     after_upload: Optional[Callable[[Path, Path, Optional[Path], bool], dict]] = None,
     after_upload_key: str = "after_upload",
+    kind: Optional[str] = None,
+    manifest: Optional[str] = None,
 ) -> NoReturn:
     """Resolve a run directory, preflight it, and upload — the whole flow for one
     upload stage.
@@ -431,15 +433,31 @@ def _upload_stage(
     if run_dir:
         resolved_run_dir = Path(run_dir).resolve()
     else:
-        runs = api.list_runs(output_dir)
-        if not runs:
-            msg = f"No runs found under {output_dir}."
+        # The newest run with something of this stage's kind — not simply the
+        # newest run: evidence and pipeline manifests usually share an
+        # output_dir, and each command would otherwise pick up the other's run.
+        manifest_path = None
+        if manifest:
+            try:
+                manifest_path = api.resolve_manifest_path(root, manifest)
+            except api.ManifestNotFound as e:
+                _fail(None, str(e), json_out)
+            if output_dir is None:
+                m_run = (api.read_manifest(manifest_path).get("run") or {})
+                output_dir = m_run.get("output_dir")
+        output_dir = output_dir or "./evidence"
+        latest = api.latest_run(output_dir, kind=kind, manifest_path=manifest_path, root=root)
+        if latest is None:
+            what = {"evidence": "collected evidence", "issue_report": "collected issue reports"}
+            scope = f" produced by {manifest}" if manifest else ""
+            has = f" that {what[kind]}" if kind else ""
+            msg = f"No run{scope} under {output_dir}{has}."
             if json_out:
                 typer.echo(json.dumps({"ok": False, "errors": [msg]}, indent=2))
             else:
                 _err(msg)
             raise typer.Exit(1)
-        resolved_run_dir = Path(runs[0]["dir"]).resolve()
+        resolved_run_dir = Path(latest["dir"]).resolve()
 
     config_path = Path(config).resolve() if config else None
     try:
@@ -1064,8 +1082,16 @@ def run_cmd(
 
 @app.command("upload")
 def upload_cmd(
-    run_dir: Optional[str] = typer.Argument(None, help="Run directory to upload (default: latest under --output-dir)"),
-    output_dir: str = typer.Option("./evidence", "-o", "--output-dir", help="Base dir to find latest run"),
+    run_dir: Optional[str] = typer.Argument(
+        None, help="Run directory to upload (default: the newest run that collected evidence)"
+    ),
+    output_dir: Optional[str] = typer.Option(
+        None, "-o", "--output-dir",
+        help="Base dir to find the run in (default: the -f manifest's output_dir, else ./evidence)",
+    ),
+    file: Optional[str] = typer.Option(
+        None, "-f", "--file", help="Only runs this manifest produced",
+    ),
     config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and report what would upload; no API calls"),
     with_validators: bool = typer.Option(False, "--with-validators", help="After upload, sync validators for the sets this run produced (create-or-skip)"),
@@ -1097,6 +1123,8 @@ def upload_cmd(
         log_name="upload_log.json",
         after_upload=_sync_after if with_validators else None,
         after_upload_key="validators",
+        kind="evidence",
+        manifest=file,
     )
 
 
@@ -2398,9 +2426,15 @@ def artifacts_pull(
 @issues_app.command("upload")
 def issues_upload_cmd(
     run_dir: Optional[str] = typer.Argument(
-        None, help="Run directory to upload (default: latest under --output-dir)"
+        None, help="Run directory to upload (default: the newest run that collected issue reports)"
     ),
-    output_dir: str = typer.Option("./evidence", "-o", "--output-dir", help="Base dir to find latest run"),
+    output_dir: Optional[str] = typer.Option(
+        None, "-o", "--output-dir",
+        help="Base dir to find the run in (default: the -f manifest's output_dir, else ./evidence)",
+    ),
+    file: Optional[str] = typer.Option(
+        None, "-f", "--file", help="Only runs this manifest produced",
+    ),
     config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and report what would upload; no API calls"),
     force: bool = typer.Option(
@@ -2436,6 +2470,8 @@ def issues_upload_cmd(
         noun="report",
         log_name="_intake_log.json",
         upload_kwargs={"force": force, "wait": not no_wait, "wait_timeout": wait_timeout},
+        kind="issue_report",
+        manifest=file,
     )
 
 
