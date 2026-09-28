@@ -485,11 +485,11 @@ def check_category(r: Report, cat: str, n_built: int) -> None:
         elif max(c[1] for c in copies) <= SMALL_HELPER_LINES:
             r.warn("build", f"{cat}: `{fn}` exists in {variants} versions across {where} — a small helper that "
                             "has drifted; lift one version into _shared/")
-    committed = sorted(p for p in root.rglob("*") if p.suffix in (".py", ".sh", ".yaml") and p.is_file())
-    committed.append(REPO / "fetchers" / "_categories" / f"{cat}.yaml")
-    check_comments(r, "build", [p for p in committed if p.is_file()])
-    committed += sorted((REPO / "validators" / cat).glob("*.yaml"))
-    for p in committed:
+    shipped = sorted(p for p in root.rglob("*") if p.suffix in (".py", ".sh", ".yaml") and p.is_file())
+    shipped.append(REPO / "fetchers" / "_categories" / f"{cat}.yaml")
+    check_comments(r, "build", [p for p in shipped if p.is_file()])
+    shipped += sorted((REPO / "validators" / cat).glob("*.yaml"))
+    for p in shipped:
         if p.is_file() and ".onboarding/" in read(p):
             r.fail("build", f"{p.relative_to(REPO)} references .onboarding/, which is gitignored — "
                             "state the fact inline or drop it")
@@ -522,15 +522,44 @@ def check_close(r: Report, st: Path, cats: set[str]) -> None:
         else:
             r.ok("close", f"sandbox {d} ({td['by']}, {td['at']})")
     paths = [f"fetchers/{c}" for c in sorted(cats)] + [f"fetchers/_categories/{c}.yaml" for c in sorted(cats)]
-    paths.append("validators")
-    try:
-        out = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain", "--", *paths],
-                             capture_output=True, text=True, timeout=20).stdout.splitlines()
-    except (OSError, subprocess.TimeoutExpired):
-        out = []
+    out = git("status", "--porcelain", "--", *paths)
     if out:
-        r.info("close", f"{len(out)} onboarding file(s) uncommitted — list them for the user and let them commit "
+        r.info("close", f"{len(out)} fetcher file(s) uncommitted — list them for the user and let them commit "
                         "by explicit path; never fold them into an unrelated commit")
+    check_validators_off_branch(r)
+
+
+def git(*args: str) -> list[str]:
+    try:
+        return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True,
+                              timeout=20).stdout.splitlines()
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+
+
+def check_validators_off_branch(r: Report) -> None:
+    """New validators, and edits to main's, are synced to the workspace but never committed."""
+    base = next((b for b in ("origin/main", "main") if git("rev-parse", "--verify", "--quiet", b)), None)
+    # History, not the net diff: a later deletion still leaves them in a non-squash merge.
+    committed = sorted({f for f in git("log", "--format=", "--name-only", f"{base}..HEAD", "--", "validators")
+                        if f}) if base else []
+    staged = git("diff", "--cached", "--name-only", "--", "validators")
+    for label, files in (("in this branch's commits", committed), ("staged", staged)):
+        if files:
+            r.fail("close", f"{len(files)} validator file(s) {label} ({', '.join(files[:3])}"
+                            f"{', …' if len(files) > 3 else ''}) — new validators never go to main; build the "
+                            "branch from main with fetcher paths only")
+    edited = [ln[3:] for ln in git("status", "--porcelain", "--", "validators") if ln[:2].strip() == "M"]
+    if edited:
+        r.warn("close", f"{len(edited)} validator(s) already in main edited locally ({', '.join(edited[:3])}) — "
+                        "fine for sync and scoring, never committed; restore them before branching")
+    new = [ln[3:] for ln in git("status", "--porcelain", "--untracked-files=all", "--", "validators")
+           if ln.startswith("??")]
+    if new:
+        r.info("close", f"{len(new)} new validator file(s) in the working tree — keep a copy in "
+                        ".onboarding/<platform>/validators/ and leave them out of the branch")
+    if base and not (committed or staged):
+        r.ok("close", "no validators on the branch")
 
 
 def main() -> int:

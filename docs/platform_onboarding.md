@@ -216,6 +216,9 @@ left the sandbox running with nothing recording whether that was intended.
   `evidence_set.instructions`; committed code never cites `.onboarding/`.
 - **A re-provisioned sandbox is a new sandbox.** It is approved, verified and
   given a teardown decision again.
+- **Fetchers go on the branch; new validators don't.** Validators are
+  authored and proven locally and synced to the workspace. They are kept out of
+  every branch headed for main, and validators already in main are not edited.
 
 ## State on disk
 
@@ -268,7 +271,8 @@ attached. By hand:
    python .claude/skills/suggest-validator/scripts/find_evidence.py <fetcher_name>
    ```
 6. Author its validator and prove it fails on a non-compliant artifact. Only
-   then build the rest.
+   then build the rest. The validator stays out of the branch, as the
+   constraints above say.
 
 The checker works just as well without an agent — run it at each gate. The
 conventions it reads (the three gate lines at the top of each
