@@ -123,6 +123,7 @@ def plan_row(
     fallback_solcap: bool = False,
     on_date_conflict: str = CONFLICT_SKIP,
     notes_policy: str = NOTES_FOLLOW_MODE,
+    skip_unassessed_notes: bool = False,
 ) -> RowPlan:
     plan = RowPlan(
         row=row_number,
@@ -274,16 +275,24 @@ def plan_row(
             )
 
     # --- Implementation Notes --------------------------------------------- #
-    # A NOT_SET capability has not been assessed, so its narrative is provisional.
-    # Its status is refused above for that reason, and publishing its prose into a
-    # live assessment would assert through the notes field what the status field
-    # deliberately declines to say. PARTIALLY_IMPLEMENTED is different: it is an
-    # assessed position, and its narrative is often the clearest statement of
-    # what is and is not yet in place, so it is still carried.
-    if str(solcap.get("implementationStatus") or "").strip().upper() == "NOT_SET":
+    # Narratives publish regardless of the capability's implementation status.
+    #
+    # An earlier version suppressed them for NOT_SET capabilities, reasoning that
+    # unassessed prose should not enter a live assessment. That conflated two
+    # different things: a narrative DESCRIBES what the system does, while the
+    # Implementation Status column carries the claim about whether it is in
+    # place. Suppressing the description because the status is unset silently
+    # emptied the Notes column for 456 of 463 rows in a real program -- the
+    # opposite of what this tool is for.
+    #
+    # --skip-unassessed-notes restores the cautious behaviour for anyone who
+    # wants it.
+    if skip_unassessed_notes and (
+        str(solcap.get("implementationStatus") or "").strip().upper() == "NOT_SET"
+    ):
         plan.skipped.append(
-            "Implementation Notes: the capability is NOT_SET, so its narrative is "
-            "provisional and is not published into the assessment"
+            "Implementation Notes: --skip-unassessed-notes and the capability is "
+            "NOT_SET, so its narrative was not published"
         )
         return plan
 

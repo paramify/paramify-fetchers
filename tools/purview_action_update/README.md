@@ -83,6 +83,7 @@ in the workspace you think you are.
 | `--mode sync` | Also replace cells that disagree with Paramify |
 | `--on-date-conflict` | `skip` (default) / `advance-test` / `clear-test` — see below |
 | `--notes-policy` | `follow-mode` (default) / `append` — see below |
+| `--skip-unassessed-notes` | Don't publish narratives for `NOT_SET` capabilities. Off by default |
 | `--status-fallback-solcap` | Where no status-change activity exists, use the capability's current status (no date derivable) |
 | `--strict-test-status` | Refuse rows whose Test Status is blank when the new status does not permit `None` |
 | `--timezone ZONE` | IANA zone for date rendering. Defaults to this machine's zone |
@@ -187,9 +188,11 @@ Every refusal lands in `run_report.json` with its reason.
 - **`PARTIALLY_IMPLEMENTED`** — Purview has no partial state, and both
   candidate mappings force Test Status to `None`, which would wipe a recorded
   pass.
-- **`NOT_SET`** — neither status nor narrative is published; the capability has
-  not been assessed, and publishing its prose would assert through the notes
-  field what the status field declines to say.
+- **`NOT_SET` status** — no Implementation Status is written, because `NOT_SET`
+  has no Purview equivalent. The **narrative still publishes**: it describes
+  what the system does, which is independent of whether anyone has set the
+  status. `--skip-unassessed-notes` suppresses it for those rows if you want
+  the stricter posture.
 - **A status that invalidates the row's Test Status** — e.g. `NotImplemented`
   onto a `Passed` row.
 - **A date later than the row's Test Date**, unless `--on-date-conflict` says
@@ -303,4 +306,4 @@ diagnoses that case by name.
 | `run.py` | CLI |
 | `fixtures/` | Synthetic capabilities and audit events — no client data |
 
-Tests: `tests/test_purview_action_update.py` — **112, fully offline**.
+Tests: `tests/test_purview_action_update.py` — **125, fully offline**.

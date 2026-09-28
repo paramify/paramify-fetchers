@@ -375,13 +375,37 @@ def test_status_that_would_invalidate_an_existing_pass_is_skipped():
     assert any("permits Test Status" in s for s in plan.skipped)
 
 
-def test_not_set_capability_publishes_no_narrative():
-    # Its status is refused as unassessed; publishing its prose would assert
-    # through the notes field what the status field declines to say.
+def test_a_not_set_capability_still_publishes_its_narrative():
+    # A narrative describes what the system DOES; the status column carries the
+    # claim about whether it is in place. Suppressing the description because
+    # the status is unset emptied the Notes column for 456 of 463 real rows.
     plan = _plan(BLANK_ROW, _cap("Alpha", status="NOT_SET", functions=[
-        {"type": "PROVIDER", "name": "P", "narrative": "Draft narrative."}]), _res("NOT_SET"))
+        {"type": "PROVIDER", "name": "P", "narrative": "The platform enforces it."}]),
+        _res("NOT_SET"))
+    assert _written(plan, "Implementation Notes").new == "The platform enforces it."
+    # ...while the STATUS is still refused, because NOT_SET has no Purview value
+    assert _written(plan, "Implementation Status") is None
+
+
+def test_skip_unassessed_notes_restores_the_cautious_behaviour():
+    plan = plan_row(
+        row_number=2, values=dict(BLANK_ROW),
+        solcap=_cap("Alpha", status="NOT_SET", functions=[
+            {"type": "PROVIDER", "name": "P", "narrative": "The platform enforces it."}]),
+        resolution=None, tzinfo=UTC, skip_unassessed_notes=True,
+    )
     assert _written(plan, "Implementation Notes") is None
-    assert any("provisional" in s for s in plan.skipped)
+    assert any("--skip-unassessed-notes" in s for s in plan.skipped)
+
+
+def test_an_assessed_capability_is_unaffected_by_the_flag():
+    plan = plan_row(
+        row_number=2, values=dict(BLANK_ROW),
+        solcap=_cap("Alpha", status="IMPLEMENTED", functions=[
+            {"type": "PROVIDER", "name": "P", "narrative": "The platform enforces it."}]),
+        resolution=None, tzinfo=UTC, skip_unassessed_notes=True,
+    )
+    assert _written(plan, "Implementation Notes").new == "The platform enforces it."
 
 
 def test_partially_implemented_still_publishes_its_narrative():
@@ -435,7 +459,7 @@ def test_offline_run_against_the_real_export(tmp_path):
     assert report["dry_run"] is True
     assert report["totals"]["action_rows"] == 463
     assert report["totals"]["cells_by_column"] == {
-        "Implementation Status": 2, "Implementation Date": 2, "Implementation Notes": 3,
+        "Implementation Status": 2, "Implementation Date": 2, "Implementation Notes": 4,
     }
     # the orphan capability and the case-drift row are both surfaced
     assert report["join"]["unmatched_solution_capabilities"] == [
@@ -679,7 +703,7 @@ def test_live_run_derives_status_and_date_from_the_audit_activity(fake_api, tmp_
     report = json.loads((tmp_path / "run_report.json").read_text())
     assert report["sources"]["implementation_status"] == "audit_log_activity"
     assert report["totals"]["cells_by_column"] == {
-        "Implementation Status": 2, "Implementation Date": 2, "Implementation Notes": 3,
+        "Implementation Status": 2, "Implementation Date": 2, "Implementation Notes": 4,
     }
     assert report.get("upload") is None             # no upload without the flag
 

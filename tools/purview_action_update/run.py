@@ -145,6 +145,12 @@ def main(argv: list[str] | None = None) -> int:
              "beneath it, and is idempotent across re-runs.",
     )
     parser.add_argument(
+        "--skip-unassessed-notes", action="store_true",
+        help="do not publish the narrative of a capability whose implementation "
+             "status is NOT_SET. Off by default: a narrative describes what the "
+             "system does, which is independent of whether the status has been set.",
+    )
+    parser.add_argument(
         "--on-date-conflict", choices=DATE_CONFLICT_CHOICES, default=CONFLICT_SKIP,
         help="Purview requires Test Date >= Implementation Date. When a derived "
              "Implementation Date is later than the row's Test Date: 'skip' (default) "
@@ -356,6 +362,7 @@ def main(argv: list[str] | None = None) -> int:
                     fallback_solcap=args.status_fallback_solcap,
                     on_date_conflict=args.on_date_conflict,
                     notes_policy=args.notes_policy,
+                    skip_unassessed_notes=args.skip_unassessed_notes,
                 )
             )
 
