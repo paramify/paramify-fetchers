@@ -59,9 +59,9 @@ logger = logging.getLogger("purview_action_update")
 #: Where the Purview export tends to live. Searched in order when --workbook is
 #: not given; the resolved path is always logged so the choice is never silent.
 WORKBOOK_CANDIDATES = (
-    Path.home() / "Desktop" / "QUICK SP TEST" / "ExportActions.xlsx",
-    Path.home() / "Desktop" / "ExportActions.xlsx",
     Path("ExportActions.xlsx"),
+    Path.home() / "Downloads" / "ExportActions.xlsx",
+    Path.home() / "Desktop" / "ExportActions.xlsx",
 )
 
 

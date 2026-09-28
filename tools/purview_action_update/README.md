@@ -68,7 +68,7 @@ in the workspace you think you are.
 
 | Flag | Effect |
 |---|---|
-| `--workbook` | The Purview export. Defaults to the first that exists of `~/Desktop/QUICK SP TEST/ExportActions.xlsx`, `~/Desktop/ExportActions.xlsx`, `./ExportActions.xlsx`; the resolved path is logged |
+| `--workbook` | The Purview export. Defaults to the first that exists of `./ExportActions.xlsx`, `~/Downloads/ExportActions.xlsx`, `~/Desktop/ExportActions.xlsx`; the resolved path is logged |
 | `--out` | Output directory (default `out/purview_action_update`) |
 | `--dry-run` | Plan and report, write no workbook |
 | `--offline DIR` | Read capabilities and audit events from JSON fixtures — no token, no network |

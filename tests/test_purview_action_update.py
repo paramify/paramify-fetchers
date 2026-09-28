@@ -6,6 +6,7 @@ where it must REFUSE to write.
 """
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,9 +18,15 @@ TOOL = Path(__file__).resolve().parents[1] / "tools" / "purview_action_update"
 sys.path.insert(0, str(TOOL))
 
 #: The client export moves around; the end-to-end tests skip if none is present.
-WORKBOOK_CANDIDATES = (
-    Path.home() / "Desktop" / "ExportActions.xlsx",
-    Path.home() / "Desktop" / "QUICK SP TEST" / "ExportActions.xlsx",
+#: The end-to-end tests need a real Purview export; they skip without one.
+#: PURVIEW_EXPORT points at it, so no engagement-specific path is baked in.
+WORKBOOK_CANDIDATES = tuple(
+    Path(p) for p in (
+        os.environ.get("PURVIEW_EXPORT", ""),
+        "ExportActions.xlsx",
+        Path.home() / "Downloads" / "ExportActions.xlsx",
+        Path.home() / "Desktop" / "ExportActions.xlsx",
+    ) if p
 )
 
 
