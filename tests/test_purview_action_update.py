@@ -1355,3 +1355,12 @@ def test_advance_test_output_verifies_clean_under_the_wider_writable_set(tmp_pat
     assert verify_mod.verify(a, b, writable=WRITABLE5) == []
     # but the same file is a violation when Test Date was not meant to be writable
     assert "read-only-column" in _checks(verify_mod.verify(a, b, writable=WRITABLE3))
+
+
+def test_the_changes_preview_shows_paragraph_breaks():
+    # Collapsing "\n\n" to a space made an appended note look like two
+    # sentences jammed together, when the cell was correct.
+    import report as report_mod
+
+    assert "⏎⏎" in report_mod._short("Client note.\n\nParamify narrative.", limit=200)
+    assert report_mod._short(None) == "(blank)"

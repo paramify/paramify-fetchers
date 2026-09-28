@@ -233,7 +233,14 @@ def changes_table(report: dict[str, Any], skip_columns: tuple[str, ...] = ()) ->
 
 
 def _short(value: Any, limit: int = 30) -> str:
+    """One-line preview of a cell value.
+
+    Paragraph breaks render as a visible marker rather than collapsing to a
+    space: an appended note reads "client text ⏎⏎ narrative", and silently
+    flattening that made the preview look like the two had been concatenated
+    without separation when the cell was in fact correct.
+    """
     if value is None:
         return "(blank)"
-    text = " ".join(str(value).split())
+    text = " ".join(str(value).replace("\n\n", " ⏎⏎ ").replace("\n", " ⏎ ").split())
     return repr(text if len(text) <= limit else text[:limit] + "…")
