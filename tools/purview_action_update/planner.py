@@ -66,7 +66,12 @@ DATE_CONFLICT_CHOICES = (CONFLICT_SKIP, CONFLICT_ADVANCE_TEST, CONFLICT_CLEAR_TE
 #: so a production sync never destroys someone's own sentence.
 NOTES_FOLLOW_MODE = "follow-mode"
 NOTES_APPEND = "append"
-NOTES_POLICIES = (NOTES_FOLLOW_MODE, NOTES_APPEND)
+#: Always write the narrative over whatever the cell holds, whatever --mode
+#: says. Paramify is the source of truth for this column and the client's
+#: earlier text is discarded. Explicit rather than implied by --mode sync, so
+#: the intent is visible in the command that ran.
+NOTES_REPLACE = "replace"
+NOTES_POLICIES = (NOTES_FOLLOW_MODE, NOTES_APPEND, NOTES_REPLACE)
 
 #: Separates the client's note from the appended narrative. Also the marker
 #: that makes appending idempotent -- re-running must not stack duplicates.
@@ -313,7 +318,10 @@ def plan_row(
             )
             write = combined is not None
         else:
-            write, reason = _should_write(existing, notes_text, mode)
+            # `replace` decides this column on its own, so --mode fill-empty
+            # can still protect status and dates while notes are overwritten.
+            effective = MODE_SYNC if notes_policy == NOTES_REPLACE else mode
+            write, reason = _should_write(existing, notes_text, effective)
             plan.updates.append(
                 CellUpdate(COL_IMPL_NOTES, existing, notes_text, write, reason)
             )

@@ -82,7 +82,7 @@ in the workspace you think you are.
 | `--mode fill-empty` | **Default.** Write only into blank cells |
 | `--mode sync` | Also replace cells that disagree with Paramify |
 | `--on-date-conflict` | `skip` (default) / `advance-test` / `clear-test` — see below |
-| `--notes-policy` | `follow-mode` (default) / `append` — see below |
+| `--notes-policy` | `follow-mode` (default) / `append` / `replace` — see below |
 | `--skip-unassessed-notes` | Don't publish narratives for `NOT_SET` capabilities. Off by default |
 | `--status-fallback-solcap` | Where no status-change activity exists, use the capability's current status (no date derivable) |
 | `--strict-test-status` | Refuse rows whose Test Status is blank when the new status does not permit `None` |
@@ -170,6 +170,12 @@ happens when Paramify has a narrative for the same row is a policy choice:
 |---|---|---|
 | `follow-mode` *(default)* | client's note kept, gaps filled | **Paramify replaces the client's note** |
 | `append` | client's note kept, gaps filled | client's note kept, narrative added beneath |
+| `replace` | **narrative overwrites the cell** | **narrative overwrites the cell** |
+
+`replace` decides this column on its own, so `--mode fill-empty` can still
+protect Implementation Status and the dates while notes are overwritten
+wholesale. Use it when Paramify is the source of truth for narrative text and
+the client's earlier wording is not wanted.
 
 `append` is what makes a `sync` run safe across all 463 rows — neither wording
 is lost. It is idempotent: the narrative's own text is the marker, so re-running
@@ -306,4 +312,4 @@ diagnoses that case by name.
 | `run.py` | CLI |
 | `fixtures/` | Synthetic capabilities and audit events — no client data |
 
-Tests: `tests/test_purview_action_update.py` — **125, fully offline**.
+Tests: `tests/test_purview_action_update.py` — **129, fully offline**.

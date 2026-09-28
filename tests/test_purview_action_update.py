@@ -1364,3 +1364,27 @@ def test_the_changes_preview_shows_paragraph_breaks():
 
     assert "⏎⏎" in report_mod._short("Client note.\n\nParamify narrative.", limit=200)
     assert report_mod._short(None) == "(blank)"
+
+
+def test_replace_overwrites_the_clients_note_entirely():
+    from planner import NOTES_REPLACE
+
+    written = _written(_notes_plan(CLIENT_NOTE, NOTES_REPLACE), "Implementation Notes")
+    assert written.new == NARRATIVE
+    assert CLIENT_NOTE not in written.new
+
+
+def test_replace_ignores_mode_so_fill_empty_still_protects_status_and_dates():
+    from planner import MODE_FILL_EMPTY, NOTES_REPLACE
+
+    written = _written(
+        _notes_plan(CLIENT_NOTE, NOTES_REPLACE, mode=MODE_FILL_EMPTY),
+        "Implementation Notes")
+    assert written.new == NARRATIVE
+
+
+def test_replace_is_a_no_op_when_the_cell_already_holds_the_narrative():
+    from planner import NOTES_REPLACE
+
+    plan = _notes_plan(NARRATIVE, NOTES_REPLACE)
+    assert _written(plan, "Implementation Notes") is None

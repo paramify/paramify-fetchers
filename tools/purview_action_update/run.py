@@ -142,7 +142,8 @@ def main(argv: list[str] | None = None) -> int:
         help="how a Paramify narrative meets a note the client already wrote. "
              "'follow-mode' (default) defers to --mode: fill gaps, or replace under "
              "sync. 'append' keeps the client's wording and adds the narrative "
-             "beneath it, and is idempotent across re-runs.",
+             "beneath it, idempotently. 'replace' always overwrites the cell with "
+             "the narrative, whatever --mode says.",
     )
     parser.add_argument(
         "--skip-unassessed-notes", action="store_true",
