@@ -42,7 +42,7 @@
   <rect class="box" x="32" y="96" width="232" height="100" rx="8"/>
   <text class="t" x="46" y="124">Create a private copy</text>
   <text class="sub" x="46" y="146">GitHub's importer, full history</text>
-  <text class="sub" x="46" y="164">check its refs and log</text>
+  <text class="sub" x="46" y="164">clone it, check the log</text>
   <text class="sub" x="46" y="182">invite your Paramify contact</text>
 
   <rect class="box" x="32" y="232" width="232" height="100" rx="8"/>
