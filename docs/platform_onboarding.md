@@ -216,9 +216,11 @@ left the sandbox running with nothing recording whether that was intended.
   `evidence_set.instructions`; committed code never cites `.onboarding/`.
 - **A re-provisioned sandbox is a new sandbox.** It is approved, verified and
   given a teardown decision again.
-- **Fetchers go on the branch; new validators don't.** Validators are
-  authored and proven locally and synced to the workspace. They are kept out of
-  every branch headed for main, and validators already in main are not edited.
+- **In the public repo, fetchers go on the branch and new validators don't.**
+  Validators are authored and proven locally and synced to the workspace. In
+  `paramify/paramify-fetchers` they are kept out of every branch, and
+  validators already in main are not edited. A client's private copy may
+  commit its own.
 
 ## State on disk
 

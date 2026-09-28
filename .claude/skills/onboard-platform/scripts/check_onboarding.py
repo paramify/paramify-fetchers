@@ -537,8 +537,14 @@ def git(*args: str) -> list[str]:
         return []
 
 
+PUBLIC_REPO = re.compile(r"github\.com[:/]paramify/paramify-fetchers(\.git)?/?$")
+
+
 def check_validators_off_branch(r: Report) -> None:
-    """New validators, and edits to main's, are synced to the workspace but never committed."""
+    """In the public repo, new validators and edits to main's are synced to the workspace but never committed."""
+    if not any(PUBLIC_REPO.search(u) for u in git("remote", "get-url", "origin")):
+        r.info("close", "origin is not paramify/paramify-fetchers — committing validators is this copy's call")
+        return
     base = next((b for b in ("origin/main", "main") if git("rev-parse", "--verify", "--quiet", b)), None)
     # History, not the net diff: a later deletion still leaves them in a non-squash merge.
     committed = sorted({f for f in git("log", "--format=", "--name-only", f"{base}..HEAD", "--", "validators")
@@ -547,12 +553,13 @@ def check_validators_off_branch(r: Report) -> None:
     for label, files in (("in this branch's commits", committed), ("staged", staged)):
         if files:
             r.fail("close", f"{len(files)} validator file(s) {label} ({', '.join(files[:3])}"
-                            f"{', …' if len(files) > 3 else ''}) — new validators never go to main; build the "
-                            "branch from main with fetcher paths only")
+                            f"{', …' if len(files) > 3 else ''}) — new validators never go into the public repo; build the "
+                            f"branch from main with fetcher paths only (compared with {base}; `git fetch` if "
+                            "it names validators you did not add)")
     edited = [ln[3:] for ln in git("status", "--porcelain", "--", "validators") if ln[:2].strip() == "M"]
     if edited:
         r.warn("close", f"{len(edited)} validator(s) already in main edited locally ({', '.join(edited[:3])}) — "
-                        "fine for sync and scoring, never committed; restore them before branching")
+                        "fine for sync and scoring, never committed to the public repo; restore them before branching")
     new = [ln[3:] for ln in git("status", "--porcelain", "--untracked-files=all", "--", "validators")
            if ln.startswith("??")]
     if new:

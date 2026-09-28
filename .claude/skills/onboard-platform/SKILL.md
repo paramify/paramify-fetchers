@@ -102,12 +102,14 @@ person. The conventions it reads are in `references/state.md`.
   `evidence_set.instructions`, where an assessor reads it; the build story goes
   in `notes/`. The third run wrote 45–74-line module docstrings restating both.
   Committed code never cites `.onboarding/`, which is gitignored.
-- **The branch carries fetchers, never new validators.** Validators are
-  authored in `validators/` because `validators check`, `score_evidence.py`
-  and `validators sync` read them there, but a new one, or an edit to a
-  validator already in main (such as adding sets to `collection_succeeded.yaml`),
-  stays out of every branch headed for main. They reach the workspace by sync,
-  and a copy lives in `.onboarding/<platform>/validators/`. See close-out.
+- **In the public repo, the branch carries fetchers, never new validators.**
+  Validators are authored in `validators/` because `validators check`,
+  `score_evidence.py` and `validators sync` read them there. In
+  `paramify/paramify-fetchers`, a new one, or an edit to a validator already
+  in main (such as adding sets to `collection_succeeded.yaml`), stays out of
+  every branch. It reaches the workspace by sync, and a copy lives in
+  `.onboarding/<platform>/validators/`. A client's private copy may commit its
+  validators; that is its call. See close-out.
 
 ---
 
@@ -589,7 +591,8 @@ Then verify the registry gate:
 .venv/bin/python -m pytest tests/test_validators_registry.py -q
 ```
 
-These validators are not committed. See *What goes on the branch* below.
+In the public repo these validators are not committed. See *What goes on the
+branch* below.
 
 ---
 
@@ -626,7 +629,7 @@ These validators are not committed. See *What goes on the branch* below.
    state from "nobody checked".
 5. **Run `check_onboarding.py $PLATFORM`** — every stage — and it reports
    clean. It also lists the fetcher files still uncommitted, and fails if a new
-   validator is on the branch — see below.
+   validator is on a branch of the public repo — see below.
 
 **Re-provisioning after Gate 4 reopens Gates 2 and 4.** Rebuilding a torn-down
 sandbox — to re-run the fetchers, to demo the evidence — is a new sandbox: move
@@ -646,8 +649,10 @@ next session on this platform a resume rather than a restart.
 
 ### What goes on the branch
 
-An onboarding leaves two kinds of new files in the working tree, and only one
-of them is committed:
+An onboarding leaves two kinds of new files in the working tree. In the
+public `paramify/paramify-fetchers` repo only one of them is committed. A
+client working in its own private copy may commit its validators too. The rest
+of this section is about the public repo.
 
 - **Committed:** `fetchers/<category>/` and `fetchers/_categories/<category>.yaml`.
 - **Never committed:** new validators and their case files, and any edit to a
@@ -691,8 +696,9 @@ in everything, validators included, without anyone having decided to.
   partial and re-brief narrowly for the named gaps.
 - Passing all of step 2's list to one research agent. Five items, the rest
   named out of scope.
-- **Committing new validators, or editing validators already in main, on the
-  fetcher branch.** Build the branch from main with fetcher paths only.
+- **Committing new validators, or editing validators already in main, on a
+  branch of the public repo.** Build the branch from main with fetcher paths
+  only.
 - **Letting `slate.md` become the build log.** It is the file the gates and
   every step-8 subagent read; detail belongs in `notes/<fetcher>.md`.
 - **Building the third sibling before lifting the shared client into
