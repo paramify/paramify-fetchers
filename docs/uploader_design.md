@@ -10,7 +10,7 @@ Three things reach Paramify today, all under `uploaders/`:
 - **`paramify_evidence`** — attaches a completed run's evidence files to their
   evidence sets. Runs **every collection**. Exposed as `paramify upload`.
 - **`paramify_issues`** — posts a run's raw issue reports (vulnerability scans,
-  CSPM findings) to assessment intake, where Paramify parses them into issues.
+  CSPM findings) into assessment pipelines, where Paramify parses them into issues.
   Runs after any collection that included a `kind: issue_report` fetcher. Exposed
   as `paramify issues upload`.
 - **`paramify_scripts`** — pushes each fetcher's entry script and connects it to
@@ -109,12 +109,14 @@ than duplicating them). Supports the shared flags above.
 the manifest's `--output-dir`). Full setup — API-key permissions included — is in
 [`../uploaders/paramify_evidence/README.md`](../uploaders/paramify_evidence/README.md).
 
-## `paramify_issues` — post raw reports to assessment intake
+## `paramify_issues` — send raw reports into assessment pipelines
 
-Reads `<run>/issue-reports/` and posts each report to
-`POST /assessment/{assessmentId}/intake`. Three things make it structurally
-different from the evidence uploader, and all three come from the endpoint rather
-than from preference:
+Reads `<run>/issue-reports/`, uploads each report to
+`POST /pipelines/{assessmentId}/intake`, then queues one
+`POST /pipelines/{assessmentId}/process` per assessment over exactly the artifacts
+it uploaded, and waits for the job. Four things make it structurally different
+from the evidence uploader, and all four come from the endpoint rather than from
+preference:
 
 - **The file is sent byte-for-byte.** Intake parses the vendor's own CSV / XML /
   JSON / Nessus structure, so there is no envelope and no re-serialization — not
@@ -127,11 +129,16 @@ than from preference:
   split as `evidence_set` versus a program target, and the reason there is no
   get-or-create step here: you cannot invent an assessment the way you can an
   evidence set.
-- **Idempotency is local.** The endpoint documents that it *adds* an artifact to a
-  cycle's intake without replacing what is there, and offers no endpoint to list
-  what is attached — so unlike the evidence uploader's `artifact_exists` check,
-  no API call can detect a duplicate. `issue-reports/_intake_log.json` records
-  what was sent and is the only thing making a re-run safe.
+- **Idempotency is local.** Intake *adds* an artifact every time, and there is no
+  endpoint to list what a cycle holds — so unlike the evidence uploader's
+  `artifact_exists` check, no API call can detect a duplicate.
+  `issue-reports/_intake_log.json` records each upload and each job queued, and is
+  the only thing making a re-run safe.
+- **Closing is a decision, not a step.** Closing a cycle auto-closes every open
+  issue it never saw, so a close after a partial run marks real issues resolved.
+  The process call is `PROCESS_CLOSE` only when the assessment's `close_cycle` is
+  `after_run` and the sidecar's `invocations` show every target succeeded; otherwise
+  `PROCESS`, and `paramify issues close` closes it later.
 
 It also inverts one default: `skip_failed` is **true** here. A failed evidence
 fetch still documents the attempt, but a partial scan report is parsed into

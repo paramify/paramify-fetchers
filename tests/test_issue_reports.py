@@ -30,6 +30,7 @@ from framework.contract import Fetcher, InvocationResult, IssueReport
 from framework.envelope import wrap_outputs
 from framework.issue_reports import (
     ASSESSMENT_ID_FIELD,
+    CLOSE_CYCLE_FIELD,
     ISSUE_REPORTS_DIR,
     build_record,
     read_index,
@@ -93,7 +94,10 @@ def make_result(outputs, **overrides) -> InvocationResult:
     return InvocationResult(**defaults)
 
 
-def write_issue_report_fetcher(root: Path, *, output="scan.csv", fmt="csv", body=RAW_CSV) -> None:
+def write_issue_report_fetcher(
+    root: Path, *, output="scan.csv", fmt="csv", body=RAW_CSV,
+    exit_code: int = 0, write_file: bool = True,
+) -> None:
     """Stage a runnable issue-report fetcher in a temp repo root."""
     fdir = root / "fetchers" / "testcat" / "vuln_scan"
     fdir.mkdir(parents=True, exist_ok=True)
@@ -112,7 +116,8 @@ def write_issue_report_fetcher(root: Path, *, output="scan.csv", fmt="csv", body
         "import os\n"
         "from pathlib import Path\n"
         f"body = {body!r}\n"
-        f'Path(os.environ["EVIDENCE_DIR"], {output!r}).write_bytes(body)\n'
+        + (f'Path(os.environ["EVIDENCE_DIR"], {output!r}).write_bytes(body)\n' if write_file else "")
+        + (f"raise SystemExit({exit_code})\n" if exit_code else "")
     )
     _stage_schemas(root)
 
@@ -343,7 +348,7 @@ def test_sidecar_carries_identity_and_assessment(tmp_path):
     summary = api.run(manifest, tmp_path)
     index = read_index(Path(summary["run_dir"]))
 
-    assert index["schema_version"] == "1.0"
+    assert index["schema_version"] == "1.1"
     assert len(index["reports"]) == 1
     rec = index["reports"][0]
     assert rec["file"] == "scan.csv"
@@ -550,9 +555,98 @@ def test_one_unwired_report_does_not_block_the_others(tmp_path):
 def test_validate_passes_once_an_assessment_is_set(tmp_path):
     write_issue_report_fetcher(tmp_path)
     manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
-        {"use": "t_vuln_scan", "config": {ASSESSMENT_ID_FIELD: "abc-123"}}
+        {"use": "t_vuln_scan",
+         "config": {ASSESSMENT_ID_FIELD: "abc-123", CLOSE_CYCLE_FIELD: "never"}}
     ]}}
     assert api.validate(manifest, tmp_path) == []
+
+
+def test_validate_asks_for_a_close_policy(tmp_path):
+    """No default: closing auto-closes the issues a cycle never saw, so whether a
+    run closes is a fact about the customer, not something to guess."""
+    write_issue_report_fetcher(tmp_path)
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
+        {"use": "t_vuln_scan", "config": {ASSESSMENT_ID_FIELD: "abc-123"}}
+    ]}}
+    errors = api.validate(manifest, tmp_path)
+    assert any(CLOSE_CYCLE_FIELD in e and "--close-cycle" in e for e in errors), errors
+
+
+def test_validate_rejects_an_unknown_close_policy(tmp_path):
+    write_issue_report_fetcher(tmp_path)
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
+        {"use": "t_vuln_scan",
+         "config": {ASSESSMENT_ID_FIELD: "abc-123", CLOSE_CYCLE_FIELD: "always"}}
+    ]}}
+    errors = api.validate(manifest, tmp_path)
+    assert any("'always'" in e for e in errors), errors
+
+
+def test_validate_reads_platform_level_assessment_and_policy(tmp_path):
+    """validate reads the same merged config the runner does, so values set once
+    for the category count for every entry that inherits them."""
+    write_issue_report_fetcher(tmp_path)
+    manifest = {"run": {
+        "output_dir": str(tmp_path / "out"),
+        "platforms": {"testcat": {"config": {
+            ASSESSMENT_ID_FIELD: "abc-123", CLOSE_CYCLE_FIELD: "after_run",
+        }}},
+        "fetchers": [{"use": "t_vuln_scan"}],
+    }}
+    assert api.validate(manifest, tmp_path) == []
+
+
+# --------------------------------------------------------------------------- #
+# Invocation records: what lets the uploader tell a complete run from a partial one
+# --------------------------------------------------------------------------- #
+
+def _run_one(tmp_path, config=None):
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
+        {"use": "t_vuln_scan", "config": config or {
+            ASSESSMENT_ID_FIELD: "A-1", CLOSE_CYCLE_FIELD: "after_run"}},
+    ]}}
+    summary = api.run(manifest, tmp_path)
+    return read_index(Path(summary["run_dir"]))
+
+
+def test_a_successful_invocation_is_recorded_with_its_policy(tmp_path):
+    write_issue_report_fetcher(tmp_path)
+    index = _run_one(tmp_path)
+    [inv] = index["invocations"]
+    assert inv["status"] == "success"
+    assert inv["files"] == ["scan.csv"]
+    assert inv["assessment_id"] == "A-1"
+    assert inv["close_cycle"] == "after_run"
+    assert index["reports"][0]["close_cycle"] == "after_run"
+
+
+def test_a_failed_invocation_that_wrote_nothing_is_still_recorded(tmp_path):
+    """The case that made invocations necessary: no file means no report record,
+    and without this entry the run would look complete."""
+    write_issue_report_fetcher(tmp_path, exit_code=1, write_file=False)
+    index = _run_one(tmp_path)
+    assert index["reports"] == []
+    [inv] = index["invocations"]
+    assert inv["status"] == "failed"
+    assert inv["files"] == []
+    assert inv["assessment_id"] == "A-1"
+
+
+def test_an_entry_that_raises_before_running_is_recorded(tmp_path, monkeypatch):
+    write_issue_report_fetcher(tmp_path)
+
+    def boom(*a, **k):
+        raise RuntimeError("secret could not be resolved")
+
+    monkeypatch.setattr("framework.runner.executor.run_entry", boom)
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
+        {"use": "t_vuln_scan",
+         "config": {ASSESSMENT_ID_FIELD: "A-1", CLOSE_CYCLE_FIELD: "after_run"}},
+    ]}}
+    summary = api.run(manifest, tmp_path)
+    [inv] = read_index(Path(summary["run_dir"]))["invocations"]
+    assert inv["status"] == "failed"
+    assert "secret could not be resolved" in inv["error"]
 
 
 def test_assessment_is_configurable_but_not_required_to_collect(tmp_path):
@@ -714,3 +808,46 @@ def test_describe_exposes_kind_and_issue_report_and_reserved_config(tmp_path):
         "title": "Test Scan",
     }
     assert {c["name"] for c in d["config"]} >= {"assessment_id", "assessment_name"}
+
+
+def _sidecar(tmp_path, *, close_cycle, failed_target=False):
+    reports = tmp_path / ISSUE_REPORTS_DIR
+    reports.mkdir(parents=True)
+    (reports / "a.csv").write_bytes(RAW_CSV)
+    invocations = [{"fetcher_name": "fa", "status": "success", "files": ["a.csv"],
+                    "assessment_id": "A-1", "close_cycle": close_cycle}]
+    if failed_target:
+        invocations.append({"fetcher_name": "fa", "status": "failed", "files": [],
+                            "assessment_id": "A-1", "close_cycle": close_cycle})
+    (reports / "_issue_reports.json").write_text(json.dumps({
+        "schema_version": "1.1", "run_id": "r1",
+        "reports": [{"file": "a.csv", "fetcher_name": "fa", "run_id": "r1",
+                     "status": "success", "format": "csv", "assessment_id": "A-1",
+                     "assessment_name": "Monthly", "close_cycle": close_cycle}],
+        "invocations": invocations,
+    }))
+
+
+def test_preflight_plans_the_close_per_assessment(tmp_path):
+    """What the TUI shows before the confirm: the close is the row to read."""
+    _sidecar(tmp_path, close_cycle="after_run")
+    pf = api.issues_upload_preflight(tmp_path, REPO_ROOT, None, dry_run=True)
+    [plan] = pf["assessments"]
+    assert plan["operation"] == "PROCESS_CLOSE"
+    assert plan["assessment_name"] == "Monthly"
+
+
+def test_preflight_plan_shows_why_a_close_is_skipped(tmp_path):
+    _sidecar(tmp_path, close_cycle="after_run", failed_target=True)
+    pf = api.issues_upload_preflight(tmp_path, REPO_ROOT, None, dry_run=True)
+    [plan] = pf["assessments"]
+    assert plan["operation"] == "PROCESS"
+    assert "failed" in plan["close_skipped"]
+
+
+def test_preflight_warns_on_a_missing_close_policy(tmp_path):
+    _sidecar(tmp_path, close_cycle=None)
+    pf = api.issues_upload_preflight(tmp_path, REPO_ROOT, None, dry_run=True)
+    assert pf["ok"], pf["errors"]
+    assert pf["assessments"][0]["error"]
+    assert any("close_cycle" in w for w in pf["warnings"]), pf["warnings"]

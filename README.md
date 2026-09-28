@@ -207,7 +207,7 @@ paramify run      <manifest>   # run it
 paramify runs                  # past runs under an output dir (newest first)
 paramify evidence <file>       # read one evidence file, or an issue-report sidecar
 paramify upload   [run-dir]    # push a run's evidence to Paramify (default: latest run)
-paramify issues   upload       # push a run's issue reports to assessment intake
+paramify issues   upload       # send a run's issue reports into assessment pipelines
 paramify programs <sub>        # list workspace programs; turn them into targets
 paramify assessments <sub>     # list workspace assessments; point issue reports at one
 paramify capabilities <sub>    # read solution capabilities and the narratives they claim
@@ -390,7 +390,7 @@ it to a Paramify **assessment**, where it becomes issues rather than evidence:
 ```bash
 paramify assessments select my_scanner_report   # pick the assessment by name, once
 paramify run manifest.yaml                      # raw report → run-<ts>/issue-reports/
-paramify issues upload                          # → POST /assessment/{id}/intake
+paramify issues upload                          # → POST /pipelines/{id}/intake + /process
 ```
 
 The file is never wrapped or rewritten — the intake parser reads the vendor's own
@@ -538,7 +538,7 @@ fetchers/
 comparators/                    # cross-source comparators (template only so far)
 uploaders/
   paramify_evidence/            # push evidence to Paramify (built)
-  paramify_issues/              # push raw scan reports to assessment intake (built)
+  paramify_issues/              # send raw scan reports into assessment pipelines (built)
   paramify_scripts/             # push fetcher entry scripts + associate to evidence sets (built)
 examples/                       # sample run manifests
 tests/                          # framework test suite (pytest)

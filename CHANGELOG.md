@@ -12,6 +12,27 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`paramify issues jobs` and `paramify issues close`.** `jobs` lists an
+  assessment's pipeline jobs and retries or cancels one (`--retry`, `--cancel`);
+  a failed job blocks every job queued behind it on the same assessment until
+  one of those happens, and nothing does it automatically. `close` closes an
+  assessment's current cycle on its own, after confirmation, for assessments
+  whose cycle is filled by several runs, and prints how many open issues the
+  close auto-closed.
+- **`close_cycle`, a reserved config key on every issue-report entry** —
+  `after_run` or `never`, with no default. Closing a cycle auto-closes every
+  open issue the cycle never saw, so it states how the customer fills the
+  assessment's cycles: one report per cycle closes after each complete run;
+  several files per cycle close only when the last is in. `paramify assessments
+  select` asks for it (or takes `--close-cycle`), and so does the TUI's
+  assessment picker. `paramify validate` reports an entry without one, reading
+  entry and `platforms.<category>` config the way the runner does.
+- **Issue-report invocations in the sidecar.** `_issue_reports.json` (schema
+  1.1) gains `invocations`: one entry per issue-report invocation, including a
+  failed one that wrote no file and an entry that raised before running. Before
+  this, a failed target that wrote nothing left no trace, and a run missing one
+  framework's report looked complete.
+
 - **A Better Stack category and its first fetcher** —
   `betterstack_public_status_page`, which GETs a public status page's own
   `/index.json` and records it as evidence. No credential: a Better Stack status
@@ -165,6 +186,23 @@ schemas and the `paramify` CLI — not the internal code.
   Adds the `azure-mgmt-loganalytics` dependency to the `azure` extra.
 
 ### Changed
+
+- **`paramify issues upload` sends reports into Paramify pipelines** instead of
+  `POST /assessment/{id}/intake`, which it no longer calls. Per assessment it
+  uploads each report bare to `POST /pipelines/{id}/intake`, then queues one
+  `POST /pipelines/{id}/process` naming exactly those artifacts, then waits for
+  the job and prints its counts (created, updated, seen-closed, auto-closed). The
+  call is `PROCESS_CLOSE` only when the assessment's `close_cycle` is `after_run`
+  and every target bound to it in the run succeeded and uploaded; otherwise
+  `PROCESS`, with the reason the close was skipped. The pipeline puts an upload
+  on its oldest open cycle, so `effectiveDate` no longer routes it. The API key
+  needs `PIPELINE_INTAKE`, plus `PIPELINE_PROCESS`, plus `PIPELINE_CLOSE` to
+  close. A job that fails, is blocked behind a failed job, or outlasts
+  `--wait-timeout` (default 900 s) fails the command; `--no-wait` queues and
+  exits. The intake log now also records each job, so a re-run processes files
+  an interrupted run uploaded but never processed, and waits on a job it left
+  running. The TUI's issue-report panel shows the planned operation per
+  assessment and warns in the confirm when a run will close a cycle.
 
 - **`azure_network_security_groups` shows outbound posture and NIC coverage**
   (0.1.0 → 0.2.0). Only an NSG's custom rules were read, so the platform's

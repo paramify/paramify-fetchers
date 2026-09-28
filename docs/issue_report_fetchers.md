@@ -3,8 +3,8 @@
 The framework collects two kinds of thing. Most fetchers collect **evidence**: a
 JSON payload asserting a configuration state, wrapped in the standard envelope and
 attached to an evidence set. An **issue-report** fetcher collects something
-different — the scan report a tool already produces, handed to Paramify's
-assessment intake, which parses it into issues.
+different — the scan report a tool already produces, sent into the assessment's
+Paramify pipeline, whose file intake preset parses it into issues.
 
 The distinction is not cosmetic. It changes where the file lands, whether it is
 enveloped, which endpoint receives it, and which command sends it.
@@ -18,7 +18,7 @@ enveloped, which endpoint receives it, and which command sends it.
 | Enveloped | yes | **never** |
 | Identity block | `evidence_set` | `issue_report` |
 | Destination | an evidence set (from the fetcher) | an assessment (from the manifest) |
-| Endpoint | `POST /evidence/{id}/artifacts/upload` | `POST /assessment/{id}/intake` |
+| Endpoint | `POST /evidence/{id}/artifacts/upload` | `POST /pipelines/{id}/intake`, then `/process` |
 | Uploaded by | `paramify upload` | `paramify issues upload` |
 
 Which one you are writing is decided by one question: **does the tool already
@@ -31,7 +31,7 @@ SentinelOne report — that is an issue report.
 
 **The file on disk must be the tool's own bytes.**
 
-Paramify's intake parses the vendor's format. Anything the framework or the
+Paramify's file intake preset parses the vendor's format. Anything the framework or the
 fetcher adds, reorders, or re-serializes is a broken import — and it breaks at
 parse time, in a system you are not watching. So:
 
@@ -223,7 +223,7 @@ same channel the envelope does.
 
 ## Pointing it at an assessment
 
-The intake endpoint takes an assessment UUID. Which assessment is a **per-customer
+A pipeline is identified by its assessment UUID. Which assessment is a **per-customer
 choice**, not fetcher knowledge, so it lives in the manifest — the same split as an
 evidence fetcher's `evidence_set` (shipped) versus a program target (chosen).
 
@@ -235,7 +235,8 @@ paramify assessments select tenable_vuln_scan   # pick by name; writes the UUID
 ```
 
 `select` defaults to every issue-report entry in the manifest, filters the list to
-the `assessment_type` the fetcher declares, and writes both fields:
+the `assessment_type` the fetcher declares, writes both fields, and asks how the
+assessment's cycle is closed (or takes `--close-cycle after_run|never`):
 
 ```yaml
 run:
@@ -244,48 +245,62 @@ run:
       config:
         assessment_id: 123e4567-e89b-12d3-a456-426614174000
         assessment_name: Production Vulnerability Assessment
+        close_cycle: after_run
 ```
 
 `assessment_id` is authoritative; `assessment_name` is carried so the manifest
 reads as something a human recognises and a stale UUID is noticeable. In the TUI,
-`A` on a selected issue-report entry opens the same picker.
+`A` on a selected issue-report entry opens the same picker, then asks the close
+policy.
 
-Both fields are framework-reserved: they are added to every issue-report fetcher's
-config schema automatically, so no `fetcher.yaml` declares them. Neither is wired
-to an env var — the fetcher has no use for them, only the uploader does.
+`close_cycle` says how the assessment's cycles are filled, because closing a cycle
+auto-closes every open issue it never saw:
+
+- `after_run` — one report per cycle (a monthly scan). The upload closes the cycle
+  when every target in the run succeeded and uploaded.
+- `never` — several files make up one cycle. The upload only processes; close the
+  cycle in Paramify or with `paramify issues close` once the last file is in.
+
+All three fields are framework-reserved: they are added to every issue-report
+fetcher's config schema automatically, so no `fetcher.yaml` declares them. None is
+wired to an env var — the fetcher has no use for them, only the uploader does.
 
 They are deliberately **not required** config. A required field would raise before
 the fetcher runs, making "collect now, decide where it goes later" impossible and
 breaking the framework's ability to run with no Paramify connection at all
 ([`design.md`](design.md)). Instead, `paramify validate` reports a missing
-assessment, and the uploader refuses that report with the command that fixes it.
+assessment or close policy, and the uploader refuses that report with the command
+that fixes it.
 
 ## Uploading
 
 ```bash
 paramify run manifests/monthly.yaml
 paramify upload           # evidence  → evidence sets
-paramify issues upload    # reports   → assessment intake
+paramify issues upload    # reports   → assessment pipelines, processed
 ```
 
 A run containing both kinds needs both commands. `paramify issues upload` takes
 the same arguments as `paramify upload` (optional run dir, `--output-dir`,
 `--config`, `--dry-run`, `--json`) plus `--force` (re-send a report already in
-this run's intake log — the endpoint adds, it does not replace).
+this run's intake log), `--no-wait` and `--wait-timeout`.
 
-Two things about intake that differ from evidence upload:
+Per assessment it uploads every report bare, then queues **one** process job over
+exactly those artifacts — `PROCESS_CLOSE` when `close_cycle: after_run` and the
+run was complete, `PROCESS` otherwise — and waits for the job's counts. Three
+things differ from evidence upload:
 
-- **Re-running is safe only because of a local log.** The endpoint *adds* an
-  artifact to a cycle's intake without replacing what is there, and offers no way
-  to list what is attached — so no API call can detect a duplicate. The uploader
-  records each success in `issue-reports/_intake_log.json` and skips those next
-  time. `paramify issues upload --force` re-sends anyway (and *will* duplicate
-  issues); prefer it over deleting the log, so other files in the same run stay
-  skipped.
-- **The effective date is the collection time.** Intake routes an artifact to
-  whichever assessment cycle its effective date falls inside, so uploading last
-  month's run lands in last month's cycle rather than filing an old scan against
-  the current one.
+- **The pipeline picks the cycle.** An upload lands on the oldest open cycle; the
+  artifact's effective date (the collection time) does not route it. Nothing moves
+  on to a newer cycle until the oldest one is closed.
+- **Re-running is safe only because of a local log.** Intake *adds* an artifact
+  every time and offers no way to list what a cycle holds — so no API call can
+  detect a duplicate. The uploader records each upload and each job it queued in
+  `issue-reports/_intake_log.json` and skips those next time.
+  `paramify issues upload --force` re-sends anyway; prefer it over deleting the
+  log, so other files in the same run stay skipped.
+- **A job can fail after the upload succeeded.** A failed job blocks the
+  assessment's queue until it is retried or cancelled (`paramify issues jobs`).
 
 Failed collections are **skipped by default** here, the opposite of the evidence
 uploader. A failed evidence fetch still documents the attempt; a partial scan
@@ -304,6 +319,6 @@ Full operational detail — config, overrides, and what each error means — is 
 | Directory name, sidecar, reserved config fields | [`framework/issue_reports.py`](../framework/issue_reports.py) |
 | `EVIDENCE_DIR` redirection | `invocation_dir` in [`framework/runner/executor.py`](../framework/runner/executor.py) |
 | The envelope skip | `wrap_outputs` in [`framework/envelope.py`](../framework/envelope.py) |
-| Assessment listing / selection | `list_assessments`, `set_assessment` in [`framework/api.py`](../framework/api.py) |
-| Intake | [`uploaders/paramify_issues/uploader.py`](../uploaders/paramify_issues/uploader.py) |
-| Endpoint contract | Paramify REST API v0 spec 0.9.2 — [API documentation](https://app.paramify.com/api/documentation/) |
+| Assessment listing / selection | `list_assessments`, `set_assessment`, `set_close_cycle` in [`framework/api.py`](../framework/api.py) |
+| Upload, process, close | [`uploaders/paramify_issues/uploader.py`](../uploaders/paramify_issues/uploader.py) |
+| Endpoint contract | Paramify REST API v0 spec 0.10.0 — [API documentation](https://app.paramify.com/api/documentation/) |

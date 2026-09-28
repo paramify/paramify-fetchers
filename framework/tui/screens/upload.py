@@ -48,6 +48,39 @@ class ScriptsSyncEvent(Message):
         super().__init__()
 
 
+_COUNT_LABELS = (
+    ("issuesCreated", "created"),
+    ("issuesUpdated", "updated"),
+    ("issuesSeenClosed", "seen-closed"),
+    ("issuesAutoClosed", "auto-closed"),
+)
+
+
+def _job_text(job: dict) -> Text:
+    """One finished pipeline job as a log line: what it did, or why it stopped."""
+    status = job.get("status") or "?"
+    ok = status == "COMPLETED"
+    counts = job.get("counts") or {}
+    shown = [f"{counts[k]} {label}" for k, label in _COUNT_LABELS if counts.get(k) is not None]
+    text = Text(
+        f"  [{'OK' if ok else 'FAIL'}] job {job.get('job_id')} {status}",
+        style=palette.OK if ok else palette.FAIL,
+    )
+    if shown:
+        text.append("  " + ", ".join(shown))
+    if job.get("blocked_by"):
+        text.append(
+            f"  blocked by failed job {job['blocked_by']} — "
+            f"paramify issues jobs --retry {job['blocked_by']}", style=palette.FAIL,
+        )
+    if job.get("timed_out"):
+        text.append("  still running — check with `paramify issues jobs`", style=palette.WARN)
+    for key in ("error", "poll_error"):
+        if job.get(key):
+            text.append(f"  {job[key]}", style="dim")
+    return text
+
+
 class UploadPage(ButtonRowNav, Vertical):
     HINTS = [("ctrl+u", "upload"), ("ctrl+i", "intake"), ("p", "preview"),
              ("ctrl+s", "sync"), ("ctrl+r", "refresh")]
@@ -72,7 +105,7 @@ class UploadPage(ButtonRowNav, Vertical):
         with Vertical(id="issues-panel", classes="panel"):
             yield DataTable(id="issues-summary")
             with Horizontal(id="issues-actions"):
-                yield Button("Intake to Assessment", variant="primary", id="issues-submit", disabled=True)
+                yield Button("Send to Pipeline", variant="primary", id="issues-submit", disabled=True)
         with Vertical(id="scripts-panel", classes="panel"):
             yield Static("", id="scripts-header")
             yield Static("", id="scripts-plan-summary")
@@ -250,6 +283,21 @@ class UploadPage(ButtonRowNav, Vertical):
             palette.pill("present", "ok") if preflight["token_present"]
             else palette.pill("missing", "fail"),
         )
+        # The plan: per assessment, what one upload will send. A close is the
+        # row to read before confirming, so it gets the warning colour.
+        for plan in preflight.get("assessments") or []:
+            label = plan.get("assessment_name") or plan["assessment_id"]
+            if plan.get("error"):
+                value = Text(plan["error"], style=palette.FAIL)
+            else:
+                op = plan.get("operation") or "?"
+                value = Text(
+                    f"{plan['files']} file(s) → {op}",
+                    style=palette.WARN if op == "PROCESS_CLOSE" else "",
+                )
+                if plan.get("close_skipped"):
+                    value.append(f"   {plan['close_skipped']}", style="dim")
+            table.add_row(label, value)
         # Non-gating: a report with no assessment is skipped by the uploader, not
         # a reason to refuse the batch. Shown so it is not a surprise afterwards.
         for warning in preflight.get("warnings") or []:
@@ -369,18 +417,24 @@ class UploadPage(ButtonRowNav, Vertical):
             if ok:
                 self._start_intake(self._run_dir)
 
-        self.app.push_screen(
-            ConfirmModal(
-                f"Intake {pf['file_count']} issue report(s) into their Paramify "
-                f"assessments at {pf['base_url']}?"
-            ),
-            go,
+        closing = [
+            p for p in pf.get("assessments") or [] if p.get("operation") == "PROCESS_CLOSE"
+        ]
+        question = (
+            f"Send {pf['file_count']} issue report(s) into their Paramify "
+            f"pipelines at {pf['base_url']} and process them?"
         )
+        if closing:
+            question += (
+                f"\n\nThis also closes the cycle on {len(closing)} assessment(s). "
+                "Open issues not in these files will be auto-closed as resolved."
+            )
+        self.app.push_screen(ConfirmModal(question), go)
 
     def _start_intake(self, run_dir: str) -> None:
         self._uploading = True
         self._upload_kind = "issue report"
-        self._begin_log(Text("intaking issue reports...", style=palette.WARN))
+        self._begin_log(Text("sending issue reports...", style=palette.WARN))
         self._issues_worker(run_dir, self.app.root_path)
 
     @work(thread=True, exclusive=True)
@@ -510,6 +564,28 @@ class UploadPage(ButtonRowNav, Vertical):
             reason = ev.get("reason") or ev.get("error")
             suffix = f"  {reason}" if reason else ""
             log.write(Text(f"  [{icon}] {ev.get('file', '?')}  {outcome}{ref}{suffix}", style=style))
+        elif etype == "process_plan" and ev.get("operation"):
+            log.write(Text(
+                f"  [DRY] would {ev['operation']} {ev.get('artifacts', 0)} artifact(s)"
+                f"  assessment={ev.get('assessment_id')}", style=palette.WARN,
+            ))
+        elif etype == "job_queued":
+            why = f"  {ev['close_skipped']}" if ev.get("close_skipped") else ""
+            self._set_banner(Text(
+                f"processing on {ev.get('assessment_id')} — job {ev.get('job_id')} queued",
+                style=palette.WARN,
+            ))
+            log.write(Text(
+                f"  [OK] queued {ev.get('operation')} job {ev.get('job_id')}"
+                f"  assessment={ev.get('assessment_id')}{why}", style=palette.OK,
+            ))
+        elif etype == "job_status":
+            self._set_banner(Text(
+                f"job {ev.get('job_id')} {ev.get('status')} on {ev.get('assessment_id')}",
+                style=palette.WARN,
+            ))
+        elif etype == "job_complete":
+            log.write(_job_text(ev))
         elif etype == "upload_complete":
             self._finalize_upload(ev)
         elif etype == "_upload_failed":
@@ -530,7 +606,8 @@ class UploadPage(ButtonRowNav, Vertical):
             f"{self._upload_kind} upload complete — "
             f"uploaded={ev.get('uploaded', 0)} "
             f"duplicates={ev.get('skipped_duplicate', 0)} "
-            f"errors={ev.get('errors', 0)}",
+            f"errors={ev.get('errors', 0)}"
+            + (f" jobs_failed={ev['jobs_failed']}" if ev.get("jobs_failed") else ""),
             style=style,
         )
         if ev.get("halted"):

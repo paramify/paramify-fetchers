@@ -109,6 +109,7 @@ Build the exact command sequence from the gaps. Map each gap to one command:
 | Ambient-cred var stripped | `manifest set-passthrough <category> VAR [VAR ...]` |
 | Programs needed as targets | `programs target [fetcher ...]` |
 | Issue report has no `assessment_id` | `assessments select <fetcher>` |
+| Issue report has no `close_cycle` | `assessments select <fetcher> --close-cycle after_run\|never` |
 
 All prefixed with `paramify`.
 

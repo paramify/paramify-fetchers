@@ -64,7 +64,7 @@ and what most should stay.
 Two clauses bind an issue-report fetcher beyond the shared contract below:
 
 1. **The output file must be the source tool's bytes, unmodified.** Paramify's
-   assessment intake parses the vendor's own format, so the framework never
+   file intake preset parses the vendor's own format, so the framework never
    envelopes the file and the fetcher must not parse and rewrite it. This is why
    the envelope guard keys on `kind` rather than the file extension — a JSON scan
    report is still a scan report.
@@ -229,7 +229,7 @@ paramify run <manifest.yaml>        # collect: enveloped JSON + _run_metadata.js
 paramify runs                       # past runs under the output dir (newest first)
 paramify evidence <file>            # read one evidence file (or an issue-report sidecar)
 paramify upload [run-dir]           # push one run's evidence to Paramify (default: latest run)
-paramify issues upload [run-dir]    # push one run's issue reports to assessment intake
+paramify issues upload [run-dir]    # send one run's issue reports into assessment pipelines
 paramify programs list              # programs in the Paramify workspace: readable name + project UUID
 paramify programs target [fetcher ...]  # select programs by name and write them as fanout targets
 paramify assessments list           # assessments in the workspace: readable name + UUID

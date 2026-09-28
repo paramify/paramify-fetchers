@@ -19,6 +19,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, DataTable, Input, Static
 
 from framework import api
+from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
 from framework.tui import palette, render
 from framework.tui.components.forms import env_name_from_ref
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
@@ -632,18 +633,50 @@ class ManifestPage(ButtonRowNav, Vertical):
         def done(chosen_id: Optional[str]) -> None:
             if chosen_id is None:
                 return
-            api.set_assessment(m, use, by_id[chosen_id])
+            chosen = by_id[chosen_id]
+            api.set_assessment(m, use, chosen)
             self._autosave()
             self.rebuild()
-            self.notify(
-                f"{use} → {api.assessment_display_name(by_id[chosen_id])}"
-            )
+            # Asked right after the assessment because it is a fact about how
+            # that assessment's cycles are filled, and the uploader will not
+            # guess it. Escape keeps the assessment and leaves the policy as it was.
+            self._pick_close_cycle(use, api.assessment_display_name(chosen))
 
         self.app.push_screen(
             PickerModal(
                 f"Assessment for {use}",
                 options,
                 subtitle=f"{assessment_type or 'any type'} — its reports are intaken here",
+            ),
+            done,
+        )
+
+    def _pick_close_cycle(self, use: str, assessment_label: str) -> None:
+        m = self._manifest
+        if m is None:
+            return
+        options = [
+            (CLOSE_AFTER_RUN,
+             "after_run — one report per cycle: close after each complete run"),
+            (CLOSE_NEVER,
+             "never — several files per cycle: close in Paramify or with "
+             "`paramify issues close`"),
+        ]
+
+        def done(policy: Optional[str]) -> None:
+            if policy is None:
+                self.notify(f"{use} → {assessment_label}")
+                return
+            api.set_close_cycle(m, use, policy)
+            self._autosave()
+            self.rebuild()
+            self.notify(f"{use} → {assessment_label}, close_cycle={policy}")
+
+        self.app.push_screen(
+            PickerModal(
+                f"How is {assessment_label}'s cycle closed?",
+                options,
+                subtitle="Closing auto-closes every open issue the cycle never saw",
             ),
             done,
         )
