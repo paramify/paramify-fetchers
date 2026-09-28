@@ -1,0 +1,73 @@
+name: splunk_log_source_freshness
+version: 0.1.0
+description: >-
+  Every host that has sent data to a Splunk deployment and every forwarder
+  connected to it, with when each last delivered data and whether it has gone
+  silent past the configured window. One Splunk deployment per target.
+category: splunk
+
+supports_targets: true
+
+target_schema:
+  name:
+    type: string
+    required: true
+    env: SPLUNK_TARGET_NAME
+    description: Label for this Splunk deployment, used in the evidence filename.
+  base_url:
+    type: string
+    required: true
+    env: SPLUNK_BASE_URL
+    description: Management URL of the search head or standalone instance, e.g. https://splunk.example.com:8089
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: SPLUNK_VERIFY_SSL
+    description: Verify the management port's TLS certificate. Set false only for a self-signed test instance.
+
+config_schema:
+  forwarder_lookback_days:
+    type: integer
+    default: 30
+    env: SPLUNK_FORWARDER_LOOKBACK_DAYS
+    description: How far back to read forwarder connection metrics in _internal (default retention is 30 days).
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: splunk_log_source_freshness.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-MLA-OSM
+  - KSI-MLA-LET
+
+evidence_set:
+  reference_id: EVD-SPLUNK-LOG-SOURCE-FRESHNESS
+  name: Splunk Log Source Freshness
+  instructions: >-
+    Reads a Splunk deployment's management REST API (port 8089) with a bearer
+    token whose role holds `search` on indexes `*` and `_*`.
+    `hosts[]` is every host with events in any searchable index, from
+    `| tstats count min(_time) max(_time) max(_indextime) where index=* OR index=_* by host`
+    over all time: `last_indexed` is when Splunk last received data from the
+    host, `minutes_since_last_indexed` is measured from collection time, and
+    `silent` is true when that exceeds `max_silence_minutes`, which is emitted
+    on every row. `forwarders[]` is every forwarder with a connection in
+    `index=_internal source=*metrics.log group=tcpin_connections` over the last
+    `forwarder_lookback_days`, with type, version, source IP and last
+    connection time judged against the same window; a forwarder silent longer
+    than the lookback appears only in `hosts[]`. Completeness is enforced, not
+    assumed: the host rows must equal an independent `tstats dc(host)` count,
+    and the set of indexes the token can search (`| eventcount summarize=false`)
+    must equal the enabled indexes in `data/indexes?datatype=all` — an index
+    the token cannot search would hide every host that sends only to it. Any
+    mismatch, missing capability, or search warning fails the collection.
+    Splunk knows only hosts that have already sent data; a production
+    component never onboarded does not appear here.

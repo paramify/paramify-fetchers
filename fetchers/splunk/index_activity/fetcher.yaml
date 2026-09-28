@@ -1,0 +1,100 @@
+name: splunk_index_activity
+version: 0.1.0
+description: >-
+  Every index on a Splunk deployment, event and metric, enabled or not, with
+  its event count, size and time span, when it last received data, whether it
+  holds any data at all, and whether it has gone stale past the configured
+  window. One Splunk deployment per target.
+category: splunk
+
+supports_targets: true
+
+target_schema:
+  name:
+    type: string
+    required: true
+    env: SPLUNK_TARGET_NAME
+    description: Label for this Splunk deployment, used in the evidence filename.
+  base_url:
+    type: string
+    required: true
+    env: SPLUNK_BASE_URL
+    description: Management URL of the search head or standalone instance, e.g. https://splunk.example.com:8089
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: SPLUNK_VERIFY_SSL
+    description: Verify the management port's TLS certificate. Set false only for a self-signed test instance.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: splunk_index_activity.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-MLA-OSM
+
+evidence_set:
+  reference_id: EVD-SPLUNK-INDEX-ACTIVITY
+  name: Splunk Index Activity
+  instructions: >-
+    Reads a Splunk deployment's management REST API (port 8089) with a bearer
+    token whose role holds `search` and `rest_properties_get`. `indexes[]` is
+    every index in `data/indexes?datatype=all` (count=0, collected count equal
+    to paging.total; without datatype=all Splunk omits metric indexes), which
+    must also equal the index stanzas of indexes.conf (`properties/indexes`,
+    less `default` and `volume:`/`provider-family:` stanzas) and include every
+    index searchable on any search peer; every enabled index must be
+    searchable by the token. Any mismatch, missing capability or search
+    warning fails the collection rather than publish a partial list.
+    `datatype` is event or metric; `enabled` is the negation of `disabled`;
+    `internal` is a name starting with `_`. The verdict comes from searches,
+    which span every search peer: `last_received` is, for an event index,
+    `max(_indextime)` from `| tstats … where index=* OR index=_* by index`,
+    when an indexer last wrote an event to it, whatever the event's own
+    timestamp says (`last_received_basis` "index_time"); a metric index has no
+    index time in Splunk (mstats rejects it and metric data points carry
+    none), so it is the newest data point's own timestamp from `| mstats
+    latest_time(_value) … by index` ("event_time"); a sender whose clock runs
+    ahead can keep a metric index looking recent after it stops.
+    `minutes_since_last_received` is measured from `metadata.collected_at`,
+    taken after those searches, and is negative for a time after collection;
+    `stale` is true when the index holds no data or its last data is more than
+    `max_silence_minutes` before collection — or after it, since a timestamp
+    that far in the future says nothing about recent receipt.
+    `max_silence_minutes` is emitted on every row (the category's
+    `max_silence_minutes`; one window for all indexes). `holds_data` is
+    whether the searches find any event or data point in the index: false
+    means it holds none, either because it never received any or because
+    everything it received has aged out or been deleted — Splunk keeps no
+    record that separates the two — and such an index is also `stale: true`,
+    never fresh. Stock Splunk ships several indexes that stay empty or write
+    only on events (history, summary, _thefishbucket, _telemetry, _ds*,
+    _dm_summary, _metrics_rollup; _configtracker writes only when
+    configuration changes), so which indexes must be receiving is a judgement
+    over `name`, `internal` and `holds_data`, not something this evidence
+    decides. A disabled index is not searchable: `holds_data`, `event_count`
+    and `size_bytes` are null and `stale` is true. When a search behind a row
+    fails, or an enabled index is not searchable by the token, that row's
+    `holds_data`, `stale` and times are null, never false, and so are the
+    summary's verdict fields, which count enabled indexes only:
+    `indexes_stale` (every stale row, empty ones included) is `quiet_indexes`
+    (hold data, gone stale) plus `empty_indexes` (hold none). `event_count`
+    and `size_bytes` are summed over search peers from `| eventcount
+    summarize=false report_size=true index=* index=_*` (Splunk's bucket
+    metadata, which can trail the newest events by a few seconds; for a metric
+    index it counts metric events, not measurements), `servers` are the peers
+    reporting the index, and `first_event` and `last_event` are the oldest and
+    newest event timestamps from the same searches. The `local_*` fields are
+    `data/indexes` on the queried instance only (totalEventCount,
+    currentDBSizeMB, minTime, maxTime — event time; data/indexes has no index
+    time): on a standalone instance they agree with the searches, on a search
+    head they describe its own indexes, not the indexers'. Retention settings
+    are not collected.
