@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import audit  # noqa: E402
 import upload as upload_mod  # noqa: E402
+import verify as verify_mod  # noqa: E402
 import report as report_mod  # noqa: E402
 import workbook as wb_mod  # noqa: E402
 from config import (  # noqa: E402
@@ -361,6 +362,7 @@ def main(argv: list[str] | None = None) -> int:
         match_rate = (len(matches.exact) / len(rows)) if rows else 0.0
 
         out_path = None
+        violations: list = []
         if not args.dry_run:
             writable = (
                 WRITABLE_COLUMNS if args.on_date_conflict == CONFLICT_SKIP
@@ -369,6 +371,11 @@ def main(argv: list[str] | None = None) -> int:
             wb_mod.apply(sheet, headers, plans, writable=writable)
             out_path = wb_mod.save(book, args.out / f"{args.workbook.stem}.updated.xlsx")
             logger.info("workbook written to %s", out_path)
+            # Independent of the planner: check the FILE, not the decisions.
+            violations = verify_mod.verify(args.workbook, out_path, writable=writable)
+            if violations:
+                logger.error("the produced workbook violates %d Purview rule(s)",
+                             len(violations))
 
         run_report = report_mod.build(
             plans=plans, matches=matches, mode=args.mode,
@@ -379,8 +386,21 @@ def main(argv: list[str] | None = None) -> int:
             strict_test_status=args.strict_test_status,
             fallback_solcap=args.status_fallback_solcap,
         )
+        run_report["verification"] = {
+            "ran": out_path is not None,
+            "violations": violations,
+        }
         report_path = report_mod.write(run_report, args.out / "run_report.json")
         logger.info("report written to %s", report_path)
+
+        if args.upload and violations:
+            logger.error(
+                "refusing to upload: the produced workbook violates %d of Purview's "
+                "own rules and would be rejected on re-upload. See "
+                "run_report.json -> verification.", len(violations))
+            print(report_mod.summarize(run_report))
+            print(verify_mod.summarize(violations))
+            return 5
 
         if args.upload and not run_report["totals"]["cells_written"] \
                 and not args.allow_no_changes:
@@ -437,6 +457,8 @@ def main(argv: list[str] | None = None) -> int:
             report_mod.write(run_report, report_path)
 
         print(report_mod.summarize(run_report))
+        if out_path is not None:
+            print(verify_mod.summarize(violations))
         if args.print_changes or args.print_changes_brief:
             print(report_mod.changes_table(
                 run_report,

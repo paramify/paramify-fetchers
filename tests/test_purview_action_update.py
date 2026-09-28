@@ -1188,3 +1188,146 @@ def test_describe_flags_which_artifacts_are_no_ops():
     assert "<- no-op" in lines["a1"]
     assert "<- no-op" in lines["a2"]
     assert "<- no-op" not in lines["a3"]   # the run that wrote 19 cells
+
+
+# --- post-write verification ----------------------------------------------- #
+# A verifier that never fails is decoration. Each case below corrupts the
+# produced workbook in one specific way and asserts it is caught.
+
+VERIFY_HEADERS = [
+    "Action Id", "Improvement Action Name", "Applicable To", "Service Scope", "Group",
+    "Implementation Status", "Implementation Date", "Implementation Notes",
+    "Test Status", "Test Date", "Test Notes", "Other Notes", "Documents",
+    "Assigned To", "Testing Type",
+]
+VERIFY_ROW = [
+    "id-1", "Alpha", "Microsoft 365", "N/A", "Default Group",
+    "Implemented", "6/19/2026 15:12:29", "A note",
+    "Passed", "6/19/2026 15:12:29", None, None, None, None, "Manual",
+]
+
+
+def _book(path, rows=None, extra_sheet=True):
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Action Update"
+    sheet.append(VERIFY_HEADERS)
+    for row in (rows or [list(VERIFY_ROW)]):
+        sheet.append(row)
+    if extra_sheet:
+        ref = book.create_sheet("How To Update Actions")
+        ref.append(["rules", "live", "here"])
+    book.save(path)
+    return path
+
+
+WRITABLE3 = ("Implementation Status", "Implementation Date", "Implementation Notes")
+WRITABLE5 = WRITABLE3 + ("Test Date", "Test Status")
+
+
+def test_an_untouched_copy_verifies_clean(tmp_path):
+    import verify as verify_mod
+
+    a, b = _book(tmp_path / "a.xlsx"), _book(tmp_path / "b.xlsx")
+    assert verify_mod.verify(a, b, writable=WRITABLE3) == []
+
+
+def test_a_legitimate_edit_verifies_clean(tmp_path):
+    import verify as verify_mod
+
+    row = list(VERIFY_ROW)
+    row[7] = "A replacement note"          # Implementation Notes, a writable column
+    a, b = _book(tmp_path / "a.xlsx"), _book(tmp_path / "b.xlsx", [row])
+    assert verify_mod.verify(a, b, writable=WRITABLE3) == []
+
+
+def _checks(problems):
+    return {p["check"] for p in problems}
+
+
+def test_it_catches_a_write_to_a_read_only_column(tmp_path):
+    import verify as verify_mod
+
+    row = list(VERIFY_ROW)
+    row[12] = "doc::http://example.test"   # Documents — never writable
+    a, b = _book(tmp_path / "a.xlsx"), _book(tmp_path / "b.xlsx", [row])
+    assert "read-only-column" in _checks(verify_mod.verify(a, b, writable=WRITABLE3))
+
+
+def test_it_catches_a_test_date_before_the_implementation_date(tmp_path):
+    import verify as verify_mod
+
+    row = list(VERIFY_ROW)
+    row[6] = "9/28/2026 15:32:58"          # implementation moved past the June test
+    a, b = _book(tmp_path / "a.xlsx"), _book(tmp_path / "b.xlsx", [row])
+    assert "test-date-order" in _checks(verify_mod.verify(a, b, writable=WRITABLE3))
+
+
+def test_it_catches_an_impossible_status_combination(tmp_path):
+    import verify as verify_mod
+
+    row = list(VERIFY_ROW)
+    row[5] = "NotImplemented"              # NotImplemented permits only Test Status None
+    a, b = _book(tmp_path / "a.xlsx"), _book(tmp_path / "b.xlsx", [row])
+    assert "status-combination" in _checks(verify_mod.verify(a, b, writable=WRITABLE3))
+
+
+def test_it_catches_a_status_outside_purviews_vocabulary(tmp_path):
+    import verify as verify_mod
+
+    row = list(VERIFY_ROW)
+    row[5], row[8], row[9] = "IMPLEMENTED", None, None   # the Paramify spelling
+    a, b = _book(tmp_path / "a.xlsx"), _book(tmp_path / "b.xlsx", [row])
+    assert "status-vocabulary" in _checks(verify_mod.verify(a, b, writable=WRITABLE3))
+
+
+def test_it_catches_a_mangled_date_format(tmp_path):
+    import verify as verify_mod
+
+    row = list(VERIFY_ROW)
+    row[6], row[8], row[9] = "2026-09-28T15:32:58Z", None, None
+    a, b = _book(tmp_path / "a.xlsx"), _book(tmp_path / "b.xlsx", [row])
+    assert "date-format" in _checks(verify_mod.verify(a, b, writable=WRITABLE3))
+
+
+def test_it_catches_a_clobbered_reference_sheet(tmp_path):
+    import openpyxl
+    import verify as verify_mod
+
+    a, b = _book(tmp_path / "a.xlsx"), _book(tmp_path / "b.xlsx")
+    book = openpyxl.load_workbook(b)
+    book["How To Update Actions"]["A1"] = "clobbered"
+    book.save(b)
+    assert "untouched-sheet" in _checks(verify_mod.verify(a, b, writable=WRITABLE3))
+
+
+def test_it_catches_a_changed_action_id(tmp_path):
+    import verify as verify_mod
+
+    row = list(VERIFY_ROW)
+    row[0] = "id-2"
+    a, b = _book(tmp_path / "a.xlsx"), _book(tmp_path / "b.xlsx", [row])
+    assert "identity-changed" in _checks(verify_mod.verify(a, b, writable=WRITABLE3))
+
+
+def test_it_catches_a_dropped_row(tmp_path):
+    import verify as verify_mod
+
+    two = [list(VERIFY_ROW), list(VERIFY_ROW)]
+    two[1][0] = "id-2"
+    a = _book(tmp_path / "a.xlsx", two)
+    b = _book(tmp_path / "b.xlsx", [list(VERIFY_ROW)])
+    assert "dimensions" in _checks(verify_mod.verify(a, b, writable=WRITABLE3))
+
+
+def test_advance_test_output_verifies_clean_under_the_wider_writable_set(tmp_path):
+    import verify as verify_mod
+
+    row = list(VERIFY_ROW)
+    row[6] = row[9] = "9/28/2026 15:32:58"   # both dates moved together
+    a, b = _book(tmp_path / "a.xlsx"), _book(tmp_path / "b.xlsx", [row])
+    assert verify_mod.verify(a, b, writable=WRITABLE5) == []
+    # but the same file is a violation when Test Date was not meant to be writable
+    assert "read-only-column" in _checks(verify_mod.verify(a, b, writable=WRITABLE3))
