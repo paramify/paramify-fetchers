@@ -364,6 +364,12 @@ parked state below. A row marked *no* that gets built anyway is a fetcher that
 will be green on an empty payload, which is the failure this whole skill exists
 to prevent.
 
+**A "keys on" column.** The evidence field a validator will read to pass or fail
+the row — `"silent": true|false` per host, or `frozenTimePeriodInSecs` together
+with `coldToFrozenDir`. Name it from `research.md` and `measured.md`, so Gate 1
+can see the fetcher collects what the claim turns on. Rows not being built take
+`—`.
+
 ### A row that isn't built is one of four things
 
 Each means something different about whether to try again, so the slate names
@@ -447,7 +453,8 @@ whole approach works before it is repeated N times.
 1. **Build it** — invoke `create-fetcher`. It owns scaffolding, the contract,
    and the wiring verification; do not restate its phases. Hand it the claim
    from `claim.md` so its interview starts from the control, not from "what
-   evidence". Its comment rule (Phase 3) holds here: one-line docstrings,
+   evidence", and the field from the row's `Keys on` cell so it is collected.
+   Its comment rule (Phase 3) holds here: one-line docstrings,
    comments only where a line would mislead.
 2. **Make it run** — invoke `wire-manifest`.
 3. **Run it against the sandbox.** Not fake creds. The tenant must be the one in
@@ -487,7 +494,8 @@ whole approach works before it is repeated N times.
    that default ships to every customer. Verification defaults **on**, and the
    sandbox opts out per target in its own manifest entry.
 8. **Author its validator** — invoke `suggest-validator`, working from
-   `claim.md` as the narrative.
+   `claim.md` as the narrative. If it ends up keying on a different field than
+   the row's `Keys on` cell, correct the cell.
 9. **Prove the validator can fail.** Its Phase 5 direction 2. A validator that
    has never failed has demonstrated nothing.
 10. **Run it against the real evidence, and predict the verdict first.** The

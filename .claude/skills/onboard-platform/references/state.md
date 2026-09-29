@@ -142,12 +142,12 @@ line. It is the file that turns a bail into a record instead of a dead end.
   `target_schema: { name, account, token_env }`. Kept true although this org has
   one account — retrofitting fanout rewrites every entry script.
 
-| # | Fetcher | Kind | Gathers | KSI | Provable on sandbox? | Status |
-|---|---|---|---|---|---|---|
-| 1 | snowflake/privileged_grants | evidence | role grants + grantees | KSI-IAM-APM | **yes — today** | built, validator proven |
-| 2 | snowflake/network_policies  | evidence | allowed IP ranges       | KSI-CNA-NTW | yes | built |
-| 3 | snowflake/login_history     | evidence | auth events, 90d        | KSI-MLA-LOG | yes | **bailed** |
-| — | snowflake/org_policies      | evidence | org-level policy set    | KSI-IAM-APM | **no — Enterprise only** | **parked** |
+| # | Fetcher | Kind | Gathers | KSI | Keys on | Provable on sandbox? | Status |
+|---|---|---|---|---|---|---|---|
+| 1 | snowflake/privileged_grants | evidence | role grants + grantees | KSI-IAM-APM | `privilege` per grant to a non-admin role | **yes — today** | built, validator proven |
+| 2 | snowflake/network_policies  | evidence | allowed IP ranges       | KSI-CNA-NTW | `allowed_ip_list` per policy | yes | built |
+| 3 | snowflake/login_history     | evidence | auth events, 90d        | KSI-MLA-LOG | `first_authentication_factor`, `second_authentication_factor` | yes | **bailed** |
+| — | snowflake/org_policies      | evidence | org-level policy set    | KSI-IAM-APM | — | **no — Enterprise only** | **parked** |
 
 ## Bail — snowflake/login_history
 3 attempts. `LOGIN_HISTORY` view returns rows only to ACCOUNTADMIN; the sandbox

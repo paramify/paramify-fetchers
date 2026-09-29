@@ -154,7 +154,8 @@ skipped a close-out step the skill spelled out, and marked the slate complete
 anyway.
 
 **Gate 1 — after step 6, the slate.** The human cuts, adds, and reorders before
-anything is built. The approval and its date are recorded in `slate.md`; a
+anything is built. Each row names the field its validator will key on, so the
+cut can check the fetcher collects it. The approval and its date are recorded in `slate.md`; a
 slate with no recorded approval has not passed.
 
 **Gate 2 — before any seeding.** The provisioning plan is approved *and every

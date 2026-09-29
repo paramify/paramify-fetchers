@@ -389,6 +389,9 @@ def check_slate(r: Report, st: Path) -> tuple[list[dict], str]:
         r.ok("slate", f"slate table has {len(rows)} row(s) and a provable-on-sandbox column")
     else:
         r.fail("slate", "slate table has no `Provable on sandbox?` column")
+    keys_col = next((h for h in header if re.search(r"\bkeys?\s+on\b", h, re.I)), None)
+    if not keys_col:
+        r.fail("slate", "slate table has no `Keys on` column — the evidence field a validator reads to pass or fail each row")
 
     for row in rows:
         row["_state"] = row_state(next((v for k, v in row.items() if k.lower() == "status"), ""))
@@ -400,6 +403,9 @@ def check_slate(r: Report, st: Path) -> tuple[list[dict], str]:
                             "so nothing about it can be checked")
             continue
         if state not in NOT_BUILT:
+            key = row.get(keys_col, "") if keys_col else ""
+            if keys_col and (not key.strip() or PLACEHOLDER.match(key)):
+                r.fail("slate", f"{fid[0]}/{fid[1]}: no field in its `Keys on` cell — name what its validator will read")
             continue
         short = fid[1]
         stem = {"bailed": "bail", "parked": "park", "cut": "cut", "reassigned": "reassign"}[state]
