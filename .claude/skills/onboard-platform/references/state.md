@@ -250,6 +250,9 @@ earns its place on its own: it is what lets step 6 order the slate by what can
 clear Gate 3 today, and finding it here beats discovering at step 7 that every
 object is compliant and the validator has nothing to fail against.
 
+Path fields (`teardown`, `provision_path`) hold a bare path; notes go in
+`notes`.
+
 `approved_by` and `approved_at` are what make this a registry rather than a
 note. Absent either, the tenant is not approved, whatever else the file says.
 

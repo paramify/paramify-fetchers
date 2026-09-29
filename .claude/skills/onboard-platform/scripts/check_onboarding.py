@@ -40,6 +40,8 @@ MAX_DOCSTRING_LINES = 3
 MAX_COMMENT_RUN = 2
 MIN_LINES_PER_COMMENT = 20
 SECRET_KEY = re.compile(r"(?:^|_)(password|passwd|secret|token|api_?key)$", re.I)
+PLACEHOLDER = re.compile(r"^[*_`\s]*(pending|tbd|todo|none|n/?a|not yet|awaiting|\?|—|-)(\W|$)", re.I)
+VERDICTS = ("PASS", "FAIL")
 ENV_REF = re.compile(r"^(\$\{env:[A-Za-z_][A-Za-z0-9_]*\}|[A-Z][A-Z0-9_]*)$")
 
 
@@ -178,7 +180,7 @@ def tls_off_defaults(category: str) -> list[str]:
     """Places a TLS-verification setting defaults to off: a YAML config default, or a Python parameter default."""
     hits = []
     try:
-        import yaml  # the repo venv has it; degrade rather than crash without it
+        import yaml
     except ImportError:
         yaml = None
 
@@ -302,7 +304,11 @@ def check_sandbox(r: Report, st: Path) -> None:
         else:
             r.fail("sandbox", "cost_estimate_usd_month is not a number — state it in dollars, 0 included")
 
-        teardown = REPO / str(sb.get("teardown") or f".onboarding/{st.name}/teardown.sh")
+        raw_td = str(sb.get("teardown") or f".onboarding/{st.name}/teardown.sh").strip()
+        td_path = raw_td.split()[0].strip("`'\"")
+        if td_path != raw_td:
+            r.warn("sandbox", "sandbox.json `teardown` holds more than a path — keep it bare and put notes in `notes`")
+        teardown = REPO / td_path
         if not teardown.is_file():
             r.fail("sandbox", f"teardown script missing ({teardown.relative_to(REPO)}) — write it before provisioning")
         else:
@@ -356,7 +362,10 @@ def check_slate(r: Report, st: Path) -> tuple[list[dict], str]:
     if not slate:
         r.fail("slate", "slate.md missing (step 6)")
         return [], ""
-    if re.search(r"^\*\*Approved by:\*\*\s*\S", slate, re.M):
+    approval = re.search(r"^\*\*Approved by:\*\*\s*(\S.*)$", slate, re.M)
+    if approval and PLACEHOLDER.match(approval.group(1)):
+        r.fail("slate", f"slate approval reads `{approval.group(1)[:40]}` — Gate 1 is not passed until a name and date replace it")
+    elif approval:
         r.ok("slate", "slate approval recorded")
     else:
         r.fail("slate", "slate.md has no `**Approved by:**` line — a slate without one is a proposal, not a plan")
@@ -449,8 +458,11 @@ def check_build(r: Report, st: Path, rows: list[dict]) -> set[str]:
             r.fail("build", f"{name}: record `predicted_verdict:` and `real_verdict:` in notes/{short}.md — "
                             "predict before scoring the real evidence")
         else:
-            p, v = pred[0].split()[0].upper(), real[0].split()[0].upper()
-            if p == v:
+            p, v = pred[0].split()[0].upper().strip("*_`"), real[0].split()[0].upper().strip("*_`")
+            if p not in VERDICTS or v not in VERDICTS:
+                r.fail("build", f"{name}: verdicts read predicted `{p}`, real `{v}` — each must be PASS or FAIL; "
+                                "predict, then score the real evidence")
+            elif p == v:
                 r.ok("build", f"{name}: real-evidence verdict {v}, as predicted")
             elif gate_lines(notes, "surprise_resolved"):
                 r.warn("build", f"{name}: predicted {p}, got {v} — resolved: {gate_lines(notes, 'surprise_resolved')[0]}")
@@ -494,6 +506,10 @@ def check_category(r: Report, cat: str, n_built: int) -> None:
             r.fail("build", f"{p.relative_to(REPO)} references .onboarding/, which is gitignored — "
                             "state the fact inline or drop it")
     tls = tls_off_defaults(cat)
+    try:
+        import yaml  # noqa: F401
+    except ImportError:
+        r.fail("build", "PyYAML missing, so fetcher.yaml TLS defaults went unchecked — run with .venv/bin/python")
     if tls:
         for t in tls:
             r.fail("build", f"TLS verification defaults off: {t} — default on, opt the sandbox out per target")

@@ -49,8 +49,8 @@ Every rule below that can be decided mechanically — a decision recorded, two
 counts equal, a section present, a default not off — is checked by one script:
 
 ```bash
-python .claude/skills/onboard-platform/scripts/check_onboarding.py $PLATFORM                    # all stages
-python .claude/skills/onboard-platform/scripts/check_onboarding.py $PLATFORM --through slate    # up to Gate 1
+.venv/bin/python .claude/skills/onboard-platform/scripts/check_onboarding.py $PLATFORM                    # all stages
+.venv/bin/python .claude/skills/onboard-platform/scripts/check_onboarding.py $PLATFORM --through slate    # up to Gate 1
 ```
 
 **A gate is not passed until the checker reports clean through its stage.**
@@ -433,7 +433,9 @@ nothing.
 > Nothing is built until they have edited it. Record the approval and its date
 > in `slate.md`; a slate with no recorded approval has not passed this gate.
 >
-> The user also builds or approves the sandbox infra here.
+> The sandbox was approved and built at step 5, so the provable column comes
+> from measurement. If the cut slate needs something it lacks, that is a new
+> step-5 approval.
 
 ---
 

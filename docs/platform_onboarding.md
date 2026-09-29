@@ -137,8 +137,8 @@ Four, and they are the point of the flow. It is not designed to run unattended.
 **Each gate is checked by a script, not by memory:**
 
 ```bash
-python .claude/skills/onboard-platform/scripts/check_onboarding.py <platform>                  # every stage
-python .claude/skills/onboard-platform/scripts/check_onboarding.py <platform> --through slate  # up to Gate 1
+.venv/bin/python .claude/skills/onboard-platform/scripts/check_onboarding.py <platform>                  # every stage
+.venv/bin/python .claude/skills/onboard-platform/scripts/check_onboarding.py <platform> --through slate  # up to Gate 1
 ```
 
 A gate is passed when the checker reports clean through its stage. It checks
