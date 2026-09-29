@@ -203,7 +203,15 @@ class ParamifyClient:
         _raise_for(r, f"intake of {filename}", assessment_id, (200, 201, 202))
         body = _json(r)
         artifact = body.get("artifact") if isinstance(body, dict) else None
-        return artifact if isinstance(artifact, dict) else {}
+        if not isinstance(artifact, dict) or not artifact.get("id"):
+            # Without the id the file cannot be named in the process call, so it
+            # would sit on the cycle unprocessed while the run reported success.
+            raise ParamifyError(
+                f"intake of {filename} returned no artifact id (HTTP {r.status_code}); "
+                f"it may be on the cycle unprocessed — check the assessment in "
+                f"Paramify before re-running, which uploads it again"
+            )
+        return artifact
 
     def process(self, assessment_id: str, artifact_ids: List[str], operation: str) -> Dict:
         """Queue one job over exactly these artifacts. Returns the job."""
@@ -342,7 +350,10 @@ def job_summary(job: Dict) -> Dict:
 
 
 def is_blocked(job: Dict) -> bool:
-    return job.get("status") == JOB_QUEUED and bool(job.get("blockedByJobId"))
+    """A queued job waiting behind a failed one — an API job or a logged one."""
+    return job.get("status") == JOB_QUEUED and bool(
+        job.get("blockedByJobId") or job.get("blocked_by")
+    )
 
 
 def wait_for_job(
@@ -560,11 +571,17 @@ def plan_assessments(index: dict, overrides: Optional[Dict] = None) -> Dict[str,
     return groups
 
 
-def close_decision(group: dict, files_ok: bool) -> Tuple[str, Optional[str]]:
+def close_decision(
+    group: dict, files_ok: bool, earlier_jobs: Optional[List[dict]] = None
+) -> Tuple[str, Optional[str]]:
     """(operation, why the close was skipped) for one assessment in one run.
 
     `files_ok`: every report bound to the assessment was uploaded (now or by an
     earlier attempt at this run) — none failed, none were skipped.
+    `earlier_jobs`: jobs an earlier attempt at this run queued. A close covers
+    the whole cycle, so an earlier job that has not completed — failed, still
+    queued, still running — means some of this run's files are not processed
+    yet, and closing would auto-close their issues.
     """
     policies = group["policies"]
     if policies != {CLOSE_AFTER_RUN}:
@@ -589,6 +606,16 @@ def close_decision(group: dict, files_ok: bool) -> Tuple[str, Optional[str]]:
         return PROCESS, f"close skipped: {len(failed)} target(s) failed ({', '.join(names)})"
     if not files_ok:
         return PROCESS, "close skipped: not every report for this assessment was uploaded"
+    unfinished = [
+        j for j in earlier_jobs or []
+        if j.get("status") not in (JOB_COMPLETED, JOB_CANCELLED)
+    ]
+    if unfinished:
+        names = ", ".join(f"{j.get('job_id')} {j.get('status')}" for j in unfinished)
+        return PROCESS, (
+            f"close skipped: an earlier job for this run has not completed ({names}); "
+            f"see `paramify issues jobs`, then close with `paramify issues close`"
+        )
     return PROCESS_CLOSE, None
 
 
@@ -600,13 +627,29 @@ def _target_label(target: Optional[dict]) -> str:
 
 
 def _processed_ids(jobs: List[dict]) -> set:
-    """Artifacts already handed to a job this run queued, whatever became of it.
+    """Artifacts already handed to a job this run queued that can still process them.
 
-    A failed job is not re-queued here: `paramify issues jobs --retry` retries it
-    in place, and queueing its artifacts again would process them twice once the
-    retry succeeds.
+    A cancelled job never will, so its artifacts are queued again. A failed one
+    is not: `paramify issues jobs --retry` retries it in place, and queueing its
+    artifacts again would process them twice once the retry succeeds.
     """
-    return {aid for job in jobs for aid in job.get("artifact_ids") or []}
+    return {
+        aid for job in jobs if job.get("status") != JOB_CANCELLED
+        for aid in job.get("artifact_ids") or []
+    }
+
+
+def _refresh_jobs(client: "ParamifyClient", jobs: List[dict]) -> None:
+    """Re-read logged jobs that may have moved since they were recorded (a
+    failed one retried, a queued one finished), in place. Best effort: a job
+    that cannot be read keeps its logged state."""
+    for job in jobs:
+        if job.get("status") in (JOB_COMPLETED, JOB_CANCELLED) or not job.get("job_id"):
+            continue
+        try:
+            job.update(job_summary(client.get_job(job["job_id"])))
+        except (requests.RequestException, ParamifyError) as e:
+            logger.warning("could not re-read job %s (%s)", job.get("job_id"), e)
 
 
 # --------------------------------------------------------------------------- #
@@ -752,8 +795,11 @@ def upload_run(
         bad = sorted({str(p) for p in group["policies"] if p not in CLOSE_CYCLE_VALUES})
         if bad:
             reason = (
-                f"{CLOSE_CYCLE_FIELD} is {', '.join(bad)} for this assessment; set it to "
-                f"after_run or never (`paramify assessments select --close-cycle`) and re-run"
+                f"{CLOSE_CYCLE_FIELD} is {', '.join(bad)} for this assessment. Set it in "
+                f"the manifest that produced this run (`paramify assessments select "
+                f"--close-cycle after_run|never`) and upload again — `paramify issues "
+                f"upload` reads it from there when the run recorded none — or set "
+                f"overrides.<fetcher>.{CLOSE_CYCLE_FIELD} in --config"
             )
             logger.error("assessment %s: %s", aid, reason)
             entry["error"] = reason
@@ -903,13 +949,16 @@ def upload_run(
         # of ours has taken yet — including uploads from an earlier attempt that
         # died before its process call.
         assessment_jobs = jobs.setdefault(aid, [])
+        if client is not None and assessment_jobs:
+            _refresh_jobs(client, assessment_jobs)
+            save_log()
         taken = _processed_ids(assessment_jobs)
         pending = [
             v["artifact_id"] for v in already.values()
             if v.get("assessment_id") == aid and v.get("artifact_id")
             and v["artifact_id"] not in taken
         ]
-        operation, close_skipped = close_decision(group, files_ok)
+        operation, close_skipped = close_decision(group, files_ok, assessment_jobs)
         entry["operation"] = operation
         entry["close_skipped"] = close_skipped
 
@@ -923,20 +972,29 @@ def upload_run(
             continue
 
         if not pending:
-            # Nothing new. A job an earlier attempt queued may still be running:
-            # finish reporting it rather than claiming there is nothing to do.
+            # Nothing new to queue. A job an earlier attempt queued is still this
+            # run's outcome: report it (waiting on it if asked) rather than
+            # claiming there is nothing to do.
             last = assessment_jobs[-1] if assessment_jobs else None
-            if last and last.get("status") not in _TERMINAL and wait and client:
-                job_state = _wait_and_record(client, aid, last, wait_timeout, on_event)
-                entry["job"] = job_state
-                if job_state.get("status") != JOB_COMPLETED:
-                    jobs_failed += 1
-                save_log()
-            else:
-                entry["operation"] = None
-                entry["job"] = last
+            entry["operation"] = None
+            if last is None:
                 _emit(on_event, {"event": "process_skipped", "assessment_id": aid,
                                  "reason": "nothing new to process"})
+                continue
+            if last.get("status") not in _TERMINAL and wait and client:
+                last = _wait_and_record(client, aid, last, wait_timeout, on_event)
+                save_log()
+            else:
+                _emit(on_event, {"event": "process_skipped", "assessment_id": aid,
+                                 "reason": f"already queued as job {last.get('job_id')} "
+                                           f"({last.get('status')})"})
+            entry["operation"] = last.get("operation")
+            entry["job"] = last
+            still_running = (
+                not wait and last.get("status") not in _TERMINAL and not is_blocked(last)
+            )
+            if last.get("status") != JOB_COMPLETED and not still_running:
+                jobs_failed += 1
             continue
 
         try:

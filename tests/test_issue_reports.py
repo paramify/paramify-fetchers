@@ -851,3 +851,30 @@ def test_preflight_warns_on_a_missing_close_policy(tmp_path):
     assert pf["ok"], pf["errors"]
     assert pf["assessments"][0]["error"]
     assert any("close_cycle" in w for w in pf["warnings"]), pf["warnings"]
+
+
+def test_upload_reads_close_cycle_from_the_producing_manifest(tmp_path):
+    """A run collected before close_cycle was set recorded none; setting it in the
+    manifest afterwards must be enough, not a reason to collect again."""
+    import yaml
+
+    write_issue_report_fetcher(tmp_path)
+    (tmp_path / "uploaders").symlink_to(REPO_ROOT / "uploaders")
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
+        {"use": "t_vuln_scan", "config": {ASSESSMENT_ID_FIELD: "A-1"}},
+    ]}}
+    path = tmp_path / "pipelines.yaml"
+    path.write_text(yaml.safe_dump(manifest))
+    summary = api.run(manifest, tmp_path, manifest_path=path)
+    run_dir = Path(summary["run_dir"])
+    assert read_index(run_dir)["reports"][0]["close_cycle"] is None
+
+    before = api.issues_upload_preflight(run_dir, tmp_path, None, dry_run=True)
+    assert before["assessments"][0]["error"]
+
+    manifest["run"]["fetchers"][0]["config"][CLOSE_CYCLE_FIELD] = "after_run"
+    path.write_text(yaml.safe_dump(manifest))
+    after = api.issues_upload_preflight(run_dir, tmp_path, None, dry_run=True)
+    [plan] = after["assessments"]
+    assert plan["error"] is None
+    assert plan["operation"] == "PROCESS_CLOSE"

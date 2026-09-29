@@ -185,7 +185,10 @@ def make_run(tmp_path, reports, *, run_id="RID", invocations="derive", close_cyc
                      "assessment_id": aid, "close_cycle": policy})
     index = {"schema_version": "1.1", "run_id": run_id, "reports": records}
     if invocations is None:
+        # A real 1.0 sidecar predates close_cycle too.
         index["schema_version"] = "1.0"
+        for record in records:
+            del record["close_cycle"]
     else:
         index["invocations"] = invs + (invocations if isinstance(invocations, list) else [])
     (reports_dir / "_issue_reports.json").write_text(json.dumps(index))
@@ -431,10 +434,12 @@ def test_mixed_policies_on_one_assessment_do_not_close(tmp_path):
 
 
 def test_an_old_sidecar_never_closes(tmp_path):
-    """A 1.0 sidecar cannot show a failed target that wrote nothing."""
-    run_dir = make_run(tmp_path, [{"name": "a.csv"}], close_cycle="after_run", invocations=None)
+    """A 1.0 sidecar cannot show a failed target that wrote nothing — even once
+    a policy is supplied for it."""
+    run_dir = make_run(tmp_path, [{"name": "a.csv"}], invocations=None)
     client = FakeClient()
-    summary = run_upload(run_dir, client)
+    summary = run_upload(run_dir, client,
+                         config={"overrides": {"t_scan": {"close_cycle": "after_run"}}})
     assert client.processed[0]["operation"] == "PROCESS"
     assert "paramify issues close" in summary["assessments"][0]["close_skipped"]
 
@@ -808,4 +813,77 @@ def test_http_errors_explain_themselves(status, error_type, expected):
     client = uploader.ParamifyClient("t", "https://example.test/api/v0")
     client.session = FakeSession([FakeResponse(status, {"error": {"message": "x"}})])
     with pytest.raises(getattr(uploader, error_type), match=expected):
+        client.intake(ASSESSMENT, "scan.csv", RAW_CSV, "text/csv", {})
+
+
+# --------------------------------------------------------------------------- #
+# Earlier jobs of the same run
+# --------------------------------------------------------------------------- #
+
+def _first_attempt(tmp_path):
+    """a uploads and its job fails; b fails to upload. Policy after_run."""
+    run_dir = make_run(tmp_path, [{"name": "a.csv"}, {"name": "b.csv"}], close_cycle="after_run")
+    run_upload(run_dir, FakeClient(fail_files={"b.csv"}, job_statuses=["FAILED"]))
+    return run_dir
+
+
+def test_a_failed_earlier_job_blocks_the_close(tmp_path):
+    """The close covers the whole cycle: closing while a's job has not completed
+    auto-closes every issue only a reported."""
+    run_dir = _first_attempt(tmp_path)
+    # re-read of job-1 still FAILED, then the new job completes
+    client = FakeClient(job_statuses=["FAILED", "COMPLETED"], id_suffix="")
+    summary = run_upload(run_dir, client)
+    [proc] = client.processed
+    assert proc["operation"] == "PROCESS"
+    assert proc["artifact_ids"] == [f"art-{ASSESSMENT[:4]}-b.csv"], "a is left to its retry"
+    assert "earlier job" in summary["assessments"][0]["close_skipped"]
+
+
+def test_a_cancelled_earlier_job_releases_its_artifacts(tmp_path):
+    """Cancelled means never processed, so a is queued again with b — and with
+    every file now in one job, the close is allowed."""
+    run_dir = _first_attempt(tmp_path)
+    client = FakeClient(job_statuses=["CANCELLED", "COMPLETED"])
+    run_upload(run_dir, client)
+    [proc] = client.processed
+    assert sorted(proc["artifact_ids"]) == sorted(
+        [f"art-{ASSESSMENT[:4]}-a.csv", f"art-{ASSESSMENT[:4]}-b.csv"]
+    )
+    assert proc["operation"] == "PROCESS_CLOSE"
+
+
+def test_a_retried_earlier_job_that_completed_allows_the_close(tmp_path):
+    run_dir = _first_attempt(tmp_path)
+    client = FakeClient(job_statuses=["COMPLETED"])
+    run_upload(run_dir, client)
+    assert client.processed[0]["operation"] == "PROCESS_CLOSE"
+
+
+def test_no_wait_rerun_reports_the_job_still_queued(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    run_upload(run_dir, FakeClient(), wait=False)
+    events = []
+    summary = run_upload(run_dir, FakeClient(job_statuses=["QUEUED"]), wait=False,
+                         on_event=events.append)
+    [skip] = [e for e in events if e["event"] == "process_skipped"]
+    assert "already queued as job job-1 (QUEUED)" in skip["reason"]
+    assert summary["ok"]
+    assert summary["assessments"][0]["job"]["status"] == "QUEUED"
+
+
+def test_rerun_reports_an_earlier_job_that_failed(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    run_upload(run_dir, FakeClient(job_statuses=["FAILED"]))
+    summary = run_upload(run_dir, FakeClient(job_statuses=["FAILED"]))
+    assert not summary["ok"]
+    assert summary["assessments"][0]["job"]["status"] == "FAILED"
+
+
+def test_intake_without_an_artifact_id_is_an_error():
+    """Unnamed, the file could never be processed while the run said ok."""
+    session = FakeSession([FakeResponse(201, {"artifact": {}, "job": None})])
+    client = uploader.ParamifyClient("t", "https://example.test/api/v0")
+    client.session = session
+    with pytest.raises(uploader.ParamifyError, match="no artifact id"):
         client.intake(ASSESSMENT, "scan.csv", RAW_CSV, "text/csv", {})

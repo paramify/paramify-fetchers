@@ -96,7 +96,15 @@ TUI's assessment picker (`A`), which asks right after the assessment.
 
 "Every target succeeded" comes from the sidecar's `invocations` list, which
 records each issue-report invocation — including one that failed without writing
-a file. A run recorded before that list existed never closes automatically.
+a file. A run recorded before that list existed never closes automatically. Nor
+does a re-run while a job an earlier attempt at the same run queued has not
+completed: the close covers the whole cycle, so it waits until every file in it
+has been processed. A cancelled earlier job's files are queued again; a failed
+one is left to `paramify issues jobs --retry`.
+
+The policy is recorded in the run when it is collected. For a run collected
+before it was set, `paramify issues upload` reads the current value from the
+manifest that produced the run, so setting it and uploading again is enough.
 
 ## Jobs
 

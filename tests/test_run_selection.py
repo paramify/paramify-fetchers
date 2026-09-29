@@ -174,3 +174,11 @@ def test_standalone_uploaders_pick_their_own_kind(tmp_path):
     later = evidence_run(tmp_path, "2026-09-03T00-00-00Z")
     assert issues.find_latest_run(tmp_path) == sc, "took the newer evidence-only run"
     assert evidence.find_latest_run(tmp_path) == later
+
+
+def test_the_evidence_uploaders_log_is_not_evidence(tmp_path):
+    """A scan-only run someone ran `paramify upload` on gains upload_log.json;
+    it must not start looking like an evidence run."""
+    run = issue_run(tmp_path, "2026-09-01T00-00-00Z")
+    (run / "upload_log.json").write_text("{}")
+    assert api.latest_run(tmp_path, kind="evidence") is None

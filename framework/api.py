@@ -1388,6 +1388,52 @@ def _load_paramify_issues_uploader(root: Path):
     return module
 
 
+def _with_manifest_close_cycles(run_dir: Path, root: Path, config: dict, index: Optional[dict]) -> dict:
+    """Fill in close_cycle for fetchers whose run recorded none, from the
+    manifest that produced the run as it stands now.
+
+    The runner records each entry's close_cycle in the sidecar, so a run
+    collected before the policy was set — or before the key existed — carries
+    none, and setting it in the manifest afterwards changed nothing: the upload
+    stayed refused until the scan was collected again. The run's metadata names
+    its manifest, so its current value is the fallback. An explicit uploader
+    override and a value the run did record both still win.
+    """
+    if not index:
+        return config
+    items = list(index.get("reports") or []) + list(index.get("invocations") or [])
+    names = sorted({i.get("fetcher_name") for i in items if i.get("fetcher_name")})
+    unset = [
+        n for n in names
+        if all(i.get(CLOSE_CYCLE_FIELD) is None for i in items if i.get("fetcher_name") == n)
+    ]
+    if not unset:
+        return config
+    try:
+        meta = json.loads((Path(run_dir) / "_run_metadata.json").read_text())
+        manifest_id = meta.get("manifest")
+    except (OSError, json.JSONDecodeError):
+        return config
+    if not manifest_id:
+        return config
+    path = Path(manifest_id)
+    path = path if path.is_absolute() else Path(root) / path
+    if not path.is_file():
+        return config
+    try:
+        view = effective_config(read_manifest(path), unset, root)
+    except Exception:  # noqa: BLE001 — a fallback; the uploader reports what is still missing
+        return config
+    overrides = {k: dict(v or {}) for k, v in (config.get("overrides") or {}).items()}
+    for name in unset:
+        value = next(
+            (d["value"] for d in view.get(name, []) if d["name"] == CLOSE_CYCLE_FIELD), None
+        )
+        if value is not None:
+            overrides.setdefault(name, {}).setdefault(CLOSE_CYCLE_FIELD, value)
+    return {**config, "overrides": overrides}
+
+
 def issues_upload_preflight(
     run_dir,
     root: Path,
@@ -1440,6 +1486,7 @@ def issues_upload_preflight(
             missing_assessment = sorted({
                 r.get("fetcher_name") or "?" for r in reports if not r.get("assessment_id")
             })
+            config = _with_manifest_close_cycles(run_path, root, config, index)
             overrides = config.get("overrides") or {}
             for aid, group in uploader.plan_assessments(index, overrides).items():
                 if not aid:
@@ -1526,6 +1573,11 @@ def issues_upload_run(
     uploader = _load_paramify_issues_uploader(root)
     config_path = _upload_config(root, config_path)
     config = uploader.load_config(str(config_path)) if config_path else {}
+    try:
+        index = read_issue_report_index(Path(run_dir))
+    except ValueError:
+        index = None  # upload_run reports the unreadable index itself
+    config = _with_manifest_close_cycles(Path(run_dir), root, config, index)
     return uploader.upload_run(
         Path(run_dir),
         config=config,
@@ -1761,7 +1813,10 @@ def _run_summary(run_dir: Path) -> dict:
             })
     # Any JSON outputs not recorded in the metadata (e.g. legacy/direct runs).
     for p in sorted(run_dir.glob("*.json")):
-        if p.name == "_run_metadata.json" or p.name in seen:
+        # upload_log.json is the evidence uploader's own record, not evidence:
+        # counted, a scan-only run someone once ran `paramify upload` on looked
+        # like an evidence run and was picked as one.
+        if p.name in ("_run_metadata.json", "upload_log.json") or p.name in seen:
             continue
         files.append({"name": p.name, "path": str(p), "fetcher": None, "target": None,
                       "exit_code": None, "kind": "evidence"})
