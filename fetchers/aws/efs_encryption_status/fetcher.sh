@@ -41,43 +41,29 @@ ACCOUNT_ID=$(echo "$CALLER_IDENTITY" | jq -r '.Account // "unknown"')
 ARN=$(echo "$CALLER_IDENTITY" | jq -r '.Arn // "unknown"')
 DATETIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-total_filesystems=0
-encrypted_filesystems=0
-
 jq -n \
   --arg profile "$PROFILE" --arg region "$REGION" --arg datetime "$DATETIME" \
   --arg account_id "$ACCOUNT_ID" --arg arn "$ARN" \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": {"file_systems": [], "summary": {}}}' \
   > "$OUTPUT_JSON"
 
-filesystems=$(aws efs describe-file-systems --query "FileSystems[*].FileSystemId" --output text 2>/dev/null)
+# One describe returns every file system's encryption fields; the per-id
+# describe this replaced re-fetched them one CLI process at a time.
+filesystems=$(aws efs describe-file-systems --query "FileSystems[*].{FileSystemId:FileSystemId,Encrypted:Encrypted,KmsKeyId:KmsKeyId}" --output json 2>/dev/null)
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     echo "aws efs describe-file-systems (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list EFS file systems"
-else
-    for fs_id in $(aws_text_list "$filesystems"); do
-        total_filesystems=$((total_filesystems + 1))
-        fs_details=$(aws efs describe-file-systems --file-system-id "$fs_id" 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws efs describe-file-systems ($fs_id) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-        encrypted=$(echo "$fs_details" | jq -r '.FileSystems[0].Encrypted')
-        kms_key_id=$(echo "$fs_details" | jq -r '.FileSystems[0].KmsKeyId // "None"')
-
-        fs_data=$(jq -n --arg id "$fs_id" --argjson enc "$encrypted" --arg kms "$kms_key_id" \
-            '{file_system_id: $id, encrypted: $enc, kms_key_id: $kms}')
-        jq --argjson data "$fs_data" '.results.file_systems += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-        [ "$encrypted" = "true" ] && encrypted_filesystems=$((encrypted_filesystems + 1))
-    done
+    filesystems='[]'
 fi
 
-percentage=0
-[ $total_filesystems -gt 0 ] && percentage=$(( (encrypted_filesystems * 100) / total_filesystems ))
-
-jq --arg total "$total_filesystems" --arg encrypted "$encrypted_filesystems" --arg percentage "$percentage" \
-    '.results.summary = {total_file_systems: ($total | tonumber), encrypted_file_systems: ($encrypted | tonumber), encryption_percentage: ($percentage | tonumber)}' \
-    "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+printf '%s' "$filesystems" | jq --slurpfile fss /dev/stdin '
+    [$fss[0][]? | {file_system_id: .FileSystemId, encrypted: .Encrypted, kms_key_id: (.KmsKeyId // "None")}] as $rows
+    | ($rows | length) as $total
+    | ([$rows[] | select(.encrypted == true)] | length) as $encrypted
+    | .results.file_systems += $rows
+    | .results.summary = {total_file_systems: $total, encrypted_file_systems: $encrypted,
+        encryption_percentage: (if $total > 0 then ($encrypted * 100 / $total | floor) else 0 end)}
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

@@ -1,5 +1,5 @@
 name: aws_route53_high_availability
-version: 0.1.0
+version: 0.2.0
 description: Lists Route 53 health checks and their current status across observers (DNS failover evidence).
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-ROUTE53-HA
   name: Route 53 High Availability
-  instructions: 'Script: route53_high_availability.sh. Commands executed: aws route53 list-health-checks, aws route53 get-health-check-status'
+  instructions: 'Script: fetcher.sh. Commands executed: aws route53 list-health-checks, aws route53 get-health-check-status'

@@ -27,6 +27,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 <a href="fetchers/okta/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/okta-dark.svg"><img src="fetchers/logos/okta.svg" alt="Okta" width="56" height="56" style="margin: 20px;"></picture></a>
 <a href="fetchers/sentinelone/"><img src="fetchers/logos/sentinelone.svg" alt="SentinelOne" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/crowdstrike/"><img src="fetchers/logos/crowdstrike.svg" alt="CrowdStrike" width="56" height="56" style="margin: 20px;"></a>
+<a href="fetchers/splunk/"><img src="fetchers/logos/splunk.svg" alt="Splunk" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/knowbe4/"><img src="fetchers/logos/knowbe4.svg" alt="KnowBe4" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/gitlab/"><img src="fetchers/logos/gitlab.svg" alt="GitLab" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/k8s/"><img src="fetchers/logos/kubernetes.svg" alt="Kubernetes" width="56" height="56" style="margin: 20px;"></a>
@@ -46,6 +47,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | **Datadog** | 13 | Cloud SIEM detection rules, signals and operational config, monitors, log pipelines/indexes/archives, host & container inventory, agent checks, APM services, and incidents with timelines |
 | **Okta** | 8 | Phishing-resistant MFA and passwordless authentication, authenticators, least privilege, just-in-time access, non-user account authentication, suspicious activity management, and account management |
 | **CrowdStrike** | 7 | Managed host inventory, Spotlight vulnerabilities, detections, prevention policies, Zero Trust Assessment, FileVantage file integrity, and host firewall policies and rules |
+| **Splunk** | 7 | Index retention and data integrity control, index and log-source freshness, configured inputs against the data actually received, alert rules with their run and fire history, alert delivery outcomes, and who can search or delete which indexes |
 | **SentinelOne** | 5 | Agents, activities, cloud detection rules, XDR assets, user config |
 | **KnowBe4** | 4 | Security-awareness, high-risk, developer, and module-based training summaries |
 | **GitLab** | 4 | CI/CD pipeline config, merge-request and project summaries, significant change notifications |
@@ -75,7 +77,6 @@ More integrations are in progress. To request a fetcher or upvote what should be
 <img src="fetchers/logos/qualys.svg" alt="SSL Labs" width="56" height="56" style="margin: 20px;">
 <img src="fetchers/logos/wiz.jpeg" alt="Wiz" width="56" height="56" style="margin: 20px;">
 <picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/github-dark.svg"><img src="fetchers/logos/github.svg" alt="GitHub" width="56" height="56" style="margin: 20px;"></picture>
-<img src="fetchers/logos/splunk.svg" alt="Splunk" width="56" height="56" style="margin: 20px;">
 <img src="fetchers/logos/jira.svg" alt="Jira" width="56" height="56" style="margin: 20px;">
 <picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/tenable-dark.svg"><img src="fetchers/logos/tenable.svg" alt="Tenable" width="56" height="56" style="margin: 20px;"></picture>
 
@@ -567,6 +568,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`fetchers/sentinelone/README.md`](fetchers/sentinelone/README.md) | SentinelOne service user + API token |
 | [`fetchers/crowdstrike/README.md`](fetchers/crowdstrike/README.md) | CrowdStrike Falcon API client, scopes, and cloud/GovCloud selection |
 | [`fetchers/knowbe4/README.md`](fetchers/knowbe4/README.md) | KnowBe4 Reporting API key |
+| [`fetchers/splunk/README.md`](fetchers/splunk/README.md) | Splunk token, the collection role, port 8089, and how to add a Splunk fetcher |
 | [`fetchers/rippling/README.md`](fetchers/rippling/README.md) | Rippling Developer Hub token + scopes |
 | [`fetchers/k8s/README.md`](fetchers/k8s/README.md) | Kubernetes / EKS credential setup |
 | [`fetchers/checkov/README.md`](fetchers/checkov/README.md) | Checkov setup + git token for IaC scanning |

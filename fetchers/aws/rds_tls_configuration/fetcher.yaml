@@ -1,5 +1,5 @@
 name: aws_rds_tls_configuration
-version: 0.1.0
+version: 0.2.0
 description: Collects RDS instance TLS/SSL configuration (engine, CA cert, parameter group force_ssl or require_secure_transport and SSL protocol versions, sync status) plus available CA certificates.
 category: aws
 
@@ -34,3 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-RDS-TLS
   name: RDS TLS Configuration
+  instructions: 'Script: fetcher.sh. Commands executed: aws rds describe-db-instances, aws rds describe-db-parameters (once per parameter group in use), aws rds describe-certificates.'

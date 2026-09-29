@@ -28,7 +28,14 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_sagemaker_encryption_status_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_sagemaker_encryption_status.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_sagemaker_encryption_status_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+# Describe responses are appended per resource type and turned into records in
+# one jq pass at the end, instead of a jq process and an output rewrite per
+# resource. An ML account's training-job history is never pruned, so that
+# rewrite ran over thousands of jobs.
+_NOTEBOOKS_JSON="$(mktemp -t aws_sagemaker_encryption_status_nb.XXXXXX.json)"
+_TRAINING_JSON="$(mktemp -t aws_sagemaker_encryption_status_tj.XXXXXX.json)"
+_ENDPOINTS_JSON="$(mktemp -t aws_sagemaker_encryption_status_ec.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_NOTEBOOKS_JSON" "$_TRAINING_JSON" "$_ENDPOINTS_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_sagemaker_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_sagemaker_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -57,18 +64,11 @@ if [ $nb_list_exit -ne 0 ]; then
 else
     for notebook in $(aws_text_list "$notebooks"); do
         details=$(aws sagemaker describe-notebook-instance --notebook-instance-name "$notebook" 2>/dev/null)
-        if [ $? -ne 0 ]; then
+        if [ $? -ne 0 ] || [ -z "$details" ]; then
             echo "aws sagemaker describe-notebook-instance ($notebook) failed" >> "$_FAILURE_LOG"
             continue
         fi
-        record=$(echo "$details" | jq '{
-            name: .NotebookInstanceName,
-            type: "notebook_instance",
-            arn: .NotebookInstanceArn,
-            kms_key_id: (.KmsKeyId // "None"),
-            volume_encrypted: (.KmsKeyId != null)
-        }')
-        jq --argjson r "$record" '.results.notebook_instances += [$r]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+        printf '%s\n' "$details" >> "$_NOTEBOOKS_JSON"
     done
 fi
 
@@ -81,19 +81,11 @@ if [ $tj_list_exit -ne 0 ]; then
 else
     for job in $(aws_text_list "$training_jobs"); do
         details=$(aws sagemaker describe-training-job --training-job-name "$job" 2>/dev/null)
-        if [ $? -ne 0 ]; then
+        if [ $? -ne 0 ] || [ -z "$details" ]; then
             echo "aws sagemaker describe-training-job ($job) failed" >> "$_FAILURE_LOG"
             continue
         fi
-        record=$(echo "$details" | jq '{
-            name: .TrainingJobName,
-            type: "training_job",
-            arn: .TrainingJobArn,
-            volume_kms_key_id: (.ResourceConfig.VolumeKmsKeyId // "None"),
-            volume_encrypted: (.ResourceConfig.VolumeKmsKeyId != null),
-            inter_container_encryption: (.EnableInterContainerTrafficEncryption // false)
-        }')
-        jq --argjson r "$record" '.results.training_jobs += [$r]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+        printf '%s\n' "$details" >> "$_TRAINING_JSON"
     done
 fi
 
@@ -106,19 +98,37 @@ if [ $ec_list_exit -ne 0 ]; then
 else
     for config in $(aws_text_list "$endpoint_configs"); do
         details=$(aws sagemaker describe-endpoint-config --endpoint-config-name "$config" 2>/dev/null)
-        if [ $? -ne 0 ]; then
+        if [ $? -ne 0 ] || [ -z "$details" ]; then
             echo "aws sagemaker describe-endpoint-config ($config) failed" >> "$_FAILURE_LOG"
             continue
         fi
-        record=$(echo "$details" | jq '{
-            name: .EndpointConfigName,
-            type: "endpoint_config",
-            arn: .EndpointConfigArn,
-            kms_key_id: (.KmsKeyId // "None"),
-            volume_encrypted: (.KmsKeyId != null)
-        }')
-        jq --argjson r "$record" '.results.endpoint_configs += [$r]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+        printf '%s\n' "$details" >> "$_ENDPOINTS_JSON"
     done
 fi
+
+jq --slurpfile notebooks "$_NOTEBOOKS_JSON" --slurpfile training "$_TRAINING_JSON" --slurpfile endpoints "$_ENDPOINTS_JSON" '
+    .results.notebook_instances += [$notebooks[] | {
+        name: .NotebookInstanceName,
+        type: "notebook_instance",
+        arn: .NotebookInstanceArn,
+        kms_key_id: (.KmsKeyId // "None"),
+        volume_encrypted: (.KmsKeyId != null)
+    }]
+    | .results.training_jobs += [$training[] | {
+        name: .TrainingJobName,
+        type: "training_job",
+        arn: .TrainingJobArn,
+        volume_kms_key_id: (.ResourceConfig.VolumeKmsKeyId // "None"),
+        volume_encrypted: (.ResourceConfig.VolumeKmsKeyId != null),
+        inter_container_encryption: (.EnableInterContainerTrafficEncryption // false)
+    }]
+    | .results.endpoint_configs += [$endpoints[] | {
+        name: .EndpointConfigName,
+        type: "endpoint_config",
+        arn: .EndpointConfigArn,
+        kms_key_id: (.KmsKeyId // "None"),
+        volume_encrypted: (.KmsKeyId != null)
+    }]
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

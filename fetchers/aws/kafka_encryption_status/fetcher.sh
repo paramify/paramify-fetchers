@@ -48,12 +48,12 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": {"clusters": [], "summary": {}}}' \
   > "$OUTPUT_JSON"
 
-total_clusters=0
-encrypted_clusters=0
-
 _ERR="$(mktemp -t aws_kafka_encryption_status_err.XXXXXX)"
 trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_ERR" "$_AWS_ERR_LOG"' EXIT
-cluster_arns=$(aws kafka list-clusters-v2 --query 'ClusterInfoList[*].ClusterArn' --output text 2>"$_ERR")
+# list-clusters-v2 returns the same Cluster objects describe-cluster-v2 does
+# (both are the API's Cluster shape), so one paginated call replaces a
+# describe per cluster.
+clusters=$(aws kafka list-clusters-v2 --query 'ClusterInfoList[*]' --output json 2>"$_ERR")
 list_exit=$?
 if [ $list_exit -ne 0 ] && aws_service_unavailable "$_ERR"; then
     log_info "Amazon MSK (Kafka) is not in use for this account/region (not subscribed / not enabled); recording not-enabled status"
@@ -64,45 +64,29 @@ if [ $list_exit -ne 0 ] && aws_service_unavailable "$_ERR"; then
 elif [ $list_exit -ne 0 ]; then
     echo "aws kafka list-clusters-v2 (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list MSK clusters"
-else
-    for cluster_arn in $(aws_text_list "$cluster_arns"); do
-        total_clusters=$((total_clusters + 1))
-        cluster_details=$(aws kafka describe-cluster-v2 --cluster-arn "$cluster_arn" 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws kafka describe-cluster-v2 ($cluster_arn) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-
-        cluster_data=$(echo "$cluster_details" | jq '
-            .ClusterInfo as $c |
-            ($c.ClusterType // "UNKNOWN") as $type |
-            (if $type == "SERVERLESS" then $c.Serverless else $c.Provisioned end) as $cfg |
-            {
-                name: ($c.ClusterName // ""),
-                arn: ($c.ClusterArn // ""),
-                cluster_type: $type,
-                state: ($c.State // ""),
-                kafka_version: (if $type == "SERVERLESS" then "SERVERLESS" else ($cfg.CurrentBrokerSoftwareInfo.KafkaVersion // "") end),
-                encryption_in_transit_client_broker: (if $type == "SERVERLESS" then "TLS" else ($cfg.EncryptionInfo.EncryptionInTransit.ClientBroker // "PLAINTEXT") end),
-                encryption_in_transit_in_cluster: (if $type == "SERVERLESS" then true else ($cfg.EncryptionInfo.EncryptionInTransit.InCluster // false) end),
-                encryption_at_rest_kms_key_id: (if $type == "SERVERLESS" then "AWS_MANAGED" else ($cfg.EncryptionInfo.EncryptionAtRest.DataVolumeKMSKeyId // "None") end)
-            }')
-
-        client_broker=$(echo "$cluster_data" | jq -r '.encryption_in_transit_client_broker')
-        kms_key=$(echo "$cluster_data" | jq -r '.encryption_at_rest_kms_key_id')
-        if [ "$client_broker" = "TLS" ] && [ "$kms_key" != "None" ] && [ -n "$kms_key" ]; then
-            encrypted_clusters=$((encrypted_clusters + 1))
-        fi
-
-        jq --argjson data "$cluster_data" '.results.clusters += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    clusters='[]'
 fi
 
-percentage=0
-[ $total_clusters -gt 0 ] && percentage=$(( (encrypted_clusters * 100) / total_clusters ))
-
-jq --arg total "$total_clusters" --arg encrypted "$encrypted_clusters" --arg percentage "$percentage" \
-    '.results.summary = {total_clusters: ($total | tonumber), encrypted_clusters: ($encrypted | tonumber), encryption_percentage: ($percentage | tonumber)}' \
-    "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+printf '%s' "$clusters" | jq --slurpfile clusters /dev/stdin '
+    [$clusters[0][]? | . as $c |
+        ($c.ClusterType // "UNKNOWN") as $type |
+        (if $type == "SERVERLESS" then $c.Serverless else $c.Provisioned end) as $cfg |
+        {
+            name: ($c.ClusterName // ""),
+            arn: ($c.ClusterArn // ""),
+            cluster_type: $type,
+            state: ($c.State // ""),
+            kafka_version: (if $type == "SERVERLESS" then "SERVERLESS" else ($cfg.CurrentBrokerSoftwareInfo.KafkaVersion // "") end),
+            encryption_in_transit_client_broker: (if $type == "SERVERLESS" then "TLS" else ($cfg.EncryptionInfo.EncryptionInTransit.ClientBroker // "PLAINTEXT") end),
+            encryption_in_transit_in_cluster: (if $type == "SERVERLESS" then true else ($cfg.EncryptionInfo.EncryptionInTransit.InCluster // false) end),
+            encryption_at_rest_kms_key_id: (if $type == "SERVERLESS" then "AWS_MANAGED" else ($cfg.EncryptionInfo.EncryptionAtRest.DataVolumeKMSKeyId // "None") end)
+        }] as $rows
+    | ($rows | length) as $total
+    | ([$rows[] | select(.encryption_in_transit_client_broker == "TLS"
+        and .encryption_at_rest_kms_key_id != "None" and .encryption_at_rest_kms_key_id != "")] | length) as $encrypted
+    | .results.clusters += $rows
+    | .results.summary = {total_clusters: $total, encrypted_clusters: $encrypted,
+        encryption_percentage: (if $total > 0 then ($encrypted * 100 / $total | floor) else 0 end)}
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

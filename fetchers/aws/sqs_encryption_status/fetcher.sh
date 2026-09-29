@@ -47,8 +47,14 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": {"queues": [], "summary": {}}}' \
   > "$OUTPUT_JSON"
 
+# get-queue-attributes has no batch form, so each queue still costs one call.
+# What the loop no longer does is spawn jq or rewrite the output file per
+# queue: each readable queue's URL and raw attributes are appended in order,
+# and one jq pass below builds the records and the summary.
 total_queues=0
-encrypted_queues=0
+_QUEUE_URLS="$(mktemp -t aws_sqs_encryption_status_urls.XXXXXX)"
+_QUEUE_ATTRIBUTES="$(mktemp -t aws_sqs_encryption_status_attributes.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_QUEUE_URLS" "$_QUEUE_ATTRIBUTES"' EXIT
 
 queue_urls=$(aws sqs list-queues --query 'QueueUrls[]' --output text 2>/dev/null)
 list_exit=$?
@@ -57,6 +63,8 @@ if [ $list_exit -ne 0 ]; then
     log_error "Failed to list SQS queues"
 else
     for queue_url in $(aws_text_list "$queue_urls"); do
+        # An unreadable queue is logged and left out of the queue list, but it
+        # stays in total_queues -- the denominator counts every listed queue.
         total_queues=$((total_queues + 1))
         queue_name="${queue_url##*/}"
 
@@ -64,33 +72,28 @@ else
             --queue-url "$queue_url" \
             --attribute-names KmsMasterKeyId SqsManagedSseEnabled \
             --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
+        if [ $? -ne 0 ] || [ -z "$attributes" ]; then
             echo "aws sqs get-queue-attributes ($queue_name) failed" >> "$_FAILURE_LOG"
             continue
         fi
 
-        kms_key_id=$(echo "$attributes" | jq -r '.Attributes.KmsMasterKeyId // "None"')
-        sqs_managed=$(echo "$attributes" | jq -r '.Attributes.SqsManagedSseEnabled // "false"')
-
-        encrypted=false
-        if [ "$kms_key_id" != "None" ] || [ "$sqs_managed" = "true" ]; then
-            encrypted=true
-            encrypted_queues=$((encrypted_queues + 1))
-        fi
-
-        queue_data=$(jq -n --arg name "$queue_name" --arg url "$queue_url" \
-            --argjson enc "$encrypted" --arg kms "$kms_key_id" --arg sse "$sqs_managed" \
-            '{name: $name, url: $url, encrypted: $enc, kms_master_key_id: $kms, sqs_managed_sse_enabled: $sse}')
-
-        jq --argjson data "$queue_data" '.results.queues += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+        printf '%s\n' "$queue_url" >> "$_QUEUE_URLS"
+        printf '%s\n' "$attributes" >> "$_QUEUE_ATTRIBUTES"
     done
 fi
 
-percentage=0
-[ $total_queues -gt 0 ] && percentage=$(( (encrypted_queues * 100) / total_queues ))
-
-jq --arg total "$total_queues" --arg encrypted "$encrypted_queues" --arg percentage "$percentage" \
-    '.results.summary = {total_queues: ($total | tonumber), encrypted_queues: ($encrypted | tonumber), encryption_percentage: ($percentage | tonumber)}' \
-    "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+jq --rawfile urls "$_QUEUE_URLS" --slurpfile attributes "$_QUEUE_ATTRIBUTES" --argjson total "$total_queues" '
+    ($urls | split("\n")) as $urls
+    | [range(0; $attributes | length) as $i
+        | ($attributes[$i].Attributes.KmsMasterKeyId // "None" | tostring) as $kms
+        | ($attributes[$i].Attributes.SqsManagedSseEnabled // "false" | tostring) as $sse
+        | {name: ($urls[$i] | split("/") | last), url: $urls[$i],
+           encrypted: ($kms != "None" or $sse == "true"),
+           kms_master_key_id: $kms, sqs_managed_sse_enabled: $sse}] as $queues
+    | ([$queues[] | select(.encrypted)] | length) as $encrypted
+    | .results.queues += $queues
+    | .results.summary = {total_queues: $total, encrypted_queues: $encrypted,
+        encryption_percentage: (if $total > 0 then ($encrypted * 100 / $total | floor) else 0 end)}
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

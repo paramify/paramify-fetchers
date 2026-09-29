@@ -1,5 +1,5 @@
 name: aws_security_groups
-version: 0.1.0
+version: 0.2.0
 description: Lists EC2 security groups and per-group inbound/outbound rules (protocol, port range, CIDRs).
 category: aws
 
@@ -35,4 +35,4 @@ ksis:
 evidence_set:
   reference_id: EVD-SECURITY-GROUPS
   name: Security Groups
-  instructions: 'Script: security_groups.sh. Commands executed: aws ec2 describe-security-groups'
+  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 describe-security-groups'

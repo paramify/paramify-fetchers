@@ -1,0 +1,69 @@
+name: splunk_alert_delivery
+version: 0.1.0
+description: >-
+  Whether Splunk alerts reach anyone: email settings, alert actions, and each
+  triggered action's delivery outcome.
+category: splunk
+
+supports_targets: true
+
+target_schema:
+  name:
+    type: string
+    required: true
+    env: SPLUNK_TARGET_NAME
+    description: Label for this Splunk deployment, used in the evidence filename.
+  base_url:
+    type: string
+    required: true
+    env: SPLUNK_BASE_URL
+    description: Management URL of the search head or standalone instance, e.g. https://splunk.example.com:8089
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: SPLUNK_VERIFY_SSL
+    description: Verify the management port's TLS certificate. Set false only for a self-signed test instance.
+  ca_bundle:
+    type: string
+    required: false
+    env: SPLUNK_CA_BUNDLE
+    description: >-
+      Path to the CA bundle that signed the management port's certificate, for
+      a deployment on a private CA. When set, TLS is verified against it and
+      verify_ssl is ignored.
+
+config_schema:
+  delivery_lookback_days:
+    type: integer
+    default: 30
+    env: SPLUNK_DELIVERY_LOOKBACK_DAYS
+    description: >-
+      How far back to read triggered alert actions and their delivery records
+      in index=_internal (default retention 30 days).
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: splunk_alert_delivery.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-MLA-RVL
+
+evidence_set:
+  reference_id: EVD-SPLUNK-ALERT-DELIVERY
+  name: Splunk Alert Delivery
+  instructions: >-
+    Email action settings (`email_settings[]`: mail server, TLS, whether SMTP
+    credentials are set), every alert action (`alert_actions[]`), and for each
+    alert action triggered in the last `lookback_days`, how many deliveries were
+    attempted, succeeded and failed, with the last error (`deliveries[]`).
+    Outcomes are read from Splunk's sendemail and sendmodalert log lines in
+    `_internal`. Success means the mail server or endpoint accepted the
+    delivery, not that anyone read it.

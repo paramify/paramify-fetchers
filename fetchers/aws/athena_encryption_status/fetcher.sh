@@ -28,7 +28,8 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_athena_encryption_status_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_athena_encryption_status.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_athena_encryption_status_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_ITEMS_JSON="$(mktemp -t aws_athena_encryption_status_workgroups.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ITEMS_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_athena_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_athena_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -54,29 +55,30 @@ if [ $list_exit -ne 0 ]; then
     echo "aws athena list-work-groups (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list Athena workgroups"
 else
+    # get-work-group is genuinely one call per workgroup (list-work-groups carries
+    # no configuration), but each response is appended raw and the records are
+    # built in the one jq pass below -- not five jq processes and an output
+    # rewrite per workgroup. `raw` reproduces the old `jq -r` -> --arg read.
     for wg in $(aws_text_list "$workgroups"); do
         wg_details=$(aws athena get-work-group --work-group "$wg" --output json 2>/dev/null)
         if [ $? -ne 0 ]; then
             echo "aws athena get-work-group ($wg) failed" >> "$_FAILURE_LOG"
             continue
         fi
-
-        name=$(echo "$wg_details" | jq -r '.WorkGroup.Name')
-        state=$(echo "$wg_details" | jq -r '.WorkGroup.State // "UNKNOWN"')
-        enforce=$(echo "$wg_details" | jq -r '.WorkGroup.Configuration.EnforceWorkGroupConfiguration // false')
-        encryption_option=$(echo "$wg_details" | jq -r '.WorkGroup.Configuration.ResultConfiguration.EncryptionConfiguration.EncryptionOption // ""')
-
-        encrypted=false
-        case "$encryption_option" in
-            SSE_S3|SSE_KMS|CSE_KMS) encrypted=true ;;
-        esac
-
-        wg_data=$(jq -n --arg name "$name" --arg state "$state" \
-            --argjson enforce "$enforce" --arg enc_option "$encryption_option" --argjson encrypted "$encrypted" \
-            '{name: $name, state: $state, enforce_workgroup_configuration: $enforce, encryption_option: $enc_option, encrypted: $encrypted}')
-
-        jq --argjson data "$wg_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+        printf '%s\n' "$wg_details" >> "$_ITEMS_JSON"
     done
+
+    jq --slurpfile wgs "$_ITEMS_JSON" '
+        def raw: (if type == "string" then . else tojson end) | sub("\n+$"; "");
+        .results += [$wgs[] | try (
+            (.WorkGroup.Configuration.ResultConfiguration.EncryptionConfiguration.EncryptionOption // "" | raw) as $enc_option
+            | {
+                name: (.WorkGroup.Name | raw),
+                state: (.WorkGroup.State // "UNKNOWN" | raw),
+                enforce_workgroup_configuration: (.WorkGroup.Configuration.EnforceWorkGroupConfiguration // false),
+                encryption_option: $enc_option,
+                encrypted: ($enc_option | IN("SSE_S3", "SSE_KMS", "CSE_KMS"))
+            }) catch empty]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

@@ -29,7 +29,9 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_dlm_lifecycle_policies_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_dlm_lifecycle_policies.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_dlm_lifecycle_policies_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_ITEMS_JSON="$(mktemp -t aws_dlm_lifecycle_policies_details.XXXXXX)"
+_POLICIES_JSON="$(mktemp -t aws_dlm_lifecycle_policies_policies.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ITEMS_JSON" "$_POLICIES_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_dlm_lifecycle_policies %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_dlm_lifecycle_policies %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -66,9 +68,15 @@ fi
 policy_count=$(echo "$policies" | jq -r '.Policies | length')
 if [ "$policy_count" -gt 0 ]; then
     log_info "Found $policy_count DLM lifecycle policies"
-    while read -r summary; do
-        policy_id=$(echo "$summary" | jq -r '.PolicyId')
-        [ -z "$policy_id" ] && continue
+    # get-lifecycle-policy is genuinely one call per policy: the summary list has
+    # no PolicyDetails. Each detail is appended raw, in summary order, and joined
+    # to its summary in the one jq pass below -- not a jq process and an output
+    # rewrite per policy.
+    while read -r policy_id; do
+        if [ -z "$policy_id" ]; then
+            printf '%s\n' '{"__skipped__": true}' >> "$_ITEMS_JSON"
+            continue
+        fi
 
         # Full policy detail: PolicyDetails carries Schedules (with RetainRule)
         # and TargetTags for KSI-RPL-ABO retention/lifecycle evidence.
@@ -78,12 +86,17 @@ if [ "$policy_count" -gt 0 ]; then
             echo "aws dlm get-lifecycle-policy ($policy_id) failed (exit=$detail_exit)" >> "$_FAILURE_LOG"
             detail='{}'
         fi
-        if [ -z "$detail" ] || ! echo "$detail" | jq . >/dev/null 2>&1; then
-            detail='{}'
-        fi
+        [ -n "$detail" ] || detail='{}'
+        printf '%s\n' "$detail" >> "$_ITEMS_JSON"
+    done < <(echo "$policies" | jq -r '.Policies[] | .PolicyId')
 
-        jq --argjson summary "$summary" --argjson detail "$detail" \
-           '.results += [{
+    printf '%s' "$policies" > "$_POLICIES_JSON"
+    jq --slurpfile policies "$_POLICIES_JSON" --slurpfile details "$_ITEMS_JSON" '
+        $policies[0].Policies as $summaries
+        | .results += [range(0; $summaries | length) as $i
+            | $summaries[$i] as $summary | $details[$i] as $detail
+            | select($detail.__skipped__ != true)
+            | {
               "PolicyId": $summary.PolicyId,
               "State": ($summary.State // ($detail.Policy.State // null)),
               "PolicyType": ($summary.PolicyType // ($detail.Policy.PolicyDetails.PolicyType // null)),
@@ -94,8 +107,7 @@ if [ "$policy_count" -gt 0 ]; then
               "Schedules": ($detail.Policy.PolicyDetails.Schedules // []),
               "PolicyDetails": ($detail.Policy.PolicyDetails // {})
            }]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done < <(echo "$policies" | jq -c '.Policies[]')
+       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 else
     log_info "No DLM lifecycle policies found"
 fi

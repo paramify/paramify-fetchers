@@ -37,7 +37,11 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_kms_key_rotation_${_TARGET_ID}.json"
 _FAILURE_LOG="$(mktemp -t aws_kms_key_rotation_fail.XXXXXX)"
 _CALL_ERR="$(mktemp -t aws_kms_key_rotation_err.XXXXXX)"
-trap 'rm -f "$_FAILURE_LOG" "$_CALL_ERR" "$_AWS_ERR_LOG"' EXIT
+_KEY_IDS="$(mktemp -t aws_kms_key_rotation_ids.XXXXXX)"
+_KEY_ERRORS="$(mktemp -t aws_kms_key_rotation_errors.XXXXXX)"
+_KEY_RESPONSES="$(mktemp -t aws_kms_key_rotation_responses.XXXXXX.json)"
+_CONFIG_JSON="$(mktemp -t aws_kms_key_rotation_config.XXXXXX.json)"
+trap 'rm -f "$_FAILURE_LOG" "$_CALL_ERR" "$_AWS_ERR_LOG" "$_KEY_IDS" "$_KEY_ERRORS" "$_KEY_RESPONSES" "$_CONFIG_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_kms_key_rotation %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_kms_key_rotation %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -74,10 +78,14 @@ fi
 
 total_keys=0
 readable_keys=0
-rotated_keys=0
-unreadable_keys=0
-kms_results=()
 
+# There is no batch form of describe-key, get-key-rotation-status or
+# get-key-policy, so each key still costs three calls. What the loop no longer
+# does is spawn jq: each key's raw responses are appended in a fixed order
+# (details, rotation status or null, policy) and its error note as one line,
+# and a single jq pass below builds every record. That pass reads files, not
+# --argjson: every key policy on one command line overflows Linux's 128 KiB
+# argv limit at around 60 keys.
 key_ids=$(aws kms list-keys --query "Keys[*].KeyId" --output text 2>/dev/null)
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
@@ -96,7 +104,7 @@ else
         key_error=""
 
         key_details=$(aws kms describe-key --key-id "$key_id" 2>"$_CALL_ERR")
-        if [ $? -ne 0 ]; then
+        if [ $? -ne 0 ] || [ -z "$key_details" ]; then
             key_error="${key_error:+$key_error; }$(key_call_error DescribeKey)"
             key_details='{"KeyMetadata": {}}'
         fi
@@ -104,42 +112,23 @@ else
         # rotation_enabled stays null when the status could not be read. The old
         # `false` fallback asserted "not rotated" about a key never actually
         # read, and dragged down the coverage percentage with it.
-        rotation_status="unreadable"
-        is_rotated="null"
         key_rotation_status=$(aws kms get-key-rotation-status --key-id "$key_id" 2>"$_CALL_ERR")
-        if [ $? -ne 0 ]; then
+        if [ $? -ne 0 ] || [ -z "$key_rotation_status" ]; then
             key_error="${key_error:+$key_error; }$(key_call_error GetKeyRotationStatus)"
-            unreadable_keys=$((unreadable_keys + 1))
+            key_rotation_status='null'
         else
             readable_keys=$((readable_keys + 1))
-            if [ "$(echo "$key_rotation_status" | jq -r '.KeyRotationEnabled // false')" = "true" ]; then
-                rotation_status="enabled"
-                is_rotated="true"
-                rotated_keys=$((rotated_keys + 1))
-            else
-                rotation_status="disabled"
-                is_rotated="false"
-            fi
         fi
 
-        key_arn=$(echo "$key_details" | jq -r '.KeyMetadata.Arn // "Unknown"')
-        key_state=$(echo "$key_details" | jq -r '.KeyMetadata.KeyState // "Unknown"')
-        key_usage=$(echo "$key_details" | jq -r '.KeyMetadata.KeyUsage // "Unknown"')
-
         key_policy=$(aws kms get-key-policy --key-id "$key_id" --policy-name default 2>"$_CALL_ERR")
-        if [ $? -ne 0 ]; then
+        if [ $? -ne 0 ] || [ -z "$key_policy" ]; then
             key_error="${key_error:+$key_error; }$(key_call_error GetKeyPolicy)"
             key_policy='{}'
         fi
 
-        kms_results+=("$(jq -n \
-            --arg id "$key_id" --arg arn "$key_arn" --arg state "$key_state" --arg usage "$key_usage" \
-            --argjson rotated "$is_rotated" --arg rotation_status "$rotation_status" \
-            --argjson policy "$key_policy" --arg collection_error "$key_error" \
-            '{key_id: $id, key_arn: $arn, key_state: $state, key_usage: $usage,
-              rotation_enabled: $rotated, rotation_status: $rotation_status,
-              key_policy: $policy}
-             + (if $collection_error == "" then {} else {collection_error: $collection_error} end)')")
+        printf '%s\n' "$key_id" >> "$_KEY_IDS"
+        printf '%s\n' "$key_error" >> "$_KEY_ERRORS"
+        printf '%s\n%s\n%s\n' "$key_details" "$key_rotation_status" "$key_policy" >> "$_KEY_RESPONSES"
     done
 fi
 
@@ -151,27 +140,44 @@ if [ "$total_keys" -gt 0 ] && [ "$readable_keys" -eq 0 ]; then
     log_error "Could not read rotation status for any of the $total_keys KMS key(s)"
 fi
 
-percentage=0
-[ $readable_keys -gt 0 ] && percentage=$(( (rotated_keys * 100) / readable_keys ))
+printf '%s' "$config_compliance" > "$_CONFIG_JSON"
 
 jq -n \
     --arg profile "$PROFILE" --arg region "$REGION" --arg datetime "$DATETIME" \
     --arg account_id "$ACCOUNT_ID" --arg arn "$ARN" \
-    --argjson keys "[$(IFS=,; echo "${kms_results[*]}")]" \
-    --argjson config "$config_compliance" \
-    --arg total "$total_keys" --arg readable "$readable_keys" --arg unreadable "$unreadable_keys" \
-    --arg rotated "$rotated_keys" --arg percentage "$percentage" \
-    '{
+    --rawfile ids "$_KEY_IDS" --rawfile errors "$_KEY_ERRORS" \
+    --slurpfile responses "$_KEY_RESPONSES" --slurpfile config "$_CONFIG_JSON" \
+    '($ids | split("\n")) as $ids
+    | ($errors | split("\n")) as $errors
+    | [range(0; ($responses | length) / 3) as $i
+        | $responses[3 * $i] as $details
+        | $responses[3 * $i + 1] as $rotation
+        | (if $rotation == null then null
+           elif ($rotation.KeyRotationEnabled // false) == true then true
+           else false end) as $rotated
+        | {key_id: $ids[$i],
+           key_arn: ($details.KeyMetadata.Arn // "Unknown"),
+           key_state: ($details.KeyMetadata.KeyState // "Unknown"),
+           key_usage: ($details.KeyMetadata.KeyUsage // "Unknown"),
+           rotation_enabled: $rotated,
+           rotation_status: (if $rotated == null then "unreadable" elif $rotated then "enabled" else "disabled" end),
+           key_policy: $responses[3 * $i + 2]}
+          + (if $errors[$i] == "" then {} else {collection_error: $errors[$i]} end)
+      ] as $keys
+    | ($keys | length) as $total
+    | ([$keys[] | select(.rotation_enabled != null)] | length) as $readable
+    | ([$keys[] | select(.rotation_enabled == true)] | length) as $rotated
+    | {
         metadata: {profile: $profile, region: $region, datetime: $datetime, account_id: $account_id, arn: $arn},
         results: {
             kms_keys: {object: $keys},
-            config_rule: $config,
+            config_rule: $config[0],
             summary: {
-                total_keys: ($total | tonumber),
-                readable_keys: ($readable | tonumber),
-                unreadable_keys: ($unreadable | tonumber),
-                rotated_keys: ($rotated | tonumber),
-                rotation_percentage: ($percentage | tonumber)
+                total_keys: $total,
+                readable_keys: $readable,
+                unreadable_keys: ($total - $readable),
+                rotated_keys: $rotated,
+                rotation_percentage: (if $readable > 0 then ($rotated * 100 / $readable | floor) else 0 end)
             }
         }
     }' > "$OUTPUT_JSON"

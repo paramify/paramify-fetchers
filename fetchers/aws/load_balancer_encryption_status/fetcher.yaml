@@ -1,5 +1,5 @@
 name: aws_load_balancer_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: Inspects ELBv2 application and network load balancers and their listener SSL policies to report which load balancers enforce in-transit encryption (HTTPS/TLS with a FIPS or TLS 1.2/1.3 policy).
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-LB-ENC-STATUS
   name: Load Balancer Encryption Status
-  instructions: 'Script: load_balancer_encryption_status.sh. Commands executed: aws elbv2 describe-load-balancers, aws elbv2 describe-listeners'
+  instructions: 'Script: fetcher.sh. Commands executed: aws elbv2 describe-load-balancers, aws elbv2 describe-listeners'

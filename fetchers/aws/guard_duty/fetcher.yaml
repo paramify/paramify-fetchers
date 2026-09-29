@@ -1,5 +1,5 @@
 name: aws_guard_duty
-version: 0.1.0
+version: 0.2.0
 description: Lists AWS GuardDuty detectors and their configuration (status, finding publishing frequency, and per-data-source statuses for CloudTrail, DNS logs, flow logs, S3 logs, and Kubernetes audit logs), plus a health summary. No detectors is valid evidence that GuardDuty is not enabled.
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-GUARD-DUTY
   name: GuardDuty Configuration
-  instructions: 'Script: guard_duty.sh. Commands executed: aws guardduty list-detectors, aws guardduty get-detector, aws guardduty get-findings'
+  instructions: 'Script: fetcher.sh. Commands executed: aws guardduty list-detectors, aws guardduty get-detector'

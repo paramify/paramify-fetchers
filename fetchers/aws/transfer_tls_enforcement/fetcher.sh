@@ -22,7 +22,8 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_transfer_tls_enforcement_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_transfer_tls_enforcement.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_transfer_tls_enforcement_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_ITEMS_JSON="$(mktemp -t aws_transfer_tls_enforcement_servers.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ITEMS_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_transfer_tls_enforcement %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_transfer_tls_enforcement %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -54,6 +55,9 @@ if [ $list_exit -ne 0 ]; then
     log_error "Failed to list Transfer Family servers"
 else
     # 2. Describe each server to capture protocols and security policy (TLS).
+    # describe-server is genuinely one call per server (list-servers has no
+    # Protocols or SecurityPolicyName). Each projection is appended as-is and
+    # added in the one jq pass below, not an output rewrite per server.
     for server_id in $(aws_text_list "$server_ids"); do
         server=$(aws transfer describe-server \
             --server-id "$server_id" \
@@ -71,9 +75,10 @@ else
             echo "aws transfer describe-server ($server_id) failed (exit=$describe_exit)" >> "$_FAILURE_LOG"
             continue
         fi
-
-        jq --argjson data "$server" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+        printf '%s\n' "$server" >> "$_ITEMS_JSON"
     done
+
+    jq --slurpfile servers "$_ITEMS_JSON" '.results += $servers' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

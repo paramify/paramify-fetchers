@@ -1,5 +1,5 @@
 name: aws_vpc_network_segmentation
-version: 0.1.0
+version: 0.2.0
 description: Lists VPCs, subnets, peering connections, and endpoints to document network topology and segmentation.
 category: aws
 

@@ -1,5 +1,5 @@
 name: aws_block_storage_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: Reports EBS encryption defaults (account-level encryption-by-default, default KMS key), per-volume EBS encryption status, and per-EFS encryption status. Aggregates a per-account encryption-coverage percentage.
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-BLOCK-ENC
   name: Block Storage Encryption
-  instructions: 'Script: block_storage_encryption_status.sh. Commands executed: aws ec2 get-ebs-encryption-by-default, aws ec2 get-ebs-default-kms-key-id, aws ec2 describe-volumes, aws efs describe-file-systems'
+  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 get-ebs-encryption-by-default, aws ec2 get-ebs-default-kms-key-id, aws ec2 describe-volumes, aws efs describe-file-systems'

@@ -81,18 +81,20 @@ their `validators/_cases/` files.
 
 ## 4. Publish to Paramify
 
-Ask the agent to sync, or run it yourself (add `--dry-run` to preview first):
-
-```bash
-paramify upload --with-validators
-```
-
-This uploads the evidence ([upload details](../README.md#collect-then-upload))
+Ask the agent to sync, or run it yourself (add `--dry-run` to preview first).
+It uploads the evidence ([upload details](../README.md#collect-then-upload))
 and then syncs the validators ([how sync works](../uploaders/paramify_validators/README.md#what-it-does-per-validator)).
 The upload has to come first, because a validator can only be attached to an
 evidence set that already exists.
 
 ![paramify upload --with-validators: three validators created and associated to EVD-SQS-ENC, collection_succeeded skipped](img/suggest_validator/02-sync.png)
+
+<details><summary>Copy the command</summary>
+
+```bash
+paramify upload --with-validators
+```
+</details>
 
 **Watch for `skipped_exists`.** A validator that's already in the workspace is
 left alone, which keeps any tuning done in the app. It's also **not attached to

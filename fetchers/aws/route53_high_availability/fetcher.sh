@@ -28,7 +28,9 @@ _TARGET_ID="$(aws_target_id)"
 OUTPUT_JSON="$OUTPUT_DIR/aws_route53_high_availability_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_route53_high_availability.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_route53_high_availability_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_HC_JSON="$(mktemp -t aws_route53_high_availability_health_checks.XXXXXX)"
+_ITEMS_JSON="$(mktemp -t aws_route53_high_availability_statuses.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_HC_JSON" "$_ITEMS_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_route53_high_availability %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_route53_high_availability %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -54,20 +56,28 @@ if [ $hc_exit -ne 0 ]; then
     echo "aws route53 list-health-checks failed (exit=$hc_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list health checks"
 else
-    echo "$health_checks" | jq -c '.[]' | while read -r hc; do
-        hc_id=$(echo "$hc" | jq -r '.Id')
-
+    # get-health-check-status is genuinely one call per health check (no batch
+    # form). Each response is appended raw, in list order, and zipped with its
+    # health check in the one jq pass below -- not a jq process and an output
+    # rewrite per check.
+    printf '%s' "$health_checks" > "$_HC_JSON"
+    while read -r hc_id; do
         hc_status=$(aws route53 get-health-check-status --health-check-id "$hc_id" --query 'HealthCheckObservations[*]' --output json 2>/dev/null)
         status_exit=$?
         if [ $status_exit -ne 0 ]; then
             echo "aws route53 get-health-check-status ($hc_id) failed (exit=$status_exit)" >> "$_FAILURE_LOG"
             hc_status='[]'
         fi
+        # Empty output could not be read as JSON, which dropped the check.
+        [ -n "$hc_status" ] || hc_status='{"__skipped__": true}'
+        printf '%s\n' "$hc_status" >> "$_ITEMS_JSON"
+    done < <(jq -r '.[] | .Id' "$_HC_JSON" 2>/dev/null)
 
-        jq --argjson hc "$hc" --argjson status "$hc_status" \
-           '.results += [{"Type": "Route53_HealthCheck", "HealthCheckInfo": $hc, "Status": $status}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    jq --slurpfile hcs "$_HC_JSON" --slurpfile statuses "$_ITEMS_JSON" '
+        .results += [range(0; $statuses | length) as $i | $statuses[$i] as $s
+            | select(($s | type) != "object" or $s.__skipped__ != true)
+            | {"Type": "Route53_HealthCheck", "HealthCheckInfo": $hcs[0][$i], "Status": $s}]' \
+       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

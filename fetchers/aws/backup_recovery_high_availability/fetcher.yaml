@@ -1,5 +1,5 @@
 name: aws_backup_recovery_high_availability
-version: 0.1.0
+version: 0.2.0
 description: Lists EBS snapshots (owner=self) and DLM lifecycle policies (backup/recovery evidence).
 category: aws
 
@@ -35,4 +35,4 @@ ksis:
 evidence_set:
   reference_id: EVD-BACKUP-RECOVERY-HA
   name: Backup Recovery High Availability
-  instructions: 'Script: backup_recovery_high_availability.sh. Commands executed: aws backup list-backup-vaults, aws backup list-backup-plans'
+  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 describe-snapshots --owner-ids self, aws dlm get-lifecycle-policies'

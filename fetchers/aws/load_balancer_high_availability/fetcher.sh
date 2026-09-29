@@ -53,26 +53,50 @@ if [ $lb_exit -ne 0 ]; then
     echo "aws elbv2 describe-load-balancers failed (exit=$lb_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to describe load balancers"
 else
-    echo "$load_balancers" | jq -c '.[]' | while read -r lb; do
-        lb_arn=$(echo "$lb" | jq -r '.LoadBalancerArn')
-        lb_azs=$(echo "$lb" | jq -r '.AvailabilityZones[]' 2>/dev/null | tr '\n' ' ')
+    # Target groups and attributes are one call each per load balancer (both take
+    # a single LB ARN). Their responses are streamed to a file, two per LB, and
+    # joined with the LB list in one jq pass -- no jq process or output rewrite
+    # per load balancer.
+    _LB_JSON="$(mktemp -t aws_load_balancer_high_availability_lbs.XXXXXX.json)"
+    _PER_LB_JSON="$(mktemp -t aws_load_balancer_high_availability_per_lb.XXXXXX.json)"
+    trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_LB_JSON" "$_PER_LB_JSON"' EXIT
+    printf '%s' "$load_balancers" > "$_LB_JSON"
 
+    while read -r lb_arn; do
         target_groups=$(aws elbv2 describe-target-groups --load-balancer-arn "$lb_arn" --query 'TargetGroups[*]' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
+        if [ $? -ne 0 ] || [ -z "$target_groups" ]; then
             echo "aws elbv2 describe-target-groups ($lb_arn) failed" >> "$_FAILURE_LOG"
             target_groups='[]'
         fi
 
         lb_attributes=$(aws elbv2 describe-load-balancer-attributes --load-balancer-arn "$lb_arn" --query 'Attributes[*]' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
+        if [ $? -ne 0 ] || [ -z "$lb_attributes" ]; then
             echo "aws elbv2 describe-load-balancer-attributes ($lb_arn) failed" >> "$_FAILURE_LOG"
             lb_attributes='[]'
         fi
 
-        jq --argjson lb "$lb" --arg azs "$lb_azs" --argjson targets "$target_groups" --argjson attrs "$lb_attributes" \
-           '.results += [{"Type": "LoadBalancer", "LoadBalancerInfo": $lb, "AvailabilityZones": $azs, "TargetGroups": $targets, "Attributes": $attrs}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+        printf '%s\n%s\n' "$target_groups" "$lb_attributes" >> "$_PER_LB_JSON"
+    done < <(jq -r '.[]?.LoadBalancerArn' "$_LB_JSON")
+
+    # "AvailabilityZones" is a string, kept exactly as the old per-LB
+    # `jq -r '.AvailabilityZones[]' | tr '\n' ' '` produced it: each AZ object
+    # pretty-printed (2-space indent), newlines turned into spaces, one trailing
+    # space per AZ; "" when the field is missing. pretty() is jq's own layout.
+    jq --slurpfile lbs "$_LB_JSON" --slurpfile per_lb "$_PER_LB_JSON" '
+        def pretty($ind):
+            if type == "object" then
+                if length == 0 then "{}" else
+                "{\n" + ([to_entries[] | $ind + "  " + (.key | tojson) + ": " + (.value | pretty($ind + "  "))] | join(",\n")) + "\n" + $ind + "}" end
+            elif type == "array" then
+                if length == 0 then "[]" else
+                "[\n" + ([.[] | $ind + "  " + pretty($ind + "  ")] | join(",\n")) + "\n" + $ind + "]" end
+            else tojson end;
+        def raw_line: if type == "string" then . else pretty("") end;
+        def az_string: (try ([.[] | raw_line + "\n"] | join("")) catch "") | gsub("\n"; " ");
+        .results += [($lbs[0] // []) | to_entries[] | .key as $i | .value
+            | {"Type": "LoadBalancer", "LoadBalancerInfo": ., "AvailabilityZones": (.AvailabilityZones | az_string),
+               "TargetGroups": $per_lb[2 * $i], "Attributes": $per_lb[2 * $i + 1]}]
+    ' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

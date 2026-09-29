@@ -1,5 +1,5 @@
 name: aws_kafka_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each Amazon MSK (Kafka) cluster, reports encryption in transit (client-broker setting) and encryption at rest (KMS key). Aggregates a per-account encryption-coverage percentage.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-KAFKA-ENC
   name: MSK (Kafka) Encryption
-  instructions: 'Script: kafka_encryption_status.sh. Commands executed: aws kafka list-clusters-v2, aws kafka describe-cluster-v2.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws kafka list-clusters-v2.'

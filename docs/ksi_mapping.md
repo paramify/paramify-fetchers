@@ -70,7 +70,7 @@ python tools/gen_ksi_mapping.py
 
 > Machine-based information resources are persistently reviewed to ensure they are appropriately optimized for high availability and rapid recovery.
 
-*14 fetchers:* [`aws_auto_scaling_high_availability`](../fetchers/aws/auto_scaling_high_availability), [`aws_backup_recovery_high_availability`](../fetchers/aws/backup_recovery_high_availability), [`aws_cloudwatch_high_availability`](../fetchers/aws/cloudwatch_high_availability), [`aws_database_high_availability`](../fetchers/aws/database_high_availability), [`aws_efs_high_availability`](../fetchers/aws/efs_high_availability), [`aws_eks_high_availability`](../fetchers/aws/eks_high_availability), [`aws_global_accelerator_ha`](../fetchers/aws/global_accelerator_ha), [`aws_load_balancer_high_availability`](../fetchers/aws/load_balancer_high_availability), [`aws_network_resilience_high_availability`](../fetchers/aws/network_resilience_high_availability), [`aws_route53_high_availability`](../fetchers/aws/route53_high_availability), [`azure_app_service_plans`](../fetchers/azure/app_service_plans), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration)
+*15 fetchers:* [`aws_auto_scaling_high_availability`](../fetchers/aws/auto_scaling_high_availability), [`aws_backup_recovery_high_availability`](../fetchers/aws/backup_recovery_high_availability), [`aws_cloudwatch_high_availability`](../fetchers/aws/cloudwatch_high_availability), [`aws_database_high_availability`](../fetchers/aws/database_high_availability), [`aws_efs_high_availability`](../fetchers/aws/efs_high_availability), [`aws_eks_high_availability`](../fetchers/aws/eks_high_availability), [`aws_global_accelerator_ha`](../fetchers/aws/global_accelerator_ha), [`aws_load_balancer_high_availability`](../fetchers/aws/load_balancer_high_availability), [`aws_network_resilience_high_availability`](../fetchers/aws/network_resilience_high_availability), [`aws_route53_high_availability`](../fetchers/aws/route53_high_availability), [`azure_app_service_plans`](../fetchers/azure/app_service_plans), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`betterstack_public_status_page`](../fetchers/betterstack/public_status_page)
 
 #### ✅ `KSI-CNA-RNT` — Restricting Network Traffic
 
@@ -170,7 +170,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `si-11`
 
-*2 fetchers:* [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments)
+*3 fetchers:* [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`splunk_role_index_access`](../fetchers/splunk/role_index_access)
 
 #### ✅ `KSI-MLA-EVC` — Evaluating Configurations
 
@@ -186,7 +186,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2.4`, `ac-6.9`, `ac-17.1`, `ac-20.1`, `au-2`, `au-7.1`, `au-12`, `si-4.4`, `si-4.5`, `si-7.7`
 
-*9 fetchers:* [`aws_vpc_flow_logs`](../fetchers/aws/vpc_flow_logs), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`azure_key_vault_configuration`](../fetchers/azure/key_vault_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration), [`datadog_log_indexes`](../fetchers/datadog/log_indexes), [`datadog_log_pipelines`](../fetchers/datadog/log_pipelines)
+*11 fetchers:* [`aws_vpc_flow_logs`](../fetchers/aws/vpc_flow_logs), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`azure_key_vault_configuration`](../fetchers/azure/key_vault_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration), [`datadog_log_indexes`](../fetchers/datadog/log_indexes), [`datadog_log_pipelines`](../fetchers/datadog/log_pipelines), [`splunk_data_inputs`](../fetchers/splunk/data_inputs), [`splunk_log_source_freshness`](../fetchers/splunk/log_source_freshness)
 
 #### ✅ `KSI-MLA-OSM` — Operating SIEM Capability
 
@@ -194,7 +194,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-17.1`, `ac-20.1`, `au-2`, `au-3`, `au-3.1`, `au-4`, `au-5`, `au-6.1`, `au-6.3`, `au-7`, `au-7.1`, `au-8`, `au-9`, `au-11`, `ir-4.1`, `si-4.2`, `si-4.4`, `si-7.7`
 
-*7 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_securityhub_status`](../fetchers/aws/securityhub_status), [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`datadog_log_archives`](../fetchers/datadog/log_archives), [`datadog_siem_configuration`](../fetchers/datadog/siem_configuration), [`datadog_siem_detection_rules`](../fetchers/datadog/siem_detection_rules), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration)
+*11 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_securityhub_status`](../fetchers/aws/securityhub_status), [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`datadog_log_archives`](../fetchers/datadog/log_archives), [`datadog_siem_configuration`](../fetchers/datadog/siem_configuration), [`datadog_siem_detection_rules`](../fetchers/datadog/siem_detection_rules), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration), [`splunk_alert_rules`](../fetchers/splunk/alert_rules), [`splunk_index_activity`](../fetchers/splunk/index_activity), [`splunk_index_retention`](../fetchers/splunk/index_retention), [`splunk_log_source_freshness`](../fetchers/splunk/log_source_freshness)
 
 #### ✅ `KSI-MLA-RVL` — Reviewing Logs
 
@@ -202,7 +202,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2.4`, `ac-6.9`, `au-2`, `au-6`, `au-6.1`, `si-4`, `si-4.4`
 
-*10 fetchers:* [`aws_cloudwatch_high_availability`](../fetchers/aws/cloudwatch_high_availability), [`aws_guard_duty`](../fetchers/aws/guard_duty), [`aws_guard_duty_findings`](../fetchers/aws/guard_duty_findings), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`crowdstrike_detections`](../fetchers/crowdstrike/detections), [`datadog_monitors_list`](../fetchers/datadog/monitors_list), [`datadog_siem_detection_rules`](../fetchers/datadog/siem_detection_rules), [`datadog_siem_signals`](../fetchers/datadog/siem_signals), [`sentinelone_activities`](../fetchers/sentinelone/activities), [`sentinelone_cloud_detection_rules`](../fetchers/sentinelone/cloud_detection_rules)
+*12 fetchers:* [`aws_cloudwatch_high_availability`](../fetchers/aws/cloudwatch_high_availability), [`aws_guard_duty`](../fetchers/aws/guard_duty), [`aws_guard_duty_findings`](../fetchers/aws/guard_duty_findings), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`crowdstrike_detections`](../fetchers/crowdstrike/detections), [`datadog_monitors_list`](../fetchers/datadog/monitors_list), [`datadog_siem_detection_rules`](../fetchers/datadog/siem_detection_rules), [`datadog_siem_signals`](../fetchers/datadog/siem_signals), [`sentinelone_activities`](../fetchers/sentinelone/activities), [`sentinelone_cloud_detection_rules`](../fetchers/sentinelone/cloud_detection_rules), [`splunk_alert_delivery`](../fetchers/splunk/alert_delivery), [`splunk_alert_rules`](../fetchers/splunk/alert_rules)
 
 ### IAM — Identity and Access Management  (6/6)
 
@@ -428,7 +428,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-186 of 189 fetchers carry a mapping.
+194 of 197 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -555,6 +555,12 @@ python tools/gen_ksi_mapping.py
 | [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status) | `KSI-CNA-RNT`, `KSI-SVC-ASM`, `KSI-SVC-SIN` |
 | [`azure_vm_hardening_status`](../fetchers/azure/vm_hardening_status) | `KSI-CNA-MAT`, `KSI-IAM-APM`, `KSI-SVC-SIN`, `KSI-SVC-VRI` |
 
+### betterstack  (1)
+
+| Fetcher | Indicators |
+|---|---|
+| [`betterstack_public_status_page`](../fetchers/betterstack/public_status_page) | `KSI-CNA-OFA` |
+
 ### checkov  (2)
 
 | Fetcher | Indicators |
@@ -680,6 +686,18 @@ python tools/gen_ksi_mapping.py
 | [`sentinelone_cloud_detection_rules`](../fetchers/sentinelone/cloud_detection_rules) | `KSI-MLA-RVL` |
 | [`sentinelone_user_config`](../fetchers/sentinelone/user_config) | `KSI-IAM-APM`, `KSI-IAM-ELP` |
 | [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets) | `KSI-PIY-GIV` |
+
+### splunk  (7)
+
+| Fetcher | Indicators |
+|---|---|
+| [`splunk_alert_delivery`](../fetchers/splunk/alert_delivery) | `KSI-MLA-RVL` |
+| [`splunk_alert_rules`](../fetchers/splunk/alert_rules) | `KSI-MLA-OSM`, `KSI-MLA-RVL` |
+| [`splunk_data_inputs`](../fetchers/splunk/data_inputs) | `KSI-MLA-LET` |
+| [`splunk_index_activity`](../fetchers/splunk/index_activity) | `KSI-MLA-OSM` |
+| [`splunk_index_retention`](../fetchers/splunk/index_retention) | `KSI-MLA-OSM` |
+| [`splunk_log_source_freshness`](../fetchers/splunk/log_source_freshness) | `KSI-MLA-LET`, `KSI-MLA-OSM` |
+| [`splunk_role_index_access`](../fetchers/splunk/role_index_access) | `KSI-MLA-ALA` |
 
 ### Unmapped
 

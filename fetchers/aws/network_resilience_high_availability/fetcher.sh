@@ -52,11 +52,11 @@ if [ $subnets_exit -ne 0 ]; then
     echo "aws ec2 describe-subnets failed (exit=$subnets_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to describe subnets"
 else
-    echo "$subnets" | jq -c '.[]' | while read -r subnet; do
-        jq --argjson subnet "$subnet" \
-           '.results += [{"Type": "VPC_Subnet", "SubnetInfo": $subnet}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # One pass over the whole list, fed on stdin (not --argjson: a large list
+    # overflows the argv limit). Appending per item rewrote the file N times.
+    printf '%s' "$subnets" | jq --slurpfile items /dev/stdin \
+       '.results += [$items[0][]? | {"Type": "VPC_Subnet", "SubnetInfo": .}]' \
+       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 nat_gateways=$(aws ec2 describe-nat-gateways --query 'NatGateways[*]' --output json 2>/dev/null)
@@ -65,11 +65,11 @@ if [ $nat_exit -ne 0 ]; then
     echo "aws ec2 describe-nat-gateways failed (exit=$nat_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to describe NAT gateways"
 else
-    echo "$nat_gateways" | jq -c '.[]' | while read -r nat; do
-        jq --argjson nat "$nat" \
-           '.results += [{"Type": "NAT_Gateway", "NATInfo": $nat}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # One pass over the whole list, fed on stdin (not --argjson: a large list
+    # overflows the argv limit). Appending per item rewrote the file N times.
+    printf '%s' "$nat_gateways" | jq --slurpfile items /dev/stdin \
+       '.results += [$items[0][]? | {"Type": "NAT_Gateway", "NATInfo": .}]' \
+       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

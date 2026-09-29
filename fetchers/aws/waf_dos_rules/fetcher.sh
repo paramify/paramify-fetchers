@@ -57,6 +57,13 @@ if [ -z "$web_acls" ]; then
     log_info "No Web ACLs found in region $REGION (empty result treated as valid evidence)"
 fi
 
+# get-web-acl has no bulk form and stays one call per Web ACL. Each response is
+# streamed to a file and every ACL's rules are filtered in one jq pass at the
+# end; the old per-rule loop spawned several jq processes per rule and
+# re-serialized the growing rule list each time.
+_ACLS_JSON="$(mktemp -t aws_waf_dos_rules_acls.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ACLS_JSON"' EXIT
+
 if [ -n "$web_acls" ]; then
     # Process each Web ACL
     while IFS=$'\t' read -r acl_id acl_name; do
@@ -80,49 +87,23 @@ if [ -n "$web_acls" ]; then
             continue
         fi
 
-        # Extract the full WebACL object
-        webacl_full=$(echo "$acl_details" | jq '.WebACL')
-
-        # Extract rules for processing
-        rules_count=$(echo "$webacl_full" | jq '.Rules | length')
-
-        if [ "$rules_count" -eq 0 ]; then
-            # Store the full WebACL even if it has no rules
-            jq --argjson webacl "$webacl_full" '.results += [$webacl]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-            continue
-        fi
-
-        # Initialize ACL data with ALL WebACL metadata (we'll filter rules but keep all other fields)
-        # Start with the full WebACL object, then we'll replace Rules with filtered DoS-related rules
-        acl_data=$(echo "$webacl_full" | jq '.')
-
-        # Process each rule in the Web ACL, keeping only DoS-related rules
-        rules_json="[]"
-        for i in $(seq 0 $((rules_count-1))); do
-            rule=$(echo "$webacl_full" | jq ".Rules[$i]")
-
-            # Determine rule type and extract DoS protection relevant details
-            if echo "$rule" | jq -e '.Statement.RateBasedStatement' > /dev/null; then
-                # Rate-based rule: always DoS-relevant, capture complete rule object
-                rules_json=$(echo "$rules_json" | jq --argjson rule "$rule" '. += [$rule]')
-
-            elif echo "$rule" | jq -e '.Statement.ManagedRuleGroupStatement' > /dev/null; then
-                name=$(echo "$rule" | jq -r '.Statement.ManagedRuleGroupStatement.Name')
-
-                # Check if this is an AWS managed rule for DoS protection
-                if [[ "$name" == *"DDoS"* || "$name" == *"DoS"* || "$name" == *"RateLimit"* || "$name" == *"AWSManagedRulesATPRuleSet"* || "$name" == *"AWSManagedRulesBotControlRuleSet"* ]]; then
-                    # Add full rule to JSON
-                    rules_json=$(echo "$rules_json" | jq --argjson rule "$rule" '. += [$rule]')
-                fi
-            fi
-        done
-
-        # Replace Rules in ACL data with only DoS-related rules (but keep all other WebACL fields)
-        acl_data=$(echo "$acl_data" | jq --argjson rules "$rules_json" '.Rules = $rules')
-
-        # Add ACL data to results (includes ALL WebACL metadata + complete DoS-related rule objects)
-        jq --argjson data "$acl_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+        printf '%s\n' "$acl_details" >> "$_ACLS_JSON"
     done <<< "$web_acls"
 fi
+
+# Keep ALL WebACL metadata, but only the DoS-related rules: a top-level
+# rate-based statement, or an AWS managed rule group whose name contains
+# DDoS / DoS / RateLimit / AWSManagedRulesATPRuleSet / AWSManagedRulesBotControlRuleSet
+# (case-sensitive, as the bash glob was). An ACL with no rules is stored whole.
+jq --slurpfile acls "$_ACLS_JSON" '
+    .results += [$acls[] | .WebACL
+        | if (.Rules | length) == 0 then . else
+            .Rules = [.Rules[] | select(
+                (.Statement.RateBasedStatement | . != null and . != false)
+                or ((.Statement.ManagedRuleGroupStatement | . != null and . != false)
+                    and (.Statement.ManagedRuleGroupStatement.Name | tostring
+                         | test("DDoS|DoS|RateLimit|AWSManagedRulesATPRuleSet|AWSManagedRulesBotControlRuleSet"))))]
+          end]
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

@@ -52,11 +52,11 @@ if [ $snap_exit -ne 0 ]; then
     echo "aws ec2 describe-snapshots failed (exit=$snap_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to describe EBS snapshots"
 else
-    echo "$snapshots" | jq -c '.[]' | while read -r snapshot; do
-        jq --argjson snapshot "$snapshot" \
-           '.results += [{"Type": "EBS_Snapshot", "SnapshotInfo": $snapshot}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # One pass over the whole list, fed on stdin (not --argjson: a large list
+    # overflows the argv limit). Appending per item rewrote the file N times.
+    printf '%s' "$snapshots" | jq --slurpfile items /dev/stdin \
+       '.results += [$items[0][]? | {"Type": "EBS_Snapshot", "SnapshotInfo": .}]' \
+       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 dlm_policies=$(aws dlm get-lifecycle-policies --query 'Policies[*]' --output json 2>/dev/null)
@@ -65,11 +65,11 @@ if [ $dlm_exit -ne 0 ]; then
     echo "aws dlm get-lifecycle-policies failed (exit=$dlm_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list DLM policies"
 else
-    echo "$dlm_policies" | jq -c '.[]' | while read -r policy; do
-        jq --argjson policy "$policy" \
-           '.results += [{"Type": "DLM_Policy", "PolicyInfo": $policy}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # One pass over the whole list, fed on stdin (not --argjson: a large list
+    # overflows the argv limit). Appending per item rewrote the file N times.
+    printf '%s' "$dlm_policies" | jq --slurpfile items /dev/stdin \
+       '.results += [$items[0][]? | {"Type": "DLM_Policy", "PolicyInfo": .}]' \
+       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

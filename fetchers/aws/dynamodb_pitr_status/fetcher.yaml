@@ -1,5 +1,5 @@
 name: aws_dynamodb_pitr_status
-version: 0.1.0
+version: 0.2.0
 description: Lists DynamoDB tables in the target region and reports each table's point-in-time recovery (PITR) / continuous-backups status as recovery-point backup evidence.
 category: aws
 

@@ -55,10 +55,9 @@ if [ $sc_exit -ne 0 ]; then
     echo "aws glue get-security-configurations failed (exit=$sc_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list Glue security configurations"
 else
-    while IFS= read -r config; do
-        [ -z "$config" ] && continue
-        jq --argjson data "$config" \
-            '.results.security_configurations += [{
+    # One pass, fed on stdin: appending per item rewrote the file N times.
+    printf '%s' "$security_configs" | jq --slurpfile d /dev/stdin \
+            '.results.security_configurations += [$d[0].SecurityConfigurations[]? | . as $data | {
                 name: $data.Name,
                 s3_encryption: ($data.EncryptionConfiguration.S3Encryption[0].S3EncryptionMode // null),
                 s3_key_arn: ($data.EncryptionConfiguration.S3Encryption[0].KmsKeyArn // null),
@@ -68,7 +67,6 @@ else
                 job_bookmark_key_arn: ($data.EncryptionConfiguration.JobBookmarksEncryption.KmsKeyArn // null)
             }]' \
             "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done < <(echo "$security_configs" | jq -c '.SecurityConfigurations[]?')
 fi
 
 # --- Data-catalog encryption-at-rest + connection-password encryption ---

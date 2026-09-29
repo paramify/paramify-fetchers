@@ -1,5 +1,5 @@
 name: aws_kms_key_rotation
-version: 0.1.0
+version: 0.2.0
 description: For each KMS key in the account, reports rotation status, key state/usage, and key policy. A key whose policy denies the collecting identity is reported as unreadable with the reason, and is excluded from the coverage denominator. Includes the AWS Config rule compliance status for cmk-backing-key-rotation-enabled. Aggregates a per-account rotation coverage percentage over the readable keys.
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-KMS-ROT
   name: KMS Key Rotation
-  instructions: 'Script: kms_key_rotation.sh. Commands executed: aws kms list-keys, aws kms describe-key, aws kms get-key-rotation-status'
+  instructions: 'Script: fetcher.sh. Commands executed: aws kms list-keys, aws kms describe-key, aws kms get-key-rotation-status, aws kms get-key-policy, aws configservice describe-compliance-by-config-rule'

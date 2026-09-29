@@ -93,17 +93,15 @@ if [ "$subscription_active" = true ]; then
         protections='[]'
     fi
 
-    echo "$protections" | jq -c '.[]' | while read -r protection; do
-        [ -z "$protection" ] && continue
-        record=$(echo "$protection" | jq '{
+    # One pass, fed on stdin: two jq processes and a file rewrite per
+    # protection before.
+    printf '%s' "$protections" | jq --slurpfile p /dev/stdin '
+        .results.protections += [$p[0][]? | {
             id: .Id,
             name: .Name,
             resource_arn: .ResourceArn,
             protection_arn: .ProtectionArn
-        }')
-        jq --argjson p "$record" '.results.protections += [$p]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+        }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 else
     log_info "Shield Advanced not active (subscription_state=$subscription_state) — recording as not enabled"
 fi

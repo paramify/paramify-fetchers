@@ -72,14 +72,22 @@ managed_count=$(echo "$managed" | jq 'length')
 compliant_count=$(echo "$compliance" | jq '[.[] | select(.Status == "COMPLIANT")] | length')
 non_compliant_count=$(echo "$compliance" | jq '[.[] | select(.Status == "NON_COMPLIANT")] | length')
 
-jq --argjson instances "$managed" \
-   --argjson compliance "$compliance" \
+# Both lists go through files, not --argjson: past roughly 800 managed
+# instances they overflow Linux's 128 KiB argv limit.
+_MANAGED_JSON="$(mktemp -t aws_ssm_patch_compliance_managed.XXXXXX.json)"
+_COMPLIANCE_JSON="$(mktemp -t aws_ssm_patch_compliance_compliance.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_MANAGED_JSON" "$_COMPLIANCE_JSON"' EXIT
+printf '%s' "$managed" > "$_MANAGED_JSON"
+printf '%s' "$compliance" > "$_COMPLIANCE_JSON"
+
+jq --slurpfile instances "$_MANAGED_JSON" \
+   --slurpfile compliance "$_COMPLIANCE_JSON" \
    --arg managed_count "$managed_count" \
    --arg compliant_count "$compliant_count" \
    --arg non_compliant_count "$non_compliant_count" \
    '.results = {
-       "managed_instances": ($instances // []),
-       "patch_compliance": ($compliance // []),
+       "managed_instances": ($instances[0] // []),
+       "patch_compliance": ($compliance[0] // []),
        "summary": {
          "managed_instance_count": ($managed_count | tonumber),
          "compliant_count": ($compliant_count | tonumber),

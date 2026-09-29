@@ -1,5 +1,5 @@
 name: aws_dynamodb_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each DynamoDB table in the region, reports server-side encryption at rest (SSE type KMS vs AWS-owned, and the KMS key ARN). Aggregates a per-region encryption-coverage percentage.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DYNAMODB-ENC
   name: DynamoDB Encryption
-  instructions: 'Script: dynamodb_encryption_status.sh. Commands executed: aws dynamodb list-tables, aws dynamodb describe-table.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws dynamodb list-tables, aws dynamodb describe-table.'

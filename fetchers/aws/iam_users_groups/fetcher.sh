@@ -47,110 +47,96 @@ jq -n \
 
 # --- per-script data collection (ported from upstream) ---
 
-# Get all IAM users
+_USERS_JSON="$(mktemp -t aws_iam_users_groups_users.XXXXXX.json)"
+_GROUPS_JSON="$(mktemp -t aws_iam_users_groups_groups.XXXXXX.json)"
+_GAAD_JSON="$(mktemp -t aws_iam_users_groups_gaad.XXXXXX.json)"
+_PER_USER_JSON="$(mktemp -t aws_iam_users_groups_per_user.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_USERS_JSON" "$_GROUPS_JSON" "$_GAAD_JSON" "$_PER_USER_JSON"' EXIT
+
+# Get all IAM users. list-users carries every field get-user was read for.
 log_info "Retrieving IAM users"
-users=$(aws iam list-users --query 'Users[*].[UserName,CreateDate,PasswordLastUsed]' --output json 2>/dev/null)
-ec=$?
-if [ $ec -ne 0 ]; then
-    echo "aws iam list-users failed (exit=$ec)" >> "$_FAILURE_LOG"
+aws iam list-users --query 'Users[*].{UserName:UserName,CreateDate:CreateDate,PasswordLastUsed:PasswordLastUsed}' --output json > "$_USERS_JSON" 2>/dev/null
+users_ec=$?
+if [ $users_ec -ne 0 ]; then
+    echo "aws iam list-users failed (exit=$users_ec)" >> "$_FAILURE_LOG"
     log_error "Failed to list IAM users"
-else
-    echo "$users" | jq -c '.[]' | while read -r user; do
-        username=$(echo "$user" | jq -r '.[0]')
-
-        # Get user details
-        user_data=$(aws iam get-user --user-name "$username" --query 'User' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam get-user ($username) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-
-        # Get user groups
-        groups=$(aws iam list-groups-for-user --user-name "$username" --query 'Groups[*].GroupName' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam list-groups-for-user ($username) failed" >> "$_FAILURE_LOG"
-            groups='[]'
-        fi
-
-        # Get access keys
-        access_keys=$(aws iam list-access-keys --user-name "$username" --query 'AccessKeyMetadata[*].[AccessKeyId,Status,CreateDate]' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam list-access-keys ($username) failed" >> "$_FAILURE_LOG"
-            access_keys='[]'
-        fi
-
-        # Get MFA devices
-        mfa_devices=$(aws iam list-mfa-devices --user-name "$username" --query 'MFADevices[*].[SerialNumber,EnableDate]' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam list-mfa-devices ($username) failed" >> "$_FAILURE_LOG"
-            mfa_devices='[]'
-        fi
-
-        # Check for login profile. Absence (NoSuchEntity) is valid evidence
-        # ("no console password"), not a collection failure -> not logged.
-        has_login_profile=false
-        if aws iam get-login-profile --user-name "$username" > /dev/null 2>&1; then
-            has_login_profile=true
-        fi
-
-        # Combine all user data
-        user_info=$(jq -n \
-            --argjson user "$user_data" \
-            --argjson groups "$groups" \
-            --argjson access_keys "$access_keys" \
-            --argjson mfa_devices "$mfa_devices" \
-            --arg has_login "$has_login_profile" \
-            '{
-                "UserName": $user.UserName,
-                "CreateDate": $user.CreateDate,
-                "PasswordLastUsed": $user.PasswordLastUsed,
-                "Groups": $groups,
-                "AccessKeys": $access_keys,
-                "MFADevices": $mfa_devices,
-                "HasLoginProfile": ($has_login | test("true"))
-            }')
-
-        jq --argjson user "$user_info" '.results.users += [$user]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    echo '[]' > "$_USERS_JSON"
 fi
 
 # Get all IAM groups
 log_info "Retrieving IAM groups"
-groups=$(aws iam list-groups --query 'Groups[*].[GroupName,CreateDate]' --output json 2>/dev/null)
-ec=$?
-if [ $ec -ne 0 ]; then
-    echo "aws iam list-groups failed (exit=$ec)" >> "$_FAILURE_LOG"
+aws iam list-groups --query 'Groups[*].{GroupName:GroupName,CreateDate:CreateDate}' --output json > "$_GROUPS_JSON" 2>/dev/null
+groups_ec=$?
+if [ $groups_ec -ne 0 ]; then
+    echo "aws iam list-groups failed (exit=$groups_ec)" >> "$_FAILURE_LOG"
     log_error "Failed to list IAM groups"
-else
-    echo "$groups" | jq -c '.[]' | while read -r group; do
-        groupname=$(echo "$group" | jq -r '.[0]')
-
-        # Get group details
-        group_data=$(aws iam get-group --group-name "$groupname" --query 'Group' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam get-group ($groupname) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-
-        # Get group policies
-        policies=$(aws iam list-attached-group-policies --group-name "$groupname" --query 'AttachedPolicies[*].[PolicyName,PolicyArn]' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam list-attached-group-policies ($groupname) failed" >> "$_FAILURE_LOG"
-            policies='[]'
-        fi
-
-        # Combine all group data
-        group_info=$(jq -n \
-            --argjson group "$group_data" \
-            --argjson policies "$policies" \
-            '{
-                "GroupName": $group.GroupName,
-                "CreateDate": $group.CreateDate,
-                "Policies": $policies
-            }')
-
-        jq --argjson group "$group_info" '.results.groups += [$group]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    echo '[]' > "$_GROUPS_JSON"
 fi
+
+# Each user's group memberships and each group's attached policies, in one
+# paginated call instead of list-groups-for-user per user and get-group +
+# list-attached-group-policies per group. Needs iam:GetAccountAuthorizationDetails
+# (in ReadOnlyAccess and SecurityAudit). On failure both fall back to [], the
+# default the per-item calls used.
+if [ "$(jq 'length' "$_USERS_JSON")" -gt 0 ] || [ "$(jq 'length' "$_GROUPS_JSON")" -gt 0 ]; then
+    if ! aws iam get-account-authorization-details --filter User Group \
+            --query '{Users:UserDetailList[*].{UserName:UserName,GroupList:GroupList},Groups:GroupDetailList[*].{GroupName:GroupName,AttachedManagedPolicies:AttachedManagedPolicies}}' \
+            --output json > "$_GAAD_JSON" 2>/dev/null; then
+        echo "aws iam get-account-authorization-details (users, groups) failed" >> "$_FAILURE_LOG"
+        echo '{}' > "$_GAAD_JSON"
+    fi
+else
+    echo '{}' > "$_GAAD_JSON"
+fi
+
+# Access keys, MFA devices and the login profile have no bulk source that is
+# current (the credential report can be four hours old), so they stay one call
+# each per user. Their raw responses are appended in a fixed order and joined
+# in one jq pass below -- no jq process or output rewrite per user.
+while read -r username; do
+    [ -z "$username" ] && continue
+
+    access_keys=$(aws iam list-access-keys --user-name "$username" --query 'AccessKeyMetadata[*].[AccessKeyId,Status,CreateDate]' --output json 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$access_keys" ]; then
+        echo "aws iam list-access-keys ($username) failed" >> "$_FAILURE_LOG"
+        access_keys='[]'
+    fi
+
+    mfa_devices=$(aws iam list-mfa-devices --user-name "$username" --query 'MFADevices[*].[SerialNumber,EnableDate]' --output json 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$mfa_devices" ]; then
+        echo "aws iam list-mfa-devices ($username) failed" >> "$_FAILURE_LOG"
+        mfa_devices='[]'
+    fi
+
+    # Check for login profile. Absence (NoSuchEntity) is valid evidence
+    # ("no console password"), not a collection failure -> not logged.
+    has_login_profile=false
+    if aws iam get-login-profile --user-name "$username" > /dev/null 2>&1; then
+        has_login_profile=true
+    fi
+
+    printf '%s\n%s\n%s\n' "$access_keys" "$mfa_devices" "$has_login_profile" >> "$_PER_USER_JSON"
+done < <(jq -r '.[].UserName' "$_USERS_JSON")
+
+jq --slurpfile users "$_USERS_JSON" --slurpfile groups "$_GROUPS_JSON" --slurpfile gaad "$_GAAD_JSON" --slurpfile per_user "$_PER_USER_JSON" '
+    (reduce ($gaad[0].Users // [])[] as $u ({}; .[$u.UserName] = [($u.GroupList // [])[]])) as $user_groups
+    | (reduce ($gaad[0].Groups // [])[] as $g ({}; .[$g.GroupName] = [($g.AttachedManagedPolicies // [])[] | [.PolicyName, .PolicyArn]])) as $group_policies
+    | .results.users += [range(0; $users[0] | length) as $i | $users[0][$i]
+        | {
+            "UserName": .UserName,
+            "CreateDate": .CreateDate,
+            "PasswordLastUsed": .PasswordLastUsed,
+            "Groups": ($user_groups[.UserName] // []),
+            "AccessKeys": $per_user[3 * $i],
+            "MFADevices": $per_user[3 * $i + 1],
+            "HasLoginProfile": $per_user[3 * $i + 2]
+        }]
+    | .results.groups += [$groups[0][]
+        | {
+            "GroupName": .GroupName,
+            "CreateDate": .CreateDate,
+            "Policies": ($group_policies[.GroupName] // [])
+        }]
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

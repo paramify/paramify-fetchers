@@ -38,6 +38,23 @@ schemas and the `paramify` CLI — not the internal code.
   failed one that wrote no file and an entry that raised before running. Before
   this, a failed target that wrote nothing left no trace, and a run missing one
   framework's report looked complete.
+- **A Splunk category with seven fetchers**, one Splunk Enterprise deployment per
+  target, each with its own management URL (port 8089) and bearer token.
+  `splunk_index_retention` (retention, archive-or-delete on freeze, data
+  integrity control), `splunk_index_activity`, `splunk_log_source_freshness`,
+  `splunk_data_inputs`, `splunk_alert_rules` (Splunk Web's own alert definition,
+  with run and fire history from `_internal` and `_audit`),
+  `splunk_alert_delivery` and `splunk_role_index_access` (effective index access
+  after inheritance and denials, delete rights, dormant accounts). This closes
+  KSI-MLA-ALA. Every fetcher is a `collect(client, config)` function handed to a
+  shared `run()`, which checks the token's capabilities first and fails the
+  collection, rather than publishing a partial list, when Splunk returns less
+  than everything: a `count` cut short of `paging.total`, a search answered with
+  a warning, or an index list that disagrees with `indexes.conf` and the search
+  peers. Tested against Splunk Enterprise 10.4.3, where a role with no
+  capabilities saw 1 of 4 users and 127 of 176 saved searches, and stock `admin`
+  12 of 26 roles, each time with a `paging.total` that agreed. The collection role
+  is in `fetchers/splunk/README.md`. Splunk Cloud is not yet supported.
 
 - **A Better Stack category and its first fetcher** —
   `betterstack_public_status_page`, which GETs a public status page's own
@@ -218,6 +235,21 @@ schemas and the `paramify` CLI — not the internal code.
   an interrupted run uploaded but never processed, and waits on a job it left
   running. The TUI's issue-report panel shows the planned operation per
   assessment and warns in the confirm when a run will close a cycle.
+- **AWS fetchers finish in large accounts** (67 fetchers, minor version
+  bumps). Many made several AWS CLI calls, and started several `jq` processes,
+  per resource, so an account with thousands of snapshots, roles or security
+  groups ran past the runner's 600-second timeout. They now read each resource
+  type with one paginated or batch call where AWS offers one, and build their
+  records in a single `jq` pass. Measured against an account with 2,925 EBS
+  snapshots, 912 IAM roles, 1,003 customer-managed policies and 1,009 security
+  groups: `ebs_snapshot_status`, `iam_roles`, `iam_policies` and
+  `security_groups` each timed out before and now finish in 2–26 seconds with
+  2–4 calls, and every fetcher that finished before and after produced
+  byte-identical evidence. Fetchers with no bulk form of their per-item call
+  (S3 bucket settings, SQS queue attributes, KMS key details) still make one
+  call per item, but no longer start a process or rewrite the output per item.
+  The evidence-set instructions in each `fetcher.yaml` now list the commands
+  the fetcher actually runs.
 
 - **`azure_network_security_groups` shows outbound posture and NIC coverage**
   (0.1.0 → 0.2.0). Only an NSG's custom rules were read, so the platform's
@@ -343,6 +375,16 @@ schemas and the `paramify` CLI — not the internal code.
   until it migrates to the registry. New validators belong in `validators/`.
 
 ### Fixed
+
+- **`aws_auto_scaling_high_availability` lists each group's instances.** A
+  query error left `Instances` empty for every Auto Scaling group.
+
+- **`aws_organizations_scp` keeps the organization record when one SCP cannot
+  be read.** A single unparseable policy used to drop the whole organization
+  from the evidence.
+
+- **AWS failure reports name the fetcher** instead of `aws__shared`, and an
+  expired `aws login` session is reported as expired credentials.
 
 - **`azure_defender_assessments` collects again, with severity** (fetcher
   0.1.1). A missing import made every run fail with a `NameError`, so the

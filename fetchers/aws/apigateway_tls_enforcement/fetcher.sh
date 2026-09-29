@@ -23,7 +23,9 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_apigateway_tls_enforcement_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_apigateway_tls_enforcement.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_apigateway_tls_enforcement_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_APIS_JSON="$(mktemp -t aws_apigateway_tls_enforcement_apis.XXXXXX)"
+_ITEMS_JSON="$(mktemp -t aws_apigateway_tls_enforcement_stages.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_APIS_JSON" "$_ITEMS_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_apigateway_tls_enforcement %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_apigateway_tls_enforcement %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -56,10 +58,11 @@ if [ $ec -ne 0 ]; then
 fi
 
 # 2. For each REST API, fetch stages and their TLS/security-relevant settings.
-while IFS= read -r api; do
-    [ -z "$api" ] && continue
-    api_id=$(echo "$api" | jq -r '.id')
-
+# get-stages is genuinely one call per API (no bulk form). Each response is
+# appended raw, in API order, and every entry is built in the one jq pass
+# below -- not four jq processes and an output rewrite per API.
+printf '%s' "$rest_apis_raw" > "$_APIS_JSON"
+while IFS= read -r api_id; do
     stages_raw=$(aws apigateway get-stages \
         --rest-api-id "$api_id" \
         --query 'item[*].{name:stageName,client_certificate_id:clientCertificateId,web_acl_arn:webAclArn,tracing_enabled:tracingEnabled,cache_cluster_enabled:cacheClusterEnabled,method_settings:methodSettings}' \
@@ -69,29 +72,34 @@ while IFS= read -r api; do
         echo "aws apigateway get-stages failed for $api_id (exit=$ec)" >> "$_FAILURE_LOG"
         stages_raw='[]'
     fi
+    # Empty output could not be read as stages, which dropped the API; null
+    # does the same below.
+    printf '%s\n' "${stages_raw:-null}" >> "$_ITEMS_JSON"
+done < <(jq -r '.[]? | .id' "$_APIS_JSON" 2>/dev/null)
 
-    # Normalize stage security flags (client cert / WAF / logging / cache encryption).
-    stages_json=$(echo "$stages_raw" | jq '[.[] | {
-        name: .name,
-        client_certificate: (.client_certificate_id != null),
-        waf_acl_arn: .web_acl_arn,
-        tracing_enabled: (.tracing_enabled == true),
-        cache_enabled: (.cache_cluster_enabled == true),
-        logging_enabled: ([(.method_settings // {}) | .[] | select((.loggingLevel // "OFF") != "OFF")] | length > 0),
-        cache_data_encrypted: ([(.method_settings // {}) | .[] | select(.cacheDataEncrypted == true)] | length > 0)
-    }]')
-
-    api_entry=$(echo "$api" | jq --argjson stages "$stages_json" '{
-        id: .id,
-        name: .name,
-        endpoint_types: (.endpoint_types // []),
-        public_endpoint: ((.endpoint_types // []) != ["PRIVATE"]),
-        disable_execute_api_endpoint: (.disable_execute_api_endpoint // false),
-        stages: $stages
-    }')
-
-    jq --argjson data "$api_entry" '.results.rest_apis += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-done < <(echo "$rest_apis_raw" | jq -c '.[]')
+# Normalize stage security flags (client cert / WAF / logging / cache encryption).
+# An API whose stages cannot be normalized is left out, as before.
+jq --slurpfile apis "$_APIS_JSON" --slurpfile stages "$_ITEMS_JSON" '
+    ($apis[0] // []) as $a
+    | .results.rest_apis += [range(0; $a | length) as $i | $a[$i] as $api | $stages[$i] as $s | try (
+        ($s | [.[] | {
+            name: .name,
+            client_certificate: (.client_certificate_id != null),
+            waf_acl_arn: .web_acl_arn,
+            tracing_enabled: (.tracing_enabled == true),
+            cache_enabled: (.cache_cluster_enabled == true),
+            logging_enabled: ([(.method_settings // {}) | .[] | select((.loggingLevel // "OFF") != "OFF")] | length > 0),
+            cache_data_encrypted: ([(.method_settings // {}) | .[] | select(.cacheDataEncrypted == true)] | length > 0)
+        }]) as $stages_json
+        | $api | {
+            id: .id,
+            name: .name,
+            endpoint_types: (.endpoint_types // []),
+            public_endpoint: ((.endpoint_types // []) != ["PRIVATE"]),
+            disable_execute_api_endpoint: (.disable_execute_api_endpoint // false),
+            stages: $stages_json
+        }) catch empty]
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 # 3. Custom domain names: securityPolicy is the TLS minimum version (e.g. TLS_1_2).
 domains_raw=$(aws apigateway get-domain-names \

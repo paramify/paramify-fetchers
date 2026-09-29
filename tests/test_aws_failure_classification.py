@@ -41,6 +41,7 @@ ERROR_TEXTS = [
     ("auth_failed", "An error occurred (ExpiredToken) when calling the ListBuckets operation: The provided token has expired."),
     ("auth_failed", "An error occurred (UnrecognizedClientException) when calling the ListDetectors operation: The security token included in the request is invalid."),
     ("auth_failed", "Unable to locate credentials. You can configure credentials by running \"aws configure\"."),
+    ("auth_failed", "aws: [ERROR]: Your session has expired. Please reauthenticate using 'aws login'."),
     ("not_authorized", "An error occurred (AccessDenied) when calling the GetBucketEncryption operation: Access Denied"),
     ("not_authorized", "An error occurred (UnauthorizedOperation) when calling the DescribeInstances operation: You are not authorized to perform this operation."),
     ("not_authorized", "An error occurred (AccessDeniedException) when calling the DescribeStandards operation: User: arn:aws:sts::1:assumed-role/x is not authorized to perform: securityhub:DescribeStandards"),
@@ -190,6 +191,19 @@ def test_wrapper_records_one_line_per_failure(fake_aws):
     env = {**os.environ, "PATH": f"{fake_aws}:{os.environ['PATH']}", "FAKE_MODE": "fail"}
     r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env)
     assert r.stdout.strip() == "3"
+
+
+def test_failure_report_names_the_fetcher_not_the_shared_helper(tmp_path):
+    """report_failure labels a line after its caller's file. For every AWS
+    fetcher that caller is aws_report_failures in _shared/aws.sh, so all of them
+    used to report as "aws__shared" -- useless when triaging a fanout run."""
+    fetcher = tmp_path / "aws" / "demo_fetcher" / "fetcher.sh"
+    fetcher.parent.mkdir(parents=True)
+    fetcher.write_text(f'source "{SHARED}"\naws_report_failures 1 "aws demo call failed"\nrm -f "$_AWS_ERR_LOG"\n')
+    env = {k: v for k, v in os.environ.items() if k != "FETCHER"}
+    r = subprocess.run(["bash", str(fetcher)], capture_output=True, text=True, env=env)
+    assert " ERROR aws_demo_fetcher 1 AWS API failure(s); first: aws demo call failed" in r.stderr
+    assert "aws__shared" not in r.stderr
 
 
 # --------------------------------------------------------------------------- #

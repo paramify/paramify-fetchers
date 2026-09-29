@@ -46,44 +46,32 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": []}' \
   > "$OUTPUT_JSON"
 
-sg_ids=$(aws ec2 describe-security-groups --query 'SecurityGroups[*].GroupId' --output text 2>/dev/null)
+# One describe for every group's rules. The list call already carries
+# IpPermissions and IpPermissionsEgress; re-describing each group once per
+# direction cost two CLI processes per group.
+_SG_JSON="$(mktemp -t aws_security_groups_list.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_SG_JSON"' EXIT
+aws ec2 describe-security-groups --query 'SecurityGroups[*].{GroupId:GroupId,IpPermissions:IpPermissions,IpPermissionsEgress:IpPermissionsEgress}' --output json > "$_SG_JSON" 2>/dev/null
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     echo "aws ec2 describe-security-groups (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list security groups"
 else
-    for sg_id in $sg_ids; do
-        group_data=$(jq -n --arg id "$sg_id" '{"GroupId": $id, "Rules": []}')
-
-        for direction in inbound outbound; do
-            if [ "$direction" == "inbound" ]; then
-                query_path='IpPermissions'
-                label="INBOUND RULES"
-            else
-                query_path='IpPermissionsEgress'
-                label="OUTBOUND RULES"
-            fi
-
-            rules=$(aws ec2 describe-security-groups \
-                --group-ids "$sg_id" \
-                --query "SecurityGroups[0].$query_path[*].[IpProtocol,FromPort,ToPort,join(', ', IpRanges[*].CidrIp)]" \
-                --output text 2>/dev/null)
-            rules_exit=$?
-            if [ $rules_exit -ne 0 ]; then
-                echo "aws ec2 describe-security-groups ($sg_id $direction) failed" >> "$_FAILURE_LOG"
-                continue
-            fi
-
-            if [ -n "$rules" ]; then
-                while IFS=$'\t' read -r protocol from to cidrs; do
-                    group_data=$(echo "$group_data" | jq --arg dir "$label" --arg p "$protocol" --arg f "${from:-null}" --arg t "${to:-null}" --arg c "${cidrs:-}" \
-                        '.Rules += [{"Direction":$dir, "Protocol":$p, "FromPort":($f|tonumber?), "ToPort":($t|tonumber?), "CIDRs":$c}]')
-                done <<< "$rules"
-            fi
-        done
-
-        jq --argjson data "$group_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # Rule shape and semantics are those of the per-group --output text read this
+    # replaced, kept exactly because validators match on them: CIDRs is the IPv4
+    # ranges joined with ", ", and a rule with no port (protocol -1, All
+    # traffic) is DROPPED -- the text read rendered its port as "None" and
+    # ("None"|tonumber?) produced no object. validators/aws/
+    # sg_no_open_inbound_except_https.yaml documents that blind spot.
+    jq --slurpfile groups "$_SG_JSON" '
+        def rules($perms; $label):
+            [$perms[]? | select(.FromPort != null and .ToPort != null)
+             | {"Direction": $label, "Protocol": (.IpProtocol | if . == null then "None" else tostring end),
+                "FromPort": .FromPort, "ToPort": .ToPort,
+                "CIDRs": ([.IpRanges[]?.CidrIp | select(. != null)] | join(", "))}];
+        .results += [$groups[0][]? | {"GroupId": .GroupId,
+            "Rules": (rules(.IpPermissions; "INBOUND RULES") + rules(.IpPermissionsEgress; "OUTBOUND RULES"))}]
+    ' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

@@ -1,0 +1,68 @@
+name: splunk_log_source_freshness
+version: 0.1.0
+description: >-
+  Every host that has sent data to a Splunk deployment and every forwarder
+  connected to it, and whether each is still sending.
+category: splunk
+
+supports_targets: true
+
+target_schema:
+  name:
+    type: string
+    required: true
+    env: SPLUNK_TARGET_NAME
+    description: Label for this Splunk deployment, used in the evidence filename.
+  base_url:
+    type: string
+    required: true
+    env: SPLUNK_BASE_URL
+    description: Management URL of the search head or standalone instance, e.g. https://splunk.example.com:8089
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: SPLUNK_VERIFY_SSL
+    description: Verify the management port's TLS certificate. Set false only for a self-signed test instance.
+  ca_bundle:
+    type: string
+    required: false
+    env: SPLUNK_CA_BUNDLE
+    description: >-
+      Path to the CA bundle that signed the management port's certificate, for
+      a deployment on a private CA. When set, TLS is verified against it and
+      verify_ssl is ignored.
+
+config_schema:
+  forwarder_lookback_days:
+    type: integer
+    default: 30
+    env: SPLUNK_FORWARDER_LOOKBACK_DAYS
+    description: How far back to read forwarder connection metrics in _internal (default retention is 30 days).
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: splunk_log_source_freshness.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-MLA-OSM
+  - KSI-MLA-LET
+
+evidence_set:
+  reference_id: EVD-SPLUNK-LOG-SOURCE-FRESHNESS
+  name: Splunk Log Source Freshness
+  instructions: >-
+    Every host with events in any index (`hosts[]`, from tstats over all time)
+    and every forwarder that connected in the last `forwarder_lookback_days`
+    (`forwarders[]`, from _internal metrics). A row is `silent` when Splunk last
+    received from it more than `max_silence_minutes` ago, or that far in the
+    future. The collection fails if the token cannot search every enabled index,
+    or if the host count disagrees with an independent count. Splunk only knows
+    hosts that have already sent data.

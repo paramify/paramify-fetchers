@@ -1,5 +1,5 @@
 name: aws_guard_duty_findings
-version: 0.1.0
+version: 0.2.0
 description: >
   Lists AWS GuardDuty findings updated within a configurable lookback window
   (list-findings + get-findings per detector) for downstream vulnerability

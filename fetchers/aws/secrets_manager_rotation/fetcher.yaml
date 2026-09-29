@@ -1,5 +1,5 @@
 name: aws_secrets_manager_rotation
-version: 0.1.0
+version: 0.2.0
 description: For each Secrets Manager secret in the region, reports automatic rotation status, rotation interval in days, last-rotated date, and the KMS key used to encrypt the secret.
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-SECRETS-ROTATION
   name: Secrets Manager Rotation
-  instructions: 'Script: secrets_manager_rotation.sh. Commands executed: aws secretsmanager list-secrets, aws secretsmanager describe-secret.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws secretsmanager list-secrets.'

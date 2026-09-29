@@ -1,5 +1,5 @@
 name: aws_emr_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each EMR cluster, reports the at-rest and in-transit encryption settings from its associated security configuration (EnableAtRestEncryption, EnableInTransitEncryption).
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-EMR-ENC
   name: EMR Encryption
-  instructions: 'Script: emr_encryption_status.sh. Commands executed: aws emr list-clusters, aws emr describe-cluster, aws emr describe-security-configuration.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws emr list-clusters, aws emr describe-cluster, aws emr describe-security-configuration.'

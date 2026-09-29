@@ -28,7 +28,8 @@ OUTPUT_JSON="$OUTPUT_DIR/aws_firehose_encryption_status_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_firehose_encryption_status.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_firehose_encryption_status_fail.XXXXXX)"
 _ERR=""
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_ERR" "$_AWS_ERR_LOG"' EXIT
+_ITEMS_JSON="$(mktemp -t aws_firehose_encryption_status_streams.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_ERR" "$_AWS_ERR_LOG" "$_ITEMS_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_firehose_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_firehose_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -51,6 +52,8 @@ jq -n \
 # firehose list-delivery-streams has NO automatic paginator (only --limit). The
 # API caps each page and signals more via HasMoreDeliveryStreams, so we paginate
 # manually with ExclusiveStartDeliveryStreamName, exactly like the Prowler service.
+# --limit 10000 (the API maximum; the default is 10) makes that one call for any
+# realistic account instead of one per ten streams.
 stream_names=""
 list_failed=0
 service_unavailable=0
@@ -58,11 +61,11 @@ _exclusive_start=""
 _ERR="$(mktemp -t aws_firehose_encryption_status_err.XXXXXX)"
 while true; do
     if [ -n "$_exclusive_start" ]; then
-        page=$(aws firehose list-delivery-streams \
+        page=$(aws firehose list-delivery-streams --limit 10000 \
             --exclusive-start-delivery-stream-name "$_exclusive_start" \
             --output json 2>"$_ERR")
     else
-        page=$(aws firehose list-delivery-streams --output json 2>"$_ERR")
+        page=$(aws firehose list-delivery-streams --limit 10000 --output json 2>"$_ERR")
     fi
     list_exit=$?
     if [ $list_exit -ne 0 ]; then
@@ -100,6 +103,9 @@ if [ $service_unavailable -eq 1 ]; then
 fi
 
 if [ $list_failed -eq 0 ]; then
+    # describe-delivery-stream is genuinely one call per stream (the list returns
+    # names only). Each response is appended raw and every record is built in the
+    # one jq pass below -- not a jq process and an output rewrite per stream.
     while IFS= read -r stream_name; do
         [ -z "$stream_name" ] && continue
         stream_details=$(aws firehose describe-delivery-stream --delivery-stream-name "$stream_name" 2>/dev/null)
@@ -107,18 +113,18 @@ if [ $list_failed -eq 0 ]; then
             echo "aws firehose describe-delivery-stream ($stream_name) failed" >> "$_FAILURE_LOG"
             continue
         fi
+        printf '%s\n' "$stream_details" >> "$_ITEMS_JSON"
+    done <<< "$stream_names"
 
-        stream_data=$(echo "$stream_details" | jq \
-            '.DeliveryStreamDescription as $d | {
+    jq --slurpfile streams "$_ITEMS_JSON" '
+        .results += [$streams[] | try (
+            .DeliveryStreamDescription as $d | {
                 name: $d.DeliveryStreamName,
                 arn: $d.DeliveryStreamARN,
                 delivery_stream_type: $d.DeliveryStreamType,
                 encryption_status: ($d.DeliveryStreamEncryptionConfiguration.Status // "DISABLED"),
                 kms_key_arn: ($d.DeliveryStreamEncryptionConfiguration.KeyARN // "None")
-            }')
-
-        jq --argjson data "$stream_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done <<< "$stream_names"
+            }) catch empty]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

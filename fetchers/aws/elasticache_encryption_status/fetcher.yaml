@@ -1,5 +1,5 @@
 name: aws_elasticache_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each ElastiCache cache cluster and replication group, reports at-rest and in-transit encryption status (AtRestEncryptionEnabled, TransitEncryptionEnabled, AuthTokenEnabled). Aggregates a per-account encryption-coverage percentage.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-ELASTICACHE-ENC
   name: ElastiCache Encryption
-  instructions: 'Script: elasticache_encryption_status.sh. Commands executed: aws elasticache describe-cache-clusters, aws elasticache describe-replication-groups.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws elasticache describe-cache-clusters, aws elasticache describe-replication-groups.'

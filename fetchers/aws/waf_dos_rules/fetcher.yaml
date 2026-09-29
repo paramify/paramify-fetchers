@@ -1,5 +1,5 @@
 name: aws_waf_dos_rules
-version: 0.1.0
+version: 0.2.0
 description: Lists WAFv2 REGIONAL Web ACLs and captures rate-based and DoS-related managed rule groups for each WebACL.
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-WAF-DOS-RULES
   name: WAF DoS Rules
-  instructions: 'Script: waf_DoS_rules.sh. Commands executed: aws wafv2 list-web-acls, aws wafv2 get-web-acl'
+  instructions: 'Script: fetcher.sh. Commands executed: aws wafv2 list-web-acls, aws wafv2 get-web-acl'

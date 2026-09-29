@@ -53,68 +53,37 @@ if [ $? -ne 0 ]; then
     ebs_default_kms_key="unknown"
 fi
 
-total_storage=0
-encrypted_storage=0
-ebs_results=()
-efs_results=()
+# One describe per service. The per-item describe-volumes --volume-ids /
+# describe-file-systems --file-system-id calls this replaced re-fetched fields the
+# list call already returns, one CLI process per volume.
+_EBS_JSON="$(mktemp -t aws_block_storage_encryption_status_ebs.XXXXXX.json)"
+_EFS_JSON="$(mktemp -t aws_block_storage_encryption_status_efs.XXXXXX.json)"
+trap 'rm -f "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_EBS_JSON" "$_EFS_JSON"' EXIT
 
-volume_ids=$(aws ec2 describe-volumes --query "Volumes[*].VolumeId" --output text 2>/dev/null)
-if [ $? -ne 0 ]; then
+if ! aws ec2 describe-volumes --query "Volumes[*].{VolumeId:VolumeId,Encrypted:Encrypted,KmsKeyId:KmsKeyId,State:State,Size:Size}" --output json > "$_EBS_JSON" 2>/dev/null \
+   || ! jq -e 'type == "array"' "$_EBS_JSON" >/dev/null 2>&1; then
     echo "aws ec2 describe-volumes (list) failed" >> "$_FAILURE_LOG"
     log_error "Failed to list EBS volumes"
-else
-    for volume in $volume_ids; do
-        total_storage=$((total_storage + 1))
-        volume_details=$(aws ec2 describe-volumes --volume-ids "$volume" 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws ec2 describe-volumes ($volume) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-        encrypted=$(echo "$volume_details" | jq -r '.Volumes[0].Encrypted')
-        kms_key_id=$(echo "$volume_details" | jq -r '.Volumes[0].KmsKeyId // "None"')
-        state=$(echo "$volume_details" | jq -r '.Volumes[0].State')
-        size=$(echo "$volume_details" | jq -r '.Volumes[0].Size')
-
-        ebs_results+=("$(jq -n --arg name "$volume" --arg type "ebs" \
-            --argjson enc "$encrypted" --arg kms "$kms_key_id" --arg st "$state" --arg sz "$size" \
-            '{name: $name, type: $type, encrypted: $enc, kms_key_id: $kms, state: $st, size_gb: ($sz | tonumber)}')")
-        [ "$encrypted" = "true" ] && encrypted_storage=$((encrypted_storage + 1))
-    done
+    echo '[]' > "$_EBS_JSON"
 fi
 
-fs_ids=$(aws efs describe-file-systems --query "FileSystems[*].FileSystemId" --output text 2>/dev/null)
-if [ $? -ne 0 ]; then
+if ! aws efs describe-file-systems --query "FileSystems[*].{FileSystemId:FileSystemId,Encrypted:Encrypted,KmsKeyId:KmsKeyId}" --output json > "$_EFS_JSON" 2>/dev/null \
+   || ! jq -e 'type == "array"' "$_EFS_JSON" >/dev/null 2>&1; then
     echo "aws efs describe-file-systems (list) failed" >> "$_FAILURE_LOG"
     log_error "Failed to list EFS file systems"
-else
-    for fs in $fs_ids; do
-        total_storage=$((total_storage + 1))
-        fs_details=$(aws efs describe-file-systems --file-system-id "$fs" 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws efs describe-file-systems ($fs) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-        encrypted=$(echo "$fs_details" | jq -r '.FileSystems[0].Encrypted')
-        kms_key_id=$(echo "$fs_details" | jq -r '.FileSystems[0].KmsKeyId // "None"')
-
-        efs_results+=("$(jq -n --arg name "$fs" --arg type "efs" \
-            --argjson enc "$encrypted" --arg kms "$kms_key_id" \
-            '{name: $name, type: $type, encrypted: $enc, kms_key_id: $kms}')")
-        [ "$encrypted" = "true" ] && encrypted_storage=$((encrypted_storage + 1))
-    done
+    echo '[]' > "$_EFS_JSON"
 fi
-
-percentage=0
-[ $total_storage -gt 0 ] && percentage=$(( (encrypted_storage * 100) / total_storage ))
 
 jq -n \
     --arg profile "$PROFILE" --arg region "$REGION" --arg datetime "$DATETIME" \
     --arg account_id "$ACCOUNT_ID" --arg arn "$ARN" \
-    --argjson ebs "[$(IFS=,; echo "${ebs_results[*]}")]" \
-    --argjson efs "[$(IFS=,; echo "${efs_results[*]}")]" \
-    --arg total "$total_storage" --arg encrypted "$encrypted_storage" --arg percentage "$percentage" \
+    --slurpfile vols "$_EBS_JSON" --slurpfile fss "$_EFS_JSON" \
     --arg ebs_default "$ebs_encryption_default" --arg ebs_kms "$ebs_default_kms_key" \
-    '{
+    '[$vols[0][] | {name: .VolumeId, type: "ebs", encrypted: .Encrypted, kms_key_id: (.KmsKeyId // "None"), state: (.State | tostring), size_gb: .Size}] as $ebs
+    | [$fss[0][] | {name: .FileSystemId, type: "efs", encrypted: .Encrypted, kms_key_id: (.KmsKeyId // "None")}] as $efs
+    | (($ebs + $efs) | length) as $total
+    | ([($ebs + $efs)[] | select(.encrypted == true)] | length) as $encrypted
+    | {
         metadata: {profile: $profile, region: $region, datetime: $datetime, account_id: $account_id, arn: $arn},
         results: {
             ebs_default_settings: {
@@ -123,9 +92,9 @@ jq -n \
             },
             storage_inventory: {ebs: $ebs, efs: $efs},
             summary: {
-                total_storage: ($total | tonumber),
-                encrypted_storage: ($encrypted | tonumber),
-                encryption_percentage: ($percentage | tonumber)
+                total_storage: $total,
+                encrypted_storage: $encrypted,
+                encryption_percentage: (if $total > 0 then ($encrypted * 100 / $total | floor) else 0 end)
             }
         }
     }' > "$OUTPUT_JSON"

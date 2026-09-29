@@ -1,5 +1,5 @@
 name: aws_ebs_snapshot_status
-version: 0.1.0
+version: 0.2.0
 description: Lists EBS volumes in the target region and whether each has at least one snapshot, plus per-snapshot encryption, age, and public-exposure status, as recovery/backup evidence.
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-EBS-SNAPSHOT
   name: EBS Snapshot Status
-  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 describe-volumes, aws ec2 describe-snapshots --owner-ids self, aws ec2 describe-snapshot-attribute --attribute createVolumePermission.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 describe-snapshots --owner-ids self, aws ec2 describe-snapshots --owner-ids self --restorable-by-user-ids all, aws ec2 describe-volumes.'

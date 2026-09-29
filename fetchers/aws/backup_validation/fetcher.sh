@@ -26,7 +26,10 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_backup_validation_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_backup_validation.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_backup_validation_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_S3_NAMES="$(mktemp -t aws_backup_validation_s3_names.XXXXXX)"
+_S3_RESPONSES="$(mktemp -t aws_backup_validation_s3.XXXXXX.json)"
+_VAULT_RESPONSES="$(mktemp -t aws_backup_validation_vaults.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_S3_NAMES" "$_S3_RESPONSES" "$_VAULT_RESPONSES"' EXIT
 
 log_info() { printf '%s INFO aws_backup_validation %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_backup_validation %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -99,8 +102,10 @@ if [ "$(echo "$rds_instances" | jq -r 'length')" -gt 0 ]; then
       )
     ')"
 
+    # On stdin, not --argjson: InstanceInfo carries each instance whole, and a
+    # few dozen instances overflow Linux's 128 KiB argv limit.
     tmp_out="$(mktemp "${OUTPUT_DIR%/}/.${COMPONENT}.rds_merge.XXXXXX")"
-    jq --argjson rds "$rds_results_json" '.results += $rds' "$OUTPUT_JSON" > "$tmp_out" \
+    printf '%s' "$rds_results_json" | jq --slurpfile rds /dev/stdin '.results += $rds[0]' "$OUTPUT_JSON" > "$tmp_out" \
       && mv "$tmp_out" "$OUTPUT_JSON" \
       || {
         rm -f "$tmp_out" 2>/dev/null || true
@@ -140,42 +145,31 @@ if [ "$(echo "$s3_buckets" | jq -r 'length')" -gt 0 ]; then
             replication_status=${replication_status:-'{}'}
             encryption_status=${encryption_status:-'{}'}
 
-            # Check if versioning is enabled
-            versioning_enabled="false"
-            if echo "$versioning_status" | jq -e '.Status == "Enabled"' > /dev/null; then
-                versioning_enabled="true"
-            fi
-
-            # Check if replication is configured
-            replication_enabled="false"
-            replication_destination=""
-            if echo "$replication_status" | jq -e '.ReplicationConfiguration' > /dev/null; then
-                replication_enabled="true"
-                replication_destination=$(echo "$replication_status" | jq -r '.ReplicationConfiguration.Rules[0].Destination.Bucket // "N/A"')
-            fi
-
-            # Check if encryption is enabled
-            encryption_enabled="false"
-            if echo "$encryption_status" | jq -e '.ServerSideEncryptionConfiguration' > /dev/null; then
-                encryption_enabled="true"
-            fi
-
-            # Add to JSON
-            tmp_out="$(mktemp "${OUTPUT_DIR%/}/.${COMPONENT}.XXXXXX")"
-            jq --argjson versioning "$versioning_status" \
-               --argjson replication "$replication_status" \
-               --argjson encryption "$encryption_status" \
-               --arg bucket "$bucket_name" \
-               --arg v_enabled "$versioning_enabled" \
-               --arg r_enabled "$replication_enabled" \
-               --arg r_destination "$replication_destination" \
-               --arg e_enabled "$encryption_enabled" \
-               '.results += [{"Type": "S3_Backup", "BucketName": $bucket, "VersioningEnabled": ($v_enabled == "true"), "ReplicationEnabled": ($r_enabled == "true"), "ReplicationDestination": $r_destination, "EncryptionEnabled": ($e_enabled == "true"), "VersioningInfo": $versioning, "ReplicationInfo": $replication, "EncryptionInfo": $encryption}]' \
-               "$OUTPUT_JSON" > "$tmp_out" && mv "$tmp_out" "$OUTPUT_JSON"
+            # Appended in order; the records are built in one jq pass after the
+            # loop -- no jq process or output rewrite per bucket.
+            printf '%s\n' "$bucket_name" >> "$_S3_NAMES"
+            printf '%s\n%s\n%s\n' "$versioning_status" "$replication_status" "$encryption_status" >> "$_S3_RESPONSES"
         else
             log_info "Skipping bucket: $bucket_name"
         fi
     done < <(echo "$s3_buckets" | jq -r '.[]')
+
+    # VersioningEnabled / ReplicationEnabled / EncryptionEnabled are the
+    # truthiness tests the per-bucket `jq -e` checks made.
+    jq --rawfile names "$_S3_NAMES" --slurpfile responses "$_S3_RESPONSES" '
+        ($names | split("\n")) as $names
+        | .results += [range(0; ($responses | length) / 3) as $i
+            | $responses[3 * $i] as $versioning
+            | $responses[3 * $i + 1] as $replication
+            | $responses[3 * $i + 2] as $encryption
+            | {"Type": "S3_Backup", "BucketName": $names[$i],
+               "VersioningEnabled": ($versioning.Status == "Enabled"),
+               "ReplicationEnabled": (if $replication.ReplicationConfiguration then true else false end),
+               "ReplicationDestination": (if $replication.ReplicationConfiguration
+                    then ($replication.ReplicationConfiguration.Rules[0].Destination.Bucket // "N/A" | tostring) else "" end),
+               "EncryptionEnabled": (if $encryption.ServerSideEncryptionConfiguration then true else false end),
+               "VersioningInfo": $versioning, "ReplicationInfo": $replication, "EncryptionInfo": $encryption}]
+    ' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 else
     log_info "No S3 buckets found"
 fi
@@ -207,50 +201,36 @@ if [ "$(echo "$backup_vaults" | jq -r '.BackupVaultList | length')" -gt 0 ]; the
             recovery_points='{"RecoveryPoints": []}'
         fi
 
-        # Add to JSON
-        tmp_out="$(mktemp "${OUTPUT_DIR%/}/.${COMPONENT}.XXXXXX")"
-        jq --argjson vault "$vault" \
-           --argjson points "$recovery_points" \
-           '.results += [{"Type": "AWS_Backup_Vault", "VaultName": $vault.BackupVaultName, "VaultArn": $vault.BackupVaultArn, "CreationDate": $vault.CreationDate, "RecoveryPoints": $points}]' \
-           "$OUTPUT_JSON" > "$tmp_out" && mv "$tmp_out" "$OUTPUT_JSON"
+        # Appended and merged once after the loop. A vault under an AWS Backup
+        # plan holds thousands of recovery points: as --argjson that overflowed
+        # Linux's 128 KiB argv limit and the vault silently fell out.
+        printf '%s\n%s\n' "$vault" "$recovery_points" >> "$_VAULT_RESPONSES"
     done < <(echo "$backup_vaults" | jq -c '.BackupVaultList[]')
+
+    jq --slurpfile responses "$_VAULT_RESPONSES" '
+        .results += [range(0; ($responses | length) / 2) as $i
+            | $responses[2 * $i] as $vault
+            | {"Type": "AWS_Backup_Vault", "VaultName": $vault.BackupVaultName, "VaultArn": $vault.BackupVaultArn,
+               "CreationDate": $vault.CreationDate, "RecoveryPoints": $responses[2 * $i + 1]}]
+    ' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 else
     log_info "No AWS Backup vaults found"
 fi
 
-# Generate summary
-rds_with_backups=$(jq '.results[] | select(.Type == "RDS_Backup" and .BackupEnabled == true) | .InstanceId' "$OUTPUT_JSON" 2>/dev/null | wc -l)
-total_rds=$(jq '.results[] | select(.Type == "RDS_Backup") | .InstanceId' "$OUTPUT_JSON" 2>/dev/null | wc -l)
-rds_with_replication=$(jq '.results[] | select(.Type == "RDS_Backup" and .CrossRegionReplication == true) | .InstanceId' "$OUTPUT_JSON" 2>/dev/null | wc -l)
-rds_with_encryption=$(jq '.results[] | select(.Type == "RDS_Backup" and .StorageEncrypted == true) | .InstanceId' "$OUTPUT_JSON" 2>/dev/null | wc -l)
-rds_with_deletion_protection=$(jq '.results[] | select(.Type == "RDS_Backup" and .DeletionProtection == true) | .InstanceId' "$OUTPUT_JSON" 2>/dev/null | wc -l)
-s3_with_versioning=$(jq '.results[] | select(.Type == "S3_Backup" and .VersioningEnabled == true) | .BucketName' "$OUTPUT_JSON" 2>/dev/null | wc -l)
-total_s3=$(jq '.results[] | select(.Type == "S3_Backup") | .BucketName' "$OUTPUT_JSON" 2>/dev/null | wc -l)
-s3_with_replication=$(jq '.results[] | select(.Type == "S3_Backup" and .ReplicationEnabled == true) | .BucketName' "$OUTPUT_JSON" 2>/dev/null | wc -l)
-s3_with_encryption=$(jq '.results[] | select(.Type == "S3_Backup" and .EncryptionEnabled == true) | .BucketName' "$OUTPUT_JSON" 2>/dev/null | wc -l)
-total_vaults=$(jq '.results[] | select(.Type == "AWS_Backup_Vault") | .VaultName' "$OUTPUT_JSON" 2>/dev/null | wc -l)
-
-# Update summary in JSON
+# Generate summary (one pass over the results)
 tmp_summary="$(mktemp "${OUTPUT_DIR%/}/.${COMPONENT}.summary.XXXXXX")"
-jq --arg rds_backups "$rds_with_backups" \
-   --arg total_rds "$total_rds" \
-   --arg rds_replication "$rds_with_replication" \
-   --arg rds_encryption "$rds_with_encryption" \
-   --arg rds_protection "$rds_with_deletion_protection" \
-   --arg s3_versioning "$s3_with_versioning" \
-   --arg total_s3 "$total_s3" \
-   --arg s3_replication "$s3_with_replication" \
-   --arg s3_encryption "$s3_with_encryption" \
-   --arg vaults "$total_vaults" \
-   '.summary = {
-       "rds_backup_coverage": {"with_backups": ($rds_backups|tonumber), "total": ($total_rds|tonumber)},
-       "rds_replication_coverage": {"with_replication": ($rds_replication|tonumber), "total": ($total_rds|tonumber)},
-       "rds_encryption_coverage": {"with_encryption": ($rds_encryption|tonumber), "total": ($total_rds|tonumber)},
-       "rds_deletion_protection": {"with_protection": ($rds_protection|tonumber), "total": ($total_rds|tonumber)},
-       "s3_versioning_coverage": {"with_versioning": ($s3_versioning|tonumber), "total": ($total_s3|tonumber)},
-       "s3_replication_coverage": {"with_replication": ($s3_replication|tonumber), "total": ($total_s3|tonumber)},
-       "s3_encryption_coverage": {"with_encryption": ($s3_encryption|tonumber), "total": ($total_s3|tonumber)},
-       "backup_vaults": ($vaults|tonumber)
+jq 'def count(f): [.results[] | select(f)] | length;
+    count(.Type == "RDS_Backup") as $total_rds
+    | count(.Type == "S3_Backup") as $total_s3
+    | .summary = {
+       "rds_backup_coverage": {"with_backups": count(.Type == "RDS_Backup" and .BackupEnabled == true), "total": $total_rds},
+       "rds_replication_coverage": {"with_replication": count(.Type == "RDS_Backup" and .CrossRegionReplication == true), "total": $total_rds},
+       "rds_encryption_coverage": {"with_encryption": count(.Type == "RDS_Backup" and .StorageEncrypted == true), "total": $total_rds},
+       "rds_deletion_protection": {"with_protection": count(.Type == "RDS_Backup" and .DeletionProtection == true), "total": $total_rds},
+       "s3_versioning_coverage": {"with_versioning": count(.Type == "S3_Backup" and .VersioningEnabled == true), "total": $total_s3},
+       "s3_replication_coverage": {"with_replication": count(.Type == "S3_Backup" and .ReplicationEnabled == true), "total": $total_s3},
+       "s3_encryption_coverage": {"with_encryption": count(.Type == "S3_Backup" and .EncryptionEnabled == true), "total": $total_s3},
+       "backup_vaults": count(.Type == "AWS_Backup_Vault")
    }' "$OUTPUT_JSON" > "$tmp_summary" && mv "$tmp_summary" "$OUTPUT_JSON"
 
 aws_finish

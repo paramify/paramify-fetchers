@@ -1,5 +1,5 @@
 name: aws_opensearch_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each OpenSearch/Elasticsearch domain in the region, reports encryption at rest, node-to-node encryption, and enforced-HTTPS endpoint settings.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-OPENSEARCH-ENC
   name: OpenSearch Encryption
-  instructions: 'Commands executed: aws opensearch list-domain-names, aws opensearch describe-domain. Reports encryption-at-rest, node-to-node encryption, and enforce-HTTPS per domain.'
+  instructions: 'Commands executed: aws opensearch list-domain-names, aws opensearch describe-domains (up to five domains per call). Reports encryption-at-rest, node-to-node encryption, and enforce-HTTPS per domain.'

@@ -1,5 +1,5 @@
 name: aws_network_acls
-version: 0.1.0
+version: 0.2.0
 description: Lists EC2 network ACLs and per-ACL inbound/outbound entries (rule number, protocol, port range, CIDR, allow/deny).
 category: aws
 

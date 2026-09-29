@@ -1,5 +1,5 @@
 name: aws_cloudwatch_high_availability
-version: 0.1.0
+version: 0.2.0
 description: Lists Auto Scaling policies and CloudWatch alarms (monitoring/scaling evidence).
 category: aws
 
@@ -35,4 +35,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CLOUDWATCH-HA
   name: CloudWatch High Availability
-  instructions: 'Script: cloudwatch_high_availability.sh. Commands executed: aws cloudwatch describe-alarms, aws logs describe-log-groups'
+  instructions: 'Script: fetcher.sh. Commands executed: aws autoscaling describe-policies, aws cloudwatch describe-alarms'

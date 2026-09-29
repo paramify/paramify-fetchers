@@ -1,5 +1,5 @@
 name: aws_ecr_image_scanning
-version: 0.1.0
+version: 0.2.0
 description: Lists AWS ECR repositories with their image scan-on-push configuration and image tag mutability, the registry scanning type and frequency, and a per-repository summary of the latest image scan finding severity counts (critical, high, medium).
 category: aws
 

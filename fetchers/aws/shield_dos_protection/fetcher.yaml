@@ -1,5 +1,5 @@
 name: aws_shield_dos_protection
-version: 0.1.0
+version: 0.2.0
 description: Reports AWS Shield Advanced subscription status and the list of Shield-protected resources (protection id, name, resource ARN, protection ARN). No subscription is valid evidence that Shield Advanced DoS protection is not enabled.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-SHIELD-DOS
   name: Shield Advanced DoS Protection
-  instructions: 'Script: shield_dos_protection.sh. Commands executed: aws shield get-subscription-state, aws shield list-protections.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws shield get-subscription-state, aws shield list-protections.'

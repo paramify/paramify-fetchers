@@ -1,5 +1,5 @@
 name: aws_neptune_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each Neptune DB cluster, reports encryption at rest (StorageEncrypted flag and KMS key) to demonstrate that graph database storage is encrypted.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-NEPTUNE-ENC
   name: Neptune Encryption
-  instructions: 'Script: neptune_encryption_status.sh. Commands executed: aws neptune describe-db-clusters.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws neptune describe-db-clusters.'

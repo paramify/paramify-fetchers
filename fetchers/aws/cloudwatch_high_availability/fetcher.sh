@@ -52,11 +52,11 @@ if [ $sp_exit -ne 0 ]; then
     echo "aws autoscaling describe-policies failed (exit=$sp_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to describe scaling policies"
 else
-    echo "$scaling_policies" | jq -c '.[]' | while read -r policy; do
-        jq --argjson policy "$policy" \
-           '.results += [{"Type": "ScalingPolicy", "PolicyInfo": $policy}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # One pass over the whole list, fed on stdin (not --argjson: a large list
+    # overflows the argv limit). Appending per item rewrote the file N times.
+    printf '%s' "$scaling_policies" | jq --slurpfile items /dev/stdin \
+       '.results += [$items[0][]? | {"Type": "ScalingPolicy", "PolicyInfo": .}]' \
+       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 cloudwatch_alarms=$(aws cloudwatch describe-alarms --query 'MetricAlarms[*]' --output json 2>/dev/null)
@@ -65,11 +65,11 @@ if [ $cw_exit -ne 0 ]; then
     echo "aws cloudwatch describe-alarms failed (exit=$cw_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to describe CloudWatch alarms"
 else
-    echo "$cloudwatch_alarms" | jq -c '.[]' | while read -r alarm; do
-        jq --argjson alarm "$alarm" \
-           '.results += [{"Type": "CloudWatch_Alarm", "AlarmInfo": $alarm}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # One pass over the whole list, fed on stdin (not --argjson: a large list
+    # overflows the argv limit). Appending per item rewrote the file N times.
+    printf '%s' "$cloudwatch_alarms" | jq --slurpfile items /dev/stdin \
+       '.results += [$items[0][]? | {"Type": "CloudWatch_Alarm", "AlarmInfo": .}]' \
+       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

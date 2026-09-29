@@ -1,5 +1,5 @@
 name: aws_load_balancer_high_availability
-version: 0.1.0
+version: 0.2.0
 description: Lists ELBv2 load balancers (ALB, NLB) and per-LB target groups, attributes, and availability zones (HA evidence).
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-LB-HA
   name: Load Balancer High Availability
-  instructions: 'Script: load_balancer_high_availability.sh. Commands executed: aws elbv2 describe-load-balancers, aws elbv2 describe-target-groups, aws elbv2 describe-load-balancer-attributes'
+  instructions: 'Script: fetcher.sh. Commands executed: aws elbv2 describe-load-balancers, aws elbv2 describe-target-groups, aws elbv2 describe-load-balancer-attributes'

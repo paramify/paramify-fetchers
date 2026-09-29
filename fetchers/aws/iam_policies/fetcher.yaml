@@ -1,5 +1,5 @@
 name: aws_iam_policies
-version: 0.1.0
+version: 0.2.0
 description: Lists local (customer-managed) IAM policies and per-policy detail (default version document, attached users/groups/roles).
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-IAM-POLICIES
   name: IAM Policies
-  instructions: 'Script: iam_policies.sh. Commands executed: aws iam list-policies, aws iam get-policy, aws iam get-policy-version'
+  instructions: 'Script: fetcher.sh. Commands executed: aws iam list-policies --scope Local, aws iam get-account-authorization-details --filter LocalManagedPolicy User Group Role'

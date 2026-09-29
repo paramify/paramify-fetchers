@@ -28,7 +28,8 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_acm_certificate_status_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_acm_certificate_status.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_acm_certificate_status_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_ITEMS_JSON="$(mktemp -t aws_acm_certificate_status_certs.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ITEMS_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_acm_certificate_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_acm_certificate_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -60,6 +61,9 @@ if [ $list_exit -ne 0 ]; then
     echo "aws acm list-certificates failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list ACM certificates"
 else
+    # describe-certificate is genuinely one call per certificate (list-certificates
+    # has no InUseBy), but its response is appended raw and every record is built
+    # in the one jq pass below -- not a jq process and an output rewrite per cert.
     for cert_arn in $(aws_text_list "$cert_arns"); do
         [ -z "$cert_arn" ] && continue
 
@@ -68,8 +72,11 @@ else
             echo "aws acm describe-certificate ($cert_arn) failed" >> "$_FAILURE_LOG"
             continue
         fi
+        printf '%s\n' "$cert_details" >> "$_ITEMS_JSON"
+    done
 
-        cert_data=$(echo "$cert_details" | jq '{
+    jq --slurpfile certs "$_ITEMS_JSON" '
+        .results += [$certs[] | try {
             certificate_arn: .Certificate.CertificateArn,
             domain_name: .Certificate.DomainName,
             type: .Certificate.Type,
@@ -79,10 +86,7 @@ else
             renewal_eligibility: .Certificate.RenewalEligibility,
             in_use: ((.Certificate.InUseBy | length) > 0),
             in_use_by: (.Certificate.InUseBy // [])
-        }')
-
-        jq --argjson data "$cert_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+        } catch empty]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

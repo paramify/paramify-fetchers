@@ -66,7 +66,11 @@ if [ -z "$detectors" ] || ! echo "$detectors" | jq . >/dev/null 2>&1; then
     detectors='[]'
 fi
 
-# Populate detector_details for each detector.
+# Populate detector_details for each detector. Each response is also kept in
+# $_DETECTOR_DIR for the summary loop below, which used to call get-detector a
+# second time for the same detector.
+_DETECTOR_DIR="$(mktemp -d -t aws_guard_duty_detectors.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"; rm -rf "$_DETECTOR_DIR"' EXIT
 if [ "$(echo "$detectors" | jq 'length')" -gt 0 ]; then
     echo "$detectors" | jq -r '.[]' | while read -r detector_id; do
         detector_details=$(aws guardduty get-detector --detector-id "$detector_id" --output json 2>/dev/null)
@@ -75,6 +79,7 @@ if [ "$(echo "$detectors" | jq 'length')" -gt 0 ]; then
             echo "aws guardduty get-detector ($detector_id) failed (exit=$ec)" >> "$_FAILURE_LOG"
             continue
         fi
+        printf '%s' "$detector_details" > "$_DETECTOR_DIR/$detector_id.json"
 
         jq --arg id "$detector_id" \
            --argjson details "$detector_details" \
@@ -96,12 +101,10 @@ overall_data_sources=""
 while read -r detector_id; do
     [ -z "$detector_id" ] && continue
 
-    detector_details=$(aws guardduty get-detector --detector-id "$detector_id" --output json 2>/dev/null)
-    ec=$?
-    if [ $ec -ne 0 ] || [ -z "$detector_details" ] || ! echo "$detector_details" | jq . >/dev/null 2>&1; then
-        echo "aws guardduty get-detector ($detector_id) failed (exit=$ec)" >> "$_FAILURE_LOG"
-        continue
-    fi
+    # Read back what the first loop fetched; a detector whose get-detector failed
+    # there (already logged) has no file and is skipped, as before.
+    [ -f "$_DETECTOR_DIR/$detector_id.json" ] || continue
+    detector_details=$(cat "$_DETECTOR_DIR/$detector_id.json")
     detector_count=$((detector_count+1))
 
     # Check if detector is enabled

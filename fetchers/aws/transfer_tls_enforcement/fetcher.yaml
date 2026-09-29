@@ -1,5 +1,5 @@
 name: aws_transfer_tls_enforcement
-version: 0.1.0
+version: 0.2.0
 description: Collects AWS Transfer Family server protocols (SFTP/FTPS/FTP/AS2) and the assigned security policy name to evidence TLS enforcement on file-transfer endpoints.
 category: aws
 

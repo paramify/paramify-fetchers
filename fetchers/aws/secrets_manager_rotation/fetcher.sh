@@ -47,32 +47,24 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": []}' \
   > "$OUTPUT_JSON"
 
-secret_arns=$(aws secretsmanager list-secrets --query 'SecretList[*].ARN' --output text 2>/dev/null)
+# list-secrets already returns every field read here (ARN, Name, RotationEnabled,
+# RotationRules, LastRotatedDate, KmsKeyId), so one paginated call replaces a
+# describe-secret per secret.
+secrets=$(aws secretsmanager list-secrets --query 'SecretList[*]' --output json 2>/dev/null)
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     echo "aws secretsmanager list-secrets failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list secrets"
 else
-    for secret_arn in $(aws_text_list "$secret_arns"); do
-        [ -z "$secret_arn" ] && continue
-
-        secret_details=$(aws secretsmanager describe-secret --secret-id "$secret_arn" 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws secretsmanager describe-secret ($secret_arn) failed" >> "$_FAILURE_LOG"
-            secret_details='{}'
-        fi
-
-        secret_data=$(echo "$secret_details" | jq '{
+    printf '%s' "$secrets" | jq --slurpfile secrets /dev/stdin '
+        .results += [$secrets[0][]? | {
             arn: (.ARN // "Unknown"),
             name: (.Name // "Unknown"),
             rotation_enabled: (.RotationEnabled // false),
             rotation_interval_days: (.RotationRules.AutomaticallyAfterDays // null),
             last_rotated_date: (.LastRotatedDate // null),
             kms_key_id: (.KmsKeyId // null)
-        }')
-
-        jq --argjson data "$secret_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+        }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

@@ -48,8 +48,11 @@ jq -n \
   > "$OUTPUT_JSON"
 
 _LIST_ERR="$(mktemp -t aws_glacier_encryption_status_list.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_LIST_ERR" "$_AWS_ERR_LOG"' EXIT
-vault_names=$(aws glacier list-vaults --account-id - --query 'VaultList[*].VaultName' --output text 2>"$_LIST_ERR")
+_VAULTS_JSONL="$(mktemp -t aws_glacier_encryption_status_vaults.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_LIST_ERR" "$_AWS_ERR_LOG" "$_VAULTS_JSONL"' EXIT
+# Name and ARN come from the one list call; re-listing every vault once per
+# vault just to look up its ARN cost an extra call each.
+vaults=$(aws glacier list-vaults --account-id - --query 'VaultList[*].[VaultName,VaultARN]' --output text 2>"$_LIST_ERR")
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     if aws_service_unavailable "$_LIST_ERR"; then
@@ -62,9 +65,11 @@ if [ $list_exit -ne 0 ]; then
         log_error "Failed to list Glacier vaults"
     fi
 else
-    for vault_name in $(aws_text_list "$vault_names"); do
-        vault_arn=$(aws glacier list-vaults --account-id - \
-            --query "VaultList[?VaultName=='$vault_name'].VaultARN | [0]" --output text 2>/dev/null)
+    # The access policy and the vault lock have no bulk API, so they stay one
+    # call each per vault; the vault records are collected and appended once.
+    while IFS=$'\t' read -r vault_name vault_arn; do
+        [ -z "$vault_name" ] && continue
+        [ "$vault_name" = "None" ] && continue
 
         # Vault access policy — absent when no policy is set (ResourceNotFoundException).
         access_policy=$(aws glacier get-vault-access-policy --account-id - --vault-name "$vault_name" \
@@ -87,14 +92,14 @@ else
             lock_policy_json=$(echo "$lock" | jq -r '.Policy // "{}"' | jq -c '.' 2>/dev/null) || lock_policy_json='{}'
         fi
 
-        vault_data=$(jq -n \
-            --arg name "$vault_name" --arg arn "$vault_arn" \
+        jq -nc \
+            --arg name "$vault_name" --arg arn "${vault_arn:-None}" \
             --argjson access_policy "$access_policy_json" \
             --arg lock_state "$lock_state" --argjson lock_policy "$lock_policy_json" \
-            '{name: $name, arn: $arn, access_policy: $access_policy, vault_lock: {state: $lock_state, policy: $lock_policy}}')
+            '{name: $name, arn: $arn, access_policy: $access_policy, vault_lock: {state: $lock_state, policy: $lock_policy}}' >> "$_VAULTS_JSONL"
+    done <<< "$vaults"
 
-        jq --argjson data "$vault_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    jq --slurpfile vaults "$_VAULTS_JSONL" '.results += $vaults' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

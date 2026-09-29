@@ -1,5 +1,5 @@
 name: aws_sqs_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each SQS queue in the region, reports server-side encryption status (KMS master key id or SQS-managed SSE). Aggregates a per-region encryption-coverage percentage.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-SQS-ENC
   name: SQS Queue Encryption
-  instructions: 'Script: sqs_encryption_status.sh. Commands executed: aws sqs list-queues, aws sqs get-queue-attributes.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws sqs list-queues, aws sqs get-queue-attributes.'

@@ -86,11 +86,19 @@ fi
 
 CRITERIA="$(jq -n --argjson since "$SINCE_EPOCH_MS" '{"Criterion":{"updatedAt":{"Gte":$since}}}')"
 
+# Finding ids and get-findings responses are appended to files and merged once
+# after the loop. Merging each 50-finding chunk as --argjson ran into Linux's
+# 128 KiB argv limit (findings run 2-5 KB each), and a chunk that hit it was
+# silently dropped.
+_FINDING_IDS="$(mktemp -t aws_guard_duty_findings_ids.XXXXXX)"
+_FINDINGS_STREAM="$(mktemp -t aws_guard_duty_findings_chunks.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_FINDING_IDS" "$_FINDINGS_STREAM"' EXIT
+
 echo "$detectors" | jq -r '.[]' | while read -r detector_id; do
     [ -z "$detector_id" ] && continue
     log_info "Listing findings for detector $detector_id (updated within ${LOOKBACK_DAYS}d)..."
 
-    finding_ids='[]'
+    : > "$_FINDING_IDS"
     next_token=""
     page=1
     while :; do
@@ -114,9 +122,9 @@ echo "$detectors" | jq -r '.[]' | while read -r detector_id; do
             break
         fi
 
-        page_ids=$(echo "$page_result" | jq -c '.FindingIds // []')
-        finding_ids=$(jq -c -n --argjson a "$finding_ids" --argjson b "$page_ids" '$a + $b')
-        next_token=$(echo "$page_result" | jq -r '.NextToken // empty')
+        # One jq per page: the first line is the next token, the rest are ids.
+        { IFS= read -r next_token; cat >> "$_FINDING_IDS"; } \
+            < <(printf '%s' "$page_result" | jq -r '(.NextToken // ""), (.FindingIds // [])[]')
         page=$((page + 1))
 
         [ -z "$next_token" ] && break
@@ -126,7 +134,11 @@ echo "$detectors" | jq -r '.[]' | while read -r detector_id; do
         fi
     done
 
-    id_count=$(echo "$finding_ids" | jq 'length')
+    finding_ids=()
+    while IFS= read -r fid; do
+        [ -n "$fid" ] && finding_ids[${#finding_ids[@]}]="$fid"
+    done < "$_FINDING_IDS"
+    id_count=${#finding_ids[@]}
     if [ "$id_count" -eq 0 ]; then
         log_info "No findings updated in the last ${LOOKBACK_DAYS}d for detector $detector_id"
         continue
@@ -136,11 +148,7 @@ echo "$detectors" | jq -r '.[]' | while read -r detector_id; do
     # get-findings accepts at most 50 ids per call; chunk accordingly.
     i=0
     while [ "$i" -lt "$id_count" ]; do
-        chunk=$(echo "$finding_ids" | jq -c ".[$i:$((i + 50))]")
-        chunk_args=()
-        while IFS= read -r fid; do
-            chunk_args+=("$fid")
-        done < <(echo "$chunk" | jq -r '.[]')
+        chunk_args=("${finding_ids[@]:i:50}")
 
         chunk_result=$(aws guardduty get-findings \
             --detector-id "$detector_id" \
@@ -153,13 +161,13 @@ echo "$detectors" | jq -r '.[]' | while read -r detector_id; do
             continue
         fi
 
-        findings=$(echo "$chunk_result" | jq -c '.Findings // []')
-        jq --argjson findings "$findings" '.results.findings += $findings' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-
+        printf '%s\n' "$chunk_result" >> "$_FINDINGS_STREAM"
         i=$((i + 50))
     done
 done
+
+jq --slurpfile chunks "$_FINDINGS_STREAM" '.results.findings += [$chunks[] | (.Findings // [])[]]' \
+   "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 # Summary: counts by severity bucket, type, and archived (disposition) status.
 # AWS severity buckets: 0.1-3.9 Low, 4.0-6.9 Medium, 7.0-8.9 High.

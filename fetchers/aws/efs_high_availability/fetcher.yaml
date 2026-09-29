@@ -1,5 +1,5 @@
 name: aws_efs_high_availability
-version: 0.1.0
+version: 0.2.0
 description: For the configured AWS account/region, lists EFS file systems and their mount targets (per-AZ distribution evidence for high availability).
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-EFS-HA
   name: EFS High Availability
-  instructions: 'Script: efs_high_availability.sh. Commands executed: aws efs describe-file-systems, aws efs describe-mount-targets'
+  instructions: 'Script: fetcher.sh. Commands executed: aws efs describe-file-systems, aws efs describe-mount-targets'
