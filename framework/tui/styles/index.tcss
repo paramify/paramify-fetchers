@@ -302,7 +302,14 @@ ModalScreen {
 }
 
 #modal-card.confirm {
-    width: 60;
+    width: 72;
+}
+
+/* A Label sizes to its text and clips what does not fit: a long question lost
+   its second sentence — the one saying a close auto-closes open issues. Full
+   width makes it wrap inside the card instead. */
+#modal-card.confirm #modal-title {
+    width: 100%;
 }
 
 #modal-card.wide {

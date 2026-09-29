@@ -370,6 +370,7 @@ paramify-fetchers/
     ├── config_injection_design.md    # platform/config/auth injection model
     ├── envelope_design.md            # evidence envelope format
     ├── issue_report_fetchers.md      # the second kind: raw scan reports → assessment pipelines
+    ├── pipelines.md                  # sending scan reports from the TUI, with recordings
     ├── packaging_design.md           # proposed `paramify package` (not built)
     └── onboarding/                   # hands-on guided tutorial (Lathe)
 ```

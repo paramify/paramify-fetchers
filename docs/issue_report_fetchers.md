@@ -274,6 +274,9 @@ that fixes it.
 
 ## Uploading
 
+Setting up and sending from the TUI, step by step with recordings, is
+[`pipelines.md`](pipelines.md). The commands:
+
 ```bash
 paramify run manifests/monthly.yaml
 paramify upload           # evidence  → evidence sets

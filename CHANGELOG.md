@@ -12,6 +12,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`docs/pipelines.md`: sending scan reports from the TUI**, step by step
+  with three recordings. It covers a manifest for the scanners, pointing each
+  fetcher at an assessment and choosing its close policy, running and sending
+  from the Paramify tab, and jobs and manual closes. It explains how cycles
+  work, lists what each error means, and maps every step to its command.
 - **`paramify issues jobs` and `paramify issues close`.** `jobs` lists an
   assessment's pipeline jobs and retries or cancels one (`--retry`, `--cancel`);
   a failed job blocks every job queued behind it on the same assessment until
@@ -210,6 +215,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **TUI fixes found while recording that walkthrough.** On a manifest with no
+  evidence and no scripts, nothing on the Paramify tab held focus, so its keys
+  did nothing. Enter in a picker's filter box now takes the highlighted option.
+  The confirm dialog wraps long messages instead of cutting them off, which had
+  hidden the auto-close warning. The jobs list shows each job's assessment by
+  name and its error. A queued or running job is marked as waiting, not failed.
 - **`paramify upload` and `paramify issues upload` pick the newest run of
   their own kind** when no run is named, not simply the newest run: evidence
   and pipeline manifests usually share an output directory, and each command

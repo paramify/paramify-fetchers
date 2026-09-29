@@ -68,13 +68,19 @@ _COUNT_LABELS = (
 def _job_text(job: dict) -> Text:
     """One finished pipeline job as a log line: what it did, or why it stopped."""
     status = job.get("status") or "?"
-    ok = status == "COMPLETED"
     counts = job.get("counts") or {}
     shown = [f"{counts[k]} {label}" for k, label in _COUNT_LABELS if counts.get(k) is not None]
-    text = Text(
-        f"  [{'OK' if ok else 'FAIL'}] job {job.get('job_id')} {status}",
-        style=palette.OK if ok else palette.FAIL,
-    )
+    # Same marks as the CLI: a queued or running job is waiting, not failed —
+    # unless it is queued behind a failed one, which needs a person.
+    if status == "COMPLETED":
+        mark, style = "OK", palette.OK
+    elif status == "FAILED" or job.get("blocked_by"):
+        mark, style = "FAIL", palette.FAIL
+    elif status == "CANCELLED":
+        mark, style = "SKIP", palette.WARN
+    else:
+        mark, style = "WAIT", palette.WARN
+    text = Text(f"  [{mark}] job {job.get('job_id')} {status}", style=style)
     if shown:
         text.append("  " + ", ".join(shown))
     if job.get("blocked_by"):
@@ -691,17 +697,26 @@ class UploadPage(ButtonRowNav, Vertical):
             self.notify("No pipeline jobs visible to this API key.")
             return
         by_id = {j["job_id"]: j for j in jobs}
+        # The API names an assessment only by id; the manifest knows the names
+        # of the ones it feeds, which are the ones worth recognising here.
+        names = dict(self._manifest_assessments())
         options = []
         for j in jobs:
             counts = j.get("counts") or {}
             done = ", ".join(
                 f"{counts[k]} {label}" for k, label in _COUNT_LABELS if counts.get(k) is not None
             )
-            blocked = f"  blocked by {j['blocked_by']}" if j.get("blocked_by") else ""
+            aid = j.get("assessment_id") or ""
+            detail = done
+            if j.get("blocked_by"):
+                detail = f"blocked by {j['blocked_by']}"
+            elif j.get("error"):
+                error = str(j["error"])
+                detail = error if len(error) <= 70 else error[:69] + "…"
             options.append((j["job_id"], (
                 f"{(j.get('created_at') or '')[:16]}  {j.get('status') or '?':<11} "
-                f"{j.get('type') or '?':<13} {j.get('assessment_id') or ''}"
-                f"{'  ' + done if done else ''}{blocked}"
+                f"{j.get('type') or '?':<13} {names.get(aid, aid)}"
+                f"{chr(10) + '    ' + detail if detail else ''}"
             )))
 
         def chosen(job_id):
@@ -822,6 +837,7 @@ class UploadPage(ButtonRowNav, Vertical):
         if kind == "jobs":
             self._show_jobs(ev["jobs"])
         elif kind == "job_done":
+            self.query_one("#upload-log-panel", Vertical).set_class(False, "empty")
             log.write(Text(f"{ev['action']}:", style="bold"))
             log.write(_job_text(ev["job"]))
             self.notify(f"{ev['action']}: job {ev['job'].get('job_id')} is now "
@@ -836,6 +852,7 @@ class UploadPage(ButtonRowNav, Vertical):
                 f"cycle close {job.get('status')}", style=palette.OK if ok else palette.FAIL,
             ))
         elif kind == "failed":
+            self.query_one("#upload-log-panel", Vertical).set_class(False, "empty")
             if ev.get("busy"):
                 self._uploading = False
                 self._restore_actions()
