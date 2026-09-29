@@ -1,0 +1,83 @@
+name: wiz_code_findings
+version: 0.1.0
+description: >-
+  Summarizes Wiz Code static analysis (SAST) findings by severity, repository,
+  weakness and age. Snippets and descriptions are not collected.
+category: wiz
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1200
+
+output:
+  type: json
+  path: wiz_code_findings.json
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read-only scopes).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov) or
+      https://api.us17.app.wiz.io/graphql (commercial).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: >-
+      Token URL from Tenant Info > Authentication URL. Defaults to Wiz for Gov.
+      Commercial tenants use https://auth.app.wiz.io/oauth/token.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  page_size:
+    type: integer
+    required: false
+    env: WIZ_PAGE_SIZE
+    default: 100
+    description: Records per GraphQL page (max 500).
+  code_open_statuses:
+    type: string
+    required: false
+    env: WIZ_CODE_OPEN_STATUSES
+    default: "OPEN,IN_PROGRESS"
+    description: Statuses counted as open.
+  include_raw_findings:
+    type: boolean
+    required: false
+    env: WIZ_INCLUDE_RAW_FINDINGS
+    default: true
+    description: Include every finding row, not just the summary.
+
+evidence_set:
+  reference_id: EVD-WIZ-CODE-FINDINGS
+  name: Wiz Code Findings (SAST)
+  instructions: >-
+    Script: fetcher.py. Read-only service account (read:sast_findings; Wiz
+    Code). Pages the sastFindings connection. Summarizes open findings by
+    severity, repository and weakness, and open findings past the remediation
+    window. Code snippets, descriptions and remediation text are not collected.
+  description: >-
+    Wiz Code SAST findings on connected repositories, evidencing code is scanned
+    for weaknesses before release.
+
+ksis:
+  - KSI-CMT-VTD
+  - KSI-PIY-RSD

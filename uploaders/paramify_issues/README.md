@@ -85,6 +85,35 @@ partial scan report is not: it gets parsed into issues, and findings absent from
 a truncated file read as resolved, silently closing real vulnerabilities. Set it
 to `false` only when you know the file is complete.
 
+## Pipeline intake (opt-in)
+
+By default every report goes to `POST /assessment/{id}/intake`. A manifest entry
+can instead send its report to the pipeline endpoint, `POST /pipelines/{id}/intake`
+(a pipeline is identified by its assessment id), and optionally queue processing
+in the same request:
+
+```yaml
+- use: wiz_stig_compliance_report
+  config:
+    assessment_id: <uuid>
+    intake_api: pipeline          # default: assessment
+    pipeline_operation: PROCESS   # optional: PROCESS or PROCESS_CLOSE
+```
+
+Differences worth knowing:
+
+- The upload lands in the pipeline's **current** cycle (one is opened if none
+  is), not the cycle the effective date falls in.
+- The assessment's file intake preset must be configured, or Paramify refuses
+  the file with HTTP 400.
+- The API key needs `PIPELINE_INTAKE`, plus `PIPELINE_PROCESS` for an operation
+  and `PIPELINE_CLOSE` for `PROCESS_CLOSE`.
+- The response carries the queued pipeline job; its id is recorded in the
+  result and in `_intake_log.json`.
+
+`overrides.<fetcher>.intake_api` / `pipeline_operation` in `--config` do the same
+per run. Records without these fields behave exactly as before.
+
 ## Effective dates and cycles
 
 The endpoint routes an artifact to whichever assessment cycle its

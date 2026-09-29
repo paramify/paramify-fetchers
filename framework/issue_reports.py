@@ -66,6 +66,17 @@ RESERVED_NAMES = frozenset({SIDECAR_NAME, INTAKE_LOG_NAME})
 ASSESSMENT_ID_FIELD = "assessment_id"
 ASSESSMENT_NAME_FIELD = "assessment_name"
 
+# Opt-in: which intake endpoint the uploader posts to. Absent (the default) keeps
+# POST /assessment/{id}/intake exactly as before. "pipeline" posts to
+# POST /pipelines/{id}/intake instead (the pipeline id IS the assessment id), and
+# pipeline_operation optionally asks Paramify to PROCESS (or PROCESS_CLOSE) the
+# cycle in the same request. Written into the sidecar only when set, so records
+# from manifests that never mention them are byte-identical to before.
+INTAKE_API_FIELD = "intake_api"
+PIPELINE_OPERATION_FIELD = "pipeline_operation"
+INTAKE_APIS = ("assessment", "pipeline")
+PIPELINE_OPERATIONS = ("PROCESS", "PROCESS_CLOSE")
+
 
 def reserved_config_schema() -> Dict[str, ConfigField]:
     """The config fields the framework adds to every issue-report fetcher."""
@@ -88,6 +99,26 @@ def reserved_config_schema() -> Dict[str, ConfigField]:
                 "Human-readable name of the assessment, written alongside assessment_id "
                 "so the manifest is readable and a stale UUID is recognisable. Not used "
                 "to resolve the assessment — assessment_id is authoritative."
+            ),
+        ),
+        INTAKE_API_FIELD: ConfigField(
+            name=INTAKE_API_FIELD,
+            type="string",
+            required=False,
+            description=(
+                "Intake endpoint: 'assessment' (default, POST /assessment/{id}/intake) or "
+                "'pipeline' (POST /pipelines/{id}/intake, which can also queue processing). "
+                "The pipeline endpoint needs the assessment's file intake preset configured."
+            ),
+        ),
+        PIPELINE_OPERATION_FIELD: ConfigField(
+            name=PIPELINE_OPERATION_FIELD,
+            type="string",
+            required=False,
+            description=(
+                "Only with intake_api: pipeline. PROCESS queues processing of the cycle after "
+                "the upload; PROCESS_CLOSE processes and then closes it. Omit to attach only. "
+                "Needs the PIPELINE_PROCESS (and for close, PIPELINE_CLOSE) API key permission."
             ),
         ),
     }
@@ -161,6 +192,9 @@ def build_record(
         "sha256": _sha256(path),
         "bytes": path.stat().st_size if path.exists() else None,
     }
+    for field in (INTAKE_API_FIELD, PIPELINE_OPERATION_FIELD):
+        if assessment.get(field):
+            record[field] = assessment[field]
     if result.exit_code != 0:
         # Same precedence as the envelope: what the fetcher reported via
         # $FETCHER_STATUS_FILE wins, stderr tail is the fallback.

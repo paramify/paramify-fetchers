@@ -43,7 +43,11 @@ from framework.envelope import ENVELOPE_KEYS, is_enveloped, wrap_outputs
 from framework.issue_reports import (
     ASSESSMENT_ID_FIELD,
     ASSESSMENT_NAME_FIELD,
+    INTAKE_API_FIELD,
+    INTAKE_APIS,
     ISSUE_REPORTS_DIR,
+    PIPELINE_OPERATION_FIELD,
+    PIPELINE_OPERATIONS,
 )
 from framework.issue_reports import read_index as read_issue_report_index
 from framework.issue_reports import record_outputs as record_issue_reports
@@ -937,6 +941,24 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
                     f"{entry.use}: no {ASSESSMENT_ID_FIELD} set, so its report cannot be "
                     f"intaken (fix: paramify assessments select {entry.use})"
                 )
+            intake_api = entry.config.get(INTAKE_API_FIELD)
+            if intake_api not in (None, "", *INTAKE_APIS):
+                errors.append(
+                    f"{entry.use}: {INTAKE_API_FIELD} must be one of {', '.join(INTAKE_APIS)} "
+                    f"(got {intake_api!r})"
+                )
+            operation = entry.config.get(PIPELINE_OPERATION_FIELD)
+            if operation not in (None, ""):
+                if operation not in PIPELINE_OPERATIONS:
+                    errors.append(
+                        f"{entry.use}: {PIPELINE_OPERATION_FIELD} must be one of "
+                        f"{', '.join(PIPELINE_OPERATIONS)} (got {operation!r})"
+                    )
+                elif intake_api != "pipeline":
+                    errors.append(
+                        f"{entry.use}: {PIPELINE_OPERATION_FIELD} only applies with "
+                        f"{INTAKE_API_FIELD}: pipeline"
+                    )
 
         # effective_secrets, and skip the optional ones: the runner resolves a
         # category-declared credential exactly like a fetcher-declared one, and it
@@ -1094,6 +1116,8 @@ def run(
             assessment = {
                 ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
                 ASSESSMENT_NAME_FIELD: values.get(ASSESSMENT_NAME_FIELD),
+                INTAKE_API_FIELD: values.get(INTAKE_API_FIELD),
+                PIPELINE_OPERATION_FIELD: values.get(PIPELINE_OPERATION_FIELD),
             }
 
         for r in results:
