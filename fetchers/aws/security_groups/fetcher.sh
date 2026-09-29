@@ -57,18 +57,22 @@ if [ $list_exit -ne 0 ]; then
     echo "aws ec2 describe-security-groups (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list security groups"
 else
-    # Rule shape and semantics are those of the per-group --output text read this
-    # replaced, kept exactly because validators match on them: CIDRs is the IPv4
-    # ranges joined with ", ", and a rule with no port (protocol -1, All
-    # traffic) is DROPPED -- the text read rendered its port as "None" and
-    # ("None"|tonumber?) produced no object. validators/aws/
-    # sg_no_open_inbound_except_https.yaml documents that blind spot.
+    # Validators match on this rule shape by key order, so keys are only ever
+    # appended: Direction, Protocol, FromPort, ToPort, CIDRs (IPv4 ranges joined
+    # with ", "), then IPv6CIDRs (IPv6 ranges, joined the same way).
+    #
+    # A rule with no ports -- protocol -1, "All traffic" -- is kept with FromPort
+    # and ToPort null. Before 0.3.0 it was dropped, which hid an inbound
+    # all-traffic rule from 0.0.0.0/0 and every default allow-all egress rule.
+    # Before 0.3.0 IPv6 ranges were not read at all, so a rule open to ::/0
+    # looked closed.
     jq --slurpfile groups "$_SG_JSON" '
         def rules($perms; $label):
-            [$perms[]? | select(.FromPort != null and .ToPort != null)
+            [$perms[]?
              | {"Direction": $label, "Protocol": (.IpProtocol | if . == null then "None" else tostring end),
                 "FromPort": .FromPort, "ToPort": .ToPort,
-                "CIDRs": ([.IpRanges[]?.CidrIp | select(. != null)] | join(", "))}];
+                "CIDRs": ([.IpRanges[]?.CidrIp | select(. != null)] | join(", ")),
+                "IPv6CIDRs": ([.Ipv6Ranges[]?.CidrIpv6 | select(. != null)] | join(", "))}];
         .results += [$groups[0][]? | {"GroupId": .GroupId,
             "Rules": (rules(.IpPermissions; "INBOUND RULES") + rules(.IpPermissionsEgress; "OUTBOUND RULES"))}]
     ' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"

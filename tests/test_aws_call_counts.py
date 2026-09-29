@@ -121,13 +121,44 @@ def test_security_groups_makes_the_same_calls_at_any_group_count(tmp_path):
     small, _ = _run(tmp_path / "small", "security_groups", _security_groups(5))
     large, payload = _run(tmp_path / "large", "security_groups", _security_groups(300))
     assert small == large == 2
-    # Port-less (All traffic) rules are dropped, as the old per-group text read
-    # dropped them -- validators/aws/sg_no_open_inbound_except_https.yaml
-    # documents that blind spot. This pins it until it is fixed deliberately.
     assert payload["results"][0] == {
         "GroupId": "sg-0",
-        "Rules": [{"Direction": "INBOUND RULES", "Protocol": "tcp", "FromPort": 443, "ToPort": 443, "CIDRs": "0.0.0.0/0"}],
+        "Rules": [
+            {"Direction": "INBOUND RULES", "Protocol": "tcp", "FromPort": 443, "ToPort": 443,
+             "CIDRs": "0.0.0.0/0", "IPv6CIDRs": ""},
+            {"Direction": "OUTBOUND RULES", "Protocol": "-1", "FromPort": None, "ToPort": None,
+             "CIDRs": "0.0.0.0/0", "IPv6CIDRs": ""},
+        ],
     }
+
+
+def test_security_groups_keeps_all_traffic_and_ipv6_rules(tmp_path):
+    # Each shape here was missing from the evidence before 0.3.0: an all-traffic
+    # rule (protocol -1, no ports) was dropped outright, and IPv6 ranges were
+    # never read, so a rule open only to ::/0 looked closed.
+    perms = [
+        {"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+        {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "Ipv6Ranges": [{"CidrIpv6": "::/0"}]},
+        {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
+         "IpRanges": [{"CidrIp": "10.0.0.0/8"}, {"CidrIp": "0.0.0.0/0"}],
+         "Ipv6Ranges": [{"CidrIpv6": "2001:db8::/32"}, {"CidrIpv6": "::/0"}]},
+        {"IpProtocol": "icmp", "FromPort": -1, "ToPort": -1, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+        {"IpProtocol": "tcp", "FromPort": 5432, "ToPort": 5432,
+         "UserIdGroupPairs": [{"GroupId": "sg-app"}]},
+    ]
+    _, payload = _run(tmp_path, "security_groups", {
+        "ec2 describe-security-groups": [{"GroupId": "sg-1", "IpPermissions": perms, "IpPermissionsEgress": []}],
+    })
+    rules = payload["results"][0]["Rules"]
+    # Keys are only ever appended: validators match on this order.
+    assert all(list(r) == ["Direction", "Protocol", "FromPort", "ToPort", "CIDRs", "IPv6CIDRs"] for r in rules)
+    assert [(r["Protocol"], r["FromPort"], r["ToPort"], r["CIDRs"], r["IPv6CIDRs"]) for r in rules] == [
+        ("-1", None, None, "0.0.0.0/0", ""),
+        ("tcp", 22, 22, "", "::/0"),
+        ("tcp", 443, 443, "10.0.0.0/8, 0.0.0.0/0", "2001:db8::/32, ::/0"),
+        ("icmp", -1, -1, "0.0.0.0/0", ""),
+        ("tcp", 5432, 5432, "", ""),
+    ]
 
 
 def _iam_roles(n_roles: int) -> dict:

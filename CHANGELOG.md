@@ -307,6 +307,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`aws_security_groups` shows all-traffic and IPv6 rules** (0.2.0 → 0.3.0).
+  A rule with no port range — protocol `-1`, "All traffic" — was dropped from
+  the evidence, so an inbound all-traffic rule from `0.0.0.0/0` and every
+  default allow-all egress rule were invisible. Such rules are now kept, with
+  `FromPort` and `ToPort` set to `null`. IPv6 ranges were never read, so a rule
+  open only to `::/0` looked closed; each rule now carries `IPv6CIDRs` (IPv6
+  ranges joined with `", "`) after `CIDRs`. Existing keys and their order are
+  unchanged.
+
 - **`aws_auto_scaling_high_availability` lists each group's instances.** A
   query error left `Instances` empty for every Auto Scaling group.
 
