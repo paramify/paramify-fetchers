@@ -1,24 +1,45 @@
 validator: sg_inbound_rule_fields_present
 cases:
+
   - name: inbound_rules_readable
     expect: PASS
-    note: the ordinary shape — inbound rules present with their full field run intact
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-aaa","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":443,"CIDRs":"0.0.0.0/0"}]}]}}'
+    note: >
+      the ordinary shape — inbound rules present with their full field run intact
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-aaa","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":443,"CIDRs":"0.0.0.0/0","IPv6CIDRs":""}]}]}}'
+
+  - name: all_traffic_rule_is_readable
+    expect: PASS
+    note: a null-port (protocol -1) inbound rule carries the full field run too
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-iii","Rules":[{"Direction":"INBOUND RULES","Protocol":"-1","FromPort":null,"ToPort":null,"CIDRs":"10.0.0.0/8","IPv6CIDRs":""}]}]}}'
 
   - name: direction_key_renamed
     expect: FAIL
     note: >
       The drift this validator exists to catch. Its partner counts violations and
       would report PASS here; this fails loudly instead.
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-ccc","Rules":[{"Dir":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CIDRs":"0.0.0.0/0"}]}]}}'
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-ccc","Rules":[{"Dir":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CIDRs":"0.0.0.0/0","IPv6CIDRs":""}]}]}}'
 
   - name: cidrs_key_renamed
     expect: FAIL
     note: >
       Renaming any single key in the run breaks the partner's count, so the partner
-      must read the whole sequence rather than probe one key. CIDRs is the last
-      link and the one the violation regex reads for its value.
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-ccc","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CidrIps":"0.0.0.0/0"}]}]}}'
+      must read the whole sequence rather than probe one key.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-ccc","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CidrIps":"0.0.0.0/0","IPv6CIDRs":""}]}]}}'
+
+  - name: ipv6_key_renamed
+    expect: FAIL
+    note: >
+      IPv6CIDRs is the last link and the one the partner reads for ::/0. Renamed,
+      every IPv6 violation would vanish from the partner's count.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-jjj","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":22,"ToPort":22,"CIDRs":"","Ipv6Cidrs":"::/0"}]}]}}'
+
+  - name: evidence_from_before_0_3_0
+    expect: FAIL
+    note: >
+      aws_security_groups before 0.3.0 emitted no IPv6CIDRs key and silently
+      dropped all-traffic rules. That evidence cannot support the partner's claim,
+      so this fails rather than letting a blind PASS through.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-aaa","Rules":[{"Direction":"INBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":443,"CIDRs":"0.0.0.0/0"}]}]}}'
 
   - name: no_inbound_rules_at_all
     expect: FAIL
@@ -27,7 +48,7 @@ cases:
       indistinguishable from one whose Direction key was renamed, and "no bad
       inbound rules" cannot be proved from evidence containing no inbound rules.
       A genuinely locked-down account lands here and needs a human look.
-    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-bbb","Rules":[]},{"GroupId":"sg-hhh","Rules":[{"Direction":"OUTBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":443,"CIDRs":"0.0.0.0/0"}]}]}}'
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":[{"GroupId":"sg-bbb","Rules":[]},{"GroupId":"sg-hhh","Rules":[{"Direction":"OUTBOUND RULES","Protocol":"tcp","FromPort":443,"ToPort":443,"CIDRs":"0.0.0.0/0","IPv6CIDRs":""}]}]}}'
 
   - name: collection_failed_empty_payload
     expect: FAIL

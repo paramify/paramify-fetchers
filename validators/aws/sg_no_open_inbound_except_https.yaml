@@ -3,48 +3,42 @@ name: No Open Inbound Security Group Rules Except HTTPS
 type: AUTOMATED
 role: configuration
 statement: >-
-  No security group inbound rule admits traffic from 0.0.0.0/0 on any port other
-  than exactly 443. Substantiates the "Policy Enforcement Points: Amazon Security
-  Groups" capability claim that "only HTTPS on port 443 is allowed in"
-  (KSI-CNA-RNT; sc-7.5 deny-by-default). It does NOT assert anything about
-  outbound traffic, about IPv6 ::/0, about rules whose source is another security
-  group, or about which groups are internet-exposed — and, because the collecting
-  fetcher drops rules with null ports, it does NOT see "All traffic" (protocol
-  -1) rules at all. See the blind-spot note below.
+  No security group inbound rule admits traffic from 0.0.0.0/0 or ::/0 on any
+  port other than exactly 443. Substantiates the "Policy Enforcement Points:
+  Amazon Security Groups" capability claim that "only HTTPS on port 443 is
+  allowed in" (KSI-CNA-RNT; sc-7.5 deny-by-default). Counts "All traffic"
+  (protocol -1, no ports) and ICMP rules as violations. It does NOT assert
+  anything about outbound traffic, about rules whose source is another security
+  group or a prefix list, or about which groups are internet-exposed. Needs
+  aws_security_groups 0.3.0 or later: earlier versions dropped all-traffic rules
+  and never read IPv6 ranges.
 
 # Counts violations, so it CANNOT guard itself — zero matches is its pass
 # condition. `sg_inbound_rule_fields_present` is its mandatory integrity partner;
 # without it a renamed Direction/FromPort/CIDRs key reads as zero violations.
 #
 # Reads the rule object's fixed key order (Direction, Protocol, FromPort, ToPort,
-# CIDRs), which fetcher.sh emits from a literal jq object construction. The
-# explicit `,\s*"Key":` separators keep the pattern inside one rule object, so a
-# compliant rule adjacent to a violating one cannot splice into a false match.
+# CIDRs, IPv6CIDRs), which fetcher.sh emits from a literal jq object
+# construction and only ever appends to. The explicit `,\s*"Key":` separators
+# keep the pattern inside one rule object, so a compliant rule adjacent to a
+# violating one cannot splice into a false match.
 #
 # The lookahead rejects exactly the one compliant pairing — FromPort 443 AND
-# ToPort 443 — so a range such as 443-8443 from 0.0.0.0/0 is still counted.
-# `\d+|null` matches a null port too, so the validator starts seeing all-traffic
-# rules automatically if the fetcher's null-port drop is fixed.
+# ToPort 443 — so a range such as 443-8443 open to the internet is still
+# counted. Ports match `-?\d+|null`: null is an all-traffic rule (no ports) and
+# -1 is ICMP's "all types", and both are open inbound rules.
 #
-# The CIDRs value is a ", "-joined list, so 0.0.0.0/0 is anchored at a list
-# element boundary: "10.0.0.0/8" and "110.0.0.0/0" both contain the substring
-# 0.0.0.0/0 and must not count.
-regex: '"Direction":\s*"INBOUND RULES"\s*,\s*"Protocol":\s*"[^"]*"\s*,\s*"FromPort":\s*(?!443\s*,\s*"ToPort":\s*443\s*,)(?<from_port>\d+|null)\s*,\s*"ToPort":\s*(?<to_port>\d+|null)\s*,\s*"CIDRs":\s*"(?:[^"]*,\s*)?0\.0\.0\.0/0(?:\s*,[^"]*)?"'
+# The open range is 0.0.0.0/0 in CIDRs OR ::/0 in IPv6CIDRs, one alternation, so
+# a rule open on both counts once. Both lists are ", "-joined, so each is
+# anchored at a list-element boundary: "10.0.0.0/8" and "110.0.0.0/0" contain
+# the substring 0.0.0.0/0, and "2001:db8::/0" contains ::/0, and none of them
+# may count.
+regex: '"Direction":\s*"INBOUND RULES"\s*,\s*"Protocol":\s*"[^"]*"\s*,\s*"FromPort":\s*(?!443\s*,\s*"ToPort":\s*443\s*,)(?<from_port>-?\d+|null)\s*,\s*"ToPort":\s*(?<to_port>-?\d+|null)\s*,\s*"CIDRs":\s*"(?:(?:[^"]*,\s*)?0\.0\.0\.0/0(?:\s*,[^"]*)?"|[^"]*"\s*,\s*"IPv6CIDRs":\s*"(?:[^"]*,\s*)?::/0(?:\s*,[^"]*)?")'
 rules_summary: MATCH_COUNT EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
-
-# KNOWN BLIND SPOT — fetchers/aws/security_groups/fetcher.sh:80 builds each rule
-# with ($f|tonumber?); on a rule with no ports the AWS CLI renders FromPort as
-# the text "None", tonumber? yields empty, and the whole rule object evaporates
-# from the payload. Every protocol "-1" (All traffic) rule is therefore absent
-# from the evidence — including an inbound All-traffic rule from 0.0.0.0/0, the
-# single worst case this validator exists to catch. Until that is fixed, a PASS
-# here means "no open inbound rule with numeric ports", not "no open inbound
-# rule". The same drop is why no outbound rule survives collection, which is why
-# the capability's two outbound claims have no validator.
 
 evidence_sets:
   - EVD-SECURITY-GROUPS

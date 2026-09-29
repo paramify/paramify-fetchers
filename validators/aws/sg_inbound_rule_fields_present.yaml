@@ -4,7 +4,8 @@ type: AUTOMATED
 role: integrity
 statement: >-
   At least one security group inbound rule is present in the evidence with its
-  full field shape intact (Direction, Protocol, FromPort, ToPort, CIDRs), so a
+  full field shape intact (Direction, Protocol, FromPort, ToPort, CIDRs,
+  IPv6CIDRs), so a
   zero count of open inbound rules reflects posture rather than an unreadable
   payload. Not a compliance claim on its own — it says the fields were there to
   count, not that what they say is good.
@@ -17,13 +18,17 @@ statement: >-
 # key such as '"CIDRs":\s*"'. The violation regex depends on the whole ordered
 # run of keys, so renaming any one of them — or reordering them — silently sends
 # its count to zero; only a partner that reads the same sequence fails loudly.
+# That includes IPv6CIDRs: without it here, a renamed IPv6 key would hide every
+# ::/0 violation while this validator kept passing. Evidence from
+# aws_security_groups before 0.3.0 has no IPv6CIDRs key and fails here, which
+# is correct: that evidence could not see all-traffic or IPv6 rules.
 #
 # CORRECT FAILURE ON AN EMPTY TENANT: an account with no inbound rules at all
 # fails this validator. That is intended, not a false alarm — a payload with zero
 # inbound rules is indistinguishable from one whose Direction key was renamed,
 # and "no bad inbound rules" cannot be proved from evidence containing no inbound
 # rules. It needs a human look either way.
-regex: '"Direction":\s*"INBOUND RULES"\s*,\s*"Protocol":\s*"[^"]*"\s*,\s*"FromPort":\s*(?<from_port>\d+|null)\s*,\s*"ToPort":\s*(?<to_port>\d+|null)\s*,\s*"CIDRs":\s*"'
+regex: '"Direction":\s*"INBOUND RULES"\s*,\s*"Protocol":\s*"[^"]*"\s*,\s*"FromPort":\s*(?<from_port>-?\d+|null)\s*,\s*"ToPort":\s*(?<to_port>-?\d+|null)\s*,\s*"CIDRs":\s*"[^"]*"\s*,\s*"IPv6CIDRs":\s*"'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
