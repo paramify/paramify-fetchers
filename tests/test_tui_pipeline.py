@@ -190,3 +190,56 @@ def test_each_panel_picks_the_newest_run_of_its_own_kind(tmp_path):
         assert page._issues_run_dir == str(scans)
 
     _run(body, _write_manifest(tmp_path))
+
+
+def test_enter_in_the_picker_filter_takes_the_highlighted_option(tmp_path):
+    """Up/down move the list's cursor from the filter box; Enter there has to
+    take that option, not do nothing."""
+    picked = []
+
+    async def body(app, pilot):
+        app.push_screen(
+            PickerModal("Pick", [("a", "Alpha assessment"), ("b", "Beta assessment")]),
+            picked.append,
+        )
+        await pilot.pause()
+        await pilot.press("b", "e", "t")
+        await pilot.pause()
+        await pilot.press("enter")  # the only match, nothing highlighted yet
+        await pilot.pause()
+        app.push_screen(
+            PickerModal("Pick", [("a", "Alpha assessment"), ("b", "Beta assessment")]),
+            picked.append,
+        )
+        await pilot.pause()
+        await pilot.press("down", "down", "enter")
+        await pilot.pause()
+
+    _run(body, _write_manifest(tmp_path))
+    assert picked == ["b", "b"]
+
+
+def test_paramify_tab_keys_work_on_a_pipeline_only_manifest(tmp_path, monkeypatch):
+    """No evidence, no scripts: every button but Send is disabled. Focus still has
+    to land in the page, or `i` does nothing."""
+    out = tmp_path / "evidence"
+    issue_run(out, "2026-09-01T00-00-00Z")
+
+    def no_scripts(page):  # what a pipeline manifest sees: nothing to sync
+        from textual.widgets import Button
+        for bid in ("#scripts-preview", "#scripts-submit"):
+            page.query_one(bid, Button).disabled = True
+
+    monkeypatch.setattr(UploadPage, "_rebuild_scripts", no_scripts)
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "t")
+
+    async def body(app, pilot):
+        await pilot.press("5")
+        await pilot.pause()
+        page = app.screen.query_one(UploadPage)
+        assert app.focused is not None and app.focused in page.walk_children()
+        await pilot.press("i")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmModal)
+
+    _run(body, _write_manifest(tmp_path))

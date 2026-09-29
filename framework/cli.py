@@ -354,6 +354,12 @@ def _human_upload_printer(noun: str = "file", log_name: str = "upload_log.json")
             )
         elif kind == "job_complete":
             typer.echo("        " + _job_line(ev))
+        elif kind == "process_skipped":
+            typer.echo(
+                f"        [{style.mark('SKIP')}] nothing new to process"
+                f"{style.env('  assessment=' + ev['assessment_id'])}"
+                f"{style.dim('  ' + ev['reason'])}"
+            )
         elif kind == "upload_complete":
             typer.echo(
                 "\nDone: "

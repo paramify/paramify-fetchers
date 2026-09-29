@@ -940,7 +940,7 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             if not values.get(ASSESSMENT_ID_FIELD):
                 errors.append(
                     f"{entry.use}: no {ASSESSMENT_ID_FIELD} set, so its report cannot be "
-                    f"intaken (fix: paramify assessments select {entry.use})"
+                    f"sent to Paramify (fix: paramify assessments select {entry.use})"
                 )
             # Same reasoning as assessment_id: not a required field (collecting
             # needs no Paramify decision), but the uploader will not guess it.
@@ -1521,7 +1521,7 @@ def issues_upload_preflight(
                 # reports that were correctly wired — and blocked --dry-run from
                 # showing what would have gone.
                 warnings.append(
-                    f"{name}: no assessment_id, so its report cannot be intaken "
+                    f"{name}: no assessment_id, so its report cannot be sent "
                     f"(fix: paramify assessments select {name})"
                 )
 

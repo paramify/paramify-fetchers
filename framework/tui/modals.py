@@ -144,6 +144,21 @@ class PickerModal(FilterListNav, ModalScreen[str]):
     def _choose(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option_id)
 
+    @on(Input.Submitted, "#picker-filter")
+    def _submit(self, event: Input.Submitted) -> None:
+        """Enter in the filter picks the highlighted option — or the only one
+        left. Without this, Enter in the box did nothing, and the cursor that
+        up/down had just moved could only be taken by tabbing into the list."""
+        ol = self.query_one("#picker-list", OptionList)
+        index = ol.highlighted
+        if index is None and ol.option_count == 1:
+            index = 0
+        if index is None:
+            return
+        option = ol.get_option_at_index(index)
+        if not option.disabled:
+            self.dismiss(option.id)
+
     def action_cancel(self) -> None:
         self.dismiss(None)
 

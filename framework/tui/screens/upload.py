@@ -180,10 +180,21 @@ class UploadPage(ButtonRowNav, Vertical):
         self.rebuild()
 
     def focus_default(self) -> None:
+        """Focus the first action that can run, else a panel's table.
+
+        Something inside the page must hold focus or none of its keys fire. A
+        pipeline manifest has no evidence to upload and no scripts to sync, so
+        falling back only to the scripts Preview button — disabled there too —
+        left focus nowhere and `i`, `j` and `C` dead on exactly the manifests
+        they exist for.
+        """
         self.rebuild()
-        submit = self.query_one("#upload-submit", Button)
-        target = submit if not submit.disabled else self.query_one("#scripts-preview", Button)
-        target.focus()
+        for bid in ("#upload-submit", "#issues-submit", "#scripts-preview"):
+            button = self.query_one(bid, Button)
+            if not button.disabled:
+                button.focus()
+                return
+        self.query_one("#issues-summary", DataTable).focus()
 
     @property
     def _busy(self) -> bool:
@@ -623,6 +634,11 @@ class UploadPage(ButtonRowNav, Vertical):
             ))
         elif etype == "job_complete":
             log.write(_job_text(ev))
+        elif etype == "process_skipped":
+            log.write(Text(
+                f"  [SKIP] nothing new to process  assessment={ev.get('assessment_id')}"
+                f"  {ev.get('reason', '')}", style=palette.WARN,
+            ))
         elif etype == "upload_complete":
             self._finalize_upload(ev)
         elif etype == "_upload_failed":
