@@ -48,6 +48,21 @@ schemas and the `paramify` CLI — not the internal code.
   status_page_resource rather than on any component's name, so it holds for any
   customer's page. Collection health stays where it belongs, in the shared
   `validators/common/collection_succeeded.yaml`, which the set is listed on.
+- **Validators for the security awareness training set**
+  (`validators/knowbe4/`). `security_awareness_completion_rate_at_least_90`
+  checks the completion rate is 90% or higher. It is 90 and not 100 because a
+  tenant always carries a rolling tail of past-due users, so a 100% bar would
+  keep the set permanently red. `security_awareness_metrics_measurable` checks
+  that the rate could be measured at all. The set is also listed on
+  `validators/common/collection_succeeded.yaml`.
+- **Validators for the security groups set** (`validators/aws/`).
+  `sg_no_open_inbound_except_https` fails when any inbound rule admits
+  `0.0.0.0/0` or `::/0` on anything but port 443 exactly, counting all-traffic
+  and ICMP rules. `sg_inbound_rule_fields_present` is its integrity partner: it
+  fails when the rule fields it reads are missing, so a renamed key cannot read
+  as "no violations". Both need `aws_security_groups` 0.3.0 or later; evidence
+  from earlier versions fails the integrity check, because it could not show
+  all-traffic or IPv6 rules.
 - **`azure_app_service_plans`** — every App Service plan with its SKU name and
   tier, instance count (`sku.capacity`), zone redundancy and scaling settings,
   plus the web apps and function apps running on it (joined by
