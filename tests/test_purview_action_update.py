@@ -459,7 +459,7 @@ def test_offline_run_against_the_real_export(tmp_path):
         pytest.skip("client export not present on this machine")
     code = run_mod.main([
         "--offline", str(TOOL / "fixtures"), "--workbook", str(workbook),
-        "--out", str(tmp_path), "--dry-run",
+        "--out", str(tmp_path), "--no-run-dir", "--dry-run",
     ])
     assert code == 0
     report = json.loads((tmp_path / "run_report.json").read_text())
@@ -520,7 +520,7 @@ def test_upload_is_refused_with_dry_run(tmp_path):
         pytest.skip("client export not present on this machine")
     code = run_mod.main([
         "--offline", str(TOOL / "fixtures"), "--workbook", str(workbook),
-        "--out", str(tmp_path), "--dry-run", "--upload",
+        "--out", str(tmp_path), "--no-run-dir", "--dry-run", "--upload",
     ])
     assert code == 2
 
@@ -537,7 +537,7 @@ def test_upload_is_opt_in(tmp_path, monkeypatch):
     monkeypatch.setattr(upload_mod, "push", lambda **kw: called.append(kw))
     code = run_mod.main([
         "--offline", str(TOOL / "fixtures"), "--workbook", str(workbook),
-        "--out", str(tmp_path),
+        "--out", str(tmp_path), "--no-run-dir",
     ])
     assert code == 0 and called == []
 
@@ -678,7 +678,10 @@ def _run(tmp_path, *extra):
     workbook = find_workbook()
     if workbook is None:
         pytest.skip("client export not present on this machine")
-    return run_mod.main(["--workbook", str(workbook), "--out", str(tmp_path), *extra])
+    # --no-run-dir so these assert on a fixed path; the run-<ISO> directory has
+    # its own tests below.
+    return run_mod.main(
+        ["--workbook", str(workbook), "--out", str(tmp_path), "--no-run-dir", *extra])
 
 
 def test_full_pipeline_writes_the_workbook_and_uploads_both_artifacts(fake_api, tmp_path):
@@ -726,7 +729,7 @@ def test_a_filename_needing_encoding_is_url_encoded(fake_api, tmp_path):
 
     import run as run_mod
     assert run_mod.main(["--workbook", str(awkward), "--out", str(tmp_path / "o"),
-                         "--upload", "--min-match-rate", "0"]) == 0
+                         "--no-run-dir", "--upload", "--min-match-rate", "0"]) == 0
     assert fake_api.uploads[0]["filename"] == (
         "Export%20Actions%20%28CMMC%20L2%29%20%231.updated.xlsx"
     )
@@ -1395,3 +1398,120 @@ def test_replace_is_a_no_op_when_the_cell_already_holds_the_narrative():
 
     plan = _notes_plan(NARRATIVE, NOTES_REPLACE)
     assert _written(plan, "Implementation Notes") is None
+
+
+# --- run directories and input provenance ---------------------------------- #
+# On a recurring cadence the workbook must come FRESH from Purview each cycle.
+# Re-using the last run's output silently discards anything changed in Purview
+# since — a new action, an edited note, a recorded test.
+
+def test_each_run_gets_its_own_timestamped_directory(fake_api, tmp_path):
+    import run as run_mod
+
+    workbook = find_workbook()
+    if workbook is None:
+        pytest.skip("client export not present on this machine")
+    assert run_mod.main(["--workbook", str(workbook), "--out", str(tmp_path)]) == 0
+    dirs = [d for d in tmp_path.iterdir() if d.is_dir() and d.name.startswith("run-")]
+    assert len(dirs) == 1
+    assert (dirs[0] / "run_report.json").exists()
+    assert (dirs[0] / f"{workbook.stem}.updated.xlsx").exists()
+
+
+def test_a_second_run_does_not_overwrite_the_first(fake_api, tmp_path, monkeypatch):
+    import run as run_mod
+
+    workbook = find_workbook()
+    if workbook is None:
+        pytest.skip("client export not present on this machine")
+
+    class _Clock:
+        """Stands in for `datetime` so two runs land in distinct directories."""
+
+        def __init__(self, moments):
+            self._moments = iter(moments)
+
+        def now(self, tz=None):
+            return next(self._moments)
+
+    monkeypatch.setattr(run_mod, "datetime", _Clock([
+        datetime(2026, 9, 29, 10, 0, 0, tzinfo=timezone.utc),
+        datetime(2026, 10, 2, 10, 0, 0, tzinfo=timezone.utc),
+    ]))
+    for _ in range(2):
+        assert run_mod.main(["--workbook", str(workbook), "--out", str(tmp_path)]) == 0
+
+    names = sorted(d.name for d in tmp_path.iterdir() if d.is_dir())
+    assert names == ["run-2026-09-29T10-00-00Z", "run-2026-10-02T10-00-00Z"]
+    # both cycles' uploaded workbook and report are still on disk
+    assert all((tmp_path / n / "run_report.json").exists() for n in names)
+
+
+def test_the_produced_workbook_is_stamped_as_a_tool_output(fake_api, tmp_path):
+    import run as run_mod
+    import workbook as wb_mod
+
+    workbook = find_workbook()
+    if workbook is None:
+        pytest.skip("client export not present on this machine")
+    run_mod.main(["--workbook", str(workbook), "--out", str(tmp_path), "--no-run-dir"])
+    stamp = wb_mod.provenance_of(tmp_path / f"{workbook.stem}.updated.xlsx")
+    assert stamp and stamp[wb_mod.PROP_TOOL] == "purview_action_update"
+
+
+def test_a_fresh_purview_export_carries_no_stamp():
+    import workbook as wb_mod
+
+    workbook = find_workbook()
+    if workbook is None:
+        pytest.skip("client export not present on this machine")
+    assert wb_mod.provenance_of(workbook) is None
+
+
+def test_feeding_a_previous_output_back_in_is_refused(fake_api, tmp_path, caplog):
+    import run as run_mod
+
+    workbook = find_workbook()
+    if workbook is None:
+        pytest.skip("client export not present on this machine")
+    run_mod.main(["--workbook", str(workbook), "--out", str(tmp_path), "--no-run-dir"])
+    produced = tmp_path / f"{workbook.stem}.updated.xlsx"
+
+    code = run_mod.main(
+        ["--workbook", str(produced), "--out", str(tmp_path / "second"), "--no-run-dir"])
+    assert code == 6
+    assert "FRESH export" in caplog.text
+    assert not (tmp_path / "second").exists()
+
+
+def test_the_chain_guard_can_be_overridden(fake_api, tmp_path):
+    import run as run_mod
+
+    workbook = find_workbook()
+    if workbook is None:
+        pytest.skip("client export not present on this machine")
+    run_mod.main(["--workbook", str(workbook), "--out", str(tmp_path), "--no-run-dir"])
+    produced = tmp_path / f"{workbook.stem}.updated.xlsx"
+    assert run_mod.main(["--workbook", str(produced), "--out", str(tmp_path / "s"),
+                         "--no-run-dir", "--allow-chained-input"]) == 0
+
+
+def test_stamping_changes_no_cell(tmp_path):
+    # The stamp lives in package metadata, never in a sheet Purview reads.
+    import openpyxl
+    import workbook as wb_mod
+
+    workbook = find_workbook()
+    if workbook is None:
+        pytest.skip("client export not present on this machine")
+    book = openpyxl.load_workbook(workbook)
+    wb_mod.stamp_provenance(book, run_id="run-x", source="src.xlsx")
+    out = tmp_path / "stamped.xlsx"
+    book.save(out)
+    a = openpyxl.load_workbook(workbook, data_only=True)
+    b = openpyxl.load_workbook(out, data_only=True)
+    assert a.sheetnames == b.sheetnames
+    assert all(a[s].cell(r, c).value == b[s].cell(r, c).value
+               for s in a.sheetnames
+               for r in range(1, a[s].max_row + 1)
+               for c in range(1, a[s].max_column + 1))

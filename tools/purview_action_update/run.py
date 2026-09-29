@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from datetime import datetime, timezone
 import logging
 import sys
 from pathlib import Path
@@ -120,6 +121,19 @@ def main(argv: list[str] | None = None) -> int:
              + ", ".join(str(c) for c in WORKBOOK_CANDIDATES) + " that exists",
     )
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument(
+        "--no-run-dir", action="store_true",
+        help="write straight into --out instead of a timestamped run-<ISO> "
+             "subdirectory. The subdirectory is the default so each cycle's "
+             "uploaded workbook and report are retained rather than overwritten.",
+    )
+    parser.add_argument(
+        "--allow-chained-input", action="store_true",
+        help="proceed even when the input workbook was produced by a previous run "
+             "of this tool. Refused by default: each cycle must start from a FRESH "
+             "Purview export, or changes made in Purview since the last run are "
+             "silently overwritten.",
+    )
     parser.add_argument(
         "--mode", choices=MODES, default=MODE_FILL_EMPTY,
         help="fill-empty (default) writes only blank cells; sync also replaces "
@@ -248,9 +262,14 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError:
         pass
 
+    run_id = datetime.now(timezone.utc).strftime("run-%Y-%m-%dT%H-%M-%SZ")
+
     if args.workbook is None:
         args.workbook = default_workbook()
         logger.info("using workbook %s", args.workbook)
+
+    if not args.no_run_dir:
+        args.out = args.out / run_id
 
     if args.base_url:
         os.environ["PARAMIFY_API_BASE_URL"] = args.base_url
@@ -332,6 +351,21 @@ def main(argv: list[str] | None = None) -> int:
             audit_status = dict(audit_status, diagnosis=shape["diagnosis"],
                                 events_carrying_changes=shape["events_carrying_changes"])
 
+        stamp = wb_mod.provenance_of(args.workbook)
+        if stamp and not args.allow_chained_input:
+            logger.error(
+                "refusing to run: %s was produced by this tool (%s), not exported "
+                "from Purview.\n"
+                "  Each cycle must start from a FRESH export. Re-using the last "
+                "run's output means any change made in Purview since then -- a new "
+                "improvement action, an edited note, a recorded test -- is invisible "
+                "here and gets overwritten on re-upload.\n"
+                "  Export again from Compliance Manager -> Assessments, or pass "
+                "--allow-chained-input if you are certain.",
+                args.workbook.name, stamp.get(wb_mod.PROP_RUN, "unknown run"),
+            )
+            return 6
+
         book = wb_mod.load(args.workbook)
         sheet = wb_mod.action_sheet(book)
         headers = wb_mod.header_index(sheet)
@@ -377,6 +411,7 @@ def main(argv: list[str] | None = None) -> int:
                 else WRITABLE_WITH_TEST_RESOLUTION
             )
             wb_mod.apply(sheet, headers, plans, writable=writable)
+            wb_mod.stamp_provenance(book, run_id=run_id, source=str(args.workbook))
             out_path = wb_mod.save(book, args.out / f"{args.workbook.stem}.updated.xlsx")
             logger.info("workbook written to %s", out_path)
             # Independent of the planner: check the FILE, not the decisions.

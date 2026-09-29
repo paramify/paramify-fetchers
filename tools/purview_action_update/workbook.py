@@ -95,6 +95,57 @@ def apply(sheet, headers: dict[str, int], plans: list[RowPlan],
     return written
 
 
+#: Custom document properties stamped onto every workbook this tool produces.
+#: They live in the OOXML package metadata, not in any sheet, so Purview's
+#: parser never sees them -- verified: stamping changes zero cells.
+PROP_TOOL = "ParamifyWritebackTool"
+PROP_RUN = "ParamifyWritebackRun"
+PROP_SOURCE = "ParamifyWritebackSource"
+TOOL_ID = "purview_action_update"
+
+
+def stamp_provenance(workbook, *, run_id: str, source: str) -> None:
+    """Mark this file as a tool output, so a later run can recognise it.
+
+    Without a mark, feeding last cycle's output back in as this cycle's input
+    is undetectable -- and that mistake silently uploads a stale snapshot of
+    Purview over whatever has changed there since.
+    """
+    try:
+        from openpyxl.packaging.custom import StringProperty
+
+        for name, value in (
+            (PROP_TOOL, TOOL_ID),
+            (PROP_RUN, run_id),
+            (PROP_SOURCE, source[:240]),
+        ):
+            workbook.custom_doc_props.append(StringProperty(name=name, value=value))
+    except Exception:  # noqa: BLE001 - metadata is a convenience, never fatal
+        pass
+    # Belt and braces: an older openpyxl without custom props still gets this.
+    workbook.properties.keywords = f"{TOOL_ID} {run_id}"
+
+
+def provenance_of(path: Path) -> dict[str, str] | None:
+    """Read the stamp off a workbook, or None if this tool did not write it."""
+    try:
+        book = openpyxl.load_workbook(path, read_only=False)
+    except Exception:  # noqa: BLE001
+        return None
+    found: dict[str, str] = {}
+    try:
+        for prop in book.custom_doc_props.props:
+            if prop.name in (PROP_TOOL, PROP_RUN, PROP_SOURCE):
+                found[prop.name] = str(prop.value)
+    except Exception:  # noqa: BLE001
+        pass
+    if not found:
+        keywords = str(book.properties.keywords or "")
+        if TOOL_ID in keywords:
+            found = {PROP_TOOL: TOOL_ID, PROP_RUN: keywords.replace(TOOL_ID, "").strip()}
+    return found or None
+
+
 def save(workbook, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(path)

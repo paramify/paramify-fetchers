@@ -70,6 +70,8 @@ in the workspace you think you are.
 |---|---|
 | `--workbook` | The Purview export. Defaults to the first that exists of `./ExportActions.xlsx`, `~/Downloads/ExportActions.xlsx`, `~/Desktop/ExportActions.xlsx`; the resolved path is logged |
 | `--out` | Output directory (default `out/purview_action_update`) |
+| `--no-run-dir` | Write straight into `--out` instead of a timestamped `run-<ISO>` subdirectory |
+| `--allow-chained-input` | Proceed even when the input was produced by a previous run (refused by default) |
 | `--dry-run` | Plan and report, write no workbook |
 | `--offline DIR` | Read capabilities and audit events from JSON fixtures — no token, no network |
 | `--print-changes` | List every written cell after the summary |
@@ -158,6 +160,60 @@ its date to a day no test happened. `clear-test` is truthful — a changed
 implementation date makes the earlier test stale — but discards a real result.
 So `skip` is the default, and the other two are the only thing that makes
 `Test Date` and `Test Status` writable at all.
+
+---
+
+## Running on a schedule
+
+**Every cycle starts from a fresh Purview export.** Not from the previous run's
+output — that is refused by default, and the refusal is the important part of
+this design.
+
+The workbook is a *snapshot of Purview*, not a store. Between cycles the client
+may add an improvement action, edit a note, record a test result, or Microsoft
+may update the assessment template. Re-feeding last cycle's output means none
+of that is visible, and re-uploading it overwrites Purview with a stale picture.
+Nothing in the file would reveal the drift.
+
+Every workbook this tool writes is stamped in its OOXML package metadata —
+no sheet, no cell, verified — so a later run recognises its own output and
+stops with exit 6 rather than compounding the error.
+
+```
+purview-writeback/
+├─ inbox/
+│  └─ ExportActions.xlsx              <- drop the fresh export here each cycle
+└─ runs/
+   ├─ run-2026-09-29T14-02-11Z/
+   │  ├─ ExportActions.updated.xlsx   <- upload THIS to Compliance Manager
+   │  └─ run_report.json
+   └─ run-2026-10-02T14-01-58Z/
+      └─ ...
+```
+
+```bash
+python tools/purview_action_update/run.py   --workbook ~/purview-writeback/inbox/ExportActions.xlsx   --out ~/purview-writeback/runs
+```
+
+Each run gets its own `run-<ISO>` directory, so no cycle overwrites the last
+and you keep a dated record of exactly what was uploaded and why. Overwrite the
+file in `inbox/` with each new export; the runs accumulate.
+
+### What can and cannot be automated
+
+Compliance Manager has no API for improvement actions in **either** direction,
+so two steps in the loop are irreducibly manual:
+
+| Step | Automatable |
+|---|---|
+| Export from Compliance Manager | ✗ — no API |
+| Run this tool | ✓ |
+| Re-upload via *Update actions* | ✗ — no API |
+
+A three-day cadence therefore means a person exports, runs, and uploads every
+three days. Scheduling the middle step alone would just re-process a workbook
+that is getting staler with each run — which is the mistake the chain guard
+exists to catch.
 
 ---
 
@@ -312,4 +368,4 @@ diagnoses that case by name.
 | `run.py` | CLI |
 | `fixtures/` | Synthetic capabilities and audit events — no client data |
 
-Tests: `tests/test_purview_action_update.py` — **129, fully offline**.
+Tests: `tests/test_purview_action_update.py` — **136, fully offline**.
