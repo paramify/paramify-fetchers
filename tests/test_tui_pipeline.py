@@ -243,3 +243,20 @@ def test_paramify_tab_keys_work_on_a_pipeline_only_manifest(tmp_path, monkeypatc
         assert isinstance(app.screen, ConfirmModal)
 
     _run(body, _write_manifest(tmp_path))
+
+
+def test_a_on_an_empty_manifest_says_what_to_do(tmp_path):
+    manifest = api.init_manifest()
+    api.set_output_dir(manifest, str(tmp_path / "evidence"))
+    path = tmp_path / "empty.yaml"
+    api.dump_manifest(manifest, path, REPO_ROOT)
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        await pilot.press("A")
+        await pilot.pause()
+        assert not isinstance(app.screen, PickerModal)
+        assert any("issue-report fetcher first" in str(n.message) for n in app._notifications)
+
+    _run(body, path)

@@ -604,6 +604,9 @@ class ManifestPage(ButtonRowNav, Vertical):
         """
         use, m = self._selected, self._manifest
         if not use or m is None:
+            # Silence here read as a broken key on a new, empty manifest.
+            self.notify("Add an issue-report fetcher first (a), then select it.",
+                        severity="warning")
             return
         d = self._descriptors().get(use)
         if not d or d.get("kind") != "issue_report":
