@@ -369,7 +369,23 @@ class MultiPickerModal(ButtonRowNav, FilterListNav, ModalScreen[list]):
 
     @on(Tree.NodeSelected, "#multi-pick-tree")
     def _on_select(self, event: Tree.NodeSelected) -> None:
-        node = event.node
+        self._activate(event.node)
+
+    @on(Input.Submitted, "#multi-pick-filter")
+    def _submit(self, event: Input.Submitted) -> None:
+        # Focus opens in the filter box, so Enter there must do what the subtitle
+        # promises: act on the highlighted row, or on the only fetcher left.
+        # The cursor rests on the platform row after filtering, so a lone match
+        # wins over it; otherwise Enter acts where the arrows put the cursor.
+        tree = self.query_one("#multi-pick-tree", _PickTree)
+        leaves = [n for c in tree.root.children for n in c.children
+                  if n.data not in self._disabled]
+        node = leaves[0] if len(leaves) == 1 else tree.cursor_node
+        if node is None or node is tree.root:
+            return
+        self._activate(node)
+
+    def _activate(self, node) -> None:
         name = node.data
         if name is None:  # a platform row → open/close the dropdown
             node.toggle()
