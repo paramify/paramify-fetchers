@@ -655,6 +655,12 @@ class UploadPage(ButtonRowNav, Vertical):
                 f"  [OK] queued {ev.get('operation')} job {ev.get('job_id')}"
                 f"  assessment={ev.get('assessment_id')}{why}", style=palette.OK,
             ))
+            if ev.get("newer_cycles"):
+                log.write(Text(
+                    f"  [WARN] landed on cycle {ev.get('cycle_name')!r}, the oldest open "
+                    f"cycle; {ev['newer_cycles']} newer cycle(s) show nothing until it is "
+                    f"closed", style=palette.WARN,
+                ))
         elif etype == "job_status":
             self._set_banner(Text(
                 f"job {ev.get('job_id')} {ev.get('status')} on {ev.get('assessment_id')}",
