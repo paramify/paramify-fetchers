@@ -887,3 +887,120 @@ def test_intake_without_an_artifact_id_is_an_error():
     client.session = session
     with pytest.raises(uploader.ParamifyError, match="no artifact id"):
         client.intake(ASSESSMENT, "scan.csv", RAW_CSV, "text/csv", {})
+
+
+# --------------------------------------------------------------------------- #
+# Path containment: the index is untrusted input
+# --------------------------------------------------------------------------- #
+
+SECRET = b"API_TOKEN=hunter2-do-not-upload\n"
+
+
+def _outside_file(tmp_path):
+    outside = tmp_path / "outside" / "secrets.env"
+    outside.parent.mkdir()
+    outside.write_bytes(SECRET)
+    return outside
+
+
+def _assert_never_sent(client):
+    """0 bytes of the outside file reached the (mock) Paramify."""
+    assert not any(SECRET in item["content"] for item in client.sent)
+
+
+def test_a_symlink_to_a_file_outside_the_run_is_not_uploaded(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}, {"name": "ok.csv"}])
+    link = run_dir / "issue-reports" / "scan.csv"
+    link.unlink()
+    link.symlink_to(_outside_file(tmp_path))
+
+    client = FakeClient()
+    summary = run_upload(run_dir, client)
+
+    _assert_never_sent(client)
+    assert [s["file"] for s in client.sent] == ["ok.csv"], "the other report still goes"
+    outcomes = {r["file"]: r for r in summary["results"]}
+    assert outcomes["scan.csv"]["outcome"] == "error"
+    assert "symlink" in outcomes["scan.csv"]["reason"]
+    assert outcomes["ok.csv"]["outcome"] == "uploaded"
+
+
+def test_a_symlink_never_reaches_the_http_layer(tmp_path):
+    """Same property one level down: the real client's session sees no POST."""
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    link = run_dir / "issue-reports" / "scan.csv"
+    link.unlink()
+    link.symlink_to(_outside_file(tmp_path))
+
+    session = FakeSession()
+    real = uploader.ParamifyClient("t", "https://example.test/api/v0")
+    real.session = session
+    original = uploader.ParamifyClient
+    uploader.ParamifyClient = lambda *a, **k: real
+    try:
+        uploader.upload_run(run_dir, token="t", base_url="https://example.test/api/v0")
+    finally:
+        uploader.ParamifyClient = original
+    assert session.posts == []
+
+
+def _point_index_at(run_dir, target):
+    index_path = run_dir / "issue-reports" / "_issue_reports.json"
+    index = json.loads(index_path.read_text())
+    index["reports"][0]["file"] = target
+    index_path.write_text(json.dumps(index))
+
+
+def test_an_index_entry_that_climbs_out_of_issue_reports_is_not_read(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    outside = _outside_file(tmp_path)
+    climbing = "../../outside/secrets.env"
+    assert (run_dir / "issue-reports" / climbing).resolve() == outside.resolve()
+    _point_index_at(run_dir, climbing)
+
+    client = FakeClient()
+    summary = run_upload(run_dir, client)
+    assert client.sent == []
+    assert summary["results"][0]["outcome"] == "error"
+    assert "outside" in summary["results"][0]["reason"]
+
+
+def test_an_absolute_index_entry_is_not_read(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    _point_index_at(run_dir, str(_outside_file(tmp_path)))
+    client = FakeClient()
+    summary = run_upload(run_dir, client)
+    assert client.sent == []
+    assert summary["results"][0]["outcome"] == "error"
+
+
+def test_a_symlinked_directory_is_not_followed(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    outside = _outside_file(tmp_path)
+    (run_dir / "issue-reports" / "linked").symlink_to(outside.parent, target_is_directory=True)
+    _point_index_at(run_dir, "linked/secrets.env")
+
+    client = FakeClient()
+    run_upload(run_dir, client)
+    assert client.sent == []
+
+
+def test_a_refused_path_blocks_the_close(tmp_path):
+    """An unreadable report means the run is incomplete: never PROCESS_CLOSE."""
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}, {"name": "ok.csv"}],
+                       close_cycle="after_run")
+    link = run_dir / "issue-reports" / "scan.csv"
+    link.unlink()
+    link.symlink_to(_outside_file(tmp_path))
+    client = FakeClient()
+    run_upload(run_dir, client)
+    assert [p["operation"] for p in client.processed] == ["PROCESS"]
+
+
+def test_a_symlink_is_refused_in_a_dry_run_too(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    link = run_dir / "issue-reports" / "scan.csv"
+    link.unlink()
+    link.symlink_to(_outside_file(tmp_path))
+    summary = run_upload(run_dir, FakeClient(), dry_run=True)
+    assert summary["results"][0]["outcome"] == "error"

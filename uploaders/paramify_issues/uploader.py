@@ -424,6 +424,35 @@ def read_sidecar(run_dir: Path) -> Optional[dict]:
     return data
 
 
+def safe_report_path(run_dir: Path, name: str) -> Tuple[Optional[Path], Optional[str]]:
+    """(path, None) for a report the uploader may read, else (None, why not).
+
+    The index names each file, and the index is just a JSON file on disk: an
+    edited or hostile one could name `../../.env`, an absolute path, or a symlink
+    planted in issue-reports/ and have its target posted to Paramify as a "scan
+    report". So the resolved path must sit inside <run>/issue-reports/ and the
+    file itself must not be a symlink. Nothing is opened until this passes.
+    """
+    base = (Path(run_dir) / ISSUE_REPORTS_DIR).resolve()
+    candidate = base / name
+    try:
+        if candidate.is_symlink():
+            return None, "refusing to read a symlink (reports must be regular files)"
+        resolved = candidate.resolve()
+    except (OSError, RuntimeError, ValueError) as e:
+        return None, f"cannot resolve the report path ({e})"
+    if base not in resolved.parents:
+        return None, f"path resolves outside {ISSUE_REPORTS_DIR}/ (refusing to read it)"
+    return resolved, None
+
+
+def _read_report_bytes(path: Path) -> bytes:
+    """Read a vetted report without following a symlink swapped in since the check."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as fh:
+        return fh.read()
+
+
 def _log_key(record: dict, assessment_id: str) -> str:
     """Dedup identity: this file, from this run, into this assessment.
 
@@ -846,7 +875,13 @@ def upload_run(
                     })
                     continue
 
-                path = run_dir / ISSUE_REPORTS_DIR / name
+                path, unsafe = safe_report_path(run_dir, name)
+                if path is None:
+                    logger.error("%s: %s; skipped, not read", name, unsafe)
+                    errors += 1
+                    files_ok = False
+                    add_result({"file": name, "outcome": "error", "reason": unsafe})
+                    continue
                 if not path.is_file():
                     logger.error("%s: listed in the index but missing from disk", name)
                     errors += 1
@@ -896,7 +931,7 @@ def upload_run(
                 # report. Never json.load/dump a .json report here: re-serializing
                 # would reorder keys and rewrite numbers, and the file is supposed
                 # to be the vendor's own artifact.
-                content = path.read_bytes()
+                content = _read_report_bytes(path)
                 artifact = client.intake(aid, name, content, content_type, meta)
                 artifact_id = artifact.get("id")
                 uploaded += 1
