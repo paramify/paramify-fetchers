@@ -325,3 +325,55 @@ def test_finishing_a_send_does_not_pull_focus_off_another_tab(tmp_path):
         assert app.focused not in page.walk_children()
 
     _run(body, _write_manifest(tmp_path))
+
+
+def _info_cell(page, use):
+    from textual.widgets import DataTable
+
+    dt = page.query_one("#run-status", DataTable)
+    return str(dt.get_cell(page._rows[use], page._cols[3]))
+
+
+def test_run_tab_shows_why_an_issue_report_fetcher_failed(tmp_path):
+    reason = "Wiz rejected the client credentials (HTTP 401)"
+
+    async def body(app, pilot):
+        page = app.screen.query_one(RunPage)
+        page._handle_event({"event": "run_start", "fetchers": ["wiz_issues_report"],
+                            "run_id": "r", "run_dir": "d"})
+        page._handle_event({"event": "fetcher_start", "fetcher": "wiz_issues_report", "targets": 1})
+        page._handle_event({"event": "fetcher_result", "fetcher": "wiz_issues_report",
+                            "exit_code": 1, "duration_sec": 1, "outputs": [],
+                            "error": reason, "error_code": "auth_failed"})
+        await pilot.pause()
+        assert _info_cell(page, "wiz_issues_report") == reason
+
+    _run(body, _write_manifest(tmp_path))
+
+
+def test_a_successful_fetcher_has_no_reason_in_the_info_column(tmp_path):
+    async def body(app, pilot):
+        page = app.screen.query_one(RunPage)
+        page._handle_event({"event": "run_start", "fetchers": ["f"], "run_id": "r", "run_dir": "d"})
+        page._handle_event({"event": "fetcher_start", "fetcher": "f", "targets": 1})
+        page._handle_event({"event": "fetcher_result", "fetcher": "f", "exit_code": 0,
+                            "duration_sec": 1, "outputs": ["issue-reports/x.csv"]})
+        await pilot.pause()
+        assert _info_cell(page, "f") == ""
+
+    _run(body, _write_manifest(tmp_path))
+
+
+def test_a_fanout_failure_keeps_the_counts_and_adds_the_reason(tmp_path):
+    async def body(app, pilot):
+        page = app.screen.query_one(RunPage)
+        page._handle_event({"event": "run_start", "fetchers": ["f"], "run_id": "r", "run_dir": "d"})
+        page._handle_event({"event": "fetcher_start", "fetcher": "f", "targets": 2, "fanout": True})
+        page._handle_event({"event": "fetcher_result", "fetcher": "f", "exit_code": 0,
+                            "duration_sec": 1, "outputs": []})
+        page._handle_event({"event": "fetcher_result", "fetcher": "f", "exit_code": 1,
+                            "duration_sec": 1, "outputs": [], "error": "scanner down"})
+        await pilot.pause()
+        assert _info_cell(page, "f") == "1/2 ok  · 1 failed  · scanner down"
+
+    _run(body, _write_manifest(tmp_path))
