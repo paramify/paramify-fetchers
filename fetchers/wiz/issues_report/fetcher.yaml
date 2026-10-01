@@ -1,0 +1,75 @@
+name: wiz_issues_report
+version: 0.2.0
+description: >-
+  Exports the Wiz Issues report (configuration findings: open, in progress and
+  resolved) as Wiz's own CSV, via the Wiz Reports API, for a Paramify
+  VULNERABILITY assessment pipeline. Full export every run; no delta mode.
+category: wiz
+kind: issue_report
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: csv
+  path: wiz_issues_report.csv
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account client ID (read:reports, create:reports, update:reports, read:issues, read:threat_issues)
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account client secret
+
+config_schema:
+  auth_url:
+    type: string
+    required: true
+    env: WIZ_AUTH_URL
+    description: Wiz OAuth token endpoint, e.g. https://auth.app.wiz.io/oauth/token (Wiz for Gov - https://auth.app.wiz.us/oauth/token)
+  api_endpoint:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT
+    description: Wiz GraphQL endpoint for the tenant, e.g. https://api.us17.app.wiz.io/graphql
+  report_name:
+    type: string
+    required: false
+    env: WIZ_REPORT_NAME
+    description: Name of the Wiz report this fetcher owns. Found by name, created if missing. Default Paramify-Wiz-Issues.
+  report_id:
+    type: string
+    required: false
+    env: WIZ_REPORT_ID
+    description: Use this existing Wiz report instead of finding one by name.
+  project_id:
+    type: string
+    required: false
+    env: WIZ_PROJECT_ID
+    description: Wiz project to report on. Default "*" (all projects).
+  poll_seconds:
+    type: string
+    required: false
+    env: WIZ_REPORT_POLL_SECONDS
+    description: Seconds between report-status checks. Default 20.
+  max_wait_seconds:
+    type: string
+    required: false
+    env: WIZ_REPORT_MAX_WAIT
+    description: Give up if the report run is not ready after this long. Default 1500 (inside runtime.timeout 1800).
+  allow_empty:
+    type: string
+    required: false
+    env: WIZ_ALLOW_EMPTY
+    description: >-
+      "true" to accept a report with a header and no rows. Off by default: an
+      empty report processed with a cycle close resolves every open issue.
+
+issue_report:
+  assessment_type: VULNERABILITY
+  title: Wiz Issues
