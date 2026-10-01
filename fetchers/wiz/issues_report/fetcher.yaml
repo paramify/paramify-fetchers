@@ -41,7 +41,7 @@ config_schema:
     type: string
     required: false
     env: WIZ_REPORT_NAME
-    description: Name of the Wiz report this fetcher owns. Found by name, created if missing. Default Paramify-Wiz-Issues.
+    description: Name of the Wiz report this fetcher owns. Found by name, created if missing. Default Paramify-Wiz-Issues, or Paramify-Wiz-Issues-<first 8 chars of project_id> when project_id is set, so a different project gets its own report.
   report_id:
     type: string
     required: false
