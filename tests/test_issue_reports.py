@@ -953,3 +953,45 @@ def test_a_healthy_sidecar_is_never_marked_cannot_close(tmp_path):
     _record(tmp_path, "a.csv")
     _record(tmp_path, "b.csv")
     assert "cannot_close" not in read_index(tmp_path)
+
+
+def test_run_emits_the_recorded_error_for_a_failed_issue_report(tmp_path):
+    """The Run tab's info column reads this: the reason the fetcher reported via
+    $FETCHER_STATUS_FILE, with its code, on the fetcher_result event."""
+    write_issue_report_fetcher(tmp_path, exit_code=1, write_file=False)
+    fetcher_py = tmp_path / "fetchers" / "testcat" / "vuln_scan" / "fetcher.py"
+    fetcher_py.write_text(
+        "import json, os\n"
+        "open(os.environ['FETCHER_STATUS_FILE'], 'w').write(json.dumps("
+        "{'error': 'Wiz rejected the client credentials (HTTP 401)', 'code': 'auth_failed'}))\n"
+        "raise SystemExit(1)\n"
+    )
+    events = []
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [{"use": "t_vuln_scan"}]}}
+    api.run(manifest, tmp_path, on_event=events.append)
+    [result] = [e for e in events if e["event"] == "fetcher_result"]
+    assert result["exit_code"] == 1
+    assert result["error"] == "Wiz rejected the client credentials (HTTP 401)"
+    assert result["error_code"] == "auth_failed"
+
+
+def test_run_falls_back_to_the_last_stderr_line_when_no_status_was_reported(tmp_path):
+    write_issue_report_fetcher(tmp_path, exit_code=1, write_file=False)
+    (tmp_path / "fetchers" / "testcat" / "vuln_scan" / "fetcher.py").write_text(
+        "import sys\nprint('starting', file=sys.stderr)\nprint('boom: no route to host', file=sys.stderr)\n"
+        "raise SystemExit(1)\n"
+    )
+    events = []
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [{"use": "t_vuln_scan"}]}}
+    api.run(manifest, tmp_path, on_event=events.append)
+    [result] = [e for e in events if e["event"] == "fetcher_result"]
+    assert result["error"] == "boom: no route to host"
+
+
+def test_a_successful_run_event_carries_no_error(tmp_path):
+    write_issue_report_fetcher(tmp_path)
+    events = []
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [{"use": "t_vuln_scan"}]}}
+    api.run(manifest, tmp_path, on_event=events.append)
+    [result] = [e for e in events if e["event"] == "fetcher_result"]
+    assert "error" not in result
