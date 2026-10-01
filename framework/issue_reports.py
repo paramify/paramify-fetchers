@@ -353,7 +353,7 @@ def _write_index(run_dir: Path, run_id: str, added: List[dict], invocation: dict
                 f"starts from the next invocation, so it cannot show the whole run "
                 f"succeeded"
             )
-            logger.error("issue_reports: %s — the cycle will not be closed", reason)
+            logger.error("issue_reports: %s; the cycle will not be closed", reason)
             index[CANNOT_CLOSE_FIELD] = reason
 
     index["schema_version"] = SIDECAR_SCHEMA_VERSION
