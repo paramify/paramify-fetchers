@@ -1,6 +1,6 @@
 name: aws_security_groups
-version: 0.2.0
-description: Lists EC2 security groups and per-group inbound/outbound rules (protocol, port range, CIDRs).
+version: 0.3.0
+description: Lists EC2 security groups and per-group inbound/outbound rules (protocol, port range, IPv4 and IPv6 CIDRs), including all-traffic rules that have no port range.
 category: aws
 
 supports_targets: true
