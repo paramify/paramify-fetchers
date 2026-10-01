@@ -38,6 +38,7 @@ from wiz_pipeline_client import WizClient, WizError, check_download_url  # noqa:
 logger = logging.getLogger("wiz_issues_report")
 
 OUTPUT_NAME = "wiz_issues_report.csv"
+DEFAULT_REPORT_NAME = "Paramify-Wiz-Issues"
 POLL_SECONDS = float(os.environ.get("WIZ_REPORT_POLL_SECONDS", "20"))
 MAX_WAIT_SECONDS = float(os.environ.get("WIZ_REPORT_MAX_WAIT", "1500"))
 
@@ -71,6 +72,18 @@ REPORT_STATUS = """
 query ReportDownloadUrl($reportId: ID!) {
   report(id: $reportId) { lastRun { url status runAt } }
 }"""
+
+
+def default_report_name(project_id: str) -> str:
+    """Report name used when WIZ_REPORT_NAME is not set.
+
+    A report is found by name and keeps the projectId it was created with
+    (updateReport does not change it). So the name has to carry the project:
+    otherwise changing project_id would silently reuse the all-projects report.
+    """
+    if project_id and project_id != "*":
+        return f"{DEFAULT_REPORT_NAME}-{project_id[:8]}"
+    return DEFAULT_REPORT_NAME
 
 
 def issue_params() -> dict:
@@ -172,8 +185,8 @@ def main() -> int:
     out_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / OUTPUT_NAME
-    name = os.environ.get("WIZ_REPORT_NAME", "").strip() or "Paramify-Wiz-Issues"
     project = os.environ.get("WIZ_PROJECT_ID", "").strip() or "*"
+    name = os.environ.get("WIZ_REPORT_NAME", "").strip() or default_report_name(project)
     try:
         wiz = WizClient.from_env()
         wiz.authenticate()
@@ -196,7 +209,8 @@ def main() -> int:
         report_failure("Wiz report has a header and no rows; set allow_empty=true if "
                        "zero issues is genuinely expected", "partial_failure")
         return 1
-    logger.info("Saved %s (%d bytes) from Wiz report %s", dest, size, report_id)
+    logger.info("Saved %s (%d bytes) from Wiz report %s (name=%r, project_id=%s)",
+                dest, size, report_id, name, project)
     return 0
 
 
