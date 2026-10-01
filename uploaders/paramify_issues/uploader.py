@@ -231,6 +231,16 @@ class ParamifyClient:
         _raise_for(r, "close", assessment_id, (200, 202))
         return _json(r)
 
+    def list_cycles(self, assessment_id: str) -> List[Dict]:
+        """The assessment's cycles (id, name, startDate, ...). Read-only."""
+        r = self.session.get(
+            f"{self.base_url}/assessment/{assessment_id}/cycle", timeout=self.timeout
+        )
+        _raise_for(r, "list cycles", assessment_id, (200,))
+        body = _json(r)
+        cycles = body.get("cycles") if isinstance(body, dict) else None
+        return cycles if isinstance(cycles, list) else []
+
     def get_job(self, job_id: str) -> Dict:
         r = self.session.get(f"{self.base_url}/pipeline-jobs/{job_id}", timeout=self.timeout)
         _raise_for(r, f"read job {job_id}", None, (200,))
@@ -305,9 +315,13 @@ def _raise_for(resp, what: str, assessment_id: Optional[str], ok: Tuple[int, ...
             f"Paramify. {msg}"
         )
     if code == 409 and assessment_id:
+        # 409 covers more than "no cycle in progress": work aimed at a cycle other
+        # than the in-progress one is refused the same way. Paramify's own message
+        # says which, so it leads.
         raise NoCycleInProgress(
-            f"{what}: assessment {assessment_id} has no cycle in progress (HTTP 409). "
-            f"{msg}"
+            f"{what} refused for assessment {assessment_id} (HTTP 409): {msg}. "
+            f"Work can only be queued on the in-progress cycle (the oldest open one), "
+            f"or there is no cycle in progress."
         )
     raise ParamifyError(f"{what} failed (HTTP {code}): {msg}")
 
@@ -347,6 +361,32 @@ def job_summary(job: Dict) -> Dict:
         "blocked_by": job.get("blockedByJobId"),
         "cycle_id": job.get("cycleId"),
     }
+
+
+def cycle_placement(client: "ParamifyClient", aid: str, cycle_id: Optional[str]) -> Dict:
+    """Name the cycle a job landed on, and how many cycles start after it.
+
+    Uploads land on the pipeline's oldest open cycle, not the newest, so an
+    assessment with old cycles left open takes every new scan into one of them,
+    and the issues never show on the cycle people look at. Best effort: the
+    lookup failing never fails the upload.
+    """
+    if not cycle_id:
+        return {}
+    try:
+        cycles = client.list_cycles(aid)
+    except Exception as e:  # noqa: BLE001 - informational only
+        logger.debug("assessment %s: could not list cycles: %s", aid, e)
+        return {}
+    mine = next((c for c in cycles if c.get("id") == cycle_id), None)
+    if mine is None:
+        return {}
+    def order(c: Dict) -> Tuple[str, str]:
+        # Several cycles can share a start date; creation time breaks the tie.
+        return (c.get("startDate") or "", c.get("createdAt") or "")
+
+    newer = [c for c in cycles if order(c) > order(mine)]
+    return {"cycle_name": mine.get("name"), "newer_cycles": len(newer)}
 
 
 def is_blocked(job: Dict) -> bool:
@@ -1060,6 +1100,7 @@ def upload_run(
             "operation": operation,
             "artifact_ids": pending,
             "queued_at": _utc_now(),
+            **cycle_placement(client, aid, job.get("cycleId")),
         }
         assessment_jobs.append(job_state)
         save_log()
@@ -1070,7 +1111,10 @@ def upload_run(
         )
         _emit(on_event, {"event": "job_queued", "assessment_id": aid,
                          "job_id": job_state["job_id"], "operation": operation,
-                         "artifacts": len(pending), "close_skipped": close_skipped})
+                         "artifacts": len(pending), "close_skipped": close_skipped,
+                         "cycle_id": job_state.get("cycle_id"),
+                         "cycle_name": job_state.get("cycle_name"),
+                         "newer_cycles": job_state.get("newer_cycles", 0)})
 
         if wait:
             job_state = _wait_and_record(client, aid, job_state, wait_timeout, on_event)

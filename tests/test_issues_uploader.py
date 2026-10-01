@@ -100,8 +100,10 @@ class FakeClient:
     """
 
     def __init__(self, *, fail_files=(), raise_on=None, process_error=None,
-                 job_statuses=None, job_extra=None, id_suffix=""):
+                 job_statuses=None, job_extra=None, id_suffix="", cycles=None):
         self.id_suffix = id_suffix
+        # None: the cycle lookup fails, as it does for a key that cannot read cycles.
+        self.cycles = cycles
         self.fail_files = set(fail_files)
         self.raise_on = raise_on or {}
         self.process_error = process_error
@@ -129,6 +131,11 @@ class FakeClient:
                                "artifact_ids": list(artifact_ids), "operation": operation})
         return {"id": f"job-{len(self.processed)}", "status": "QUEUED",
                 "type": operation, "cycleId": "cyc-1"}
+
+    def list_cycles(self, assessment_id):
+        if self.cycles is None:
+            raise uploader.AccessDenied("HTTP 403 on list cycles")
+        return self.cycles
 
     def get_job(self, job_id):
         i = min(self.polls, len(self.job_statuses) - 1)
@@ -805,7 +812,7 @@ def test_error_message_falls_back_to_body_text_on_non_json():
     (404, "AssessmentRefused", "not found"),
     (401, "AccessDenied", "PIPELINE_INTAKE"),
     (403, "AccessDenied", "PIPELINE_CLOSE"),
-    (409, "NoCycleInProgress", "no cycle in progress"),
+    (409, "NoCycleInProgress", "refused .* \\(HTTP 409\\): x"),
     (501, "IntakeNotEnabled", "not enabled"),
     (500, "ParamifyError", "failed"),
 ])
@@ -1048,3 +1055,57 @@ def test_a_real_upload_of_a_cannot_close_run_sends_process_not_close(tmp_path):
     client = FakeClient()
     run_upload(run_dir, client)
     assert [p["operation"] for p in client.processed] == ["PROCESS"]
+
+
+# --------------------------------------------------------------------------- #
+# Cycle placement: uploads land on the oldest open cycle, not the newest
+# --------------------------------------------------------------------------- #
+
+OLD_CYCLE = {"id": "cyc-1", "name": "June 2026", "startDate": "2026-06-01T00:00:00.000Z"}
+NEW_CYCLE = {"id": "cyc-2", "name": "October 1-31, 2026", "startDate": "2026-10-01T00:00:00.000Z"}
+
+
+def test_landing_on_an_old_cycle_is_named(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    events = []
+    summary = run_upload(run_dir, FakeClient(cycles=[NEW_CYCLE, OLD_CYCLE]),
+                         on_event=events.append)
+    queued = next(e for e in events if e["event"] == "job_queued")
+    assert queued["cycle_name"] == "June 2026"
+    assert queued["newer_cycles"] == 1
+    assert summary["assessments"][0]["job"]["cycle_name"] == "June 2026"
+    log = json.loads((run_dir / "issue-reports" / "_intake_log.json").read_text())
+    assert log["jobs"][ASSESSMENT][0]["newer_cycles"] == 1
+
+
+def test_landing_on_the_newest_cycle_warns_nothing(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    events = []
+    run_upload(run_dir, FakeClient(cycles=[OLD_CYCLE]), on_event=events.append)
+    queued = next(e for e in events if e["event"] == "job_queued")
+    assert queued["cycle_name"] == "June 2026"
+    assert queued["newer_cycles"] == 0
+
+
+def test_a_failed_cycle_lookup_never_fails_the_upload(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    events = []
+    summary = run_upload(run_dir, FakeClient(cycles=None), on_event=events.append)
+    assert summary["ok"]
+    queued = next(e for e in events if e["event"] == "job_queued")
+    assert queued["cycle_name"] is None and queued["newer_cycles"] == 0
+
+
+
+def test_cycles_sharing_a_start_date_are_ordered_by_creation(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    same_day = [
+        {"id": "cyc-1", "name": "October 1-31, 2026", "startDate": "2026-10-01T00:00:00.000Z",
+         "createdAt": "2026-10-01T22:03:01.000Z"},
+        {"id": "cyc-2", "name": "October 1-31, 2026", "startDate": "2026-10-01T00:00:00.000Z",
+         "createdAt": "2026-10-01T22:47:04.000Z"},
+    ]
+    events = []
+    run_upload(run_dir, FakeClient(cycles=same_day), on_event=events.append)
+    queued = next(e for e in events if e["event"] == "job_queued")
+    assert queued["newer_cycles"] == 1

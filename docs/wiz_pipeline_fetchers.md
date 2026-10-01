@@ -85,7 +85,8 @@ see.** The cycle only sees what these files contain, so scope matters:
 - Uploads land on the assessment's **oldest open cycle**, and Paramify only
   processes or closes that cycle (naming a newer one is refused with HTTP 409). An
   assessment with old cycles left open takes each scan into the oldest of them,
-  and newer cycles show nothing until it is closed. See
+  and newer cycles show nothing until it is closed. The upload prints the cycle
+  it landed on and warns when newer ones exist. See
   [pipelines.md](pipelines.md#how-cycles-work).
 
 ## Verified vs unverified against real Wiz
