@@ -582,6 +582,9 @@ def plan_assessments(index: dict, overrides: Optional[Dict] = None) -> Dict[str,
         return groups.setdefault(aid, {
             "records": [], "invocations": [] if "invocations" in index else None,
             "policies": set(), "name": None,
+            # Why the run's index cannot prove the run was complete (see
+            # framework/issue_reports.CANNOT_CLOSE_FIELD), or None.
+            "cannot_close": index.get("cannot_close"),
         })
 
     for record in index.get("reports") or []:
@@ -615,6 +618,8 @@ def close_decision(
     policies = group["policies"]
     if policies != {CLOSE_AFTER_RUN}:
         return PROCESS, None if policies == {"never"} else "close_cycle is not after_run for every fetcher"
+    if group.get("cannot_close"):
+        return PROCESS, f"close skipped: {group['cannot_close']}"
     invocations = group["invocations"]
     if invocations is None:
         return PROCESS, (

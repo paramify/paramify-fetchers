@@ -1004,3 +1004,47 @@ def test_a_symlink_is_refused_in_a_dry_run_too(tmp_path):
     link.symlink_to(_outside_file(tmp_path))
     summary = run_upload(run_dir, FakeClient(), dry_run=True)
     assert summary["results"][0]["outcome"] == "error"
+
+
+# --------------------------------------------------------------------------- #
+# A sidecar that had to be restarted can never close the cycle
+# --------------------------------------------------------------------------- #
+
+def _flag_cannot_close(run_dir, reason="the earlier _issue_reports.json was unreadable"):
+    path = run_dir / "issue-reports" / "_issue_reports.json"
+    index = json.loads(path.read_text())
+    index["cannot_close"] = reason
+    path.write_text(json.dumps(index))
+
+
+def test_close_decision_refuses_a_run_flagged_cannot_close():
+    group = {"policies": {"after_run"}, "invocations": [{"status": "success"}],
+             "records": [], "name": None, "cannot_close": "index restarted"}
+    operation, why = uploader.close_decision(group, files_ok=True)
+    assert operation == "PROCESS"
+    assert "close skipped" in why and "index restarted" in why
+
+
+def test_corrupt_sidecar_dry_run_shows_the_close_skipped(tmp_path):
+    """End to end: framework restarts a corrupt sidecar -> uploader previews PROCESS."""
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}], close_cycle="after_run")
+    # Control: a healthy after_run run would close.
+    events = []
+    run_upload(run_dir, FakeClient(), dry_run=True, on_event=events.append)
+    assert [e["operation"] for e in events if e["event"] == "process_plan"] == ["PROCESS_CLOSE"]
+
+    _flag_cannot_close(run_dir)
+    events = []
+    client = FakeClient()
+    run_upload(run_dir, client, dry_run=True, on_event=events.append)
+    [plan] = [e for e in events if e["event"] == "process_plan"]
+    assert plan["operation"] == "PROCESS"
+    assert "close skipped" in (plan.get("close_skipped") or "")
+
+
+def test_a_real_upload_of_a_cannot_close_run_sends_process_not_close(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}], close_cycle="after_run")
+    _flag_cannot_close(run_dir)
+    client = FakeClient()
+    run_upload(run_dir, client)
+    assert [p["operation"] for p in client.processed] == ["PROCESS"]
