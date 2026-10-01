@@ -209,7 +209,7 @@ class UploadPage(ButtonRowNav, Vertical):
         """Put focus back in this page after an operation, if it fell out.
 
         Starting a send disables every button, and the one that held focus
-        takes it with it — focus drops to the tab strip, where `i`, `j` and `C`
+        takes it with it, so focus drops to the tab strip, where `i`, `j` and `C`
         (this page's keys) do nothing until the user presses 5 again. So when an
         operation ends, return focus to the page. Left alone when the user has
         meanwhile moved to another tab or a modal is open, or when focus is
