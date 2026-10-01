@@ -1,14 +1,15 @@
 # Wiz pipeline fetchers
 
-Two issue-report fetchers collect Wiz data for a Paramify VULNERABILITY assessment
-pipeline. Both write a CSV to `<run>/issue-reports/`; `paramify issues upload`
-(`uploaders/paramify_issues`) sends it into the assessment. General background is
+Two issue-report fetchers collect Wiz data for Paramify assessment pipelines: Issues
+(configuration findings) for a CONFIGURATION assessment, vulnerability findings for
+a VULNERABILITY assessment. Both write a CSV to `<run>/issue-reports/`;
+`paramify issues upload` (`uploaders/paramify_issues`) sends it into the assessment. General background is
 in [issue_report_fetchers.md](issue_report_fetchers.md).
 
-| Fetcher | What it exports | How |
-|---|---|---|
-| `wiz_issues_report` | Issues (configuration findings: open, in progress, resolved) as Wiz's own CSV | Wiz Reports API: find or create a report, update its parameters, rerun, wait, download |
-| `wiz_vulnerability_findings` | Every vulnerability finding in the legacy Paramify column layout | GraphQL `vulnerabilityFindings`, cursor pagination, flattened to CSV |
+| Fetcher | Assessment type | What it exports | How |
+|---|---|---|---|
+| `wiz_issues_report` | CONFIGURATION | Issues (configuration findings: open, in progress, resolved) as Wiz's own CSV | Wiz Reports API: find or create a report, update its parameters, rerun, wait, download |
+| `wiz_vulnerability_findings` | VULNERABILITY | Every vulnerability finding in the legacy Paramify column layout | GraphQL `vulnerabilityFindings`, cursor pagination, flattened to CSV |
 
 One Wiz service account per tenant serves both.
 
@@ -81,31 +82,38 @@ see.** The cycle only sees what these files contain, so scope matters:
   a cycle by hand.
 - If a run's `_issue_reports.json` was corrupt and had to be restarted, the run is
   marked `cannot_close` and the uploader processes without closing.
+- Uploads land on the assessment's **oldest open cycle**, and Paramify only
+  processes or closes that cycle (naming a newer one is refused with HTTP 409). An
+  assessment with old cycles left open takes each scan into the oldest of them,
+  and newer cycles show nothing until it is closed. See
+  [pipelines.md](pipelines.md#how-cycles-work).
 
 ## Verified vs unverified against real Wiz
 
 All of the code is tested offline against a local fake Wiz
 (`fetchers/wiz/_shared/fake_wiz.py`). That proves the fetchers' own logic, not
-Wiz's behavior. Nothing in this table was re-checked against a live tenant when it
-was written.
+Wiz's behavior. Items marked **Verified** were exercised on 2026-10-01 against a
+Wiz for Gov tenant (`auth.app.wiz.us`, `api.us2.app.wiz.us`) with all projects
+(`project_id` unset), and the CSVs were accepted by Paramify pipeline intake on
+stage.
 
 | Item | Status |
 |---|---|
-| OAuth client-credentials exchange and token endpoints | Inherited from the legacy fetchers, which ran against Wiz. Not re-checked. |
-| `CreateReport`, `UpdateReport`, `RerunReport` mutations | Inherited from the legacy issues script. Not re-checked. |
-| `ReportDownloadUrl` (`lastRun { url status }`) | Inherited from the legacy script. Not re-checked. |
-| `vulnerabilityFindings` query, CSV columns, row flattening | Copied unchanged from the legacy fetcher so the existing intake preset still maps. Not re-checked. |
-| `FindReports` query and its `search` filter (find a report by name) | **UNVERIFIED.** Not used by the legacy script. Set `report_id` to skip it. |
-| `lastRun.runAt` (used to reject a stale run) | **UNVERIFIED.** Field, format and timezone assumed. |
+| OAuth client-credentials exchange and token endpoints | **Verified** (Wiz for Gov). |
+| `FindReports` query and its `search` filter (find a report by name) | **Verified.** `search` is a substring match (it also returns e.g. `<name>-retired-...`), so the exact-name filter in `find_or_create_report` is required, and works. |
+| `UpdateReport`, `RerunReport` mutations | **Verified.** |
+| `ReportDownloadUrl` (`lastRun { url status runAt }`) | **Verified.** `runAt` is ISO-8601 UTC (`...Z`). |
+| `vulnerabilityFindings` query, CSV columns, row flattening | **Verified** that the query runs and the CSV is accepted by intake. Column mapping against the preset is not re-checked. |
+| `CreateReport` mutation | Not confirmed: the verified runs found an existing report. Inherited from the legacy issues script. |
 | `createReport` with a specific `projectId` (not `*`) | **UNVERIFIED.** Only `*` is known to have been used before. |
 | `updateReport` leaving a report's project unchanged | **UNVERIFIED.** The scoped default name assumes it. |
 | `filterBy: { projectId: [<id>] }` on `vulnerabilityFindings` | **UNVERIFIED against real Wiz schema.** Confirm via introspection. A wrong name should fail the GraphQL query rather than export everything, but that is also unconfirmed. |
-| Scope lists above | Taken from the fetchers' `fetcher.yaml`. Not re-checked against a tenant. |
-| Wiz for Gov endpoints | Allowed by the host checks. Not exercised. |
+| Scope lists above | Taken from the fetchers' `fetcher.yaml`. Not re-checked one by one against a tenant. |
+| Commercial Wiz endpoints | Allowed by the host checks. Not exercised. |
 
-To confirm the unverified items, run both fetchers against a test tenant with
-`close_cycle: never`, and introspect `VulnerabilityFindingFilters` for the project
-field.
+To confirm the remaining items, run both fetchers with a `project_id` set against a
+test tenant with `close_cycle: never`, and introspect `VulnerabilityFindingFilters`
+for the project field.
 
 ## Testing offline
 

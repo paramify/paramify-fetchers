@@ -1,9 +1,9 @@
 name: wiz_issues_report
-version: 0.2.0
+version: 0.3.0
 description: >-
   Exports the Wiz Issues report (configuration findings: open, in progress and
   resolved) as Wiz's own CSV, via the Wiz Reports API, for a Paramify
-  VULNERABILITY assessment pipeline. Full export every run; no delta mode.
+  CONFIGURATION assessment pipeline. Full export every run; no delta mode.
 category: wiz
 kind: issue_report
 
@@ -71,5 +71,5 @@ config_schema:
       empty report processed with a cycle close resolves every open issue.
 
 issue_report:
-  assessment_type: VULNERABILITY
+  assessment_type: CONFIGURATION
   title: Wiz Issues
