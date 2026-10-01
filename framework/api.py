@@ -43,7 +43,10 @@ from framework.envelope import ENVELOPE_KEYS, is_enveloped, wrap_outputs
 from framework.issue_reports import (
     ASSESSMENT_ID_FIELD,
     ASSESSMENT_NAME_FIELD,
+    CLOSE_CYCLE_FIELD,
+    CLOSE_CYCLE_VALUES,
     ISSUE_REPORTS_DIR,
+    record_failed_entry,
 )
 from framework.issue_reports import read_index as read_issue_report_index
 from framework.issue_reports import record_outputs as record_issue_reports
@@ -931,11 +934,28 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
         # config field: making it one would block collecting without a Paramify
         # connection, which the framework is supposed to allow (docs/design.md).
         if fetcher.is_issue_report:
-            in_platform = platform_cfg and ASSESSMENT_ID_FIELD in platform_cfg.config
-            if not (ASSESSMENT_ID_FIELD in entry.config or in_platform):
+            from framework.runner.executor import merged_config  # lazy: import cycle
+
+            _, values = merged_config(fetcher, spec, platform_cfg, entry)
+            if not values.get(ASSESSMENT_ID_FIELD):
                 errors.append(
                     f"{entry.use}: no {ASSESSMENT_ID_FIELD} set, so its report cannot be "
-                    f"intaken (fix: paramify assessments select {entry.use})"
+                    f"sent to Paramify (fix: paramify assessments select {entry.use})"
+                )
+            # Same reasoning as assessment_id: not a required field (collecting
+            # needs no Paramify decision), but the uploader will not guess it.
+            close_cycle = values.get(CLOSE_CYCLE_FIELD)
+            if close_cycle is None:
+                errors.append(
+                    f"{entry.use}: no {CLOSE_CYCLE_FIELD} set — say whether the "
+                    f"assessment's cycle closes after each run "
+                    f"({' or '.join(CLOSE_CYCLE_VALUES)}; fix: paramify assessments "
+                    f"select {entry.use} --close-cycle after_run|never)"
+                )
+            elif close_cycle not in CLOSE_CYCLE_VALUES:
+                errors.append(
+                    f"{entry.use}: {CLOSE_CYCLE_FIELD} is {close_cycle!r}; expected "
+                    f"{' or '.join(CLOSE_CYCLE_VALUES)}"
                 )
 
         # effective_secrets, and skip the optional ones: the runner resolves a
@@ -1064,6 +1084,25 @@ def run(
         def on_note(note: str, _use=entry.use) -> None:
             emit({"event": "fetcher_note", "fetcher": _use, "note": note})
 
+        # Which assessment an issue report is destined for, and whether its cycle
+        # closes after the run, are resolved from the manifest but injected into
+        # no env var — the fetcher has no use for them, only the uploader does.
+        # Read them off the same merged config the runner builds so the ladder
+        # can't drift.
+        assessment = None
+        if fetcher.is_issue_report:
+            _, values = merged_config(
+                fetcher,
+                platforms.get(fetcher.category or ""),
+                parsed.platforms.get(fetcher.category or ""),
+                entry,
+            )
+            assessment = {
+                ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
+                ASSESSMENT_NAME_FIELD: values.get(ASSESSMENT_NAME_FIELD),
+                CLOSE_CYCLE_FIELD: values.get(CLOSE_CYCLE_FIELD),
+            }
+
         try:
             results = run_entry(
                 fetcher,
@@ -1077,24 +1116,11 @@ def run(
         except (RuntimeError, ValueError) as e:
             emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
             overall_ok = False
+            if fetcher.is_issue_report:
+                # No invocation ran, so nothing else records it — and a cycle
+                # must not close on a run this entry was part of.
+                record_failed_entry(fetcher, run_id, run_dir, str(e), assessment)
             continue
-
-        # Which assessment an issue report is destined for is resolved from the
-        # manifest but injected into no env var — the fetcher has no use for it,
-        # only the uploader does. Read it off the same merged config the runner
-        # built so the ladder can't drift.
-        assessment = None
-        if fetcher.is_issue_report:
-            _, values = merged_config(
-                fetcher,
-                platforms.get(fetcher.category or ""),
-                parsed.platforms.get(fetcher.category or ""),
-                entry,
-            )
-            assessment = {
-                ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
-                ASSESSMENT_NAME_FIELD: values.get(ASSESSMENT_NAME_FIELD),
-            }
 
         for r in results:
             # Exactly one of these applies: an issue report is never enveloped
@@ -1362,6 +1388,52 @@ def _load_paramify_issues_uploader(root: Path):
     return module
 
 
+def _with_manifest_close_cycles(run_dir: Path, root: Path, config: dict, index: Optional[dict]) -> dict:
+    """Fill in close_cycle for fetchers whose run recorded none, from the
+    manifest that produced the run as it stands now.
+
+    The runner records each entry's close_cycle in the sidecar, so a run
+    collected before the policy was set — or before the key existed — carries
+    none, and setting it in the manifest afterwards changed nothing: the upload
+    stayed refused until the scan was collected again. The run's metadata names
+    its manifest, so its current value is the fallback. An explicit uploader
+    override and a value the run did record both still win.
+    """
+    if not index:
+        return config
+    items = list(index.get("reports") or []) + list(index.get("invocations") or [])
+    names = sorted({i.get("fetcher_name") for i in items if i.get("fetcher_name")})
+    unset = [
+        n for n in names
+        if all(i.get(CLOSE_CYCLE_FIELD) is None for i in items if i.get("fetcher_name") == n)
+    ]
+    if not unset:
+        return config
+    try:
+        meta = json.loads((Path(run_dir) / "_run_metadata.json").read_text())
+        manifest_id = meta.get("manifest")
+    except (OSError, json.JSONDecodeError):
+        return config
+    if not manifest_id:
+        return config
+    path = Path(manifest_id)
+    path = path if path.is_absolute() else Path(root) / path
+    if not path.is_file():
+        return config
+    try:
+        view = effective_config(read_manifest(path), unset, root)
+    except Exception:  # noqa: BLE001 — a fallback; the uploader reports what is still missing
+        return config
+    overrides = {k: dict(v or {}) for k, v in (config.get("overrides") or {}).items()}
+    for name in unset:
+        value = next(
+            (d["value"] for d in view.get(name, []) if d["name"] == CLOSE_CYCLE_FIELD), None
+        )
+        if value is not None:
+            overrides.setdefault(name, {}).setdefault(CLOSE_CYCLE_FIELD, value)
+    return {**config, "overrides": overrides}
+
+
 def issues_upload_preflight(
     run_dir,
     root: Path,
@@ -1389,6 +1461,10 @@ def issues_upload_preflight(
     warnings: List[str] = []
     file_count = 0
     missing_assessment: List[str] = []
+    # Per assessment: what the upload will send, computed without the network.
+    # A report that fails to upload at run time can still downgrade a planned
+    # PROCESS_CLOSE to PROCESS; this is the plan when every upload succeeds.
+    plan: List[dict] = []
     if not run_path.is_dir():
         errors.append(f"No run directory to upload: {run_path}")
     else:
@@ -1410,13 +1486,42 @@ def issues_upload_preflight(
             missing_assessment = sorted({
                 r.get("fetcher_name") or "?" for r in reports if not r.get("assessment_id")
             })
+            config = _with_manifest_close_cycles(run_path, root, config, index)
+            overrides = config.get("overrides") or {}
+            for aid, group in uploader.plan_assessments(index, overrides).items():
+                if not aid:
+                    continue
+                files_ok = all(r.get("status") == "success" for r in group["records"])
+                operation, close_skipped = uploader.close_decision(group, files_ok)
+                bad = sorted({
+                    str(p) for p in group["policies"] if p not in CLOSE_CYCLE_VALUES
+                })
+                plan.append({
+                    "assessment_id": aid,
+                    "assessment_name": group["name"],
+                    "files": len(group["records"]),
+                    "operation": None if bad else operation,
+                    "close_skipped": close_skipped,
+                    "error": (
+                        f"{CLOSE_CYCLE_FIELD} is {', '.join(bad)}; set after_run or never"
+                        if bad else None
+                    ),
+                })
+                if bad:
+                    # A warning for the same reason as a missing assessment: the
+                    # uploader holds back only this assessment's reports.
+                    warnings.append(
+                        f"assessment {group['name'] or aid}: no valid {CLOSE_CYCLE_FIELD} "
+                        f"({', '.join(bad)}), so its reports will not be sent "
+                        f"(fix: paramify assessments select --close-cycle after_run|never)"
+                    )
             for name in missing_assessment:
                 # A warning, not an error. upload_run already isolates this per
                 # file and sends the rest, so gating the batch on it stranded
                 # reports that were correctly wired — and blocked --dry-run from
                 # showing what would have gone.
                 warnings.append(
-                    f"{name}: no assessment_id, so its report cannot be intaken "
+                    f"{name}: no assessment_id, so its report cannot be sent "
                     f"(fix: paramify assessments select {name})"
                 )
 
@@ -1438,6 +1543,7 @@ def issues_upload_preflight(
         "config_path": str(config_path) if config_path else None,
         "file_count": file_count,
         "missing_assessment": missing_assessment,
+        "assessments": plan,
         "warnings": warnings,
         "token_present": token_present,
         "token_source": token_source,
@@ -1453,23 +1559,117 @@ def issues_upload_run(
     *,
     dry_run: bool = False,
     force: bool = False,
+    wait: bool = True,
+    wait_timeout: Optional[float] = None,
     on_event: Optional[Callable[[dict], None]] = None,
 ) -> dict:
-    """Intake one run directory's issue reports into Paramify assessments.
+    """Send one run directory's issue reports into their Paramify pipelines.
 
     Fires the same upload_start / upload_file / upload_complete events as
-    upload_run, so a front-end renders both with one code path.
+    upload_run, so a front-end renders both with one code path, plus the
+    pipeline's own: process_plan (dry-run), job_queued, job_status,
+    job_complete, process_skipped.
     """
     uploader = _load_paramify_issues_uploader(root)
     config_path = _upload_config(root, config_path)
     config = uploader.load_config(str(config_path)) if config_path else {}
+    try:
+        index = read_issue_report_index(Path(run_dir))
+    except ValueError:
+        index = None  # upload_run reports the unreadable index itself
+    config = _with_manifest_close_cycles(Path(run_dir), root, config, index)
     return uploader.upload_run(
         Path(run_dir),
         config=config,
         dry_run=dry_run,
         force=force,
+        wait=wait,
+        wait_timeout=wait_timeout,
         on_event=on_event,
     )
+
+
+def _issues_client(root: Path, config_path: Optional[Path] = None):
+    """(uploader module, client) for the pipeline commands that act on Paramify
+    directly rather than on a run: jobs, retry, cancel, close."""
+    uploader = _load_paramify_issues_uploader(root)
+    uploader.load_dotenv()
+    config_path = _upload_config(root, config_path)
+    config = uploader.load_config(str(config_path)) if config_path else {}
+    base_url, _ = resolve_base_url((config.get("paramify") or {}).get("base_url"))
+    url_error = uploader._base_url_error(base_url)
+    if url_error:
+        raise RuntimeError(url_error)
+    token, _ = resolve_upload_token()
+    if not token:
+        raise RuntimeError(_missing_token_error())
+    return uploader, uploader.ParamifyClient(token, base_url)
+
+
+def issues_jobs(
+    root: Path,
+    config_path: Optional[Path] = None,
+    *,
+    assessment_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+) -> List[dict]:
+    """Recent pipeline jobs, newest first, as job_summary dicts plus timestamps."""
+    uploader, client = _issues_client(root, config_path)
+    out = []
+    for job in client.list_jobs(assessment_id=assessment_id, status=status, limit=limit):
+        out.append({
+            **uploader.job_summary(job),
+            "assessment_id": job.get("assessmentId"),
+            "created_at": job.get("createdAt"),
+            "completed_at": job.get("completedAt"),
+        })
+    return out
+
+
+def issues_job_action(
+    root: Path, job_id: str, action: str, config_path: Optional[Path] = None
+) -> dict:
+    """Retry or cancel one pipeline job. Cancelling also cancels every unfinished
+    job queued behind it on the same assessment — that is Paramify's rule."""
+    uploader, client = _issues_client(root, config_path)
+    if action == "retry":
+        job = client.retry_job(job_id)
+    elif action == "cancel":
+        job = client.cancel_job(job_id)
+    else:
+        raise ValueError(f"unknown job action {action!r}")
+    return uploader.job_summary(job)
+
+
+def issues_close(
+    root: Path,
+    assessment_id: str,
+    config_path: Optional[Path] = None,
+    *,
+    wait: bool = True,
+    wait_timeout: Optional[float] = None,
+    on_event: Optional[Callable[[dict], None]] = None,
+) -> dict:
+    """Close an assessment's current cycle on its own, and report what it closed.
+
+    For assessments whose cycle is filled by several runs (`close_cycle: never`):
+    closing auto-closes every open issue the cycle never saw, so it belongs after
+    the last file has landed, which only a person knows.
+    """
+    uploader, client = _issues_client(root, config_path)
+    job = uploader.job_summary(client.close(assessment_id))
+    if on_event:
+        on_event({"event": "job_queued", "assessment_id": assessment_id,
+                  "job_id": job["job_id"], "operation": "CLOSE"})
+    if not wait:
+        return job
+    timeout = wait_timeout or uploader.DEFAULT_WAIT_TIMEOUT
+    final, timed_out = uploader.wait_for_job(client, job["job_id"], timeout=timeout)
+    result = uploader.job_summary(final)
+    if timed_out:
+        result["timed_out"] = True
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -1613,7 +1813,10 @@ def _run_summary(run_dir: Path) -> dict:
             })
     # Any JSON outputs not recorded in the metadata (e.g. legacy/direct runs).
     for p in sorted(run_dir.glob("*.json")):
-        if p.name == "_run_metadata.json" or p.name in seen:
+        # upload_log.json is the evidence uploader's own record, not evidence:
+        # counted, a scan-only run someone once ran `paramify upload` on looked
+        # like an evidence run and was picked as one.
+        if p.name in ("_run_metadata.json", "upload_log.json") or p.name in seen:
             continue
         files.append({"name": p.name, "path": str(p), "fetcher": None, "target": None,
                       "exit_code": None, "kind": "evidence"})
@@ -1671,6 +1874,42 @@ def list_runs(output_dir) -> List[dict]:
             continue  # pure ghost: nothing was written
         runs.append(summary)
     return runs
+
+
+RUN_KINDS = ("evidence", "issue_report")
+
+
+def run_has(run: dict, kind: str) -> bool:
+    """Whether a list_runs entry holds anything for this kind's upload."""
+    if kind == "issue_report":
+        return bool(run.get("issue_reports"))
+    if kind == "evidence":
+        return any(f.get("kind") == "evidence" for f in run.get("files") or [])
+    raise ValueError(f"unknown run kind {kind!r}; expected one of {RUN_KINDS}")
+
+
+def latest_run(
+    output_dir,
+    *,
+    kind: Optional[str] = None,
+    manifest_path=None,
+    root: Optional[Path] = None,
+) -> Optional[dict]:
+    """The newest run under output_dir worth uploading, or None.
+
+    `kind` skips runs with nothing of that kind: an evidence manifest and a
+    pipeline manifest usually share an output_dir, and "the newest run" alone
+    handed `paramify issues upload` an evidence-only run while the scan run sat
+    beside it. `manifest_path` keeps only runs that manifest produced (its
+    _manifest_id in the run metadata), for two manifests of the same kind.
+    """
+    runs = list_runs(output_dir)
+    if manifest_path is not None:
+        mid = _manifest_id(manifest_path, root or find_repo_root())
+        runs = [r for r in runs if r.get("manifest") == mid]
+    if kind is not None:
+        runs = [r for r in runs if run_has(r, kind)]
+    return runs[0] if runs else None
 
 
 def read_evidence(path) -> dict:
@@ -2148,8 +2387,10 @@ def issue_report_fetchers(
     ]
 
 
-def set_assessment(m: dict, use: str, assessment: dict) -> dict:
-    """Point one manifest entry at an assessment.
+def set_assessment(
+    m: dict, use: str, assessment: dict, close_cycle: Optional[str] = None
+) -> dict:
+    """Point one manifest entry at an assessment, and optionally set its close policy.
 
     Writes the UUID (authoritative) and the display name (so the manifest reads
     as something a human recognises, and a UUID that no longer resolves can be
@@ -2160,6 +2401,19 @@ def set_assessment(m: dict, use: str, assessment: dict) -> dict:
     label = assessment_display_name(assessment)
     if label and label != assessment["id"]:
         set_fetcher_config(m, use, ASSESSMENT_NAME_FIELD, label)
+    if close_cycle is not None:
+        set_close_cycle(m, use, close_cycle)
+    return m
+
+
+def set_close_cycle(m: dict, use: str, close_cycle: str) -> dict:
+    """Set whether an issue-report entry's cycle closes after each run."""
+    if close_cycle not in CLOSE_CYCLE_VALUES:
+        raise ValueError(
+            f"{CLOSE_CYCLE_FIELD} must be {' or '.join(CLOSE_CYCLE_VALUES)}, "
+            f"got {close_cycle!r}"
+        )
+    set_fetcher_config(m, use, CLOSE_CYCLE_FIELD, close_cycle)
     return m
 
 

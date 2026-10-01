@@ -50,6 +50,17 @@ curl -sSfL https://app.paramify.com/api/v0/documentation.json \
 diff /tmp/paramify_api_old.json /tmp/paramify_api_new.json
 ```
 
+## Pipeline endpoints (v0.10.0, 2026-09-28)
+
+`paramify issues upload` moved from `POST /assessment/{assessmentId}/intake` to the
+pipeline surface: `POST /pipelines/{pipelineId}/intake`, `/process` and `/close`
+(a pipeline is identified by its assessment id), plus `GET /pipeline-jobs`,
+`GET /pipeline-jobs/{id}` and `POST /pipeline-jobs/{id}/retry|cancel`. Behaviour the
+uploader depends on, verified on stage: an upload with no cycle named lands on the
+oldest open cycle; `process` runs only on that cycle; close auto-closes open issues
+the cycle never saw (`issuesAutoClosed`); after a close nothing is in progress and
+`process` returns 409 until the next upload opens a cycle.
+
 ## Checked against the v0.9.2 spec (2026-09-18)
 
 Re-verified 0.6.0 → 0.9.2 by diffing the live document structurally (paths,

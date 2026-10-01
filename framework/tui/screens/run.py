@@ -209,7 +209,7 @@ class RunPage(Vertical):
             self._paint_row(use)
 
         elif etype == "run_complete":
-            self._finalize(ev.get("ok"), ev.get("metadata_path", ""))
+            self._finalize(ev.get("ok"), ev.get("metadata_path", ""), ev.get("issue_reports") or 0)
 
         elif etype == "_run_failed":
             log.write(Text(f"✗ run failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
@@ -247,12 +247,19 @@ class RunPage(Vertical):
         log.write(line)
         self._paint_row(ev["fetcher"])
 
-    def _finalize(self, ok, metadata_path: str) -> None:
+    def _finalize(self, ok, metadata_path: str, issue_reports: int = 0) -> None:
         self._running = False
         self.query_one("#btn-run", Button).disabled = False
         icon = "✓" if ok else "✗"
         style = palette.OK if ok else palette.FAIL
         msg = Text(f"{icon} run complete — ok={ok}", style=style)
+        if issue_reports:
+            # Reports go through their own upload, so a run that collected any is
+            # not finished after the evidence upload. Say where to send them.
+            msg.append(
+                f"   {issue_reports} issue report(s) ready — Paramify tab, i to send",
+                style=palette.WARN,
+            )
         if metadata_path:
             msg.append(f"   {metadata_path}", style="dim")
         self._set_banner(msg)

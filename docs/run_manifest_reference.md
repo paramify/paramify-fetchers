@@ -39,25 +39,27 @@ The runner walks `run.fetchers[]` and invokes each in order. v0.x is serial — 
 
 ### `config.assessment_id` (issue-report fetchers)
 
-A `kind: issue_report` fetcher accepts two config keys the framework adds to every
-one of them, rather than each `fetcher.yaml` declaring them:
+A `kind: issue_report` fetcher accepts three config keys the framework adds to
+every one of them, rather than each `fetcher.yaml` declaring them:
 
 | Key | Description |
 |---|---|
-| `assessment_id` | UUID of the Paramify assessment its report is intaken into |
+| `assessment_id` | UUID of the Paramify assessment (pipeline) its report is sent into |
 | `assessment_name` | The readable name, written alongside so the manifest stays legible and a stale UUID is recognisable. Not used to resolve anything. |
+| `close_cycle` | `after_run`: the upload closes the assessment's cycle once a run is processed, if every target succeeded (one report per cycle). `never`: process only; close in Paramify or with `paramify issues close`. No default — closing auto-closes open issues the cycle never saw. |
 
 Set them by name rather than by hand:
 
 ```bash
-paramify assessments select <fetcher>      # picks from the workspace, writes both keys
+paramify assessments select <fetcher>      # picks from the workspace, writes the keys, asks the close policy
+paramify assessments select <fetcher> --close-cycle never
 ```
 
-Unlike most required wiring, a missing `assessment_id` does not stop a run —
+Unlike most required wiring, a missing `assessment_id` or `close_cycle` does not stop a run —
 collecting with no Paramify connection at all is a property the framework keeps
 (see [`design.md`](design.md)). `paramify validate` reports it and
 `paramify issues upload` refuses the report, which are the two points where it
-matters. Details: [`issue_report_fetchers.md`](issue_report_fetchers.md).
+matters. Both work at `platforms.<category>.config` level too. Details: [`issue_report_fetchers.md`](issue_report_fetchers.md).
 
 ---
 
@@ -195,10 +197,12 @@ carry an `error` in the metadata. `_run_metadata.json` is the run-level
 index and is not itself enveloped. See [`envelope_design.md`](envelope_design.md).
 
 Files under `issue-reports/` are the exception: they are the source tool's own
-bytes, unmodified, because Paramify's assessment intake parses the vendor format.
+bytes, unmodified, because Paramify's file intake preset parses the vendor format.
 The attribution an envelope would have carried lives in `_issue_reports.json`
 beside them — one record per report, naming the fetcher, the run, the assessment
-it is destined for, and the file's sha256. The subdirectory is also what keeps the
+it is destined for, its close policy, and the file's sha256 — plus one
+`invocations` entry per issue-report invocation, including failures that wrote no
+file, so the uploader can tell a complete run from a partial one. The subdirectory is also what keeps the
 two uploaders from stepping on each other: `paramify upload` globs the run dir's
 top level, so it never sees a report, and `paramify issues upload` reads only the
 sidecar. See [`issue_report_fetchers.md`](issue_report_fetchers.md).
@@ -275,7 +279,7 @@ paramify run <manifest.yaml> [--json]        # run the manifest
 paramify runs [--json]                       # past runs under an output dir (newest first)
 paramify evidence <file> [--json]            # read one evidence file (normalizing the envelope)
 paramify upload [run-dir] [--json]           # push one run's evidence to Paramify (default: latest run)
-paramify issues upload [run-dir] [--json]    # push one run's issue reports to assessment intake
+paramify issues upload [run-dir] [--json]    # send one run's issue reports into assessment pipelines
 ```
 
 `--json` is available on every command and emits machine-readable output for
@@ -343,7 +347,8 @@ With no fetcher argument it offers every `kind: issue_report` entry in the
 manifest. The picker is filtered to the assessment type the fetcher declares, so a
 CSPM report is never offered a vulnerability assessment. It writes
 `config.assessment_id` and `config.assessment_name` via the ordinary
-`set-config` path, so the result is a manifest you could have typed by hand.
+`set-config` path, so the result is a manifest you could have typed by hand, then
+asks for `config.close_cycle` unless the entry has one or `--close-cycle` is given.
 
 Needs `PARAMIFY_API_TOKEN` with read scope. Under `--json` nothing prompts, so
 pass `--assessment`.
@@ -387,7 +392,7 @@ resolves it from its own environment at run time.
 - Every `use:` matches a discovered fetcher
 - `targets[]` is supplied only when the fetcher has at least one required target field; a `supports_targets` fetcher whose target fields are all optional may omit `targets[]` (the runner does a single ambient invocation)
 - Every declared secret (per fetcher + per target) has a corresponding entry in the manifest
-- Every `kind: issue_report` entry has a `config.assessment_id` — reported as an error here rather than refused at run time, because a report collected with nowhere to go is still a report worth having on disk
+- Every `kind: issue_report` entry has a `config.assessment_id` and a valid `config.close_cycle` (entry or platform level) — reported as an error here rather than refused at run time, because a report collected with nowhere to go is still a report worth having on disk
 
 `validate` does NOT check whether `${env:...}` references resolve at runtime — that's discovered only at `run` time, with a structured error per failing invocation. It also doesn't check that an `assessment_id` still exists in the workspace; a deleted assessment surfaces at intake.
 

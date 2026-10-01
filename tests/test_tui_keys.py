@@ -380,6 +380,22 @@ def test_disabled_buttons_are_skipped(tmp_path):
     assert _run(body, manifest) == "cancel"
 
 
+def test_enter_in_the_add_filter_picks_the_fetcher(tmp_path):
+    """Focus opens in the filter box, where Enter did nothing: typing a name and
+    pressing Enter left nothing checked, so ctrl+s had nothing to add."""
+    manifest = _write_manifest(tmp_path)
+
+    async def body(app, pilot):
+        await pilot.press("2")
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.press(*"okta_authenticators", "enter")
+        await pilot.pause()
+        return sorted(app.screen._chosen)
+
+    assert _run(body, manifest) == ["okta_authenticators"]
+
 def test_catalog_filter_arrows_walk_the_tree(tmp_path):
     """Typing in the filter, up/down move the result cursor without leaving the
     box — so the contract pane follows along and you can keep narrowing."""

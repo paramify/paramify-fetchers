@@ -12,6 +12,37 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`docs/pipelines.md`: sending scan reports from the TUI**, step by step
+  with three recordings. It covers a manifest for the scanners, pointing each
+  fetcher at an assessment and choosing its close policy, running and sending
+  from the Paramify tab, and jobs and manual closes. It explains how cycles
+  work, lists what each error means, and maps every step to its command.
+- **`paramify issues jobs` and `paramify issues close`.** `jobs` lists an
+  assessment's pipeline jobs and retries or cancels one (`--retry`, `--cancel`);
+  a failed job blocks every job queued behind it on the same assessment until
+  one of those happens, and nothing does it automatically. `close` closes an
+  assessment's current cycle on its own, after confirmation, for assessments
+  whose cycle is filled by several runs, and prints how many open issues the
+  close auto-closed.
+  The TUI's Paramify tab has both: `j` lists jobs and retries or cancels one,
+  `C` closes one of the manifest's assessments' cycles behind a warning. The
+  reports themselves are sent with `i`, which replaces `ctrl+i` (most terminals
+  send the same byte for ctrl+i and Tab, so it never fired). The run console
+  says when a run left issue reports to send, and the assessment picker no
+  longer blocks the app while it lists the workspace's assessments.
+- **`close_cycle`, a reserved config key on every issue-report entry** —
+  `after_run` or `never`, with no default. Closing a cycle auto-closes every
+  open issue the cycle never saw, so it states how the customer fills the
+  assessment's cycles: one report per cycle closes after each complete run;
+  several files per cycle close only when the last is in. `paramify assessments
+  select` asks for it (or takes `--close-cycle`), and so does the TUI's
+  assessment picker. `paramify validate` reports an entry without one, reading
+  entry and `platforms.<category>` config the way the runner does.
+- **Issue-report invocations in the sidecar.** `_issue_reports.json` (schema
+  1.1) gains `invocations`: one entry per issue-report invocation, including a
+  failed one that wrote no file and an entry that raised before running. Before
+  this, a failed target that wrote nothing left no trace, and a run missing one
+  framework's report looked complete.
 - **A Splunk category with seven fetchers**, one Splunk Enterprise deployment per
   target, each with its own management URL (port 8089) and bearer token.
   `splunk_index_retention` (retention, archive-or-delete on freeze, data
@@ -184,6 +215,37 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **TUI fixes found while recording that walkthrough.** On a manifest with no
+  evidence and no scripts, nothing on the Paramify tab held focus, so its keys
+  did nothing. Enter in a picker's filter box now takes the highlighted option.
+  The confirm dialog wraps long messages instead of cutting them off, which had
+  hidden the auto-close warning. The jobs list shows each job's assessment by
+  name and its error. A queued or running job is marked as waiting, not failed.
+- **`paramify upload` and `paramify issues upload` pick the newest run of
+  their own kind** when no run is named, not simply the newest run: evidence
+  and pipeline manifests usually share an output directory, and each command
+  used to pick up the other's run (`issues upload` then failed with "this run
+  collected no issue reports" while the scan run sat beside it). Both take
+  `-f MANIFEST` to use only that manifest's runs, reading its output directory
+  when `--output-dir` is not given. The standalone uploaders and each panel of
+  the TUI's Paramify tab choose the same way; the TUI scopes to the active
+  manifest's runs once it has any.
+- **`paramify issues upload` sends reports into Paramify pipelines** instead of
+  `POST /assessment/{id}/intake`, which it no longer calls. Per assessment it
+  uploads each report bare to `POST /pipelines/{id}/intake`, then queues one
+  `POST /pipelines/{id}/process` naming exactly those artifacts, then waits for
+  the job and prints its counts (created, updated, seen-closed, auto-closed). The
+  call is `PROCESS_CLOSE` only when the assessment's `close_cycle` is `after_run`
+  and every target bound to it in the run succeeded and uploaded; otherwise
+  `PROCESS`, with the reason the close was skipped. The pipeline puts an upload
+  on its oldest open cycle, so `effectiveDate` no longer routes it. The API key
+  needs `PIPELINE_INTAKE`, plus `PIPELINE_PROCESS`, plus `PIPELINE_CLOSE` to
+  close. A job that fails, is blocked behind a failed job, or outlasts
+  `--wait-timeout` (default 900 s) fails the command; `--no-wait` queues and
+  exits. The intake log now also records each job, so a re-run processes files
+  an interrupted run uploaded but never processed, and waits on a job it left
+  running. The TUI's issue-report panel shows the planned operation per
+  assessment and warns in the confirm when a run will close a cycle.
 - **AWS fetchers finish in large accounts** (67 fetchers, minor version
   bumps). Many made several AWS CLI calls, and started several `jq` processes,
   per resource, so an account with thousands of snapshots, roles or security

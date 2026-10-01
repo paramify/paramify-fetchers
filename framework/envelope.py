@@ -71,7 +71,7 @@ def wrap_outputs(
     wrap a single file is logged and skipped — it never aborts the run.
 
     An issue-report fetcher is skipped entirely. Its output is the source tool's
-    own file, which Paramify's assessment intake parses directly, so wrapping it
+    own file, which Paramify's file intake preset parses directly, so wrapping it
     would break the parse. The guard is on `kind` rather than the file extension
     because a JSON scan report is still a scan report — its identity lives in the
     sidecar index instead (see framework/issue_reports.py).

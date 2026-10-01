@@ -12,13 +12,14 @@ from typing import Dict, List, Optional
 
 import yaml
 from rich.text import Text
-from textual import on
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, DataTable, Input, Static
 
 from framework import api
+from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
 from framework.tui import palette, render
 from framework.tui.components.forms import env_name_from_ref
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
@@ -603,6 +604,9 @@ class ManifestPage(ButtonRowNav, Vertical):
         """
         use, m = self._selected, self._manifest
         if not use or m is None:
+            # Silence here read as a broken key on a new, empty manifest.
+            self.notify("Add an issue-report fetcher first (a), then select it.",
+                        severity="warning")
             return
         d = self._descriptors().get(use)
         if not d or d.get("kind") != "issue_report":
@@ -612,10 +616,27 @@ class ManifestPage(ButtonRowNav, Vertical):
             return
 
         assessment_type = (d.get("issue_report") or {}).get("assessment_type")
+        self.notify("Loading assessments…")
+        self._assessments_worker(use, assessment_type)
+
+    @work(thread=True, exclusive=True, group="assessments")
+    def _assessments_worker(self, use: str, assessment_type: Optional[str]) -> None:
+        # Off the UI thread: listing assessments is a network call, and a slow or
+        # unreachable workspace froze the whole app while it ran.
         try:
             assessments = api.list_assessments(assessment_type)
         except (RuntimeError, ValueError) as exc:
-            self.notify(f"Cannot list assessments: {exc}", severity="error", timeout=12)
+            self.app.call_from_thread(
+                self.notify, f"Cannot list assessments: {exc}", severity="error", timeout=12
+            )
+            return
+        self.app.call_from_thread(self._show_assessment_picker, use, assessment_type, assessments)
+
+    def _show_assessment_picker(
+        self, use: str, assessment_type: Optional[str], assessments: List[dict]
+    ) -> None:
+        m = self._manifest
+        if m is None:
             return
         if not assessments:
             scope = f" of type {assessment_type}" if assessment_type else ""
@@ -632,18 +653,50 @@ class ManifestPage(ButtonRowNav, Vertical):
         def done(chosen_id: Optional[str]) -> None:
             if chosen_id is None:
                 return
-            api.set_assessment(m, use, by_id[chosen_id])
+            chosen = by_id[chosen_id]
+            api.set_assessment(m, use, chosen)
             self._autosave()
             self.rebuild()
-            self.notify(
-                f"{use} → {api.assessment_display_name(by_id[chosen_id])}"
-            )
+            # Asked right after the assessment because it is a fact about how
+            # that assessment's cycles are filled, and the uploader will not
+            # guess it. Escape keeps the assessment and leaves the policy as it was.
+            self._pick_close_cycle(use, api.assessment_display_name(chosen))
 
         self.app.push_screen(
             PickerModal(
                 f"Assessment for {use}",
                 options,
-                subtitle=f"{assessment_type or 'any type'} — its reports are intaken here",
+                subtitle=f"{assessment_type or 'any type'} — its reports are sent into this pipeline",
+            ),
+            done,
+        )
+
+    def _pick_close_cycle(self, use: str, assessment_label: str) -> None:
+        m = self._manifest
+        if m is None:
+            return
+        options = [
+            (CLOSE_AFTER_RUN,
+             "after_run — one report per cycle: close after each complete run"),
+            (CLOSE_NEVER,
+             "never — several files per cycle: close in Paramify or with "
+             "`paramify issues close`"),
+        ]
+
+        def done(policy: Optional[str]) -> None:
+            if policy is None:
+                self.notify(f"{use} → {assessment_label}")
+                return
+            api.set_close_cycle(m, use, policy)
+            self._autosave()
+            self.rebuild()
+            self.notify(f"{use} → {assessment_label}, close_cycle={policy}")
+
+        self.app.push_screen(
+            PickerModal(
+                f"How is {assessment_label}'s cycle closed?",
+                options,
+                subtitle="Closing auto-closes every open issue the cycle never saw",
             ),
             done,
         )

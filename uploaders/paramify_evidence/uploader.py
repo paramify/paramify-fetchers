@@ -168,10 +168,12 @@ def is_enveloped(obj) -> bool:
 
 
 def find_latest_run(output_dir: Path) -> Optional[Path]:
+    """The newest run that holds evidence — not simply the newest run, which is
+    often a pipeline manifest's (issue reports only) sharing the same output dir."""
     if not output_dir.is_dir():
         return None
     runs = sorted((p for p in output_dir.glob("run-*") if p.is_dir()), reverse=True)
-    return runs[0] if runs else None
+    return next((r for r in runs if any(iter_evidence_files(r))), None)
 
 
 def iter_evidence_files(run_dir: Path):

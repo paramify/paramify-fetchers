@@ -3,7 +3,7 @@
 #
 # An ISSUE REPORT is not evidence. It is the scan report a tool already produces
 # — a Nessus export, a Wiz findings CSV, a SentinelOne JSON — handed to Paramify's
-# assessment intake, which parses it into issues. See docs/issue_report_fetchers.md.
+# assessment's pipeline, which parses it into issues. See docs/issue_report_fetchers.md.
 #
 # Use `kind: evidence` (the default, see ../_template/) when you are asserting a
 # configuration state. Use this template when you are handing over a list of

@@ -3,7 +3,7 @@
 An evidence fetcher's identity travels *inside* its output — the runner wraps the
 payload in `{schema_version, metadata, payload}` and the uploader reads
 `metadata.evidence_set` back out. An issue report cannot work that way. Paramify's
-assessment intake parses the source tool's own CSV/XML/JSON/Nessus structure, so
+file intake preset parses the source tool's own CSV/XML/JSON/Nessus structure, so
 anything the framework adds to the file breaks the parse. The file must land on
 disk byte-for-byte as the tool emitted it.
 
@@ -40,7 +40,10 @@ logger = logging.getLogger("framework.issue_reports")
 # EVIDENCE_DIR here for an issue-report fetcher, so fetchers never name it.
 ISSUE_REPORTS_DIR = "issue-reports"
 SIDECAR_NAME = "_issue_reports.json"
-SIDECAR_SCHEMA_VERSION = "1.0"
+# 1.1 adds `invocations`: one entry per issue-report invocation, including the
+# ones that failed without writing a file. The uploader needs it to tell a
+# complete run from a partial one before it may close a cycle.
+SIDECAR_SCHEMA_VERSION = "1.1"
 
 # Where the uploader records what it already sent (see the uploader's dedup note).
 INTAKE_LOG_NAME = "_intake_log.json"
@@ -65,6 +68,18 @@ RESERVED_NAMES = frozenset({SIDECAR_NAME, INTAKE_LOG_NAME})
 # points where it actually matters.
 ASSESSMENT_ID_FIELD = "assessment_id"
 ASSESSMENT_NAME_FIELD = "assessment_name"
+CLOSE_CYCLE_FIELD = "close_cycle"
+
+# Whether the uploader closes the assessment's cycle after processing a run.
+# Closing is what tells Paramify which issues are resolved: it auto-closes every
+# open issue the cycle never saw. So it is a statement about the customer's
+# process, not a default the framework can pick — one monthly report per cycle
+# closes every run; several files that make up one cycle close only once the
+# last has landed, and that is a person's call. No default: `paramify validate`
+# asks for it, and the uploader refuses to guess.
+CLOSE_AFTER_RUN = "after_run"
+CLOSE_NEVER = "never"
+CLOSE_CYCLE_VALUES = (CLOSE_AFTER_RUN, CLOSE_NEVER)
 
 
 def reserved_config_schema() -> Dict[str, ConfigField]:
@@ -88,6 +103,19 @@ def reserved_config_schema() -> Dict[str, ConfigField]:
                 "Human-readable name of the assessment, written alongside assessment_id "
                 "so the manifest is readable and a stale UUID is recognisable. Not used "
                 "to resolve the assessment — assessment_id is authoritative."
+            ),
+        ),
+        CLOSE_CYCLE_FIELD: ConfigField(
+            name=CLOSE_CYCLE_FIELD,
+            type="string",
+            required=False,
+            description=(
+                "after_run: close the assessment's cycle once a run's reports are "
+                "processed, if every target in the run succeeded (one report per "
+                "cycle, e.g. a monthly scan). never: process only, and close the "
+                "cycle in Paramify or with `paramify issues close` once every file "
+                "for it has landed. Closing auto-closes open issues the cycle never "
+                "saw, so a partial run is never closed."
             ),
         ),
     }
@@ -155,6 +183,7 @@ def build_record(
         "title": _title(fetcher, result, filename),
         "assessment_id": assessment.get(ASSESSMENT_ID_FIELD),
         "assessment_name": assessment.get(ASSESSMENT_NAME_FIELD),
+        "close_cycle": assessment.get(CLOSE_CYCLE_FIELD),
         "assessment_type": (
             fetcher.issue_report.assessment_type if fetcher.issue_report else None
         ),
@@ -179,7 +208,11 @@ def record_outputs(
     run_dir: Path,
     assessment: Optional[Dict[str, Any]] = None,
 ) -> List[dict]:
-    """Append this invocation's reports to the run's sidecar index.
+    """Append this invocation, and any reports it wrote, to the run's sidecar.
+
+    Every invocation is recorded, including one that failed without writing a
+    file: "every target in this run succeeded" is what lets the uploader close a
+    cycle, and a failed target that left no report would otherwise be invisible.
 
     Read-modify-write rather than accumulate-in-memory so the index is complete
     on disk after every invocation: a run killed halfway through still leaves an
@@ -195,12 +228,73 @@ def record_outputs(
         for name in result.outputs
         if name.startswith(prefix) and Path(name).name not in RESERVED_NAMES
     ]
-    if not names:
+    added = [
+        build_record(name, result, fetcher, run_id, run_dir, assessment) for name in names
+    ]
+    invocation = _invocation(
+        result.fetcher_name,
+        target=result.target,
+        ok=result.exit_code == 0,
+        exit_code=result.exit_code,
+        files=names,
+        assessment=assessment,
+        error=result.error if result.exit_code != 0 else None,
+    )
+    if not _write_index(run_dir, run_id, added, invocation):
         return []
+    return added
 
+
+def record_failed_entry(
+    fetcher: Fetcher,
+    run_id: str,
+    run_dir: Path,
+    error: str,
+    assessment: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Record an issue-report entry that raised before any invocation ran.
+
+    It wrote no file, so it has no report record — but a run it belonged to is
+    still incomplete, and the uploader must not close a cycle on the strength of
+    the other targets alone.
+    """
+    _write_index(run_dir, run_id, [], _invocation(
+        fetcher.name, target=None, ok=False, exit_code=None, files=[],
+        assessment=assessment, error=error,
+    ))
+
+
+def _invocation(
+    fetcher_name: str,
+    *,
+    target: Optional[dict],
+    ok: bool,
+    exit_code: Optional[int],
+    files: List[str],
+    assessment: Optional[Dict[str, Any]],
+    error: Optional[str],
+) -> dict:
+    assessment = assessment or {}
+    entry = {
+        "fetcher_name": fetcher_name,
+        "target": target,
+        "status": "success" if ok else "failed",
+        "exit_code": exit_code,
+        "files": files,
+        "assessment_id": assessment.get(ASSESSMENT_ID_FIELD),
+        "close_cycle": assessment.get(CLOSE_CYCLE_FIELD),
+    }
+    if error:
+        entry["error"] = str(error)[-1000:]
+    return entry
+
+
+def _write_index(run_dir: Path, run_id: str, added: List[dict], invocation: dict) -> bool:
+    """Read-modify-write the sidecar with this invocation and its reports."""
     path = sidecar_path(run_dir)
     index: Dict[str, Any] = {
-        "schema_version": SIDECAR_SCHEMA_VERSION, "run_id": run_id, "reports": [],
+        "schema_version": SIDECAR_SCHEMA_VERSION, "run_id": run_id,
+        "reports": [], "invocations": [],
     }
     if path.exists():
         try:
@@ -215,12 +309,9 @@ def record_outputs(
                 "issue_reports: %s is unreadable (%s); starting a fresh index", path.name, e
             )
 
-    added = [
-        build_record(name, result, fetcher, run_id, run_dir, assessment) for name in names
-    ]
-    reports: List[dict] = list(index.get("reports") or [])
-    reports.extend(added)
-    index["reports"] = reports
+    index["schema_version"] = SIDECAR_SCHEMA_VERSION
+    index["reports"] = list(index.get("reports") or []) + added
+    index["invocations"] = list(index.get("invocations") or []) + [invocation]
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(index, indent=2, default=str))
@@ -229,8 +320,8 @@ def record_outputs(
             "issue_reports: could not write %s (%s) — these reports will not be "
             "uploadable until it is rewritten", path, e
         )
-        return []
-    return added
+        return False
+    return True
 
 
 def read_index(run_dir: Path) -> Optional[dict]:
