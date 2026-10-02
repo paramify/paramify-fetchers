@@ -19,7 +19,8 @@ paramify:
 
 # Per-fetcher overrides. Key = fetcher name (metadata.fetcher_name). Override
 # just reference_id to map a fetcher to a different evidence set in your program;
-# name/instructions/description can be overridden too.
+# name/instructions/description/frequency can be overridden too. Like the rest,
+# frequency is only written when the uploader creates the set.
 overrides:
   okta_phishing_resistant_mfa:
     reference_id: CUST-OKTA-MFA-01

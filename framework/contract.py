@@ -55,6 +55,15 @@ class TargetField:
     description: Optional[str] = None
 
 
+# How often a set expects a new artifact — the `frequency` enum on Paramify's
+# /evidence endpoints (API 0.10.0). Every fetcher defaults to THREE_DAY.
+EVIDENCE_FREQUENCIES = (
+    "NOT_SET", "DAILY", "THREE_DAY", "WEEKLY", "BIWEEKLY",
+    "MONTHLY", "QUARTERLY", "BIANNUAL", "ANNUAL",
+)
+DEFAULT_EVIDENCE_FREQUENCY = "THREE_DAY"
+
+
 @dataclass
 class EvidenceSet:
     """Paramify evidence-set identity for a fetcher (1 fetcher = 1 evidence set).
@@ -67,6 +76,7 @@ class EvidenceSet:
     name: str
     instructions: Optional[str] = None
     description: Optional[str] = None
+    frequency: str = DEFAULT_EVIDENCE_FREQUENCY
 
 
 @dataclass

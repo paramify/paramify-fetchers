@@ -172,6 +172,40 @@ def test_create_other_400_raises():
         c.get_or_create_evidence_set({"reference_id": "EVD-1", "name": "n"})
 
 
+def _created_body(es):
+    bodies = []
+
+    def post_handler(url, j, f):
+        bodies.append(j)
+        return FakeResponse(201, {"id": "NEW"})
+
+    c = _client_with_session(
+        get_handler=lambda url, params: FakeResponse(200, {"evidences": []}),
+        post_handler=post_handler,
+    )
+    c.get_or_create_evidence_set(es)
+    return bodies[0]
+
+
+def test_create_sends_the_envelope_frequency():
+    body = _created_body({"reference_id": "EVD-1", "name": "n", "frequency": "WEEKLY"})
+    assert body["frequency"] == "WEEKLY"
+
+
+def test_create_defaults_frequency_for_an_envelope_without_one():
+    # A run directory written before the field existed must still create the set
+    # with the default, not NOT_SET.
+    body = _created_body({"reference_id": "EVD-1", "name": "n"})
+    assert body["frequency"] == "THREE_DAY"
+
+
+def test_override_replaces_frequency():
+    metadata = {"fetcher_name": "f",
+                "evidence_set": {"reference_id": "EVD-1", "name": "n", "frequency": "THREE_DAY"}}
+    es = uploader.resolve_evidence_set(metadata, {"f": {"frequency": "MONTHLY"}})
+    assert es["frequency"] == "MONTHLY"
+
+
 # --------------------------------------------------------------------------- #
 # artifact_exists — run_id is matched as a TOKEN, not a substring
 # --------------------------------------------------------------------------- #

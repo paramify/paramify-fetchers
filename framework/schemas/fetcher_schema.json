@@ -118,6 +118,12 @@
         "description": {
           "type": "string",
           "description": "Evidence-set description. Defaults to the fetcher's top-level description when omitted."
+        },
+        "frequency": {
+          "type": "string",
+          "enum": ["NOT_SET", "DAILY", "THREE_DAY", "WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY", "BIANNUAL", "ANNUAL"],
+          "default": "THREE_DAY",
+          "description": "How often the evidence set expects a new artifact (Paramify's evidence `frequency`). Defaults to THREE_DAY when omitted. Written once into the evidence set on create."
         }
       }
     },

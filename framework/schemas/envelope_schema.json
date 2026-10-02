@@ -34,7 +34,8 @@
             "reference_id": { "type": "string" },
             "name": { "type": "string" },
             "instructions": { "type": "string" },
-            "description": { "type": "string" }
+            "description": { "type": "string" },
+            "frequency": { "type": "string" }
           }
         }
       }

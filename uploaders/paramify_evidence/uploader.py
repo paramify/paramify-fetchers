@@ -9,7 +9,7 @@ re-upload. See docs/uploader_design.md.
 
 Per evidence file the uploader:
   1. reads the envelope `metadata.evidence_set` (skips with a warning if absent),
-  2. applies any customer override (reference_id / name / instructions),
+  2. applies any customer override (reference_id / name / instructions / frequency),
   3. get-or-creates the evidence set by reference_id,
   4. picks the channel to upload through, where the set has any (see
      resolve_channel — artifacts uploaded outside a configured channel do not
@@ -40,6 +40,7 @@ from dotenv import load_dotenv
 # rule locally — duplicating it is what let the uploader and the fetchers disagree.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from framework.contract import DEFAULT_EVIDENCE_FREQUENCY  # noqa: E402
 from framework.paramify_auth import (  # noqa: E402
     READ_TOKEN_ENV,
     UPLOAD_TOKEN_ENV,
@@ -101,7 +102,13 @@ class ParamifyClient:
 
     def create_evidence_set(self, es: Dict) -> Optional[Dict]:
         """Create the evidence set; on 'already exists' fall back to find (idempotent)."""
-        body = {"referenceId": es["reference_id"], "name": es["name"], "automated": True}
+        body = {
+            "referenceId": es["reference_id"],
+            "name": es["name"],
+            "automated": True,
+            # Envelopes written before the field existed carry no frequency.
+            "frequency": es.get("frequency") or DEFAULT_EVIDENCE_FREQUENCY,
+        }
         if es.get("description"):
             body["description"] = es["description"]
         if es.get("instructions"):
@@ -195,7 +202,7 @@ def resolve_evidence_set(metadata: Dict, overrides: Dict) -> Optional[Dict]:
         return None
     ov = override_for(metadata, overrides)
     resolved = dict(es)
-    for key in ("reference_id", "name", "instructions", "description"):
+    for key in ("reference_id", "name", "instructions", "description", "frequency"):
         if key in ov:
             resolved[key] = ov[key]
     return resolved
