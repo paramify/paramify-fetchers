@@ -12,6 +12,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Evidence sets carry a collection frequency.** `evidence_set.frequency` in
+  `fetcher.yaml` takes Paramify's evidence frequency values (`DAILY`,
+  `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `QUARTERLY`, `BIANNUAL`,
+  `ANNUAL`, `NOT_SET`) and defaults to `THREE_DAY`, so every fetcher has one
+  without a change to its file. The runner copies it into the envelope's
+  `metadata.evidence_set`, and both uploaders send it when they create a set.
+  Sets that already exist keep the frequency they have. The uploader config can
+  override it per fetcher, like `name` and `instructions`.
 - **`docs/pipelines.md`: sending scan reports from the TUI**, step by step
   with three recordings. It covers a manifest for the scanners, pointing each
   fetcher at an assessment and choosing its close policy, running and sending

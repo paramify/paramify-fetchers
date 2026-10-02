@@ -45,6 +45,7 @@ from dotenv import load_dotenv
 # duplicating the token-resolution rule locally.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from framework.contract import DEFAULT_EVIDENCE_FREQUENCY  # noqa: E402
 from framework.paramify_auth import (  # noqa: E402
     READ_TOKEN_ENV,
     UPLOAD_TOKEN_ENV,
@@ -109,8 +110,10 @@ class ParamifyScriptsClient:
                 return ev.get("id")
         return None
 
-    def create_evidence_set(self, reference_id: str, name: str) -> Optional[str]:
-        body = {"referenceId": reference_id, "name": name, "automated": True}
+    def create_evidence_set(
+        self, reference_id: str, name: str, frequency: str = DEFAULT_EVIDENCE_FREQUENCY
+    ) -> Optional[str]:
+        body = {"referenceId": reference_id, "name": name, "automated": True, "frequency": frequency}
         r = self.session.post(f"{self.base_url}/evidence", json=body, timeout=self.timeout)
         if r.status_code in (200, 201):
             return r.json().get("id")
@@ -120,8 +123,10 @@ class ParamifyScriptsClient:
             f"create evidence set {reference_id} failed (HTTP {r.status_code}): {r.text[:300]}"
         )
 
-    def get_or_create_evidence_set(self, reference_id: str, name: str) -> Optional[str]:
-        return self.find_evidence_set(reference_id) or self.create_evidence_set(reference_id, name)
+    def get_or_create_evidence_set(
+        self, reference_id: str, name: str, frequency: str = DEFAULT_EVIDENCE_FREQUENCY
+    ) -> Optional[str]:
+        return self.find_evidence_set(reference_id) or self.create_evidence_set(reference_id, name, frequency)
 
     # -- association ------------------------------------------------------ #
     def associate_script(self, evidence_id: str, script_id: str) -> None:
@@ -196,12 +201,13 @@ def load_config(path: Optional[str]) -> Dict:
 
 
 def _resolve_reference(fetcher_name: str, es: Dict, overrides: Dict) -> Dict:
-    """Apply any per-fetcher reference_id/name override so scripts associate to the
-    SAME evidence set the evidence uploader targets (overrides share that config)."""
+    """Apply any per-fetcher reference_id/name/frequency override so scripts associate
+    to the SAME evidence set the evidence uploader targets (overrides share that config)."""
     ov = overrides.get(fetcher_name, {}) or {}
     return {
         "reference_id": ov.get("reference_id", es["reference_id"]),
         "name": ov.get("name", es["name"]),
+        "frequency": ov.get("frequency", es.get("frequency", DEFAULT_EVIDENCE_FREQUENCY)),
     }
 
 
@@ -236,7 +242,11 @@ def _discover_specs(root: Path, include: Optional[set] = None) -> List[Dict]:
             "version": str(f.version),
             "entry": f.runtime_entry,
             "code": code,
-            "evidence_set": {"reference_id": f.evidence_set.reference_id, "name": f.evidence_set.name},
+            "evidence_set": {
+                "reference_id": f.evidence_set.reference_id,
+                "name": f.evidence_set.name,
+                "frequency": f.evidence_set.frequency,
+            },
         })
     return specs
 
@@ -357,7 +367,7 @@ def sync_scripts(
                 counts["noop"] += 1
 
             if do_associate and script_id:
-                evidence_id = client.get_or_create_evidence_set(ref["reference_id"], ref["name"])
+                evidence_id = client.get_or_create_evidence_set(ref["reference_id"], ref["name"], ref["frequency"])
                 if not evidence_id:
                     raise ParamifyError(f"could not get or create evidence set {ref['reference_id']}")
                 client.associate_script(evidence_id, script_id)
