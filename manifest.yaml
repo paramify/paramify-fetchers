@@ -1,0 +1,83 @@
+run:
+  output_dir: ./evidence
+  platforms:
+    azure:
+      auth:
+        passthrough_env:
+        - AZURE_AUTHORITY_HOST
+        - AZURE_TENANT_ID
+        - AZURE_CLIENT_ID
+        - AZURE_FEDERATED_TOKEN_FILE
+  fetchers:
+  - use: azure_activity_log_alerts
+    targets: &azure_targets
+    - subscription_id: 29fb2f8b-2858-4f80-b995-f33661e6d559
+      environment: staging
+  - use: azure_defender_assessments
+    targets: *azure_targets
+  - use: azure_defender_plans
+    targets: *azure_targets
+  - use: azure_defender_regulatory_compliance
+    targets: *azure_targets
+  - use: azure_policy_assignments
+    targets: *azure_targets
+  - use: azure_policy_compliance
+    targets: *azure_targets
+  - use: azure_resource_inventory
+    targets: *azure_targets
+  - use: azure_aks_cluster_configuration
+    targets: *azure_targets
+  - use: azure_app_service_configuration
+    targets: *azure_targets
+  - use: azure_app_service_plans
+    targets: *azure_targets
+  - use: azure_container_registry_configuration
+    targets: *azure_targets
+  - use: azure_databricks_workspace_configuration
+    targets: *azure_targets
+  - use: azure_function_app_configuration
+    targets: *azure_targets
+  - use: azure_network_security_groups
+    targets: *azure_targets
+  - use: azure_vm_hardening_status
+    targets: *azure_targets
+  - use: azure_entra_app_registrations
+    targets: *azure_targets
+  - use: azure_entra_authentication_policy
+    targets: *azure_targets
+  - use: azure_entra_conditional_access_policies
+    targets: *azure_targets
+  - use: azure_entra_mfa_status
+    targets: *azure_targets
+  - use: azure_entra_privileged_roles
+    targets: *azure_targets
+  - use: azure_entra_service_principals
+    targets: *azure_targets
+  - use: azure_rbac_custom_roles
+    targets: *azure_targets
+  - use: azure_rbac_role_assignments
+    targets: *azure_targets
+  - use: azure_backup_recovery_status
+    targets: *azure_targets
+  - use: azure_diagnostic_settings
+    targets: *azure_targets
+  - use: azure_log_analytics_workspaces
+    targets: *azure_targets
+  - use: azure_cosmosdb_configuration
+    targets: *azure_targets
+  - use: azure_disk_encryption_status
+    targets: *azure_targets
+  - use: azure_key_vault_configuration
+    targets: *azure_targets
+  - use: azure_key_vault_key_rotation
+    targets: *azure_targets
+  - use: azure_mysql_configuration
+    targets: *azure_targets
+  - use: azure_postgresql_configuration
+    targets: *azure_targets
+  - use: azure_sql_encryption_status
+    targets: *azure_targets
+  - use: azure_sql_server_configuration
+    targets: *azure_targets
+  - use: azure_storage_encryption_status
+    targets: *azure_targets

@@ -1,0 +1,11 @@
+validator: policy_enforcement_present
+cases:
+  - name: enforcing_assignment_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"actually_enforcing_assignments":2,"total_policy_assignments":3}}}'
+  - name: only_audit_assignments
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"actually_enforcing_assignments":0,"total_policy_assignments":3}}}'
+  - name: summary_field_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"actuallyEnforcingAssignments":2,"total_policy_assignments":3}}}'

@@ -1,0 +1,20 @@
+key: aks_api_access_restricted
+name: AKS API Access Restricted
+type: AUTOMATED
+role: configuration
+statement: The AKS API server is private or otherwise restricted for every collected cluster.
+
+# The fetcher counts a private API server or an API server with authorized IP
+# ranges as restricted. Require at least one cluster to avoid vacuous success.
+regex: '"api_server_access_restricted_clusters":\s*(?<restricted>\d+)[\s\S]*?"total_clusters":\s*(?<total>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+
+evidence_sets:
+  - EVD-AZURE-AKS-CONFIG

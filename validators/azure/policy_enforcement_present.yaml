@@ -1,0 +1,17 @@
+key: policy_enforcement_present
+name: Azure Policy Enforcement Present
+type: AUTOMATED
+role: configuration
+statement: At least one Azure Policy assignment in the subscription has an enforcing effect and is actually enforced.
+
+# A nonzero count is encoded in the pattern; the evaluator's comparisons are
+# not guaranteed to be numeric. Collection health is checked separately.
+regex: '"actually_enforcing_assignments":\s*(?<actually_enforcing_assignments>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-POLICY-ASSIGN

@@ -1,0 +1,17 @@
+validator: disk_encryption_types_recognized
+cases:
+  - name: platform_and_customer_keys_recognized
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"encryption_type":"EncryptionAtRestWithPlatformKey"},{"encryption_type":"EncryptionAtRestWithCustomerKey"},{"encryption_type":"EncryptionAtRestWithPlatformAndCustomerKeys"}]},"summary":{"total_disks":3}}}'
+  - name: one_disk_has_unknown_type
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"encryption_type":"EncryptionAtRestWithPlatformKey"},{"encryption_type":"Other"}]},"summary":{"total_disks":2}}}'
+  - name: disk_field_missing
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"encryption_type":"EncryptionAtRestWithPlatformKey"},{}]},"summary":{"total_disks":2}}}'
+  - name: disk_field_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[{"encryptionType":"EncryptionAtRestWithPlatformKey"}]},"summary":{"total_disks":1}}}'
+  - name: no_disks_collected
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"disks":[]},"summary":{"total_disks":0}}}'

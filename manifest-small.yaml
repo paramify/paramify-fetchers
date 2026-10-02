@@ -1,0 +1,21 @@
+# Azure US Government policy, AKS, and disk-encryption evidence collection.
+# Set AZURE_AUTHORITY_HOST=https://login.microsoftonline.us in the run environment.
+run:
+  output_dir: ./evidence
+  platforms:
+    azure:
+      auth:
+        passthrough_env:
+          - AZURE_AUTHORITY_HOST
+          - AZURE_TENANT_ID
+          - AZURE_CLIENT_ID
+          - AZURE_FEDERATED_TOKEN_FILE
+  fetchers:
+    - use: azure_policy_assignments
+      targets: &azure_targets
+        - subscription_id: 29fb2f8b-2858-4f80-b995-f33661e6d559
+          environment: staging
+    - use: azure_aks_cluster_configuration
+      targets: *azure_targets
+    - use: azure_disk_encryption_status
+      targets: *azure_targets

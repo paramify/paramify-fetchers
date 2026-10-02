@@ -1,0 +1,21 @@
+key: disk_encryption_types_recognized
+name: Azure Managed Disk Encryption Types Recognized
+type: AUTOMATED
+role: configuration
+statement: Every counted managed disk has a recognized Azure encryption-at-rest type, with at least one disk collected.
+
+# Match only known encryption types and compare their count to total_disks.
+# Missing, null, or unknown per-disk values reduce the match count and fail.
+# The lookahead reads the summary following the disk records in the envelope.
+regex: '"encryption_type":\s*"(?<encryption_type>EncryptionAtRestWith(?:PlatformKey|CustomerKey|PlatformAndCustomerKeys))"(?=[\s\S]*?"total_disks":\s*(?<total_disks>[1-9]\d*))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_COUNT EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+
+evidence_sets:
+  - EVD-AZURE-DISK-ENC
