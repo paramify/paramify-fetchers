@@ -1,0 +1,8 @@
+# Wiz fetchers are python (requests) against the Wiz GraphQL API with OAuth2
+# client credentials. Both fetchers in this category are issue reports: they
+# write a findings CSV that uploaders/paramify_issues sends into a Paramify
+# assessment pipeline. Ported from paramify/legacy-evidence-fetchers.
+description: >-
+  Wiz cloud security. Issues (configuration findings) via the Wiz Reports API,
+  and vulnerability findings via GraphQL, both as CSV reports for Paramify
+  assessment pipelines. One service account per tenant.

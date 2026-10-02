@@ -352,6 +352,14 @@ def _human_upload_printer(noun: str = "file", log_name: str = "upload_log.json")
                 f"        [{style.mark('OK')}] queued {ev['operation']} job {ev['job_id']}"
                 f"{style.env('  assessment=' + ev['assessment_id'])}{style.dim(why)}"
             )
+            if ev.get("cycle_name"):
+                typer.echo(f"             cycle: {ev['cycle_name']}")
+            if ev.get("newer_cycles"):
+                typer.echo(
+                    f"        [{style.mark('WARN')}] {ev['newer_cycles']} newer cycle(s) exist. "
+                    f"Uploads land on the oldest open cycle, so look for these issues on "
+                    f"{ev['cycle_name']!r}; newer cycles show nothing until it is closed."
+                )
         elif kind == "job_complete":
             typer.echo("        " + _job_line(ev))
         elif kind == "process_skipped":

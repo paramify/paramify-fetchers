@@ -116,8 +116,10 @@ include = ["framework*"]
 # without testpaths a bare `pytest` walks the whole tree and aborts at collection
 # on duplicate test_fetcher.py basenames. importlib import-mode additionally makes
 # duplicate basenames safe if a path outside tests/ is ever collected explicitly.
+# fetchers/wiz is listed because its per-fetcher tests/ dirs (against a local fake
+# Wiz) are real tests, unlike the placeholder scaffolds in the templates.
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "fetchers/wiz"]
 addopts = "--import-mode=importlib"
 
 # Lint + import order for the framework's OWN code. Ported v0.x fetchers under

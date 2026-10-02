@@ -260,3 +260,120 @@ def test_a_on_an_empty_manifest_says_what_to_do(tmp_path):
         assert any("issue-report fetcher first" in str(n.message) for n in app._notifications)
 
     _run(body, path)
+
+
+def _fake_send(monkeypatch):
+    """Stand-in for the framework's issue-report upload: the same events, no HTTP."""
+    def upload(run_dir, root, on_event=None, **kw):
+        on_event({"event": "upload_start", "files": 1, "run_dir": run_dir, "base_url": "x"})
+        on_event({"event": "upload_file", "file": "scan.csv", "outcome": "uploaded",
+                  "assessment_id": "A-1"})
+        on_event({"event": "upload_complete", "ok": True, "uploaded": 1, "errors": 0})
+        return {"ok": True}
+
+    monkeypatch.setattr(api, "issues_upload_run", upload)
+
+
+def test_focus_returns_to_the_paramify_page_after_a_send(tmp_path, monkeypatch):
+    """Sending disables the page's buttons; the focused one going disabled used to
+    leave focus nowhere, so `j` and `C` did nothing until the user pressed 5."""
+    from textual.widgets import Button
+
+    out = tmp_path / "evidence"
+    issue_run(out, "2026-09-01T00-00-00Z")
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "t")
+    _fake_send(monkeypatch)
+    monkeypatch.setattr(api, "issues_jobs", lambda root, **kw: [
+        {"job_id": "job-1", "status": "COMPLETED", "type": "PROCESS", "assessment_id": "A-1",
+         "created_at": "", "counts": None, "blocked_by": None}])
+
+    def no_scripts(page):
+        for bid in ("#scripts-preview", "#scripts-submit"):
+            page.query_one(bid, Button).disabled = True
+
+    monkeypatch.setattr(UploadPage, "_rebuild_scripts", no_scripts)
+
+    async def body(app, pilot):
+        await pilot.press("5")
+        await pilot.pause()
+        page = app.screen.query_one(UploadPage)
+        await pilot.press("i")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmModal)
+        await pilot.press("y")
+        await _settle(app, pilot)
+
+        assert app.focused is not None and app.focused in page.walk_children(), \
+            "focus was lost after the send"
+        assert not app.focused.disabled
+        await pilot.press("j")
+        await _settle(app, pilot)
+        assert isinstance(app.screen, PickerModal)
+
+    _run(body, _write_manifest(tmp_path))
+
+
+def test_finishing_a_send_does_not_pull_focus_off_another_tab(tmp_path):
+    async def body(app, pilot):
+        page = app.screen.query_one(UploadPage)
+        await pilot.press("1")                     # the user is on Catalog
+        await pilot.pause()
+        before = app.focused
+        page._finalize_upload({"ok": True, "uploaded": 1})
+        await _settle(app, pilot)
+        assert app.focused is before
+        assert app.focused not in page.walk_children()
+
+    _run(body, _write_manifest(tmp_path))
+
+
+def _info_cell(page, use):
+    from textual.widgets import DataTable
+
+    dt = page.query_one("#run-status", DataTable)
+    return str(dt.get_cell(page._rows[use], page._cols[3]))
+
+
+def test_run_tab_shows_why_an_issue_report_fetcher_failed(tmp_path):
+    reason = "Wiz rejected the client credentials (HTTP 401)"
+
+    async def body(app, pilot):
+        page = app.screen.query_one(RunPage)
+        page._handle_event({"event": "run_start", "fetchers": ["wiz_issues_report"],
+                            "run_id": "r", "run_dir": "d"})
+        page._handle_event({"event": "fetcher_start", "fetcher": "wiz_issues_report", "targets": 1})
+        page._handle_event({"event": "fetcher_result", "fetcher": "wiz_issues_report",
+                            "exit_code": 1, "duration_sec": 1, "outputs": [],
+                            "error": reason, "error_code": "auth_failed"})
+        await pilot.pause()
+        assert _info_cell(page, "wiz_issues_report") == reason
+
+    _run(body, _write_manifest(tmp_path))
+
+
+def test_a_successful_fetcher_has_no_reason_in_the_info_column(tmp_path):
+    async def body(app, pilot):
+        page = app.screen.query_one(RunPage)
+        page._handle_event({"event": "run_start", "fetchers": ["f"], "run_id": "r", "run_dir": "d"})
+        page._handle_event({"event": "fetcher_start", "fetcher": "f", "targets": 1})
+        page._handle_event({"event": "fetcher_result", "fetcher": "f", "exit_code": 0,
+                            "duration_sec": 1, "outputs": ["issue-reports/x.csv"]})
+        await pilot.pause()
+        assert _info_cell(page, "f") == ""
+
+    _run(body, _write_manifest(tmp_path))
+
+
+def test_a_fanout_failure_keeps_the_counts_and_adds_the_reason(tmp_path):
+    async def body(app, pilot):
+        page = app.screen.query_one(RunPage)
+        page._handle_event({"event": "run_start", "fetchers": ["f"], "run_id": "r", "run_dir": "d"})
+        page._handle_event({"event": "fetcher_start", "fetcher": "f", "targets": 2, "fanout": True})
+        page._handle_event({"event": "fetcher_result", "fetcher": "f", "exit_code": 0,
+                            "duration_sec": 1, "outputs": []})
+        page._handle_event({"event": "fetcher_result", "fetcher": "f", "exit_code": 1,
+                            "duration_sec": 1, "outputs": [], "error": "scanner down"})
+        await pilot.pause()
+        assert _info_cell(page, "f") == "1/2 ok  · 1 failed  · scanner down"
+
+    _run(body, _write_manifest(tmp_path))
