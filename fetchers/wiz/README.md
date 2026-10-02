@@ -1,9 +1,11 @@
 # Wiz
 
-Read-only evidence fetchers for the Wiz cloud security platform (commercial and
-Wiz for Government). All eleven share one GraphQL client (`_shared/wiz_client.py`)
-and one pair of secrets. None of them writes to Wiz: the client refuses to send
-a GraphQL mutation.
+Read-only fetchers for the Wiz cloud security platform (commercial and Wiz for
+Government): eleven evidence fetchers, below, and one issue report,
+[`wiz_stig_compliance_report`](stig_compliance_report/README.md), which sends
+STIG compliance results to a Paramify assessment. All twelve share one GraphQL
+client (`_shared/wiz_client.py`) and one pair of secrets. None of them writes to
+Wiz: the client refuses to send a GraphQL mutation.
 
 | Fetcher | Evidence | Wiz scopes |
 |---|---|---|

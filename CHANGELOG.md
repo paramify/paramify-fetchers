@@ -12,6 +12,25 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **A Wiz category with twelve fetchers**, for Wiz commercial and Wiz for
+  Government, sharing one GraphQL client and one service account. Eleven are
+  evidence fetchers: `wiz_scan_coverage`, `wiz_posture_issues`,
+  `wiz_infrastructure_vulnerabilities`, `wiz_container_vulnerabilities`,
+  `wiz_cloud_configuration_posture`, `wiz_host_configuration_posture`,
+  `wiz_threat_detections`, `wiz_file_integrity_monitoring`,
+  `wiz_attack_surface_findings`, `wiz_code_findings` and
+  `wiz_tenant_security_settings`. The last five read Wiz modules a tenant may
+  not have; each checks the tenant's schema at run time, selects only the
+  fields that exist, and lists the missing ones in the evidence. A missing
+  scope or licence fails the collection rather than reading as no findings.
+  The twelfth, `wiz_stig_compliance_report`, is an issue report: one CSV row per
+  STIG control, rule and resource for one enabled Wiz framework, for a
+  CONFIGURATION assessment's pipeline. Wiz's own compliance CSV exists only as
+  a saved report, and creating or rerunning one is a write, so the rows are
+  built from GraphQL queries instead, in a fixed column set and sorted order so
+  the same Wiz state gives the same file. Any Wiz error, Wiz's 10,000-row cap,
+  an empty result or a disabled framework fails the run with no file written.
+  None of the twelve writes to Wiz: the client refuses to send a mutation.
 - **Evidence sets carry a collection frequency.** `evidence_set.frequency` in
   `fetcher.yaml` takes Paramify's evidence frequency values (`DAILY`,
   `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `QUARTERLY`, `BIANNUAL`,
