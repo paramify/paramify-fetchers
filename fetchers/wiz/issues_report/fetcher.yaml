@@ -1,9 +1,10 @@
 name: wiz_issues_report
-version: 0.3.0
+version: 0.4.0
 description: >-
-  Exports the Wiz Issues report (configuration findings: open, in progress and
-  resolved) as Wiz's own CSV, via the Wiz Reports API, for a Paramify
-  CONFIGURATION assessment pipeline. Full export every run; no delta mode.
+  Downloads the latest run of a Wiz Issues report as Wiz's own CSV, for a
+  Paramify CONFIGURATION assessment pipeline. Read-only: the report is created
+  and scheduled once in Wiz, and this fetcher only reads its last completed run.
+  Full export every run; no delta mode.
 category: wiz
 kind: issue_report
 
@@ -12,7 +13,7 @@ supports_targets: false
 runtime:
   type: python
   entry: fetcher.py
-  timeout: 1800
+  timeout: 900
 
 output:
   type: csv
@@ -21,47 +22,53 @@ output:
 secrets:
   - name: client_id
     env: WIZ_CLIENT_ID
-    description: Wiz service account client ID (read:reports, create:reports, update:reports, read:issues, read:threat_issues)
+    description: Wiz service account Client ID (Custom Integration, read:reports).
   - name: client_secret
     env: WIZ_CLIENT_SECRET
-    description: Wiz service account client secret
+    description: Wiz service account Client Secret.
 
 config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov).
   auth_url:
     type: string
-    required: true
+    required: false
     env: WIZ_AUTH_URL
-    description: Wiz OAuth token endpoint, e.g. https://auth.app.wiz.io/oauth/token (Wiz for Gov - https://auth.app.wiz.us/oauth/token)
-  api_endpoint:
-    type: string
-    required: true
-    env: WIZ_API_ENDPOINT
-    description: Wiz GraphQL endpoint for the tenant, e.g. https://api.us17.app.wiz.io/graphql
+    default: https://auth.app.wiz.us/oauth/token
+    description: Token URL. Defaults to Wiz for Gov; commercial is https://auth.app.wiz.io/oauth/token.
   report_name:
     type: string
     required: false
     env: WIZ_REPORT_NAME
-    description: Name of the Wiz report this fetcher owns. Found by name, created if missing. Default Paramify-Wiz-Issues, or Paramify-Wiz-Issues-<first 8 chars of project_id> when project_id is set, so a different project gets its own report.
+    default: Paramify-Wiz-Issues
+    description: >-
+      Exact name of the Wiz Issues report to download. Create it once in Wiz
+      and schedule it to rerun (e.g. daily); its own settings decide which
+      projects and issue statuses it covers.
   report_id:
     type: string
     required: false
     env: WIZ_REPORT_ID
-    description: Use this existing Wiz report instead of finding one by name.
-  project_id:
+    description: Download this Wiz report instead of finding one by name.
+  max_report_age_hours:
     type: string
     required: false
-    env: WIZ_PROJECT_ID
-    description: Wiz project to report on. Default "*" (all projects).
-  poll_seconds:
+    env: WIZ_MAX_REPORT_AGE_HOURS
+    default: "26"
+    description: >-
+      Fail if the report's last completed run is older than this. The default
+      suits a report scheduled every 24 hours.
+  min_request_interval:
     type: string
     required: false
-    env: WIZ_REPORT_POLL_SECONDS
-    description: Seconds between report-status checks. Default 20.
-  max_wait_seconds:
-    type: string
-    required: false
-    env: WIZ_REPORT_MAX_WAIT
-    description: Give up if the report run is not ready after this long. Default 1500 (inside runtime.timeout 1800).
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
   allow_empty:
     type: string
     required: false
