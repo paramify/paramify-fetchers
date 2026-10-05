@@ -223,6 +223,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **The TUI keeps evidence and scan reports apart.** The catalog and the
+  add-fetcher picker group by kind first (**Evidence**, **Scan reports**) and
+  platform second, so a platform that ships both, like Wiz, no longer lists
+  them in one folder. Highlighting a section heading explains what that kind
+  is and how it is sent. A fetcher's contract states its kind and where its
+  output goes: the evidence set, or for a scan report the type of assessment it
+  needs, its format, and how it is sent. The manifest table replaces the `mode`
+  column (the `targets` column already shows `—` for a fetcher that runs once)
+  with `kind`, and adds a last `sends to` column: the evidence set, or the
+  assessment and close policy, or `no assessment — press A`. The manifest's
+  detail pane shows the same. The TUI now says "scan report" wherever it said
+  "issue report"; `kind: issue_report` in `fetcher.yaml` is unchanged. The
+  catalog descriptor (`paramify catalog --json`) gains an `evidence_set` block
+  and `issue_report.format`.
 - **TUI fixes found while recording that walkthrough.** On a manifest with no
   evidence and no scripts, nothing on the Paramify tab held focus, so its keys
   did nothing. Enter in a picker's filter box now takes the highlighted option.

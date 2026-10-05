@@ -272,9 +272,10 @@ class _PickTree(Tree):
 
 
 class MultiPickerModal(ButtonRowNav, FilterListNav, ModalScreen[list]):
-    """A filterable multi-select catalog: collapsible per-platform dropdowns of
-    checkbox leaves on the left, a live list of everything checked on the right.
-    Returns the chosen ids (platform-grouped order), or None.
+    """A filterable multi-select catalog: sections (always open) of collapsible
+    per-platform dropdowns of checkbox leaves on the left, a live list of
+    everything checked on the right, under the same section headings. Returns the
+    chosen ids (section- then platform-grouped order), or None.
 
     The checked set is the source of truth; leaf labels and the right pane are
     rendered from it, so filtering (which rebuilds the tree) never drops a pick.
@@ -289,20 +290,25 @@ class MultiPickerModal(ButtonRowNav, FilterListNav, ModalScreen[list]):
     FILTER_NAV = ("#multi-pick-filter", "#multi-pick-tree")
 
     def __init__(
-        self, title: str, groups: List[Tuple[str, List[str]]], subtitle: str = "",
-        disabled: set[str] | None = None,
+        self, title: str, sections: List[Tuple[str, List[Tuple[str, List[str]]]]],
+        subtitle: str = "", disabled: set[str] | None = None,
     ) -> None:
-        # groups: ordered [(platform, [fetcher_name, ...]), ...] — every discovered
-        # fetcher, in the catalog's order. `disabled` names are already in the
+        # sections: ordered [(heading, [(platform, [fetcher_name, ...]), ...]), ...]
+        # — every discovered fetcher, in the catalog's order. A platform may sit
+        # under more than one heading. `disabled` names are already in the
         # manifest: shown for context (so a fully-added category still appears)
         # but not selectable.
         super().__init__()
         self._title = title
         self._subtitle = subtitle
-        self._groups = groups
+        self._sections = sections
         self._disabled = set(disabled or ())
-        self._cat_of = {name: cat for cat, names in groups for name in names}
-        self._all_ids = [name for _, names in groups for name in names]
+        self._cat_of = {
+            name: cat for _, groups in sections for cat, names in groups for name in names
+        }
+        self._all_ids = [
+            name for _, groups in sections for _, names in groups for name in names
+        ]
         self._chosen: set = set()
 
     def compose(self) -> ComposeResult:
@@ -313,7 +319,7 @@ class MultiPickerModal(ButtonRowNav, FilterListNav, ModalScreen[list]):
             with Horizontal(id="multi-pick-split"):
                 with Vertical(id="multi-pick-left"):
                     yield Input(placeholder="filter…", id="multi-pick-filter")
-                    yield _PickTree("platforms", id="multi-pick-tree")
+                    yield _PickTree("fetchers", id="multi-pick-tree")
                 with VerticalScroll(id="multi-pick-right"):
                     yield Static("selected", classes="panel-title")
                     yield Static(id="multi-pick-chosen")
@@ -345,23 +351,31 @@ class MultiPickerModal(ButtonRowNav, FilterListNav, ModalScreen[list]):
         label.append(name)
         return label
 
+    def _count(self, names: List[str]) -> str:
+        # Count what's actually addable; a fully-added platform still shows
+        # (labelled "all added") so the category never silently disappears.
+        addable = sum(1 for n in names if n not in self._disabled)
+        return f"({addable})" if addable else "(all added)"
+
     def _populate(self, flt: str) -> None:
         tree = self.query_one("#multi-pick-tree", _PickTree)
         tree.clear()
         flt = flt.strip().lower()
-        for cat, names in self._groups:
-            matches = [n for n in names if not flt or flt in n.lower()]
-            if not matches:
+        for heading, groups in self._sections:
+            hits = [
+                (cat, matches) for cat, names in groups
+                if (matches := [n for n in names if not flt or flt in n.lower()])
+            ]
+            if not hits:
                 continue
-            # Count what's actually addable; a fully-added platform still shows
-            # (labelled "all added") so the category never silently disappears.
-            addable = sum(1 for n in matches if n not in self._disabled)
-            count = f"({addable})" if addable else "(all added)"
-            # Filtering opens the platforms with hits; otherwise stay collapsed
-            # so a long catalog reads as a tidy list of platforms to open.
-            node = tree.root.add(f"{cat}  {count}", expand=bool(flt))
-            for name in matches:
-                node.add_leaf(self._leaf_label(name), data=name)
+            every = [n for _, matches in hits for n in matches]
+            section = tree.root.add(f"{heading}  {self._count(every)}", expand=True)
+            for cat, matches in hits:
+                # Filtering opens the platforms with hits; otherwise stay collapsed
+                # so a long catalog reads as a tidy list of platforms to open.
+                node = section.add(f"{cat}  {self._count(matches)}", expand=bool(flt))
+                for name in matches:
+                    node.add_leaf(self._leaf_label(name), data=name)
 
     @on(Input.Changed, "#multi-pick-filter")
     def _filter(self, event: Input.Changed) -> None:
@@ -378,7 +392,7 @@ class MultiPickerModal(ButtonRowNav, FilterListNav, ModalScreen[list]):
         # The cursor rests on the platform row after filtering, so a lone match
         # wins over it; otherwise Enter acts where the arrows put the cursor.
         tree = self.query_one("#multi-pick-tree", _PickTree)
-        leaves = [n for c in tree.root.children for n in c.children
+        leaves = [n for s in tree.root.children for c in s.children for n in c.children
                   if n.data not in self._disabled]
         node = leaves[0] if len(leaves) == 1 else tree.cursor_node
         if node is None or node is tree.root:
@@ -387,7 +401,7 @@ class MultiPickerModal(ButtonRowNav, FilterListNav, ModalScreen[list]):
 
     def _activate(self, node) -> None:
         name = node.data
-        if name is None:  # a platform row → open/close the dropdown
+        if name is None:  # a section or platform row → open/close it
             node.toggle()
             return
         if name in self._disabled:
@@ -409,21 +423,26 @@ class MultiPickerModal(ButtonRowNav, FilterListNav, ModalScreen[list]):
             chosen.update(Text("(nothing selected yet)", style="dim"))
             return
         body = Text()
-        # Walk the original (platform-grouped) order so the picked list mirrors
-        # the catalog's grouping, not a/z by name.
-        for name in self._all_ids:
-            if name not in self._chosen:
+        # Walk the original (section- then platform-grouped) order so the picked
+        # list mirrors the catalog's grouping, not a/z by name.
+        for heading, groups in self._sections:
+            picked = [n for _, names in groups for n in names if n in self._chosen]
+            if not picked:
                 continue
-            body.append("• ", style="green")
-            body.append(name)
-            body.append(f"   [{self._cat_of.get(name, '?')}]\n", style="dim")
+            if body:
+                body.append("\n")
+            body.append(f"{heading}\n", style="bold")
+            for name in picked:
+                body.append("• ", style="green")
+                body.append(name)
+                body.append(f"   [{self._cat_of.get(name, '?')}]\n", style="dim")
         chosen.update(body)
 
     @on(Button.Pressed, "#confirm")
     def action_confirm(self) -> None:
         if not self._chosen:
             return
-        # Return in platform-grouped order so manifest entries keep the grouping.
+        # Return in grouped order so manifest entries keep the grouping.
         self.dismiss([name for name in self._all_ids if name in self._chosen])
 
     @on(Button.Pressed, "#cancel")

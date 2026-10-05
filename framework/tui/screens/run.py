@@ -257,7 +257,7 @@ class RunPage(Vertical):
             # Reports go through their own upload, so a run that collected any is
             # not finished after the evidence upload. Say where to send them.
             msg.append(
-                f"   {issue_reports} issue report(s) ready — Paramify tab, i to send",
+                f"   {issue_reports} scan report(s) ready — Paramify tab, i to send",
                 style=palette.WARN,
             )
         if metadata_path:

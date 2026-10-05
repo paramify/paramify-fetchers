@@ -170,7 +170,7 @@ def test_run_console_points_at_waiting_issue_reports(tmp_path):
         banner = page.query_one("#run-banner")
         rendered = banner.render()
         text = rendered.plain if isinstance(rendered, Text) else str(rendered)
-        assert "2 issue report(s) ready" in text
+        assert "2 scan report(s) ready" in text
 
     _run(body, _write_manifest(tmp_path))
 
@@ -257,6 +257,6 @@ def test_a_on_an_empty_manifest_says_what_to_do(tmp_path):
         await pilot.press("A")
         await pilot.pause()
         assert not isinstance(app.screen, PickerModal)
-        assert any("issue-report fetcher first" in str(n.message) for n in app._notifications)
+        assert any("scan report first" in str(n.message) for n in app._notifications)
 
     _run(body, path)

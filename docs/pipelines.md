@@ -50,7 +50,7 @@ create one. Then, on the **Manifest** tab (`2`):
 
 | Key | Does |
 |---|---|
-| `a` | add a fetcher — pick the scanner's report fetcher |
+| `a` | add a fetcher — the scanner's report fetcher is listed under **Scan reports**, apart from evidence |
 | `t` | edit its targets, for a fetcher that runs once per framework, account or scan |
 | `e` | edit its settings and secrets |
 
@@ -62,7 +62,9 @@ mistake.
 
 Select the fetcher on the **Manifest** tab and press `A`. The picker lists the
 assessments in your workspace of the type the fetcher feeds; type to filter, then
-`enter`. It then asks how that assessment's cycle is closed.
+`enter`. It then asks how that assessment's cycle is closed. Until an assessment
+is set, the entry's **sends to** column reads `no assessment — press A`; then it
+shows the assessment and its close policy, or `close unset` if that is missing.
 
 ![Pointing a scan fetcher at an assessment and choosing how its cycle closes](demo/pipeline-setup.gif)
 
@@ -83,7 +85,7 @@ one as an issue, and the upload sends nothing for that assessment until it is se
 Run the manifest from the **Run** tab (`3`, then `enter`). When it finishes, the
 banner tells you how many scan reports are waiting.
 
-On the **Paramify** tab (`5`), the **issue reports** panel shows the run it will
+On the **Paramify** tab (`5`), the **scan reports** panel shows the run it will
 send and one row per assessment: how many files, and what the upload will ask
 Paramify to do. Read that row before sending:
 
