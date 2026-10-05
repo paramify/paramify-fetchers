@@ -1,11 +1,11 @@
 # Wiz
 
 Read-only fetchers for the Wiz cloud security platform (commercial and Wiz for
-Government): eleven evidence fetchers, below, and one issue report,
-[`wiz_stig_compliance_report`](stig_compliance_report/README.md), which sends
-STIG compliance results to a Paramify assessment. All twelve share one GraphQL
-client (`_shared/wiz_client.py`) and one pair of secrets. None of them writes to
-Wiz: the client refuses to send a GraphQL mutation.
+Government): eleven evidence fetchers, below, and three issue reports that send
+findings to a Paramify assessment (see [Issue reports](#issue-reports)). All
+fourteen share one GraphQL client (`_shared/wiz_client.py`) and one pair of
+secrets. None of them writes to Wiz: the client refuses to send a GraphQL
+mutation.
 
 | Fetcher | Evidence | Wiz scopes |
 |---|---|---|
@@ -39,6 +39,18 @@ tooling (FedRAMP SCG-ENH); that has to come from the organization's product.
 Read the vulnerability and issue evidence together with `wiz_scan_coverage`:
 zero findings only means something if every account in the boundary is being
 scanned.
+
+## Issue reports
+
+These write a CSV for an assessment's pipeline instead of an evidence set. Setup,
+config and the `close_cycle` warning are in
+[docs/wiz_pipeline_fetchers.md](../../docs/wiz_pipeline_fetchers.md).
+
+| Fetcher | Assessment type | What it sends | Wiz scopes |
+|---|---|---|---|
+| [`wiz_stig_compliance_report`](stig_compliance_report/README.md) | CONFIGURATION | STIG control pass/fail per rule and resource, for one enabled framework | `read:security_frameworks`, `read:cloud_configuration`, `read:host_configuration` |
+| `wiz_issues_report` | CONFIGURATION | The last completed run of a Wiz Issues report, as Wiz's own CSV. The report is created and scheduled once in Wiz; the fetcher only downloads it | `read:reports` |
+| `wiz_vulnerability_findings` | VULNERABILITY | Every vulnerability finding, in the legacy Paramify column layout | `read:vulnerabilities` |
 
 ## Service account
 

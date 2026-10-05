@@ -1,55 +1,81 @@
 # Wiz pipeline fetchers
 
-Two issue-report fetchers collect Wiz data for Paramify assessment pipelines: Issues
-(configuration findings) for a CONFIGURATION assessment, vulnerability findings for
-a VULNERABILITY assessment. Both write a CSV to `<run>/issue-reports/`;
-`paramify issues upload` (`uploaders/paramify_issues`) sends it into the assessment. General background is
-in [issue_report_fetchers.md](issue_report_fetchers.md).
+Three issue-report fetchers send Wiz data into Paramify assessment pipelines. Each
+writes a CSV to `<run>/issue-reports/`, and `paramify issues upload`
+(`uploaders/paramify_issues`) sends it into the assessment. General background is
+in [issue_report_fetchers.md](issue_report_fetchers.md); the pipeline itself is
+in [pipelines.md](pipelines.md).
 
 | Fetcher | Assessment type | What it exports | How |
 |---|---|---|---|
-| `wiz_issues_report` | CONFIGURATION | Issues (configuration findings: open, in progress, resolved) as Wiz's own CSV | Wiz Reports API: find or create a report, update its parameters, rerun, wait, download |
+| `wiz_issues_report` | CONFIGURATION | Issues (configuration findings) as Wiz's own CSV | Downloads the last completed run of a Wiz Issues report that is scheduled in Wiz |
 | `wiz_vulnerability_findings` | VULNERABILITY | Every vulnerability finding in the legacy Paramify column layout | GraphQL `vulnerabilityFindings`, cursor pagination, flattened to CSV |
+| `wiz_stig_compliance_report` | CONFIGURATION | STIG control pass/fail per rule and resource for one framework | GraphQL queries; see [its README](../fetchers/wiz/stig_compliance_report/README.md) |
 
-One Wiz service account per tenant serves both.
+All three are read-only and use the category's shared client
+(`fetchers/wiz/_shared/wiz_client.py`), which refuses to send a GraphQL mutation
+and checks the auth and API hosts before any credential is sent. One Wiz service
+account per tenant serves every Wiz fetcher.
+
+## Read-only: what a person sets up in Wiz
+
+No fetcher creates, edits or reruns anything in Wiz. Anything that has to exist in
+the tenant is a one-time setup step, and the fetcher checks it is there and
+fails clearly when it is not.
+
+For `wiz_issues_report`, that is the report itself:
+
+1. In Wiz, create an **Issues** report with the projects and issue statuses the
+   assessment should cover. Name it `Paramify-Wiz-Issues`, or set `report_name`
+   (or `report_id`) to the one you made.
+2. Give it a **schedule**, for example every 24 hours, and run it once.
+3. Each fetcher run downloads the report's **last completed run**. It fails, with
+   no file, if the report is missing, has never run, its last run is not
+   `COMPLETED` (for example still running), or that run is older than
+   `max_report_age_hours` (default 26, which suits a daily schedule).
+
+The report's own settings decide its scope. To change which projects or statuses
+it covers, change the report in Wiz.
 
 ## Service account scopes
 
 | Fetcher | Scopes |
 |---|---|
-| `wiz_issues_report` | `read:reports`, `create:reports`, `update:reports`, `read:issues`, `read:threat_issues` |
+| `wiz_issues_report` | `read:reports` |
 | `wiz_vulnerability_findings` | `read:vulnerabilities` |
+| `wiz_stig_compliance_report` | `read:security_frameworks`, `read:cloud_configuration`, `read:host_configuration` |
 
-A missing scope shows up as `not_authorized` ("check the service account's
-scopes"), not as an empty export.
+Never grant `create:`, `update:`, `write:`, `delete:` or `admin:` scopes to a
+fetcher account. A missing scope fails the run as `not_authorized`, not as an
+empty export.
 
 ## Configuration
 
-Secrets (both fetchers): `client_id` (`WIZ_CLIENT_ID`), `client_secret`
-(`WIZ_CLIENT_SECRET`). Use `${env:...}` in the manifest.
+Secrets (every Wiz fetcher): `client_id` (`WIZ_CLIENT_ID`), `client_secret`
+(`WIZ_CLIENT_SECRET`).
 
 | Key | Env | Fetcher | Default | Notes |
 |---|---|---|---|---|
-| `auth_url` | `WIZ_AUTH_URL` | both, required | none | Must be one of Wiz's token endpoints (commercial, `auth.gov.wiz.io`, Wiz for Gov `auth.app.wiz.us`). Checked before any credential is sent. |
-| `api_endpoint` | `WIZ_API_ENDPOINT` | both, required | none | https on a Wiz domain, e.g. `https://api.us17.app.wiz.io/graphql`. |
-| `report_name` | `WIZ_REPORT_NAME` | issues | `Paramify-Wiz-Issues`, or `Paramify-Wiz-Issues-<first 8 chars of project_id>` when `project_id` is set | The report is found by name and created if missing. An explicit name is used as given. |
+| `api_endpoint_url` | `WIZ_API_ENDPOINT_URL` | all, required | none | Wiz > Tenant Info > API Endpoint URL, e.g. `https://api.us2.app.wiz.us/graphql`. Must be https on a Wiz API host. |
+| `auth_url` | `WIZ_AUTH_URL` | all | `https://auth.app.wiz.us/oauth/token` (Wiz for Gov) | Must be one of Wiz's token endpoints. Commercial is `https://auth.app.wiz.io/oauth/token`. |
+| `min_request_interval` | `WIZ_MIN_REQUEST_INTERVAL` | all | 1.0 | Seconds between API calls. The tenant's rate limit is shared with every other integration. |
+| `report_name` | `WIZ_REPORT_NAME` | issues | `Paramify-Wiz-Issues` | Exact name. Wiz's search is a substring match, so the fetcher keeps only exact matches and refuses two reports with the same name. |
 | `report_id` | `WIZ_REPORT_ID` | issues | none | Use this report instead of finding one by name. |
-| `project_id` | `WIZ_PROJECT_ID` | both | `*` (all projects) | Issues: the report's project. Vulnerabilities: added to `filterBy` only when set and not `*`. |
-| `poll_seconds` | `WIZ_REPORT_POLL_SECONDS` | issues | 20 | Seconds between report status checks. |
-| `max_wait_seconds` | `WIZ_REPORT_MAX_WAIT` | issues | 1500 | Inside `runtime.timeout` 1800. |
-| `allow_empty` | `WIZ_ALLOW_EMPTY` | both | off | `true` accepts a header-only or zero-finding export. |
-| `assessment_id`, `assessment_name`, `close_cycle` | n/a | both | none | Framework fields; see the warning below. |
+| `max_report_age_hours` | `WIZ_MAX_REPORT_AGE_HOURS` | issues | 26 | Fail if the last completed run is older than this. |
+| `project_id` | `WIZ_PROJECT_ID` | vulnerabilities | all projects | Added to `filterBy` only when set and not `*`. |
+| `page_size` | `WIZ_PAGE_SIZE` | vulnerabilities | 100 | Findings per page, max 500. The client reads at most 2,000 pages and fails beyond that. |
+| `allow_empty` | `WIZ_ALLOW_EMPTY` | issues, vulnerabilities | off | `true` accepts a header-only or zero-finding export. |
+| `assessment_id`, `assessment_name`, `close_cycle` | n/a | all | none | Framework fields; see the warning below. |
 
 Behavior worth knowing:
 
-- A failed or empty collection never leaves a CSV behind. Downloads go to a `.part`
-  file and are renamed only when complete, so a truncated export can't be sent.
-- A report run that ends `FAILED` or `EXPIRED` is re-run up to 3 times.
-- A `COMPLETED` run whose `runAt` is older than the start of this fetch is ignored:
-  it is last run's report.
-- The bearer token is never sent to the report's download URL.
-- The vulnerability export refuses to continue if a page says there is more data
-  but gives no cursor, or if there are more than `WIZ_MAX_PAGES` pages.
+- A failed or empty collection never leaves a CSV behind. The issues download goes
+  to a `.part` file and is renamed only when complete; the vulnerability CSV is
+  written only after every page has been read.
+- Any failure the shared client records (a GraphQL error, a page that says there is
+  more data but gives no cursor, a repeated cursor, the page cap) fails the run.
+- The bearer token is never sent to the report's download URL, and the download
+  must be https.
 
 ## Why DELTA_MODE was removed
 
@@ -58,25 +84,23 @@ last run. A delta file lists only what changed. Paramify closes a cycle by
 auto-closing every open issue the cycle never saw, so a delta processed with a
 cycle close would resolve nearly every open issue. Every run is a full export. For
 the same reason there is no `state.json` or `vuln_state.json`: the issues report is
-found by name each run, so a fresh checkout or CI runner behaves like the machine
-that created it.
+found by id or name each run, so a fresh checkout or CI runner behaves like any
+other machine.
 
-## Warning: close_cycle and project scope
+## Warning: close_cycle and scope
 
 `close_cycle: after_run` closes the assessment's cycle after processing, and
 **closing auto-closes every open issue in the assessment that the cycle did not
 see.** The cycle only sees what these files contain, so scope matters:
 
-- A fetcher scoped to one project (`project_id`) only reports that project. If the
-  assessment already holds issues from other projects, a close marks them resolved.
-- Changing `project_id` on an existing setup changes what "the cycle saw". Before
-  this was fixed, the default report name did not include the project, so a new
-  `project_id` silently reused the old report (still scoped to the old project).
-  The default name now includes the project, so a new project gets its own report.
-  An explicit `report_name` or `report_id` still pins one report: changing
-  `project_id` while keeping them does not retarget it.
-- Two fetchers feeding one assessment must cover the same scope you want kept open.
-  Closing runs only if every target in the run succeeded and every file uploaded.
+- The issues report covers what its settings in Wiz say. If the assessment already
+  holds issues from projects the report does not cover, a close marks them
+  resolved. Changing the report's projects in Wiz changes what "the cycle saw".
+- `project_id` on the vulnerability fetcher works the same way: findings from other
+  projects are not in the file, so a close resolves them.
+- Two fetchers feeding one assessment must together cover the scope you want kept
+  open. Closing runs only if every target in the run succeeded and every file
+  uploaded.
 - Use `close_cycle: never` while validating a new scope, check the result in
   Paramify, and only then switch to `after_run`. `paramify issues close` closes
   a cycle by hand.
@@ -91,36 +115,32 @@ see.** The cycle only sees what these files contain, so scope matters:
 
 ## Verified vs unverified against real Wiz
 
-All of the code is tested offline against a local fake Wiz
-(`fetchers/wiz/_shared/fake_wiz.py`). That proves the fetchers' own logic, not
-Wiz's behavior. Items marked **Verified** were exercised on 2026-10-01 against a
-Wiz for Gov tenant (`auth.app.wiz.us`, `api.us2.app.wiz.us`) with all projects
-(`project_id` unset), and the CSVs were accepted by Paramify pipeline intake on
-stage.
+The code is tested offline (`tests/test_wiz_pipeline_fetchers.py`, which stands in
+for Wiz at the HTTP boundary). That proves the fetchers' own logic, not Wiz's
+behavior. Items marked **Verified** were exercised against a Wiz for Gov tenant
+(`auth.app.wiz.us`, `api.us2.app.wiz.us`) with all projects, and the CSVs were
+accepted by Paramify pipeline intake.
 
 | Item | Status |
 |---|---|
 | OAuth client-credentials exchange and token endpoints | **Verified** (Wiz for Gov). |
-| `FindReports` query and its `search` filter (find a report by name) | **Verified.** `search` is a substring match (it also returns e.g. `<name>-retired-...`), so the exact-name filter in `find_or_create_report` is required, and works. |
-| `UpdateReport`, `RerunReport` mutations | **Verified.** |
-| `ReportDownloadUrl` (`lastRun { url status runAt }`) | **Verified.** `runAt` is ISO-8601 UTC (`...Z`). |
+| `FindReports` query and its `search` filter (find a report by name) | **Verified.** `search` is a substring match, so the exact-name filter is required. |
+| `ReportDownloadUrl` (`lastRun { url status runAt }`) and the download | **Verified.** `runAt` is ISO-8601 UTC (`...Z`). |
 | `vulnerabilityFindings` query, CSV columns, row flattening | **Verified** that the query runs and the CSV is accepted by intake. Column mapping against the preset is not re-checked. |
-| `CreateReport` mutation | Not confirmed: the verified runs found an existing report. Inherited from the legacy issues script. |
-| `createReport` with a specific `projectId` (not `*`) | **UNVERIFIED.** Only `*` is known to have been used before. |
-| `updateReport` leaving a report's project unchanged | **UNVERIFIED.** The scoped default name assumes it. |
+| A report on a Wiz schedule: what `lastRun` shows while a scheduled run is in progress | **UNVERIFIED.** The fetcher refuses anything but `COMPLETED`; if Wiz reports the in-progress run there, a run during that window fails and the next one succeeds. |
+| `read:reports` alone being enough to read and download an Issues report | **UNVERIFIED.** The live checks used an account that could also manage reports. If Wiz refuses, add `read:issues` (and `read:threat_issues` if the report includes threats). |
 | `filterBy: { projectId: [<id>] }` on `vulnerabilityFindings` | **UNVERIFIED against real Wiz schema.** Confirm via introspection. A wrong name should fail the GraphQL query rather than export everything, but that is also unconfirmed. |
-| Scope lists above | Taken from the fetchers' `fetcher.yaml`. Not re-checked one by one against a tenant. |
 | Commercial Wiz endpoints | Allowed by the host checks. Not exercised. |
 
-To confirm the remaining items, run both fetchers with a `project_id` set against a
-test tenant with `close_cycle: never`, and introspect `VulnerabilityFindingFilters`
-for the project field.
+To confirm the remaining items, schedule the report in a test tenant, run the
+fetchers with `close_cycle: never` while it is running and after it finishes, and
+introspect `VulnerabilityFindingFilters` for the project field.
 
 ## Testing offline
 
 ```
-python3 -m pytest -q fetchers/wiz     # also part of the default `pytest` run
+python3 -m pytest -q tests/test_wiz_pipeline_fetchers.py
 ```
 
-The tests start `FakeWiz` on 127.0.0.1 and run each `fetcher.py` in-process. No
-traffic goes to `*.wiz.io`, `*.wiz.us` or `*.paramify.com`.
+The tests replace `requests.post` and `requests.get`, so nothing goes to
+`*.wiz.io`, `*.wiz.us` or `*.paramify.com`.

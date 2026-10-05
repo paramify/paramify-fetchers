@@ -34,6 +34,39 @@ schemas and the `paramify` CLI — not the internal code.
   finding Wiz returns without its control mapping fails the run with no file
   written.
   None of the twelve writes to Wiz: the client refuses to send a mutation.
+- **Two more Wiz issue reports, `wiz_issues_report` and
+  `wiz_vulnerability_findings`**, on the same read-only client and config
+  names. `wiz_issues_report` sends Wiz's own Issues CSV to a CONFIGURATION
+  assessment. The report is created once in Wiz and scheduled there; the
+  fetcher finds it by `report_id` or exact `report_name`, and downloads its
+  last run only if that run completed within `max_report_age_hours` (default
+  26). It never creates, edits or reruns a report, so the service account
+  needs `read:reports` and nothing that writes. `wiz_vulnerability_findings`
+  pages through every vulnerability finding and writes the legacy Paramify
+  column layout for a VULNERABILITY assessment, with an optional `project_id`
+  filter. Both export everything on every run (no delta mode, since a delta
+  processed with a cycle close resolves every issue it leaves out), and any
+  read failure, an empty export (unless `allow_empty`), or an interrupted
+  download fails the run with no file written. See
+  `docs/wiz_pipeline_fetchers.md`.
+- **`paramify issues upload` names the cycle an upload landed on**, and warns
+  when newer cycles exist. Uploads land on the assessment's oldest open cycle,
+  so an old cycle left open takes every new scan while the newer cycles show
+  nothing. The TUI's Paramify tab shows the same warning. An HTTP 409 now
+  quotes Paramify's reason instead of assuming no cycle is in progress, since
+  work aimed at a cycle other than the in-progress one is refused the same way.
+- **The issues uploader only reads reports inside the run's `issue-reports/`.**
+  A report path in `_issue_reports.json` that resolves outside it, or a report
+  that is a symlink, is refused and nothing is read, so an edited index cannot
+  send another file to Paramify as a scan report.
+- **`_issue_reports.json` is written atomically, and a corrupt one never closes
+  a cycle.** An index that cannot be read is kept beside the new one as
+  `_issue_reports.json.corrupt`, and the new index is marked `cannot_close`:
+  the uploader processes that run's reports but does not close the cycle,
+  because the index can no longer show that every target succeeded. The TUI's
+  Run tab shows why a fetcher failed next to its status, and focus returns to
+  the Paramify tab when a send finishes, so its keys work without pressing 5
+  again.
 - **Evidence sets carry a collection frequency.** `evidence_set.frequency` in
   `fetcher.yaml` takes Paramify's evidence frequency values (`DAILY`,
   `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `QUARTERLY`, `BIANNUAL`,
