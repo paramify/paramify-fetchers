@@ -112,14 +112,29 @@ def operation_keywords(document: str) -> List[str]:
     field that happens to be called ``subscription`` is not mistaken for one.
     Commas and a byte-order mark are insignificant in GraphQL and are ignored
     here the same way.
+
+    One left-to-right pass, so a quote inside a comment, or a ``#`` inside a
+    string, cannot hide the text after it.
     """
-    text = re.sub(r'"""[\s\S]*?"""|"(?:\\.|[^"\\])*"', " ", document)
-    text = re.sub(r"#[^\n\r]*", " ", text)
     names: List[str] = []
     braces = parens = 0
-    i = 0
-    while i < len(text):
-        ch = text[i]
+    i, n = 0, len(document)
+    while i < n:
+        ch = document[i]
+        if ch == "#":  # comment: to end of line
+            while i < n and document[i] not in "\r\n":
+                i += 1
+            continue
+        if document.startswith('"""', i):  # block string
+            end = document.find('"""', i + 3)
+            i = n if end < 0 else end + 3
+            continue
+        if ch == '"':  # string, with escapes
+            i += 1
+            while i < n and document[i] != '"':
+                i += 2 if document[i] == "\\" else 1
+            i += 1
+            continue
         if ch == "{":
             braces += 1
         elif ch == "}":
@@ -129,7 +144,7 @@ def operation_keywords(document: str) -> List[str]:
         elif ch == ")":
             parens -= 1
         elif braces == 0 and parens == 0:
-            m = _NAME.match(text, i)
+            m = _NAME.match(document, i)
             if m:
                 names.append(m.group(0))
                 i = m.end()
@@ -199,8 +214,7 @@ def env_int(name: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
-        logger.warning("%s is not an integer (%r); using %s", name, raw, default)
-        return default
+        raise WizConfigError(f"{name} must be a whole number (got {raw!r})") from None
 
 
 def env_float(name: str, default: float) -> float:
@@ -210,8 +224,7 @@ def env_float(name: str, default: float) -> float:
     try:
         return float(raw)
     except ValueError:
-        logger.warning("%s is not a number (%r); using %s", name, raw, default)
-        return default
+        raise WizConfigError(f"{name} must be a number (got {raw!r})") from None
 
 
 def env_list(name: str, default: List[str]) -> List[str]:
@@ -434,6 +447,9 @@ class WizClient:
             except ValueError:
                 last_error = "response was not JSON"
                 break
+            if not isinstance(payload, dict):
+                last_error = "response was not a JSON object"
+                break
 
             errors = payload.get("errors") or []
             if errors and payload.get("data") is None and attempt < MAX_RETRIES and _is_transient(errors):
@@ -447,6 +463,11 @@ class WizClient:
                 self._record(operation, "GraphQLError", "; ".join(
                     str(e.get("message", e)) for e in errors[:3]), response.status_code,
                     partial=payload.get("data") is not None)
+            elif payload.get("data") is None:
+                # HTTP 200 with neither data nor errors is not an answer. Returning
+                # None unrecorded would read as "no more pages".
+                self._record(operation, "EmptyResponse", "HTTP 200 with no data and no errors",
+                             response.status_code)
             return payload.get("data")
 
         self._record(operation, "HTTPError" if last_response is not None else "ConnectionError",
@@ -524,7 +545,13 @@ class WizClient:
                 if data is None:
                     return nodes
                 size = self.page_size
-            conn = data.get(root) or {}
+            conn = data.get(root)
+            if not isinstance(conn, dict):
+                # A null root is Wiz declining to answer, not an empty connection.
+                self.api_failures.append({"operation": operation, "type": "MissingConnection",
+                                          "message": f"{root} came back null after {len(nodes)} records; "
+                                                     "evidence is incomplete"})
+                return nodes
             page = conn.get("nodes") or []
             nodes.extend(page)
 
@@ -710,5 +737,8 @@ def collect_guarded(fn: Callable[[WizClient], Dict[str, Any]]) -> Callable[[], D
             return evidence_error(str(e), code="bad_config")
         except WizAuthError as e:
             return evidence_error(str(e), code="auth_failed")
-        return fn(client)
+        try:
+            return fn(client)
+        except WizConfigError as e:
+            return evidence_error(str(e), code="bad_config")
     return _collect

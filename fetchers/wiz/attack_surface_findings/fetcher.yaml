@@ -68,6 +68,12 @@ config_schema:
     env: WIZ_INCLUDE_RAW_FINDINGS
     default: true
     description: Include every finding row, not just the summary.
+  max_records:
+    type: integer
+    required: false
+    env: WIZ_MAX_RECORDS
+    default: 20000
+    description: Safety cap on records pulled. Hitting it is reported as a failure, never silent truncation.
 
 evidence_set:
   reference_id: EVD-WIZ-ATTACK-SURFACE

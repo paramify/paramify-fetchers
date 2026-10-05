@@ -86,7 +86,7 @@ query WizHostConfigurationAssessmentCount($filterBy: HostConfigurationRuleAssess
 # split again on these filters (values from the tenant's schema) so that one
 # assessment Wiz cannot serve costs as few neighbouring rows as possible.
 SPLITS = [
-    ("severity", ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL"]),
+    ("severity", ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL", "NONE"]),
     ("status", ["OPEN", "IN_PROGRESS", "RESOLVED", "REJECTED"]),
 ]
 
@@ -215,7 +215,8 @@ def total_count(client: WizClient, filter_by: Dict[str, Any]) -> Any:
 
 
 def fetch_slice(client: WizClient, filter_by: Dict[str, Any], depth: int, cap: int,
-                found: Dict[str, Dict[str, Any]], unreadable: List[Dict[str, Any]]) -> None:
+                found: Dict[str, Dict[str, Any]], unreadable: List[Dict[str, Any]],
+                split: List[Dict[str, Any]]) -> None:
     """
     Read one filter slice into ``found`` (keyed by assessment id). If Wiz still
     fails on it, keep what came back, split the slice on the next filter in
@@ -244,8 +245,9 @@ def fetch_slice(client: WizClient, filter_by: Dict[str, Any], depth: int, cap: i
     del client.api_failures[before:]
     field, values = SPLITS[depth]
     logger.warning("slice %s kept failing; splitting on %s", filter_by, field)
+    split.append({"filter": dict(filter_by), "split_on": field})
     for v in values:
-        fetch_slice(client, {**filter_by, field: v}, depth + 1, cap, found, unreadable)
+        fetch_slice(client, {**filter_by, field: v}, depth + 1, cap, found, unreadable, split)
 
 
 def body(client: WizClient) -> Dict[str, Any]:
@@ -258,10 +260,11 @@ def body(client: WizClient) -> Dict[str, Any]:
     # One pass per result value, so a page Wiz cannot serve only affects that slice.
     found: Dict[str, Dict[str, Any]] = {}
     unreadable: List[Dict[str, Any]] = []
+    split: List[Dict[str, Any]] = []
     by_result_fetched: Dict[str, int] = {}
     for result in RESULTS:
         before = len(found)
-        fetch_slice(client, {"result": result}, 0, cap, found, unreadable)
+        fetch_slice(client, {"result": result}, 0, cap, found, unreadable, split)
         by_result_fetched[result] = len(found) - before
     raw = list(found.values())
     missing = (expected - len(raw)) if expected is not None else None
@@ -273,6 +276,17 @@ def body(client: WizClient) -> Dict[str, Any]:
                         f"smallest page and lightest query; {missing if missing is not None else 'an unknown number of'} "
                         f"of {expected if expected is not None else '?'} assessments could not be read. "
                         "See scope.unreadable_slices for the filters and Wiz request ids."),
+        })
+    elif split and (missing is None or missing > 0):
+        # A split slice is read one listed value at a time, so rows whose value is
+        # not listed (a null severity, a status Wiz added) are never fetched. With
+        # every part readable that shows up only as a shortfall against Wiz's count.
+        client.api_failures.append({
+            "operation": "hostConfigurationRuleAssessments",
+            "type": "WizSplitIncomplete",
+            "message": (f"Wiz failed on {len(split)} slice(s), which were re-read by severity/status; "
+                        f"{missing if missing is not None else 'an unknown number'} of "
+                        f"{expected if expected is not None else '?'} assessments were not read that way."),
         })
 
     rule_ids = sorted({(a.get("rule") or {}).get("id") for a in raw if (a.get("rule") or {}).get("id")})
@@ -310,6 +324,7 @@ def body(client: WizClient) -> Dict[str, Any]:
             "assessments_not_read": missing,
             "assessments_by_result_fetched": by_result_fetched,
             "unreadable_slices": unreadable,
+            "split_slices": split,
             "assessments_by_benchmark": dict(all_benchmarks.most_common()),
             "pages_served_by_lighter_query": client.fallback_pages,
             "lighter_query_note": ("Pages Wiz could not serve with host type included were re-read without it; "

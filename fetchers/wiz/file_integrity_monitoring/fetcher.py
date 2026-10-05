@@ -127,8 +127,15 @@ def body(client: WizClient) -> Dict[str, Any]:
             filt[field] = {"after": since}
             break
     fim: List[Dict[str, Any]] = []
-    queries = [dict(filt, matchedRuleName={"contains": n}) for n in needles] \
-        if inputs and "matchedRuleName" in inputs else [filt]
+    server_side = bool(inputs and "matchedRuleName" in inputs)
+    queries = [dict(filt, matchedRuleName={"contains": n}) for n in needles] if server_side else [filt]
+    if not server_side and {"ruleMatch", "ruleMatch.rule", "ruleMatch.rule.name"} & set(dmissing):
+        # Neither Wiz nor this fetcher can tell a FIM detection from any other, so
+        # "0 FIM detections" would be a guess. Say so instead.
+        client.api_failures.append({"operation": "detections", "type": "FieldUnavailable",
+                                    "message": "this tenant has no matchedRuleName filter and no ruleMatch "
+                                               "field, so file-integrity detections cannot be identified"})
+        queries = []
     seen_ids = set()
     for f in queries:
         for d in client.paginate("detections", connection_query("WizFimDetections", "detections",
@@ -138,7 +145,8 @@ def body(client: WizClient) -> Dict[str, Any]:
             name = (rule.get("name") or "").lower()
             created = d.get("createdAt")
             age = age_days(created, now)
-            if d.get("id") in seen_ids or not any(n in name for n in needles):
+            # Wiz already matched the rule name when filtering server-side.
+            if d.get("id") in seen_ids or (not server_side and not any(n in name for n in needles)):
                 continue
             if age is not None and age > window:
                 continue

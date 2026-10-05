@@ -164,10 +164,10 @@ def body(client: WizClient) -> Dict[str, Any]:
         {"filterBy": {"securityFramework": fw["id"], "result": ["PASS", "FAIL"]}},
         max_records=env_int("WIZ_MAX_RECORDS", 50000),
     )
-    if len(raw) == WIZ_ROW_CAP:
+    if len(raw) >= WIZ_ROW_CAP:
         client.api_failures.append({
             "operation": "configurationFindings", "type": "WizRowCapReached",
-            "message": "exactly 10,000 findings returned; Wiz caps this query at 10,000 rows, so the "
+            "message": f"{len(raw)} findings returned; Wiz caps this query at 10,000 rows, so the "
                        "evidence is probably truncated. Narrow the scope (framework or account).",
         })
     rows = [slim(f, now) for f in raw]

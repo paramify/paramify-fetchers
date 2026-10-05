@@ -84,6 +84,12 @@ config_schema:
     env: WIZ_MAX_RECORDS
     default: 50000
     description: Safety cap on records pulled. Hitting it is reported as a failure, never silent truncation.
+  open_statuses:
+    type: string
+    required: false
+    env: WIZ_ISSUE_OPEN_STATUSES
+    default: "OPEN,IN_PROGRESS"
+    description: Statuses counted as open.
   issue_types:
     type: string
     required: false

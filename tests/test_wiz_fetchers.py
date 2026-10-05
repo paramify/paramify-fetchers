@@ -551,6 +551,8 @@ def test_host_unreadable_assessment_is_isolated_and_reported(fake, tmp_path):
     "subscription S { issueCreated { id } }",
     "# harmless\nMUTATION M { x }",
     "query A { a } query B { b }",
+    '# "\nmutation M { deleteIssue(id: 1) { id } }\n# "',   # a quote inside a comment hides nothing
+    'query Q { a(s: "# not a comment") } mutation M { x }',
 ])
 def test_read_only_guard_blocks_bypasses(doc):
     with pytest.raises(ValueError):
@@ -660,6 +662,51 @@ def test_empty_page_with_next_is_a_failure(fake, tmp_path):
 
 
 
+@pytest.mark.parametrize("answer", [{}, {"data": None}, {"data": {"cloudAccounts": None}}])
+def test_blank_answer_mid_paging_is_a_failure_not_the_last_page(fake, answer):
+    fake.pages["cloudAccounts"] = [[{"id": "a"}], [{"id": "b"}]]
+    real = fake.__call__
+
+    def blank_page_two(url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
+        if json and (json.get("variables") or {}).get("after") == "1":
+            return FakeResponse(200, answer)
+        return real(url, data=data, json=json, headers=headers, timeout=timeout, allow_redirects=allow_redirects)
+
+    wiz_client.requests.post = blank_page_two
+    client = wiz_client.build_client()
+    nodes = client.paginate("cloudAccounts", "query($first: Int, $after: String) { cloudAccounts(first: $first, "
+                            "after: $after) { nodes { id } pageInfo { hasNextPage endCursor } } }", "cloudAccounts")
+    assert nodes == [{"id": "a"}]
+    assert client.api_failures and client.api_failures[-1]["type"] in {"EmptyResponse", "MissingConnection"}
+
+
+def test_bad_number_setting_is_bad_config(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("WIZ_STALE_SCAN_DAYS", "seven")
+    code, ev = run("scan_coverage", tmp_path)
+    assert code == 1 and ev["error_code"] == "bad_config" and "WIZ_STALE_SCAN_DAYS" in ev["message"]
+
+
+def test_host_split_that_cannot_see_every_row_is_a_failure(fake, tmp_path):
+    # h2 has no severity, so once the FAIL slice is split by severity no part asks for it.
+    fake.pages["hostConfigurationRuleAssessments"] = [[
+        _host(1, "PASS", "HIGH", RHEL_STIG, fake=fake), _host(2, "FAIL", None, RHEL_STIG, fake=fake),
+        _host(3, "FAIL", "HIGH", RHEL_STIG, fake=fake)]]
+    real = fake.__call__
+
+    def poison(url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
+        resp = real(url, data=data, json=json, headers=headers, timeout=timeout, allow_redirects=allow_redirects)
+        nodes = (((resp._body or {}).get("data") or {}).get("hostConfigurationRuleAssessments") or {}).get("nodes") or []
+        if {"h2", "h3"} <= {n.get("id") for n in nodes}:
+            return FakeResponse(200, {"data": None, "errors": [{"message": "oops! an internal error has occurred."}]})
+        return resp
+
+    wiz_client.requests.post = poison
+    code, ev = run("host_configuration_posture", tmp_path)
+    assert code == 1
+    assert ev["api_failures"][-1]["type"] == "WizSplitIncomplete"
+    assert ev["scope"]["assessments_not_read"] == 1 and ev["scope"]["split_slices"]
+
+
 # --- modules not yet exercised on a live tenant ---------------------------
 
 
@@ -712,6 +759,35 @@ def test_file_integrity_monitoring(fake, tmp_path):
     assert a["fim_detections_in_window"] == 1 and "blocked" in a["prevention_note"]
     q = next(c for c in fake.graphql_calls if "sensors(" in c["query"])
     assert "lastSeen" not in q["query"]           # unknown schema: only the safe fallback fields
+
+
+def _fim_schema(fake, rule_match: bool, server_filter: bool):
+    fields = {"id": None, "severity": None, "createdAt": None, "primaryResource": "GraphEntity"}
+    if rule_match:
+        fields["ruleMatch"] = "DetectionRuleMatch"
+    fake.types["Detection"] = {"fields": fields}
+    fake.types["GraphEntity"] = {"fields": {"id": None, "name": None, "type": None}}
+    fake.types["DetectionRuleMatch"] = {"fields": {"rule": "DetectionRule"}}
+    fake.types["DetectionRule"] = {"fields": {"id": None, "name": None}}
+    fake.types["DetectionFilters"] = {"fields": {}, "inputs": ["createdAt"] + (["matchedRuleName"] if server_filter else [])}
+
+
+def test_fim_trusts_the_server_side_rule_filter_without_rule_names(fake, tmp_path):
+    _fim_schema(fake, rule_match=False, server_filter=True)
+    fake.pages["sensors"] = [[{"id": "s1", "name": "vm-1", "status": "CONNECTED"}]]
+    det = _det(1, "MEDIUM", "File integrity: /etc/passwd modified")
+    det.pop("ruleMatch")
+    fake.pages["detections"] = [[det]]
+    code, ev = run("file_integrity_monitoring", tmp_path)
+    assert code == 0, ev["api_failures"]
+    assert ev["analysis"]["fim_detections_in_window"] == 1
+
+
+def test_fim_with_no_way_to_identify_rules_is_a_failure(fake, tmp_path):
+    _fim_schema(fake, rule_match=False, server_filter=False)
+    fake.pages["sensors"] = [[{"id": "s1", "name": "vm-1", "status": "CONNECTED"}]]
+    code, ev = run("file_integrity_monitoring", tmp_path)
+    assert code == 1 and ev["api_failures"][-1]["type"] == "FieldUnavailable"
 
 
 def test_attack_surface_and_code_findings(fake, tmp_path):
