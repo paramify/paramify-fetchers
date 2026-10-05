@@ -1,7 +1,7 @@
 # wiz_stig_compliance_report
 
 STIG checklist results from Wiz as a CSV for a Paramify **CONFIGURATION**
-assessment: one row per STIG control, per rule, per resource, with the PASS/FAIL
+assessment: one row per STIG control, per rule, per resource, with Wiz's
 result, for one enabled Wiz framework (Okta IDaaS STIG, DISA GPOS SRG, a CIS
 STIG benchmark, ...).
 
@@ -21,10 +21,14 @@ bytes, and the Paramify file intake preset maps them once.
 
 | Source | Query | Kept when |
 |---|---|---|
-| Cloud configuration rules | `configurationFindings` filtered to the framework, `result` PASS/FAIL | always (Wiz filters server-side) |
-| Host configuration (OS benchmarks) | `hostConfigurationRuleAssessments`, one pass per result, then `hostConfigurationRules` for each rule's framework mapping | the rule maps to the framework |
+| Cloud configuration rules | `configurationFindings` filtered to the framework, every result | always (Wiz filters server-side) |
+| Host configuration (OS benchmarks) | `hostConfigurationRuleAssessments`, one pass per result (PASS, FAIL, ERROR, NOT_ASSESSED), then `hostConfigurationRules` for each rule's framework mapping | the rule maps to the framework |
 
-A rule mapped to several STIG controls produces one row per control.
+Every result is kept, not just PASS and FAIL: a check that moves from FAIL to
+ERROR stays in the file, where its absence would read as fixed. A rule mapped to
+several STIG controls produces one row per control; a control listed under two
+titles is still one row, with both titles. An assessment read in two passes
+(its result changed mid-run) is written once, from the newer read.
 
 ## Columns
 
@@ -37,7 +41,7 @@ A rule mapped to several STIG controls produces one row per control.
 | Rule Type | `Cloud Configuration` / `Host Configuration` | |
 | Rule ID, Rule Name | `OKTA-012`, `Okta User should not be inactive for more than 90 days` | |
 | Remediation | `In the Okta Admin Console, go to Security > ...` | Wiz's fix instructions for the rule. Map to the intake **Recommendation** field. Blank if the tenant does not expose `remediationInstructions` (probed once per run; never fails the run) |
-| Result | `PASS` / `FAIL` | |
+| Result | `PASS` / `FAIL` / `ERROR` / `NOT_ASSESSED` | As Wiz reports it. Map anything other than `PASS` so the issue stays open: a check Wiz could not evaluate is not a pass |
 | Status, Severity | `OPEN`, `MEDIUM` | As Wiz reports them |
 | Resource ID, Resource Name, Resource Type | | Use Resource Name as the **asset identifier** |
 | Cloud Platform, Region, Subscription, Subscription ID | | Cloud rows only |
@@ -97,7 +101,8 @@ reads as resolved findings once intake parses it.
 | Bad client id/secret | `auth_failed` |
 | Service account missing a scope | `not_authorized` |
 | Rate limited after retries | `rate_limited` |
-| No rows for the framework, 10,000-row Wiz cap hit, record cap hit, control mappings unavailable | `partial_failure` |
+| No rows for the framework, 10,000-row Wiz cap hit, record cap hit, control mappings unavailable, a cloud finding with no control in the framework, a host rule the lookup did not return, an empty or null page from Wiz | `partial_failure` |
+| The CSV could not be written | `internal_error` |
 
 ## Caveats
 

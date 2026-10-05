@@ -93,7 +93,8 @@ class FakeWiz:
         if root == "securityFrameworks":
             return page(root, [self.frameworks], v)
         if root == "configurationFindings":
-            assert v["filterBy"] == {"securityFramework": "wf-id-305", "result": ["PASS", "FAIL"]}
+            # Every result: no result filter, so a FAIL that becomes ERROR stays in the file.
+            assert v["filterBy"] == {"securityFramework": "wf-id-305"}
             if self.fail_subcats and "securitySubCategories" in q:
                 return Resp(200, {"data": None, "errors": [{"message": "An internal error has occurred"}]})
             return page(root, self.cloud_pages, v)
@@ -286,3 +287,67 @@ def test_host_rows_carry_remediation(fake, tmp_path):
     assert fetcher.main() == 0
     host = [r for r in rows(tmp_path) if r["Rule Type"] == "Host Configuration"]
     assert host[0]["Remediation"] == "Fix hr1"
+
+
+def _host_node(i, result, analyzed="2026-09-23T00:00:00Z"):
+    return {"id": f"h{i}", "result": result, "severity": "HIGH", "status": "OPEN", "firstSeen": None,
+            "analyzedAt": analyzed,
+            "rule": {"id": f"hr{i}", "name": f"rule {i}", "shortName": "RHEL8.DISA.STIG/1", "externalId": f"RHEL-{i}"},
+            "resource": {"id": "i-1", "name": "node-a", "type": "VIRTUAL_MACHINE"}}
+
+
+def test_cloud_finding_without_a_control_fails_without_writing(fake, tmp_path):
+    # Wiz filtered it to the framework, so a missing mapping is missing data; leaving
+    # the row out would read as resolved.
+    unmapped = cloud(2, "FAIL", [("V-2", "b")])
+    unmapped["rule"]["securitySubCategories"][0]["category"]["framework"] = None
+    fake.cloud_pages = [[cloud(1, "FAIL", [("V-1", "a")]), unmapped]]
+    assert fetcher.main() == 1
+    assert not out(tmp_path).exists()
+    assert "without a control" in status(tmp_path)["error"]
+
+
+def test_host_rule_missing_from_lookup_fails(fake, tmp_path):
+    fake.cloud_pages = [[cloud(1, "PASS", [("V-1", "a")])]]
+    fake.host = [_host_node(1, "FAIL"), _host_node(2, "FAIL")]
+    fake.host_rules = {"hr1": [sub("V-9", "SRG", "wf-id-305")]}   # hr2 never comes back
+    assert fetcher.main() == 1
+    assert not out(tmp_path).exists()
+    assert "did not return 1 of 2" in status(tmp_path)["error"]
+
+
+def test_host_assessment_read_in_two_passes_is_one_row(fake, tmp_path):
+    # Its result flipped between the FAIL pass and the PASS pass: keep the newer read.
+    fake.cloud_pages = [[cloud(1, "PASS", [("V-1", "a")])]]
+    fake.host = [_host_node(1, "PASS", "2026-09-23T00:00:00Z"), _host_node(1, "FAIL", "2026-09-24T00:00:00Z")]
+    fake.host_rules = {"hr1": [sub("V-9", "SRG", "wf-id-305")]}
+    assert fetcher.main() == 0
+    host = [r for r in rows(tmp_path) if r["Rule Type"] == "Host Configuration"]
+    assert [(r["Record ID"], r["Result"]) for r in host] == [("h1:V-9", "FAIL")]
+
+
+def test_control_under_two_titles_is_one_row(fake, tmp_path):
+    fake.cloud_pages = [[cloud(1, "FAIL", [("V-1", "SRG-B"), ("V-1", "SRG-A")])]]
+    assert fetcher.main() == 0
+    got = rows(tmp_path)
+    assert [(r["Record ID"], r["Control Title"]) for r in got] == [("cf-1:V-1", "SRG-A; SRG-B")]
+
+
+def test_host_error_and_not_assessed_results_stay_in_the_file(fake, tmp_path):
+    fake.cloud_pages = [[cloud(1, "PASS", [("V-1", "a")])]]
+    fake.host = [_host_node(1, "ERROR"), _host_node(2, "NOT_ASSESSED")]
+    fake.host_rules = {"hr1": [sub("V-9", "SRG", "wf-id-305")], "hr2": [sub("V-8", "SRG", "wf-id-305")]}
+    assert fetcher.main() == 0
+    host = {r["Record ID"]: r["Result"] for r in rows(tmp_path) if r["Rule Type"] == "Host Configuration"}
+    assert host == {"h1:V-9": "ERROR", "h2:V-8": "NOT_ASSESSED"}
+
+
+def test_failed_write_leaves_no_file(fake, tmp_path, monkeypatch):
+    fake.cloud_pages = [[cloud(1, "PASS", [("V-1", "a")])]]
+
+    def boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(fetcher.os, "replace", boom)
+    assert fetcher.main() == 1
+    assert list(tmp_path.glob("*.csv*")) == [] and not list(tmp_path.glob(".*.part"))

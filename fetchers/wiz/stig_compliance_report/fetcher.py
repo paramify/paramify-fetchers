@@ -2,7 +2,7 @@
 """
 Wiz STIG compliance report: one CSV row per STIG control, per rule, per resource.
 
-Pulls pass/fail results for one enabled Wiz security framework (a DISA STIG such
+Pulls the results for one enabled Wiz security framework (a DISA STIG such
 as "Okta IDaaS STIG", or a CIS STIG benchmark) and writes them as a CSV for a
 Paramify CONFIGURATION assessment. This is the per-asset checklist shape a ConMon
 assessor expects: every rule the framework maps, on every resource it applies to,
@@ -61,7 +61,7 @@ COLUMNS = [
     "Rule ID",
     "Rule Name",
     "Remediation",        # Wiz's fix instructions for the rule; blank if the tenant does not expose them
-    "Result",             # PASS | FAIL (as Wiz reports it)
+    "Result",             # PASS | FAIL | ERROR | NOT_ASSESSED ... (as Wiz reports it)
     "Status",
     "Severity",
     "Resource ID",
@@ -77,7 +77,11 @@ COLUMNS = [
 ]
 
 WIZ_ROW_CAP = 10000  # Wiz stops returning configurationFindings at 10,000 rows per query
-RESULTS = ["PASS", "FAIL"]
+# Every result, not just PASS and FAIL: a check that moves from FAIL to ERROR must
+# stay in the file, or intake reads its absence as fixed. Cloud findings are read
+# with no result filter at all; host assessments one pass per value (the values
+# wiz_host_configuration_posture reads).
+HOST_RESULTS = ["PASS", "FAIL", "ERROR", "NOT_ASSESSED"]
 
 FRAMEWORKS_QUERY = """
 query WizFrameworks($first: Int, $after: String) {
@@ -164,13 +168,18 @@ def find_framework(frameworks: List[Dict[str, Any]], wanted: str) -> Dict[str, A
 
 
 def controls_for(subcats: Iterable[Dict[str, Any]], framework_id: str) -> List[Tuple[str, str]]:
-    """(control id, title) pairs of a rule that belong to this framework, sorted and de-duplicated."""
-    out = set()
+    """(control id, title) pairs of a rule that belong to this framework, one per control id.
+
+    Record ID is finding id + control id, so a control listed under two titles
+    must still be one row: its titles are joined rather than emitted twice.
+    """
+    titles: Dict[str, set] = {}
     for sub in subcats or []:
         fw = ((sub or {}).get("category") or {}).get("framework") or {}
         if fw.get("id") == framework_id:
-            out.add(((sub.get("externalId") or "").strip(), (sub.get("title") or "").strip()))
-    return sorted(out)
+            control = (sub.get("externalId") or "").strip()
+            titles.setdefault(control, set()).add((sub.get("title") or "").strip())
+    return [(control, "; ".join(sorted(t for t in titles[control] if t))) for control in sorted(titles)]
 
 
 def target_suffix(framework: str) -> str:
@@ -221,7 +230,7 @@ def supports_remediation(client: WizClient, operation: str, query: str, root: st
 
 
 def cloud_rows(client: WizClient, fw: Dict[str, Any]) -> Tuple[List[Dict[str, str]], int]:
-    variables = {"filterBy": {"securityFramework": fw["id"], "result": RESULTS}}
+    variables = {"filterBy": {"securityFramework": fw["id"]}}
     with_fix = supports_remediation(client, "configurationFindings", CLOUD_QUERY_WITH_REMEDIATION,
                                     "configurationFindings", variables)
     before = len(client.api_failures)
@@ -232,8 +241,8 @@ def cloud_rows(client: WizClient, fw: Dict[str, Any]) -> Tuple[List[Dict[str, st
         max_records=env_int("WIZ_MAX_RECORDS", 50000), fallback_queries=CLOUD_FALLBACKS,
     )
     check(client, before)
-    if len(nodes) == WIZ_ROW_CAP:
-        raise StigError("exactly 10,000 cloud findings returned; Wiz caps this query at 10,000 rows, so the "
+    if len(nodes) >= WIZ_ROW_CAP:
+        raise StigError(f"{len(nodes)} cloud findings returned; Wiz caps this query at 10,000 rows, so the "
                         "report would be truncated. Scope the framework or tenant down.")
     if client.fallback_pages > fallback_before:
         raise StigError("Wiz could not return STIG control mappings for some cloud findings "
@@ -242,7 +251,7 @@ def cloud_rows(client: WizClient, fw: Dict[str, Any]) -> Tuple[List[Dict[str, st
 
     rows: List[Dict[str, str]] = []
     unmapped = 0
-    for n in nodes:
+    for n in dedupe(nodes):
         rule = n.get("rule") or {}
         res = n.get("resource") or {}
         sub = res.get("subscription") or {}
@@ -256,6 +265,12 @@ def cloud_rows(client: WizClient, fw: Dict[str, Any]) -> Tuple[List[Dict[str, st
                             res.get("nativeType") or res.get("type"), res.get("cloudPlatform"),
                             res.get("region"), sub.get("name"), sub.get("externalId"),
                             n.get("firstSeenAt"), n.get("analyzedAt")))
+    if unmapped:
+        # Wiz filtered these to the framework, so each one maps to a control of it.
+        # Coming back without the mapping means the data is incomplete, and leaving
+        # the finding out would read as resolved.
+        raise StigError(f"{unmapped} of {len(nodes)} cloud findings came back without a control in "
+                        f"{fw['name']!r}; refusing to write a report that leaves them out.")
     return rows, unmapped
 
 
@@ -263,7 +278,7 @@ def host_rows(client: WizClient, fw: Dict[str, Any]) -> Tuple[List[Dict[str, str
     # One pass per result value, the filter shape wiz_host_configuration_posture
     # uses against the live tenant (a single value, not a list).
     nodes: List[Dict[str, Any]] = []
-    for result in RESULTS:
+    for result in HOST_RESULTS:
         before = len(client.api_failures)
         nodes.extend(client.paginate(
             "hostConfigurationRuleAssessments", HOST_QUERY, "hostConfigurationRuleAssessments",
@@ -271,10 +286,14 @@ def host_rows(client: WizClient, fw: Dict[str, Any]) -> Tuple[List[Dict[str, str
             max_records=env_int("WIZ_MAX_RECORDS", 50000), fallback_queries=HOST_FALLBACKS,
         ))
         check(client, before)
+    # An assessment whose result changed between two passes is read twice; keep
+    # the most recently analyzed copy so its Record ID appears once.
+    nodes = dedupe(nodes)
 
     rule_ids = sorted({(n.get("rule") or {}).get("id") for n in nodes if (n.get("rule") or {}).get("id")})
     mapping: Dict[str, List[Tuple[str, str]]] = {}
     fixes: Dict[str, str] = {}
+    returned: set = set()
     chunk = max(1, env_int("WIZ_HOST_RULE_LOOKUP_CHUNK", 20))
     rules_query = HOST_RULES_QUERY
     if rule_ids and supports_remediation(client, "hostConfigurationRules", HOST_RULES_QUERY_WITH_REMEDIATION,
@@ -285,11 +304,18 @@ def host_rows(client: WizClient, fw: Dict[str, Any]) -> Tuple[List[Dict[str, str
         rules = client.paginate("hostConfigurationRules", rules_query, "hostConfigurationRules",
                                 {"filterBy": {"id": rule_ids[i:i + chunk]}})
         check(client, before)
+        returned.update(r.get("id") for r in rules if r.get("id"))
         for r in rules:
             pairs = controls_for(r.get("securitySubCategories"), fw["id"])
             if pairs and r.get("id"):
                 mapping[r["id"]] = pairs
                 fixes[r["id"]] = r.get(REMEDIATION_FIELD) or ""
+    unresolved = [rid for rid in rule_ids if rid not in returned]
+    if unresolved:
+        # A rule the lookup did not return cannot be told apart from one outside
+        # the framework, so its assessments would silently drop out.
+        raise StigError(f"Wiz did not return {len(unresolved)} of {len(rule_ids)} host configuration rules "
+                        f"(e.g. {unresolved[0]}); cannot tell which framework their assessments belong to.")
 
     rows: List[Dict[str, str]] = []
     for n in nodes:
@@ -301,6 +327,17 @@ def host_rows(client: WizClient, fw: Dict[str, Any]) -> Tuple[List[Dict[str, str
                             fixes.get(rule.get("id") or ""), n, res.get("id"), res.get("name"), res.get("type"), None, None, None, None,
                             n.get("firstSeen"), n.get("analyzedAt")))
     return rows, len(nodes)
+
+
+def dedupe(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One node per id, keeping the most recently analyzed (the later read on a tie)."""
+    keep: Dict[Any, Dict[str, Any]] = {}
+    for n in nodes:
+        key = n.get("id")
+        prior = keep.get(key)
+        if prior is None or (n.get("analyzedAt") or "") >= (prior.get("analyzedAt") or ""):
+            keep[key] = n
+    return list(keep.values())
 
 
 def row(fw, control_id, title, rule_type, rule_id, rule_name, remediation, node, res_id, res_name, res_type,
@@ -360,8 +397,12 @@ def collect(client: WizClient, wanted: str, include_host: bool) -> Tuple[bytes, 
     if not rows:
         # Intake reads an empty report as "no findings" and would resolve every open
         # issue on the assessment. Never hand it one.
-        raise StigError(f"Wiz returned no PASS/FAIL results mapped to {fw['name']!r}; check that its rules "
+        raise StigError(f"Wiz returned no results mapped to {fw['name']!r}; check that its rules "
                         "apply to resources this service account can see (wiz_scan_coverage).")
+    ids = [r["Record ID"] for r in rows]
+    if len(set(ids)) != len(ids):
+        dup = next(i for i in ids if ids.count(i) > 1)
+        raise StigError(f"Record ID {dup!r} would appear more than once; intake keys issues on it.")
     return render_csv(rows), stats
 
 
@@ -392,8 +433,17 @@ def main() -> int:
         report_failure(f"unexpected error: {type(e).__name__}: {e}", "internal_error")
         return 1
 
+    # Write beside the target and rename, so a failed write never leaves a
+    # partial CSV where the runner would record it as this run's report.
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(content)
+    tmp = output_path.with_name(f".{output_path.name}.part")
+    try:
+        tmp.write_bytes(content)
+        os.replace(tmp, output_path)
+    except OSError as e:
+        tmp.unlink(missing_ok=True)
+        report_failure(f"could not write {output_path.name}: {e}", "internal_error")
+        return 1
     fw = stats["framework"]
     logger.info("Report saved to %s (%d rows: %d cloud, %s host) for %s (%s); %d cloud findings had no "
                 "control in this framework", output_path, stats["cloud_rows"] + stats.get("host_rows", 0),

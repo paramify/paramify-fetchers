@@ -28,8 +28,11 @@ schemas and the `paramify` CLI — not the internal code.
   CONFIGURATION assessment's pipeline. Wiz's own compliance CSV exists only as
   a saved report, and creating or rerunning one is a write, so the rows are
   built from GraphQL queries instead, in a fixed column set and sorted order so
-  the same Wiz state gives the same file. Any Wiz error, Wiz's 10,000-row cap,
-  an empty result or a disabled framework fails the run with no file written.
+  the same Wiz state gives the same file. Every result is reported, not just
+  PASS and FAIL, so a check that moves to ERROR is not read as fixed. Any Wiz
+  error, Wiz's 10,000-row cap, an empty result, a disabled framework, or a
+  finding Wiz returns without its control mapping fails the run with no file
+  written.
   None of the twelve writes to Wiz: the client refuses to send a mutation.
 - **Evidence sets carry a collection frequency.** `evidence_set.frequency` in
   `fetcher.yaml` takes Paramify's evidence frequency values (`DAILY`,
