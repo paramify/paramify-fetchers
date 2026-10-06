@@ -143,12 +143,23 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
         "secrets": [_secret_descriptor(s) for s in effective_secrets(f, platform_spec)],
         "target_schema": [_target_descriptor(t) for t in f.target_schema.values()],
     }
+    # Where the output goes, so a front-end can say so before anything runs.
+    # Evidence names its destination in fetcher.yaml; an issue report names only
+    # the kind of assessment it fits, and the manifest picks which one.
+    if f.evidence_set is not None:
+        d["evidence_set"] = {
+            "reference_id": f.evidence_set.reference_id,
+            "name": f.evidence_set.name,
+            "frequency": f.evidence_set.frequency,
+        }
     if f.issue_report is not None:
         # What kind of assessment this report can go to, so a front-end can
-        # filter the assessment picker without re-reading fetcher.yaml.
+        # filter the assessment picker without re-reading fetcher.yaml. The
+        # format is the tool's own (csv, nessus, …), never one we convert to.
         d["issue_report"] = {
             "assessment_type": f.issue_report.assessment_type,
             "title": f.issue_report.title,
+            "format": f.output_type,
         }
     return d
 

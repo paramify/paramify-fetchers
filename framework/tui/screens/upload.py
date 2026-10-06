@@ -162,7 +162,7 @@ class UploadPage(ButtonRowNav, Vertical):
         self._upload_kind = "evidence"
 
         self.query_one("#evidence-panel", Vertical).border_title = "evidence upload"
-        self.query_one("#issues-panel", Vertical).border_title = "issue reports"
+        self.query_one("#issues-panel", Vertical).border_title = "scan reports"
         self.query_one("#scripts-panel", Vertical).border_title = "scripts sync"
         log_panel = self.query_one("#upload-log-panel", Vertical)
         log_panel.border_title = "log"
@@ -317,7 +317,7 @@ class UploadPage(ButtonRowNav, Vertical):
             table.add_row("status", Text(f"cannot list runs: {exc}", style=palette.FAIL))
             return
         if latest is None:
-            table.add_row("status", Text("no run collected issue reports", style="dim"))
+            table.add_row("status", Text("no run collected scan reports", style="dim"))
             return
 
         self._issues_run_dir = latest["dir"]
@@ -464,7 +464,7 @@ class UploadPage(ButtonRowNav, Vertical):
         pf = self._issues_preflight
         run_dir = self._issues_run_dir
         if not run_dir or not pf or not pf.get("ok"):
-            self.notify("No issue reports ready to send.")
+            self.notify("No scan reports ready to send.")
             return
 
         def go(ok: bool) -> None:
@@ -475,7 +475,7 @@ class UploadPage(ButtonRowNav, Vertical):
             p for p in pf.get("assessments") or [] if p.get("operation") == "PROCESS_CLOSE"
         ]
         question = (
-            f"Send {pf['file_count']} issue report(s) into their Paramify "
+            f"Send {pf['file_count']} scan report(s) into their assessments' "
             f"pipelines at {pf['base_url']} and process them?"
         )
         if closing:
@@ -487,8 +487,8 @@ class UploadPage(ButtonRowNav, Vertical):
 
     def _start_intake(self, run_dir: str) -> None:
         self._uploading = True
-        self._upload_kind = "issue report"
-        self._begin_log(Text("sending issue reports...", style=palette.WARN))
+        self._upload_kind = "scan report"
+        self._begin_log(Text("sending scan reports...", style=palette.WARN))
         self._issues_worker(run_dir, self.app.root_path)
 
     @work(thread=True, exclusive=True)
@@ -791,7 +791,7 @@ class UploadPage(ButtonRowNav, Vertical):
             return
         choices = self._manifest_assessments()
         if not choices:
-            self.notify("No issue-report entry in this manifest points at an assessment.")
+            self.notify("No scan report in this manifest points at an assessment.")
             return
 
         def chosen(aid):

@@ -806,6 +806,7 @@ def test_describe_exposes_kind_and_issue_report_and_reserved_config(tmp_path):
     assert d["issue_report"] == {
         "assessment_type": "VULNERABILITY",
         "title": "Test Scan",
+        "format": "csv",
     }
     assert {c["name"] for c in d["config"]} >= {"assessment_id", "assessment_name"}
 
