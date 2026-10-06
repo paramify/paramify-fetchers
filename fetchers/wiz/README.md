@@ -1,9 +1,9 @@
 # Wiz
 
 Read-only fetchers for the Wiz cloud security platform (commercial and Wiz for
-Government): eleven evidence fetchers, below, and three issue reports that send
+Government): twelve evidence fetchers, below, and three issue reports that send
 findings to a Paramify assessment (see [Issue reports](#issue-reports)). All
-fourteen share one GraphQL client (`_shared/wiz_client.py`) and one pair of
+fifteen share one GraphQL client (`_shared/wiz_client.py`) and one pair of
 secrets. None of them writes to Wiz: the client refuses to send a GraphQL
 mutation.
 
@@ -15,6 +15,7 @@ mutation.
 | `wiz_container_vulnerabilities` | Open vulnerability findings on container images and containers | `read:vulnerabilities` |
 | `wiz_cloud_configuration_posture` | Cloud configuration rule pass/fail against one framework (default NIST SP 800-53 Rev 5) | `read:cloud_configuration`, `read:security_frameworks` |
 | `wiz_host_configuration_posture` | OS benchmark pass/fail per benchmark and host (default DISA STIG) | `read:host_configuration` |
+| [`wiz_inventory`](../../docs/wiz_inventory.md) | One record per cloud resource (account, region, type, IPs, OS, tags, owners) with its open Inventory Management findings, shaped for a Paramify inventory pipeline (data path `payload.data`) | `read:resources`, plus read access to Inventory Management findings |
 
 ### Fetchers for Wiz modules with limited live data
 

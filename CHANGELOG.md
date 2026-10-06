@@ -12,6 +12,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`wiz_inventory`, the Wiz cloud resource inventory, for Paramify inventory
+  pipelines.** One record per resource from `cloudResourcesV2` (account,
+  region, type, IPs, OS, tags, owners, internet exposure), joined with the
+  resource's open Inventory Management findings from `inventoryFindings` (tag
+  enforcement, agent coverage, custom rules). Records sit under
+  `payload.data` with flat, stable keys, so an inventory pipeline attached to
+  the `EVD-WIZ-INVENTORY` evidence set can map them and its condition rules
+  can test `environment`, `owner`, `public` or the finding count directly.
+  Scope is set by resource type, cloud platform, account and project;
+  unknown types or platforms are refused before any paging, and a filter
+  that Wiz counts above `max_records` is refused before paging too. A failed
+  findings pull fails the run instead of sending an inventory without its
+  findings. Queries and filters were checked against the live Wiz for Gov
+  schema; the service-account scope for `inventoryFindings` still needs one
+  live run. See `docs/wiz_inventory.md`.
 - **A Wiz category with twelve fetchers**, for Wiz commercial and Wiz for
   Government, sharing one GraphQL client and one service account. Eleven are
   evidence fetchers: `wiz_scan_coverage`, `wiz_posture_issues`,
