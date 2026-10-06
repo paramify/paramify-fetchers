@@ -80,7 +80,7 @@ last one is in. Closing auto-closes open issues the cycle never saw.
 
 Or do the same from `paramify tui`: add the fetcher, fill its config, press `A`
 on the entry to pick the assessment and its close policy, run, then send the
-issue reports from the Paramify tab.
+scan reports from the Paramify tab.
 
 5. **Run and upload**:
 
