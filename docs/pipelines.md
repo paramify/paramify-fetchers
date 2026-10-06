@@ -149,6 +149,8 @@ Three rules explain most of what you will see.
 | `HTTP 401` / `403` | The key lacks a pipeline permission. The upload stops. | Add `PIPELINE_INTAKE` / `PIPELINE_PROCESS` / `PIPELINE_CLOSE` to the key. |
 | `HTTP 404` | The assessment ID is from another workspace, or the assessment was deleted. | Step 2 again. |
 | `HTTP 409` / `no cycle in progress` | The last cycle was closed and nothing has been uploaded since. | Nothing: the next upload opens a cycle. |
+| `HTTP 409` / `not the assessment's in-progress cycle` | Work was aimed at a cycle other than the oldest open one. Paramify only processes or closes that one. | Close the older open cycles first (each close auto-closes issues it never saw). |
+| `[WARN] N newer cycle(s) exist` | The upload landed on an old cycle left open, so the newer cycles show nothing. | Look for the issues on the named cycle. To move on, close it (and any other old ones). |
 | job `FAILED` | Processing failed; the error says why (often the preset's column mapping). | Fix the cause, then `j` → retry. |
 | `blocked by failed job …` | An older failed job holds the queue. | `j` → retry or cancel that job. |
 | `still running` | The job outlasted the wait (15 minutes by default). | Nothing is lost: `j` shows how it ends, and sending again waits on it. |

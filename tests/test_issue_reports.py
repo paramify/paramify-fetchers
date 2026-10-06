@@ -879,3 +879,120 @@ def test_upload_reads_close_cycle_from_the_producing_manifest(tmp_path):
     [plan] = after["assessments"]
     assert plan["error"] is None
     assert plan["operation"] == "PROCESS_CLOSE"
+
+
+# --------------------------------------------------------------------------- #
+# Sidecar integrity
+# --------------------------------------------------------------------------- #
+
+def _record(tmp_path, name, **result_overrides):
+    reports = tmp_path / ISSUE_REPORTS_DIR
+    reports.mkdir(exist_ok=True)
+    (reports / name).write_bytes(RAW_CSV)
+    fetcher = make_issue_report_fetcher(tmp_path)
+    return record_outputs(
+        make_result([f"{ISSUE_REPORTS_DIR}/{name}"], **result_overrides), fetcher, "run-1", tmp_path,
+        {ASSESSMENT_ID_FIELD: "assess-uuid", CLOSE_CYCLE_FIELD: "after_run"},
+    )
+
+
+def test_sidecar_is_written_atomically_via_a_temp_file_and_replace(tmp_path, monkeypatch):
+    import os
+
+    from framework import issue_reports
+
+    calls = []
+    real = os.replace
+    monkeypatch.setattr(issue_reports.os, "replace",
+                        lambda src, dst: (calls.append((Path(src).name, Path(dst).name)), real(src, dst))[1])
+    _record(tmp_path, "a.csv")
+    assert ("_issue_reports.json.tmp", "_issue_reports.json") in calls
+    assert not (tmp_path / ISSUE_REPORTS_DIR / "_issue_reports.json.tmp").exists()
+
+
+def test_a_failed_write_leaves_the_previous_sidecar_intact(tmp_path, monkeypatch):
+    from framework import issue_reports
+
+    _record(tmp_path, "a.csv")
+    path = tmp_path / ISSUE_REPORTS_DIR / "_issue_reports.json"
+    before = path.read_bytes()
+
+    def boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(issue_reports.os, "replace", boom)
+    assert _record(tmp_path, "b.csv") == []          # reported as not recorded
+    assert path.read_bytes() == before, "a half-finished write must not touch the index"
+    assert not (tmp_path / ISSUE_REPORTS_DIR / "_issue_reports.json.tmp").exists()
+
+
+def test_a_corrupt_sidecar_is_kept_and_the_new_index_cannot_close(tmp_path):
+    reports = tmp_path / ISSUE_REPORTS_DIR
+    reports.mkdir()
+    (reports / "_issue_reports.json").write_text('{"reports": [ {"file": "a.csv", TRUNC')
+
+    added = _record(tmp_path, "b.csv")
+
+    assert [r["file"] for r in added] == ["b.csv"], "this invocation is still recorded"
+    index = read_index(tmp_path)
+    assert index["cannot_close"] and "unreadable" in index["cannot_close"]
+    assert (reports / "_issue_reports.json.corrupt").read_text().endswith("TRUNC")
+
+
+def test_cannot_close_survives_later_invocations(tmp_path):
+    reports = tmp_path / ISSUE_REPORTS_DIR
+    reports.mkdir()
+    (reports / "_issue_reports.json").write_text("not json at all")
+    _record(tmp_path, "b.csv")
+    _record(tmp_path, "c.csv")
+    index = read_index(tmp_path)
+    assert index["cannot_close"]
+    assert [r["file"] for r in index["reports"]] == ["b.csv", "c.csv"]
+
+
+def test_a_healthy_sidecar_is_never_marked_cannot_close(tmp_path):
+    _record(tmp_path, "a.csv")
+    _record(tmp_path, "b.csv")
+    assert "cannot_close" not in read_index(tmp_path)
+
+
+def test_run_emits_the_recorded_error_for_a_failed_issue_report(tmp_path):
+    """The Run tab's info column reads this: the reason the fetcher reported via
+    $FETCHER_STATUS_FILE, with its code, on the fetcher_result event."""
+    write_issue_report_fetcher(tmp_path, exit_code=1, write_file=False)
+    fetcher_py = tmp_path / "fetchers" / "testcat" / "vuln_scan" / "fetcher.py"
+    fetcher_py.write_text(
+        "import json, os\n"
+        "open(os.environ['FETCHER_STATUS_FILE'], 'w').write(json.dumps("
+        "{'error': 'Wiz rejected the client credentials (HTTP 401)', 'code': 'auth_failed'}))\n"
+        "raise SystemExit(1)\n"
+    )
+    events = []
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [{"use": "t_vuln_scan"}]}}
+    api.run(manifest, tmp_path, on_event=events.append)
+    [result] = [e for e in events if e["event"] == "fetcher_result"]
+    assert result["exit_code"] == 1
+    assert result["error"] == "Wiz rejected the client credentials (HTTP 401)"
+    assert result["error_code"] == "auth_failed"
+
+
+def test_run_falls_back_to_the_last_stderr_line_when_no_status_was_reported(tmp_path):
+    write_issue_report_fetcher(tmp_path, exit_code=1, write_file=False)
+    (tmp_path / "fetchers" / "testcat" / "vuln_scan" / "fetcher.py").write_text(
+        "import sys\nprint('starting', file=sys.stderr)\nprint('boom: no route to host', file=sys.stderr)\n"
+        "raise SystemExit(1)\n"
+    )
+    events = []
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [{"use": "t_vuln_scan"}]}}
+    api.run(manifest, tmp_path, on_event=events.append)
+    [result] = [e for e in events if e["event"] == "fetcher_result"]
+    assert result["error"] == "boom: no route to host"
+
+
+def test_a_successful_run_event_carries_no_error(tmp_path):
+    write_issue_report_fetcher(tmp_path)
+    events = []
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [{"use": "t_vuln_scan"}]}}
+    api.run(manifest, tmp_path, on_event=events.append)
+    [result] = [e for e in events if e["event"] == "fetcher_result"]
+    assert "error" not in result

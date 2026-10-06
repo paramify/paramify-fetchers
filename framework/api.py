@@ -1024,6 +1024,14 @@ def _manifest_id(path, root: Path) -> str:
         return str(p)
 
 
+def _last_line(text: Optional[str]) -> str:
+    """Last non-blank line of `text`, or ''."""
+    for line in reversed((text or "").splitlines()):
+        if line.strip():
+            return line.strip()
+    return ""
+
+
 def run(
     manifest: dict,
     root: Path,
@@ -1142,14 +1150,24 @@ def run(
                 record_issue_reports(r, fetcher, run_id, run_dir, assessment)
             if r.exit_code != 0:
                 overall_ok = False
-            emit({
+            result_event = {
                 "event": "fetcher_result",
                 "fetcher": entry.use,
                 "exit_code": r.exit_code,
                 "duration_sec": r.duration_sec,
                 "target": r.target,
                 "outputs": r.outputs,
-            })
+            }
+            if r.exit_code != 0:
+                # Why it failed, for a front-end to show next to the status: what
+                # the fetcher reported via $FETCHER_STATUS_FILE, else the last
+                # line it wrote to stderr (the same precedence the sidecar uses).
+                reason = r.error or _last_line(r.stderr)
+                if reason:
+                    result_event["error"] = reason
+                if r.error_code:
+                    result_event["error_code"] = r.error_code
+            emit(result_event)
         all_results.extend(results)
 
     completed_at = _iso_now()
