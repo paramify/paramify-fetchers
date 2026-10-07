@@ -113,8 +113,8 @@ config_schema:
       owner field. Without a matching tag, the first owner Wiz attributes is used.
 
 evidence_set:
-  reference_id: "Type here"
-  name: "Type here"
+  reference_id: "EVD-WIZ-INVENTORY"
+  name: "Wiz Cloud Resource Inventory"
   instructions: >-
     Script: fetcher.py. Read-only service account (scope read:resources). Pages
     cloudResourcesV2 filtered by the configured resource types, accounts and
