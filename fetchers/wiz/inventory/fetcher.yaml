@@ -86,6 +86,15 @@ config_schema:
     env: WIZ_INVENTORY_PROJECT_IDS
     default: ""
     description: Comma-separated Wiz project IDs to limit the inventory to. Empty keeps every project.
+  include_tags:
+    type: boolean
+    required: false
+    env: WIZ_INVENTORY_INCLUDE_TAGS
+    default: false
+    description: >-
+      Copy every resource tag into each record's tags list. Off by default:
+      tags are free text and can hold names, emails or values that should not
+      leave the tenant. The environment and owner tags are read either way.
   environment_tag_keys:
     type: string
     required: false
@@ -111,9 +120,11 @@ evidence_set:
     cloudResourcesV2 filtered by the configured resource types, accounts and
     projects, and writes one record per resource under payload.data:
     unique_asset_identifier (the cloud's own ID, an ARN on AWS), name, type,
-    account, region, IPs, OS, image, tags, the environment and owner tags,
-    internet exposure and first/last seen. A Paramify inventory pipeline
-    attached to this evidence set reads payload.data.
+    account, region, IPs, OS, image, the environment and owner tags,
+    internet exposure and first/last seen (all tags only when include_tags is
+    on). A run with any collection failure writes counts but no records, so a
+    Paramify inventory pipeline attached to this evidence set never reads a
+    partial inventory from payload.data.
   description: >-
     Automatically generated inventory of cloud resources in the authorization
     boundary as discovered by Wiz.

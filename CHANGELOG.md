@@ -14,10 +14,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`wiz_inventory`, the Wiz cloud resource inventory, for Paramify inventory
   pipelines.** One record per resource from `cloudResourcesV2` (account,
-  region, type, IPs, OS, image, tags, environment and owner, internet
-  exposure) under `payload.data`, with the same keys on every record, so an
-  inventory pipeline attached to `EVD-WIZ-INVENTORY` maps them one-to-one.
-  Scoped by resource type, account and project. Needs only `read:resources`;
+  region, type, IPs, OS, image, environment and owner, internet exposure)
+  under `payload.data`, with the same keys on every record, so an inventory
+  pipeline attached to `EVD-WIZ-INVENTORY` maps them one-to-one. Other tags
+  are copied only with `include_tags`, and a run with any collection failure
+  (including a resource without an ID) ships counts but no records, so a
+  pipeline never builds Inventory from a partial list. Scoped by resource
+  type, account and project. Needs only `read:resources`;
   verified against a Wiz for Gov tenant and a Paramify inventory pipeline. See
   `docs/wiz_inventory.md`.
 - **A Wiz category with twelve fetchers**, for Wiz commercial and Wiz for

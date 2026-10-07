@@ -34,6 +34,7 @@ From the command line: `paramify run <manifest>` then `paramify upload`.
 | `project_ids` | `WIZ_INVENTORY_PROJECT_IDS` | every project |
 | `environment_tag_keys` | `WIZ_ENVIRONMENT_TAG_KEYS` | `Environment,env` |
 | `owner_tag_keys` | `WIZ_OWNER_TAG_KEYS` | `Owner` |
+| `include_tags` | `WIZ_INVENTORY_INCLUDE_TAGS` | `false` (see [What leaves the tenant](#what-leaves-the-tenant)) |
 | `max_records` | `WIZ_MAX_RECORDS` | 50000 |
 
 ## 2. Set up the inventory pipeline (once)
@@ -61,15 +62,26 @@ From the command line: `paramify run <manifest>` then `paramify upload`.
 
 Other fields useful in rules: `environment`, `owner`, `has_sensitive_data`,
 `cloud_account_id`, `kubernetes_cluster`, `status`, `first_seen`, `last_seen`.
-`detail_complete` is false for a record served by the light fallback query
-(identity and placement only).
+
+## What leaves the tenant
+
+Each record carries the resource's cloud ID, name, type, account, region, IP
+addresses (private and public), OS, image, owner (the owner tag, or the owner
+Wiz attributes), the environment tag, and whether Wiz sees it as internet
+facing or holding sensitive data. For secrets and keys that is their names and
+IDs, never their values. Other tags are left out unless `include_tags` is on,
+because tags are free text and can hold anything. Set `cloud_account_ids` to
+the accounts in the boundary so resources outside it are not collected.
 
 ## Failure behavior
 
-Same as the rest of the Wiz category: a GraphQL error, a cursor problem or the
-record cap fails the run and `metadata.error` names it; the file is still
-written. An empty inventory is `partial_or_empty`, not a failure. Nothing writes
-to Wiz.
+Same as the rest of the Wiz category: a GraphQL error, a cursor problem, the
+record cap, or a resource without an ID fails the run and `metadata.error`
+names it. The file is still written, but with counts only and no records
+(`records_included: false`), so a pipeline never builds Inventory from a
+partial list. An empty inventory is `partial_or_empty`, not a failure. Two
+copies of the same resource (the estate changed while paging) keep the newer
+one and are counted in `analysis.duplicates_collapsed`. Nothing writes to Wiz.
 
 ## Verified
 

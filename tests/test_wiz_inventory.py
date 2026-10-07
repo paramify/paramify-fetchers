@@ -5,8 +5,8 @@ No network and no credentials. The fake answers the token URL and
 (introspected 2026-10-06; values are synthetic).
 
 What this proves: the filters sent to Wiz, the record shape a Paramify
-inventory pipeline maps from, de-duplication, the light-query fallback, and the
-exit-code contract. Run: ``pytest tests/test_wiz_inventory.py``
+inventory pipeline maps from, de-duplication, tolerance of off-schema fields,
+and the exit-code contract (a failed run ships no records). Run: ``pytest tests/test_wiz_inventory.py``
 """
 
 from __future__ import annotations
@@ -45,7 +45,6 @@ class FakeWiz:
     def __init__(self) -> None:
         self.pages: List[List[Dict[str, Any]]] = [[]]
         self.error: str | None = None
-        self.heavy_error: str | None = None   # fail only the full (typeFields) query
         self.calls: List[Dict[str, Any]] = []
 
     def __call__(self, url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
@@ -55,23 +54,13 @@ class FakeWiz:
         assert url == API and headers["Authorization"] == "Bearer tok1"
         query, variables = json["query"], json.get("variables") or {}
         self.calls.append({"query": query, "variables": variables})
-        heavy = "typeFields" in query
-        if self.error or (heavy and self.heavy_error):
-            return FakeResponse(200, {"data": None, "errors": [{"message": self.error or self.heavy_error}]})
+        if self.error:
+            return FakeResponse(200, {"data": None, "errors": [{"message": self.error}]})
         idx = int(variables.get("after") or 0)
         nodes = self.pages[idx]
-        if not heavy:  # a real server returns only what was selected
-            keep = set(selected_fields(query))
-            nodes = [{k: v for k, v in n.items() if k in keep} for n in nodes]
         has_next = idx + 1 < len(self.pages)
         return FakeResponse(200, {"data": {"cloudResourcesV2": {
             "nodes": nodes, "pageInfo": {"hasNextPage": has_next, "endCursor": str(idx + 1) if has_next else None}}}})
-
-
-def selected_fields(query: str) -> List[str]:
-    """Top-level node field names in a query (good enough for the light query)."""
-    inner = query.split("nodes {", 1)[1]
-    return [w for w in inner.replace("{", " { ").replace("}", " } ").split() if w.isidentifier()]
 
 
 @pytest.fixture
@@ -81,7 +70,8 @@ def fake(monkeypatch, tmp_path) -> FakeWiz:
     monkeypatch.setattr(wiz_client.time, "sleep", lambda s: None)
     monkeypatch.setattr(wiz_client, "load_dotenv", lambda *a, **k: False)
     for k in ("WIZ_INVENTORY_RESOURCE_TYPES", "WIZ_INVENTORY_CLOUD_ACCOUNT_IDS", "WIZ_INVENTORY_PROJECT_IDS",
-              "WIZ_ENVIRONMENT_TAG_KEYS", "WIZ_OWNER_TAG_KEYS", "WIZ_MAX_RECORDS", "WIZ_PAGE_SIZE"):
+              "WIZ_ENVIRONMENT_TAG_KEYS", "WIZ_OWNER_TAG_KEYS", "WIZ_MAX_RECORDS", "WIZ_PAGE_SIZE",
+              "WIZ_INVENTORY_INCLUDE_TAGS"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("WIZ_CLIENT_ID", "id")
     monkeypatch.setenv("WIZ_CLIENT_SECRET", SECRET)
@@ -146,10 +136,10 @@ def test_records_shaped_for_the_inventory_pipeline(fake, tmp_path):
     one = recs["1"]
     assert one["unique_asset_identifier"].startswith("arn:aws:ec2:") and one["provider_unique_id"] == "i-1"
     assert one["environment"] == "prod" and one["owner"] == "platform-team"   # tag keys case-insensitive
-    assert one["tags"] == ["OWNER=platform-team", "environment=prod"]
+    assert one["tags"] == []   # tags are opt-in; environment and owner are still read from them
     assert one["ip_addresses"] == ["10.0.0.5", "10.0.0.6"] and one["primary_ip_address"] == "10.0.0.5"
     assert one["public"] is True and one["operating_system"] == "LINUX" and one["image"] == "ami-hardened"
-    assert one["cloud_account_id"] == "111111111111" and one["detail_complete"] is True
+    assert one["cloud_account_id"] == "111111111111"
 
     assert recs["2"]["owner"] == "jane.doe" and recs["2"]["environment"] is None   # Wiz's own owner as fallback
     assert recs["3"]["operating_system"] == "Alpine Linux" and recs["3"]["primary_ip_address"] is None
@@ -208,10 +198,64 @@ def test_record_cap_is_a_failure(fake, tmp_path, monkeypatch):
     assert code == 1 and ev["api_failures"][0]["type"] == "RecordCapReached"
 
 
-def test_duplicates_across_pages_are_collapsed(fake, tmp_path):
-    fake.pages = [[vm("1"), vm("2")], [vm("2")]]
+def test_duplicates_keep_the_newest_copy_and_are_counted(fake, tmp_path):
+    fake.pages = [[vm("1"), vm("2")], [vm("2", public=True)]]
     code, ev = run(tmp_path)
-    assert code == 0 and ev["record_count"] == 2
+    assert code == 0 and ev["record_count"] == 2 and ev["analysis"]["duplicates_collapsed"] == 1
+    assert {r["wiz_id"]: r for r in ev["data"]}["2"]["public"] is True
+
+
+def test_tags_are_copied_only_when_asked(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("WIZ_INVENTORY_INCLUDE_TAGS", "true")
+    fake.pages = [[vm("1", tags=[{"key": "Owner", "value": "x"}, {"key": "team", "value": ""}])]]
+    _, ev = run(tmp_path)
+    assert ev["data"][0]["tags"] == ["Owner=x", "team"] and ev["scope"]["tags_included"] is True
+
+
+def test_resource_without_id_fails_the_run_and_ships_no_records(fake, tmp_path):
+    no_id = vm("x")
+    no_id["id"] = None
+    fake.pages = [[vm("1"), no_id, "not-a-node"]]
+    code, ev = run(tmp_path)
+    assert code == 1 and ev["api_failures"][0]["type"] == "MalformedResource"
+    assert "2 resource(s)" in ev["api_failures"][0]["message"]
+    assert ev["data"] == [] and ev["records_included"] is False and ev["record_count"] == 1
+
+
+def test_off_schema_fields_do_not_lose_the_inventory(fake, tmp_path):
+    odd = vm("2")
+    odd["typeFields"] = ["not", "a", "dict"]
+    odd["owners"] = ["not-a-dict"]
+    weird_ips = vm("3")
+    weird_ips["typeFields"]["ipAddresses"] = "8.8.8.8"
+    fake.pages = [[vm("1"), odd, weird_ips]]
+    code, ev = run(tmp_path)
+    assert code == 0 and ev["record_count"] == 3
+    recs = {r["wiz_id"]: r for r in ev["data"]}
+    assert recs["2"]["operating_system"] is None and recs["2"]["owner"] is None
+    assert recs["3"]["ip_addresses"] == [] and recs["3"]["primary_ip_address"] is None
+
+
+def test_a_failed_collection_ships_counts_but_no_records(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("WIZ_MAX_RECORDS", "2")
+    fake.pages = [[vm("1"), vm("2")], [vm("3")]]
+    code, ev = run(tmp_path)
+    assert code == 1 and ev["data"] == [] and ev["analysis"]["resource_count"] == 2
+    assert ev["status"] == "error" and "records withheld" in ev["message"]
+
+
+def test_mass_duplicate_ids_fail_the_run(fake, tmp_path):
+    fake.pages = [[vm("same") for _ in range(50)]]
+    code, ev = run(tmp_path)
+    assert code == 1 and ev["api_failures"][0]["type"] == "DuplicateIds" and ev["data"] == []
+
+
+def test_odd_types_in_summary_fields_do_not_crash(fake, tmp_path):
+    odd = vm("1")
+    odd["type"], odd["region"] = {"x": 1}, ["us"]
+    fake.pages = [[odd, vm("2")]]
+    code, ev = run(tmp_path)
+    assert code == 0 and ev["analysis"]["by_region"] == {"us-gov-west-1": 1, "unknown": 1}
 
 
 def test_empty_inventory_is_not_a_failure(fake, tmp_path):
@@ -219,19 +263,7 @@ def test_empty_inventory_is_not_a_failure(fake, tmp_path):
     assert code == 0 and ev["status"] == "partial_or_empty" and "read:resources" in ev["message"]
 
 
-def test_light_query_keeps_identity_and_flags_missing_detail(fake, tmp_path, monkeypatch):
-    monkeypatch.setenv("WIZ_PAGE_SIZE", "10")
-    fake.pages = [[vm("1")]]
-    fake.heavy_error = "query too complex"
-    code, ev = run(tmp_path)
-    assert code == 0 and ev["scope"]["pages_served_by_light_query"] == 1
-    rec = ev["data"][0]
-    assert rec["unique_asset_identifier"].startswith("arn:aws:ec2:") and rec["detail_complete"] is False
-    assert rec["operating_system"] is None and ev["analysis"]["records_missing_detail_count"] == 1
-
-
 def test_queries_are_read_only():
     m = load()
-    for q in (m.RESOURCES_QUERY, m.RESOURCES_QUERY_LIGHT):
-        wiz_client.WizClient._assert_read_only(q)
-        assert q.count("{") == q.count("}")
+    wiz_client.WizClient._assert_read_only(m.RESOURCES_QUERY)
+    assert m.RESOURCES_QUERY.count("{") == m.RESOURCES_QUERY.count("}")
