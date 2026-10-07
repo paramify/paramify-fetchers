@@ -15,7 +15,7 @@ mutation.
 | `wiz_container_vulnerabilities` | Open vulnerability findings on container images and containers | `read:vulnerabilities` |
 | `wiz_cloud_configuration_posture` | Cloud configuration rule pass/fail against one framework (default NIST SP 800-53 Rev 5) | `read:cloud_configuration`, `read:security_frameworks` |
 | `wiz_host_configuration_posture` | OS benchmark pass/fail per benchmark and host (default DISA STIG) | `read:host_configuration` |
-| [`wiz_inventory`](../../docs/wiz_inventory.md) | One record per cloud resource (account, region, type, IPs, OS, tags, owners) with its open Inventory Management findings, shaped for a Paramify inventory pipeline (data path `payload.data`) | `read:resources`, plus read access to Inventory Management findings |
+| [`wiz_inventory`](../../docs/wiz_inventory.md) | One record per cloud resource (account, region, type, IPs, OS, tags, owner) for a Paramify inventory pipeline (data path `payload.data`) | `read:resources` |
 
 ### Fetchers for Wiz modules with limited live data
 
