@@ -39,6 +39,7 @@ from packaging.utils import canonicalize_name
 from framework import yaml_io
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import ConfigField, Secret, TargetField, effective_secrets
+from framework.custom_tags import category_display_names
 from framework.envelope import ENVELOPE_KEYS, is_enveloped, wrap_outputs
 from framework.issue_reports import (
     ASSESSMENT_ID_FIELD,
@@ -200,6 +201,7 @@ def catalog(root: Path) -> dict:
         categories.append({
             "name": name,
             "description": spec.description if spec else None,
+            "display_name": spec.display_name if spec else None,
             "platform": platform_block,
             "fetchers": [
                 _fetcher_descriptor(f, spec)
@@ -1312,6 +1314,9 @@ def sync_validators(
     """
     syncer = _load_paramify_validator_syncer(root)
     validators = syncer.collect_validators(root, manifest_path, reference_ids)
+    # The same default config as the other stages (<root>/upload.yaml), so the
+    # base URL and the default tags do not depend on which stage is running.
+    config_path = _upload_config(root, config_path)
     config: dict = {}
     if config_path:
         config = yaml_io.load_path(Path(config_path)) or {}
@@ -1322,6 +1327,7 @@ def sync_validators(
         update=update,
         lock_path=lock_path,
         on_event=on_event,
+        display_names=category_display_names(root),
     )
 
 

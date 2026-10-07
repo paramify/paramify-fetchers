@@ -1,3 +1,4 @@
+display_name: Okta
 description: >-
   Okta identity posture. Authenticator and MFA policy, account lifecycle,
   least-privilege and just-in-time authorization, non-user accounts, and

@@ -1,3 +1,4 @@
+display_name: Splunk
 description: >-
   Splunk Enterprise logging evidence: index retention and integrity, whether
   indexes and log sources are still receiving data, what is collected, alert

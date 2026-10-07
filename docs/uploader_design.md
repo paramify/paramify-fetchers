@@ -98,6 +98,46 @@ Two API limits shape this:
   itself comes back with no channels and nothing can attach one; it uploads
   unchanneled until someone adds a channel in the app.
 
+## Default custom tags (shared)
+
+Every evidence set, script and validator the three stages create or maintain
+gets two Paramify custom tags, so a user who has the fetchers create resources
+sees tagging working out of the box and can filter the fetchers' work from the
+hand-made rest:
+
+- a **provenance** tag — `Automated by Paramify Fetchers` unless renamed;
+- a **service** tag — the category's `display_name` from
+  `fetchers/_categories/<category>.yaml` (`AWS`, `Okta`, `SentinelOne`).
+  Declared, not derived: no rule turns `aws` into `AWS`. A category without one
+  gets the provenance tag only.
+
+Both are project-wide knobs in `upload.yaml`, which all three stages read:
+
+```yaml
+tags:
+  provenance: Automated by Paramify Fetchers   # a string, or false
+  service: true                                 # false to drop the category tag
+# tags: false                                   # no default tags at all
+```
+
+**Writes are additive and re-asserted on every run.** `POST
+/custom-tags/{entity}/{id}` adds names (creating unknown ones) and never
+replaces the entity's tag set, so a user's own tags survive and a run reaches
+resources an earlier run created before tagging existed. The cost: a renamed or
+disabled default leaves its old tag behind once, because additive writes cannot
+remove it. `PATCH`, which could, would clobber user tags and is never used.
+Per-fetcher content tags (`STIG`, `CIS`) and single-valued validator criticality
+(`P1`/`P2`) are expected later as a layer on top; additive writes are what let
+the layers coexist, but criticality will need a reconcile step, not just
+another additive tag.
+
+**Tagging never fails a stage.** A token without the custom-tags permission
+gets one warning and the rest of the run proceeds untagged; any other error is
+logged per entity and counted. Each stage's summary carries a `tags` block
+(`applied` / `failed` / `skipped` / `disabled`), and each result row the names
+it applied. A dry run shows the planned names and writes nothing. The
+implementation is one module, `framework/custom_tags.py`.
+
 ## `paramify_evidence` — attach evidence to sets
 
 Reads a completed, enveloped `run-<timestamp>/` directory and, per evidence file:

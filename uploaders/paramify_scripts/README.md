@@ -72,6 +72,10 @@ Shares the shape of the evidence uploader config so overrides stay consistent:
 - `overrides.<fetcher_name>.reference_id` (and optionally `name`) — must match
   the evidence uploader's overrides so the script associates to the **same**
   evidence set the evidence lands on.
+- `tags` — the default custom tags (`provenance` + the category's `display_name`
+  as the `service` tag) put on every script the sync sees, and on the set it
+  associates to. Same block, same meaning as the evidence uploader's; see
+  [`../paramify_evidence/README.md`](../paramify_evidence/README.md).
 
 ## Required tooling
 

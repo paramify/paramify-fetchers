@@ -338,7 +338,7 @@ def _human_upload_printer(noun: str = "file", log_name: str = "upload_log.json")
             suffix = f"  {reason}" if reason else ""
             typer.echo(
                 f"        [{style.mark(mark)}] {ev.get('file', '?')}"
-                f"{style.env(ref)}{style.dim(suffix)}"
+                f"{style.env(ref)}{style.dim(_tags_suffix(ev) + suffix)}"
             )
         elif kind == "process_plan":
             if ev.get("operation"):
@@ -381,6 +381,8 @@ def _human_upload_printer(noun: str = "file", log_name: str = "upload_log.json")
             )
             if ev.get("halted"):
                 typer.echo(f"\nStopped early: {ev['halted']}")
+            for line in _tags_done_lines(ev.get("tags")):
+                typer.echo(line)
             if ev.get("log_path"):
                 typer.echo(f"{log_name} → {ev['log_path']}")
     return on_event
@@ -552,6 +554,25 @@ def _upload_stage(
     raise typer.Exit(0 if ok else 1)
 
 
+def _tags_suffix(ev: dict) -> str:
+    """`  tags=A,B` for a per-item line, or nothing when none were applied."""
+    tags = ev.get("tags")
+    return f"  tags={','.join(tags)}" if tags else ""
+
+
+def _tags_done_lines(summary: Optional[dict]) -> List[str]:
+    """The default-custom-tags lines of a stage's Done block; empty when tags are off."""
+    if not summary:
+        return []
+    line = f"tags: applied={summary.get('applied', 0)} failed={summary.get('failed', 0)}"
+    if summary.get("provenance"):
+        line += f"  provenance={summary['provenance']!r}"
+    lines = [line]
+    if summary.get("disabled"):
+        lines.append(f"  WARN  {summary['disabled']}")
+    return lines
+
+
 def _human_validator_printer():
     """Return an on_event callback for Paramify validator-sync progress."""
     def on_event(ev: dict) -> None:
@@ -572,6 +593,7 @@ def _human_validator_printer():
                 extra += f"  associated={','.join(ev['associated'])}"
             if ev.get("set_not_found"):
                 extra += f"  set_not_found={','.join(ev['set_not_found'])}"
+            extra += _tags_suffix(ev)
             if ev.get("error"):
                 extra += f"  {ev['error']}"
             typer.echo(f"        [{mark}] {ev.get('key', '?')}  {outcome}{extra}")
@@ -582,6 +604,8 @@ def _human_validator_printer():
                 f"associated={ev['associated']} set_not_found={ev['set_not_found']} "
                 f"errors={ev['errors']}"
             )
+            for line in _tags_done_lines(ev.get("tags")):
+                typer.echo(line)
             if not ev.get("dry_run"):
                 typer.echo(f"lock → {ev['lock_path']}")
     return on_event
@@ -1251,7 +1275,7 @@ def _human_scripts_printer():
             mark = _marks.get(ev.get("outcome"), "?")
             assoc = " +assoc" if ev.get("associated") else ""
             reason = ev.get("reason") or ev.get("error")
-            suffix = f"  {reason}" if reason else ""
+            suffix = _tags_suffix(ev) + (f"  {reason}" if reason else "")
             typer.echo(f"        [{mark}] {ev.get('fetcher', '?')}  set={ev.get('reference_id')}{assoc}{suffix}")
         elif kind == "sync_complete":
             typer.echo(
@@ -1259,6 +1283,8 @@ def _human_scripts_printer():
                 f"created={ev['created']} updated={ev['updated']} drift={ev['drift']} "
                 f"noop={ev['noop']} associated={ev['associated']} errors={ev['errors']}"
             )
+            for line in _tags_done_lines(ev.get("tags")):
+                typer.echo(line)
     return on_event
 
 

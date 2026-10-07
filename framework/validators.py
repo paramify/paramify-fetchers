@@ -38,6 +38,7 @@ def _parse_validator(data: dict, path: Path) -> Validator:
         validation_rules=list(data.get("validation_rules") or []),
         attestation_rules=list(data.get("attestation_rules") or []),
         path=path.resolve(),
+        category=path.parent.name,
     )
 
 

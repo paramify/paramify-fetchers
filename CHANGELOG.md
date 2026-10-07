@@ -12,6 +12,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Default custom tags on everything the uploaders create.** Every evidence
+  set, script and validator that `paramify upload`, `paramify scripts sync`
+  and `paramify validators sync` create or maintain now carries two custom
+  tags: a provenance tag, `Automated by Paramify Fetchers`, and a service tag
+  from the category's new `display_name` (`AWS`, `Okta`, `SentinelOne`).
+  Tags are added on every run and never removed, so a user's own tags on
+  those resources are left alone and resources from earlier runs are
+  backfilled. Both are `upload.yaml` knobs under `tags:` — rename the
+  provenance string, drop either tag, or set `tags: false` for none. A token
+  without the custom-tags permission gets one warning and the stage proceeds
+  untagged. Every category file now declares a `display_name`; the category
+  schema gains the optional field. `paramify validators sync` reads the
+  repo's `upload.yaml` by default, as the other two stages already did.
+
 - **A third fetcher kind, `kind: inventory`**, for fetchers that list every
   asset of a kind for Paramify's Inventory. An inventory is evidence with a
   record contract: the payload holds `data`, one record per asset each with a

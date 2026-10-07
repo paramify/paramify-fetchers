@@ -44,13 +44,26 @@ def test_code_hash_stable_and_sensitive():
 # Fake client at the sync_scripts boundary
 # --------------------------------------------------------------------------- #
 
+class TagSession:
+    """What the Tagger posts default custom tags through; records every POST."""
+
+    def __init__(self, status=200):
+        self.status = status
+        self.posts = []
+
+    def post(self, url, json=None, timeout=None, **_):
+        self.posts.append((url, json))
+        return type("R", (), {"status_code": self.status, "text": ""})()
+
+
 class FakeClient:
-    def __init__(self, existing):
+    def __init__(self, existing, tag_status=200):
         # existing: list of {id, name, description}
         self._existing = existing
         self.created = []
         self.updated = []
         self.associated = []
+        self.session = TagSession(tag_status)
 
     def list_scripts(self):
         return self._existing
@@ -211,3 +224,72 @@ def test_sync_forwards_include_to_discovery(monkeypatch):
     monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: FakeClient(_existing_for_specs()))
     uploader.sync_scripts(".", include={"f_bump"})
     assert seen["include"] == {"f_bump"}
+
+
+# --------------------------------------------------------------------------- #
+# Default custom tags — every script the sweep sees, and the set it links to
+# --------------------------------------------------------------------------- #
+
+def _tag_posts(fake):
+    return [(url.rsplit("/custom-tags/", 1)[1], body["names"]) for url, body in fake.session.posts]
+
+
+def test_every_script_is_tagged_including_noop_and_drift(wired):
+    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
+    posted = dict(_tag_posts(wired))
+    # SPECS carry no category, so only the provenance tag applies.
+    # The fake names a created script after its display name ("New").
+    assert posted == {
+        "scripts/sid-New": ["Automated by Paramify Fetchers"],
+        "evidence/ev-EVD-NEW": ["Automated by Paramify Fetchers"],
+        "scripts/sid-f_bump": ["Automated by Paramify Fetchers"],
+        "evidence/ev-EVD-BUMP": ["Automated by Paramify Fetchers"],
+        "scripts/sid-f_drift": ["Automated by Paramify Fetchers"],
+        "scripts/sid-f_noop": ["Automated by Paramify Fetchers"],
+    }
+    by = _by_fetcher(summary)
+    assert by["f_noop"]["tags"] == ["Automated by Paramify Fetchers"]
+    assert by["f_drift"]["outcome"] == "drift_skipped" and by["f_drift"]["tags"]
+    assert summary["tags"]["applied"] == 6 and summary["tags"]["disabled"] is None
+
+
+def test_service_tag_uses_the_category_display_name(monkeypatch):
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
+    spec = {**SPECS[0], "category": "aws"}
+    monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: [spec])
+    fake = FakeClient([])
+    monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: fake)
+    real_build_tagger = uploader.build_tagger
+    monkeypatch.setattr(uploader, "build_tagger",
+                        lambda session, base_url, **kw: real_build_tagger(
+                            session, base_url, config=kw.get("config"), display_names={"aws": "AWS"}))
+
+    uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
+    posted = dict(_tag_posts(fake))
+    assert posted["scripts/sid-New"] == ["Automated by Paramify Fetchers", "AWS"]
+    assert posted["evidence/ev-EVD-NEW"] == ["Automated by Paramify Fetchers", "AWS"]
+
+
+def test_dry_run_plans_tags_without_posting(wired):
+    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0", dry_run=True)
+    assert wired.session.posts == []
+    assert all(r["tags"] == ["Automated by Paramify Fetchers"] for r in summary["results"])
+
+
+def test_tags_off_posts_nothing(wired):
+    summary = uploader.sync_scripts(
+        "/repo", base_url="https://app.example.com/api/v0", config={"tags": False}
+    )
+    assert wired.session.posts == [] and summary["tags"] is None
+
+
+def test_missing_tag_permission_does_not_fail_the_sync(monkeypatch):
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
+    monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: list(SPECS))
+    fake = FakeClient(_existing_for_specs(), tag_status=403)
+    monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: fake)
+
+    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
+    assert summary["ok"] and summary["errors"] == 0
+    assert len(fake.session.posts) == 1
+    assert summary["tags"]["disabled"]
