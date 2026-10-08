@@ -65,6 +65,18 @@ def test_wrapped_output_conforms_to_envelope_schema(tmp_path):
     assert env["metadata"]["target"] == {"region": "us-east-1"}
 
 
+def test_envelope_carries_the_evidence_set_frequency(tmp_path):
+    default = make_fetcher(tmp_path, evidence_set=EvidenceSet(reference_id="EVD-1", name="S"))
+    env = _wrap_one(tmp_path, {"k": 1}, fetcher=default)
+    assert env["metadata"]["evidence_set"]["frequency"] == "THREE_DAY"
+
+    weekly = make_fetcher(tmp_path, evidence_set=EvidenceSet(reference_id="EVD-1", name="S",
+                                                              frequency="WEEKLY"))
+    env = _wrap_one(tmp_path, {"k": 1}, fetcher=weekly)
+    assert env["metadata"]["evidence_set"]["frequency"] == "WEEKLY"
+    assert not list(_VALIDATOR.iter_errors(env))
+
+
 def test_failed_status_carries_bounded_error_tail(tmp_path):
     env = _wrap_one(tmp_path, {"k": 1},
                     result=make_result(exit_code=2, stderr="boom\ntraceback here"))

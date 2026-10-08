@@ -50,7 +50,7 @@ create one. Then, on the **Manifest** tab (`2`):
 
 | Key | Does |
 |---|---|
-| `a` | add a fetcher — pick the scanner's report fetcher |
+| `a` | add a fetcher — the scanner's report fetcher is listed under **Scan reports**, apart from evidence |
 | `t` | edit its targets, for a fetcher that runs once per framework, account or scan |
 | `e` | edit its settings and secrets |
 
@@ -62,7 +62,9 @@ mistake.
 
 Select the fetcher on the **Manifest** tab and press `A`. The picker lists the
 assessments in your workspace of the type the fetcher feeds; type to filter, then
-`enter`. It then asks how that assessment's cycle is closed.
+`enter`. It then asks how that assessment's cycle is closed. Until an assessment
+is set, the entry's **sends to** column reads `no assessment — press A`; then it
+shows the assessment and its close policy, or `close unset` if that is missing.
 
 ![Pointing a scan fetcher at an assessment and choosing how its cycle closes](demo/pipeline-setup.gif)
 
@@ -83,7 +85,7 @@ one as an issue, and the upload sends nothing for that assessment until it is se
 Run the manifest from the **Run** tab (`3`, then `enter`). When it finishes, the
 banner tells you how many scan reports are waiting.
 
-On the **Paramify** tab (`5`), the **issue reports** panel shows the run it will
+On the **Paramify** tab (`5`), the **scan reports** panel shows the run it will
 send and one row per assessment: how many files, and what the upload will ask
 Paramify to do. Read that row before sending:
 
@@ -147,6 +149,8 @@ Three rules explain most of what you will see.
 | `HTTP 401` / `403` | The key lacks a pipeline permission. The upload stops. | Add `PIPELINE_INTAKE` / `PIPELINE_PROCESS` / `PIPELINE_CLOSE` to the key. |
 | `HTTP 404` | The assessment ID is from another workspace, or the assessment was deleted. | Step 2 again. |
 | `HTTP 409` / `no cycle in progress` | The last cycle was closed and nothing has been uploaded since. | Nothing: the next upload opens a cycle. |
+| `HTTP 409` / `not the assessment's in-progress cycle` | Work was aimed at a cycle other than the oldest open one. Paramify only processes or closes that one. | Close the older open cycles first (each close auto-closes issues it never saw). |
+| `[WARN] N newer cycle(s) exist` | The upload landed on an old cycle left open, so the newer cycles show nothing. | Look for the issues on the named cycle. To move on, close it (and any other old ones). |
 | job `FAILED` | Processing failed; the error says why (often the preset's column mapping). | Fix the cause, then `j` → retry. |
 | `blocked by failed job …` | An older failed job holds the queue. | `j` → retry or cancel that job. |
 | `still running` | The job outlasted the wait (15 minutes by default). | Nothing is lost: `j` shows how it ends, and sending again waits on it. |

@@ -29,6 +29,7 @@ See docs/issue_report_fetchers.md.
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -44,6 +45,13 @@ SIDECAR_NAME = "_issue_reports.json"
 # ones that failed without writing a file. The uploader needs it to tell a
 # complete run from a partial one before it may close a cycle.
 SIDECAR_SCHEMA_VERSION = "1.1"
+
+# Set on the index when the previous sidecar could not be read and a fresh one
+# had to be started. The value says why. A fresh index lists only the
+# invocations seen since, so it cannot show that the whole run succeeded: the
+# uploader must PROCESS and never PROCESS_CLOSE (closing auto-closes every open
+# issue the cycle did not see).
+CANNOT_CLOSE_FIELD = "cannot_close"
 
 # Where the uploader records what it already sent (see the uploader's dedup note).
 INTAKE_LOG_NAME = "_intake_log.json"
@@ -289,8 +297,39 @@ def _invocation(
     return entry
 
 
+def _atomic_write_json(path: Path, data: Any) -> None:
+    """Write `data` to `path` so a reader (or a crash) never sees a half-written file.
+
+    Temp file in the same directory (same filesystem, so os.replace is atomic),
+    flushed to disk, then renamed over the target. A killed run leaves either the
+    old index or the new one, never a truncated one.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with tmp.open("w") as fh:
+            fh.write(json.dumps(data, indent=2, default=str))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def _write_index(run_dir: Path, run_id: str, added: List[dict], invocation: dict) -> bool:
-    """Read-modify-write the sidecar with this invocation and its reports."""
+    """Read-modify-write the sidecar with this invocation and its reports.
+
+    An existing sidecar that cannot be parsed is NOT silently replaced: starting
+    fresh would drop the earlier invocations, and a run whose failed targets were
+    among them would then look complete and be closed. The unreadable file is kept
+    beside it as `_issue_reports.json.corrupt`, a new index is started so this
+    invocation's reports are still uploadable, and the index is marked
+    `cannot_close` so the uploader processes but never closes the cycle.
+    """
     path = sidecar_path(run_dir)
     index: Dict[str, Any] = {
         "schema_version": SIDECAR_SCHEMA_VERSION, "run_id": run_id,
@@ -299,22 +338,29 @@ def _write_index(run_dir: Path, run_id: str, added: List[dict], invocation: dict
     if path.exists():
         try:
             existing = json.loads(path.read_text())
-            if isinstance(existing, dict) and isinstance(existing.get("reports"), list):
-                index = existing
-        except (OSError, json.JSONDecodeError) as e:
-            # Losing prior records is bad, but refusing to record this
-            # invocation's is worse: the alternative is a run whose reports
-            # exist on disk with nothing pointing at them.
-            logger.warning(
-                "issue_reports: %s is unreadable (%s); starting a fresh index", path.name, e
+            if not (isinstance(existing, dict) and isinstance(existing.get("reports"), list)):
+                raise ValueError("not an issue-report index (no reports list)")
+            index = existing
+        except (OSError, ValueError) as e:
+            backup = path.with_name(path.name + ".corrupt")
+            try:
+                os.replace(path, backup)
+                kept = f"kept as {backup.name}"
+            except OSError:
+                kept = "could not be set aside"
+            reason = (
+                f"the earlier {path.name} was unreadable ({e}) and {kept}; this index "
+                f"starts from the next invocation, so it cannot show the whole run "
+                f"succeeded"
             )
+            logger.error("issue_reports: %s; the cycle will not be closed", reason)
+            index[CANNOT_CLOSE_FIELD] = reason
 
     index["schema_version"] = SIDECAR_SCHEMA_VERSION
     index["reports"] = list(index.get("reports") or []) + added
     index["invocations"] = list(index.get("invocations") or []) + [invocation]
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(index, indent=2, default=str))
+        _atomic_write_json(path, index)
     except OSError as e:
         logger.error(
             "issue_reports: could not write %s (%s) — these reports will not be "

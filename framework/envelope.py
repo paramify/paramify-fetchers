@@ -53,7 +53,7 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
             meta["error_code"] = result.error_code
     if fetcher.evidence_set:
         es = fetcher.evidence_set
-        es_meta = {"reference_id": es.reference_id, "name": es.name}
+        es_meta = {"reference_id": es.reference_id, "name": es.name, "frequency": es.frequency}
         if es.instructions is not None:
             es_meta["instructions"] = es.instructions
         if es.description is not None:
