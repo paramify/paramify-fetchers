@@ -4,7 +4,6 @@
 import logging
 import os
 import sys
-from collections import Counter
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -30,11 +29,16 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from frontdoor import (  # noqa: E402
-    FRONT_DOOR_SKUS,
     SECURITY_POLICY_API_VERSION,
     arm_key,
+    cdn_client,
     collect_waf_policies,
-    enum_list,
+    custom_domains,
+    endpoints_with_routes,
+    front_door_profiles,
+    project_reference,
+    route_hosts,
+    route_serving,
     waf_policy_record,
     wire,
 )
@@ -47,54 +51,6 @@ ACCESS_LOG_CATEGORY = "FrontDoorAccessLog"
 
 
 # --- projection: the only code here that touches an azure-mgmt model ---
-
-def project_profile(profile) -> dict:
-    return {
-        "id": model_attr(profile, "id"),
-        "name": model_attr(profile, "name"),
-        "sku": model_attr(model_attr(profile, "sku"), "name"),
-        "resource_state": model_attr(model_attr(profile, "properties"), "resource_state"),
-    }
-
-
-def project_endpoint(endpoint) -> dict:
-    props = model_attr(endpoint, "properties")
-    return {
-        "id": model_attr(endpoint, "id"),
-        "name": model_attr(endpoint, "name"),
-        "host_name": model_attr(props, "host_name"),
-        "enabled_state": model_attr(props, "enabled_state"),
-        "deployment_status": model_attr(props, "deployment_status"),
-    }
-
-
-def project_reference(ref) -> dict:
-    return {"id": model_attr(ref, "id"), "is_active": model_attr(ref, "is_active")}
-
-
-def project_route(route) -> dict:
-    props = model_attr(route, "properties")
-    return {
-        "id": model_attr(route, "id"),
-        "name": model_attr(route, "name"),
-        "enabled_state": model_attr(props, "enabled_state"),
-        "supported_protocols": enum_list(model_attr(props, "supported_protocols")),
-        "https_redirect": model_attr(props, "https_redirect"),
-        "patterns_to_match": list(model_attr(props, "patterns_to_match") or []),
-        "link_to_default_domain": model_attr(props, "link_to_default_domain"),
-        "custom_domains": [project_reference(d) for d in (model_attr(props, "custom_domains") or [])],
-    }
-
-
-def project_custom_domain(domain) -> dict:
-    props = model_attr(domain, "properties")
-    return {
-        "id": model_attr(domain, "id"),
-        "name": model_attr(domain, "name"),
-        "host_name": model_attr(props, "host_name"),
-        "domain_validation_state": model_attr(props, "domain_validation_state"),
-    }
-
 
 def project_security_policy(policy) -> dict:
     props = model_attr(policy, "properties")
@@ -220,7 +176,7 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
         (d for d in (assoc["domains"] if assoc else []) if arm_key(d["id"]) == arm_key(host["id"])), None
     )
     assoc_active = assoc_ref["is_active"] if assoc_ref else None
-    serving = endpoint["enabled_state"] == "Enabled" and route["enabled_state"] == "Enabled"
+    serving = route_serving(endpoint, route)
 
     reasons = []
     if scope == "none":
@@ -267,21 +223,6 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
         "protected": serving and not reasons,
         "unprotected_reasons": reasons,
     }
-
-
-def route_hosts(endpoint: dict, route: dict, domains_by_key: dict) -> list[dict]:
-    hosts = []
-    for ref in route["custom_domains"]:
-        domain = domains_by_key.get(arm_key(ref["id"]), {})
-        hosts.append({
-            "id": ref["id"],
-            "host_name": domain.get("host_name"),
-            "kind": "custom_domain",
-            "is_active": ref["is_active"],
-        })
-    if route["link_to_default_domain"] == "Enabled":
-        hosts.append({"id": endpoint["id"], "host_name": endpoint["host_name"], "kind": "endpoint_default", "is_active": None})
-    return hosts
 
 
 def coverage_for_profile(collected: dict, waf_by_key: dict) -> dict:
@@ -346,48 +287,27 @@ def summarize(profiles, skipped_by_sku, host_routes, endpoints_without_routes, u
 # --- collection (lazy azure imports) ---
 
 def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[dict], dict]:
-    from azure.mgmt.cdn import CdnManagementClient
     from azure.mgmt.monitor import MonitorManagementClient
 
-    kwargs = {"credential": cred, "subscription_id": subscription_id, **arm_client_kwargs()}
-    cdn = collector.guard("cdn.CdnManagementClient (init)", lambda: CdnManagementClient(**kwargs))
-    # Pinned per client: a per-call api_version kwarg is silently ignored by azure-mgmt-cdn 14.
-    cdn_sp = collector.guard(
-        "cdn.CdnManagementClient (init, security policies)",
-        lambda: CdnManagementClient(api_version=SECURITY_POLICY_API_VERSION, **kwargs),
+    cdn = cdn_client(subscription_id, cred, collector)
+    cdn_sp = cdn_client(subscription_id, cred, collector, api_version=SECURITY_POLICY_API_VERSION)
+    monitor = collector.guard(
+        "monitor.MonitorManagementClient (init)",
+        lambda: MonitorManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs()),
     )
-    monitor = collector.guard("monitor.MonitorManagementClient (init)", lambda: MonitorManagementClient(**kwargs))
     if cdn is None or cdn_sp is None or monitor is None:
         return [], {}
 
-    all_profiles = collector.guard(
-        "cdn.profiles.list", lambda: [project_profile(p) for p in cdn.profiles.list()], default=[]
-    )
-    skipped = Counter(str(p["sku"]) for p in all_profiles if p["sku"] not in FRONT_DOOR_SKUS)
+    profiles, skipped = front_door_profiles(cdn, collector)
     collected = []
-    for profile in sorted((p for p in all_profiles if p["sku"] in FRONT_DOOR_SKUS), key=lambda p: arm_key(p["id"])):
+    for profile in profiles:
         rg, name = resource_group_from_id(profile["id"]), profile["name"]
         # The SDK substitutes resource_uri after a "/", so a leading slash would double it.
         uri = (profile["id"] or "").lstrip("/")
-        endpoints = collector.guard(
-            f"cdn.afd_endpoints.list_by_profile({name})",
-            lambda: [project_endpoint(e) for e in cdn.afd_endpoints.list_by_profile(rg, name)],
-            default=[],
-        )
-        for endpoint in endpoints:
-            endpoint["routes"] = collector.guard(
-                f"cdn.routes.list_by_endpoint({name}/{endpoint['name']})",
-                lambda: [project_route(r) for r in cdn.routes.list_by_endpoint(rg, name, endpoint["name"])],
-                default=[],
-            )
         collected.append({
             "profile": profile,
-            "endpoints": endpoints,
-            "custom_domains": collector.guard(
-                f"cdn.afd_custom_domains.list_by_profile({name})",
-                lambda: [project_custom_domain(d) for d in cdn.afd_custom_domains.list_by_profile(rg, name)],
-                default=[],
-            ),
+            "endpoints": endpoints_with_routes(cdn, collector, profile),
+            "custom_domains": custom_domains(cdn, collector, profile),
             "security_policies": collector.guard(
                 f"cdn.security_policies.list_by_profile({name})",
                 lambda: [project_security_policy(s) for s in cdn_sp.security_policies.list_by_profile(rg, name)],
@@ -404,7 +324,7 @@ def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[
                 default=[],
             ),
         })
-    return collected, dict(sorted(skipped.items()))
+    return collected, skipped
 
 
 def main() -> int:

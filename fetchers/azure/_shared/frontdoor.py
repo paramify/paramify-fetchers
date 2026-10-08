@@ -1,4 +1,4 @@
-"""Shared Azure Front Door helpers: WAF policy projection, its blocking verdict, and wire-key reads."""
+"""Shared Azure Front Door helpers: the profile/endpoint/route/domain walk, WAF policy verdicts, wire-key reads."""
 
 from __future__ import annotations
 
@@ -18,6 +18,10 @@ DEFAULT_RULE_SET_TYPES = ("DefaultRuleSet", "Microsoft_DefaultRuleSet")
 ENFORCING_ACTIONS = ("Block", "Redirect")
 # First GA api-version whose security policies carry isProfileLevel and associations[].routes.
 SECURITY_POLICY_API_VERSION = "2026-07-01"
+# Documented API defaults when a route omits them.
+DEFAULT_SUPPORTED_PROTOCOLS = ["Http", "Https"]
+DEFAULT_HTTPS_REDIRECT = "Disabled"
+DEFAULT_FORWARDING_PROTOCOL = "MatchRequest"
 
 
 def wire(model: Any, *keys: str) -> Any:
@@ -287,6 +291,249 @@ def select_front_door(projected: List[dict]) -> Tuple[List[dict], Dict[str, int]
     kept = [p for p in projected if p["sku"] in FRONT_DOOR_SKUS]
     skipped = Counter(str(p["sku"]) for p in projected if p["sku"] not in FRONT_DOOR_SKUS)
     return kept, dict(sorted(skipped.items()))
+
+
+# --- Front Door topology projection (profiles, endpoints, routes, custom domains) ---
+
+def project_profile(profile) -> dict:
+    return {
+        "id": model_attr(profile, "id"),
+        "name": model_attr(profile, "name"),
+        "sku": model_attr(model_attr(profile, "sku"), "name"),
+        "resource_state": model_attr(model_attr(profile, "properties"), "resource_state"),
+    }
+
+
+def project_endpoint(endpoint) -> dict:
+    props = model_attr(endpoint, "properties")
+    return {
+        "id": model_attr(endpoint, "id"),
+        "name": model_attr(endpoint, "name"),
+        "host_name": model_attr(props, "host_name"),
+        "enabled_state": model_attr(props, "enabled_state"),
+        "deployment_status": model_attr(props, "deployment_status"),
+    }
+
+
+def project_reference(ref) -> dict:
+    return {"id": model_attr(ref, "id"), "is_active": model_attr(ref, "is_active")}
+
+
+def project_route(route) -> dict:
+    props = model_attr(route, "properties")
+    return {
+        "id": model_attr(route, "id"),
+        "name": model_attr(route, "name"),
+        "enabled_state": model_attr(props, "enabled_state"),
+        "supported_protocols": enum_list(model_attr(props, "supported_protocols")),
+        "https_redirect": model_attr(props, "https_redirect"),
+        "forwarding_protocol": model_attr(props, "forwarding_protocol"),
+        "patterns_to_match": list(model_attr(props, "patterns_to_match") or []),
+        "link_to_default_domain": model_attr(props, "link_to_default_domain"),
+        "custom_domains": [project_reference(d) for d in (model_attr(props, "custom_domains") or [])],
+        "origin_group_id": model_attr(model_attr(props, "origin_group"), "id"),
+        "origin_path": model_attr(props, "origin_path"),
+        "rule_set_ids": [model_attr(r, "id") for r in (model_attr(props, "rule_sets") or [])],
+    }
+
+
+def project_custom_domain(domain) -> dict:
+    props = model_attr(domain, "properties")
+    tls = model_attr(props, "tls_settings")
+    suites = model_attr(tls, "customized_cipher_suite_set")
+    return {
+        "id": model_attr(domain, "id"),
+        "name": model_attr(domain, "name"),
+        "host_name": model_attr(props, "host_name"),
+        "domain_validation_state": model_attr(props, "domain_validation_state"),
+        "certificate_type": model_attr(tls, "certificate_type"),
+        "minimum_tls_version": model_attr(tls, "minimum_tls_version"),
+        "cipher_suite_set_type": model_attr(tls, "cipher_suite_set_type"),
+        "customized_cipher_suites_tls12": enum_list(model_attr(suites, "cipher_suite_set_for_tls12")),
+        "customized_cipher_suites_tls13": enum_list(model_attr(suites, "cipher_suite_set_for_tls13")),
+        "secret_id": model_attr(model_attr(tls, "secret"), "id"),
+    }
+
+
+def route_hosts(endpoint: dict, route: dict, domains_by_key: dict) -> List[dict]:
+    """Hosts a route serves: its custom domains, plus the endpoint's own domain when linked."""
+    hosts = []
+    for ref in route["custom_domains"]:
+        domain = domains_by_key.get(arm_key(ref["id"]), {})
+        hosts.append({
+            "id": ref["id"],
+            "host_name": domain.get("host_name"),
+            "kind": "custom_domain",
+            "is_active": ref["is_active"],
+        })
+    if route["link_to_default_domain"] == "Enabled":
+        hosts.append({"id": endpoint["id"], "host_name": endpoint["host_name"], "kind": "endpoint_default", "is_active": None})
+    return hosts
+
+
+def route_serving(endpoint: dict, route: dict) -> bool:
+    return endpoint["enabled_state"] == "Enabled" and route["enabled_state"] == "Enabled"
+
+
+# --- rule sets: HTTP→HTTPS redirects and origin overrides ---
+
+def project_rule_condition(condition) -> dict:
+    params = model_attr(condition, "parameters")
+    return {
+        "name": model_attr(condition, "name"),
+        "operator": model_attr(params, "operator"),
+        "negate_condition": model_attr(params, "negate_condition"),
+        "match_values": enum_list(model_attr(params, "match_values")),
+    }
+
+
+def project_rule_action(action) -> dict:
+    params = model_attr(action, "parameters")
+    override = model_attr(params, "origin_group_override")
+    return {
+        "name": model_attr(action, "name"),
+        "redirect_type": model_attr(params, "redirect_type"),
+        "destination_protocol": model_attr(params, "destination_protocol"),
+        "origin_group_override_id": model_attr(model_attr(override, "origin_group"), "id"),
+        "forwarding_protocol_override": model_attr(override, "forwarding_protocol"),
+        "overrides_origin_group": override is not None,
+    }
+
+
+def project_rule(rule) -> dict:
+    props = model_attr(rule, "properties")
+    return {
+        "id": model_attr(rule, "id"),
+        "name": model_attr(rule, "name"),
+        "order": model_attr(props, "order"),
+        "match_processing_behavior": model_attr(props, "match_processing_behavior"),
+        "conditions": [project_rule_condition(c) for c in (model_attr(props, "conditions") or [])],
+        "actions": [project_rule_action(a) for a in (model_attr(props, "actions") or [])],
+    }
+
+
+def redirects_all_http(rule: dict) -> bool:
+    """A redirect to Https with no condition, or only a request-scheme condition that matches exactly HTTP."""
+    conditions = rule["conditions"]
+    if len(conditions) > 1:
+        return False
+    if conditions:
+        cond = conditions[0]
+        values = {str(v).upper() for v in cond["match_values"]}
+        if cond["name"] != "RequestScheme" or (cond["operator"] or "Equal") != "Equal":
+            return False
+        if not ((values == {"HTTP"} and not cond["negate_condition"]) or (values == {"HTTPS"} and cond["negate_condition"])):
+            return False
+    return any(a["name"] == "UrlRedirect" and a["destination_protocol"] == "Https" for a in rule["actions"])
+
+
+def attached_rules(rule_set_ids: List[str], rule_sets_by_key: dict) -> List[Tuple[dict, dict]]:
+    """(rule set, rule) in evaluation order: the route's rule-set order, then each set's rule order."""
+    ordered = []
+    for rs_id in rule_set_ids:
+        rule_set = rule_sets_by_key.get(arm_key(rs_id))
+        if rule_set:
+            ordered += [(rule_set, rule) for rule in rule_set["rules"]]
+    return ordered
+
+
+def rule_set_https_redirect(rule_set_ids: List[str], rule_sets_by_key: dict) -> Optional[dict]:
+    for rule_set, rule in attached_rules(rule_set_ids, rule_sets_by_key):
+        if redirects_all_http(rule):
+            return {"rule_set": rule_set["name"], "rule": rule["name"]}
+        # An earlier rule that stops evaluation may catch HTTP first.
+        if rule["match_processing_behavior"] == "Stop":
+            return None
+    return None
+
+
+def https_only_basis(protocols: List[str], https_redirect: str, rule_set_redirect: bool) -> Optional[str]:
+    if "Http" not in protocols:
+        return "https_only_protocols" if "Https" in protocols else None
+    if https_redirect == "Enabled":
+        return "https_redirect"
+    if rule_set_redirect:
+        return "rule_set_redirect"
+    return None
+
+
+def route_https(route: dict, rule_sets_by_key: dict) -> dict:
+    """Whether a route only ever handles HTTPS requests, applying the API defaults for absent fields."""
+    protocols = route["supported_protocols"] or DEFAULT_SUPPORTED_PROTOCOLS
+    redirect = route["https_redirect"] or DEFAULT_HTTPS_REDIRECT
+    rule = rule_set_https_redirect(route["rule_set_ids"], rule_sets_by_key)
+    basis = https_only_basis(protocols, redirect, rule is not None)
+    return {
+        "effective_supported_protocols": protocols,
+        "effective_https_redirect": redirect,
+        "https_redirect_rule": rule if basis == "rule_set_redirect" else None,
+        "accepts_http": "Http" in protocols,
+        "https_only": basis is not None,
+        "https_only_basis": basis,
+    }
+
+
+# --- Front Door topology collection (lazy azure imports) ---
+
+def cdn_client(subscription_id: str, cred, collector: Collector, api_version: Optional[str] = None):
+    from azure.mgmt.cdn import CdnManagementClient
+
+    kwargs = {"credential": cred, "subscription_id": subscription_id, **arm_client_kwargs()}
+    if api_version:
+        # Pinned per client: a per-call api_version kwarg is silently ignored by azure-mgmt-cdn 14.
+        kwargs["api_version"] = api_version
+    label = f"cdn.CdnManagementClient (init{', ' + api_version if api_version else ''})"
+    return collector.guard(label, lambda: CdnManagementClient(**kwargs))
+
+
+def front_door_profiles(cdn, collector: Collector) -> Tuple[List[dict], Dict[str, int]]:
+    """Standard/Premium profiles sorted by id, and a count of the other CDN SKUs skipped."""
+    projected = collector.guard("cdn.profiles.list", lambda: [project_profile(p) for p in cdn.profiles.list()], default=[])
+    kept, skipped = select_front_door(projected)
+    return sorted(kept, key=lambda p: arm_key(p["id"])), skipped
+
+
+def endpoints_with_routes(cdn, collector: Collector, profile: dict) -> List[dict]:
+    rg, name = resource_group_from_id(profile["id"]), profile["name"]
+    endpoints = collector.guard(
+        f"cdn.afd_endpoints.list_by_profile({name})",
+        lambda: [project_endpoint(e) for e in cdn.afd_endpoints.list_by_profile(rg, name)],
+        default=[],
+    )
+    for endpoint in endpoints:
+        endpoint["routes"] = collector.guard(
+            f"cdn.routes.list_by_endpoint({name}/{endpoint['name']})",
+            lambda: [project_route(r) for r in cdn.routes.list_by_endpoint(rg, name, endpoint["name"])],
+            default=[],
+        )
+    return endpoints
+
+
+def rule_sets_with_rules(cdn, collector: Collector, profile: dict) -> Dict[str, dict]:
+    """Every rule set in the profile with its rules in order, keyed by lower-cased id."""
+    rg, name = resource_group_from_id(profile["id"]), profile["name"]
+    rule_sets = collector.guard(
+        f"cdn.rule_sets.list_by_profile({name})",
+        lambda: [{"id": model_attr(rs, "id"), "name": model_attr(rs, "name")} for rs in cdn.rule_sets.list_by_profile(rg, name)],
+        default=[],
+    )
+    for rule_set in rule_sets:
+        rules = collector.guard(
+            f"cdn.rules.list_by_rule_set({name}/{rule_set['name']})",
+            lambda: [project_rule(r) for r in cdn.rules.list_by_rule_set(rg, name, rule_set["name"])],
+            default=[],
+        )
+        rule_set["rules"] = sorted(rules, key=lambda r: (r["order"] is None, r["order"] or 0))
+    return {arm_key(rs["id"]): rs for rs in rule_sets}
+
+
+def custom_domains(cdn, collector: Collector, profile: dict) -> List[dict]:
+    rg, name = resource_group_from_id(profile["id"]), profile["name"]
+    return collector.guard(
+        f"cdn.afd_custom_domains.list_by_profile({name})",
+        lambda: [project_custom_domain(d) for d in cdn.afd_custom_domains.list_by_profile(rg, name)],
+        default=[],
+    )
 
 
 def collect_waf_policies(subscription_id: str, cred, collector: Collector) -> Tuple[List[dict], dict]:

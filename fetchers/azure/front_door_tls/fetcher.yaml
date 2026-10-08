@@ -1,0 +1,81 @@
+name: azure_front_door_tls
+version: 0.1.0
+description: >
+  TLS enforcement at Azure Front Door Standard/Premium. Every route with the
+  protocols it accepts and whether it accepts only HTTPS (HTTPS-only, or HTTP
+  redirected to HTTPS by the route or by a rule set), and every custom domain with
+  the TLS floor it enforces (from its cipher-suite set or customized minimum
+  version), its certificate type, issuer and expiry, and whether a serving route
+  uses it. A route still serving plain HTTP, a domain below TLS 1.2, or an expired
+  certificate is visible rather than reading as "TLS configured".
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_front_door_tls.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # traffic to the public entry points is encrypted: HTTPS-only routes, TLS 1.2+ floor
+  - KSI-CNA-MAT   # routes still accepting plain HTTP and weak TLS floors are the exposed surface
+
+evidence_set:
+  reference_id: EVD-AZURE-FRONTDOOR-TLS
+  name: Azure Front Door TLS
+  instructions: >
+    Script: fetcher.py. Azure SDK calls (azure-mgmt-cdn CdnManagementClient):
+    profiles.list() kept to sku Standard_AzureFrontDoor / Premium_AzureFrontDoor
+    (other CDN SKUs counted in skipped_profiles_by_sku); per profile
+    afd_endpoints.list_by_profile, afd_custom_domains.list_by_profile,
+    secrets.list_by_profile and rule_sets.list_by_profile with rules.list_by_rule_set;
+    per endpoint routes.list_by_endpoint. Reader is sufficient — all GETs; a secret
+    returns certificate metadata and a Key Vault reference, never key material.
+    Routes: supportedProtocols absent reads as [Http, Https] and httpsRedirect absent
+    as Disabled (documented API defaults). https_only = the route accepts Https and
+    not Http (https_only_protocols), or accepts Http with httpsRedirect Enabled
+    (https_redirect), or accepts Http and, walking its rule sets in route order and
+    each set's rules by order, a rule redirects to destinationProtocol Https with no
+    condition or only a RequestScheme condition matching exactly HTTP, before any rule
+    that stops evaluation (rule_set_redirect, named in https_redirect_rule);
+    https_only_basis names which.
+    serving = endpoint and route both Enabled. forwarding_protocol is the protocol
+    to the origin, reported for azure_front_door_origins. Endpoint default domains
+    (*.azurefd.net) use the platform TLS policy and carry no TLS settings of their
+    own. Custom domains: effective_minimum_tls is minimumTlsVersion when
+    cipherSuiteSetType is Customized (the API applies the version only then), else
+    the floor the predefined set implies (TLS10_2019 → TLS10, TLS12_2022 / TLS12_2023
+    → TLS12), else minimumTlsVersion when no set is stored; below_tls12 is null when
+    the floor is unknown. The certificate is the profile secret tlsSettings.secret
+    points to; days_until_expiry, certificate_expired and certificate_expiring_soon
+    (within expiry_warning_days, 30) come from its expirationDate at run time.
+    certificate_status is found, managed_without_secret (a Front Door managed
+    certificate whose domain exposes no secret, so no expiry is readable; the platform
+    renews it), or missing (any other certificate with no resolvable secret).
+    served = a serving route lists the domain. Summary serving_routes_accepting_plain_http
+    and served_domains_below_tls12 are the counts a check asserts on. Maps to
+    KSI-SVC-SIN / KSI-CNA-MAT.
