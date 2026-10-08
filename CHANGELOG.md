@@ -25,7 +25,7 @@ schemas and the `paramify` CLI — not the internal code.
   at all. The TUI lists inventories in their own section. Start from
   `fetchers/_template_inventory/`; see `docs/inventory_fetchers.md`.
 - **`wiz_inventory`, the Wiz cloud resource inventory, for Paramify inventory
-  pipelines.** One record per resource from `cloudResourcesV2` (account,
+  pipelines**, and the first `kind: inventory` fetcher. One record per resource from `cloudResourcesV2` (account,
   region, type, IPs, OS, image, environment and owner, internet exposure)
   under `payload.data`, with the same keys on every record, so an inventory
   pipeline attached to `EVD-WIZ-INVENTORY` maps them one-to-one. Other tags

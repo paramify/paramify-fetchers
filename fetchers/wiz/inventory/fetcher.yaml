@@ -6,6 +6,8 @@ description: >-
   pipeline.
 category: wiz
 
+kind: inventory
+
 supports_targets: false
 
 runtime:
@@ -122,9 +124,10 @@ evidence_set:
     unique_asset_identifier (the cloud's own ID, an ARN on AWS), name, type,
     account, region, IPs, OS, image, the environment and owner tags,
     internet exposure and first/last seen (all tags only when include_tags is
-    on). A run with any collection failure writes counts but no records, so a
-    Paramify inventory pipeline attached to this evidence set never reads a
-    partial inventory from payload.data.
+    on). A run with any collection failure writes counts but no records, and
+    the uploader sends only a complete, non-empty inventory, so a Paramify
+    inventory pipeline attached to this evidence set never reads a partial
+    inventory from payload.data.
   description: >-
     Automatically generated inventory of cloud resources in the authorization
     boundary as discovered by Wiz.

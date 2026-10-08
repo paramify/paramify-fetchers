@@ -1,7 +1,8 @@
 # Wiz inventory into Paramify
 
 `wiz_inventory` writes one record per cloud resource Wiz has discovered (Wiz >
-Inventory > Cloud Resources). It is an evidence fetcher: the file goes to the
+Inventory > Cloud Resources). It is an inventory fetcher (`kind: inventory`, see
+[`inventory_fetchers.md`](inventory_fetchers.md)): the file goes to the
 evidence set `EVD-WIZ-INVENTORY`, and an **inventory pipeline** attached to that
 evidence set turns each record into an Inventory item.
 
@@ -79,9 +80,12 @@ Same as the rest of the Wiz category: a GraphQL error, a cursor problem, the
 record cap, or a resource without an ID fails the run and `metadata.error`
 names it. The file is still written, but with counts only and no records
 (`records_included: false`), so a pipeline never builds Inventory from a
-partial list. An empty inventory is `partial_or_empty`, not a failure. Two
-copies of the same resource (the estate changed while paging) keep the newer
-one and are counted in `analysis.duplicates_collapsed`. Nothing writes to Wiz.
+partial list. `paramify upload` also checks this itself and does not send a
+failed run's file. An empty inventory is `partial_or_empty`, not a failure: the
+run exits 0, but the uploader does not send it either, because a pipeline would
+read it as an empty estate. Two copies of the same resource (the estate
+changed while paging) keep the newer one and are counted in
+`analysis.duplicates_collapsed`. Nothing writes to Wiz.
 
 ## Verified
 

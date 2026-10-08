@@ -19,6 +19,9 @@ from typing import Any, Dict, List
 
 import pytest
 
+from framework import inventory
+from framework.config_loader import discover_fetchers
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WIZ = REPO_ROOT / "fetchers" / "wiz"
 sys.path.insert(0, str(WIZ / "_shared"))
@@ -261,6 +264,25 @@ def test_odd_types_in_summary_fields_do_not_crash(fake, tmp_path):
 def test_empty_inventory_is_not_a_failure(fake, tmp_path):
     code, ev = run(tmp_path)
     assert code == 0 and ev["status"] == "partial_or_empty" and "read:resources" in ev["message"]
+    # ...but it is not sent: a pipeline would read it as an empty estate.
+    assert inventory.check(ev, code)["incomplete_because"] == ["it holds no records"]
+
+
+def test_a_clean_run_meets_the_inventory_contract(fake, tmp_path):
+    """kind: inventory — the verdict the uploader acts on (framework/inventory.py)."""
+    fake.pages = [[vm("1"), vm("2")], [image("3")]]
+    code, ev = run(tmp_path)
+    assert inventory.check(ev, code) == {"records": 3, "records_included": True, "complete": True}
+
+
+def test_a_failed_run_is_not_sent(fake, tmp_path):
+    fake.error = "access denied, at least one of the following is required: [read:resources]"
+    code, ev = run(tmp_path)
+    assert inventory.check(ev, code)["complete"] is False
+
+
+def test_the_fetcher_is_an_inventory():
+    assert discover_fetchers(REPO_ROOT)["wiz_inventory"].is_inventory
 
 
 def test_queries_are_read_only():
