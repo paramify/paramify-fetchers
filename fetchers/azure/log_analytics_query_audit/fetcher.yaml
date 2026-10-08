@@ -1,0 +1,69 @@
+name: azure_log_analytics_query_audit
+version: 0.1.0
+description: >
+  For every Log Analytics workspace in the subscription, Sentinel or not: whether
+  query auditing is on (a diagnostic setting exporting the workspace's Audit
+  category) and where it goes. From LAQueryLogs over the lookback: queries per
+  week split into people and applications, the weeks with no human query, and
+  each user who queried the logs with their query count and last query. This
+  collector's own queries are excluded.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_log_analytics_query_audit.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+  workspaces:
+    type: string
+    required: false
+    env: SENTINEL_WORKSPACES
+    description: >
+      Comma-separated workspace names or resource ids to limit collection to.
+      Optional — omit to collect every Log Analytics workspace in the
+      subscription.
+
+config_schema:
+  query_audit_lookback_days:
+    type: integer
+    required: false
+    default: 90
+    env: QUERY_AUDIT_LOOKBACK_DAYS
+    description: How many days of LAQueryLogs to summarize into weeks.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-MLA-RVL      # Reviewing logs — people query and review the logs, week by week
+
+evidence_set:
+  reference_id: EVD-AZURE-LOG-ANALYTICS-QUERY-AUDIT
+  name: Azure Log Analytics Query Audit
+  instructions: >
+    Script: fetcher.py. ARM REST: Log Analytics workspaces and their diagnostic
+    settings; auditing is on when one enables category Audit or categoryGroup
+    audit/allLogs. LAQueryLogs on the setting's destination, per
+    startofweek(TimeGenerated): human when AADEmail is set, excluding this
+    collector (RequestClientApp paramify-fetchers). Weeks before LAQueryLogs'
+    table retention are not retained (null), never counted as weeks without
+    review. Roles: Reader and Log Analytics Reader.

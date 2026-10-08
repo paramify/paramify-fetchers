@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Entra ID Protection risky users, joined to directory roles: which privileged accounts are at risk and what was done about it."""
+
+import logging
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from azure_rest import ArmError, parse_time, run_tenant  # noqa: E402
+
+NAME = "azure_entra_risky_users"
+OPEN_STATES = frozenset({"atRisk", "confirmedCompromised"})
+CLOSED_STATES = frozenset({"remediated", "dismissed", "confirmedSafe"})
+
+logger = logging.getLogger(NAME)
+
+
+def not_licensed(exc: BaseException) -> bool:
+    """Identity Protection needs Entra ID P2; without it Graph refuses the call, which is a state, not a failure."""
+    return isinstance(exc, ArmError) and exc.status == 403 and "licens" in str(exc).lower()
+
+
+def privileged_roles(client) -> Dict[str, List[str]]:
+    """Principal id -> names of the activated directory roles it holds directly."""
+    held: Dict[str, List[str]] = {}
+    for role in client.graph_list("/directoryRoles", {"$expand": "members($select=id)"}):
+        for member in role.get("members") or []:
+            held.setdefault(member.get("id"), []).append(role.get("displayName"))
+    return {k: sorted(v) for k, v in held.items()}
+
+
+def project_user(user: Dict[str, Any], roles: Dict[str, List[str]], now: datetime) -> Dict[str, Any]:
+    updated = parse_time(user.get("riskLastUpdatedDateTime"))
+    return {
+        "id": user.get("id"),
+        "user_principal_name": user.get("userPrincipalName"),
+        "display_name": user.get("userDisplayName"),
+        "risk_level": user.get("riskLevel"),
+        "risk_state": user.get("riskState"),
+        "risk_detail": user.get("riskDetail"),
+        "risk_last_updated": user.get("riskLastUpdatedDateTime"),
+        "days_since_risk_update": round((now - updated).total_seconds() / 86400, 1) if updated else None,
+        "is_deleted": user.get("isDeleted"),
+        "privileged_roles": roles.get(user.get("id"), []),
+    }
+
+
+def account_enabled(client, user_id: str) -> Optional[bool]:
+    return client.graph_get(f"/users/{user_id}", {"$select": "id,accountEnabled"}).get("accountEnabled")
+
+
+def collect(client, collector) -> tuple:
+    try:
+        raw = client.graph_list("/identityProtection/riskyUsers", {"$top": "500"})
+    except Exception as exc:  # noqa: BLE001
+        if not_licensed(exc):
+            return {"identity_protection_available": False, "reason": str(exc), "risky_users": None}, {
+                "identity_protection_available": False
+            }
+        collector.record("graph.identityProtection.riskyUsers.list", exc)
+        return {"risky_users": None}, {}
+    roles = collector.guard("graph.directoryRoles.list(members)", lambda: privileged_roles(client)) or {}
+
+    now = datetime.now(timezone.utc)
+    users = sorted((project_user(u, roles, now) for u in raw), key=lambda u: (u["user_principal_name"] or "").lower())
+    for user in users:
+        if user["privileged_roles"] and user["risk_state"] in OPEN_STATES:
+            user["account_enabled"] = collector.guard(
+                f"graph.users.get({user['id']})", lambda u=user: account_enabled(client, u["id"])
+            )
+
+    open_ = [u for u in users if u["risk_state"] in OPEN_STATES]
+    privileged_open = [u for u in open_ if u["privileged_roles"]]
+    by_state: Dict[str, int] = {}
+    for user in users:
+        by_state[user["risk_state"] or "unknown"] = by_state.get(user["risk_state"] or "unknown", 0) + 1
+    ages = [u["days_since_risk_update"] for u in open_ if u["days_since_risk_update"] is not None]
+    summary = {
+        "identity_protection_available": True,
+        "risky_users_total": len(users),
+        "by_risk_state": dict(sorted(by_state.items())),
+        "open_risk_users": len(open_),
+        "open_high_risk_users": sum(1 for u in open_ if u["risk_level"] == "high"),
+        "privileged_open_risk_users": len(privileged_open),
+        "privileged_open_risk_users_enabled": sum(1 for u in privileged_open if u.get("account_enabled") is not False),
+        "oldest_open_risk_days": max(ages) if ages else None,
+        "privileged_principals": len(roles),
+    }
+    return {"identity_protection_available": True, "risky_users": users}, summary
+
+
+def main() -> int:
+    return run_tenant(fetcher=NAME, logger=logger, collect=collect)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

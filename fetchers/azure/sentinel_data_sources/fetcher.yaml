@@ -1,0 +1,75 @@
+name: azure_sentinel_data_sources
+version: 0.1.0
+description: >
+  For every Microsoft Sentinel workspace in the subscription: its data connectors
+  and their enabled data types, and every Log Analytics table that received data
+  in the ingestion window, with its last ingestion time and record count. The
+  per-workspace count of ingesting source tables is what shows which sources feed
+  the SIEM. It is measured from the data itself, because the data connectors list
+  omits sources wired up through diagnostic settings or data collection rules
+  (Azure Activity, Entra ID logs, AMA).
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_sentinel_data_sources.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+  workspaces:
+    type: string
+    required: false
+    env: SENTINEL_WORKSPACES
+    description: >
+      Comma-separated workspace names or resource ids to limit collection to.
+      Optional — omit to collect every Sentinel-onboarded workspace in the
+      subscription.
+
+config_schema:
+  ingestion_window_days:
+    type: integer
+    required: false
+    default: 14
+    env: SENTINEL_INGESTION_WINDOW_DAYS
+    description: >
+      How far back a table's latest record may be for the table to count as
+      ingesting. The default of 14 matches Sentinel's own rule for showing a
+      connector as connected.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-MLA-OSM      # Operating SIEM capability — which sources actually feed the SIEM
+  - KSI-MLA-LET      # Logging event types — the event sources being collected
+
+evidence_set:
+  reference_id: EVD-AZURE-SENTINEL-DATA-SOURCES
+  name: Azure Sentinel Data Sources
+  instructions: >
+    Script: fetcher.py. ARM REST, api-version 2025-09-01: list Log Analytics
+    workspaces, keep those with a SecurityInsights onboardingStates/default,
+    then list dataConnectors. Log Analytics query API: union of every table
+    over the window, summarized to max(TimeGenerated) and count() per table.
+    sources_ingesting counts tables with data in the window, excluding the
+    workspace's own telemetry (Usage, Operation, LAQueryLogs, SentinelHealth,
+    SentinelAudit, SecurityIncident, Watchlist, UEBA output). Roles: Microsoft Sentinel Reader
+    and Log Analytics Reader.
