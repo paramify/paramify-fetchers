@@ -1,0 +1,62 @@
+name: azure_entra_risky_users
+version: 0.1.0
+description: >
+  Every user Microsoft Entra ID Protection has flagged as risky, with risk level,
+  risk state (atRisk, confirmedCompromised, remediated, dismissed, confirmedSafe),
+  risk detail and when the risk last changed, joined to the directory roles each
+  user holds. Privileged users whose risk is still open also report whether the
+  account is enabled. Per tenant: counts by risk state, open and high-risk users,
+  privileged users with open risk and how many of those can still sign in, and
+  the oldest open risk. A tenant without Entra ID P2 reports Identity Protection
+  as unavailable rather than failing.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_entra_risky_users.json
+  aggregation: per_target
+
+target_schema:
+  # Microsoft Graph data is tenant-scoped: one target per Entra tenant.
+  tenant_id:
+    type: string
+    required: false
+    env: AZURE_TENANT_ID
+    description: >
+      Entra tenant id to collect from, and the output filename's discriminator.
+      Optional — omit to use the tenant the credential authenticates into. When
+      set, a credential that lands in a different tenant fails the run.
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Optional and not used to scope collection. With an Azure CLI login it picks
+      the account that holds this subscription, and it is recorded for correlation.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-IAM-SUS      # Responding to suspicious activity — risky accounts remediated or disabled
+
+evidence_set:
+  reference_id: EVD-AZURE-ENTRA-RISKY-USERS
+  name: Azure Entra ID Risky Users
+  instructions: >
+    Script: fetcher.py. Microsoft Graph v1.0: identityProtection/riskyUsers (every
+    @odata.nextLink followed) and directoryRoles?$expand=members. Open risk means
+    riskState atRisk or confirmedCompromised. Roles are active assignments held
+    directly; PIM-eligible roles and group-held roles are not expanded. Graph
+    application permissions: IdentityRiskyUser.Read.All and
+    RoleManagement.Read.Directory (or Directory.Read.All). Needs Entra ID P2.
