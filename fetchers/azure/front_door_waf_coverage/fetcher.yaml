@@ -1,0 +1,83 @@
+name: azure_front_door_waf_coverage
+version: 0.1.0
+description: >
+  Which Azure Front Door Standard/Premium entry points are actually protected by a
+  blocking WAF. Every host a route serves (each custom domain, and the endpoint's own
+  *.azurefd.net domain when the route links it) is resolved to the WAF policy that
+  applies to it, with Front Door's precedence of route over domain over profile, and
+  that policy's mode and blocking state. Hosts with no WAF, a WAF in Detection mode,
+  or path-limited coverage are listed with the reason, alongside endpoints that have
+  no routes and custom domains no route serves. Each profile also records whether a
+  diagnostic setting exports its WAF log (and access log) and where, so a profile with
+  a WAF in use but no WAF log export is visible in the same evidence.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_front_door_waf_coverage.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-RVP   # DoS / unwanted-activity protection on the public entry points
+  - KSI-CNA-RNT   # every internet-facing host is filtered by a WAF
+  - KSI-CNA-MAT   # unprotected or path-limited hosts are the exposed surface
+  - KSI-MLA-LET   # whether each WAF-protected profile exports its WAF log
+
+evidence_set:
+  reference_id: EVD-AZURE-FRONTDOOR-WAF-COVERAGE
+  name: Azure Front Door WAF Coverage
+  instructions: >
+    Script: fetcher.py. Azure SDK calls: azure-mgmt-cdn CdnManagementClient
+    profiles.list() (kept to sku Standard_AzureFrontDoor / Premium_AzureFrontDoor;
+    other CDN SKUs counted in skipped_profiles_by_sku), per profile
+    afd_endpoints.list_by_profile, afd_custom_domains.list_by_profile and
+    security_policies.list_by_profile (on a client pinned to api-version 2026-07-01,
+    the first GA version carrying isProfileLevel and associations[].routes), per
+    endpoint routes.list_by_endpoint; azure-mgmt-frontdoor policies.list_by_subscription
+    and managed_rule_sets.list for rule-set definitions; azure-mgmt-monitor MonitorManagementClient
+    diagnostic_settings_category.list and diagnostic_settings.list per profile.
+    Reader is sufficient — all GETs. One record per (host,
+    route): hosts are the route's custom domains plus the endpoint default domain when
+    linkToDefaultDomain is Enabled. effective_scope is route (an association listing
+    the route, applied only to the hosts it also lists when it lists any), else domain
+    (an association listing the host's custom-domain or endpoint id), else profile
+    (isProfileLevel), else none. The applied WAF's verdict (blocking, mode,
+    not_blocking_reasons, disabled_managed_rules, default_rule_set enabled / total
+    rules and fully disabled groups) is the same derivation as
+    azure_front_door_waf_policies. protected = serving AND a WAF resolves AND it
+    blocks AND it covers "/*" AND the host reference is not inactive;
+    unprotected_reasons names each failure. Host-routes on a disabled endpoint or
+    route are kept with serving=false and left out of the unprotected counts. Per
+    profile: waf_in_use = some serving host-route resolves to a WAF; a diagnostic
+    setting exports logs when it has a destination (an empty-string id counts as none)
+    and an enabled log category or category group; a category is captured when an
+    exporting setting enables it by name, enables allLogs, or enables a group it
+    belongs to; waf_log_exported = FrontDoorWebApplicationFirewallLog is captured, with
+    waf_log_destinations. Summary profiles_with_waf_in_use_without_waf_log_export
+    counts profiles a WAF protects whose WAF log goes nowhere. Maps to
+    KSI-CNA-RVP / KSI-CNA-RNT / KSI-CNA-MAT / KSI-MLA-LET.
