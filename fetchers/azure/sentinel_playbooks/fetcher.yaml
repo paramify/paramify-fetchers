@@ -60,5 +60,6 @@ evidence_set:
     Capabilities come from each action's connector and inputs, nested branches
     included. Account containment means an action sets accountEnabled false,
     revokes sign-in sessions or confirms a user compromised. Recipients are
-    static addresses only. Standard (single-tenant) Logic Apps are not read.
-    Roles: Reader (or Logic App Reader) and Microsoft Sentinel Reader.
+    static addresses only. Standard (single-tenant) workflows are read
+    (Microsoft.Web 2024-04-01) only when an automation rule runs them. Roles:
+    Reader (or Logic App Reader) and Microsoft Sentinel Reader.

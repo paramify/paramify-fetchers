@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Who can delete log data from each Log Analytics workspace, through the Purge or the Delete Data API."""
+"""Who can delete log data from each Log Analytics workspace: purge, Delete Data, deleting the workspace, or shortening retention."""
 
 import logging
 import re
@@ -13,10 +13,15 @@ from azure_rest import ArmError, run_workspaces  # noqa: E402
 
 NAME = "azure_log_analytics_deletion_rights"
 AUTH_API = "2022-04-01"
-# Both are granted by Data Purger / Log Analytics Contributor (learn.microsoft.com personal-data-mgmt, delete-log-data).
+PIM_API = "2020-10-01"
+# Purge and Delete Data come with Data Purger / Log Analytics Contributor; workspaces/write (Monitoring Contributor too)
+# sets workspace retention, and tables/write per-table retention, which deletes everything older.
 DELETION_ACTIONS = {
     "purge": "Microsoft.OperationalInsights/workspaces/purge/action",
     "delete_data": "Microsoft.OperationalInsights/workspaces/tables/deleteData/action",
+    "delete_workspace": "Microsoft.OperationalInsights/workspaces/delete",
+    "change_workspace_retention": "Microsoft.OperationalInsights/workspaces/write",
+    "change_table_retention": "Microsoft.OperationalInsights/workspaces/tables/write",
 }
 GETBYIDS_BATCH = 1000
 
@@ -66,6 +71,22 @@ def resolve_principals(client, ids: List[str]) -> Dict[str, Dict[str, Any]]:
     return names
 
 
+def eligible_assignments(client, ws: Dict[str, Any], collector, notes: List[str]) -> List[Dict[str, Any]]:
+    """PIM-eligible assignments at or above the workspace: rights a principal can activate."""
+    try:
+        listed = client.list(
+            f"{ws['id']}/providers/Microsoft.Authorization/roleEligibilityScheduleInstances", PIM_API, {"$filter": "atScope()"}
+        )
+    except ArmError as exc:
+        # Without Entra ID P2 the tenant has no PIM, which is a state rather than a failure.
+        if exc.status == 400 and any(w in str(exc).lower() for w in ("licens", "premium", "p2")):
+            notes.append(f"PIM-eligible assignments not read: {exc}")
+        else:
+            collector.record(f"authorization.roleEligibilityScheduleInstances.list(atScope, {ws['name']})", exc)
+        return []
+    return [a for a in listed if ((a.get("properties") or {}).get("status") or "Provisioned") == "Provisioned"]
+
+
 def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     assignments = collector.guard(
         f"authorization.roleAssignments.list(atScope, {ws['name']})",
@@ -73,15 +94,18 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     )
     if assignments is None:
         return {"deletion_grants": None}
+    notes: List[str] = []
+    eligible = eligible_assignments(client, ws, collector, notes)
+    tagged = [(a, "active") for a in assignments] + [(a, "eligible") for a in eligible]
     definitions: Dict[str, Optional[Dict[str, Any]]] = {}
-    for definition_id in sorted({(a.get("properties") or {}).get("roleDefinitionId") for a in assignments} - {None}):
+    for definition_id in sorted({(a.get("properties") or {}).get("roleDefinitionId") for a, _ in tagged} - {None}):
         definitions[definition_id] = collector.guard(
             f"authorization.roleDefinitions.get({definition_id.rsplit('/', 1)[-1]})",
             lambda d=definition_id: client.get(d, AUTH_API),
         )
 
     grants = []
-    for assignment in assignments:
+    for assignment, assignment_type in tagged:
         props = assignment.get("properties") or {}
         definition = definitions.get(props.get("roleDefinitionId"))
         if not definition:
@@ -99,15 +123,18 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             "principal_type": props.get("principalType"),
             "role_name": role.get("roleName"),
             "role_type": role.get("type"),
+            "assignment_type": assignment_type,
             "can_purge": "purge" in granted,
             "can_delete_data": "delete_data" in granted,
+            "can_delete_workspace": "delete_workspace" in granted,
+            "can_shorten_retention": "change_workspace_retention" in granted or "change_table_retention" in granted,
             "granted": granted,
             "scope": props.get("scope"),
             "scope_level": scope_level(props.get("scope"), ws["id"]),
             "condition": props.get("condition"),
+            "eligibility_end": props.get("endDateTime") if assignment_type == "eligible" else None,
         })
 
-    notes: List[str] = []
     ids = sorted({g["principal_id"] for g in grants if g["principal_id"]})
     names: Dict[str, Dict[str, Any]] = {}
     if ids:
@@ -118,17 +145,22 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     for grant in grants:
         found = names.get(grant["principal_id"]) or {}
         grant.update(principal_name=found.get("name"), principal_upn=found.get("upn"), principal_app_id=found.get("app_id"))
-    grants.sort(key=lambda g: (g["role_name"] or "", g["principal_name"] or g["principal_id"] or ""))
+    grants.sort(key=lambda g: (g["role_name"] or "", g["principal_name"] or g["principal_id"] or "", g["assignment_type"]))
 
     def principals(pred) -> int:
         return len({g["principal_id"] for g in grants if pred(g)})
 
+    active = {g["principal_id"] for g in grants if g["assignment_type"] == "active"}
     return {
         "role_assignments_at_scope": len(assignments),
+        "eligible_assignments_at_scope": len(eligible),
         "deletion_grants": grants,
         "principals_with_deletion_rights": principals(lambda g: True),
+        "principals_eligible_only": principals(lambda g: g["principal_id"] not in active),
         "principals_with_purge": principals(lambda g: g["can_purge"]),
         "principals_with_delete_data": principals(lambda g: g["can_delete_data"]),
+        "principals_who_can_delete_workspace": principals(lambda g: g["can_delete_workspace"]),
+        "principals_who_can_shorten_retention": principals(lambda g: g["can_shorten_retention"]),
         "principals_with_explicit_grant": principals(
             lambda g: any(v["kind"] == "explicit" for v in g["granted"].values())
         ),

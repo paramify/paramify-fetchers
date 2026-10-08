@@ -67,9 +67,9 @@ evidence_set:
   instructions: >
     Script: fetcher.py. ARM REST, api-version 2025-09-01: list Log Analytics
     workspaces, keep those with a SecurityInsights onboardingStates/default,
-    then list dataConnectors. Log Analytics query API: union of every table
-    over the window, summarized to max(TimeGenerated) and count() per table.
-    sources_ingesting counts tables with data in the window, excluding the
-    workspace's own telemetry (Usage, Operation, LAQueryLogs, SentinelHealth,
-    SentinelAudit, SecurityIncident, Watchlist, UEBA output). Roles: Microsoft Sentinel Reader
-    and Log Analytics Reader.
+    then list dataConnectors. Log Analytics query API: max(TimeGenerated) and
+    count() per table over the window, and per SecurityAlert ProductName.
+    sources_ingesting counts tables with data, plus each non-Sentinel alert
+    product, excluding workspace and Sentinel telemetry (Usage, Operation,
+    LAQueryLogs, SentinelHealth/Audit, SecurityIncident, Watchlist, UEBA) and
+    Heartbeat. Roles: Microsoft Sentinel Reader and Log Analytics Reader.

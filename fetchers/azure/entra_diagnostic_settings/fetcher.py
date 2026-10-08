@@ -27,8 +27,8 @@ def project_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
         "storage_account_id": props.get("storageAccountId"),
         "event_hub_authorization_rule_id": props.get("eventHubAuthorizationRuleId"),
         "event_hub_name": props.get("eventHubName"),
-        "enabled_categories": sorted(l.get("category") for l in logs if l.get("enabled") is True and l.get("category")),
-        "disabled_categories": sorted(l.get("category") for l in logs if l.get("enabled") is not True and l.get("category")),
+        "enabled_categories": sorted(log["category"] for log in logs if log.get("enabled") is True and log.get("category")),
+        "disabled_categories": sorted(log["category"] for log in logs if log.get("enabled") is not True and log.get("category")),
     }
 
 
@@ -37,10 +37,18 @@ def workspace_sentinel(client, workspace_id: str, collector) -> Optional[bool]:
     try:
         return sentinel_onboarded(client, workspace_id)
     except ArmError as exc:
-        if exc.status in (401, 403):
+        if exc.status in (401, 403) or exc.code == "SubscriptionNotFound":
             return None
         collector.record(f"securityinsights.onboardingStates.list({workspace_id})", exc)
         return None
+
+
+def reaches_sentinel(workspaces: List[str], sentinel: Dict[str, Optional[bool]]) -> Optional[bool]:
+    """True if any destination is a Sentinel workspace; None when none is but one couldn't be read."""
+    states = [sentinel.get(w) for w in workspaces]
+    if any(s is True for s in states):
+        return True
+    return None if any(s is None for s in states) else False
 
 
 def category_coverage(settings: List[Dict[str, Any]], available: List[str], sentinel: Dict[str, Optional[bool]]) -> List[Dict[str, Any]]:
@@ -52,7 +60,7 @@ def category_coverage(settings: List[Dict[str, Any]], available: List[str], sent
             "category": category,
             "exported": bool(exporting),
             "to_workspaces": workspaces,
-            "to_sentinel_workspace": any(sentinel.get(w) is True for w in workspaces),
+            "to_sentinel_workspace": reaches_sentinel(workspaces, sentinel),
             "to_storage": any(s["storage_account_id"] for s in exporting),
             "to_event_hub": any(s["event_hub_authorization_rule_id"] for s in exporting),
         })
@@ -77,19 +85,24 @@ def collect(client, collector) -> tuple:
     available = sorted(c.get("name") for c in categories or [] if c.get("name"))
     coverage = category_coverage(settings, available, sentinel)
     by_name = {c["category"]: c for c in coverage}
-    key = {c: by_name.get(c, {}).get("to_sentinel_workspace", False) for c in KEY_CATEGORIES}
+    key = {c: by_name[c]["to_sentinel_workspace"] if c in by_name else False for c in KEY_CATEGORIES}
+    unreadable = sorted(w for w, v in sentinel.items() if v is None)
     results = {
         "settings": settings,
         "destination_workspaces": [{"workspace_id": w, "sentinel_onboarded": v} for w, v in sentinel.items()],
         "categories_available": available if categories is not None else None,
         "category_coverage": coverage,
+        "notes": [
+            f"Sentinel state unknown for {len(unreadable)} destination workspace(s) this credential can't read, "
+            "so categories sent only there report to_sentinel_workspace as null"
+        ] if unreadable else [],
     }
     summary = {
         "settings_total": len(settings),
         "categories_exported": sum(1 for c in coverage if c["exported"]),
         "categories_not_exported": sorted(c["category"] for c in coverage if not c["exported"]),
         "key_categories_to_sentinel": key,
-        "audit_and_signin_logs_to_sentinel": all(key.values()),
+        "audit_and_signin_logs_to_sentinel": False if False in key.values() else (None if None in key.values() else True),
     }
     return results, summary
 

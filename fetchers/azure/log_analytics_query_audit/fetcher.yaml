@@ -62,8 +62,9 @@ evidence_set:
   instructions: >
     Script: fetcher.py. ARM REST: Log Analytics workspaces and their diagnostic
     settings; auditing is on when one enables category Audit or categoryGroup
-    audit/allLogs. LAQueryLogs on the setting's destination, per
-    startofweek(TimeGenerated): human when AADEmail is set, excluding this
+    audit/allLogs. LAQueryLogs on the setting's destination, filtered to this
+    workspace's _ResourceId, per startofweek(TimeGenerated): human when
+    AADEmail is set, excluding this
     collector (RequestClientApp paramify-fetchers). Weeks before LAQueryLogs'
     table retention are not retained (null), never counted as weeks without
     review. Roles: Reader and Log Analytics Reader.

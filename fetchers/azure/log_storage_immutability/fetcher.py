@@ -41,23 +41,26 @@ def log_type(container_name: str) -> Optional[str]:
     return next((kind for prefix, kind in LOG_CONTAINER_PREFIXES if name.startswith(prefix)), None)
 
 
-def project_container(container: Dict[str, Any], account_version_level: bool) -> Dict[str, Any]:
+def project_container(container: Dict[str, Any], account_version_level: bool, account_policy: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """`account_policy` is the account's default version-level policy, which applies where the container sets none."""
     props = container.get("properties") or {}
-    policy = dig(props, "immutabilityPolicy", "properties") or {}
-    state = policy.get("state")
-    days = policy.get("immutabilityPeriodSinceCreationInDays")
-    legal_hold = props.get("hasLegalHold") is True
+    own = (dig(props, "immutabilityPolicy", "properties") or {}) if props.get("hasImmutabilityPolicy") else {}
     version_level = dig(props, "immutableStorageWithVersioning", "enabled") is True or account_version_level
+    policy, source = (own, "container") if own else ((account_policy, "account_default") if account_policy else ({}, None))
+    state = policy.get("state") if policy.get("state") in ("Locked", "Unlocked") else None
+    legal_hold = props.get("hasLegalHold") is True
     return {
         "container": container.get("name"),
         "log_type": log_type(container.get("name")),
-        "time_based_policy_state": state if props.get("hasImmutabilityPolicy") else None,
-        "retention_days": days if props.get("hasImmutabilityPolicy") else None,
-        "allow_protected_append_writes": policy.get("allowProtectedAppendWrites"),
+        "time_based_policy_state": state,
+        "policy_source": source if state else None,
+        "retention_days": policy.get("immutabilityPeriodSinceCreationInDays") if state else None,
+        "allow_protected_append_writes": policy.get("allowProtectedAppendWrites") if state else None,
         "legal_hold": legal_hold,
         "version_level_immutability": version_level,
-        "locked": state == "Locked" and props.get("hasImmutabilityPolicy") is True,
-        "protected": legal_hold or (props.get("hasImmutabilityPolicy") is True and state in ("Locked", "Unlocked")),
+        "locked": state == "Locked",
+        # An Unlocked policy can be shortened or deleted by an admin, so only a Locked policy or a legal hold protects.
+        "protected": legal_hold or state == "Locked",
     }
 
 
@@ -82,9 +85,9 @@ def collect(client, subscription_id: str, collector) -> tuple:
             lambda a=account: client.get(f"{a['id']}/blobServices/default", STORAGE_API),
         ) or {}
         account_level = dig(account, "properties", "immutableStorageWithVersioning") or {}
-        projected = sorted(
-            (project_container(c, account_level.get("enabled") is True) for c in logs), key=lambda c: c["container"]
-        )
+        enabled = account_level.get("enabled") is True
+        account_policy = account_level.get("immutabilityPolicy") if enabled else None
+        projected = sorted((project_container(c, enabled, account_policy) for c in logs), key=lambda c: c["container"])
         out.append({
             "account": account.get("name"),
             "id": account.get("id"),

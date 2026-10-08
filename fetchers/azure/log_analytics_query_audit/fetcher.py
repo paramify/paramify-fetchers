@@ -5,7 +5,7 @@ import logging
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
@@ -28,7 +28,8 @@ AUDIT_GROUPS = frozenset({"audit", "alllogs"})
 
 _BASE = (
     "LAQueryLogs "
-    "| where TimeGenerated > ago({days}d){scope} "
+    "| where TimeGenerated > ago({days}d) "
+    "| where _ResourceId =~ '{workspace_id}' "
     f"| where RequestClientApp != '{CLIENT_APP}' "
 )
 WEEKLY_QUERY = _BASE + (
@@ -128,9 +129,8 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             result["notes"].append("Audit is exported only to storage or Event Hubs; LAQueryLogs is not queryable here")
         return result
 
-    # A setting sending to another workspace lands rows there, tagged with this workspace's resource id.
-    same = destination.lower() == (ws.get("id") or "").lower()
-    scope = "" if same else f" | where _ResourceId =~ '{ws['id']}'"
+    # Rows carry the queried workspace's resource id; a central destination also holds other workspaces' audit.
+    scope = {"days": days, "workspace_id": ws["id"]}
     result["audit_destination_workspace_id"] = destination
     weekly = users = retention = None
     try:
@@ -138,8 +138,8 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         if not target["customer_id"]:
             raise LookupError(f"no customerId for audit destination {destination}")
         retention = table_retention_days(client, destination, "LAQueryLogs", target["retention_in_days"])
-        weekly = client.query(target["customer_id"], WEEKLY_QUERY.format(days=days, scope=scope), iso_duration_days(days))
-        users = client.query(target["customer_id"], USERS_QUERY.format(days=days, scope=scope), iso_duration_days(days))
+        weekly = client.query(target["customer_id"], WEEKLY_QUERY.format(**scope), iso_duration_days(days))
+        users = client.query(target["customer_id"], USERS_QUERY.format(**scope), iso_duration_days(days))
     except Exception as exc:  # noqa: BLE001
         if table_missing(exc, "LAQueryLogs"):
             weekly, users = [], []

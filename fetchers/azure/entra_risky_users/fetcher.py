@@ -10,6 +10,10 @@ from typing import Any, Dict, List, Optional
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_rest import ArmError, parse_time, run_tenant  # noqa: E402
+from entra_graph import (  # noqa: E402
+    GLOBAL_ADMINISTRATOR_TEMPLATE_ID,
+    PRIVILEGED_ROLE_NAMES,
+)
 
 NAME = "azure_entra_risky_users"
 OPEN_STATES = frozenset({"atRisk", "confirmedCompromised"})
@@ -23,17 +27,27 @@ def not_licensed(exc: BaseException) -> bool:
     return isinstance(exc, ArmError) and exc.status == 403 and "licens" in str(exc).lower()
 
 
-def privileged_roles(client) -> Dict[str, List[str]]:
-    """Principal id -> names of the activated directory roles it holds directly."""
-    held: Dict[str, List[str]] = {}
-    for role in client.graph_list("/directoryRoles", {"$expand": "members($select=id)"}):
-        for member in role.get("members") or []:
-            held.setdefault(member.get("id"), []).append(role.get("displayName"))
-    return {k: sorted(v) for k, v in held.items()}
+def is_privileged(role: Dict[str, Any]) -> bool:
+    return role.get("displayName") in PRIVILEGED_ROLE_NAMES or (
+        str(role.get("roleTemplateId") or "").lower() == GLOBAL_ADMINISTRATOR_TEMPLATE_ID
+    )
 
 
-def project_user(user: Dict[str, Any], roles: Dict[str, List[str]], now: datetime) -> Dict[str, Any]:
+def directory_roles(client) -> Dict[str, List[Dict[str, Any]]]:
+    """Principal id -> the activated directory roles it holds directly, each flagged privileged or not."""
+    held: Dict[str, List[Dict[str, Any]]] = {}
+    for role in client.graph_list("/directoryRoles"):
+        # $expand=members on the collection caps at 20 members per role, so each role's members are paged.
+        for member in client.graph_list(f"/directoryRoles/{role.get('id')}/members", {"$select": "id"}):
+            held.setdefault(member.get("id"), []).append(
+                {"name": role.get("displayName"), "privileged": is_privileged(role)}
+            )
+    return held
+
+
+def project_user(user: Dict[str, Any], roles: Dict[str, List[Dict[str, Any]]], now: datetime) -> Dict[str, Any]:
     updated = parse_time(user.get("riskLastUpdatedDateTime"))
+    held = roles.get(user.get("id"), [])
     return {
         "id": user.get("id"),
         "user_principal_name": user.get("userPrincipalName"),
@@ -44,7 +58,8 @@ def project_user(user: Dict[str, Any], roles: Dict[str, List[str]], now: datetim
         "risk_last_updated": user.get("riskLastUpdatedDateTime"),
         "days_since_risk_update": round((now - updated).total_seconds() / 86400, 1) if updated else None,
         "is_deleted": user.get("isDeleted"),
-        "privileged_roles": roles.get(user.get("id"), []),
+        "directory_roles": sorted(r["name"] for r in held),
+        "privileged_roles": sorted(r["name"] for r in held if r["privileged"]),
     }
 
 
@@ -62,7 +77,7 @@ def collect(client, collector) -> tuple:
             }
         collector.record("graph.identityProtection.riskyUsers.list", exc)
         return {"risky_users": None}, {}
-    roles = collector.guard("graph.directoryRoles.list(members)", lambda: privileged_roles(client)) or {}
+    roles = collector.guard("graph.directoryRoles.members.list", lambda: directory_roles(client)) or {}
 
     now = datetime.now(timezone.utc)
     users = sorted((project_user(u, roles, now) for u in raw), key=lambda u: (u["user_principal_name"] or "").lower())
@@ -87,7 +102,7 @@ def collect(client, collector) -> tuple:
         "privileged_open_risk_users": len(privileged_open),
         "privileged_open_risk_users_enabled": sum(1 for u in privileged_open if u.get("account_enabled") is not False),
         "oldest_open_risk_days": max(ages) if ages else None,
-        "privileged_principals": len(roles),
+        "privileged_principals": sum(1 for held in roles.values() if any(r["privileged"] for r in held)),
     }
     return {"identity_protection_available": True, "risky_users": users}, summary
 

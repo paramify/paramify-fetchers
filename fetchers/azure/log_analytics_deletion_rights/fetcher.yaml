@@ -1,14 +1,15 @@
 name: azure_log_analytics_deletion_rights
 version: 0.1.0
 description: >
-  Who can permanently remove log data from each Log Analytics workspace in the
-  subscription, through either the Purge API or the Delete Data API. Every role
-  assignment that applies at the workspace (made there or inherited from its
-  resource group, subscription, management group or root) is checked against its
-  role definition for both destructive actions, net of notActions. Each grant
-  lists its principal (name resolved where Microsoft Graph allows), role and
-  scope. It also says whether the action comes from an explicit grant (Data
-  Purger) or a wildcard such as Log Analytics Contributor's
+  Who can remove log data from each Log Analytics workspace in the subscription:
+  through the Purge API, the Delete Data API, deleting the workspace, or
+  shortening workspace or table retention (which deletes everything older).
+  Every role assignment that applies at the workspace (made there or inherited
+  from its resource group, subscription, management group or root), active or
+  PIM-eligible, is checked against its role definition, net of notActions. Each
+  grant lists its principal (name resolved where Microsoft Graph allows), role,
+  scope, whether it is active or eligible, and whether each right comes from an
+  explicit grant (Data Purger) or a wildcard such as Log Analytics Contributor's
   Microsoft.OperationalInsights/* or Contributor's '*'.
 category: azure
 
@@ -54,10 +55,11 @@ evidence_set:
   reference_id: EVD-AZURE-LOG-ANALYTICS-DELETION-RIGHTS
   name: Azure Log Analytics Deletion Rights
   instructions: >
-    Script: fetcher.py. ARM REST, api-version 2022-04-01: roleAssignments at each
-    workspace with $filter=atScope() (that scope and above), and each role
-    definition. Checked actions: workspaces/purge/action and
-    workspaces/tables/deleteData/action. A grant holds one when an action pattern
-    matches it (case-insensitive, * wildcard) and no notActions does; explicit
-    means the exact action. Group members are not expanded. Names via Graph
-    directoryObjects/getByIds when permitted.
+    Script: fetcher.py. ARM REST at each workspace with $filter=atScope():
+    roleAssignments (2022-04-01), PIM roleEligibilityScheduleInstances
+    (2020-10-01), and each role definition. Checked actions: workspaces purge,
+    tables/deleteData, delete, write (retention) and tables/write. A grant holds
+    one when an action pattern matches (case-insensitive, * wildcard) and no
+    notActions does; explicit means the exact action. Group members are not
+    expanded. Names via Graph directoryObjects/getByIds when permitted. Role:
+    Reader.

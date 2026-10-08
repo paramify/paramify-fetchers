@@ -32,9 +32,14 @@ LAW_API = "2023-09-01"
 DIAG_API = "2021-05-01-preview"
 HTTP_TIMEOUT = 60
 QUERY_TIMEOUT = 600
+# Throttling and transient server errors, retried as azure-core's policy does for the SDK fetchers.
+RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+MAX_RETRIES = 4
+MAX_RETRY_WAIT = 120
 # Sent as x-ms-app so LAQueryLogs can tell this collector's queries from people's.
 CLIENT_APP = "paramify-fetchers"
 WORKSPACES_ENV = "SENTINEL_WORKSPACES"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _LOGGER = logging.getLogger("azure_rest")
 
@@ -61,6 +66,29 @@ class QueryError(Exception):
     def __init__(self, code: str, message: str):
         self.code = code
         super().__init__(f"{code}: {message}")
+
+
+def retry_wait(response, attempt: int) -> float:
+    """Seconds to wait: the service's Retry-After (seconds or HTTP date) when given, else exponential backoff."""
+    headers = getattr(response, "headers", None) or {}
+    raw = headers.get("x-ms-retry-after-ms")
+    if raw:
+        try:
+            return min(float(raw) / 1000, MAX_RETRY_WAIT)
+        except ValueError:
+            pass
+    raw = headers.get("Retry-After")
+    if raw:
+        try:
+            return min(max(float(raw), 0.0), MAX_RETRY_WAIT)
+        except ValueError:
+            from email.utils import parsedate_to_datetime
+
+            try:
+                return min(max((parsedate_to_datetime(raw) - datetime.now(timezone.utc)).total_seconds(), 0.0), MAX_RETRY_WAIT)
+            except (TypeError, ValueError):
+                pass
+    return float(min(2 ** attempt, MAX_RETRY_WAIT))
 
 
 def _error_parts(response) -> tuple:
@@ -91,9 +119,28 @@ class AzureRestClient:
             self._tokens[resource] = cached
         return cached.token
 
+    def _send(self, method: str, url: str, resource: str, headers: Optional[Dict[str, str]] = None, **kwargs: Any):
+        """One request, retried on throttling, transient 5xx and dropped connections."""
+        import requests  # lazy
+
+        for attempt in range(MAX_RETRIES + 1):
+            sent = {"Authorization": f"Bearer {self._token(resource)}", **(headers or {})}
+            try:
+                response = getattr(self.session, method)(url, headers=sent, **kwargs)
+            except requests.ConnectionError:
+                if attempt == MAX_RETRIES:
+                    raise
+                time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
+                continue
+            if response.status_code not in RETRY_STATUSES or attempt == MAX_RETRIES:
+                return response
+            wait = retry_wait(response, attempt)
+            _LOGGER.warning("%s %s answered %s; retrying in %.0fs", method.upper(), url.split("?")[0], response.status_code, wait)
+            time.sleep(wait)
+        raise AssertionError("unreachable")
+
     def _get(self, url: str, params: Optional[Dict[str, str]] = None, resource: Optional[str] = None) -> Dict[str, Any]:
-        headers = {"Authorization": f"Bearer {self._token(resource or self.arm)}"}
-        response = self.session.get(url, params=params, headers=headers, timeout=HTTP_TIMEOUT)
+        response = self._send("get", url, resource or self.arm, params=params, timeout=HTTP_TIMEOUT)
         if response.status_code >= 400:
             raise ArmError(response.status_code, *_error_parts(response))
         return response.json()
@@ -123,12 +170,7 @@ class AzureRestClient:
         return items
 
     def graph_post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
-        response = self.session.post(
-            f"{self.graph}/v1.0{path}",
-            json=body,
-            headers={"Authorization": f"Bearer {self._token(self.graph)}"},
-            timeout=HTTP_TIMEOUT,
-        )
+        response = self._send("post", f"{self.graph}/v1.0{path}", self.graph, json=body, timeout=HTTP_TIMEOUT)
         if response.status_code >= 400:
             raise ArmError(response.status_code, *_error_parts(response))
         return response.json()
@@ -146,14 +188,12 @@ class AzureRestClient:
 
     def query(self, customer_id: str, kql: str, timespan: str) -> List[Dict[str, Any]]:
         """Rows of the primary table; a partial result raises rather than returning short."""
-        response = self.session.post(
+        response = self._send(
+            "post",
             f"{self.logs}/v1/workspaces/{customer_id}/query",
+            self.logs,
+            headers={"Prefer": f"wait={QUERY_TIMEOUT}", "x-ms-app": CLIENT_APP},
             json={"query": kql, "timespan": timespan},
-            headers={
-                "Authorization": f"Bearer {self._token(self.logs)}",
-                "Prefer": f"wait={QUERY_TIMEOUT}",
-                "x-ms-app": CLIENT_APP,
-            },
             timeout=QUERY_TIMEOUT + 30,
         )
         if response.status_code >= 400:
@@ -207,6 +247,8 @@ def sentinel_onboarded(client: AzureRestClient, workspace_id: str) -> bool:
         states = client.list(f"{workspace_id}/providers/Microsoft.SecurityInsights/onboardingStates", SI_API)
     except ArmError as exc:
         # Unregistered provider or a workspace Sentinel never touched: not onboarded, not a failure.
+        if exc.code.lower() == "subscriptionnotfound":
+            raise
         if exc.status == 404 or exc.code.lower() in _NOT_ONBOARDED_CODES:
             return False
         raise
@@ -296,7 +338,11 @@ _EXPLICIT_IDENTITY_ENV = ("AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_FEDER
 
 def pinned_credential(subscription_id: Optional[str]):
     """DefaultAzureCredential, except a CLI login is asked for the account that holds the target subscription."""
-    from azure.identity import AzureCliCredential, ChainedTokenCredential, DefaultAzureCredential  # lazy
+    from azure.identity import (  # lazy
+        AzureCliCredential,
+        ChainedTokenCredential,
+        DefaultAzureCredential,
+    )
 
     if not subscription_id or any(os.environ.get(v) for v in _EXPLICIT_IDENTITY_ENV):
         return DefaultAzureCredential()
@@ -305,7 +351,7 @@ def pinned_credential(subscription_id: Optional[str]):
 
 
 def _start(logger: logging.Logger) -> Path:
-    from dotenv import find_dotenv, load_dotenv  # lazy
+    from dotenv import load_dotenv  # lazy
 
     logging.basicConfig(
         level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -313,9 +359,9 @@ def _start(logger: logging.Logger) -> Path:
     )
     for noisy in ("azure", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-    # The working directory's .env first, so a per-client folder overrides the repo's; neither overrides the real env.
-    load_dotenv(find_dotenv(usecwd=True))
-    load_dotenv()
+    # The working directory's .env, then the repo's; neither overrides the real env. Parent folders are not searched.
+    load_dotenv(Path.cwd() / ".env")
+    load_dotenv(REPO_ROOT / ".env")
     return Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
 
 

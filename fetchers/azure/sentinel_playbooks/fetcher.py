@@ -11,10 +11,19 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
-from azure_rest import SI_API, basename, discover_workspaces, parse_time, resource_group_from_id, run_subscription  # noqa: E402
+from azure_rest import (  # noqa: E402
+    SI_API,
+    basename,
+    discover_workspaces,
+    parse_time,
+    resource_group_from_id,
+    run_subscription,
+)
 
 NAME = "azure_sentinel_playbooks"
 LOGIC_API = "2019-05-01"
+# Standard (single-tenant) workflows live under Microsoft.Web/sites/{app}/workflows.
+WEB_API = "2024-04-01"
 SENTINEL_API = "azuresentinel"
 EMAIL_APIS = frozenset({"office365", "outlook", "sendgrid", "smtp", "gmail"})
 TEAMS_APIS = frozenset({"teams"})
@@ -44,9 +53,39 @@ def connection_apis(workflow: Dict[str, Any]) -> Dict[str, str]:
 
 
 def api_of(step: Dict[str, Any], apis: Dict[str, str]) -> Optional[str]:
-    ref = (((step.get("inputs") or {}).get("host") or {}).get("connection") or {}).get("name") or ""
-    match = CONNECTION_REF.search(ref)
+    connection = ((step.get("inputs") or {}).get("host") or {}).get("connection") or {}
+    if connection.get("referenceName"):
+        # Standard workflows name a connections.json entry, which by default carries the managed API's name.
+        return apis.get(connection["referenceName"], connection["referenceName"].lower())
+    match = CONNECTION_REF.search(connection.get("name") or "")
     return apis.get(match.group(1), match.group(1).lower()) if match else None
+
+
+def is_standard(workflow_id: str) -> bool:
+    return "/providers/microsoft.web/sites/" in (workflow_id or "").lower()
+
+
+def from_standard(envelope: Dict[str, Any]) -> Dict[str, Any]:
+    """A Standard workflow envelope in the Consumption shape analyse() reads; its definition sits in files['workflow.json']."""
+    props = envelope.get("properties") or {}
+    files = props.get("files") or {}
+    doc = files.get("workflow.json") or next((f for f in files.values() if isinstance(f, dict) and "definition" in f), {})
+    if isinstance(doc, str):
+        try:
+            doc = json.loads(doc)
+        except ValueError:
+            doc = {}
+    return {
+        "id": envelope.get("id"),
+        "name": envelope.get("name"),
+        "properties": {"state": props.get("flowState"), "definition": (doc or {}).get("definition")},
+    }
+
+
+def get_workflow(client, workflow_id: str) -> Dict[str, Any]:
+    if is_standard(workflow_id):
+        return from_standard(client.get(workflow_id, WEB_API))
+    return client.get(workflow_id, LOGIC_API)
 
 
 def trigger_kind(path: str) -> str:
@@ -117,8 +156,8 @@ def analyse(workflow: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def automation_references(client, subscription_id: str, collector) -> Dict[str, List[Dict[str, Any]]]:
-    """Playbook id (lowercased) -> the automation rules that run it, from every Sentinel workspace in the subscription."""
+def automation_references(client, subscription_id: str, collector, ids: Dict[str, str]) -> Dict[str, List[Dict[str, Any]]]:
+    """Playbook id (lowercased) -> the automation rules that run it, from every Sentinel workspace; `ids` keeps the id as written."""
     now = datetime.now(timezone.utc)
     refs: Dict[str, List[Dict[str, Any]]] = {}
     for ws in discover_workspaces(client, subscription_id, collector):
@@ -136,6 +175,7 @@ def automation_references(client, subscription_id: str, collector) -> Dict[str, 
             for action in props.get("actions") or []:
                 playbook = (action.get("actionConfiguration") or {}).get("logicAppResourceId")
                 if action.get("actionType") == "RunPlaybook" and playbook:
+                    ids.setdefault(playbook.lower(), playbook)
                     refs.setdefault(playbook.lower(), []).append(
                         {"workspace": ws["name"], "rule": props.get("displayName"), "active": active}
                     )
@@ -143,7 +183,8 @@ def automation_references(client, subscription_id: str, collector) -> Dict[str, 
 
 
 def collect(client, subscription_id: str, collector) -> tuple:
-    refs = automation_references(client, subscription_id, collector)
+    ids: Dict[str, str] = {}
+    refs = automation_references(client, subscription_id, collector, ids)
     listed = collector.guard(
         "logic.workflows.list",
         lambda: client.list(f"/subscriptions/{subscription_id}/providers/Microsoft.Logic/workflows", LOGIC_API),
@@ -153,14 +194,16 @@ def collect(client, subscription_id: str, collector) -> tuple:
     by_id = {(w.get("id") or "").lower(): w for w in listed}
     for playbook_id in sorted(set(refs) - set(by_id)):
         # A rule may run a playbook from another subscription or resource group the list didn't return.
-        found = collector.guard(f"logic.workflows.get({basename(playbook_id)})", lambda p=playbook_id: client.get(p, LOGIC_API))
+        found = collector.guard(f"workflows.get({basename(playbook_id)})", lambda p=ids[playbook_id]: get_workflow(client, p))
         if found:
             by_id[playbook_id] = found
 
     playbooks = []
     for key, workflow in sorted(by_id.items()):
-        if not (workflow.get("properties") or {}).get("definition"):
-            workflow = collector.guard(f"logic.workflows.get({workflow.get('name')})", lambda w=workflow: client.get(w["id"], LOGIC_API)) or workflow
+        if not (workflow.get("properties") or {}).get("definition") and not is_standard(key):
+            workflow = collector.guard(
+                f"logic.workflows.get({workflow.get('name')})", lambda w=workflow: client.get(w["id"], LOGIC_API)
+            ) or workflow
         analysis = analyse(workflow)
         wired = refs.get(key, [])
         if not analysis["sentinel_triggered"] and not wired:
@@ -171,6 +214,8 @@ def collect(client, subscription_id: str, collector) -> tuple:
             "id": workflow.get("id"),
             "resource_group": resource_group_from_id(workflow.get("id")),
             "enabled": enabled,
+            "plan": "standard" if is_standard(key) else "consumption",
+            "definition_read": bool((workflow.get("properties") or {}).get("definition")),
             **analysis,
             "automation_rules": wired,
             "run_by_active_automation_rule": enabled and any(r["active"] for r in wired),
@@ -185,6 +230,8 @@ def collect(client, subscription_id: str, collector) -> tuple:
         "live_account_containment_playbooks": sum(1 for p in live if p["capabilities"]["account_containment"]),
         "live_notifying_playbooks": sum(1 for p in live if p["capabilities"]["email"] or p["capabilities"]["teams"]),
         "notification_recipients": sorted({e for p in live for e in p["email_recipients"]}),
+        "standard_playbooks": sum(1 for p in playbooks if p["plan"] == "standard"),
+        "playbooks_without_definition": sorted(p["id"] for p in playbooks if not p["definition_read"]),
         "automation_rule_references_unresolved": sorted(set(refs) - set(by_id)),
     }
     return {"playbooks": playbooks}, summary

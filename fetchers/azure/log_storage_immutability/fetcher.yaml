@@ -51,6 +51,7 @@ evidence_set:
     storageAccounts, each account's blobServices/default/containers and
     blobServices/default. Log containers are found by the names Azure Monitor
     creates (insights-logs-, insights-activity-logs, insights-metrics-, am-).
-    protected means a legal hold or a time-based policy; locked means the policy
-    can no longer be shortened or removed. Lifecycle-management rules are not
+    A container without its own policy inherits the account's default
+    version-level policy. protected means a legal hold or a Locked policy; an
+    Unlocked policy can still be deleted. Lifecycle-management rules are not
     read. Role: Reader.

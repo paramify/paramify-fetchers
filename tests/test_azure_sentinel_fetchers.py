@@ -11,8 +11,8 @@ exist yet.
 
 from __future__ import annotations
 
-import importlib.util
 import base64
+import importlib.util
 import json
 import os
 import sys
@@ -84,10 +84,11 @@ def table(columns, rows):
 
 
 class Resp:
-    def __init__(self, status, body):
+    def __init__(self, status, body, headers=None):
         self.status_code, self._body = status, body
         self.reason = "OK" if status < 400 else "Error"
         self.text = json.dumps(body)
+        self.headers = headers or {}
 
     def json(self):
         return self._body
@@ -152,7 +153,10 @@ class FakeAzure:
         sunday = (NOW - timedelta(days=(NOW.weekday() + 1) % 7)).replace(hour=0, minute=0, second=0, microsecond=0)
         self.queries = [
             ("union withsource=ParamifySourceTable", table(["ParamifySourceTable", "LastIngested", "Records"], [
-                ["AzureActivity", iso(NOW), 10], ["SecurityAlert", iso(NOW), 2], ["Usage", iso(NOW), 5]])),
+                ["AzureActivity", iso(NOW), 10], ["SecurityAlert", iso(NOW), 2], ["Usage", iso(NOW), 5],
+                ["Heartbeat", iso(NOW), 50]])),
+            ("by ProductName", table(["ProductName", "LastIngested", "Records"], [
+                ["Microsoft Defender Advanced Threat Protection", iso(NOW), 1], ["Azure Sentinel", iso(NOW), 1]])),
             ("SecurityIncident", table(["IncidentName", "Status", "ClosedTime", "CreatedTime"], [
                 ["i-closed", "Closed", iso(NOW - timedelta(days=2)), iso(NOW - timedelta(days=3))],
                 ["i-new", "New", None, iso(NOW - timedelta(days=200))]])),
@@ -178,6 +182,8 @@ class FakeAzure:
         if key not in self.arm:
             return Resp(404, {"error": {"code": "ResourceNotFound", "message": f"no {key}"}})
         body = self.arm[key]
+        if isinstance(body, list):  # answered in turn, the last one repeating
+            body = body.pop(0) if len(body) > 1 else body[0]
         if isinstance(body, Resp):
             return body
         return Resp(200, body)
@@ -190,6 +196,8 @@ class FakeAzure:
         assert headers["x-ms-app"] == "paramify-fetchers"
         for fragment, body in self.queries:
             if fragment in json["query"]:
+                if isinstance(body, list):
+                    body = body.pop(0) if len(body) > 1 else body[0]
                 return body if isinstance(body, Resp) else Resp(200, body)
         return Resp(400, {"error": {"code": "BadArgumentError", "message": "unrouted query"}})
 
@@ -203,6 +211,9 @@ class FakeCred:
 def azure(monkeypatch, tmp_path):
     fake = FakeAzure()
     monkeypatch.setattr(azure_rest, "pinned_credential", lambda sub: FakeCred())
+    monkeypatch.setattr(azure_rest, "REPO_ROOT", tmp_path / "repo")
+    fake.sleeps = []
+    monkeypatch.setattr(azure_rest.time, "sleep", fake.sleeps.append)
     monkeypatch.setattr("requests.Session", lambda: fake)
     monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", SUB)
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
@@ -300,8 +311,10 @@ def test_data_sources(azure, tmp_path):
     code, ev = run("sentinel_data_sources", tmp_path)
     assert code == 0 and ev["metadata"]["partial_failure"] is False
     ws = ws_a(ev)
-    assert ws["source_tables"] == ["AzureActivity", "SecurityAlert"]
-    assert ws["sources_ingesting"] == 2 and ws["self_telemetry_tables"] == ["Usage"]
+    # SecurityAlert counts once per other product; Sentinel's own alerts and agent Heartbeat don't count.
+    assert ws["source_tables"] == ["AzureActivity", "SecurityAlert (Microsoft Defender Advanced Threat Protection)"]
+    assert ws["sources_ingesting"] == 2 and ws["non_source_tables"] == ["Heartbeat", "Usage"]
+    assert [p["product"] for p in ws["alert_products"] if not p["counts_as_source"]] == ["Azure Sentinel"]
     o365 = next(c for c in ws["data_connectors"] if c["kind"] == "Office365")
     assert o365["enabled_data_types"] == ["exchange"]
     assert ev["results"]["workspaces_without_sentinel"] == ["law-plain"]
@@ -383,6 +396,8 @@ def test_query_audit(azure, tmp_path):
     assert a["users"] == [{"user": "alice@contoso.com", "queries": 4, "last_query": a["users"][0]["last_query"]}]
     queried = [c[2] for c in azure.calls if c[0] == "POST"]
     assert all("RequestClientApp != 'paramify-fetchers'" in q for q in queried)
+    # Always scoped: a central destination also holds other workspaces' audit rows.
+    assert all(f"_ResourceId =~ '{WS_A}'" in q for q in queried)
     assert not any("cust-b" in c[1] for c in azure.calls if c[0] == "POST")
 
 
@@ -449,9 +464,9 @@ def role_def(guid, name, actions, not_actions=()):
                                                   "permissions": [{"actions": list(actions), "notActions": list(not_actions)}]}}
 
 
-def assignment(principal, kind, guid, scope):
+def assignment(principal, kind, guid, scope, **extra):
     return {"properties": {"principalId": principal, "principalType": kind,
-                           "roleDefinitionId": f"{RD}/{guid}", "scope": scope}}
+                           "roleDefinitionId": f"{RD}/{guid}", "scope": scope, **extra}}
 
 
 def container(name, policy=None, legal_hold=False):
@@ -498,12 +513,23 @@ EXTRA_ARM = {
         assignment("u-purger", "User", "purger", WS_A),
         assignment("sp-la", "ServicePrincipal", "lacontrib", f"/subscriptions/{SUB}"),
         assignment("u-reader", "User", "reader", f"/subscriptions/{SUB}"),
-        assignment("g-ops", "Group", "nopurge", RG)]},
+        assignment("g-ops", "Group", "nopurge", RG),
+        assignment("u-monitor", "User", "moncontrib", RG),
+        assignment("g-mg-owners", "Group", "owner", "/providers/Microsoft.Management/managementGroups/mg-root"),
+        assignment("u-no-oi", "User", "nooi", f"/subscriptions/{SUB}")]},
     (f"{WS_B}/providers/Microsoft.Authorization/roleAssignments", "2022-04-01"): {"value": []},
+    (f"{WS_A}/providers/Microsoft.Authorization/roleEligibilityScheduleInstances", "2020-10-01"): {"value": [
+        assignment("u-eligible", "User", "purger", WS_A, status="Provisioned", endDateTime="2027-01-01T00:00:00Z"),
+        assignment("u-lapsed", "User", "purger", WS_A, status="Expired")]},
+    (f"{WS_B}/providers/Microsoft.Authorization/roleEligibilityScheduleInstances", "2020-10-01"): {"value": []},
     (f"{RD}/purger", "2022-04-01"): role_def("purger", "Data Purger", ["Microsoft.OperationalInsights/workspaces/purge/action"]),
     (f"{RD}/lacontrib", "2022-04-01"): role_def("lacontrib", "Log Analytics Contributor", ["*/read", "Microsoft.OperationalInsights/*"]),
     (f"{RD}/reader", "2022-04-01"): role_def("reader", "Reader", ["*/read"]),
     (f"{RD}/nopurge", "2022-04-01"): role_def("nopurge", "Ops Custom", ["*"], ["Microsoft.OperationalInsights/workspaces/purge/action"]),
+    (f"{RD}/moncontrib", "2022-04-01"): role_def("moncontrib", "Monitoring Contributor", [
+        "*/read", "Microsoft.OperationalInsights/workspaces/write", "Microsoft.OperationalInsights/workspaces/search/action"]),
+    (f"{RD}/owner", "2022-04-01"): role_def("owner", "Owner", ["*"]),
+    (f"{RD}/nooi", "2022-04-01"): role_def("nooi", "Everything But Logs", ["*"], ["Microsoft.OperationalInsights/*"]),
     (f"/subscriptions/{SUB}/providers/Microsoft.Storage/storageAccounts", "2023-05-01"): {"value": [
         {"id": f"{SA}/stlogs", "name": "stlogs", "kind": "StorageV2", "properties": {}},
         {"id": f"{SA}/stfiles", "name": "stfiles", "kind": "FileStorage", "properties": {}},
@@ -523,9 +549,18 @@ EXTRA_ARM = {
         "@odata.nextLink": "https://graph.microsoft.com/v1.0/identityProtection/riskyUsers?$skiptoken=p2"},
     ("/v1.0/identityProtection/riskyUsers", None, "p2"): {"value": [
         {"id": "u-staff", "userPrincipalName": "staff@contoso.com", "riskLevel": "medium", "riskState": "remediated",
-         "riskLastUpdatedDateTime": iso(NOW - timedelta(days=3))}]},
+         "riskLastUpdatedDateTime": iso(NOW - timedelta(days=3))},
+        {"id": "u-reader", "userPrincipalName": "reader@contoso.com", "riskLevel": "low", "riskState": "atRisk",
+         "riskLastUpdatedDateTime": iso(NOW - timedelta(days=1))}]},
     ("/v1.0/directoryRoles", None): {"value": [
-        {"displayName": "Global Administrator", "members": [{"id": "u-admin"}]}]},
+        {"id": "role-ga", "displayName": "Company Admin", "roleTemplateId": "62e90394-69f5-4237-9190-012177145e10"},
+        {"id": "role-dr", "displayName": "Directory Readers", "roleTemplateId": "88d8e3e3-8f55-4a1e-953a-9b9898b8876b"}]},
+    # More members than $expand would return: the role's member list is paged.
+    ("/v1.0/directoryRoles/role-ga/members", None): {
+        "value": [{"id": f"u-filler-{i}"} for i in range(20)],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/directoryRoles/role-ga/members?$skiptoken=p2"},
+    ("/v1.0/directoryRoles/role-ga/members", None, "p2"): {"value": [{"id": "u-admin"}]},
+    ("/v1.0/directoryRoles/role-dr/members", None): {"value": [{"id": "u-reader"}, {"id": "u-admin"}]},
     ("/v1.0/users/u-admin", None): {"id": "u-admin", "accountEnabled": True},
 }
 
@@ -556,20 +591,28 @@ def test_deletion_rights(azure, tmp_path):
     assert code == 0
     ws = ws_a(ev)
     grants = {g["principal_id"]: g for g in ws["deletion_grants"]}
-    assert set(grants) == {"u-purger", "sp-la", "g-ops"}
+    # u-reader reads only; u-no-oi's wildcard notActions removes every Log Analytics right; u-lapsed's eligibility expired.
+    assert set(grants) == {"u-purger", "sp-la", "g-ops", "u-monitor", "g-mg-owners", "u-eligible"}
     assert grants["u-purger"]["granted"]["purge"]["kind"] == "explicit" and not grants["u-purger"]["can_delete_data"]
     assert grants["sp-la"]["granted"]["purge"]["via"] == "Microsoft.OperationalInsights/*"
     assert grants["sp-la"]["can_delete_data"] and grants["sp-la"]["scope_level"] == "subscription"
     assert grants["g-ops"]["can_purge"] is False and grants["g-ops"]["can_delete_data"] is True
     assert grants["u-purger"]["principal_name"] == "Pat Purger"
-    assert ws["principals_with_purge"] == 2 and ws["principals_with_explicit_grant"] == 1
+    monitor = grants["u-monitor"]
+    assert monitor["can_shorten_retention"] and not (monitor["can_purge"] or monitor["can_delete_workspace"])
+    assert grants["g-mg-owners"]["scope_level"] == "management_group" and grants["g-mg-owners"]["can_delete_workspace"]
+    assert grants["u-eligible"]["assignment_type"] == "eligible" and grants["u-eligible"]["can_purge"]
+    assert grants["u-purger"]["assignment_type"] == "active" and grants["u-eligible"]["eligibility_end"]
+    assert ws["principals_with_purge"] == 4 and ws["principals_with_explicit_grant"] == 3
+    assert ws["principals_eligible_only"] == 1 and ws["eligible_assignments_at_scope"] == 1
+    assert ws["principals_who_can_delete_workspace"] == 3 and ws["principals_who_can_shorten_retention"] == 4
 
 
 def test_deletion_rights_names_are_optional(azure, tmp_path):
     azure.graph_post_response = Resp(403, {"error": {"code": "Authorization_RequestDenied", "message": "no"}})
     code, ev = run("log_analytics_deletion_rights", tmp_path)
     ws = ws_a(ev)
-    assert code == 0 and ws["principals_with_deletion_rights"] == 3 and "not resolved" in ws["notes"][0]
+    assert code == 0 and ws["principals_with_deletion_rights"] == 6 and "not resolved" in ws["notes"][0]
 
 
 def test_log_storage_immutability(azure, tmp_path):
@@ -580,11 +623,12 @@ def test_log_storage_immutability(azure, tmp_path):
     by_name = {c["container"]: c for c in accounts[0]["log_containers"]}
     assert set(by_name) == {"insights-logs-auditevent", "insights-activity-logs", "am-securityevent"}
     assert by_name["insights-logs-auditevent"]["locked"] and by_name["insights-logs-auditevent"]["retention_days"] == 365
-    assert by_name["am-securityevent"]["protected"] and not by_name["am-securityevent"]["locked"]
+    # An Unlocked policy can still be deleted, so it doesn't protect.
+    assert not by_name["am-securityevent"]["protected"] and by_name["am-securityevent"]["time_based_policy_state"] == "Unlocked"
     assert by_name["insights-activity-logs"]["protected"] is False
     assert accounts[0]["blob_soft_delete_days"] == 14
     assert ev["summary"] == {"storage_accounts_scanned": 3, "accounts_with_log_containers": 1, "log_containers": 3,
-                             "locked_policy": 1, "unlocked_policy_only": 1, "legal_hold": 0, "unprotected": 1,
+                             "locked_policy": 1, "unlocked_policy_only": 1, "legal_hold": 0, "unprotected": 2,
                              "min_retention_days": 30}
     assert not any("stfiles" in c[1] for c in azure.calls)
 
@@ -607,11 +651,15 @@ def test_entra_risky_users(azure, tmp_path):
     code, ev = run("entra_risky_users", tmp_path)
     assert code == 0
     users = {u["user_principal_name"]: u for u in ev["results"]["risky_users"]}
-    assert users["admin@contoso.com"]["privileged_roles"] == ["Global Administrator"]
+    # Global Administrator found by template id past the first 20 members; Directory Readers isn't privileged.
+    assert users["admin@contoso.com"]["privileged_roles"] == ["Company Admin"]
+    assert users["admin@contoso.com"]["directory_roles"] == ["Company Admin", "Directory Readers"]
+    assert users["reader@contoso.com"]["privileged_roles"] == [] and "account_enabled" not in users["reader@contoso.com"]
     assert users["admin@contoso.com"]["account_enabled"] is True and "account_enabled" not in users["staff@contoso.com"]
     s = ev["summary"]
-    assert s["risky_users_total"] == 2 and s["by_risk_state"] == {"atRisk": 1, "remediated": 1}
+    assert s["risky_users_total"] == 3 and s["by_risk_state"] == {"atRisk": 2, "remediated": 1}
     assert s["privileged_open_risk_users"] == 1 and s["privileged_open_risk_users_enabled"] == 1
+    assert s["privileged_principals"] == 21
 
 
 def test_entra_risky_users_without_p2_is_a_state(azure, tmp_path):
@@ -619,3 +667,130 @@ def test_entra_risky_users_without_p2_is_a_state(azure, tmp_path):
         403, {"error": {"code": "Forbidden", "message": "Your tenant is not licensed for this feature."}})
     code, ev = run("entra_risky_users", tmp_path)
     assert code == 0 and ev["summary"] == {"identity_protection_available": False}
+
+
+def test_entra_diagnostic_settings_unreadable_destination_is_unknown(azure, tmp_path):
+    other = "/subscriptions/other/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/law-elsewhere"
+    azure.arm[("/providers/microsoft.aadiam/diagnosticSettings", "2017-04-01")]["value"].append(
+        {"name": "elsewhere", "properties": {"workspaceId": other, "logs": [{"category": "ProvisioningLogs", "enabled": True}]}})
+    azure.arm[(f"{other}/providers/Microsoft.SecurityInsights/onboardingStates", "2025-09-01")] = Resp(
+        403, {"error": {"code": "AuthorizationFailed", "message": "no access"}})
+    code, ev = run("entra_diagnostic_settings", tmp_path)
+    coverage = {c["category"]: c for c in ev["results"]["category_coverage"]}
+    assert code == 0 and coverage["ProvisioningLogs"]["to_sentinel_workspace"] is None
+    assert coverage["AuditLogs"]["to_sentinel_workspace"] is True and ev["summary"]["audit_and_signin_logs_to_sentinel"] is True
+    assert "1 destination workspace" in ev["results"]["notes"][0]
+
+
+def test_entra_key_category_only_to_an_unreadable_workspace_is_unknown(azure, tmp_path):
+    settings = azure.arm[("/providers/microsoft.aadiam/diagnosticSettings", "2017-04-01")]["value"]
+    other = "/subscriptions/other/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/law-elsewhere"
+    settings[0]["properties"]["workspaceId"] = other
+    azure.arm[(f"{other}/providers/Microsoft.SecurityInsights/onboardingStates", "2025-09-01")] = Resp(
+        404, {"error": {"code": "SubscriptionNotFound", "message": "not in this tenant"}})
+    code, ev = run("entra_diagnostic_settings", tmp_path)
+    assert code == 0 and ev["summary"]["key_categories_to_sentinel"] == {"AuditLogs": None, "SignInLogs": None}
+    assert ev["summary"]["audit_and_signin_logs_to_sentinel"] is None
+
+
+def test_deletion_rights_without_pim_is_a_note(azure, tmp_path):
+    azure.arm[(f"{WS_A}/providers/Microsoft.Authorization/roleEligibilityScheduleInstances", "2020-10-01")] = Resp(
+        400, {"error": {"code": "AadPremiumLicenseRequired", "message": "The tenant needs an AAD Premium P2 license."}})
+    code, ev = run("log_analytics_deletion_rights", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["eligible_assignments_at_scope"] == 0
+    assert any("PIM-eligible assignments not read" in n for n in ws["notes"])
+
+
+def test_log_storage_account_default_version_policy(azure, tmp_path):
+    azure.arm[(f"/subscriptions/{SUB}/providers/Microsoft.Storage/storageAccounts", "2023-05-01")]["value"].append(
+        {"id": f"{SA}/stworm", "name": "stworm", "kind": "StorageV2", "properties": {"immutableStorageWithVersioning": {
+            "enabled": True, "immutabilityPolicy": {"state": "Locked", "immutabilityPeriodSinceCreationInDays": 180}}}})
+    azure.arm[(f"{SA}/stworm/blobServices/default/containers", "2023-05-01")] = {"value": [
+        container("insights-logs-signinlogs"),
+        container("insights-logs-auditlogs", {"state": "Unlocked", "immutabilityPeriodSinceCreationInDays": 7})]}
+    azure.arm[(f"{SA}/stworm/blobServices/default", "2023-05-01")] = {"properties": {}}
+    code, ev = run("log_storage_immutability", tmp_path)
+    worm = next(a for a in ev["results"]["accounts"] if a["account"] == "stworm")
+    by_name = {c["container"]: c for c in worm["log_containers"]}
+    inherited = by_name["insights-logs-signinlogs"]
+    assert code == 0 and inherited["protected"] and inherited["policy_source"] == "account_default"
+    assert inherited["retention_days"] == 180 and inherited["version_level_immutability"]
+    # The container's own Unlocked policy overrides the account default, and doesn't protect.
+    assert by_name["insights-logs-auditlogs"]["policy_source"] == "container"
+    assert not by_name["insights-logs-auditlogs"]["protected"]
+
+
+STD = f"{RG}/providers/Microsoft.Web/sites/la-std/workflows/contain"
+
+
+def _run_standard_playbook(azure, envelope):
+    rules = azure.arm[(f"{SI_A}/automationRules", "2025-09-01")]["value"]
+    rules[0]["properties"]["actions"].append(
+        {"order": 2, "actionType": "RunPlaybook", "actionConfiguration": {"logicAppResourceId": STD}})
+    azure.arm[(STD, "2024-04-01")] = envelope
+
+
+def test_sentinel_playbooks_standard_workflow(azure, tmp_path):
+    _run_standard_playbook(azure, {"id": STD, "name": "la-std/contain", "properties": {
+        "flowState": "Enabled", "files": {"workflow.json": {"kind": "Stateful", "definition": {
+            "triggers": {"incident": {"type": "ApiConnectionWebhook", "inputs": {
+                "host": {"connection": {"referenceName": "azuresentinel"}}, "path": "/incident-creation"}}},
+            "actions": {"Disable_user": {"type": "ApiConnection", "inputs": {
+                "host": {"connection": {"referenceName": "azuread"}}, "method": "patch",
+                "path": "/v1.0/users/x", "body": {"accountEnabled": False}}}}}}}}})
+    code, ev = run("sentinel_playbooks", tmp_path)
+    std = next(p for p in ev["results"]["playbooks"] if p["id"] == STD)
+    assert code == 0 and std["plan"] == "standard" and std["definition_read"] and std["enabled"]
+    assert std["triggers"][0]["kind"] == "incident" and std["capabilities"]["account_containment"]
+    assert ("GET", STD, "2024-04-01") in azure.calls and ev["summary"]["standard_playbooks"] == 1
+
+
+def test_sentinel_playbooks_standard_workflow_without_definition(azure, tmp_path):
+    _run_standard_playbook(azure, {"id": STD, "name": "la-std/contain", "properties": {"flowState": "Enabled"}})
+    code, ev = run("sentinel_playbooks", tmp_path)
+    assert code == 0 and ev["summary"]["playbooks_without_definition"] == [STD]
+
+
+def test_throttling_is_retried_after_retry_after(azure, tmp_path):
+    body = azure.arm[(f"{SI_A}/automationRules", "2025-09-01")]
+    azure.arm[(f"{SI_A}/automationRules", "2025-09-01")] = [
+        Resp(429, {"error": {"code": "TooManyRequests", "message": "slow down"}}, {"Retry-After": "7"}),
+        Resp(503, {"error": {"code": "ServiceUnavailable", "message": "busy"}}),
+        body]
+    code, ev = run("sentinel_automation_rules", tmp_path)
+    assert code == 0 and ws_a(ev)["active_rules"] == 1
+    assert azure.sleeps == [7.0, 2.0]
+
+
+def test_query_throttling_is_retried(azure, tmp_path):
+    first = azure.queries[0]
+    azure.queries[0] = (first[0], [Resp(429, {"error": {"code": "Throttled", "message": "x"}}, {"Retry-After": "3"}), first[1]])
+    code, ev = run("sentinel_data_sources", tmp_path)
+    assert code == 0 and ws_a(ev)["sources_ingesting"] == 2 and azure.sleeps == [3.0]
+
+
+def test_persistent_server_errors_give_up_and_fail(azure, tmp_path):
+    azure.arm[(f"{SI_A}/automationRules", "2025-09-01")] = Resp(500, {"error": {"code": "InternalServerError", "message": "x"}})
+    code, ev = run("sentinel_automation_rules", tmp_path)
+    assert code == 1 and len(azure.sleeps) == azure_rest.MAX_RETRIES
+
+
+def test_dotenv_in_a_parent_folder_is_not_read(azure, tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text("SENTINEL_WORKSPACES=law-typo\n")
+    child = tmp_path / "client"
+    child.mkdir()
+    monkeypatch.chdir(child)
+    try:
+        code, ev = run("sentinel_automation_rules", tmp_path)
+    finally:
+        os.environ.pop("SENTINEL_WORKSPACES", None)
+    assert code == 0 and ev["results"]["workspace_filter"] is None
+
+
+def test_retry_wait_reads_the_service_hint():
+    wait = azure_rest.retry_wait
+    assert wait(Resp(429, {}, {"x-ms-retry-after-ms": "1500"}), 0) == 1.5
+    assert wait(Resp(429, {}, {"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}), 0) == 0.0
+    assert wait(Resp(429, {}, {"Retry-After": "9999"}), 0) == azure_rest.MAX_RETRY_WAIT
+    assert wait(Resp(503, {}), 3) == 8.0
