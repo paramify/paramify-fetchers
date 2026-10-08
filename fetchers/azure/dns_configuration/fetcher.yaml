@@ -40,9 +40,7 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-SVC-SIN   # DNSSEC signing of public zones (sc-20, sc-21)
-  - KSI-SVC-VCM   # DS records let resolvers validate the authenticity of zone data
-  - KSI-CNA-ULN   # private zones and the virtual networks they resolve for
+  - KSI-SVC-SIN   # DNSSEC signing of public zones (sc-20, sc-21, sc-22)
 
 evidence_set:
   reference_id: EVD-AZURE-DNS-CONFIG
@@ -55,3 +53,5 @@ evidence_set:
     Succeeded and it carries at least one signing key. azure-mgmt-privatedns PrivateDnsManagementClient
     private_zones.list() and virtual_network_links.list(resource_group, zone) for private zones.
     summary.dnssec_enabled_public_zones over summary.total_public_zones is the DNSSEC coverage.
+    provider_registration_status (Microsoft.Network) tells "zero zones because the provider is not
+    registered" apart from "registered but no zones".

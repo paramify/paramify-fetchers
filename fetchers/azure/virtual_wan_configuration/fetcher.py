@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import (  # noqa: E402
+    NOT_REGISTERED,
+    REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
     basename,
@@ -20,13 +22,20 @@ from azure_common import (  # noqa: E402
     credential,
     failure_reason,
     model_attr,
+    provider_registration_status,
     report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
 )
-from vpn_crypto import project_ipsec_policy, weak_algorithms  # noqa: E402
+from vpn_crypto import (  # noqa: E402
+    VIRTUAL_WAN_DEFAULT_WEAK,
+    effective_weak_algorithms,
+    policy_source,
+    project_ipsec_policy,
+    weak_algorithms,
+)
 
 logger = logging.getLogger("azure_virtual_wan_configuration")
 
@@ -93,7 +102,8 @@ def link_connection_record(link) -> dict:
         "ikev2": str(protocol or "").lower() == "ikev2",
         "ipsec_policies": policies,
         "explicit_ipsec_policy": bool(policies),
-        "weak_ipsec_algorithms": weak_algorithms(policies),
+        "ipsec_policy_source": policy_source(policies),
+        "weak_ipsec_algorithms": effective_weak_algorithms(policies, VIRTUAL_WAN_DEFAULT_WEAK),
         "provisioning_state": model_attr(link, "provisioning_state"),
     }
 
@@ -113,7 +123,6 @@ def project_vpn_gateway(gw) -> dict:
                     "id": model_attr(c, "id"),
                     "name": model_attr(c, "name"),
                     "remote_vpn_site": _ref(c, "remote_vpn_site"),
-                    "connection_status": model_attr(c, "connection_status"),
                     "enable_internet_security": bool(model_attr(c, "enable_internet_security") or False),
                     "link_connections": sorted(
                         (link_connection_record(link) for link in (model_attr(c, "vpn_link_connections") or [])),
@@ -206,6 +215,12 @@ def summarize(results: dict) -> dict:
         "ikev1_link_connections": len(links) - ikev2,
         "explicit_ipsec_policy_link_connections": sum(1 for link in links if link["explicit_ipsec_policy"]),
         "weak_ipsec_policy_link_connections": sum(1 for link in links if link["weak_ipsec_algorithms"]),
+        "azure_default_ipsec_policy_link_connections": sum(
+            1 for link in links if not link["explicit_ipsec_policy"]
+        ),
+        "connected_link_connections": sum(
+            1 for link in links if str(link.get("connection_status") or "").lower() == "connected"
+        ),
         "total_vpn_sites": len(results["vpn_sites"]),
         "total_p2s_vpn_gateways": len(results["p2s_vpn_gateways"]),
         "total_vpn_server_configurations": len(results["vpn_server_configurations"]),
@@ -260,7 +275,13 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     results = {key: [] for key, _, _ in COLLECTIONS}
+    registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
+        registration = provider_registration_status(
+            collector, subscription_id, cred, "Microsoft.Network"
+        )
+        if registration == NOT_REGISTERED:
+            logger.warning("Microsoft.Network is not registered on subscription %s", subscription_id)
         results = collect(subscription_id, cred, collector)
     elif not subscription_id:
         collector.record(
@@ -275,8 +296,8 @@ def main() -> int:
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results=results,
-        summary=summarize(results),
+        results={**results, "provider_registration_status": registration},
+        summary={**summarize(results), "provider_registration_status": registration},
     )
     filename = (
         f"azure_virtual_wan_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"

@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import (  # noqa: E402
+    NOT_REGISTERED,
+    REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
     basename,
@@ -20,13 +22,19 @@ from azure_common import (  # noqa: E402
     credential,
     failure_reason,
     model_attr,
+    provider_registration_status,
     report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
 )
-from vpn_crypto import project_ipsec_policy, weak_algorithms  # noqa: E402
+from vpn_crypto import (  # noqa: E402
+    VPN_GATEWAY_DEFAULT_WEAK,
+    effective_weak_algorithms,
+    policy_source,
+    project_ipsec_policy,
+)
 
 logger = logging.getLogger("azure_vpn_gateway_configuration")
 
@@ -55,6 +63,9 @@ def project_gateway(gw) -> dict:
         "p2s": None if p2s is None else {
             "vpn_client_protocols": model_attr(p2s, "vpn_client_protocols") or [],
             "vpn_authentication_types": model_attr(p2s, "vpn_authentication_types") or [],
+            "vpn_client_address_prefixes": model_attr(
+                model_attr(p2s, "vpn_client_address_pool"), "address_prefixes"
+            ) or [],
             "aad_tenant": model_attr(p2s, "aad_tenant"),
             "root_certificates": len(model_attr(p2s, "vpn_client_root_certificates") or []),
             "revoked_certificates": len(model_attr(p2s, "vpn_client_revoked_certificates") or []),
@@ -113,7 +124,8 @@ def gateway_record(gw: dict) -> dict:
         "tags": gw.get("tags") or {},
         "active_active": bool(gw.get("active_active") or False),
         "enable_bgp": bool(gw.get("enable_bgp") or False),
-        "p2s_enabled": bool(gw.get("p2s") and gw["p2s"]["vpn_client_protocols"]),
+        # The list call returns a placeholder P2S block on gateways that never set P2S up; a client pool is the tell.
+        "p2s_enabled": bool(gw.get("p2s") and gw["p2s"]["vpn_client_address_prefixes"]),
     }
 
 
@@ -132,7 +144,10 @@ def connection_record(conn: dict) -> dict:
         "is_ipsec_tunnel": is_ipsec,
         "ikev2": (str(conn.get("connection_protocol") or "").lower() == "ikev2") if is_ipsec else None,
         "explicit_ipsec_policy": bool(policies),
-        "weak_ipsec_algorithms": weak_algorithms(policies),
+        "ipsec_policy_source": policy_source(policies) if is_ipsec else None,
+        "weak_ipsec_algorithms": (
+            effective_weak_algorithms(policies, VPN_GATEWAY_DEFAULT_WEAK) if is_ipsec else []
+        ),
     }
 
 
@@ -150,6 +165,12 @@ def summarize(gateways: list[dict], connections: list[dict], local_gateways: lis
         "ikev1_connections": len(tunnels) - ikev2,
         "ikev2_percentage": coverage_percentage(ikev2, len(tunnels)),
         "explicit_ipsec_policy_connections": sum(1 for c in tunnels if c["explicit_ipsec_policy"]),
+        "azure_default_ipsec_policy_connections": sum(
+            1 for c in tunnels if not c["explicit_ipsec_policy"]
+        ),
+        "connected_connections": sum(
+            1 for c in connections if str(c.get("connection_status") or "").lower() == "connected"
+        ),
         "weak_ipsec_policy_connections": sum(1 for c in tunnels if c["weak_ipsec_algorithms"]),
         "total_local_network_gateways": len(local_gateways),
     }
@@ -198,6 +219,16 @@ def collect(subscription_id, cred, collector: Collector):
             default=[],
         )
 
+    for conn in connections:
+        # connection_status is only populated on a per-connection GET, never on list.
+        conn["connection_status"] = collector.guard(
+            f"network.virtual_network_gateway_connections.get({conn['resource_group']}/{conn['name']})",
+            lambda: model_attr(
+                net.virtual_network_gateway_connections.get(conn["resource_group"], conn["name"]),
+                "connection_status",
+            ),
+        )
+
     def by_id(records):
         return sorted(records, key=lambda r: r.get("id") or "")
 
@@ -220,7 +251,13 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     gateways, connections, local_gateways = [], [], []
+    registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
+        registration = provider_registration_status(
+            collector, subscription_id, cred, "Microsoft.Network"
+        )
+        if registration == NOT_REGISTERED:
+            logger.warning("Microsoft.Network is not registered on subscription %s", subscription_id)
         gateways, connections, local_gateways = collect(subscription_id, cred, collector)
     elif not subscription_id:
         collector.record(
@@ -239,8 +276,12 @@ def main() -> int:
             "virtual_network_gateways": gateways,
             "connections": connections,
             "local_network_gateways": local_gateways,
+            "provider_registration_status": registration,
         },
-        summary=summarize(gateways, connections, local_gateways),
+        summary={
+            **summarize(gateways, connections, local_gateways),
+            "provider_registration_status": registration,
+        },
     )
     filename = (
         f"azure_vpn_gateway_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"

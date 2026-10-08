@@ -35,3 +35,24 @@ def weak_algorithms(policies: List[Dict[str, Any]]) -> List[str]:
             if value.lower() in WEAK_ALGORITHMS:
                 found.add(f"{key}={value}")
     return sorted(found)
+
+
+# Weak proposals in Azure's default policy, which applies when a connection has no custom policy.
+# https://learn.microsoft.com/en-us/azure/vpn-gateway/vpn-gateway-about-compliance-crypto
+VPN_GATEWAY_DEFAULT_WEAK = ("dh_group=DHGroup2",)
+# https://learn.microsoft.com/en-us/azure/virtual-wan/virtual-wan-ipsec
+VIRTUAL_WAN_DEFAULT_WEAK = ("dh_group=DHGroup2", "ike_integrity=SHA1", "ipsec_integrity=SHA1", "pfs_group=None")
+
+POLICY_SOURCE_CUSTOM = "custom"
+POLICY_SOURCE_AZURE_DEFAULT = "azure_default"
+
+
+def policy_source(policies: List[Dict[str, Any]]) -> str:
+    return POLICY_SOURCE_CUSTOM if policies else POLICY_SOURCE_AZURE_DEFAULT
+
+
+def effective_weak_algorithms(policies: List[Dict[str, Any]], default_weak: tuple) -> List[str]:
+    """Weak algorithms in the custom policy, or in Azure's default when there is none."""
+    if policies:
+        return weak_algorithms(policies)
+    return sorted(f"{weak} ({POLICY_SOURCE_AZURE_DEFAULT})" for weak in default_weak)

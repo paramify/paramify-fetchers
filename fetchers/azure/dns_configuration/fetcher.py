@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import (  # noqa: E402
+    NOT_REGISTERED,
+    REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
     basename,
@@ -20,6 +22,7 @@ from azure_common import (  # noqa: E402
     credential,
     failure_reason,
     model_attr,
+    provider_registration_status,
     report_failure,
     resolve_subscription,
     resource_group_from_id,
@@ -223,7 +226,13 @@ def main() -> int:
 
     public: list[dict] = []
     private: list[dict] = []
+    registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
+        registration = provider_registration_status(
+            collector, subscription_id, cred, "Microsoft.Network"
+        )
+        if registration == NOT_REGISTERED:
+            logger.warning("Microsoft.Network is not registered on subscription %s", subscription_id)
         public = collect_public_zones(subscription_id, cred, collector)
         private = collect_private_zones(subscription_id, cred, collector)
     elif not subscription_id:
@@ -239,8 +248,12 @@ def main() -> int:
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={"public_zones": public, "private_zones": private},
-        summary=summarize(public, private),
+        results={
+            "public_zones": public,
+            "private_zones": private,
+            "provider_registration_status": registration,
+        },
+        summary={**summarize(public, private), "provider_registration_status": registration},
     )
     filename = f"azure_dns_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

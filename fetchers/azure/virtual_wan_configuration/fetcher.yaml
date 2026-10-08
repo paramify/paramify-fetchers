@@ -44,7 +44,6 @@ ksis:
   - KSI-CNA-ULN   # hub-and-spoke logical networking and transit controls
   - KSI-CNA-RNT   # secured hubs route traffic through a firewall
   - KSI-SVC-SIN   # VPN encryption and IKE/IPsec settings on site links
-  - KSI-IAM-AAM   # point-to-site authentication types
 
 evidence_set:
   reference_id: EVD-AZURE-VIRTUAL-WAN-CONFIG
@@ -56,5 +55,10 @@ evidence_set:
     read from each VPN gateway's own properties. Fields are projected from an allow-list, so the shared_key
     the API returns on every site-link connection, VPN site keys and RADIUS secrets never enter the evidence.
     A hub is secured when it has an Azure Firewall or a security partner provider. A site-link connection is
-    ikev2 when vpn_connection_protocol_type is IKEv2. summary.ikev2_link_connections over
-    summary.total_vpn_link_connections is the IKEv2 coverage; summary.vpn_encryption_disabled_wans must be 0.
+    ikev2 when vpn_connection_protocol_type is IKEv2. connection_status is reported per site link; Azure
+    leaves it empty at the connection level. With no custom policy on a site link, weak_ipsec_algorithms
+    lists the weak proposals of Virtual WAN's default policy (DH Group 2, SHA1, PFS None;
+    learn.microsoft.com/azure/virtual-wan/virtual-wan-ipsec), suffixed "(azure_default)", and
+    ipsec_policy_source is "azure_default". summary.ikev2_link_connections over
+    summary.total_vpn_link_connections is the IKEv2 coverage; summary.vpn_encryption_disabled_wans must be 0. provider_registration_status is for
+    Microsoft.Network.

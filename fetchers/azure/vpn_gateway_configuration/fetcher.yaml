@@ -43,7 +43,6 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 ksis:
   - KSI-SVC-SIN   # IPsec/IKE encryption of site-to-site and remote-access links
   - KSI-CNA-RNT   # which peers and address spaces the gateways accept traffic from
-  - KSI-IAM-AAM   # point-to-site authentication types (Entra ID, certificate, RADIUS)
   - KSI-CNA-OFA   # active-active gateways
 
 evidence_set:
@@ -52,10 +51,17 @@ evidence_set:
   instructions: >
     Script: fetcher.py. Azure SDK calls: azure-mgmt-resource resource_groups.list(), then per resource
     group azure-mgmt-network virtual_network_gateways.list(rg), virtual_network_gateway_connections.list(rg)
-    and local_network_gateways.list(rg) (these operations have no subscription-wide list). Fields are
+    and local_network_gateways.list(rg) (these operations have no subscription-wide list), then
+    virtual_network_gateway_connections.get(rg, name) per connection, because connection_status is only
+    populated on a GET. Fields are
     projected from an allow-list, so shared_key, authorization_key and radius_server_secret never enter
     the evidence. An IPsec or Vnet2Vnet connection is ikev2 when connection_protocol is IKEv2.
-    explicit_ipsec_policy is true when the connection carries a custom ipsecPolicies entry; when false
-    Azure's default IKE/IPsec suites apply. weak_ipsec_algorithms lists any DES, 3DES, MD5, SHA1, DH
-    group 1/2 or PFS None in a custom policy. summary.ikev2_connections over summary.ipsec_connections is
-    the IKEv2 coverage.
+    explicit_ipsec_policy is true when the connection carries a custom ipsecPolicies entry;
+    ipsec_policy_source is "custom" or "azure_default". weak_ipsec_algorithms lists any DES, 3DES, MD5,
+    SHA1, DH group 1/2 or PFS None in a custom policy; with no custom policy it lists the weak proposals
+    of Azure's default policy, whose IKEv2 main mode uses only DH Group 2
+    (learn.microsoft.com/azure/vpn-gateway/vpn-gateway-about-compliance-crypto), suffixed
+    "(azure_default)". p2s_enabled is true only when the gateway has a client address pool: the list call
+    returns a placeholder point-to-site block on gateways that never configured it.
+    summary.ikev2_connections over summary.ipsec_connections is the IKEv2 coverage.
+    provider_registration_status is for Microsoft.Network.
