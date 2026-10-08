@@ -24,6 +24,34 @@ schemas and the `paramify` CLI — not the internal code.
   incomplete: a failed run, a contract break, withheld records, or no records
   at all. The TUI lists inventories in their own section. Start from
   `fetchers/_template_inventory/`; see `docs/inventory_fetchers.md`.
+
+- **Four Azure fetchers for the network edge and cache tier**, read-only on
+  the built-in Reader role. `azure_managed_redis_configuration` reports each
+  Azure Managed Redis cluster's minimum TLS version, public network access and
+  private endpoints, and per database the client protocol (Encrypted or
+  Plaintext) and whether access-key authentication is disabled. Classic Azure
+  Cache for Redis is not read. `azure_dns_configuration` reports each public
+  zone's DNSSEC state and signing keys, and each private zone with its virtual
+  network links. The DNS SDK has no DNSSEC operation, so it is read with a
+  direct ARM call, and a 404 "DNSSEC is not enabled" counts as unsigned rather
+  than as a failed collection. `azure_vpn_gateway_configuration` reports VPN
+  gateways, the IKE version, status and IPsec policy of each connection, and
+  point-to-site protocols and sign-in types. A connection with no custom policy
+  is reported against Azure's default, whose IKEv2 main mode uses DH Group 2, so
+  the default does not read as free of weak algorithms. Point-to-site counts only
+  when a client address pool exists, because the list call returns a placeholder
+  on gateways that never set it up.
+  `azure_virtual_wan_configuration` reports Virtual WANs, whether hubs are
+  secured by a firewall, and the IKE version on each site link, along with
+  vWAN VPN sites, point-to-site gateways and server configurations. The DNS,
+  VPN and Virtual WAN fetchers record whether Microsoft.Network is registered,
+  so zero resources can be told apart from a provider that is off. A read that
+  fails (a Redis cluster's databases, a zone's DNSSEC config) or an IKE protocol
+  Azure leaves empty is recorded as null and counted as unknown, never as
+  compliant, unsigned or IKEv1. Both VPN
+  fetchers keep an allow-list of fields, because Azure returns site-link
+  pre-shared keys in plain text to Reader; no key reaches the evidence.
+  Verified against a live subscription.
 - **A Wiz category with twelve fetchers**, for Wiz commercial and Wiz for
   Government, sharing one GraphQL client and one service account. Eleven are
   evidence fetchers: `wiz_scan_coverage`, `wiz_posture_issues`,

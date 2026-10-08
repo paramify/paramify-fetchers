@@ -1,0 +1,65 @@
+name: azure_managed_redis_configuration
+version: 0.1.0
+description: >
+  For each Azure Managed Redis (Microsoft.Cache/redisEnterprise) cluster in the
+  subscription, and each database on it, reports the transport and access posture:
+  the cluster's minimum TLS version, public network access and private endpoint
+  connections, customer-managed-key encryption, and per database the client protocol
+  (Encrypted = TLS only, Plaintext = non-TLS accepted), whether access-key
+  authentication is disabled so only Entra ID can be used, persistence and
+  geo-replication. Classic Azure Cache for Redis (Microsoft.Cache/redis) is not read.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_managed_redis_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # minimum TLS version and encrypted client protocol; CMK encryption
+  - KSI-IAM-SNU   # access-key authentication disabled so only Entra ID can be used
+  - KSI-CNA-RNT   # public network access and private endpoint connections
+  - KSI-CNA-OFA   # high availability, zones and geo-replication
+
+evidence_set:
+  reference_id: EVD-AZURE-MANAGED-REDIS-CONFIG
+  name: Azure Managed Redis Configuration
+  instructions: >
+    Script: fetcher.py. Azure SDK calls (azure-mgmt-redisenterprise
+    RedisEnterpriseManagementClient): redis_enterprise.list() for every cluster in the
+    subscription, then databases.list_by_cluster(resource_group, cluster) for each.
+    Access keys are never listed. minimum_tls_version comes from the cluster;
+    client_protocol and access_keys_authentication from each database.
+    tls_only is true when the cluster floor is 1.2 or higher AND the cluster has at least
+    one database AND every database's client_protocol is Encrypted; it is null (unknown)
+    when the database list could not be read (databases_read false). entra_only is true when every database has
+    access_keys_authentication Disabled. private_only is true when public network
+    access is Disabled and at least one private endpoint connection is Approved.
+    public_network_access is null on clusters created before Azure returned the property;
+    null is counted as not disabled and tallied in summary.public_network_access_unset_clusters.
+    summary.total_clusters and summary.total_databases are the counts collected.

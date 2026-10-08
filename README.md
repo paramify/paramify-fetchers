@@ -43,7 +43,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | Category | Fetchers | What it collects |
 |---|---:|---|
 | **AWS** | 80 | Encryption at rest and in transit, IAM and Organizations guardrails, threat detection and vulnerability scanning, logging and config drift, network segmentation, WAF and DDoS protection, backup and high availability, patch compliance, key and secret rotation, and CI/CD pipeline config |
-| **Azure** | 28 | Storage/disk/SQL encryption and CMK use, Entra identity + Conditional Access, RBAC assignments and custom roles, Azure Policy assignments, network security groups, Key Vault config and key rotation, Defender plans and per-resource assessments, VM hardening, the container and PaaS surface (AKS, Container Registry, App Service, Functions, Databricks), diagnostic settings and activity-log alerts, backup, and the managed databases |
+| **Azure** | 39 | Storage/disk/SQL encryption and CMK use, Entra identity + Conditional Access, RBAC assignments and custom roles, Azure Policy assignments, network security groups, Key Vault config and key rotation, Defender plans and per-resource assessments, VM hardening, the container and PaaS surface (AKS, Container Registry, App Service, Functions, Databricks), diagnostic settings and activity-log alerts, backup, the managed databases, Managed Redis TLS and access, DNS zones and DNSSEC, and VPN Gateway / Virtual WAN IPsec and hub security |
 | **GCP** | 19 | Disk/bucket/Cloud SQL/BigQuery/Secret Manager encryption and CMEK use, IAM policy bindings, custom roles and service-account keys, KMS key rotation, GKE cluster and Compute Engine hardening, Cloud Logging sinks, Cloud SQL backups and network exposure, VPC/firewall/DNS segmentation, load-balancer TLS, and API keys |
 | **Datadog** | 13 | Cloud SIEM detection rules, signals and operational config, monitors, log pipelines/indexes/archives, host & container inventory, agent checks, APM services, and incidents with timelines |
 | **Okta** | 8 | Phishing-resistant MFA and passwordless authentication, authenticators, least privilege, just-in-time access, non-user account authentication, suspicious activity management, and account management |
@@ -104,7 +104,7 @@ through the official SDKs rather than a CLI, so each has its own extra and
 neither needs a cloud CLI at runtime.
 
 ```bash
-pip install -e '.[azure]'    # 23 packages; no `az` CLI at runtime
+pip install -e '.[azure]'    # 29 packages; no `az` CLI at runtime
 pip install -e '.[gcp]'      # 12 packages; no `gcloud` at runtime
 ```
 
