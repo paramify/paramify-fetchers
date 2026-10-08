@@ -288,6 +288,12 @@ def test_parse_time_takes_seven_fractional_digits():
     assert azure_rest.parse_time("2026-10-01T12:00:00.1234567Z") == datetime(2026, 10, 1, 12, 0, 0, 123456, tzinfo=timezone.utc)
 
 
+def test_parse_time_short_fractions_and_offsets():
+    # Python 3.10's fromisoformat takes only 3 or 6 fractional digits.
+    assert azure_rest.parse_time("2026-10-01T12:00:00.12Z") == datetime(2026, 10, 1, 12, 0, 0, 120000, tzinfo=timezone.utc)
+    assert azure_rest.parse_time("2026-10-01T17:30:00.5+05:30") == datetime(2026, 10, 1, 12, 0, 0, 500000, tzinfo=timezone.utc)
+
+
 # --- each fetcher, end to end ---------------------------------------------------
 
 def test_data_sources(azure, tmp_path):

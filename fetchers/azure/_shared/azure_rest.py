@@ -279,11 +279,11 @@ def parse_time(value: Any) -> Optional[datetime]:
     if not value:
         return None
     text = str(value).replace("Z", "+00:00")
-    # ARM and KQL emit up to 7 fractional digits; fromisoformat takes at most 6.
+    # ARM and KQL emit 1-7 fractional digits; Python 3.10's fromisoformat takes exactly 3 or 6.
     if "." in text:
         head, _, tail = text.partition(".")
-        digits = "".join(c for c in tail if c.isdigit())
-        text = f"{head}.{digits[:6]}{tail[len(digits):]}"
+        frac = tail[: len(tail) - len(tail.lstrip("0123456789"))]
+        text = f"{head}.{frac[:6].ljust(6, '0')}{tail[len(frac):]}"
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:
