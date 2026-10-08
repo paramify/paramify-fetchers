@@ -17,11 +17,16 @@ schemas and the `paramify` CLI — not the internal code.
   Per cache it reports the minimum TLS version and whether the non-TLS port is
   enabled, whether authentication is required at all, whether access keys are
   disabled so only Entra ID can be used, public network access, private
-  endpoints, VNet injection and firewall rules. `list_keys` is never called and
+  endpoints, VNet injection and firewall rules (flagging any that allow every
+  address). For an assessor it also reports who holds Entra data-access
+  policies, whether connection and Entra sign-in audit logs reach a destination
+  (through a new shared `_shared/diagnostics.py`), the maintenance window, and
+  replication, zones, geo-replication and persistence, and its summary names the
+  caches behind each failed expectation. `list_keys` is never called and
   the projection is an allow-list, so access keys and the storage connection
   strings in the cache's Redis configuration never reach the evidence. A cache
   without `minimumTlsVersion` accepts TLS 1.0 and is not counted as TLS-only, and
-  a failed firewall-rule read is recorded as unknown. Adds `azure-mgmt-redis`.
+  any per-cache read that fails is recorded as unknown. Adds `azure-mgmt-redis`.
   Verified against a live subscription.
 
 - **A third fetcher kind, `kind: inventory`**, for fetchers that list every

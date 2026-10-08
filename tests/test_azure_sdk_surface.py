@@ -217,6 +217,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "diagnostic_settings",
         ["list"],
         "azure/diagnostic_settings, azure/container_registry_configuration, "
+        "azure/redis_cache_configuration, "
         "azure/app_service_configuration, azure/key_vault_configuration",
     ),
     (
@@ -262,6 +263,34 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "firewall_rules",
         ["list"],
         "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "access_policy",
+        ["list"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "access_policy_assignment",
+        ["list"],
+        "azure/redis_cache_configuration — who holds Entra data access",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "patch_schedules",
+        ["list_by_redis_resource"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "linked_server",
+        ["list"],
+        "azure/redis_cache_configuration — geo-replication",
     ),
     # --- Managed Redis, DNS, VPN Gateway, Virtual WAN ------------------------
     (
@@ -877,6 +906,18 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["aad_enabled", "authnotrequired"],
         "azure/redis_cache_configuration — a renamed authnotrequired reads every cache "
         "as requiring auth",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "RedisCacheAccessPolicyAssignment",
+        ["access_policy_name", "object_id", "object_id_alias"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "ScheduleEntry",
+        ["day_of_week", "start_hour_utc", "maintenance_window"],
+        "azure/redis_cache_configuration",
     ),
     (
         "azure.mgmt.redis.models",

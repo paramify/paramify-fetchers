@@ -5,8 +5,11 @@ description: >
   reports the transport and access posture: the minimum TLS version and whether the
   non-TLS port (6379) is enabled, whether authentication is required at all, whether
   access-key authentication is disabled so only Microsoft Entra ID can be used, public
-  network access, private endpoints, VNet injection and firewall rules, plus the SKU,
-  Redis version, zones and replicas. Azure Managed Redis (redisEnterprise) is covered by
+  network access, private endpoints, VNet injection and firewall rules (flagging any that
+  allow every address), who holds Entra data-access policies, whether connection and Entra
+  sign-in audit logs are exported, the maintenance (patch) window, and resilience: SKU,
+  replication, zones, geo-replication and persistence. A summary.exceptions block names the
+  caches behind each failed expectation so a reviewer can sample them. Azure Managed Redis (redisEnterprise) is covered by
   azure_managed_redis_configuration. Access keys and storage connection strings are never
   requested or recorded.
 category: azure
@@ -45,23 +48,36 @@ ksis:
   - KSI-SVC-SIN   # minimum TLS version and the non-TLS port
   - KSI-IAM-SNU   # authentication required; access keys disabled so only Entra ID can be used
   - KSI-CNA-RNT   # public network access, private endpoints, VNet injection, firewall rules
-  - KSI-CNA-OFA   # zones and replicas
+  - KSI-CNA-OFA   # replication, zones, geo-replication
+  - KSI-MLA-LET   # connection and Entra sign-in audit logs exported per cache
 
 evidence_set:
   reference_id: EVD-AZURE-REDIS-CACHE-CONFIG
   name: Azure Cache for Redis Configuration
   instructions: >
     Script: fetcher.py. Azure SDK calls (azure-mgmt-redis RedisManagementClient):
-    redis.list_by_subscription() for every cache, then firewall_rules.list(resource_group,
-    cache) for each. list_keys is never called, and the projection is an allow-list, so the
+    redis.list_by_subscription() for every cache, then per cache firewall_rules.list,
+    access_policy.list, access_policy_assignment.list, patch_schedules.list_by_redis_resource and
+    linked_server.list (resource_group, cache), plus azure-mgmt-monitor
+    diagnostic_settings.list(cache id). list_keys is never called, and the projection is an allow-list, so the
     access_keys and the *_storage_connection_string fields of redis_configuration never enter
     the evidence. minimum_tls_version absent means the cache accepts TLS 1.0, so it is not
     recommended. enable_non_ssl_port absent is Azure's default, false. tls_only is true when the
     minimum TLS version is 1.2 or higher AND the non-TLS port is disabled. auth_required is false
     only when redis_configuration.authnotrequired is "true". entra_only is true when
-    disable_access_key_authentication is true. private_only is true when public network access is
+    disable_access_key_authentication is true; auth_methods lists access_key_auth and/or entra_id,
+    or none when authnotrequired is "true". access_policy_assignments are the Entra principals
+    (object_id, alias) granted a data-access policy; they only take effect when entra_auth_enabled.
+    audit_logging_enabled is true when a diagnostic setting with a destination exports
+    ConnectedClientList or MSEntraAuthenticationAuditLog (directly or via the audit/allLogs
+    group); audit_log_destinations names each sink. maintenance_window_configured is false when
+    the cache has no patch schedule (Azure answers 404, and picks the time itself). replicated is
+    false on the Basic SKU, a single node with no SLA; zone_redundant needs more than one zone;
+    geo_replicated is true when the cache has linked servers. firewall_rules[].allows_all_ips
+    marks a 0.0.0.0-255.255.255.255 rule. private_only is true when public network access is
     Disabled and the cache has an Approved private endpoint or is VNet-injected (subnet_id).
     public_network_access is null on caches where Azure does not return it; null is counted as not
-    disabled and tallied in summary.public_network_access_unset_caches. A firewall-rule read that
-    fails leaves firewall_rules null (firewall_rules_read false) and fails the run.
+    disabled and tallied in summary.public_network_access_unset_caches. Any per-cache read that fails
+    leaves its field null (unknown, never compliant), lists the cache under
+    summary.exceptions.unknown_state, and fails the run.
     summary.tls_only_caches over summary.total_caches is the TLS-only coverage.
