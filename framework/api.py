@@ -143,12 +143,23 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
         "secrets": [_secret_descriptor(s) for s in effective_secrets(f, platform_spec)],
         "target_schema": [_target_descriptor(t) for t in f.target_schema.values()],
     }
+    # Where the output goes, so a front-end can say so before anything runs.
+    # Evidence names its destination in fetcher.yaml; an issue report names only
+    # the kind of assessment it fits, and the manifest picks which one.
+    if f.evidence_set is not None:
+        d["evidence_set"] = {
+            "reference_id": f.evidence_set.reference_id,
+            "name": f.evidence_set.name,
+            "frequency": f.evidence_set.frequency,
+        }
     if f.issue_report is not None:
         # What kind of assessment this report can go to, so a front-end can
-        # filter the assessment picker without re-reading fetcher.yaml.
+        # filter the assessment picker without re-reading fetcher.yaml. The
+        # format is the tool's own (csv, nessus, …), never one we convert to.
         d["issue_report"] = {
             "assessment_type": f.issue_report.assessment_type,
             "title": f.issue_report.title,
+            "format": f.output_type,
         }
     return d
 
@@ -1013,6 +1024,14 @@ def _manifest_id(path, root: Path) -> str:
         return str(p)
 
 
+def _last_line(text: Optional[str]) -> str:
+    """Last non-blank line of `text`, or ''."""
+    for line in reversed((text or "").splitlines()):
+        if line.strip():
+            return line.strip()
+    return ""
+
+
 def run(
     manifest: dict,
     root: Path,
@@ -1131,14 +1150,24 @@ def run(
                 record_issue_reports(r, fetcher, run_id, run_dir, assessment)
             if r.exit_code != 0:
                 overall_ok = False
-            emit({
+            result_event = {
                 "event": "fetcher_result",
                 "fetcher": entry.use,
                 "exit_code": r.exit_code,
                 "duration_sec": r.duration_sec,
                 "target": r.target,
                 "outputs": r.outputs,
-            })
+            }
+            if r.exit_code != 0:
+                # Why it failed, for a front-end to show next to the status: what
+                # the fetcher reported via $FETCHER_STATUS_FILE, else the last
+                # line it wrote to stderr (the same precedence the sidecar uses).
+                reason = r.error or _last_line(r.stderr)
+                if reason:
+                    result_event["error"] = reason
+                if r.error_code:
+                    result_event["error_code"] = r.error_code
+            emit(result_event)
         all_results.extend(results)
 
     completed_at = _iso_now()

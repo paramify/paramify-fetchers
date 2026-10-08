@@ -231,6 +231,16 @@ class ParamifyClient:
         _raise_for(r, "close", assessment_id, (200, 202))
         return _json(r)
 
+    def list_cycles(self, assessment_id: str) -> List[Dict]:
+        """The assessment's cycles (id, name, startDate, ...). Read-only."""
+        r = self.session.get(
+            f"{self.base_url}/assessment/{assessment_id}/cycle", timeout=self.timeout
+        )
+        _raise_for(r, "list cycles", assessment_id, (200,))
+        body = _json(r)
+        cycles = body.get("cycles") if isinstance(body, dict) else None
+        return cycles if isinstance(cycles, list) else []
+
     def get_job(self, job_id: str) -> Dict:
         r = self.session.get(f"{self.base_url}/pipeline-jobs/{job_id}", timeout=self.timeout)
         _raise_for(r, f"read job {job_id}", None, (200,))
@@ -305,9 +315,13 @@ def _raise_for(resp, what: str, assessment_id: Optional[str], ok: Tuple[int, ...
             f"Paramify. {msg}"
         )
     if code == 409 and assessment_id:
+        # 409 covers more than "no cycle in progress": work aimed at a cycle other
+        # than the in-progress one is refused the same way. Paramify's own message
+        # says which, so it leads.
         raise NoCycleInProgress(
-            f"{what}: assessment {assessment_id} has no cycle in progress (HTTP 409). "
-            f"{msg}"
+            f"{what} refused for assessment {assessment_id} (HTTP 409): {msg}. "
+            f"Work can only be queued on the in-progress cycle (the oldest open one), "
+            f"or there is no cycle in progress."
         )
     raise ParamifyError(f"{what} failed (HTTP {code}): {msg}")
 
@@ -347,6 +361,32 @@ def job_summary(job: Dict) -> Dict:
         "blocked_by": job.get("blockedByJobId"),
         "cycle_id": job.get("cycleId"),
     }
+
+
+def cycle_placement(client: "ParamifyClient", aid: str, cycle_id: Optional[str]) -> Dict:
+    """Name the cycle a job landed on, and how many cycles start after it.
+
+    Uploads land on the pipeline's oldest open cycle, not the newest, so an
+    assessment with old cycles left open takes every new scan into one of them,
+    and the issues never show on the cycle people look at. Best effort: the
+    lookup failing never fails the upload.
+    """
+    if not cycle_id:
+        return {}
+    try:
+        cycles = client.list_cycles(aid)
+    except Exception as e:  # noqa: BLE001 - informational only
+        logger.debug("assessment %s: could not list cycles: %s", aid, e)
+        return {}
+    mine = next((c for c in cycles if c.get("id") == cycle_id), None)
+    if mine is None:
+        return {}
+    def order(c: Dict) -> Tuple[str, str]:
+        # Several cycles can share a start date; creation time breaks the tie.
+        return (c.get("startDate") or "", c.get("createdAt") or "")
+
+    newer = [c for c in cycles if order(c) > order(mine)]
+    return {"cycle_name": mine.get("name"), "newer_cycles": len(newer)}
 
 
 def is_blocked(job: Dict) -> bool:
@@ -422,6 +462,35 @@ def read_sidecar(run_dir: Path) -> Optional[dict]:
     if not isinstance(data, dict) or not isinstance(data.get("reports"), list):
         raise ValueError(f"{path} is not an issue-report index (no reports list)")
     return data
+
+
+def safe_report_path(run_dir: Path, name: str) -> Tuple[Optional[Path], Optional[str]]:
+    """(path, None) for a report the uploader may read, else (None, why not).
+
+    The index names each file, and the index is just a JSON file on disk: an
+    edited or hostile one could name `../../.env`, an absolute path, or a symlink
+    planted in issue-reports/ and have its target posted to Paramify as a "scan
+    report". So the resolved path must sit inside <run>/issue-reports/ and the
+    file itself must not be a symlink. Nothing is opened until this passes.
+    """
+    base = (Path(run_dir) / ISSUE_REPORTS_DIR).resolve()
+    candidate = base / name
+    try:
+        if candidate.is_symlink():
+            return None, "refusing to read a symlink (reports must be regular files)"
+        resolved = candidate.resolve()
+    except (OSError, RuntimeError, ValueError) as e:
+        return None, f"cannot resolve the report path ({e})"
+    if base not in resolved.parents:
+        return None, f"path resolves outside {ISSUE_REPORTS_DIR}/ (refusing to read it)"
+    return resolved, None
+
+
+def _read_report_bytes(path: Path) -> bytes:
+    """Read a vetted report without following a symlink swapped in since the check."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as fh:
+        return fh.read()
 
 
 def _log_key(record: dict, assessment_id: str) -> str:
@@ -553,6 +622,9 @@ def plan_assessments(index: dict, overrides: Optional[Dict] = None) -> Dict[str,
         return groups.setdefault(aid, {
             "records": [], "invocations": [] if "invocations" in index else None,
             "policies": set(), "name": None,
+            # Why the run's index cannot prove the run was complete (see
+            # framework/issue_reports.CANNOT_CLOSE_FIELD), or None.
+            "cannot_close": index.get("cannot_close"),
         })
 
     for record in index.get("reports") or []:
@@ -586,6 +658,8 @@ def close_decision(
     policies = group["policies"]
     if policies != {CLOSE_AFTER_RUN}:
         return PROCESS, None if policies == {"never"} else "close_cycle is not after_run for every fetcher"
+    if group.get("cannot_close"):
+        return PROCESS, f"close skipped: {group['cannot_close']}"
     invocations = group["invocations"]
     if invocations is None:
         return PROCESS, (
@@ -846,7 +920,13 @@ def upload_run(
                     })
                     continue
 
-                path = run_dir / ISSUE_REPORTS_DIR / name
+                path, unsafe = safe_report_path(run_dir, name)
+                if path is None:
+                    logger.error("%s: %s; skipped, not read", name, unsafe)
+                    errors += 1
+                    files_ok = False
+                    add_result({"file": name, "outcome": "error", "reason": unsafe})
+                    continue
                 if not path.is_file():
                     logger.error("%s: listed in the index but missing from disk", name)
                     errors += 1
@@ -896,7 +976,7 @@ def upload_run(
                 # report. Never json.load/dump a .json report here: re-serializing
                 # would reorder keys and rewrite numbers, and the file is supposed
                 # to be the vendor's own artifact.
-                content = path.read_bytes()
+                content = _read_report_bytes(path)
                 artifact = client.intake(aid, name, content, content_type, meta)
                 artifact_id = artifact.get("id")
                 uploaded += 1
@@ -1020,6 +1100,7 @@ def upload_run(
             "operation": operation,
             "artifact_ids": pending,
             "queued_at": _utc_now(),
+            **cycle_placement(client, aid, job.get("cycleId")),
         }
         assessment_jobs.append(job_state)
         save_log()
@@ -1030,7 +1111,10 @@ def upload_run(
         )
         _emit(on_event, {"event": "job_queued", "assessment_id": aid,
                          "job_id": job_state["job_id"], "operation": operation,
-                         "artifacts": len(pending), "close_skipped": close_skipped})
+                         "artifacts": len(pending), "close_skipped": close_skipped,
+                         "cycle_id": job_state.get("cycle_id"),
+                         "cycle_name": job_state.get("cycle_name"),
+                         "newer_cycles": job_state.get("newer_cycles", 0)})
 
         if wait:
             job_state = _wait_and_record(client, aid, job_state, wait_timeout, on_event)

@@ -12,6 +12,69 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **A Wiz category with twelve fetchers**, for Wiz commercial and Wiz for
+  Government, sharing one GraphQL client and one service account. Eleven are
+  evidence fetchers: `wiz_scan_coverage`, `wiz_posture_issues`,
+  `wiz_infrastructure_vulnerabilities`, `wiz_container_vulnerabilities`,
+  `wiz_cloud_configuration_posture`, `wiz_host_configuration_posture`,
+  `wiz_threat_detections`, `wiz_file_integrity_monitoring`,
+  `wiz_attack_surface_findings`, `wiz_code_findings` and
+  `wiz_tenant_security_settings`. The last five read Wiz modules a tenant may
+  not have; each checks the tenant's schema at run time, selects only the
+  fields that exist, and lists the missing ones in the evidence. A missing
+  scope or licence fails the collection rather than reading as no findings.
+  The twelfth, `wiz_stig_compliance_report`, is an issue report: one CSV row per
+  STIG control, rule and resource for one enabled Wiz framework, for a
+  CONFIGURATION assessment's pipeline. Wiz's own compliance CSV exists only as
+  a saved report, and creating or rerunning one is a write, so the rows are
+  built from GraphQL queries instead, in a fixed column set and sorted order so
+  the same Wiz state gives the same file. Every result is reported, not just
+  PASS and FAIL, so a check that moves to ERROR is not read as fixed. Any Wiz
+  error, Wiz's 10,000-row cap, an empty result, a disabled framework, or a
+  finding Wiz returns without its control mapping fails the run with no file
+  written.
+  None of the twelve writes to Wiz: the client refuses to send a mutation.
+- **Two more Wiz issue reports, `wiz_issues_report` and
+  `wiz_vulnerability_findings`**, on the same read-only client and config
+  names. `wiz_issues_report` sends Wiz's own Issues CSV to a CONFIGURATION
+  assessment. The report is created once in Wiz and scheduled there; the
+  fetcher finds it by `report_id` or exact `report_name`, and downloads its
+  last run only if that run completed within `max_report_age_hours` (default
+  26). It never creates, edits or reruns a report, so the service account
+  needs `read:reports` and nothing that writes. `wiz_vulnerability_findings`
+  pages through every vulnerability finding and writes the legacy Paramify
+  column layout for a VULNERABILITY assessment, with an optional `project_id`
+  filter. Both export everything on every run (no delta mode, since a delta
+  processed with a cycle close resolves every issue it leaves out), and any
+  read failure, an empty export (unless `allow_empty`), or an interrupted
+  download fails the run with no file written. See
+  `docs/wiz_pipeline_fetchers.md`.
+- **`paramify issues upload` names the cycle an upload landed on**, and warns
+  when newer cycles exist. Uploads land on the assessment's oldest open cycle,
+  so an old cycle left open takes every new scan while the newer cycles show
+  nothing. The TUI's Paramify tab shows the same warning. An HTTP 409 now
+  quotes Paramify's reason instead of assuming no cycle is in progress, since
+  work aimed at a cycle other than the in-progress one is refused the same way.
+- **The issues uploader only reads reports inside the run's `issue-reports/`.**
+  A report path in `_issue_reports.json` that resolves outside it, or a report
+  that is a symlink, is refused and nothing is read, so an edited index cannot
+  send another file to Paramify as a scan report.
+- **`_issue_reports.json` is written atomically, and a corrupt one never closes
+  a cycle.** An index that cannot be read is kept beside the new one as
+  `_issue_reports.json.corrupt`, and the new index is marked `cannot_close`:
+  the uploader processes that run's reports but does not close the cycle,
+  because the index can no longer show that every target succeeded. The TUI's
+  Run tab shows why a fetcher failed next to its status, and focus returns to
+  the Paramify tab when a send finishes, so its keys work without pressing 5
+  again.
+- **Evidence sets carry a collection frequency.** `evidence_set.frequency` in
+  `fetcher.yaml` takes Paramify's evidence frequency values (`DAILY`,
+  `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `QUARTERLY`, `BIANNUAL`,
+  `ANNUAL`, `NOT_SET`) and defaults to `THREE_DAY`, so every fetcher has one
+  without a change to its file. The runner copies it into the envelope's
+  `metadata.evidence_set`, and both uploaders send it when they create a set.
+  Sets that already exist keep the frequency they have. The uploader config can
+  override it per fetcher, like `name` and `instructions`.
 - **`docs/pipelines.md`: sending scan reports from the TUI**, step by step
   with three recordings. It covers a manifest for the scanners, pointing each
   fetcher at an assessment and choosing its close policy, running and sending
@@ -129,6 +192,15 @@ schemas and the `paramify` CLI — not the internal code.
   service applied is recorded, and `resources_evaluated` tells "nothing
   non-compliant" from "nothing evaluated".
 
+- **A Jira category, and its first fetcher: `jira_site_inventory`.** One
+  evidence set covering a Jira Cloud site end to end: deployment info, every
+  project the account can browse (type, lead, issue types, issue count), the
+  issue types, priorities and statuses in use, Jira Service Management service
+  desks where the site has JSM, and every issue updated in the lookback window
+  (90 days, or an explicit `jql`) with rollups by project, type, status and
+  priority, time to resolution, and separate change and incident counts.
+  Account email + API token, declared once on the category; no Jira admin
+  needed. See [`fetchers/jira/README.md`](fetchers/jira/README.md).
 - **A fanout target editor in the TUI** (`t` on the Manifest tab). A fanout
   fetcher runs once per target, so its targets are the run plan — but the page
   showed only how many there were, and there was no way to change one: fixing a
@@ -215,6 +287,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **The TUI keeps evidence and scan reports apart.** The catalog and the
+  add-fetcher picker group by kind first (**Evidence**, **Scan reports**) and
+  platform second, so a platform that ships both, like Wiz, no longer lists
+  them in one folder. Highlighting a section heading explains what that kind
+  is and how it is sent. A fetcher's contract states its kind and where its
+  output goes: the evidence set, or for a scan report the type of assessment it
+  needs, its format, and how it is sent. The manifest table replaces the `mode`
+  column (the `targets` column already shows `—` for a fetcher that runs once)
+  with `kind`, and adds a last `sends to` column: the evidence set, or the
+  assessment and close policy, or `no assessment — press A`. The manifest's
+  detail pane shows the same. The TUI now says "scan report" wherever it said
+  "issue report"; `kind: issue_report` in `fetcher.yaml` is unchanged. The
+  catalog descriptor (`paramify catalog --json`) gains an `evidence_set` block
+  and `issue_report.format`.
 - **TUI fixes found while recording that walkthrough.** On a manifest with no
   evidence and no scripts, nothing on the Paramify tab held focus, so its keys
   did nothing. Enter in a picker's filter box now takes the highlighted option.

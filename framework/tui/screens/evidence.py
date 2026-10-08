@@ -164,7 +164,7 @@ class EvidencePage(Vertical):
             try:
                 text = api.preview_issue_report(p)
             except Exception as exc:
-                self.notify(f"Cannot read issue report: {exc}", severity="error", timeout=8)
+                self.notify(f"Cannot read scan report: {exc}", severity="error", timeout=8)
                 return
             self.app.push_screen(PreviewModal(text, title=p.name))
             return

@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 
 from framework import yaml_io
 from framework.contract import (
+    DEFAULT_EVIDENCE_FREQUENCY,
     ConfigField,
     EvidenceSet,
     Fetcher,
@@ -121,6 +122,7 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
             name=raw_es["name"],
             instructions=raw_es.get("instructions"),
             description=raw_es.get("description") or data["description"],
+            frequency=raw_es.get("frequency", DEFAULT_EVIDENCE_FREQUENCY),
         )
 
     issue_report = None
