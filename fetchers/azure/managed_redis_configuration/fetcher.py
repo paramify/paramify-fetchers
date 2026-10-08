@@ -108,8 +108,10 @@ def database_record(db: dict) -> dict:
     }
 
 
-def cluster_record(cluster: dict, databases: list[dict]) -> dict:
-    """Evidence record for one cluster, its databases nested beneath it."""
+def cluster_record(cluster: dict, databases) -> dict:
+    """`databases` is None when the database list could not be read; tls_only/entra_only are then None."""
+    databases_read = databases is not None
+    databases = databases or []
     resource_id = cluster.get("id")
     tls = cluster.get("minimum_tls_version")
     pna = cluster.get("public_network_access")
@@ -127,10 +129,14 @@ def cluster_record(cluster: dict, databases: list[dict]) -> dict:
         "public_network_access_disabled": public_disabled,
         "approved_private_endpoints": len(approved),
         "private_only": public_disabled and bool(approved),
+        "databases_read": databases_read,
         "databases": databases,
-        "tls_only": tls_ok and all(d["client_protocol_encrypted"] for d in databases),
-        "entra_only": bool(databases)
-        and all(d["access_keys_authentication_disabled"] for d in databases),
+        "tls_only": (
+            tls_ok and bool(databases) and all(d["client_protocol_encrypted"] for d in databases)
+        ) if databases_read else None,
+        "entra_only": (
+            bool(databases) and all(d["access_keys_authentication_disabled"] for d in databases)
+        ) if databases_read else None,
     }
 
 
@@ -138,7 +144,7 @@ def summarize(clusters: list[dict]) -> dict:
     """Counts per posture property; databases are counted across every cluster."""
     total = len(clusters)
     dbs = [d for c in clusters for d in c["databases"]]
-    tls_only = sum(1 for c in clusters if c["tls_only"])
+    tls_only = sum(1 for c in clusters if c["tls_only"] is True)
     return {
         "total_clusters": total,
         "total_databases": len(dbs),
@@ -152,6 +158,10 @@ def summarize(clusters: list[dict]) -> dict:
         ),
         "private_only_clusters": sum(1 for c in clusters if c["private_only"]),
         "customer_managed_key_clusters": sum(1 for c in clusters if c["customer_managed_key"]),
+        "databases_unread_clusters": sum(1 for c in clusters if not c["databases_read"]),
+        "public_network_access_unset_clusters": sum(
+            1 for c in clusters if c.get("public_network_access") is None
+        ),
         "encrypted_protocol_databases": sum(1 for d in dbs if d["client_protocol_encrypted"]),
         "plaintext_protocol_databases": sum(1 for d in dbs if not d["client_protocol_encrypted"]),
         "access_keys_disabled_databases": sum(
@@ -192,9 +202,10 @@ def collect_clusters(subscription_id, cred, collector: Collector) -> list[dict]:
                 database_record(project_database(d))
                 for d in client.databases.list_by_cluster(rg, name)
             ],
-            default=[],
         )
-        records.append(cluster_record(cluster, sorted(dbs, key=lambda d: d.get("id") or "")))
+        records.append(
+            cluster_record(cluster, None if dbs is None else sorted(dbs, key=lambda d: d.get("id") or ""))
+        )
     return sorted(records, key=lambda r: r.get("id") or "")
 
 

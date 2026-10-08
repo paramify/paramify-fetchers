@@ -55,8 +55,11 @@ evidence_set:
     subscription, then databases.list_by_cluster(resource_group, cluster) for each.
     Access keys are never listed. minimum_tls_version comes from the cluster;
     client_protocol and access_keys_authentication from each database.
-    tls_only is true when the cluster floor is 1.2 or higher AND every database's
-    client_protocol is Encrypted. entra_only is true when every database has
+    tls_only is true when the cluster floor is 1.2 or higher AND the cluster has at least
+    one database AND every database's client_protocol is Encrypted; it is null (unknown)
+    when the database list could not be read (databases_read false). entra_only is true when every database has
     access_keys_authentication Disabled. private_only is true when public network
     access is Disabled and at least one private endpoint connection is Approved.
+    public_network_access is null on clusters created before Azure returned the property;
+    null is counted as not disabled and tallied in summary.public_network_access_unset_clusters.
     summary.total_clusters and summary.total_databases are the counts collected.

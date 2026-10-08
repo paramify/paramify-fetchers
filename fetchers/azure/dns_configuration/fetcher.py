@@ -66,8 +66,13 @@ def project_dnssec_config(body: dict) -> dict:
     }
 
 
+DNSSEC_READ_FAILED = object()
+
+
 def public_zone_record(zone: dict, dnssec) -> dict:
-    """`dnssec` is the projected config, or None when the zone is unsigned."""
+    """`dnssec` is the projected config, None when unsigned, or DNSSEC_READ_FAILED (state unknown)."""
+    read_failed = dnssec is DNSSEC_READ_FAILED
+    dnssec = None if read_failed else dnssec
     keys = (dnssec or {}).get("signing_keys") or []
     state = (dnssec or {}).get("provisioning_state")
     return {
@@ -77,7 +82,7 @@ def public_zone_record(zone: dict, dnssec) -> dict:
         "name_servers": zone.get("name_servers") or [],
         "dnssec_provisioning_state": state,
         "dnssec_signing_keys": keys,
-        "dnssec_enabled": str(state or "").lower() == "succeeded" and bool(keys),
+        "dnssec_enabled": None if read_failed else (str(state or "").lower() == "succeeded" and bool(keys)),
         "delegation_signer_records": sum(k["delegation_signer_records"] for k in keys),
     }
 
@@ -121,11 +126,13 @@ def private_zone_record(zone: dict, links: list[dict]) -> dict:
 
 def summarize(public: list[dict], private: list[dict]) -> dict:
     total = len(public)
-    signed = sum(1 for z in public if z["dnssec_enabled"])
+    signed = sum(1 for z in public if z["dnssec_enabled"] is True)
+    unknown = sum(1 for z in public if z["dnssec_enabled"] is None)
     return {
         "total_public_zones": total,
         "dnssec_enabled_public_zones": signed,
-        "dnssec_disabled_public_zones": total - signed,
+        "dnssec_disabled_public_zones": total - signed - unknown,
+        "dnssec_unknown_public_zones": unknown,
         "dnssec_percentage": coverage_percentage(signed, total),
         "total_private_zones": len(private),
         "total_private_zone_virtual_network_links": sum(
@@ -173,6 +180,7 @@ def collect_public_zones(subscription_id, cred, collector: Collector) -> list[di
         dnssec = collector.guard(
             f"dns.dnssecConfigs.get({zone.get('name')})",
             lambda: fetch_dnssec(arm, zone["id"]),
+            default=DNSSEC_READ_FAILED,
         )
         records.append(public_zone_record(zone, dnssec))
     return sorted(records, key=lambda r: r.get("id") or "")

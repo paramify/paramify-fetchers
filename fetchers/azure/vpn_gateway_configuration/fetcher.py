@@ -32,6 +32,7 @@ from azure_common import (  # noqa: E402
 from vpn_crypto import (  # noqa: E402
     VPN_GATEWAY_DEFAULT_WEAK,
     effective_weak_algorithms,
+    ike_is_v2,
     policy_source,
     project_ipsec_policy,
 )
@@ -142,7 +143,7 @@ def connection_record(conn: dict) -> dict:
             conn.get("use_policy_based_traffic_selectors") or False
         ),
         "is_ipsec_tunnel": is_ipsec,
-        "ikev2": (str(conn.get("connection_protocol") or "").lower() == "ikev2") if is_ipsec else None,
+        "ikev2": ike_is_v2(conn.get("connection_protocol")) if is_ipsec else None,
         "explicit_ipsec_policy": bool(policies),
         "ipsec_policy_source": policy_source(policies) if is_ipsec else None,
         "weak_ipsec_algorithms": (
@@ -153,7 +154,8 @@ def connection_record(conn: dict) -> dict:
 
 def summarize(gateways: list[dict], connections: list[dict], local_gateways: list[dict]) -> dict:
     tunnels = [c for c in connections if c["is_ipsec_tunnel"]]
-    ikev2 = sum(1 for c in tunnels if c["ikev2"])
+    ikev2 = sum(1 for c in tunnels if c["ikev2"] is True)
+    ikev1 = sum(1 for c in tunnels if c["ikev2"] is False)
     return {
         "total_gateways": len(gateways),
         "vpn_gateways": sum(1 for g in gateways if str(g.get("gateway_type") or "").lower() == "vpn"),
@@ -162,7 +164,8 @@ def summarize(gateways: list[dict], connections: list[dict], local_gateways: lis
         "total_connections": len(connections),
         "ipsec_connections": len(tunnels),
         "ikev2_connections": ikev2,
-        "ikev1_connections": len(tunnels) - ikev2,
+        "ikev1_connections": ikev1,
+        "ike_version_unknown_connections": len(tunnels) - ikev2 - ikev1,
         "ikev2_percentage": coverage_percentage(ikev2, len(tunnels)),
         "explicit_ipsec_policy_connections": sum(1 for c in tunnels if c["explicit_ipsec_policy"]),
         "azure_default_ipsec_policy_connections": sum(

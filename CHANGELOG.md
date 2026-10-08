@@ -32,7 +32,10 @@ schemas and the `paramify` CLI — not the internal code.
   secured by a firewall, and the IKE version on each site link, along with
   vWAN VPN sites, point-to-site gateways and server configurations. The DNS,
   VPN and Virtual WAN fetchers record whether Microsoft.Network is registered,
-  so zero resources can be told apart from a provider that is off. Both VPN
+  so zero resources can be told apart from a provider that is off. A read that
+  fails (a Redis cluster's databases, a zone's DNSSEC config) or an IKE protocol
+  Azure leaves empty is recorded as null and counted as unknown, never as
+  compliant, unsigned or IKEv1. Both VPN
   fetchers keep an allow-list of fields, because Azure returns site-link
   pre-shared keys in plain text to Reader; no key reaches the evidence.
   Verified against a live subscription.

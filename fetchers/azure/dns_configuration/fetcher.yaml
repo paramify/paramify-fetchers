@@ -48,8 +48,10 @@ evidence_set:
   instructions: >
     Script: fetcher.py. Azure SDK calls: azure-mgmt-dns DnsManagementClient zones.list() for public
     zones; for each, ARM GET {zone id}/dnssecConfigs/default?api-version=2023-07-01-preview (the SDK has
-    no DNSSEC operation). An HTTP 404 "DNSSEC is not enabled" is recorded as dnssec_enabled false, not as
-    a collection failure. dnssec_enabled is true only when the config exists, its provisioningState is
+    no DNSSEC operation; this preview is the only API version that exposes DNSSEC). An HTTP 404 "DNSSEC
+    is not enabled" is recorded as dnssec_enabled false, not as a collection failure; any other failed
+    DNSSEC read leaves dnssec_enabled null (unknown), counted in summary.dnssec_unknown_public_zones, and
+    fails the run. dnssec_enabled is true only when the config exists, its provisioningState is
     Succeeded and it carries at least one signing key. azure-mgmt-privatedns PrivateDnsManagementClient
     private_zones.list() and virtual_network_links.list(resource_group, zone) for private zones.
     summary.dnssec_enabled_public_zones over summary.total_public_zones is the DNSSEC coverage.

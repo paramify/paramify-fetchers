@@ -55,7 +55,8 @@ evidence_set:
     virtual_network_gateway_connections.get(rg, name) per connection, because connection_status is only
     populated on a GET. Fields are
     projected from an allow-list, so shared_key, authorization_key and radius_server_secret never enter
-    the evidence. An IPsec or Vnet2Vnet connection is ikev2 when connection_protocol is IKEv2.
+    the evidence. An IPsec or Vnet2Vnet connection is ikev2 when connection_protocol is IKEv2, false when IKEv1, and null
+    (counted in summary.ike_version_unknown_connections) when Azure returns no protocol.
     explicit_ipsec_policy is true when the connection carries a custom ipsecPolicies entry;
     ipsec_policy_source is "custom" or "azure_default". weak_ipsec_algorithms lists any DES, 3DES, MD5,
     SHA1, DH group 1/2 or PFS None in a custom policy; with no custom policy it lists the weak proposals

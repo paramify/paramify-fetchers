@@ -55,7 +55,8 @@ evidence_set:
     read from each VPN gateway's own properties. Fields are projected from an allow-list, so the shared_key
     the API returns on every site-link connection, VPN site keys and RADIUS secrets never enter the evidence.
     A hub is secured when it has an Azure Firewall or a security partner provider. A site-link connection is
-    ikev2 when vpn_connection_protocol_type is IKEv2. connection_status is reported per site link; Azure
+    ikev2 when vpn_connection_protocol_type is IKEv2, false when IKEv1, null when absent
+    (summary.ike_version_unknown_link_connections). connection_status is reported per site link; Azure
     leaves it empty at the connection level. With no custom policy on a site link, weak_ipsec_algorithms
     lists the weak proposals of Virtual WAN's default policy (DH Group 2, SHA1, PFS None;
     learn.microsoft.com/azure/virtual-wan/virtual-wan-ipsec), suffixed "(azure_default)", and

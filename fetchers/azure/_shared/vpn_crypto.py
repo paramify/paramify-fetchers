@@ -47,6 +47,13 @@ POLICY_SOURCE_CUSTOM = "custom"
 POLICY_SOURCE_AZURE_DEFAULT = "azure_default"
 
 
+def ike_is_v2(protocol: Any):
+    """True for IKEv2, False for IKEv1, None when Azure returned no protocol (unknown)."""
+    if not protocol:
+        return None
+    return str(protocol).lower() == "ikev2"
+
+
 def policy_source(policies: List[Dict[str, Any]]) -> str:
     return POLICY_SOURCE_CUSTOM if policies else POLICY_SOURCE_AZURE_DEFAULT
 

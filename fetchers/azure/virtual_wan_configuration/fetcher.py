@@ -32,6 +32,7 @@ from azure_common import (  # noqa: E402
 from vpn_crypto import (  # noqa: E402
     VIRTUAL_WAN_DEFAULT_WEAK,
     effective_weak_algorithms,
+    ike_is_v2,
     policy_source,
     project_ipsec_policy,
     weak_algorithms,
@@ -99,7 +100,7 @@ def link_connection_record(link) -> dict:
         "use_policy_based_traffic_selectors": bool(
             model_attr(link, "use_policy_based_traffic_selectors") or False
         ),
-        "ikev2": str(protocol or "").lower() == "ikev2",
+        "ikev2": ike_is_v2(protocol),
         "ipsec_policies": policies,
         "explicit_ipsec_policy": bool(policies),
         "ipsec_policy_source": policy_source(policies),
@@ -113,6 +114,7 @@ def project_vpn_gateway(gw) -> dict:
         "id": model_attr(gw, "id"),
         "name": model_attr(gw, "name"),
         "location": model_attr(gw, "location"),
+        "tags": model_attr(gw, "tags"),
         "virtual_hub": _ref(gw, "virtual_hub"),
         "vpn_gateway_scale_unit": model_attr(gw, "vpn_gateway_scale_unit"),
         "bgp_asn": model_attr(model_attr(gw, "bgp_settings"), "asn"),
@@ -142,6 +144,7 @@ def project_vpn_site(site) -> dict:
         "id": model_attr(site, "id"),
         "name": model_attr(site, "name"),
         "location": model_attr(site, "location"),
+        "tags": model_attr(site, "tags"),
         "virtual_wan": _ref(site, "virtual_wan"),
         "device_vendor": model_attr(device, "device_vendor"),
         "device_model": model_attr(device, "device_model"),
@@ -164,6 +167,7 @@ def project_p2s_gateway(gw) -> dict:
         "id": model_attr(gw, "id"),
         "name": model_attr(gw, "name"),
         "location": model_attr(gw, "location"),
+        "tags": model_attr(gw, "tags"),
         "virtual_hub": _ref(gw, "virtual_hub"),
         "vpn_server_configuration": _ref(gw, "vpn_server_configuration"),
         "custom_dns_servers": model_attr(gw, "custom_dns_servers") or [],
@@ -178,6 +182,7 @@ def project_server_configuration(cfg) -> dict:
         "id": model_attr(cfg, "id"),
         "name": model_attr(cfg, "name"),
         "location": model_attr(cfg, "location"),
+        "tags": model_attr(cfg, "tags"),
         "vpn_protocols": model_attr(cfg, "vpn_protocols") or [],
         "vpn_authentication_types": model_attr(cfg, "vpn_authentication_types") or [],
         "aad_tenant": model_attr(aad, "aad_tenant"),
@@ -200,7 +205,8 @@ def summarize(results: dict) -> dict:
     wans, hubs = results["virtual_wans"], results["virtual_hubs"]
     connections = [c for g in results["vpn_gateways"] for c in g["connections"]]
     links = [link for c in connections for link in c["link_connections"]]
-    ikev2 = sum(1 for link in links if link["ikev2"])
+    ikev2 = sum(1 for link in links if link["ikev2"] is True)
+    ikev1 = sum(1 for link in links if link["ikev2"] is False)
     secured = sum(1 for h in hubs if h["secured_hub"])
     return {
         "total_virtual_wans": len(wans),
@@ -212,7 +218,8 @@ def summarize(results: dict) -> dict:
         "total_vpn_connections": len(connections),
         "total_vpn_link_connections": len(links),
         "ikev2_link_connections": ikev2,
-        "ikev1_link_connections": len(links) - ikev2,
+        "ikev1_link_connections": ikev1,
+        "ike_version_unknown_link_connections": len(links) - ikev2 - ikev1,
         "explicit_ipsec_policy_link_connections": sum(1 for link in links if link["explicit_ipsec_policy"]),
         "weak_ipsec_policy_link_connections": sum(1 for link in links if link["weak_ipsec_algorithms"]),
         "azure_default_ipsec_policy_link_connections": sum(
