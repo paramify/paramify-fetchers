@@ -171,6 +171,17 @@ class Fetcher:
         """
         return self.kind == "issue_report"
 
+    @property
+    def is_inventory(self) -> bool:
+        """True when this fetcher's evidence is an asset inventory.
+
+        An inventory is evidence in every other respect (enveloped, sent to its
+        evidence set by the evidence uploader). The difference is the payload
+        contract, checked when the output is enveloped, and that the uploader
+        only sends one the run collected completely. See framework/inventory.py.
+        """
+        return self.kind == "inventory"
+
 
 @dataclass
 class Requires:

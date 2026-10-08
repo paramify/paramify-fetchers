@@ -29,7 +29,7 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 
 | Field | Type | Purpose |
 |---|---|---|
-| `kind` | enum | `evidence` (default) or `issue_report`. See [Collection kinds](#collection-kinds). |
+| `kind` | enum | `evidence` (default), `inventory` or `issue_report`. See [Collection kinds](#collection-kinds). |
 | `runtime.timeout` | int | Max seconds for one invocation before the runner kills it (default 600). Raise for long scanners. |
 | `category` | string | Source-system family (e.g. `okta`, `gitlab`) |
 | `config_schema` | object | Typed config the fetcher accepts (free-form for v0.x) |
@@ -39,7 +39,7 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 | `secrets[].per_target` | bool | Secret resolved per-target instead of once per fetcher |
 | `target_schema.<field>.env` | string | Env var the runner sets from this field per target |
 | `depends_on` | array | Fetcher names this one depends on (not yet honored by the runner) |
-| `evidence_set` | object | Paramify evidence-set identity: `{reference_id, name, instructions?, description?, frequency?}`. Carried into envelope metadata and used by the uploader to get-or-create the set. `frequency` is how often the set expects a new artifact, one of Paramify's values (`DAILY`, `THREE_DAY`, `WEEKLY`, … `ANNUAL`, or `NOT_SET`); it defaults to `THREE_DAY`. `kind: evidence` only. |
+| `evidence_set` | object | Paramify evidence-set identity: `{reference_id, name, instructions?, description?, frequency?}`. Carried into envelope metadata and used by the uploader to get-or-create the set. `frequency` is how often the set expects a new artifact, one of Paramify's values (`DAILY`, `THREE_DAY`, `WEEKLY`, … `ANNUAL`, or `NOT_SET`); it defaults to `THREE_DAY`. Required for `kind: inventory`; not allowed on `kind: issue_report`. |
 | `issue_report` | object | Paramify assessment-intake identity: `{assessment_type, title?}`. Required for, and only valid on, `kind: issue_report`. Carries no assessment id — that is per-customer and lives in the manifest. |
 | `ksis` | array | FedRAMP KSIs this fetcher's evidence speaks to (1+) — *suggested / related* mappings, not a claim that the fetcher alone satisfies the indicator. Intrinsic to the fetcher; per-customer control mappings stay Paramify-side. |
 | `validators` | array | **Deprecated.** The legacy inline block (`{id, regex, proves?, failure_modes?}`); nothing reads it, and only `gitlab/significant_change_notifications` still carries one. Validators are now first-class objects in the central `validators/` registry, linked to a fetcher by its `evidence_set.reference_id` — see [`validators_design.md`](validators_design.md). |
@@ -48,18 +48,25 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 
 ## Collection kinds
 
-`kind` selects which of two contracts a fetcher is signing. Omitting it means
+`kind` selects which of three contracts a fetcher is signing. Omitting it means
 `evidence`, which is what every fetcher in this repo was before the field existed
 and what most should stay.
 
-| | `kind: evidence` (default) | `kind: issue_report` |
-|---|---|---|
-| Produces | a JSON payload asserting a state | the source tool's own report file |
-| Writes to | `EVIDENCE_DIR` = `<run>/` | `EVIDENCE_DIR` = `<run>/issue-reports/` |
-| Runner wraps output in the envelope | yes | **no** |
-| Identity block | `evidence_set` | `issue_report` |
-| `output.type` | `json`, `csv`, `html` | `csv`, `json`, `xml`, `nessus` |
-| Uploaded by | `paramify upload` | `paramify issues upload` |
+| | `kind: evidence` (default) | `kind: inventory` | `kind: issue_report` |
+|---|---|---|---|
+| Produces | a JSON payload asserting a state | one record per asset under `data` | the source tool's own report file |
+| Writes to | `EVIDENCE_DIR` = `<run>/` | `EVIDENCE_DIR` = `<run>/` | `EVIDENCE_DIR` = `<run>/issue-reports/` |
+| Runner wraps output in the envelope | yes | yes, and checks the payload (`metadata.inventory`) | **no** |
+| Identity block | `evidence_set` | `evidence_set` (required) | `issue_report` |
+| `output.type` | `json`, `csv`, `html` | `json` | `csv`, `json`, `xml`, `nessus` |
+| Uploaded by | `paramify upload` | `paramify upload`, only when complete | `paramify issues upload` |
+
+An inventory fetcher is an evidence fetcher with two more clauses: its payload
+holds `data` (records, each with a unique, non-empty `unique_asset_identifier`)
+and `records_included`, and it writes no records at all when collection was
+incomplete. A Paramify inventory pipeline reads the file as the whole estate, so
+the uploader does not send an inventory the runner did not mark complete. Full
+detail: [`inventory_fetchers.md`](inventory_fetchers.md).
 
 Two clauses bind an issue-report fetcher beyond the shared contract below:
 
@@ -73,7 +80,7 @@ Two clauses bind an issue-report fetcher beyond the shared contract below:
    discovery, because the result would be a fetcher neither uploader collects.
 
 Everything else — input env, exit codes, `$FETCHER_STATUS_FILE`, fanout, timeouts
-— is identical for both kinds. Full detail:
+— is identical for every kind. Full detail:
 [`issue_report_fetchers.md`](issue_report_fetchers.md).
 
 ---

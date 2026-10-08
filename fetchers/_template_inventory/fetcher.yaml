@@ -1,0 +1,54 @@
+# Template inventory fetcher.yaml. Copy this directory to
+# fetchers/<category>/<short_name>/ and fill in the placeholders.
+#
+# An INVENTORY is evidence with a record contract: one record per asset under
+# the payload's `data`, each with a `unique_asset_identifier`. It goes to an
+# evidence set like any evidence, and an inventory pipeline attached to that set
+# in Paramify turns each record into an Inventory item. See
+# docs/inventory_fetchers.md.
+#
+# Use `kind: evidence` (the default, see ../_template/) when you are asserting a
+# configuration state, and `kind: issue_report` (../_template_issue_report/)
+# when you are handing over a scanner's findings.
+#
+# Validated against framework/schemas/fetcher_schema.json.
+
+name: <category>_<short_name>            # globally unique (e.g. wiz_inventory)
+version: 0.1.0
+description: <which assets this lists, from which system, over what scope>
+category: <category>                      # matches the parent directory
+
+kind: inventory                           # the one line that makes this an inventory
+
+runtime:
+  type: python                            # or bash
+  entry: fetcher.py
+
+output:
+  type: json                              # an inventory is always json
+  path: <category>_<short_name>.json
+
+secrets:
+  - name: api_token
+    env: <UPPER_SNAKE_ENV_VAR>
+    description: <what this credential is, and where to get it>
+  # Same rules as an evidence fetcher: one entry per env var read, `required:
+  # false` for the ambient-identity case, and category-wide credentials go in
+  # fetchers/_categories/<category>.yaml instead. Anything this fetcher needs
+  # installed must be declared in that category file's `requires:` block.
+
+# Required for an inventory: the pipeline that builds Inventory is attached to
+# this evidence set in Paramify, so this is where the records have to land.
+evidence_set:
+  reference_id: EVD-<CATEGORY>-INVENTORY
+  name: <Tool> <Asset> Inventory
+  instructions: >-
+    Script: fetcher.py. <Which API calls, which scope, what each record holds.>
+    A run that could not collect every asset writes no records, and the
+    uploader does not send it.
+  description: >-
+    <What this inventory covers, e.g. every cloud resource in the authorization
+    boundary as discovered by Tool.>
+
+ksis:
+  - KSI-PIY-GIV

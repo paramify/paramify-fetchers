@@ -407,6 +407,16 @@ constraint is what makes this a separate kind with a separate uploader instead o
 a flag on the existing one. Nothing ships in this category yet; to write the
 first, start from [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
 
+### Inventory
+
+A third kind, `kind: inventory`, lists every asset of some kind (cloud resources,
+hosts, devices) as one record per asset, so Paramify's Inventory can be generated
+instead of kept by hand. It uploads to an evidence set like any evidence, and an
+inventory pipeline attached to that set turns each record into an Inventory item.
+Because the pipeline reads the file as the whole estate, `paramify upload` sends
+an inventory only when the run collected all of it. See
+[`docs/inventory_fetchers.md`](docs/inventory_fetchers.md).
+
 ### Show how evidence is generated (optional)
 
 Beyond the evidence itself, you can push each fetcher's **entry script** to
