@@ -73,8 +73,9 @@ evidence_set:
     route or the override (absent = MatchRequest). protocols_to_origin is Https for
     HttpsOnly, Http for HttpOnly, and for MatchRequest Https when the route accepts
     only HTTPS (as in azure_front_door_tls) else both. serving = an enabled route on
-    an enabled endpoint reaches the group. unprotected_reasons: http_to_origin (a
-    serving path can forward HTTP), certificate_name_check_disabled (an enabled
+    an enabled endpoint reaches the group. unprotected_reasons: no_enabled_origin
+    (every origin in the group is disabled), http_to_origin (a serving path can
+    forward HTTP), certificate_name_check_disabled (an enabled
     origin skips it), no_private_link_or_origin_auth (not every enabled origin uses
     private link and the group has no managed-identity authentication);
     connection_protected = serving and none apply. Private link status is reported

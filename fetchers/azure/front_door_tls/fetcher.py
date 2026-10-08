@@ -90,12 +90,15 @@ def parse_timestamp(value) -> datetime | None:
 
 def certificate_expiry(expiration_date, now: datetime) -> dict:
     end = parse_timestamp(expiration_date)
-    days = (end - now).days if end else None
-    expired = end is not None and end <= now
+    if end is None:
+        days = expired = expiring_soon = None
+    else:
+        days, expired = (end - now).days, end <= now
+        expiring_soon = not expired and days <= EXPIRY_WARNING_DAYS
     return {
         "days_until_expiry": days,
         "certificate_expired": expired,
-        "certificate_expiring_soon": end is not None and not expired and days <= EXPIRY_WARNING_DAYS,
+        "certificate_expiring_soon": expiring_soon,
         "expiry_warning_days": EXPIRY_WARNING_DAYS,
     }
 
@@ -212,8 +215,9 @@ def summarize(profiles: list[dict], skipped_by_sku: dict, routes: list[dict], do
         "served_domains_managed_certificate_without_secret": count(
             served, lambda d: d["certificate_status"] == "managed_without_secret"
         ),
-        "served_domains_certificate_expired": count(served, lambda d: d["certificate_expired"]),
-        "served_domains_certificate_expiring_soon": count(served, lambda d: d["certificate_expiring_soon"]),
+        "served_domains_certificate_expired": count(served, lambda d: d["certificate_expired"] is True),
+        "served_domains_certificate_expiring_soon": count(served, lambda d: d["certificate_expiring_soon"] is True),
+        "served_domains_certificate_expiry_unknown": count(served, lambda d: d["certificate_expired"] is None),
         "domains_by_cipher_suite_set": dict(sorted(Counter(str(d["cipher_suite_set_type"]) for d in domains).items())),
         "domains_by_certificate_type": dict(sorted(Counter(str(d["certificate_type"]) for d in domains).items())),
         "certificate_secrets": count(secrets, lambda s: s["type"] in CERTIFICATE_SECRET_TYPES),

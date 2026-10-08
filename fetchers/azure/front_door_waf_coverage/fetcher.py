@@ -220,6 +220,9 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
         "waf_default_rule_set_enabled_rules": waf["default_rule_set_enabled_rules"] if waf else None,
         "waf_default_rule_set_total_rules": waf["default_rule_set_total_rules"] if waf else None,
         "waf_default_rule_set_fully_disabled_groups": waf["default_rule_set_fully_disabled_groups"] if waf else None,
+        "waf_default_rule_set_groups_without_blocking_rules": (
+            waf["default_rule_set_groups_without_blocking_rules"] if waf else None
+        ),
         "protected": serving and not reasons,
         "unprotected_reasons": reasons,
     }

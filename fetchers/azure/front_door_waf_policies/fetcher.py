@@ -54,6 +54,9 @@ def summarize(policies: list[dict], skipped_by_sku: dict) -> dict:
         "policies_default_rule_set_log_only": count(
             lambda p: "default_rule_set_log_only" in p["not_blocking_reasons"]
         ),
+        "policies_rule_groups_not_blocking": count(lambda p: "rule_groups_not_blocking" in p["not_blocking_reasons"]),
+        "policies_rule_definition_not_found": count(lambda p: "rule_definition_not_found" in p["not_blocking_reasons"]),
+        "policies_with_allow_all_custom_rule": count(lambda p: "allow_all_custom_rule" in p["not_blocking_reasons"]),
         "waf_policies_with_rate_limit_rules": count(lambda p: p["rate_limit_rules"] > 0),
         "total_disabled_managed_rules": sum(p["disabled_managed_rules"] for p in policies),
         "total_disabled_managed_rule_groups": sum(p["disabled_managed_rule_groups"] for p in policies),

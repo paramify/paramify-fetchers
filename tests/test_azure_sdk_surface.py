@@ -1130,6 +1130,12 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     ),
     (
         "azure.mgmt.frontdoor.models",
+        "MatchCondition",
+        ["match_variable", "selector", "operator", "negate_condition", "match_value"],
+        "azure/front_door_waf_policies — an Allow rule matching every request makes the policy not blocking",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
         "ManagedRuleSetDefinitionProperties",
         ["rule_set_type", "rule_set_version", "rule_groups"],
         "azure/front_door_waf_policies",

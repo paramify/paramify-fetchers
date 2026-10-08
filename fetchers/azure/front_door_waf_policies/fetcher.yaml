@@ -6,9 +6,10 @@ description: >
   version and anomaly-score action, the rules and rule groups its overrides disable,
   exclusions, custom and rate-limit rules, and the security policies that attach it
   to Front Door endpoints and domains. Each policy carries a `blocking` verdict
-  (enabled, Prevention, and a Default Rule Set that blocks) with the reasons when it
-  does not, so a policy left in Detection mode or with its core rules switched off
-  is visible rather than reading as "WAF present".
+  (enabled, Prevention, a Default Rule Set that blocks with every rule group still
+  blocking, and no custom rule allowing all traffic) with the reasons when it does
+  not, so a policy left in Detection mode or with its core rules switched off is
+  visible rather than reading as "WAF present".
 category: azure
 
 supports_targets: true
@@ -62,16 +63,25 @@ evidence_set:
     blocked. A rule-group override with no rules disables the whole group; a rule
     override with no enabledState is Disabled (both documented API defaults).
     blocking = enabled AND mode Prevention AND a Default Rule Set
-    (DefaultRuleSet / Microsoft_DefaultRuleSet) whose effective_action is Block or
-    Redirect; not_blocking_reasons names each failed condition. associated = the
+    (DefaultRuleSet / Microsoft_DefaultRuleSet, matched case-insensitively) whose
+    effective_action is Block or Redirect AND whose definition was found AND in which
+    every rule group has an enabled blocking rule AND no enabled custom MatchRule with
+    action Allow matches all requests (every condition operator Any, not negated;
+    custom rules run before managed rules). not_blocking_reasons names each failed
+    condition: policy_disabled, mode_unset, mode_detection, no_default_rule_set,
+    default_rule_set_log_only, rule_definition_not_found, rule_groups_not_blocking,
+    allow_all_custom_rule. No allowance is made for groups switched off on purpose;
+    default_rule_set_groups_without_blocking_rules names them. associated = the
     policy is referenced by at least one Front Door security policy; which
     endpoints and domains it actually covers is evidenced by
     azure_front_door_waf_coverage. Rule counts: each rule in the policy's rule-set
     definition is Disabled when its whole group is overridden with no rules, else takes
     its override's enabledState (absent = Disabled), else the definition's
-    defaultState; total_rules / enabled_rules / blocking_rules (enabled, action not
-    Log), fully_disabled_rule_groups (no rule enabled) and
-    groups_without_blocking_rules (no enabled rule that blocks) follow, surfaced per policy
+    defaultState; total_rules / enabled_rules / blocking_rules (enabled, action Block,
+    Redirect or AnomalyScoring; Allow and Log let the request through),
+    fully_disabled_rule_groups (no rule enabled) and
+    groups_without_blocking_rules (no enabled rule that blocks) follow, beside
+    disabled_rules, log_only_rules and allow_rules (the overrides that set each), surfaced per policy
     as default_rule_set_* for its Default Rule Set, with latest_version_available —
     no threshold is applied in the fetcher. Maps to KSI-CNA-RVP / KSI-CNA-RNT /
     KSI-CNA-MAT.

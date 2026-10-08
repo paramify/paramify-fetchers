@@ -192,6 +192,8 @@ def group_record(profile: dict, group: dict, origins: list[dict], paths: list[di
     serving = bool(serving_paths)
 
     reasons = []
+    if not enabled:
+        reasons.append("no_enabled_origin")
     if "Http" in protocols:
         reasons.append("http_to_origin")
     if name_check_off:

@@ -72,7 +72,9 @@ evidence_set:
     → TLS12), else minimumTlsVersion when no set is stored; below_tls12 is null when
     the floor is unknown. The certificate is the profile secret tlsSettings.secret
     points to; days_until_expiry, certificate_expired and certificate_expiring_soon
-    (within expiry_warning_days, 30) come from its expirationDate at run time.
+    (within expiry_warning_days, 30) come from its expirationDate at run time, and
+    are all null when no expiry is readable (counted in
+    served_domains_certificate_expiry_unknown).
     certificate_status is found, managed_without_secret (a Front Door managed
     certificate whose domain exposes no secret, so no expiry is readable; the platform
     renews it), or missing (any other certificate with no resolvable secret).

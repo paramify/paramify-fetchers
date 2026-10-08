@@ -16,6 +16,8 @@ from azure_common import (
 FRONT_DOOR_SKUS = ("Standard_AzureFrontDoor", "Premium_AzureFrontDoor")
 DEFAULT_RULE_SET_TYPES = ("DefaultRuleSet", "Microsoft_DefaultRuleSet")
 ENFORCING_ACTIONS = ("Block", "Redirect")
+# Managed-rule actions that stop or score a request; Allow and Log let it through.
+BLOCKING_RULE_ACTIONS = ("Block", "Redirect", "AnomalyScoring")
 # First GA api-version whose security policies carry isProfileLevel and associations[].routes.
 SECURITY_POLICY_API_VERSION = "2026-07-01"
 # Documented API defaults when a route omits them.
@@ -93,6 +95,16 @@ def project_custom_rule(rule) -> dict:
         "rate_limit_threshold": model_attr(rule, "rate_limit_threshold"),
         "rate_limit_duration_in_minutes": model_attr(rule, "rate_limit_duration_in_minutes"),
         "match_condition_count": len(model_attr(rule, "match_conditions") or []),
+        "match_conditions": [
+            {
+                "match_variable": model_attr(c, "match_variable"),
+                "selector": model_attr(c, "selector"),
+                "operator": model_attr(c, "operator"),
+                "negate_condition": model_attr(c, "negate_condition"),
+                "match_value": list(model_attr(c, "match_value") or []),
+            }
+            for c in (model_attr(rule, "match_conditions") or [])
+        ],
         "group_by": [model_attr(g, "variable_name") for g in (model_attr(rule, "group_by") or [])],
     }
 
@@ -193,8 +205,8 @@ def effective_rule_counts(rule_set: dict, definition: Optional[dict], disabled_g
             if state == "Enabled":
                 enabled += 1
                 group_enabled += 1
-                blocking += action != "Log"
-                group_blocking += action != "Log"
+                blocking += action in BLOCKING_RULE_ACTIONS
+                group_blocking += action in BLOCKING_RULE_ACTIONS
         if group["rules"] and not group_enabled:
             fully_off.append(name)
         if group["rules"] and not group_blocking:
@@ -205,7 +217,7 @@ def effective_rule_counts(rule_set: dict, definition: Optional[dict], disabled_g
 
 
 def rule_set_record(rule_set: dict, definitions: Optional[dict] = None) -> dict:
-    disabled_groups, disabled_rules, log_only_rules = [], [], []
+    disabled_groups, disabled_rules, log_only_rules, allow_rules = [], [], [], []
     exclusion_count = len(rule_set["exclusions"])
     for group in rule_set["rule_group_overrides"]:
         name = group["rule_group_name"]
@@ -220,7 +232,9 @@ def rule_set_record(rule_set: dict, definitions: Optional[dict] = None) -> dict:
                 disabled_rules.append(ref)
             elif rule["action"] == "Log":
                 log_only_rules.append(ref)
-    is_default = rule_set["rule_set_type"] in DEFAULT_RULE_SET_TYPES
+            elif rule["action"] == "Allow":
+                allow_rules.append(ref)
+    is_default = str(rule_set["rule_set_type"] or "").lower() in {t.lower() for t in DEFAULT_RULE_SET_TYPES}
     index = definitions or {"by_key": {}, "latest": {}}
     rs_type = str(rule_set["rule_set_type"] or "").lower()
     definition = index["by_key"].get((rs_type, rule_set["rule_set_version"]))
@@ -231,6 +245,7 @@ def rule_set_record(rule_set: dict, definitions: Optional[dict] = None) -> dict:
         "disabled_rule_groups": sorted(g for g in disabled_groups if g),
         "disabled_rules": disabled_rules,
         "log_only_rules": log_only_rules,
+        "allow_rules": allow_rules,
         "total_exclusions": exclusion_count,
         **effective_rule_counts(rule_set, definition, disabled_groups),
         "latest_version_available": index["latest"].get(rs_type),
@@ -238,10 +253,22 @@ def rule_set_record(rule_set: dict, definitions: Optional[dict] = None) -> dict:
 
 
 def custom_rule_record(rule: dict) -> dict:
-    return {**rule, "enabled_state": rule["enabled_state"] or "Enabled"}
+    conditions = rule["match_conditions"]
+    return {
+        **rule,
+        "enabled_state": rule["enabled_state"] or "Enabled",
+        "matches_all_requests": bool(conditions)
+        and all(c["operator"] == "Any" and not c["negate_condition"] for c in conditions),
+    }
 
 
-def not_blocking_reasons(enabled_state: str, mode, rule_sets: List[dict]) -> List[str]:
+def allows_all_requests(rule: dict) -> bool:
+    """An enabled match rule that allows every request; custom rules run before managed rules."""
+    return (rule["enabled_state"] == "Enabled" and rule["rule_type"] == "MatchRule"
+            and rule["action"] == "Allow" and rule["matches_all_requests"])
+
+
+def not_blocking_reasons(enabled_state: str, mode, rule_sets: List[dict], custom_rules: List[dict]) -> List[str]:
     reasons = []
     if enabled_state != "Enabled":
         reasons.append("policy_disabled")
@@ -252,8 +279,15 @@ def not_blocking_reasons(enabled_state: str, mode, rule_sets: List[dict]) -> Lis
     default_sets = [rs for rs in rule_sets if rs["is_default_rule_set"]]
     if not default_sets:
         reasons.append("no_default_rule_set")
-    elif not any(rs["effective_action"] in ENFORCING_ACTIONS for rs in default_sets):
-        reasons.append("default_rule_set_log_only")
+    else:
+        if not any(rs["effective_action"] in ENFORCING_ACTIONS for rs in default_sets):
+            reasons.append("default_rule_set_log_only")
+        if not all(rs["rule_definition_found"] for rs in default_sets):
+            reasons.append("rule_definition_not_found")
+        elif any(rs["groups_without_blocking_rules"] for rs in default_sets):
+            reasons.append("rule_groups_not_blocking")
+    if any(allows_all_requests(r) for r in custom_rules):
+        reasons.append("allow_all_custom_rule")
     return reasons
 
 
@@ -262,13 +296,14 @@ def waf_policy_record(policy: dict, definitions: Optional[dict] = None) -> dict:
     core = next((rs for rs in rule_sets if rs["is_default_rule_set"]), None)
     custom_rules = [custom_rule_record(r) for r in policy["custom_rules"]]
     enabled_state = policy["enabled_state"] or "Enabled"
-    reasons = not_blocking_reasons(enabled_state, policy["mode"], rule_sets)
+    reasons = not_blocking_reasons(enabled_state, policy["mode"], rule_sets, custom_rules)
     return {
         **policy,
         "resource_group": resource_group_from_id(policy["id"]),
         "enabled_state": enabled_state,
         "managed_rule_sets": rule_sets,
         "custom_rules": custom_rules,
+        "allow_all_custom_rules": [r["name"] for r in custom_rules if allows_all_requests(r)],
         "rate_limit_rules": sum(
             1 for r in custom_rules if r["rule_type"] == "RateLimitRule" and r["enabled_state"] == "Enabled"
         ),

@@ -65,10 +65,11 @@ evidence_set:
     route): hosts are the route's custom domains plus the endpoint default domain when
     linkToDefaultDomain is Enabled. effective_scope is route (an association listing
     the route, applied only to the hosts it also lists when it lists any), else domain
-    (an association listing the host's custom-domain or endpoint id), else profile
+    (an association that lists no routes and lists the host's custom-domain or endpoint
+    id), else profile
     (isProfileLevel), else none. The applied WAF's verdict (blocking, mode,
     not_blocking_reasons, disabled_managed_rules, default_rule_set enabled / total
-    rules and fully disabled groups) is the same derivation as
+    rules, fully disabled groups and groups without blocking rules) is the same derivation as
     azure_front_door_waf_policies. protected = serving AND a WAF resolves AND it
     blocks AND it covers "/*" AND the host reference is not inactive;
     unprotected_reasons names each failure. Host-routes on a disabled endpoint or
