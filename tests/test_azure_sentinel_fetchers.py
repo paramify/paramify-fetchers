@@ -11,7 +11,6 @@ exist yet.
 
 from __future__ import annotations
 
-import base64
 import importlib.util
 import json
 import os
@@ -32,13 +31,9 @@ FETCHERS = [
     "sentinel_incidents",
     "sentinel_automation_rules",
     "log_analytics_query_audit",
-    "entra_diagnostic_settings",
     "log_analytics_deletion_rights",
     "log_storage_immutability",
-    "sentinel_playbooks",
-    "entra_risky_users",
 ]
-TENANT_FETCHERS = {"entra_diagnostic_settings", "entra_risky_users"}
 
 
 def _load(name):
@@ -240,9 +235,7 @@ def ws_a(evidence):
 def test_every_fetcher_follows_the_shape(name):
     spec = yaml.safe_load((AZURE / name / "fetcher.yaml").read_text())
     assert MODS[name].NAME == spec["name"] == f"azure_{name}"
-    if name in TENANT_FETCHERS:
-        assert spec["target_schema"]["tenant_id"]["env"] == "AZURE_TENANT_ID"
-    elif name != "log_storage_immutability":
+    if name != "log_storage_immutability":
         assert spec["target_schema"]["workspaces"]["env"] == azure_rest.WORKSPACES_ENV
     assert spec["evidence_set"]["reference_id"].startswith("EVD-AZURE-")
     assert len(spec["evidence_set"]["instructions"].split()) <= 80
@@ -455,7 +448,6 @@ def test_query_audit_weeks_older_than_retention_are_unknown(azure, tmp_path):
 # --- the gap-closing fetchers ---------------------------------------------------
 
 RD = f"/subscriptions/{SUB}/providers/Microsoft.Authorization/roleDefinitions"
-PB = f"{RG}/providers/Microsoft.Logic/workflows/pb"
 SA = f"{RG}/providers/Microsoft.Storage/storageAccounts"
 
 
@@ -476,39 +468,7 @@ def container(name, policy=None, legal_hold=False):
     return {"name": name, "properties": props}
 
 
-PLAYBOOK = {"id": PB, "name": "pb", "properties": {
-    "state": "Enabled",
-    "parameters": {"$connections": {"value": {
-        "azuresentinel": {"id": "/subscriptions/x/providers/Microsoft.Web/locations/eastus/managedApis/azuresentinel"},
-        "office365": {"id": "/subscriptions/x/providers/Microsoft.Web/locations/eastus/managedApis/office365"},
-        "azuread": {"id": "/subscriptions/x/providers/Microsoft.Web/locations/eastus/managedApis/azuread"}}}},
-    "definition": {
-        "triggers": {"Microsoft_Sentinel_incident": {"type": "ApiConnectionWebhook", "inputs": {
-            "host": {"connection": {"name": "@parameters('$connections')['azuresentinel']['connectionId']"}},
-            "path": "/incident-creation"}}},
-        "actions": {"Condition": {"type": "If", "actions": {
-            "Send_an_email_(V2)": {"type": "ApiConnection", "inputs": {
-                "host": {"connection": {"name": "@parameters('$connections')['office365']['connectionId']"}},
-                "method": "post", "path": "/v2/Mail",
-                "body": {"To": "SecOps@Contoso.com; @{triggerBody()?['owner']}", "Subject": "incident"}}}},
-            "else": {"actions": {
-                "Disable_user": {"type": "ApiConnection", "inputs": {
-                    "host": {"connection": {"name": "@parameters('$connections')['azuread']['connectionId']"}},
-                    "method": "patch", "path": "/v1.0/users/@{encodeURIComponent('x')}",
-                    "body": {"accountEnabled": False}}}}}}}}}}
-NOT_A_PLAYBOOK = {"id": f"{RG}/providers/Microsoft.Logic/workflows/etl", "name": "etl",
-                  "properties": {"state": "Enabled", "definition": {"triggers": {"Recurrence": {"type": "Recurrence"}},
-                                                                     "actions": {}}}}
-
 EXTRA_ARM = {
-    ("/providers/microsoft.aadiam/diagnosticSettings", "2017-04-01"): {"value": [
-        {"name": "to-sentinel", "properties": {"workspaceId": WS_A, "logs": [
-            {"category": "AuditLogs", "enabled": True}, {"category": "SignInLogs", "enabled": True},
-            {"category": "ProvisioningLogs", "enabled": False}]}},
-        {"name": "archive", "properties": {"storageAccountId": f"{SA}/starchive", "logs": [
-            {"category": "NonInteractiveUserSignInLogs", "enabled": True}]}}]},
-    ("/providers/microsoft.aadiam/diagnosticSettingsCategories", "2017-04-01"): {"value": [
-        {"name": n} for n in ("AuditLogs", "SignInLogs", "NonInteractiveUserSignInLogs", "ProvisioningLogs")]},
     (f"{WS_A}/providers/Microsoft.Authorization/roleAssignments", "2022-04-01"): {"value": [
         assignment("u-purger", "User", "purger", WS_A),
         assignment("sp-la", "ServicePrincipal", "lacontrib", f"/subscriptions/{SUB}"),
@@ -542,48 +502,8 @@ EXTRA_ARM = {
     (f"{SA}/stlogs/blobServices/default", "2023-05-01"): {"properties": {
         "deleteRetentionPolicy": {"enabled": True, "days": 14}, "isVersioningEnabled": True}},
     (f"{SA}/stapp/blobServices/default/containers", "2023-05-01"): {"value": [container("images")]},
-    (f"/subscriptions/{SUB}/providers/Microsoft.Logic/workflows", "2019-05-01"): {"value": [PLAYBOOK, NOT_A_PLAYBOOK]},
-    ("/v1.0/identityProtection/riskyUsers", None): {"value": [
-        {"id": "u-admin", "userPrincipalName": "admin@contoso.com", "riskLevel": "high", "riskState": "atRisk",
-         "riskLastUpdatedDateTime": iso(NOW - timedelta(days=10))}],
-        "@odata.nextLink": "https://graph.microsoft.com/v1.0/identityProtection/riskyUsers?$skiptoken=p2"},
-    ("/v1.0/identityProtection/riskyUsers", None, "p2"): {"value": [
-        {"id": "u-staff", "userPrincipalName": "staff@contoso.com", "riskLevel": "medium", "riskState": "remediated",
-         "riskLastUpdatedDateTime": iso(NOW - timedelta(days=3))},
-        {"id": "u-reader", "userPrincipalName": "reader@contoso.com", "riskLevel": "low", "riskState": "atRisk",
-         "riskLastUpdatedDateTime": iso(NOW - timedelta(days=1))}]},
-    ("/v1.0/directoryRoles", None): {"value": [
-        {"id": "role-ga", "displayName": "Company Admin", "roleTemplateId": "62e90394-69f5-4237-9190-012177145e10"},
-        {"id": "role-dr", "displayName": "Directory Readers", "roleTemplateId": "88d8e3e3-8f55-4a1e-953a-9b9898b8876b"}]},
-    # More members than $expand would return: the role's member list is paged.
-    ("/v1.0/directoryRoles/role-ga/members", None): {
-        "value": [{"id": f"u-filler-{i}"} for i in range(20)],
-        "@odata.nextLink": "https://graph.microsoft.com/v1.0/directoryRoles/role-ga/members?$skiptoken=p2"},
-    ("/v1.0/directoryRoles/role-ga/members", None, "p2"): {"value": [{"id": "u-admin"}]},
-    ("/v1.0/directoryRoles/role-dr/members", None): {"value": [{"id": "u-reader"}, {"id": "u-admin"}]},
-    ("/v1.0/users/u-admin", None): {"id": "u-admin", "accountEnabled": True},
+
 }
-
-
-def test_entra_diagnostic_settings(azure, tmp_path):
-    code, ev = run("entra_diagnostic_settings", tmp_path)
-    assert code == 0
-    s = ev["summary"]
-    assert s["key_categories_to_sentinel"] == {"AuditLogs": True, "SignInLogs": True}
-    assert s["audit_and_signin_logs_to_sentinel"] is True and s["categories_not_exported"] == ["ProvisioningLogs"]
-    coverage = {c["category"]: c for c in ev["results"]["category_coverage"]}
-    assert coverage["NonInteractiveUserSignInLogs"]["to_storage"] is True
-    assert coverage["NonInteractiveUserSignInLogs"]["to_sentinel_workspace"] is False
-
-
-def test_entra_diagnostic_settings_wrong_tenant_fails(azure, tmp_path, monkeypatch):
-    claims = base64.urlsafe_b64encode(json.dumps({"tid": "other-tenant"}).encode()).decode().rstrip("=")
-    monkeypatch.setattr(azure_rest, "pinned_credential", lambda sub: type("C", (), {
-        "get_token": lambda self, scope: namedtuple("T", "token expires_on")(f"h.{claims}.s", 9_999_999_999)})())
-    monkeypatch.setenv("AZURE_TENANT_ID", "target-tenant")
-    code, ev = run("entra_diagnostic_settings", tmp_path)
-    assert code == 1 and "not the target tenant" in ev["metadata"]["api_failures"][0]["message"]
-    assert not any("aadiam" in c[1] for c in azure.calls)
 
 
 def test_deletion_rights(azure, tmp_path):
@@ -633,66 +553,6 @@ def test_log_storage_immutability(azure, tmp_path):
     assert not any("stfiles" in c[1] for c in azure.calls)
 
 
-def test_sentinel_playbooks(azure, tmp_path):
-    code, ev = run("sentinel_playbooks", tmp_path)
-    assert code == 0
-    (pb,) = ev["results"]["playbooks"]
-    assert pb["name"] == "pb" and pb["triggers"][0]["kind"] == "incident"
-    assert pb["capabilities"] == {"account_containment": True, "device_isolation": False, "email": True,
-                                  "teams": False, "incident_update": False}
-    assert pb["email_recipients"] == ["secops@contoso.com"] and pb["dynamic_recipient_fields"] == 1
-    assert pb["automation_rules"] == [{"workspace": "law-sentinel", "rule": "notify", "active": True}]
-    s = ev["summary"]
-    assert s["run_by_active_automation_rule"] == 1 and s["live_account_containment_playbooks"] == 1
-    assert s["notification_recipients"] == ["secops@contoso.com"] and s["logic_apps_scanned"] == 2
-
-
-def test_entra_risky_users(azure, tmp_path):
-    code, ev = run("entra_risky_users", tmp_path)
-    assert code == 0
-    users = {u["user_principal_name"]: u for u in ev["results"]["risky_users"]}
-    # Global Administrator found by template id past the first 20 members; Directory Readers isn't privileged.
-    assert users["admin@contoso.com"]["privileged_roles"] == ["Company Admin"]
-    assert users["admin@contoso.com"]["directory_roles"] == ["Company Admin", "Directory Readers"]
-    assert users["reader@contoso.com"]["privileged_roles"] == [] and "account_enabled" not in users["reader@contoso.com"]
-    assert users["admin@contoso.com"]["account_enabled"] is True and "account_enabled" not in users["staff@contoso.com"]
-    s = ev["summary"]
-    assert s["risky_users_total"] == 3 and s["by_risk_state"] == {"atRisk": 2, "remediated": 1}
-    assert s["privileged_open_risk_users"] == 1 and s["privileged_open_risk_users_enabled"] == 1
-    assert s["privileged_principals"] == 21
-
-
-def test_entra_risky_users_without_p2_is_a_state(azure, tmp_path):
-    azure.arm[("/v1.0/identityProtection/riskyUsers", None)] = Resp(
-        403, {"error": {"code": "Forbidden", "message": "Your tenant is not licensed for this feature."}})
-    code, ev = run("entra_risky_users", tmp_path)
-    assert code == 0 and ev["summary"] == {"identity_protection_available": False}
-
-
-def test_entra_diagnostic_settings_unreadable_destination_is_unknown(azure, tmp_path):
-    other = "/subscriptions/other/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/law-elsewhere"
-    azure.arm[("/providers/microsoft.aadiam/diagnosticSettings", "2017-04-01")]["value"].append(
-        {"name": "elsewhere", "properties": {"workspaceId": other, "logs": [{"category": "ProvisioningLogs", "enabled": True}]}})
-    azure.arm[(f"{other}/providers/Microsoft.SecurityInsights/onboardingStates", "2025-09-01")] = Resp(
-        403, {"error": {"code": "AuthorizationFailed", "message": "no access"}})
-    code, ev = run("entra_diagnostic_settings", tmp_path)
-    coverage = {c["category"]: c for c in ev["results"]["category_coverage"]}
-    assert code == 0 and coverage["ProvisioningLogs"]["to_sentinel_workspace"] is None
-    assert coverage["AuditLogs"]["to_sentinel_workspace"] is True and ev["summary"]["audit_and_signin_logs_to_sentinel"] is True
-    assert "1 destination workspace" in ev["results"]["notes"][0]
-
-
-def test_entra_key_category_only_to_an_unreadable_workspace_is_unknown(azure, tmp_path):
-    settings = azure.arm[("/providers/microsoft.aadiam/diagnosticSettings", "2017-04-01")]["value"]
-    other = "/subscriptions/other/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/law-elsewhere"
-    settings[0]["properties"]["workspaceId"] = other
-    azure.arm[(f"{other}/providers/Microsoft.SecurityInsights/onboardingStates", "2025-09-01")] = Resp(
-        404, {"error": {"code": "SubscriptionNotFound", "message": "not in this tenant"}})
-    code, ev = run("entra_diagnostic_settings", tmp_path)
-    assert code == 0 and ev["summary"]["key_categories_to_sentinel"] == {"AuditLogs": None, "SignInLogs": None}
-    assert ev["summary"]["audit_and_signin_logs_to_sentinel"] is None
-
-
 def test_deletion_rights_without_pim_is_a_note(azure, tmp_path):
     azure.arm[(f"{WS_A}/providers/Microsoft.Authorization/roleEligibilityScheduleInstances", "2020-10-01")] = Resp(
         400, {"error": {"code": "AadPremiumLicenseRequired", "message": "The tenant needs an AAD Premium P2 license."}})
@@ -719,37 +579,6 @@ def test_log_storage_account_default_version_policy(azure, tmp_path):
     # The container's own Unlocked policy overrides the account default, and doesn't protect.
     assert by_name["insights-logs-auditlogs"]["policy_source"] == "container"
     assert not by_name["insights-logs-auditlogs"]["protected"]
-
-
-STD = f"{RG}/providers/Microsoft.Web/sites/la-std/workflows/contain"
-
-
-def _run_standard_playbook(azure, envelope):
-    rules = azure.arm[(f"{SI_A}/automationRules", "2025-09-01")]["value"]
-    rules[0]["properties"]["actions"].append(
-        {"order": 2, "actionType": "RunPlaybook", "actionConfiguration": {"logicAppResourceId": STD}})
-    azure.arm[(STD, "2024-04-01")] = envelope
-
-
-def test_sentinel_playbooks_standard_workflow(azure, tmp_path):
-    _run_standard_playbook(azure, {"id": STD, "name": "la-std/contain", "properties": {
-        "flowState": "Enabled", "files": {"workflow.json": {"kind": "Stateful", "definition": {
-            "triggers": {"incident": {"type": "ApiConnectionWebhook", "inputs": {
-                "host": {"connection": {"referenceName": "azuresentinel"}}, "path": "/incident-creation"}}},
-            "actions": {"Disable_user": {"type": "ApiConnection", "inputs": {
-                "host": {"connection": {"referenceName": "azuread"}}, "method": "patch",
-                "path": "/v1.0/users/x", "body": {"accountEnabled": False}}}}}}}}})
-    code, ev = run("sentinel_playbooks", tmp_path)
-    std = next(p for p in ev["results"]["playbooks"] if p["id"] == STD)
-    assert code == 0 and std["plan"] == "standard" and std["definition_read"] and std["enabled"]
-    assert std["triggers"][0]["kind"] == "incident" and std["capabilities"]["account_containment"]
-    assert ("GET", STD, "2024-04-01") in azure.calls and ev["summary"]["standard_playbooks"] == 1
-
-
-def test_sentinel_playbooks_standard_workflow_without_definition(azure, tmp_path):
-    _run_standard_playbook(azure, {"id": STD, "name": "la-std/contain", "properties": {"flowState": "Enabled"}})
-    code, ev = run("sentinel_playbooks", tmp_path)
-    assert code == 0 and ev["summary"]["playbooks_without_definition"] == [STD]
 
 
 def test_throttling_is_retried_after_retry_after(azure, tmp_path):

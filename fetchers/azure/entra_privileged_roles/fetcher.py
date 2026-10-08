@@ -35,9 +35,6 @@ from azure_common import (  # noqa: E402
     report_failure,
 )
 from entra_graph import (  # noqa: E402
-    GLOBAL_ADMINISTRATOR,
-    GLOBAL_ADMINISTRATOR_TEMPLATE_ID,
-    PRIVILEGED_ROLE_NAMES,
     graph_attr,
     paginate,
     resolve_tenant,
@@ -49,6 +46,62 @@ from entra_graph import (  # noqa: E402
 
 logger = logging.getLogger("azure_entra_privileged_roles")
 
+# The role Prowler's entra_global_admin_in_less_than_five_users check counts.
+GLOBAL_ADMINISTRATOR = "Global Administrator"
+
+# A SECOND way to recognize that role, never the only one — `is_privileged_role`
+# matches the display name first, so a wrong constant here cannot drop the role from
+# the counts.
+#
+# Provenance: this GUID has no upstream ancestor. Prowler's config.py carries the ARM
+# *RBAC* role GUIDs (reused verbatim by rbac_role_assignments) but no Entra *directory*
+# role template ids; the two are different id spaces, and Prowler's directory-role code
+# matches on the display name, as this does.
+GLOBAL_ADMINISTRATOR_TEMPLATE_ID = "62e90394-69f5-4237-9190-012177145e10"
+
+# Entra built-in directory roles that grant tenant-wide administrative power: each can
+# take over identities, grant itself more access, or alter the controls protecting the
+# tenant.
+#
+# Matched on display name because that is the stable documented identifier Graph
+# returns for a built-in role (v1.0 does not localize these), and is what Prowler
+# matches on. Each record also carries `role_template_id` verbatim, so a validator can
+# pin the GUID without this list asserting one.
+PRIVILEGED_ROLE_NAMES = frozenset(
+    {
+        # --- full tenant control ---
+        GLOBAL_ADMINISTRATOR,
+        "Privileged Role Administrator",       # can grant any role, including GA
+        "Privileged Authentication Administrator",  # can reset a GA's credentials
+        # --- identity takeover ---
+        "Authentication Administrator",
+        "User Administrator",
+        "Helpdesk Administrator",
+        "Password Administrator",
+        "Directory Writers",
+        # --- can grant itself access via an app or a federated identity ---
+        "Application Administrator",
+        "Cloud Application Administrator",
+        "Hybrid Identity Administrator",
+        "Domain Name Administrator",
+        "External Identity Provider Administrator",
+        # --- controls the controls ---
+        "Conditional Access Administrator",
+        "Security Administrator",
+        "Compliance Administrator",
+        "Intune Administrator",
+        # --- workload-wide data access ---
+        "Exchange Administrator",
+        "SharePoint Administrator",
+        "Teams Administrator",
+        # --- reads everything (no write, but full-tenant disclosure) ---
+        "Global Reader",
+        "Security Reader",
+        # --- commercial control of the tenant ---
+        "Billing Administrator",
+        "Partner Tier2 Support",
+    }
+)
 
 # The members collection is typed as directoryObject and the concrete kind shows up
 # only in @odata.type. It matters: a role-assignable GROUP moves the real access
