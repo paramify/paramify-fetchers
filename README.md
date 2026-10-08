@@ -23,6 +23,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 <a href="fetchers/aws/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/aws-dark.svg"><img src="fetchers/logos/aws.svg" alt="AWS" width="56" height="56" style="margin: 20px;"></picture></a>
 <a href="fetchers/azure/"><img src="fetchers/logos/azure.svg" alt="Azure" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/gcp/"><img src="fetchers/logos/gcp.svg" alt="GCP" width="56" height="56" style="margin: 20px;"></a>
+<a href="fetchers/wiz/"><img src="fetchers/logos/wiz.jpeg" alt="Wiz" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/datadog/"><img src="fetchers/logos/datadog.svg" alt="Datadog" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/okta/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/okta-dark.svg"><img src="fetchers/logos/okta.svg" alt="Okta" width="56" height="56" style="margin: 20px;"></picture></a>
 <a href="fetchers/sentinelone/"><img src="fetchers/logos/sentinelone.svg" alt="SentinelOne" width="56" height="56" style="margin: 20px;"></a>
@@ -45,6 +46,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | **AWS** | 80 | Encryption at rest and in transit, IAM and Organizations guardrails, threat detection and vulnerability scanning, logging and config drift, network segmentation, WAF and DDoS protection, backup and high availability, patch compliance, key and secret rotation, and CI/CD pipeline config |
 | **Azure** | 28 | Storage/disk/SQL encryption and CMK use, Entra identity + Conditional Access, RBAC assignments and custom roles, Azure Policy assignments, network security groups, Key Vault config and key rotation, Defender plans and per-resource assessments, VM hardening, the container and PaaS surface (AKS, Container Registry, App Service, Functions, Databricks), diagnostic settings and activity-log alerts, backup, and the managed databases |
 | **GCP** | 19 | Disk/bucket/Cloud SQL/BigQuery/Secret Manager encryption and CMEK use, IAM policy bindings, custom roles and service-account keys, KMS key rotation, GKE cluster and Compute Engine hardening, Cloud Logging sinks, Cloud SQL backups and network exposure, VPC/firewall/DNS segmentation, load-balancer TLS, and API keys |
+| **Wiz** | 15 | Cloud resource inventory for inventory pipelines, scan coverage, posture issues, host and container vulnerabilities, cloud and host configuration posture (including DISA STIG), threat detections, file integrity monitoring, attack surface and code (SAST) findings, and tenant security settings, plus three scan reports (Wiz Issues, vulnerability findings, STIG compliance) sent into assessment pipelines |
 | **Datadog** | 13 | Cloud SIEM detection rules, signals and operational config, monitors, log pipelines/indexes/archives, host & container inventory, agent checks, APM services, and incidents with timelines |
 | **Okta** | 8 | Phishing-resistant MFA and passwordless authentication, authenticators, least privilege, just-in-time access, non-user account authentication, suspicious activity management, and account management |
 | **CrowdStrike** | 7 | Managed host inventory, Spotlight vulnerabilities, detections, prevention policies, Zero Trust Assessment, FileVantage file integrity, and host firewall policies and rules |
@@ -77,7 +79,6 @@ More integrations are in progress. To request a fetcher or upvote what should be
 <div align="center">
 
 <img src="fetchers/logos/qualys.svg" alt="SSL Labs" width="56" height="56" style="margin: 20px;">
-<img src="fetchers/logos/wiz.jpeg" alt="Wiz" width="56" height="56" style="margin: 20px;">
 <picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/github-dark.svg"><img src="fetchers/logos/github.svg" alt="GitHub" width="56" height="56" style="margin: 20px;"></picture>
 <img src="fetchers/logos/jira.svg" alt="Jira" width="56" height="56" style="margin: 20px;">
 <picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/tenable-dark.svg"><img src="fetchers/logos/tenable.svg" alt="Tenable" width="56" height="56" style="margin: 20px;"></picture>
@@ -404,8 +405,9 @@ paramify issues upload                          # → POST /pipelines/{id}/intak
 The file is never wrapped or rewritten — the intake parser reads the vendor's own
 CSV/XML/JSON/Nessus structure, so anything added to it breaks the parse. That one
 constraint is what makes this a separate kind with a separate uploader instead of
-a flag on the existing one. Nothing ships in this category yet; to write the
-first, start from [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
+a flag on the existing one. Wiz ships three (`wiz_issues_report`,
+`wiz_vulnerability_findings`, `wiz_stig_compliance_report`); to write one for
+another tool, start from [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
 
 ### Inventory
 
@@ -529,8 +531,8 @@ design (peering connections and endpoints are omitted above for brevity).
 > tracked interim shortcuts, not the target. Comparators (`depends_on`) and
 > structured exit-code categories (still binary `0`/`1`, plus `124` for a runner
 > timeout-kill) are not built yet. Issue-report collection is built end to end —
-> contract, runner, uploader, template — but no vendor fetcher ships in that
-> category yet. See `docs/design.md` for what's deferred.
+> contract, runner, uploader, template. The Wiz category ships three
+> issue-report fetchers. See `docs/design.md` for what's deferred.
 
 ---
 
@@ -584,6 +586,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`fetchers/gitlab/README.md`](fetchers/gitlab/README.md) | GitLab project access token setup |
 | [`fetchers/sentinelone/README.md`](fetchers/sentinelone/README.md) | SentinelOne service user + API token |
 | [`fetchers/crowdstrike/README.md`](fetchers/crowdstrike/README.md) | CrowdStrike Falcon API client, scopes, and cloud/GovCloud selection |
+| [`fetchers/wiz/README.md`](fetchers/wiz/README.md) | Wiz service account, read-only scopes per fetcher, and commercial vs Wiz for Government endpoints |
 | [`fetchers/knowbe4/README.md`](fetchers/knowbe4/README.md) | KnowBe4 Reporting API key |
 | [`fetchers/splunk/README.md`](fetchers/splunk/README.md) | Splunk token, the collection role, port 8089, and how to add a Splunk fetcher |
 | [`fetchers/rippling/README.md`](fetchers/rippling/README.md) | Rippling Developer Hub token + scopes |

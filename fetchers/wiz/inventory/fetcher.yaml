@@ -1,0 +1,136 @@
+name: wiz_inventory
+version: 0.1.0
+description: >-
+  Cloud resource inventory from Wiz, one record per resource with its account,
+  region, type, IPs, OS, tags and owner, shaped for a Paramify inventory
+  pipeline.
+category: wiz
+
+kind: inventory
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: wiz_inventory.json
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read-only scopes).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov) or
+      https://api.us17.app.wiz.io/graphql (commercial).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: >-
+      Token URL from Tenant Info > Authentication URL. Defaults to Wiz for Gov.
+      Commercial tenants use https://auth.app.wiz.io/oauth/token.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  page_size:
+    type: integer
+    required: false
+    env: WIZ_PAGE_SIZE
+    default: 100
+    description: Records per GraphQL page (max 500).
+  max_records:
+    type: integer
+    required: false
+    env: WIZ_MAX_RECORDS
+    default: 50000
+    description: Safety cap on resources pulled. Hitting it is reported as a failure, never silent truncation.
+  resource_types:
+    type: string
+    required: false
+    env: WIZ_INVENTORY_RESOURCE_TYPES
+    default: >-
+      VIRTUAL_MACHINE,CONTAINER,CONTAINER_IMAGE,KUBERNETES_CLUSTER,DB_SERVER,DATABASE,BUCKET,SERVERLESS,LOAD_BALANCER,GATEWAY,FIREWALL,VIRTUAL_NETWORK,SUBNET,VOLUME,ENCRYPTION_KEY,SECRET
+    description: >-
+      Comma-separated Wiz resource types (the Type column on Wiz > Inventory >
+      Cloud Resources). ALL collects every type, which on most tenants is
+      mostly IAM policies and service accounts. A type Wiz does not know fails
+      the run.
+  cloud_account_ids:
+    type: string
+    required: false
+    env: WIZ_INVENTORY_CLOUD_ACCOUNT_IDS
+    default: ""
+    description: >-
+      Comma-separated cloud account IDs (AWS account, Azure subscription, GCP
+      project) in the authorization boundary. Empty keeps every account the
+      service account can see.
+  project_ids:
+    type: string
+    required: false
+    env: WIZ_INVENTORY_PROJECT_IDS
+    default: ""
+    description: Comma-separated Wiz project IDs to limit the inventory to. Empty keeps every project.
+  include_tags:
+    type: boolean
+    required: false
+    env: WIZ_INVENTORY_INCLUDE_TAGS
+    default: false
+    description: >-
+      Copy every resource tag into each record's tags list. Off by default:
+      tags are free text and can hold names, emails or values that should not
+      leave the tenant. The environment and owner tags are read either way.
+  environment_tag_keys:
+    type: string
+    required: false
+    env: WIZ_ENVIRONMENT_TAG_KEYS
+    default: "Environment,env"
+    description: >-
+      Tag keys (case-insensitive, first match wins) copied into each record's
+      environment field.
+  owner_tag_keys:
+    type: string
+    required: false
+    env: WIZ_OWNER_TAG_KEYS
+    default: "Owner"
+    description: >-
+      Tag keys (case-insensitive, first match wins) copied into each record's
+      owner field. Without a matching tag, the first owner Wiz attributes is used.
+
+evidence_set:
+  reference_id: "EVD-WIZ-INVENTORY"
+  name: "Wiz Cloud Resource Inventory"
+  instructions: >-
+    Script: fetcher.py. Read-only service account (scope read:resources). Pages
+    cloudResourcesV2 filtered by the configured resource types, accounts and
+    projects, and writes one record per resource under payload.data:
+    unique_asset_identifier (the cloud's own ID, an ARN on AWS), name, type,
+    account, region, IPs, OS, image, the environment and owner tags,
+    internet exposure and first/last seen (all tags only when include_tags is
+    on). A run with any collection failure writes counts but no records, and
+    the uploader sends only a complete, non-empty inventory, so a Paramify
+    inventory pipeline attached to this evidence set never reads a partial
+    inventory from payload.data.
+  description: >-
+    Automatically generated inventory of cloud resources in the authorization
+    boundary as discovered by Wiz.
+
+ksis:
+  - KSI-PIY-GIV
