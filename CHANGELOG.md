@@ -12,6 +12,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **A third fetcher kind, `kind: inventory`**, for fetchers that list every
+  asset of a kind for Paramify's Inventory. An inventory is evidence with a
+  record contract: the payload holds `data`, one record per asset each with a
+  unique `unique_asset_identifier`, and `records_included`. The record fields
+  are each fetcher's own. It needs an `evidence_set` and goes to it through
+  `paramify upload`, where an inventory pipeline attached to the set builds
+  Inventory items. A pipeline reads the file as the whole estate, so the
+  runner checks every inventory output when it envelopes it and records the
+  verdict in `metadata.inventory`, and the uploader does not send one that is
+  incomplete: a failed run, a contract break, withheld records, or no records
+  at all. The TUI lists inventories in their own section. Start from
+  `fetchers/_template_inventory/`; see `docs/inventory_fetchers.md`.
 - **`wiz_inventory`, the Wiz cloud resource inventory, for Paramify inventory
   pipelines.** One record per resource from `cloudResourcesV2` (account,
   region, type, IPs, OS, image, environment and owner, internet exposure)
@@ -203,6 +215,15 @@ schemas and the `paramify` CLI — not the internal code.
   service applied is recorded, and `resources_evaluated` tells "nothing
   non-compliant" from "nothing evaluated".
 
+- **A Jira category, and its first fetcher: `jira_site_inventory`.** One
+  evidence set covering a Jira Cloud site end to end: deployment info, every
+  project the account can browse (type, lead, issue types, issue count), the
+  issue types, priorities and statuses in use, Jira Service Management service
+  desks where the site has JSM, and every issue updated in the lookback window
+  (90 days, or an explicit `jql`) with rollups by project, type, status and
+  priority, time to resolution, and separate change and incident counts.
+  Account email + API token, declared once on the category; no Jira admin
+  needed. See [`fetchers/jira/README.md`](fetchers/jira/README.md).
 - **A fanout target editor in the TUI** (`t` on the Manifest tab). A fanout
   fetcher runs once per target, so its targets are the run plan — but the page
   showed only how many there were, and there was no way to change one: fixing a

@@ -1,7 +1,7 @@
 ---
 name: create-fetcher
 description: >
-  Create a new Paramify fetcher — evidence or issue report — or port an existing
+  Create a new Paramify fetcher — evidence, inventory or issue report — or port an existing
   one from another source. Use when the user wants to add a fetcher,
   integrate a new tool or data source (aws, azure, okta, gitlab, k8s, a
   vulnerability scanner, …), or scaffold a fetcher for a category. Runs a short
@@ -56,8 +56,9 @@ this one cannot reach (Phase 4).
    ```
 
 3. **Decide the kind.** Does the source tool already compute the findings — is
-   this a vulnerability scan, a CSPM export, a Nessus file — or is the fetcher
-   asserting a state (MFA on, buckets encrypted)?
+   this a vulnerability scan, a CSPM export, a Nessus file — is the fetcher
+   listing every asset of a kind for Paramify's Inventory, or is it asserting a
+   state (MFA on, buckets encrypted)?
    - **Tool computes findings → ISSUE REPORT.** Copy
      `fetchers/_template_issue_report/` (not `_template/`) and follow
      `docs/issue_report_fetchers.md` for the rest of the build. Shared parts
@@ -70,11 +71,22 @@ this one cannot reach (Phase 4).
      run `suggest-validator`. The Phase 4 smoke test below expects a JSON
      evidence file — skip it. The check for this kind is: after a real run, the
      file in `<run>/issue-reports/` is byte-identical to the tool's own export.
+   - **Fetcher lists assets for Inventory → INVENTORY.** Copy
+     `fetchers/_template_inventory/` (not `_template/`) and read
+     `docs/inventory_fetchers.md`. It is an evidence fetcher with
+     `kind: inventory`, a required `evidence_set`, and a payload of `data`
+     (one record per asset, each with a unique `unique_asset_identifier`) plus
+     `records_included`. All or nothing: any failed page or unreadable asset
+     writes `data: []`, `records_included: false` and exits non-zero. Everything
+     below applies. In the Phase 4 smoke test, also check the envelope's
+     `metadata.inventory.complete` is true. Test the failure paths, not only the
+     happy one. A list of resources that backs a configuration claim (an IAM
+     role list proving least privilege) is evidence, not inventory.
    - **Fetcher asserts a state → EVIDENCE.** Continue below.
 
    Don't ask this as a question if the tool makes it obvious; a scanner is an
-   issue report, an identity provider is evidence. Ask only when the same tool
-   could plausibly be either.
+   issue report, an identity provider is evidence, "for the Inventory" is
+   inventory. Ask only when the same tool could plausibly be more than one.
 
 4. **Decide port vs new.** Ask: "Do you already have a working script that
    collects this evidence (in another repo, a local file, etc.)?"

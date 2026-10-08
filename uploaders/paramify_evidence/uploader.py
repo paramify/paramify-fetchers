@@ -397,6 +397,20 @@ def upload_run(
                 add_result({"file": path.name, "outcome": "error", "reason": "missing/incomplete evidence_set"})
                 continue
 
+            # An inventory pipeline reads the artifact as the whole estate, so a
+            # partial or empty one would read as assets that are gone. The runner
+            # judged completeness when it enveloped the file (framework/inventory.py);
+            # this is not optional the way skip_failed is.
+            inventory = metadata.get("inventory")
+            if isinstance(inventory, dict) and inventory.get("complete") is not True:
+                why = "; ".join(inventory.get("incomplete_because") or ["not marked complete"])
+                reason = f"incomplete inventory not sent: {why}"
+                logger.warning("%s: %s", path.name, reason)
+                skipped_failed += 1
+                add_result({"file": path.name, "outcome": "skipped_failed",
+                            "reference_id": es["reference_id"], "reason": reason})
+                continue
+
             if metadata.get("status") == "failed" and skip_failed:
                 logger.info("%s: status=failed and skip_failed set; skipping", path.name)
                 skipped_failed += 1

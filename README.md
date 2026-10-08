@@ -37,6 +37,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 <a href="fetchers/paramify/"><img src="fetchers/logos/paramify.svg" alt="Paramify" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/servicenow/"><img src="fetchers/logos/servicenow.png" alt="ServiceNow" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/betterstack/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/betterstack-dark.svg"><img src="fetchers/logos/betterstack.svg" alt="Better Stack" width="56" height="56" style="margin: 20px;"></picture></a>
+<a href="fetchers/jira/"><img src="fetchers/logos/jira.svg" alt="Jira" width="56" height="56" style="margin: 20px;"></a>
 
 </div>
 
@@ -59,6 +60,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | **Checkov** | 2 | IaC scans over cloned Terraform / Kubernetes source |
 | **ServiceNow** | 2 | Customer service cases and ITSM change records |
 | **Better Stack** | 1 | Public status page components, their reported uptime and status history, and published incident reports |
+| **Jira** | 1 | Site and project inventory, issue schemes, Jira Service Management service desks, and recent issue activity with change and incident rollups |
 
 <!-- BEGIN:fetcher-chart -->
 <div align="center">
@@ -407,6 +409,16 @@ a flag on the existing one. Wiz ships three (`wiz_issues_report`,
 `wiz_vulnerability_findings`, `wiz_stig_compliance_report`); to write one for
 another tool, start from [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
 
+### Inventory
+
+A third kind, `kind: inventory`, lists every asset of some kind (cloud resources,
+hosts, devices) as one record per asset, so Paramify's Inventory can be generated
+instead of kept by hand. It uploads to an evidence set like any evidence, and an
+inventory pipeline attached to that set turns each record into an Inventory item.
+Because the pipeline reads the file as the whole estate, `paramify upload` sends
+an inventory only when the run collected all of it. See
+[`docs/inventory_fetchers.md`](docs/inventory_fetchers.md).
+
 ### Show how evidence is generated (optional)
 
 Beyond the evidence itself, you can push each fetcher's **entry script** to
@@ -580,6 +592,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`fetchers/rippling/README.md`](fetchers/rippling/README.md) | Rippling Developer Hub token + scopes |
 | [`fetchers/k8s/README.md`](fetchers/k8s/README.md) | Kubernetes / EKS credential setup |
 | [`fetchers/checkov/README.md`](fetchers/checkov/README.md) | Checkov setup + git token for IaC scanning |
+| [`fetchers/jira/README.md`](fetchers/jira/README.md) | Jira Cloud API token + the permissions it needs |
 | [`uploaders/paramify_evidence/README.md`](uploaders/paramify_evidence/README.md) | Paramify API key setup + upload options |
 | [`uploaders/paramify_issues/README.md`](uploaders/paramify_issues/README.md) | Intaking raw scan reports into an assessment + why the file is never touched |
 | [`uploaders/paramify_scripts/README.md`](uploaders/paramify_scripts/README.md) | Syncing fetcher entry scripts to Paramify + the association model |
