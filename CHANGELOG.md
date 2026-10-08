@@ -12,6 +12,24 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Four Azure fetchers for the network edge and cache tier**, read-only on
+  the built-in Reader role. `azure_managed_redis_configuration` reports each
+  Azure Managed Redis cluster's minimum TLS version, public network access and
+  private endpoints, and per database the client protocol (Encrypted or
+  Plaintext) and whether access-key authentication is disabled. Classic Azure
+  Cache for Redis is not read. `azure_dns_configuration` reports each public
+  zone's DNSSEC state and signing keys, and each private zone with its virtual
+  network links. The DNS SDK has no DNSSEC operation, so it is read with a
+  direct ARM call, and a 404 "DNSSEC is not enabled" counts as unsigned rather
+  than as a failed collection. `azure_vpn_gateway_configuration` reports VPN
+  gateways, the IKE version and any custom IPsec policy on each connection, weak
+  algorithms in those policies, and point-to-site protocols and sign-in types.
+  `azure_virtual_wan_configuration` reports Virtual WANs, whether hubs are
+  secured by a firewall, and the IKE version on each site link, along with
+  vWAN VPN sites, point-to-site gateways and server configurations. Both VPN
+  fetchers keep an allow-list of fields, because Azure returns site-link
+  pre-shared keys in plain text to Reader; no key reaches the evidence.
+  Verified against a live subscription.
 - **A Wiz category with twelve fetchers**, for Wiz commercial and Wiz for
   Government, sharing one GraphQL client and one service account. Eleven are
   evidence fetchers: `wiz_scan_coverage`, `wiz_posture_issues`,

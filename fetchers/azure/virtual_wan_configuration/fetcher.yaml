@@ -1,0 +1,60 @@
+name: azure_virtual_wan_configuration
+version: 0.1.0
+description: >
+  For every Azure Virtual WAN in the subscription, reports its type, whether VPN encryption is
+  disabled and whether branch-to-branch / VNet-to-VNet transit is allowed; for every virtual hub,
+  its address space, SKU, routing preference and whether it is a secured hub (Azure Firewall or a
+  security partner provider); for every hub site-to-site VPN gateway, each connection and site-link
+  connection with its IKE version, custom IPsec policy and weak algorithms; for every VPN site, its
+  device and address space; and for every point-to-site gateway, the server configuration's tunnel
+  protocols and authentication types. Pre-shared keys, site keys and RADIUS secrets are never recorded.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_virtual_wan_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-ULN   # hub-and-spoke logical networking and transit controls
+  - KSI-CNA-RNT   # secured hubs route traffic through a firewall
+  - KSI-SVC-SIN   # VPN encryption and IKE/IPsec settings on site links
+  - KSI-IAM-AAM   # point-to-site authentication types
+
+evidence_set:
+  reference_id: EVD-AZURE-VIRTUAL-WAN-CONFIG
+  name: Azure Virtual WAN, Hub and VPN Configuration
+  instructions: >
+    Script: fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient), all subscription-wide:
+    virtual_wans.list(), virtual_hubs.list(), vpn_gateways.list(), vpn_sites.list(),
+    p2_s_vpn_gateways.list(), vpn_server_configurations.list(). Connections and site-link connections are
+    read from each VPN gateway's own properties. Fields are projected from an allow-list, so the shared_key
+    the API returns on every site-link connection, VPN site keys and RADIUS secrets never enter the evidence.
+    A hub is secured when it has an Azure Firewall or a security partner provider. A site-link connection is
+    ikev2 when vpn_connection_protocol_type is IKEv2. summary.ikev2_link_connections over
+    summary.total_vpn_link_connections is the IKEv2 coverage; summary.vpn_encryption_disabled_wans must be 0.

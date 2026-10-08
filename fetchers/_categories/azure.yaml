@@ -82,15 +82,18 @@ requires:
     - azure-mgmt-containerservice
     - azure-mgmt-cosmosdb
     - azure-mgmt-databricks
+    - azure-mgmt-dns
     - azure-mgmt-keyvault
     - azure-mgmt-loganalytics
     - azure-mgmt-monitor
     - azure-mgmt-network
     - azure-mgmt-policyinsights
     - azure-mgmt-postgresqlflexibleservers
+    - azure-mgmt-privatedns
     - azure-mgmt-rdbms
     - azure-mgmt-recoveryservices
     - azure-mgmt-recoveryservicesbackup
+    - azure-mgmt-redisenterprise
     - azure-mgmt-resource
     - azure-mgmt-resource-policy
     - azure-mgmt-resourcegraph

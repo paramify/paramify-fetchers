@@ -1,0 +1,57 @@
+name: azure_dns_configuration
+version: 0.1.0
+description: >
+  Inventories Azure DNS in the subscription. For every public zone (Microsoft.Network/dnszones):
+  its name servers, record-set count and whether DNSSEC signing is enabled, with the signing
+  keys' flags, key tags and algorithms and the number of DS (delegation signer) records Azure
+  publishes for the parent zone. For every private zone (Microsoft.Network/privateDnsZones): its
+  record-set count and each virtual network link, with auto-registration and the link's
+  resolution policy.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_dns_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # DNSSEC signing of public zones (sc-20, sc-21)
+  - KSI-SVC-VCM   # DS records let resolvers validate the authenticity of zone data
+  - KSI-CNA-ULN   # private zones and the virtual networks they resolve for
+
+evidence_set:
+  reference_id: EVD-AZURE-DNS-CONFIG
+  name: Azure DNS Zone Configuration and DNSSEC
+  instructions: >
+    Script: fetcher.py. Azure SDK calls: azure-mgmt-dns DnsManagementClient zones.list() for public
+    zones; for each, ARM GET {zone id}/dnssecConfigs/default?api-version=2023-07-01-preview (the SDK has
+    no DNSSEC operation). An HTTP 404 "DNSSEC is not enabled" is recorded as dnssec_enabled false, not as
+    a collection failure. dnssec_enabled is true only when the config exists, its provisioningState is
+    Succeeded and it carries at least one signing key. azure-mgmt-privatedns PrivateDnsManagementClient
+    private_zones.list() and virtual_network_links.list(resource_group, zone) for private zones.
+    summary.dnssec_enabled_public_zones over summary.total_public_zones is the DNSSEC coverage.
