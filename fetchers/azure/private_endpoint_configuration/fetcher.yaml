@@ -60,9 +60,11 @@ evidence_set:
     checked_resource_id is the resource whose public access is read: the target itself, except for an
     App Service slot, which is private-linked through its parent site with group id "sites-<slot>"
     and is checked at {site}/slots/<slot> (target_slot names it). target_lookup_status is found,
-    not_found (its subscription is readable and the resource is gone), not_visible (azure-mgmt-subscription
-    subscriptions.list() does not return its subscription, so its existence cannot be checked) or
-    unknown (the lookup failed; also sets metadata.partial_failure). target_public_network_access is
+    not_found (the credential can read the resource's resource group and the resource is not in it),
+    not_visible (its subscription is not returned by azure-mgmt-subscription subscriptions.list(), or
+    its resource group is not among the resource groups Resource Graph's ResourceContainers table
+    returns to this credential; a deleted resource group also lands here) or unknown (the lookup
+    failed; also sets metadata.partial_failure). target_public_network_access is
     the checked resource's raw properties.publicNetworkAccess; target_public_network_access_state is
     disabled, enabled or unset (no value) when the resource was read, else its lookup status, and target_public_network_access_disabled is true only for "Disabled".
     unset is reported apart from enabled because its meaning is service-specific: a storage account

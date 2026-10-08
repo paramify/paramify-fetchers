@@ -49,29 +49,39 @@ evidence_set:
   instructions: >
     Script: fetcher.py. Azure SDK calls: azure-mgmt-privatedns PrivateDnsManagementClient
     private_zones.list(), and for each zone virtual_network_links.list(resource_group, zone) and
-    record_sets.list(resource_group, zone). SOA records are omitted. Two azure-mgmt-resourcegraph
-    queries, not scoped to a subscription so resources in other subscriptions the credential can read
-    still resolve: every virtual network with its address prefixes, and every network interface owned
-    by a private endpoint with its private IPs and properties.ipConfigurations[].properties
-    .privateLinkConnectionProperties.fqdns. For an A record in a zone named privatelink.<suffix>, the
-    record's public name is <record>.<suffix>; private_endpoint_status is backed when one of its IPs
-    belongs to a private endpoint that serves that public name, ip_mismatch when the IP belongs to a
-    private endpoint serving a different name, stale when no private endpoint holds the IP and the IP
-    falls inside a virtual network the credential can read (a record left behind by a deleted
-    endpoint), and unverified when no visible private endpoint holds the IP and it lies outside every
-    readable virtual network (the endpoint may live in a subscription this credential cannot read).
-    Overlapping address space across subscriptions can make an unreadable endpoint's record read as
-    stale. A record is unknown, never stale, when the endpoint or virtual network query failed.
-    virtual_network_status on a link is found, not_found (the VNet's subscription is readable and the
-    VNet is gone), not_visible (azure-mgmt-subscription subscriptions.list() does not return the
-    VNet's subscription, so its existence cannot be checked) or unknown (a lookup failed). Any
-    unknown also sets metadata.partial_failure. Records in non-privatelink zones and the zone apex have
-    private_endpoint_status null. resolution_policy NxDomainRedirect means names missing from the
-    zone fall back to public resolution. summary.duplicate_zone_names lists zone names that exist more
-    than once, with the VNets linked to all copies; Azure blocks linking one VNet to two zones of the
-    same name, so duplicates mean different VNets resolve those names differently.
+    record_sets.list(resource_group, zone). SOA records are omitted. azure-mgmt-resourcegraph queries,
+    not scoped to a subscription so resources in other subscriptions the credential can read still
+    resolve: every virtual network with its address prefixes; every network interface owned by a
+    private endpoint, with its private IPs and properties.ipConfigurations[].properties
+    .privateLinkConnectionProperties.fqdns; every private DNS zone and zone link; and the resource
+    groups the credential can read (ResourceContainers).
+    Each IP of an A record in a privatelink.* zone gets a status in ip_address_statuses: backed when a
+    private endpoint holds the IP and one of its FQDNs is the record's full name or starts with the
+    record's own name (the record name, not a public name derived from the zone, because Key Vault's
+    zone privatelink.vaultcore.azure.net serves <vault>.vault.azure.net and AKS FQDNs keep the
+    privatelink label; an endpoint that publishes no FQDNs is matched by IP alone); ip_mismatch when a
+    private endpoint holds the IP but serves a different name; stale when no private endpoint holds
+    the IP and it falls inside a virtual network the credential can read (a record left behind by a
+    deleted endpoint); unverified when no visible private endpoint holds it and it lies outside every
+    readable virtual network (the endpoint may be in a subscription this credential cannot read);
+    unknown when the endpoint or virtual network query failed, never stale. The record's
+    private_endpoint_status is backed only when every IP is backed, partially_backed when some are
+    (so a dead IP next to a live one is not hidden), and otherwise the most serious of ip_mismatch,
+    stale, unknown, unverified. Overlapping address space across subscriptions can make an unreadable
+    endpoint's record read as stale. Records in non-privatelink zones and the zone apex have
+    private_endpoint_status null.
+    virtual_network_status on a link is found; not_found when the credential can read the VNet's
+    resource group and the VNet is not in it; not_visible when its subscription or resource group is
+    not readable to this credential (a deleted resource group also lands here); unknown when a lookup
+    failed. Any unknown also sets metadata.partial_failure. resolution_policy NxDomainRedirect means
+    names missing from the zone fall back to public resolution.
+    summary.duplicate_zone_names lists zone names in this subscription that exist more than once
+    across every subscription the credential can read, with the VNets linked to all copies;
+    duplicate_zone_names_scope is readable_subscriptions, or target_subscription when the
+    cross-subscription query failed. Azure blocks linking one VNet to two zones of the same name, so
+    duplicates mean different VNets resolve those names differently.
     summary.privatelink_records_backed over summary.privatelink_a_records is the share of privatelink
-    records that resolve to a live private endpoint; summary.privatelink_records_unverified and
+    records that resolve only to live private endpoints. summary.privatelink_records_unverified and
     summary.links_to_unreadable_virtual_networks are non-zero when the credential cannot read every
     subscription the zones serve, and fall to zero once it can. provider_registration_status
     (registered / not_registered / unknown) is the Microsoft.Network resource provider's state, so

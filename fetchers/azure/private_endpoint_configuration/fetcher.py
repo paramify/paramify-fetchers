@@ -25,12 +25,12 @@ from azure_common import (  # noqa: E402
     lookup_status,
     model_attr,
     provider_registration_status,
+    readable_scopes,
     report_failure,
     resolve_subscription,
     resource_graph_rows,
     resource_group_from_id,
     sanitize_for_filename,
-    visible_subscription_ids,
     write_evidence,
 )
 
@@ -174,11 +174,11 @@ def public_access_state(row, status: str) -> str:
     return "unset"
 
 
-def target_record(conn: dict, lookups: dict, failed: set, visible) -> dict:
+def target_record(conn: dict, lookups: dict, failed: set, scopes) -> dict:
     """The connection plus what Resource Graph says about the resource it governs."""
     key = (conn.get("checked_resource_id") or "").lower()
     row = lookups.get(key)
-    status = lookup_status(conn.get("checked_resource_id"), row is not None, key not in failed, visible)
+    status = lookup_status(conn.get("checked_resource_id"), row is not None, key not in failed, scopes)
     pna = (row or {}).get("public_network_access")
     return {
         **conn,
@@ -191,7 +191,7 @@ def target_record(conn: dict, lookups: dict, failed: set, visible) -> dict:
     }
 
 
-def subnet_record(subnet_id, subnets: dict, failed_vnets: set, visible) -> dict:
+def subnet_record(subnet_id, subnets: dict, failed_vnets: set, scopes) -> dict:
     """The endpoint subnet's policy setting and attached NSG / route table."""
     row = subnets.get((subnet_id or "").lower())
     vnet_ok = (virtual_network_id(subnet_id) or "").lower() not in failed_vnets
@@ -199,7 +199,7 @@ def subnet_record(subnet_id, subnets: dict, failed_vnets: set, visible) -> dict:
     nsg_id = (row or {}).get("nsg_id")
     nsg_applies = str(policies or "").lower() in NSG_POLICIES
     return {
-        "subnet_lookup_status": lookup_status(subnet_id, row is not None, vnet_ok, visible),
+        "subnet_lookup_status": lookup_status(subnet_id, row is not None, vnet_ok, scopes),
         "subnet_private_endpoint_network_policies": policies,
         "subnet_network_security_group_id": nsg_id,
         "subnet_route_table_id": (row or {}).get("route_table_id"),
@@ -210,9 +210,9 @@ def subnet_record(subnet_id, subnets: dict, failed_vnets: set, visible) -> dict:
 
 
 def endpoint_record(
-    pe: dict, zone_groups: list, lookups: dict, failed: set, subnets: dict, failed_vnets: set, visible
+    pe: dict, zone_groups: list, lookups: dict, failed: set, subnets: dict, failed_vnets: set, scopes
 ) -> dict:
-    connections = [target_record(c, lookups, failed, visible) for c in pe["connections"]]
+    connections = [target_record(c, lookups, failed, scopes) for c in pe["connections"]]
     statuses = [c["status"] for c in connections]
     ips = []
     for nic_id in pe["network_interface_ids"]:
@@ -222,7 +222,7 @@ def endpoint_record(
     )
     return {
         **pe,
-        **subnet_record(pe.get("subnet_id"), subnets, failed_vnets, visible),
+        **subnet_record(pe.get("subnet_id"), subnets, failed_vnets, scopes),
         "resource_group": resource_group_from_id(pe.get("id")),
         "connections": connections,
         "connection_status": statuses[0] if len(set(statuses)) == 1 else ("Mixed" if statuses else None),
@@ -386,10 +386,10 @@ def collect_endpoints(subscription_id, cred, collector: Collector) -> list[dict]
     lookups, failed = lookup_by_ids(cred, ids, lookup_query, "lookup", collector)
     vnet_ids = [virtual_network_id(pe["subnet_id"]) for pe in endpoints]
     subnets, failed_vnets = lookup_by_ids(cred, vnet_ids, subnet_query, "subnet lookup", collector)
-    visible = visible_subscription_ids(cred, collector) if endpoints else set()
+    scopes = readable_scopes(cred, collector) if endpoints else None
 
     records = [
-        endpoint_record(pe, zone_groups[pe["id"]], lookups, failed, subnets, failed_vnets, visible)
+        endpoint_record(pe, zone_groups[pe["id"]], lookups, failed, subnets, failed_vnets, scopes)
         for pe in endpoints
     ]
     return sorted(records, key=lambda r: r.get("id") or "")
