@@ -1,8 +1,9 @@
-"""The two kinds of fetcher, as the console names and groups them.
+"""The kinds of fetcher, as the console names and groups them.
 
-A fetcher either asserts a configuration state (evidence) or hands over a report
-a scanner already produced (an issue report — see docs/issue_report_fetchers.md).
-The kind, not the platform, decides where the output goes, whether it is
+A fetcher asserts a configuration state (evidence), lists every asset of some
+kind for Paramify's Inventory (an inventory — see docs/inventory_fetchers.md),
+or hands over a report a scanner already produced (an issue report — see
+docs/issue_report_fetchers.md). The kind, not the platform, decides where the output goes, whether it is
 enveloped, and which key sends it, so everywhere the console lists fetchers it
 groups by kind first and platform second.
 
@@ -16,11 +17,13 @@ from __future__ import annotations
 from typing import Callable, Dict, List, Optional, Tuple
 
 EVIDENCE = "evidence"
+INVENTORY = "inventory"
 SCAN_REPORT = "issue_report"
 
 # kind -> (section heading, singular noun), in display order.
 _NAMES: Dict[str, Tuple[str, str]] = {
     EVIDENCE: ("Evidence", "evidence"),
+    INVENTORY: ("Inventory", "inventory"),
     SCAN_REPORT: ("Scan reports", "scan report"),
 }
 

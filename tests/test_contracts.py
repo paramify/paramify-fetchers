@@ -134,7 +134,8 @@ def test_template_yaml_matches_schema(yaml_path: Path) -> None:
 
 def test_every_fetcher_declares_the_identity_its_kind_needs() -> None:
     """An evidence fetcher needs an evidence_set to reach an evidence set; an
-    issue report needs an issue_report block to reach an assessment. The schema
+    issue report needs an issue_report block to reach an assessment; an
+    inventory needs an evidence_set for its pipeline to read. The schema
     enforces this per file — this asserts it across the discovered set, so a
     fetcher that would be silently ignored by both uploaders fails the suite.
     """
@@ -143,6 +144,9 @@ def test_every_fetcher_declares_the_identity_its_kind_needs() -> None:
         if f.is_issue_report:
             if f.issue_report is None or f.evidence_set is not None:
                 missing.append(f"{name}: kind=issue_report but identity blocks are wrong")
+        elif f.is_inventory:
+            if f.evidence_set is None or f.issue_report is not None:
+                missing.append(f"{name}: kind=inventory but identity blocks are wrong")
         elif f.issue_report is not None:
             missing.append(f"{name}: kind=evidence but declares an issue_report block")
     assert not missing, "\n".join(missing)

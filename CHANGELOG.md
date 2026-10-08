@@ -12,6 +12,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **A third fetcher kind, `kind: inventory`**, for fetchers that list every
+  asset of a kind for Paramify's Inventory. An inventory is evidence with a
+  record contract: the payload holds `data`, one record per asset each with a
+  unique `unique_asset_identifier`, and `records_included`. The record fields
+  are each fetcher's own. It needs an `evidence_set` and goes to it through
+  `paramify upload`, where an inventory pipeline attached to the set builds
+  Inventory items. A pipeline reads the file as the whole estate, so the
+  runner checks every inventory output when it envelopes it and records the
+  verdict in `metadata.inventory`, and the uploader does not send one that is
+  incomplete: a failed run, a contract break, withheld records, or no records
+  at all. The TUI lists inventories in their own section. Start from
+  `fetchers/_template_inventory/`; see `docs/inventory_fetchers.md`.
 - **A Wiz category with twelve fetchers**, for Wiz commercial and Wiz for
   Government, sharing one GraphQL client and one service account. Eleven are
   evidence fetchers: `wiz_scan_coverage`, `wiz_posture_issues`,
