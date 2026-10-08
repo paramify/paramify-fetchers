@@ -1,0 +1,68 @@
+name: azure_vpn_gateway_configuration
+version: 0.1.0
+description: >
+  For every Azure VPN Gateway (Microsoft.Network/virtualNetworkGateways) in the subscription,
+  reports its type, SKU, generation, active-active and BGP settings and its point-to-site
+  configuration (tunnel protocols and authentication types). For every gateway connection
+  (site-to-site IPsec, VNet-to-VNet) it reports the IKE version, any custom IPsec/IKE policy
+  with its encryption, integrity, DH and PFS groups and SA lifetimes, flags weak algorithms, and
+  for every local network gateway its peer address and address space. Pre-shared keys, RADIUS
+  secrets and authorization keys are never requested or recorded.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_vpn_gateway_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # IPsec/IKE encryption of site-to-site and remote-access links
+  - KSI-CNA-RNT   # which peers and address spaces the gateways accept traffic from
+  - KSI-CNA-OFA   # active-active gateways
+
+evidence_set:
+  reference_id: EVD-AZURE-VPN-GATEWAY-CONFIG
+  name: Azure VPN Gateway and Connection Configuration
+  instructions: >
+    Script: fetcher.py. Azure SDK calls: azure-mgmt-resource resource_groups.list(), then per resource
+    group azure-mgmt-network virtual_network_gateways.list(rg), virtual_network_gateway_connections.list(rg)
+    and local_network_gateways.list(rg) (these operations have no subscription-wide list), then
+    virtual_network_gateway_connections.get(rg, name) per connection, because connection_status is only
+    populated on a GET. Fields are
+    projected from an allow-list, so shared_key, authorization_key and radius_server_secret never enter
+    the evidence. An IPsec or Vnet2Vnet connection is ikev2 when connection_protocol is IKEv2, false when IKEv1, and null
+    (counted in summary.ike_version_unknown_connections) when Azure returns no protocol.
+    explicit_ipsec_policy is true when the connection carries a custom ipsecPolicies entry;
+    ipsec_policy_source is "custom" or "azure_default". weak_ipsec_algorithms lists any DES, 3DES, MD5,
+    SHA1, DH group 1/2 or PFS None in a custom policy; with no custom policy it lists the weak proposals
+    of Azure's default policy, whose IKEv2 main mode uses only DH Group 2
+    (learn.microsoft.com/azure/vpn-gateway/vpn-gateway-about-compliance-crypto), suffixed
+    "(azure_default)". p2s_enabled is true only when the gateway has a client address pool: the list call
+    returns a placeholder point-to-site block on gateways that never configured it.
+    summary.ikev2_connections over summary.ipsec_connections is the IKEv2 coverage.
+    provider_registration_status is for Microsoft.Network.

@@ -72,6 +72,9 @@ azure-mgmt-sql>=4.0.0,<5
 azure-mgmt-rdbms>=10.1.1,<11
 azure-mgmt-postgresqlflexibleservers>=2.0.0,<3
 azure-mgmt-cosmosdb>=10.0.0,<11
+azure-mgmt-redisenterprise>=3.1.0,<4
+azure-mgmt-dns>=9.0.0,<10
+azure-mgmt-privatedns>=2.0.0,<3
 
 # Compute and containers.
 azure-mgmt-compute>=38.2.0,<39

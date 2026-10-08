@@ -11,9 +11,9 @@
 
     "kind": {
       "type": "string",
-      "enum": ["evidence", "issue_report"],
+      "enum": ["evidence", "issue_report", "inventory"],
       "default": "evidence",
-      "description": "What class of output this fetcher produces. `evidence` (the default) writes a JSON payload the runner wraps in the evidence envelope and the paramify_evidence uploader attaches to an evidence set. `issue_report` writes the source tool's own file (a scan report) UNMODIFIED into <run>/issue-reports/, where the paramify_issues uploader posts it to an assessment intake. Issue reports are never enveloped: Paramify's intake parser reads the vendor's own structure, so anything added to the file breaks it."
+      "description": "What class of output this fetcher produces. `evidence` (the default) writes a JSON payload the runner wraps in the evidence envelope and the paramify_evidence uploader attaches to an evidence set. `inventory` is evidence with a record contract: the payload's `data` is one record per asset, each with a `unique_asset_identifier`, for a Paramify inventory pipeline attached to the evidence set to turn into Inventory items. The uploader sends an inventory only when the run collected all of it (see docs/inventory_fetchers.md). `issue_report` writes the source tool's own file (a scan report) UNMODIFIED into <run>/issue-reports/, where the paramify_issues uploader posts it to an assessment intake. Issue reports are never enveloped: Paramify's intake parser reads the vendor's own structure, so anything added to the file breaks it."
     },
 
     "runtime": {
@@ -181,6 +181,23 @@
       },
       "else": {
         "not": { "required": ["issue_report"] }
+      }
+    },
+    {
+      "$comment": "An inventory reaches Paramify through an evidence set (an inventory pipeline attached to the set reads the artifact), so it needs one, and its records live in a JSON payload.",
+      "if": {
+        "properties": { "kind": { "const": "inventory" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "required": ["evidence_set"],
+        "properties": {
+          "output": {
+            "properties": {
+              "type": { "const": "json" }
+            }
+          }
+        }
       }
     },
     {
