@@ -1,0 +1,79 @@
+name: azure_private_dns_zone_configuration
+version: 0.1.0
+description: >
+  Inventories Azure private DNS zones (Microsoft.Network/privateDnsZones) in the subscription. For
+  every zone: its virtual network links (auto-registration, resolution policy, link state, and
+  whether the linked VNet still exists) and its record sets. For every A record in a privatelink.*
+  zone: whether it resolves to a live private endpoint that serves that name, so stale records left
+  behind by deleted endpoints are visible. Zone names that exist more than once are listed with the
+  VNets each copy serves.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_private_dns_zone_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-ULN   # which virtual networks each private zone resolves for
+  - KSI-CNA-RNT   # privatelink names resolve to private endpoints, keeping PaaS traffic off the public path
+
+evidence_set:
+  reference_id: EVD-AZURE-PRIVATE-DNS-ZONE-CONFIG
+  name: Azure Private DNS Zone Configuration
+  instructions: >
+    Script: fetcher.py. Azure SDK calls: azure-mgmt-privatedns PrivateDnsManagementClient
+    private_zones.list(), and for each zone virtual_network_links.list(resource_group, zone) and
+    record_sets.list(resource_group, zone). SOA records are omitted. Two azure-mgmt-resourcegraph
+    queries, not scoped to a subscription so resources in other subscriptions the credential can read
+    still resolve: every virtual network with its address prefixes, and every network interface owned
+    by a private endpoint with its private IPs and properties.ipConfigurations[].properties
+    .privateLinkConnectionProperties.fqdns. For an A record in a zone named privatelink.<suffix>, the
+    record's public name is <record>.<suffix>; private_endpoint_status is backed when one of its IPs
+    belongs to a private endpoint that serves that public name, ip_mismatch when the IP belongs to a
+    private endpoint serving a different name, stale when no private endpoint holds the IP and the IP
+    falls inside a virtual network the credential can read (a record left behind by a deleted
+    endpoint), and unverified when no visible private endpoint holds the IP and it lies outside every
+    readable virtual network (the endpoint may live in a subscription this credential cannot read).
+    Overlapping address space across subscriptions can make an unreadable endpoint's record read as
+    stale. A record is unknown, never stale, when the endpoint or virtual network query failed.
+    virtual_network_status on a link is found, not_found (the VNet's subscription is readable and the
+    VNet is gone), not_visible (azure-mgmt-subscription subscriptions.list() does not return the
+    VNet's subscription, so its existence cannot be checked) or unknown (a lookup failed). Any
+    unknown also sets metadata.partial_failure. Records in non-privatelink zones and the zone apex have
+    private_endpoint_status null. resolution_policy NxDomainRedirect means names missing from the
+    zone fall back to public resolution. summary.duplicate_zone_names lists zone names that exist more
+    than once, with the VNets linked to all copies; Azure blocks linking one VNet to two zones of the
+    same name, so duplicates mean different VNets resolve those names differently.
+    summary.privatelink_records_backed over summary.privatelink_a_records is the share of privatelink
+    records that resolve to a live private endpoint; summary.privatelink_records_unverified and
+    summary.links_to_unreadable_virtual_networks are non-zero when the credential cannot read every
+    subscription the zones serve, and fall to zero once it can. provider_registration_status
+    (registered / not_registered / unknown) is the Microsoft.Network resource provider's state, so
+    total_zones 0 on an unregistered subscription reads as "service not in use" rather than "in use,
+    none deployed".

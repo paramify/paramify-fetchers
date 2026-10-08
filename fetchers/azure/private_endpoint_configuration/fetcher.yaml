@@ -1,0 +1,88 @@
+name: azure_private_endpoint_configuration
+version: 0.1.0
+description: >
+  Inventories Azure private endpoints (Microsoft.Network/privateEndpoints) in the subscription. For
+  every endpoint: the target resource and sub-resource (group id) it connects to, the connection's
+  approval status (Approved / Pending / Rejected / Disconnected), the subnet and virtual network it
+  sits in, its private IP addresses, and the private DNS zone groups that publish its records. For
+  every target resource: whether it still exists and whether its public network access is disabled,
+  so the evidence shows that traffic to the service stays on the private network. For every endpoint
+  subnet: whether its network security group and route table apply to private endpoint traffic.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_private_endpoint_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-RNT   # PaaS reached over private endpoints, with public network access disabled on the target
+  - KSI-CNA-ULN   # the subnets each endpoint is placed in, and whether their NSG filters endpoint traffic
+  - KSI-CNA-MAT   # target resources' public network access
+
+evidence_set:
+  reference_id: EVD-AZURE-PRIVATE-ENDPOINT-CONFIG
+  name: Azure Private Endpoint Configuration
+  instructions: >
+    Script: fetcher.py. Azure SDK calls: azure-mgmt-network NetworkManagementClient
+    private_endpoints.list_by_subscription(), and private_dns_zone_groups.list(endpoint, resource_group)
+    for each endpoint. Target resources and the endpoints' network interfaces are then read in one
+    azure-mgmt-resourcegraph ResourceGraphClient query (Resources | where id in~ (...)), not scoped to a
+    subscription so targets in other subscriptions the credential can read still resolve.
+    connections[] holds both auto-approved and manual (manual: true) private link connections;
+    connection_status is their shared status, or "Mixed" when they differ, and approved is true only
+    when every connection is Approved. Disconnected usually means the target resource was deleted.
+    checked_resource_id is the resource whose public access is read: the target itself, except for an
+    App Service slot, which is private-linked through its parent site with group id "sites-<slot>"
+    and is checked at {site}/slots/<slot> (target_slot names it). target_lookup_status is found,
+    not_found (its subscription is readable and the resource is gone), not_visible (azure-mgmt-subscription
+    subscriptions.list() does not return its subscription, so its existence cannot be checked) or
+    unknown (the lookup failed; also sets metadata.partial_failure). target_public_network_access is
+    the checked resource's raw properties.publicNetworkAccess; target_public_network_access_state is
+    disabled, enabled or unset (no value) when the resource was read, else its lookup status, and target_public_network_access_disabled is true only for "Disabled".
+    unset is reported apart from enabled because its meaning is service-specific: a storage account
+    without the property allows public traffic subject to its networkAcls, while Azure Managed Redis
+    returns null only for clusters created on an old API version and the property cannot be read
+    back as a value for them.
+    target_network_acls_default_action is the target's properties.networkAcls.defaultAction (storage
+    and similar services); summary.target_resources_public_access_firewall_deny_default counts targets
+    whose public access is not disabled but whose firewall defaults to Deny (reachable only from
+    allow-listed networks). connections_by_target_type keys are lowercased because ARM ids keep the
+    creator's casing. Each endpoint's subnet is read from its virtual network in the same Resource
+    Graph lookup: subnet_private_endpoint_network_policies is the subnet's
+    privateEndpointNetworkPolicies. Azure applies a subnet's NSG to private endpoint traffic only when
+    it is Enabled or NetworkSecurityGroupEnabled (subnet_nsg_applies_to_endpoint), and its route table
+    only when Enabled or RouteTableEnabled; endpoint_nsg_enforced is true when the NSG applies and
+    one is attached. It says the NSG is in the path, not what its rules allow; the rules themselves
+    are evidenced by azure_network_security_groups. summary.endpoint_subnets_with_nsg_not_applied counts subnets with an
+    NSG attached that Azure does not apply to their endpoints. private_ip_addresses come from the endpoint's
+    network interfaces. summary.approved_endpoints over summary.total_private_endpoints is approval
+    coverage; summary.target_resources_public_access_disabled over summary.target_resources_found is
+    the share of private-linked services closed to the public internet;
+    summary.target_resources_public_access_enabled and summary.target_resources_public_access_unset
+    split the remainder.
