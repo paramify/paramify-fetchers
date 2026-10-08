@@ -105,20 +105,31 @@ def project_failover_group(group) -> dict:
 
 # --- pure transforms (flat dicts in, evidence records out) ---
 
-def database_record(database: dict, retention_days, policy_found, ltr: dict | None) -> dict:
+def meets_minimum(retention_days, policy_found) -> bool | None:
+    if policy_found is False:
+        return False
+    if policy_found is None or not isinstance(retention_days, int):
+        return None
+    return retention_days >= MINIMUM_RETENTION_DAYS
+
+
+def database_record(
+    database: dict, retention_days, policy_found, ltr: dict | None, ltr_found
+) -> dict:
     ltr = ltr or {}
     tiers = ("weekly_retention", "monthly_retention", "yearly_retention")
     return {
         **database,
         "short_term_retention_policy_found": policy_found,
         "short_term_retention_days": retention_days,
-        "short_term_retention_at_least_7_days": (
-            isinstance(retention_days, int) and retention_days >= MINIMUM_RETENTION_DAYS
-        ),
+        "short_term_retention_at_least_7_days": meets_minimum(retention_days, policy_found),
         "long_term_retention": {
+            "policy_found": ltr_found,
             **{tier: ltr.get(tier) for tier in tiers},
             "week_of_year": ltr.get("week_of_year"),
-            "configured": any(ltr_tier_on(ltr.get(tier)) for tier in tiers),
+            "configured": (
+                None if ltr_found is None else any(ltr_tier_on(ltr.get(tier)) for tier in tiers)
+            ),
         },
     }
 
@@ -132,14 +143,35 @@ def instance_ids_in(group: dict) -> set:
     return ids
 
 
+def merge_failover_group_views(views: list[dict]) -> dict:
+    """One record per group: Azure lists a group once from each region it spans, each with its own id."""
+    unique = sorted({lower(v.get("id")): v for v in views}.values(), key=lambda v: v.get("id") or "")
+    primary = next((v for v in unique if lower(v.get("replication_role")) == "primary"), unique[0])
+    return {
+        **primary,
+        "regional_views": [
+            {
+                "id": v.get("id"),
+                "resource_group": v.get("resource_group"),
+                "location": v.get("location"),
+                "replication_role": v.get("replication_role"),
+            }
+            for v in unique
+        ],
+    }
+
+
 def instance_record(
-    instance: dict, databases: list[dict] | None, failover_groups: list[dict]
+    instance: dict,
+    databases: list[dict] | None,
+    failover_groups: list[dict],
+    failover_groups_collected: bool,
 ) -> dict:
     resource_id = instance.get("id")
     requested = instance.get("requested_backup_storage_redundancy")
     current = instance.get("current_backup_storage_redundancy")
-    groups = [g["name"] for g in failover_groups if lower(resource_id) in instance_ids_in(g)]
-    user_databases = [d for d in databases or [] if not d["is_system_database"]]
+    groups = sorted({g["name"] for g in failover_groups if lower(resource_id) in instance_ids_in(g)})
+    users = None if databases is None else [d for d in databases if not d["is_system_database"]]
     return {
         **instance,
         "backup_storage_zone_redundant": lower(current) in ZONE_REDUNDANT_STORAGE,
@@ -148,36 +180,45 @@ def instance_record(
             requested and current and lower(requested) != lower(current)
         ),
         "zone_redundant": bool(instance.get("zone_redundant") or False),
-        "failover_groups": sorted(groups),
-        "in_failover_group": bool(groups),
+        "failover_groups": groups,
+        "in_failover_group": True if groups else (False if failover_groups_collected else None),
         "databases_collected": databases is not None,
         "databases": databases or [],
-        "total_user_databases": len(user_databases),
-        "databases_below_7_days": sum(
-            1 for d in user_databases if d["short_term_retention_policy_found"]
-            and not d["short_term_retention_at_least_7_days"]
+        "total_user_databases": None if users is None else len(users),
+        "databases_below_7_days": None if users is None else sum(
+            1 for d in users if d["short_term_retention_policy_found"]
+            and d["short_term_retention_at_least_7_days"] is False
         ),
     }
 
 
-def summarize(instances: list[dict], failover_groups: list[dict]) -> dict:
+def summarize(
+    instances: list[dict], failover_groups: list[dict], failover_groups_collected: bool
+) -> dict:
     databases = [d for i in instances for d in i["databases"] if not d["is_system_database"]]
     redundancy: dict[str, int] = {}
     for i in instances:
         key = i.get("current_backup_storage_redundancy") or "unknown"
         redundancy[key] = redundancy.get(key, 0) + 1
+    all_listed = all(i["databases_collected"] for i in instances)
     return {
         "total_managed_instances": len(instances),
-        "total_user_databases": len(databases),
+        "total_user_databases": len(databases) if all_listed else None,
         "databases_retention_at_least_7_days": sum(
-            1 for d in databases if d["short_term_retention_at_least_7_days"]
+            1 for d in databases if d["short_term_retention_at_least_7_days"] is True
         ),
-        "databases_retention_below_7_days": sum(i["databases_below_7_days"] for i in instances),
+        "databases_retention_below_7_days": sum(i["databases_below_7_days"] or 0 for i in instances),
         "databases_missing_retention_policy": sum(
             1 for d in databases if d["short_term_retention_policy_found"] is False
         ),
+        "databases_retention_unknown": sum(
+            1 for d in databases if d["short_term_retention_at_least_7_days"] is None
+        ),
         "databases_with_long_term_retention": sum(
-            1 for d in databases if d["long_term_retention"]["configured"]
+            1 for d in databases if d["long_term_retention"]["configured"] is True
+        ),
+        "databases_long_term_retention_unknown": sum(
+            1 for d in databases if d["long_term_retention"]["configured"] is None
         ),
         "instances_by_current_backup_storage_redundancy": redundancy,
         "instances_backup_storage_zone_redundant": sum(
@@ -185,40 +226,47 @@ def summarize(instances: list[dict], failover_groups: list[dict]) -> dict:
         ),
         "instances_stopped": sum(1 for i in instances if lower(i.get("state")) == "stopped"),
         "instances_zone_redundant": sum(1 for i in instances if i["zone_redundant"]),
-        "instances_in_failover_group": sum(1 for i in instances if i["in_failover_group"]),
-        "total_instance_failover_groups": len(failover_groups),
+        "instances_in_failover_group": sum(1 for i in instances if i["in_failover_group"] is True),
+        "instances_failover_group_unknown": sum(1 for i in instances if i["in_failover_group"] is None),
+        "total_instance_failover_groups": len(failover_groups) if failover_groups_collected else None,
         "failover_groups_manual_policy": sum(
             1 for g in failover_groups if lower(g.get("failover_policy")) == "manual"
-        ),
+        ) if failover_groups_collected else None,
     }
 
 
 # --- collection (lazy azure imports) ---
 
-def collect(subscription_id, cred, collector: Collector) -> tuple[list[dict], list[dict]]:
+def collect(subscription_id, cred, collector: Collector) -> tuple[list[dict], list[dict], set]:
     client = sql_client(subscription_id, cred, collector)
     if client is None:
-        return [], []
+        return [], [], set()
     projected = list_instances(client, collector, project_instance)
 
-    failover_groups: dict[str, dict] = {}
+    views: dict[tuple, list[dict]] = {}
+    unlisted: set = set()
     for group_name, location in sorted({(i["resource_group"], i.get("location")) for i in projected}):
         if not location:
+            unlisted.add((group_name, location))
             continue
-        for group in collector.guard(
+        listed = collector.guard(
             f"sql.instance_failover_groups.list_by_location ({group_name}, {location})",
             lambda: [
                 project_failover_group(g)
                 for g in client.instance_failover_groups.list_by_location(group_name, location)
             ],
-            default=[],
-        ):
-            failover_groups[lower(group.get("id"))] = {
-                **group,
-                "resource_group": group_name,
-                "location": location,
-            }
-    groups = sorted(failover_groups.values(), key=lambda g: g.get("id") or "")
+        )
+        if listed is None:
+            unlisted.add((group_name, location))
+            continue
+        for group in listed:
+            key = (lower(group.get("name")), tuple(sorted(instance_ids_in(group))))
+            views.setdefault(key, []).append(
+                {**group, "resource_group": group_name, "location": location}
+            )
+    groups = sorted(
+        (merge_failover_group_views(v) for v in views.values()), key=lambda g: g.get("id") or ""
+    )
 
     instances: list[dict] = []
     for instance in projected:
@@ -228,7 +276,7 @@ def collect(subscription_id, cred, collector: Collector) -> tuple[list[dict], li
         for database in databases or []:
             db = database["name"]
             if database["is_system_database"]:
-                records.append(database_record(database, None, None, None))
+                records.append(database_record(database, None, None, None, None))
                 continue
             policy, found = get_optional(
                 collector,
@@ -237,7 +285,7 @@ def collect(subscription_id, cred, collector: Collector) -> tuple[list[dict], li
                     group_name, name, db, POLICY_NAME
                 ),
             )
-            ltr, _ = get_optional(
+            ltr, ltr_found = get_optional(
                 collector,
                 f"sql.managed_instance_long_term_retention_policies.get ({name}/{db})",
                 lambda: project_ltr_policy(
@@ -246,16 +294,19 @@ def collect(subscription_id, cred, collector: Collector) -> tuple[list[dict], li
                     )
                 ),
             )
-            records.append(database_record(database, model_attr(policy, "retention_days"), found, ltr))
+            records.append(
+                database_record(database, model_attr(policy, "retention_days"), found, ltr, ltr_found)
+            )
         instances.append(
             instance_record(
                 instance,
                 None if databases is None else sorted(records, key=lambda d: d.get("id") or ""),
                 groups,
+                (group_name, instance.get("location")) not in unlisted,
             )
         )
 
-    return sorted(instances, key=lambda i: i.get("id") or ""), groups
+    return sorted(instances, key=lambda i: i.get("id") or ""), groups, unlisted
 
 
 def main() -> int:
@@ -275,6 +326,7 @@ def main() -> int:
 
     instances: list[dict] = []
     groups: list[dict] = []
+    unlisted: set = set()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(
@@ -286,7 +338,7 @@ def main() -> int:
                 "Instance in use; reporting status not_registered",
                 subscription_id,
             )
-        instances, groups = collect(subscription_id, cred, collector)
+        instances, groups, unlisted = collect(subscription_id, cred, collector)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -305,7 +357,10 @@ def main() -> int:
             "instance_failover_groups": groups,
             "provider_registration_status": registration,
         },
-        summary={**summarize(instances, groups), "provider_registration_status": registration},
+        summary={
+            **summarize(instances, groups, not unlisted),
+            "provider_registration_status": registration,
+        },
     )
 
     filename = (

@@ -54,9 +54,14 @@ evidence_set:
     for a customer-managed key), `server_key_name`, `key_vault_key_uri`,
     `thumbprint` and `auto_rotation_enabled` (absent reads as false);
     `customer_managed_key`; null when the protector call failed.
-    `databases_collected` is false when the database list call failed. Per
+    `databases_collected` is false when the database list call failed, and
+    `total_user_databases` is then null. Per
     database: `is_system_database` (master, model, msdb, tempdb — kept in the
     evidence, not queried, left out of every count), `status`, `tde_state`
     (Enabled or Disabled) and `tde_enabled` (null when the TDE call failed, so an
     unanswered call is never read as unencrypted). `all_user_databases_tde_enabled`
-    is null for an instance with no user databases rather than a vacuous true.
+    is false when any user database is known Disabled, null when any TDE call
+    failed (and none is known Disabled) or the instance has no user databases,
+    and true only when every user database answered Enabled. Instance and
+    summary counts split user databases into TDE enabled, disabled and unknown;
+    the summary's `total_user_databases` is null when any database list failed.

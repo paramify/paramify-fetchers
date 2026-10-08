@@ -80,14 +80,16 @@ def project_administrator(admin) -> dict:
 # --- pure transforms (flat dicts in, evidence records out) ---
 
 # Proves a route, not that auditing is on; possible fix: query the destination workspace for recent SQLSecurityAuditEvents.
-def exports_audit_logs(settings: list[dict] | None) -> bool:
+def exports_audit_logs(settings: list[dict] | None) -> bool | None:
+    if settings is None:
+        return None
     return any(
         log["enabled"]
         and (
             lower(log.get("category")) == AUDIT_CATEGORY
             or lower(log.get("category_group")) in AUDIT_CATEGORY_GROUPS
         )
-        for setting in settings or []
+        for setting in settings
         for log in setting.get("logs") or []
     )
 
@@ -107,18 +109,23 @@ def instance_record(
         "minimal_tls_version_recommended": tls in RECOMMENDED_TLS_VERSIONS,
         "approved_private_endpoints": sum(1 for c in connections if lower(c.get("status")) == "approved"),
         "administrators": administrators,
-        "entra_administrator_configured": any(
-            lower(a.get("administrator_type")) == ADMINISTRATOR_TYPE_ENTRA for a in administrators or []
+        "entra_administrator_configured": None if administrators is None else any(
+            lower(a.get("administrator_type")) == ADMINISTRATOR_TYPE_ENTRA for a in administrators
         ),
         "azure_ad_only_authentication": entra_only,
         "diagnostic_settings": diagnostic_settings,
         "audit_logs_exported": exports_audit_logs(diagnostic_settings),
-        "audit_log_destinations": sorted(
+        "audit_log_destinations": None if diagnostic_settings is None else sorted(
             {
                 dest
-                for s in diagnostic_settings or []
+                for s in diagnostic_settings
                 if exports_audit_logs([s])
-                for dest in (s.get("workspace_id"), s.get("storage_account_id"), s.get("event_hub_name"))
+                for dest in (
+                    s.get("workspace_id"),
+                    s.get("storage_account_id"),
+                    # The hub name is optional (Azure then makes one per category); the rule id is not.
+                    s.get("event_hub_authorization_rule_id") or s.get("event_hub_name"),
+                )
                 if dest
             }
         ),
@@ -138,11 +145,13 @@ def summarize(instances: list[dict]) -> dict:
         "instances_minimal_tls_recommended": sum(
             1 for i in instances if i["minimal_tls_version_recommended"]
         ),
-        "instances_entra_administrator": sum(1 for i in instances if i["entra_administrator_configured"]),
+        "instances_entra_administrator": sum(
+            1 for i in instances if i["entra_administrator_configured"] is True
+        ),
         "instances_entra_only_authentication": sum(
             1 for i in instances if i["azure_ad_only_authentication"] is True
         ),
-        "instances_audit_logs_exported": sum(1 for i in instances if i["audit_logs_exported"]),
+        "instances_audit_logs_exported": sum(1 for i in instances if i["audit_logs_exported"] is True),
     }
 
 

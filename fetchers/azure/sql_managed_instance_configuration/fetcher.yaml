@@ -42,7 +42,7 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 ksis:
   - KSI-CNA-MAT   # public data endpoint off, private endpoints
-  - KSI-SVC-VCM   # Entra-only authentication, minimum TLS for machine connections
+  - KSI-IAM-APM   # Entra ID administrator and whether Entra-only auth is enforced
   - KSI-SVC-SIN   # minimum TLS version
   - KSI-MLA-LET   # SQL security audit events exported by a diagnostic setting
 
@@ -61,14 +61,22 @@ evidence_set:
     always reachable inside its own virtual network, so the public data endpoint
     is its only public path; `proxy_override` (Proxy, Redirect or Default);
     `minimal_tls_version` (None, 1.0, 1.1, 1.2) with
-    `minimal_tls_version_recommended` for 1.2 or higher; `private_endpoint_connections`
+    `minimal_tls_version_recommended` for 1.2 or higher (an omitted version reads
+    as false); `private_endpoint_connections`
     with each connection's status (Approved, Pending, Rejected);
     `administrators` (Entra admin type, login, sid, tenant) and
-    `entra_administrator_configured`; `azure_ad_only_authentication` (null when
-    the call failed). `diagnostic_settings` lists every setting with its
-    destinations and enabled log categories; `audit_logs_exported` is true when an
+    `entra_administrator_configured`; `azure_ad_only_authentication`.
+    `diagnostic_settings` lists every setting with its destinations (workspace,
+    storage account, Event Hub authorization rule and hub name) and enabled log
+    categories; `audit_logs_exported` is true when an
     enabled log is the SQLSecurityAuditEvents category or the audit or allLogs
-    category group. That proves audit records have a route out of the instance,
+    category group, and `audit_log_destinations` lists where those settings send
+    it (an Event Hub by its authorization rule id, since the hub name is
+    optional). A failed call leaves the fields derived from it null —
+    `administrators` and `entra_administrator_configured`,
+    `azure_ad_only_authentication`, and `diagnostic_settings`,
+    `audit_logs_exported` and `audit_log_destinations` — so an unanswered call
+    is never read as "off"; summary counts count only true values. That proves audit records have a route out of the instance,
     NOT that auditing is on: Managed Instance auditing is created and started in
     T-SQL (CREATE SERVER AUDIT ... TO EXTERNAL_MONITOR, STATE = ON), which no ARM
     call can read.

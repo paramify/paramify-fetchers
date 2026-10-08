@@ -70,8 +70,18 @@ def database_record(database: dict, tde_state) -> dict:
     }
 
 
+def all_enabled(flags: list) -> bool | None:
+    """False once any is known off; null while any is unanswered; never true over nothing."""
+    if any(f is False for f in flags):
+        return False
+    if not flags or any(f is None for f in flags):
+        return None
+    return True
+
+
 def instance_record(instance: dict, protector: dict | None, databases: list[dict] | None) -> dict:
-    users = [d for d in databases or [] if not d["is_system_database"]]
+    users = None if databases is None else [d for d in databases if not d["is_system_database"]]
+    tde = [d["tde_enabled"] for d in users or []]
     return {
         **instance,
         "encryption_protector": protector,
@@ -80,10 +90,11 @@ def instance_record(instance: dict, protector: dict | None, databases: list[dict
         ),
         "databases_collected": databases is not None,
         "databases": databases or [],
-        "total_user_databases": len(users),
-        "tde_enabled_user_databases": sum(1 for d in users if d["tde_enabled"] is True),
-        "tde_disabled_user_databases": sum(1 for d in users if d["tde_enabled"] is False),
-        "all_user_databases_tde_enabled": all(d["tde_enabled"] is True for d in users) if users else None,
+        "total_user_databases": None if users is None else len(users),
+        "tde_enabled_user_databases": tde.count(True),
+        "tde_disabled_user_databases": tde.count(False),
+        "tde_unknown_user_databases": tde.count(None),
+        "all_user_databases_tde_enabled": None if users is None else all_enabled(tde),
     }
 
 
@@ -94,9 +105,14 @@ def summarize(instances: list[dict]) -> dict:
         "instances_key_auto_rotation": sum(
             1 for i in instances if (i["encryption_protector"] or {}).get("auto_rotation_enabled")
         ),
-        "total_user_databases": sum(i["total_user_databases"] for i in instances),
+        "total_user_databases": (
+            sum(i["total_user_databases"] for i in instances)
+            if all(i["databases_collected"] for i in instances)
+            else None
+        ),
         "tde_enabled_user_databases": sum(i["tde_enabled_user_databases"] for i in instances),
         "tde_disabled_user_databases": sum(i["tde_disabled_user_databases"] for i in instances),
+        "tde_unknown_user_databases": sum(i["tde_unknown_user_databases"] for i in instances),
     }
 
 

@@ -64,17 +64,32 @@ evidence_set:
     `backup_storage_zone_redundant` is true only when the current value is Zone or
     GeoZone (Geo keeps its primary-region copies in a single availability zone);
     `backup_storage_geo_redundant` is true for Geo or GeoZone; `zone_redundant` is
-    compute zone redundancy, a separate setting from backup storage;
-    `failover_groups` names the instance failover groups whose instance pairs
-    include it. `databases_collected` is false when the database list call failed.
+    compute zone redundancy, a separate setting from backup storage (omitted
+    reads as false); `failover_groups` names the instance failover groups whose
+    instance pairs include it, and `in_failover_group` is null when the failover
+    group list for the instance's resource group and region failed and no other
+    region's list showed it in a group. `databases_collected` is false when the
+    database list call failed, and `total_user_databases` and
+    `databases_below_7_days` are then null.
     Per database: `is_system_database` (master, model, msdb, tempdb — kept in the
     evidence, not queried for retention, and left out of every count), `status`,
-    `earliest_restore_point`,
+    `earliest_restore_point`, `failover_group_id` (the group the database
+    replicates through, if any),
     `short_term_retention_days` (1-35; Azure's default is 7) with
     `short_term_retention_at_least_7_days`, `short_term_retention_policy_found`
-    (false when the GET returned 404), and `long_term_retention` (ISO 8601
-    durations; PT0S or absent means that tier is off, `configured` is true when any
-    tier is on). `instance_failover_groups` lists each group's `failover_policy`
-    (Manual or Automatic), replication role and state, and instance pairs. Summary
-    counts user databases at or above 7 days, below it, and missing a policy, and
-    instances by backup storage redundancy.
+    (false when the GET returned 404, null when it failed), and
+    `long_term_retention` with its own `policy_found` (ISO 8601 durations; PT0S
+    or absent means that tier is off, `configured` is true when any tier is on).
+    A failed retention call leaves `short_term_retention_at_least_7_days` or
+    `configured` null, never false. `instance_failover_groups` has one record per
+    group: Azure lists a group once from each region it spans, each with its own
+    resource id, so views are merged by group name and instance pairs. Each
+    record is the primary region's view, with `failover_policy` (Manual or
+    Automatic), replication role and state, instance pairs, and
+    `regional_views` listing every region's id and role. Summary counts user
+    databases at or above 7 days, below it, missing a policy, and unknown;
+    long-term retention configured and unknown; instances in a failover group and
+    unknown; and instances by backup storage redundancy. The summary's
+    `total_user_databases` is null when any database list failed, and
+    `total_instance_failover_groups` and `failover_groups_manual_policy` are null
+    when any failover group list failed.

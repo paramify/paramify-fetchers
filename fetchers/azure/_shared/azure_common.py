@@ -145,6 +145,7 @@ def diagnostic_setting_record(setting) -> Dict[str, Any]:
         "name": model_attr(setting, "name") or basename(model_attr(setting, "id")),
         "storage_account_id": model_attr(setting, "storage_account_id"),
         "workspace_id": model_attr(setting, "workspace_id"),
+        "event_hub_authorization_rule_id": model_attr(setting, "event_hub_authorization_rule_id"),
         "event_hub_name": model_attr(setting, "event_hub_name"),
         "logs": [
             {

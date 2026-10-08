@@ -292,7 +292,8 @@ schemas and the `paramify` CLI — not the internal code.
     long-term retention for each database, the instance's backup storage
     redundancy (requested vs current, so a pending change shows), compute zone
     redundancy, and the instance failover groups with their failover policy and
-    instance pairs.
+    instance pairs. Azure lists a failover group once from each region it spans,
+    each with its own resource id; the fetcher merges them into one record.
   - `azure_sql_managed_instance_configuration` (`EVD-AZURE-SQLMI-CONFIG`): the
     public data endpoint, proxy override, minimum TLS version, private endpoint
     connections, the Entra admin and Entra-only authentication, and whether a
@@ -303,7 +304,9 @@ schemas and the `paramify` CLI — not the internal code.
     TDE protector (service-managed or Key Vault key, auto-rotation) and TDE
     state for each database.
 
-  Any system database the API lists is flagged and left out of every count.
+  Any system database the API lists is flagged and left out of every count. A
+  failed call leaves every flag and total derived from it null rather than
+  false or 0, so an unanswered call never reads as "off".
 
 ### Changed
 
