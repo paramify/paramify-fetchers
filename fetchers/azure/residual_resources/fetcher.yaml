@@ -1,0 +1,80 @@
+name: azure_residual_resources
+version: 0.1.0
+description: >
+  Residual elements left behind in the subscription after changes: managed disks
+  attached to nothing, network interfaces with no VM or private endpoint, network
+  security groups on no subnet or NIC, public IPs bound to nothing, resource groups
+  holding no resources, and role assignments whose principal no longer exists in
+  Entra ID. Each orphan is listed with its kind, and the summary counts them by
+  kind. This is evidence that the state of the environment is reviewed after
+  changes and unwanted leftovers are removed.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_residual_resources.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-PRR      # Reviewing residual elements after changes — orphaned resources and stale access
+
+evidence_set:
+  reference_id: EVD-AZURE-RESIDUAL-RESOURCES
+  name: Azure Residual Resources
+  instructions: >
+    Script: fetcher.py. Needs Reader on the subscription and, for the principal
+    check, directory read in Microsoft Graph (a signed-in member user has it by
+    default; an application needs Directory.Read.All). Every query is an Azure
+    Resource Graph query (azure-mgmt-resourcegraph ResourceGraphClient.resources,
+    subscriptions=[<subscription_id>]). Each is paged with $skipToken to the end,
+    and the run fails if Resource Graph returns fewer rows than it counted. The
+    queries are recorded in results.sources. The orphan kinds are:
+    unattached_disk, a compute disk whose diskState is Unattached;
+    unattached_nic, a network interface with no virtualMachine, privateEndpoint or
+    privateLinkService and no hostedWorkloads;
+    unattached_nsg, a network security group with no networkInterfaces and no
+    subnets;
+    unattached_public_ip, a public IP with no ipConfiguration and no natGateway;
+    empty_resource_group, a resource group from ResourceContainers with no row in
+    Resources (hidden resource types that Resource Graph does not index are not
+    counted).
+    Role assignments come from authorizationresources (type
+    microsoft.authorization/roleassignments: principalId, principalType,
+    roleDefinitionId, scope, createdOn), with role names from azure-mgmt-authorization
+    AuthorizationManagementClient.role_definitions.list(scope=/subscriptions/<id>),
+    because Resource Graph does not index built-in roles. Only assignments made at
+    the subscription or below are listed; assignments inherited from a management
+    group or the tenant root belong to that scope and are not reviewed here. Every
+    distinct principalId is looked up through Microsoft Graph POST
+    /directoryObjects/getByIds, in batches of 1000. An id Graph does not return
+    has `principal_exists: false` and `orphan_kind: deleted_principal_assignment`.
+    ARM keeps the assignment and its stored principalType after the principal is
+    deleted, so only the directory lookup can tell. If the lookup fails,
+    principal_exists is null, summary.principal_check reads "failed", and the run
+    fails. A principal created in the last few minutes can still be replicating
+    and read as missing; created_on lets a reviewer rule that out.
+    summary.total_orphans counts every orphan of every kind.

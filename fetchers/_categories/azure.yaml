@@ -92,6 +92,7 @@ requires:
     - azure-mgmt-recoveryservices
     - azure-mgmt-recoveryservicesbackup
     - azure-mgmt-resource
+    - azure-mgmt-resource-deployments
     - azure-mgmt-resource-policy
     - azure-mgmt-resourcegraph
     - azure-mgmt-security

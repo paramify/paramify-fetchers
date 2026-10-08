@@ -561,7 +561,23 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "ResourceGraphClient",
         None,
         ["resources"],
-        "azure/resource_inventory",
+        "azure/resource_inventory, azure/change_provenance",
+    ),
+    # --- deployment history: left azure-mgmt-resource for its own distribution -
+    (
+        "azure.mgmt.resource.deployments",
+        "DeploymentsMgmtClient",
+        "deployments",
+        ["list_at_subscription_scope", "list_by_resource_group"],
+        "azure/change_provenance — without it no change can be attributed to a "
+        "deployment, so every change reads as a direct edit",
+    ),
+    (
+        "azure.mgmt.resource.resources",
+        "ResourceManagementClient",
+        "resource_groups",
+        ["list"],
+        "azure/change_provenance — the resource groups whose deployment history is read",
     ),
     # --- app platform --------------------------------------------------------
     (
@@ -940,6 +956,19 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/resource_inventory — the page loop and its completeness check",
     ),
     (
+        "msgraph.generated.directory_objects.get_by_ids.get_by_ids_post_request_body",
+        "GetByIdsPostRequestBody",
+        ["ids"],
+        "azure/residual_resources — the principal ids looked up in the directory",
+    ),
+    (
+        "azure.mgmt.resource.deployments.models",
+        "DeploymentPropertiesExtended",
+        ["correlation_id", "timestamp", "duration", "output_resources", "provisioning_state", "template_hash"],
+        "azure/change_provenance — correlation_id and output_resources are the two "
+        "joins from a change to the deployment that made it",
+    ),
+    (
         "azure.mgmt.loganalytics.models",
         "Workspace",
         ["properties"],
@@ -1029,6 +1058,7 @@ GRAPH_BUILDERS = [
     ("group_settings", "azure/entra_authentication_policy"),
     ("group_setting_templates", "azure/entra_authentication_policy"),
     ("subscribed_skus", "azure/entra_authentication_policy"),
+    ("directory_objects", "azure/residual_resources — getByIds; without it no deleted principal is found"),
 ]
 
 
