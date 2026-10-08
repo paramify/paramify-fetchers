@@ -1,0 +1,80 @@
+name: azure_sql_managed_instance_backups
+version: 0.1.0
+description: >
+  For each Azure SQL Managed Instance in the subscription, reports how its databases
+  are backed up and how the instance survives a zone or region loss: the instance
+  state (no backups are taken while it is stopped), the requested and current backup
+  storage redundancy (Local, Zone, Geo, GeoZone) with zone- and geo-redundancy
+  flagged separately, compute zone redundancy, and the instance failover groups it
+  belongs to with their failover policy; and for every database on it, its status,
+  earliest restore point, point-in-time-restore (short-term) retention in days, and
+  long-term retention policy (weekly, monthly, yearly).
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_sql_managed_instance_backups.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-RPL-ABO   # short- and long-term backup retention, backup storage redundancy
+  - KSI-CNA-OFA   # compute zone redundancy, instance failover groups
+
+evidence_set:
+  reference_id: EVD-AZURE-SQLMI-BACKUPS
+  name: Azure SQL Managed Instance Backups
+  instructions: >
+    Script: fetcher.py. Azure SDK calls (azure-mgmt-sql SqlManagementClient, api
+    2025-01-01, Reader is sufficient): managed_instances.list(),
+    managed_databases.list_by_instance(),
+    managed_backup_short_term_retention_policies.get(..., "default"),
+    managed_instance_long_term_retention_policies.get(..., "default"), and
+    instance_failover_groups.list_by_location() once per resource group and region
+    holding an instance. Every list follows nextLink, so counts are complete.
+    Per instance: `state` (Ready, Stopped, ...; Azure takes no backups while an
+    instance is stopped, so read retention together with state);
+    `requested_backup_storage_redundancy` and `current_backup_storage_redundancy`
+    (a change applies only to future backups and can take up to 24 hours, during
+    which they differ — `backup_storage_redundancy_change_pending`);
+    `backup_storage_zone_redundant` is true only when the current value is Zone or
+    GeoZone (Geo keeps its primary-region copies in a single availability zone);
+    `backup_storage_geo_redundant` is true for Geo or GeoZone; `zone_redundant` is
+    compute zone redundancy, a separate setting from backup storage;
+    `failover_groups` names the instance failover groups whose instance pairs
+    include it. `databases_collected` is false when the database list call failed.
+    Per database: `is_system_database` (master, model, msdb, tempdb — kept in the
+    evidence, not queried for retention, and left out of every count), `status`,
+    `earliest_restore_point`,
+    `short_term_retention_days` (1-35; Azure's default is 7) with
+    `short_term_retention_at_least_7_days`, `short_term_retention_policy_found`
+    (false when the GET returned 404), and `long_term_retention` (ISO 8601
+    durations; PT0S or absent means that tier is off, `configured` is true when any
+    tier is on). `instance_failover_groups` lists each group's `failover_policy`
+    (Manual or Automatic), replication role and state, and instance pairs. Summary
+    counts user databases at or above 7 days, below it, and missing a policy, and
+    instances by backup storage redundancy.

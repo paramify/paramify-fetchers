@@ -213,6 +213,26 @@ schemas and the `paramify` CLI — not the internal code.
   Nothing in the Azure category recorded where logs are kept or for how long.
   Adds the `azure-mgmt-loganalytics` dependency to the `azure` extra.
 
+- **Three Azure SQL Managed Instance fetchers.** Nothing in the Azure category
+  covered Managed Instance, which has its own API surface apart from SQL
+  Database. All three are Reader-only and fan out per subscription.
+  - `azure_sql_managed_instance_backups` (`EVD-AZURE-SQLMI-BACKUPS`): short- and
+    long-term retention for each database, the instance's backup storage
+    redundancy (requested vs current, so a pending change shows), compute zone
+    redundancy, and the instance failover groups with their failover policy and
+    instance pairs.
+  - `azure_sql_managed_instance_configuration` (`EVD-AZURE-SQLMI-CONFIG`): the
+    public data endpoint, proxy override, minimum TLS version, private endpoint
+    connections, the Entra admin and Entra-only authentication, and whether a
+    diagnostic setting exports `SQLSecurityAuditEvents`. That shows the audit
+    route only; whether a server audit is on is set in T-SQL, which no ARM call
+    can read.
+  - `azure_sql_managed_instance_encryption` (`EVD-AZURE-SQLMI-ENCRYPTION`): the
+    TDE protector (service-managed or Key Vault key, auto-rotation) and TDE
+    state for each database.
+
+  Any system database the API lists is flagged and left out of every count.
+
 ### Changed
 
 - **TUI fixes found while recording that walkthrough.** On a manifest with no

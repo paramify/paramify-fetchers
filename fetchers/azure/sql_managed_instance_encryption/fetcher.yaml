@@ -1,0 +1,62 @@
+name: azure_sql_managed_instance_encryption
+version: 0.1.0
+description: >
+  For each Azure SQL Managed Instance in the subscription, reports how its data is
+  encrypted at rest: the instance's TDE encryption protector (a service-managed key
+  or a customer-managed Key Vault key, its key URI and whether auto-rotation is on),
+  and Transparent Data Encryption state for every database on the instance.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_sql_managed_instance_encryption.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # TDE per database, service- or customer-managed protector
+
+evidence_set:
+  reference_id: EVD-AZURE-SQLMI-ENCRYPTION
+  name: Azure SQL Managed Instance Encryption
+  instructions: >
+    Script: fetcher.py. Azure SDK calls (azure-mgmt-sql SqlManagementClient, api
+    2025-01-01, Reader is sufficient): managed_instances.list(),
+    managed_instance_encryption_protectors.get(..., "current"),
+    managed_databases.list_by_instance(), and
+    managed_database_transparent_data_encryption.get(..., "current") per user
+    database. Every list follows nextLink. Per instance: `state`;
+    `encryption_protector` with `server_key_type` (ServiceManaged, or AzureKeyVault
+    for a customer-managed key), `server_key_name`, `key_vault_key_uri`,
+    `thumbprint` and `auto_rotation_enabled` (absent reads as false);
+    `customer_managed_key`; null when the protector call failed.
+    `databases_collected` is false when the database list call failed. Per
+    database: `is_system_database` (master, model, msdb, tempdb — kept in the
+    evidence, not queried, left out of every count), `status`, `tde_state`
+    (Enabled or Disabled) and `tde_enabled` (null when the TDE call failed, so an
+    unanswered call is never read as unencrypted). `all_user_databases_tde_enabled`
+    is null for an instance with no user databases rather than a vacuous true.

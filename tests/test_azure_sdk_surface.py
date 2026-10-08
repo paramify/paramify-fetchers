@@ -209,7 +209,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "diagnostic_settings",
         ["list"],
         "azure/diagnostic_settings, azure/container_registry_configuration, "
-        "azure/app_service_configuration, azure/key_vault_configuration",
+        "azure/app_service_configuration, azure/key_vault_configuration, "
+        "azure/sql_managed_instance_configuration",
     ),
     (
         "azure.mgmt.monitor",
@@ -450,6 +451,70 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "server_vulnerability_assessments",
         ["get"],
         "azure/sql_server_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instances",
+        ["list"],
+        "azure/sql_managed_instance_backups, azure/sql_managed_instance_configuration, "
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_databases",
+        ["list_by_instance"],
+        "azure/sql_managed_instance_backups, azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_backup_short_term_retention_policies",
+        ["get"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_long_term_retention_policies",
+        ["get"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "instance_failover_groups",
+        ["list_by_location"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_administrators",
+        ["list_by_instance"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_azure_ad_only_authentications",
+        ["list_by_instance"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_encryption_protectors",
+        ["get"],
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_database_transparent_data_encryption",
+        ["get"],
+        "azure/sql_managed_instance_encryption",
     ),
     # --- MySQL / PostgreSQL --------------------------------------------------
     (
@@ -701,6 +766,44 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["state"],
         "azure/sql_encryption_status — azure-mgmt-sql 4 renamed `status` to "
         "`state`; reading the old name yields None, i.e. 'not encrypted'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceProperties",
+        ["state", "requested_backup_storage_redundancy", "current_backup_storage_redundancy", "zone_redundant"],
+        "azure/sql_managed_instance_backups — a lost redundancy field reads as "
+        "'not zone-redundant'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedBackupShortTermRetentionPolicyProperties",
+        ["retention_days"],
+        "azure/sql_managed_instance_backups — a lost field reads as 'no retention'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceProperties",
+        ["public_data_endpoint_enabled", "proxy_override", "minimal_tls_version", "private_endpoint_connections"],
+        "azure/sql_managed_instance_configuration — a lost field reads as 'private' "
+        "or 'no TLS floor'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceAzureADOnlyAuthProperties",
+        ["azure_ad_only_authentication"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceEncryptionProtectorProperties",
+        ["server_key_type", "server_key_name", "uri", "auto_rotation_enabled"],
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedTransparentDataEncryptionProperties",
+        ["state"],
+        "azure/sql_managed_instance_encryption — a lost field reads as 'not encrypted'",
     ),
     (
         "azure.mgmt.keyvault.models",
