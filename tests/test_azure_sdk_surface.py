@@ -248,6 +248,21 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list_all"],
         "azure/network_security_groups — NIC-level NSG association",
     ),
+    # --- Azure Cache for Redis (classic) ------------------------------------
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "redis",
+        ["list_by_subscription"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "firewall_rules",
+        ["list"],
+        "azure/redis_cache_configuration",
+    ),
     # --- Managed Redis, DNS, VPN Gateway, Virtual WAN ------------------------
     (
         "azure.mgmt.redisenterprise",
@@ -840,6 +855,34 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["priority", "destination_address_prefix", "destination_address_prefixes"],
         "azure/network_security_groups — outbound rules are evaluated in "
         "priority order against their destination",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "RedisResource",
+        [
+            "minimum_tls_version",
+            "enable_non_ssl_port",
+            "public_network_access",
+            "disable_access_key_authentication",
+            "private_endpoint_connections",
+            "subnet_id",
+            "redis_configuration",
+        ],
+        "azure/redis_cache_configuration — a renamed enable_non_ssl_port reads as the "
+        "non-TLS port off, i.e. TLS-only",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "RedisCommonPropertiesRedisConfiguration",
+        ["aad_enabled", "authnotrequired"],
+        "azure/redis_cache_configuration — a renamed authnotrequired reads every cache "
+        "as requiring auth",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "RedisFirewallRule",
+        ["start_ip", "end_ip"],
+        "azure/redis_cache_configuration",
     ),
     (
         "azure.mgmt.redisenterprise.models",
