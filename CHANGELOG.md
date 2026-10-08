@@ -344,6 +344,17 @@ schemas and the `paramify` CLI — not the internal code.
   the stable and the preview API and merged, since NRT rules exist only in
   preview. Data older than a table's retention is reported as not retained,
   never as missing.
+- **Three more on the same client: `azure_sentinel_playbooks`,
+  `azure_entra_diagnostic_settings` and `azure_entra_risky_users`.** Per
+  subscription, `azure_sentinel_playbooks` reports what each Logic App Sentinel
+  can run does (disable an account, isolate a device, notify) and who it
+  notifies, Standard workflows included when an automation rule runs them. Per
+  tenant, `azure_entra_diagnostic_settings` reports which Entra log categories
+  reach a Sentinel workspace (unknown where a destination can't be read), and
+  `azure_entra_risky_users` joins Identity Protection risky users to privileged
+  directory roles; a tenant without Entra ID P2 reports that as a state, not a
+  failure. The privileged-role list `azure_entra_privileged_roles` keys on
+  moves to `_shared/entra_graph`, so both fetchers use the same one.
 
 ### Changed
 
