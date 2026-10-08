@@ -896,6 +896,8 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
             "private_endpoint_connections",
             "subnet_id",
             "redis_configuration",
+            "zones",
+            "zonal_allocation_policy",
         ],
         "azure/redis_cache_configuration — a renamed enable_non_ssl_port reads as the "
         "non-TLS port off, i.e. TLS-only",

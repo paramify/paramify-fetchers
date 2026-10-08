@@ -17,11 +17,12 @@ schemas and the `paramify` CLI — not the internal code.
   Per cache it reports the minimum TLS version and whether the non-TLS port is
   enabled, whether authentication is required at all, whether access keys are
   disabled so only Entra ID can be used, public network access, private
-  endpoints, VNet injection and firewall rules (flagging any that allow every
-  address). For an assessor it also reports who holds Entra data-access
+  endpoints, VNet injection and firewall rules, judged on the distinct addresses
+  all rules admit together so a split or near-total range is visible. For an assessor it also reports who holds Entra data-access
   policies, whether connection and Entra sign-in audit logs reach a destination
   (through a new shared `_shared/diagnostics.py`), the maintenance window, and
-  replication, zones, geo-replication and persistence, and its summary names the
+  replication, zone redundancy (including Azure's Automatic zonal allocation),
+  geo-replication and persistence, and its summary names the
   caches behind each failed expectation. `list_keys` is never called and
   the projection is an allow-list, so access keys and the storage connection
   strings in the cache's Redis configuration never reach the evidence. A cache

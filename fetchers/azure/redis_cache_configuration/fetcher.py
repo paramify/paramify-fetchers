@@ -73,6 +73,7 @@ def project_cache(cache) -> dict:
         "identity_type": model_attr(identity, "type"),
         "subnet_id": model_attr(cache, "subnet_id"),
         "zones": model_attr(cache, "zones"),
+        "zonal_allocation_policy": model_attr(cache, "zonal_allocation_policy"),
         "replicas_per_primary": model_attr(cache, "replicas_per_primary"),
         "shard_count": model_attr(cache, "shard_count"),
         "provisioning_state": model_attr(cache, "provisioning_state"),
@@ -85,6 +86,35 @@ def project_cache(cache) -> dict:
             }
             for pec in (model_attr(cache, "private_endpoint_connections") or [])
         ],
+    }
+
+
+IPV4_ADDRESSES = 2**32
+
+
+def _ip_range(rule: dict):
+    try:
+        first = int(ipaddress.IPv4Address(rule.get("start_ip")))
+        last = int(ipaddress.IPv4Address(rule.get("end_ip")))
+    except (ipaddress.AddressValueError, TypeError, ValueError):
+        return None
+    return (first, last) if last >= first else None
+
+
+def firewall_coverage(rules) -> dict:
+    """Distinct IPv4 addresses the rules admit together, so overlapping or split rules are judged as one."""
+    if rules is None:
+        return {"firewall_allowed_address_count": None, "firewall_allowed_address_percentage": None,
+                "firewall_allows_all_ips": None}
+    covered, end = 0, -1
+    for first, last in sorted(r for r in (_ip_range(rule) for rule in rules) if r):
+        if last > end:
+            covered += last - max(first, end + 1) + 1
+            end = last
+    return {
+        "firewall_allowed_address_count": covered,
+        "firewall_allowed_address_percentage": round(covered * 100 / IPV4_ADDRESSES, 4),
+        "firewall_allows_all_ips": covered == IPV4_ADDRESSES,
     }
 
 
@@ -186,7 +216,7 @@ def cache_record(cache: dict, extras: dict) -> dict:
         "vnet_injected": vnet_injected,
         "private_only": public_disabled and (bool(approved) or vnet_injected),
         "firewall_rules": rules,
-        "firewall_allows_all_ips": None if rules is None else any(r["allows_all_ips"] for r in rules),
+        **firewall_coverage(rules),
         # --- logging ---
         **audit_logging_summary(extras.get("diagnostic_settings"), REDIS_AUDIT_CATEGORIES),
         # --- patching ---
@@ -194,7 +224,9 @@ def cache_record(cache: dict, extras: dict) -> dict:
         "maintenance_window_configured": None if schedule is None else bool(schedule),
         # --- resilience ---
         "replicated": sku not in UNREPLICATED_SKUS,
-        "zone_redundant": len(zones) > 1,
+        # Automatic spreads Standard/Premium nodes across zones without listing them in `zones`.
+        "zone_redundant": len(zones) > 1
+        or str(cache.get("zonal_allocation_policy") or "").lower() == "automatic",
         "linked_servers": linked,
         "geo_replicated": None if linked is None else bool(linked),
         "persistence_enabled": str(cache.get("rdb_backup_enabled") or "").lower() == "true"
@@ -215,7 +247,7 @@ EXCEPTIONS = {
     "not_replicated": lambda c: not c["replicated"],
     "unknown_state": lambda c: any(
         c[k] is None for k in ("firewall_rules", "audit_logging_enabled", "maintenance_window_configured",
-                               "access_policy_assignments", "geo_replicated")
+                               "access_policies", "access_policy_assignments", "geo_replicated")
     ),
 }
 

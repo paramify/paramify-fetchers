@@ -72,9 +72,14 @@ evidence_set:
     ConnectedClientList or MSEntraAuthenticationAuditLog (directly or via the audit/allLogs
     group); audit_log_destinations names each sink. maintenance_window_configured is false when
     the cache has no patch schedule (Azure answers 404, and picks the time itself). replicated is
-    false on the Basic SKU, a single node with no SLA; zone_redundant needs more than one zone;
+    false on the Basic SKU, a single node with no SLA; zone_redundant is true with more than one zone or
+    zonal_allocation_policy Automatic (Azure's default for Standard/Premium in zonal regions, which
+    spreads nodes across zones without listing them);
     geo_replicated is true when the cache has linked servers. firewall_rules[].allows_all_ips
-    marks a 0.0.0.0-255.255.255.255 rule. private_only is true when public network access is
+    marks a single 0.0.0.0-255.255.255.255 rule; firewall_allowed_address_count and
+    firewall_allowed_address_percentage are the distinct IPv4 addresses all rules admit together
+    (overlaps merged), and firewall_allows_all_ips is true when that union is every address, so a
+    rule split into halves is caught. A validator can set its own threshold on the percentage. private_only is true when public network access is
     Disabled and the cache has an Approved private endpoint or is VNet-injected (subnet_id).
     public_network_access is null on caches where Azure does not return it; null is counted as not
     disabled and tallied in summary.public_network_access_unset_caches. Any per-cache read that fails
