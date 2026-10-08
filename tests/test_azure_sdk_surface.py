@@ -1311,6 +1311,176 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["event_hub_name", "marketplace_partner_id"],
         "azure/front_door_waf_coverage — the remaining WAF-log destinations",
     ),
+    # --- Front Door: the `properties` pivots azure-mgmt-cdn 14 / frontdoor 2 moved fields under
+    (
+        "azure.mgmt.frontdoor.models",
+        "WebApplicationFirewallPolicy",
+        ["location"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSetList",
+        ["managed_rule_sets"],
+        "azure/front_door_waf_policies — exceptionsList is read by wire key beside it",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleExclusion",
+        ["match_variable", "selector_match_operator", "selector"],
+        "azure/front_door_waf_policies — exclusions",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "CustomRuleList",
+        ["rules"],
+        "azure/front_door_waf_policies — custom and rate-limit rules",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "GroupByVariable",
+        ["variable_name"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSetDefinition",
+        ["properties"],
+        "azure/front_door_waf_policies — rule-set definitions",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ProfileProperties",
+        ["resource_state"],
+        "azure/front_door_*",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Sku",
+        ["name"],
+        "azure/front_door_* — the SKU that separates Front Door from classic CDN",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDEndpoint",
+        ["properties"],
+        "azure/front_door_*",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Route",
+        ["properties"],
+        "azure/front_door_*",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ResourceReference",
+        ["id"],
+        "azure/front_door_* — route origin group, rule sets, certificate secret, private link target",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDDomain",
+        ["properties"],
+        "azure/front_door_tls, azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicy",
+        ["properties"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyProperties",
+        ["parameters", "deployment_status", "provisioning_state"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallParameters",
+        ["type"],
+        "azure/front_door_waf_coverage — only WebApplicationFirewall policies attach a WAF",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Secret",
+        ["properties"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "CustomerCertificateParameters",
+        ["type"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ManagedCertificateParameters",
+        ["type"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AzureFirstPartyManagedCertificateParameters",
+        ["type", "subject", "subject_alternative_names", "certificate_authority", "thumbprint",
+         "expiration_date", "secret_source"],
+        "azure/front_door_tls — a first-party managed certificate's expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleSet",
+        ["id", "name"],
+        "azure/front_door_tls, azure/front_door_origins — the join from a route's ruleSets",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Rule",
+        ["properties"],
+        "azure/front_door_tls, azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "DeliveryRuleRequestSchemeCondition",
+        ["name", "parameters"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "UrlRedirectAction",
+        ["name", "parameters"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "DeliveryRuleRouteConfigurationOverrideAction",
+        ["name", "parameters"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginGroup",
+        ["properties"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginGroupProperties",
+        ["provisioning_state", "deployment_status"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOrigin",
+        ["properties"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginProperties",
+        ["provisioning_state", "deployment_status"],
+        "azure/front_door_origins",
+    ),
 ]
 
 
@@ -1331,6 +1501,183 @@ def test_model_fields_present(
         f"  affected fetchers: {affects}\n"
         f"  This produces WRONG evidence rather than empty evidence, which is "
         f"worse — the control reads as unimplemented."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Front Door: wire-key reads, polymorphic models, the pinned api-version
+# ---------------------------------------------------------------------------
+# Fields azure-mgmt-cdn 14 / azure-mgmt-frontdoor 2 do not model are read by their
+# wire key through the dict-backed hybrid models (`_shared/frontdoor.wire`). If a
+# release drops that backing, `.get` vanishes and the read returns None: WAF scope
+# reads as "none" and the coverage verdict is wrong with no error.
+#
+# (module, model, body, wire-key path, expected value, affected fetchers)
+WIRE_KEY_READS: list[tuple[str, str, dict, list[str], object, str]] = [
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallParameters",
+        {"type": "WebApplicationFirewall", "isProfileLevel": True},
+        ["isProfileLevel"],
+        True,
+        "azure/front_door_waf_coverage — profile-level WAF scope",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallAssociation",
+        {"domains": [], "routes": [{"id": "/r1"}]},
+        ["routes"],
+        [{"id": "/r1"}],
+        "azure/front_door_waf_coverage — route-level WAF scope",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSetList",
+        {"managedRuleSets": [], "exceptionsList": {"exceptions": [{"matchVariable": "RequestUri"}]}},
+        ["exceptionsList", "exceptions"],
+        [{"matchVariable": "RequestUri"}],
+        "azure/front_door_waf_policies — WAF exceptions",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginProperties",
+        {"hostName": "o.example.net", "certificateNameCheckValidationMode": "OriginHostname"},
+        ["certificateNameCheckValidationMode"],
+        "OriginHostname",
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginProperties",
+        {"hostName": "o.example.net", "customCertificateSubjects": ["o.example.net"]},
+        ["customCertificateSubjects"],
+        ["o.example.net"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "OriginAuthenticationProperties",
+        {"type": "SystemAssignedIdentity", "tokenDestinationHeader": "X-Azure-Authorization"},
+        ["tokenDestinationHeader"],
+        "X-Azure-Authorization",
+        "azure/front_door_origins",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "module,model,body,path,expected,affects",
+    WIRE_KEY_READS,
+    ids=[f"{c[1]}.{'.'.join(c[3])}" for c in WIRE_KEY_READS],
+)
+def test_front_door_wire_key_reads(
+    module: str, model: str, body: dict, path: list[str], expected: object, affects: str
+) -> None:
+    """An unmodeled wire key must stay readable with `.get` on the deserialized model."""
+    value: object = _import(module, model)(body)  # type: ignore[operator]
+    for key in path:
+        assert hasattr(value, "get"), (
+            f"{model} no longer supports .get('{key}') — the hybrid model lost its dict backing.\n"
+            f"  affected fetchers: {affects}\n"
+            f"  _shared/frontdoor.wire() would return None and the field would read as absent."
+        )
+        value = value.get(key)  # type: ignore[attr-defined]
+    assert value == expected, f"{model} wire key {'.'.join(path)} read {value!r}, expected {expected!r} ({affects})"
+
+
+# A discriminated field must still deserialize to the subclass that carries the
+# fields the fetcher reads; the base class has none of them, so every read is None.
+#
+# (module, model, body, attribute path, expected class, affected fetchers)
+POLYMORPHIC_READS: list[tuple[str, str, dict, list[object], str, str]] = [
+    (
+        "azure.mgmt.cdn.models",
+        "SecretProperties",
+        {"parameters": {"type": "CustomerCertificate", "expirationDate": "2027-01-01T00:00:00+00:00"}},
+        ["parameters"],
+        "CustomerCertificateParameters",
+        "azure/front_door_tls — certificate expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecretProperties",
+        {"parameters": {"type": "ManagedCertificate", "expirationDate": "2027-01-01T00:00:00+00:00"}},
+        ["parameters"],
+        "ManagedCertificateParameters",
+        "azure/front_door_tls — certificate expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecretProperties",
+        {"parameters": {"type": "AzureFirstPartyManagedCertificate"}},
+        ["parameters"],
+        "AzureFirstPartyManagedCertificateParameters",
+        "azure/front_door_tls — certificate expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleProperties",
+        {"conditions": [{"name": "RequestScheme", "parameters": {
+            "typeName": "DeliveryRuleRequestSchemeConditionParameters", "operator": "Equal", "matchValues": ["HTTP"]}}]},
+        ["conditions", 0],
+        "DeliveryRuleRequestSchemeCondition",
+        "azure/front_door_tls — rule-set HTTP→HTTPS redirect",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleProperties",
+        {"actions": [{"name": "UrlRedirect", "parameters": {
+            "typeName": "DeliveryRuleUrlRedirectActionParameters", "redirectType": "Moved", "destinationProtocol": "Https"}}]},
+        ["actions", 0],
+        "UrlRedirectAction",
+        "azure/front_door_tls — rule-set HTTP→HTTPS redirect",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleProperties",
+        {"actions": [{"name": "RouteConfigurationOverride", "parameters": {
+            "typeName": "DeliveryRuleRouteConfigurationOverrideActionParameters",
+            "originGroupOverride": {"originGroup": {"id": "/og"}, "forwardingProtocol": "HttpOnly"}}}]},
+        ["actions", 0],
+        "DeliveryRuleRouteConfigurationOverrideAction",
+        "azure/front_door_origins — a rule that changes the forwarding protocol",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "module,model,body,path,expected,affects",
+    POLYMORPHIC_READS,
+    ids=[f"{c[1]}->{c[4]}" for c in POLYMORPHIC_READS],
+)
+def test_front_door_polymorphic_reads(
+    module: str, model: str, body: dict, path: list[object], expected: str, affects: str
+) -> None:
+    """A discriminated Front Door field must deserialize to the subclass the fetcher reads."""
+    value: object = _import(module, model)(body)  # type: ignore[operator]
+    for step in path:
+        value = value[step] if isinstance(step, int) else getattr(value, step)  # type: ignore[index]
+    assert type(value).__name__ == expected, (
+        f"{model}.{'.'.join(map(str, path))} deserialized to {type(value).__name__}, not {expected}.\n"
+        f"  affected fetchers: {affects}\n"
+        f"  The base class carries none of the fields read, so they would all be None."
+    )
+
+
+def test_cdn_client_honours_pinned_api_version() -> None:
+    """Security policies and origins are read on a client built with api_version=2026-07-01.
+
+    The per-call `api_version` kwarg is silently ignored by azure-mgmt-cdn 14; the
+    client-level one is what reaches the request. If the constructor stops honouring it,
+    isProfileLevel and associations[].routes stop coming back and WAF scope reads as none.
+    """
+    from azure.mgmt.cdn import CdnManagementClient
+
+    client = CdnManagementClient(_FakeCredential(), SUBSCRIPTION_ID, api_version="2026-07-01")
+    config = getattr(client, "_config", None)
+    assert getattr(config, "api_version", None) == "2026-07-01", (
+        "CdnManagementClient no longer records api_version from its constructor.\n"
+        "  affected fetchers: azure/front_door_waf_coverage, azure/front_door_origins"
     )
 
 
