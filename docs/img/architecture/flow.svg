@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 500" width="960" height="500" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <style>
+    .bg { fill: #ffffff; }
+    .lane { fill: #f6f8fa; stroke: #d0d7de; }
+    .lane-skill { fill: #eef4ff; stroke: #9ec0ff; }
+    .box { fill: #ffffff; stroke: #d0d7de; }
+    .you { fill: #fff8e5; stroke: #d4a72c; }
+    .h { fill: #1f2328; font-size: 15px; font-weight: 700; }
+    .sub { fill: #59636e; font-size: 12px; }
+    .t { fill: #1f2328; font-size: 13px; font-weight: 600; }
+    .c { fill: #59636e; font-size: 11.5px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+    .n { fill: #0969da; font-size: 13px; font-weight: 700; }
+    .ok { fill: #1a7f37; font-size: 11.5px; font-weight: 700; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+    .bad { fill: #cf222e; font-size: 11.5px; font-weight: 700; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+    .arrow { stroke: #8c959f; stroke-width: 2; fill: none; }
+    .wall { stroke-dasharray: 6 5; }
+    .head { fill: #8c959f; }
+    .key { fill: #59636e; font-size: 12px; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .lane { fill: #161b22; stroke: #30363d; }
+      .lane-skill { fill: #121d2f; stroke: #1f6feb; }
+      .box { fill: #0d1117; stroke: #30363d; }
+      .you { fill: #2b2111; stroke: #9e6a03; }
+      .h, .t { fill: #e6edf3; }
+      .sub, .c, .key { fill: #9198a1; }
+      .n { fill: #58a6ff; }
+      .ok { fill: #3fb950; }
+      .bad { fill: #f85149; }
+      .arrow { stroke: #6e7681; }
+      .head { fill: #6e7681; }
+    }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="head"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="960" height="500" rx="12"/>
+
+  <!-- Lane 1: ships with the repo -->
+  <rect class="lane" x="16" y="16" width="232" height="430" rx="10"/>
+  <text class="h" x="32" y="44">1 · Ships with the repo</text>
+  <text class="sub" x="32" y="62">Code-side; customers don’t edit it</text>
+
+  <rect class="box" x="32" y="86" width="200" height="164" rx="8"/>
+  <text class="n" x="46" y="112">1</text><text class="t" x="64" y="112">Discover</text>
+  <text class="c" x="46" y="136">fetcher.yaml says:</text>
+  <text class="sub" x="46" y="158">the secrets and config it needs</text>
+  <text class="sub" x="46" y="176">its target fields + env vars</text>
+  <text class="sub" x="46" y="194">its evidence_set identity</text>
+  <text class="c" x="46" y="228">paramify describe</text>
+
+  <text class="sub" x="32" y="290">The catalog, the TUI, and</text>
+  <text class="sub" x="32" y="308">the manifest builder all read</text>
+  <text class="sub" x="32" y="326">these files. Nothing else</text>
+  <text class="sub" x="32" y="344">lists the fetchers.</text>
+
+  <!-- Lane 2: runs on your infrastructure -->
+  <rect class="lane-skill" x="268" y="16" width="424" height="430" rx="10"/>
+  <text class="h" x="284" y="44">2 · Runs on your infrastructure</text>
+  <text class="sub" x="284" y="62">Laptop, CI, or a container. Nothing is uploaded here.</text>
+
+  <rect class="you" x="284" y="80" width="392" height="80" rx="8"/>
+  <text class="n" x="298" y="104">2</text><text class="t" x="318" y="104">Manifest: your intent</text>
+  <text class="c" x="298" y="126">manifests/status-pages.yaml</text>
+  <text class="sub" x="298" y="146">which fetchers, which targets; secrets only as ${env:VAR}</text>
+
+  <rect class="box" x="284" y="186" width="392" height="152" rx="8"/>
+  <text class="n" x="298" y="210">3</text><text class="t" x="318" y="210">Run: the runner joins yaml + manifest</text>
+  <text class="sub" x="298" y="230">one subprocess per target, given only what it declared</text>
+
+  <rect class="box" x="298" y="246" width="174" height="78" rx="6"/>
+  <text class="t" x="310" y="268">fetcher · primary</text>
+  <text class="sub" x="310" y="288">GET page → raw JSON</text>
+  <text class="ok" x="310" y="310">OK  exit=0</text>
+
+  <rect class="box" x="488" y="246" width="174" height="78" rx="6"/>
+  <text class="t" x="500" y="268">fetcher · eu</text>
+  <text class="sub" x="500" y="288">GET page → HTTP 404</text>
+  <text class="bad" x="500" y="310">FAIL  exit=1</text>
+
+  <rect class="box" x="284" y="364" width="392" height="66" rx="8"/>
+  <text class="n" x="298" y="388">4</text><text class="t" x="318" y="388">Evidence on disk:</text><text class="c" x="442" y="388">run-&lt;ts&gt;/</text>
+  <text class="sub" x="298" y="412">one envelope per target, plus _run_metadata.json</text>
+
+  <path class="arrow" d="M480 160 V184" marker-end="url(#a)"/>
+  <path class="arrow" d="M480 338 V362" marker-end="url(#a)"/>
+
+  <!-- Lane 3: Paramify -->
+  <rect class="lane" x="712" y="16" width="232" height="430" rx="10"/>
+  <text class="h" x="728" y="44">3 · Paramify</text>
+  <text class="sub" x="728" y="62">A separate stage, when you say</text>
+
+  <rect class="you" x="728" y="86" width="200" height="164" rx="8"/>
+  <text class="n" x="742" y="112">5</text><text class="t" x="760" y="112">Upload</text>
+  <text class="c" x="742" y="136">paramify upload</text>
+  <text class="sub" x="742" y="158">reads only the run directory</text>
+  <text class="sub" x="742" y="176">preview it with --dry-run</text>
+  <text class="sub" x="742" y="194">review first, or re-send</text>
+  <text class="sub" x="742" y="212">any past run</text>
+
+  <rect class="box" x="728" y="284" width="200" height="130" rx="8"/>
+  <text class="n" x="742" y="310">6</text><text class="t" x="760" y="310">Verify</text>
+  <text class="sub" x="742" y="334">set found or created by</text>
+  <text class="c" x="742" y="352">reference_id</text>
+  <text class="sub" x="742" y="376">each artifact is the</text>
+  <text class="sub" x="742" y="394">envelope from step 4</text>
+
+  <path class="arrow" d="M828 250 V282" marker-end="url(#a)"/>
+
+  <!-- cross-lane arrows -->
+  <path class="arrow" d="M232 168 H256 V222 H282" marker-end="url(#a)"/>
+  <path class="arrow wall" d="M676 397 H702 V168 H726" marker-end="url(#a)"/>
+
+  <!-- key -->
+  <rect class="you" x="16" y="464" width="16" height="16" rx="3"/>
+  <text class="key" x="40" y="477">= a step where you decide</text>
+  <path class="arrow wall" d="M236 472 H272"/>
+  <text class="key" x="282" y="477">= a separate command: the runner never uploads</text>
+</svg>

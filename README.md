@@ -603,6 +603,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`docs/run_manifest_reference.md`](docs/run_manifest_reference.md) | Manifest format reference |
 | [`docs/config_injection_design.md`](docs/config_injection_design.md) | Platform/config/auth model |
 | [`docs/design.md`](docs/design.md) | Why the framework is shaped this way + current state of the work |
+| [`docs/architecture_guide.md`](docs/architecture_guide.md) | Follow one run through the framework, from `describe` to upload, with each step linked to the design decision behind it |
 | [`docs/versioning.md`](docs/versioning.md) | How we version, the contract, and what 1.0 means |
 | [`docs/releasing.md`](docs/releasing.md) | How a release is cut |
 | [`docs/private_mirror_workflow.md`](docs/private_mirror_workflow.md) | Keeping a private copy of this repo that still receives upstream releases |
