@@ -39,6 +39,7 @@ set in a customer's package.
 from __future__ import annotations
 
 import importlib
+import inspect
 
 import pytest
 
@@ -193,7 +194,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "SubscriptionClient",
         "subscriptions",
         ["list"],
-        "_shared/azure_common — subscription discovery for all 27 fetchers",
+        "_shared/azure_common — subscription discovery for every subscription-scoped "
+        "fetcher, the _shared/azure_rest ones (sentinel_*, log_*) included",
     ),
     (
         "azure.mgmt.resource.resources",
@@ -218,7 +220,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list"],
         "azure/diagnostic_settings, azure/container_registry_configuration, "
         "azure/redis_cache_configuration, "
-        "azure/app_service_configuration, azure/key_vault_configuration",
+        "azure/app_service_configuration, azure/key_vault_configuration, "
+        "azure/sql_managed_instance_configuration",
     ),
     (
         "azure.mgmt.monitor",
@@ -610,6 +613,70 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["get"],
         "azure/sql_server_configuration",
     ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instances",
+        ["list"],
+        "azure/sql_managed_instance_backups, azure/sql_managed_instance_configuration, "
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_databases",
+        ["list_by_instance"],
+        "azure/sql_managed_instance_backups, azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_backup_short_term_retention_policies",
+        ["get"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_long_term_retention_policies",
+        ["get"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "instance_failover_groups",
+        ["list_by_location"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_administrators",
+        ["list_by_instance"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_azure_ad_only_authentications",
+        ["list_by_instance"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_encryption_protectors",
+        ["get"],
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_database_transparent_data_encryption",
+        ["get"],
+        "azure/sql_managed_instance_encryption",
+    ),
     # --- MySQL / PostgreSQL --------------------------------------------------
     (
         "azure.mgmt.rdbms.mysql_flexibleservers",
@@ -720,7 +787,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "ResourceGraphClient",
         None,
         ["resources"],
-        "azure/resource_inventory",
+        "azure/resource_inventory, azure/front_door_origins (origin regions)",
     ),
     # --- app platform --------------------------------------------------------
     (
@@ -788,6 +855,98 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "remediations",
         ["list_for_subscription"],
         "azure/policy_compliance",
+    ),
+    # --- Front Door WAF ------------------------------------------------------
+    (
+        "azure.mgmt.frontdoor",
+        "FrontDoorManagementClient",
+        "policies",
+        ["list_by_subscription"],
+        "azure/front_door_waf_policies, azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.frontdoor",
+        "FrontDoorManagementClient",
+        "managed_rule_sets",
+        ["list"],
+        "azure/front_door_waf_policies — rule-set definitions, the denominator of enabled_rules",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "profiles",
+        ["list"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "afd_endpoints",
+        ["list_by_profile"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "routes",
+        ["list_by_endpoint"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "afd_custom_domains",
+        ["list_by_profile"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "security_policies",
+        ["list_by_profile"],
+        "azure/front_door_waf_coverage — on a client pinned to api-version 2026-07-01",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "secrets",
+        ["list_by_profile"],
+        "azure/front_door_tls — certificate type, issuer and expiry behind each custom domain",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "rule_sets",
+        ["list_by_profile"],
+        "azure/front_door_tls, azure/front_door_origins — rule-set redirects and origin overrides",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "rules",
+        ["list_by_rule_set"],
+        "azure/front_door_tls, azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "afd_origin_groups",
+        ["list_by_profile"],
+        "azure/front_door_origins — on a client pinned to api-version 2026-07-01",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "afd_origins",
+        ["list_by_origin_group"],
+        "azure/front_door_origins — on a client pinned to api-version 2026-07-01",
+    ),
+    (
+        "azure.mgmt.monitor",
+        "MonitorManagementClient",
+        "diagnostic_settings_category",
+        ["list"],
+        "azure/front_door_waf_coverage — which log categories a profile emits, and their groups",
     ),
 ]
 
@@ -860,6 +1019,136 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["state"],
         "azure/sql_encryption_status — azure-mgmt-sql 4 renamed `status` to "
         "`state`; reading the old name yields None, i.e. 'not encrypted'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceProperties",
+        [
+            "state",
+            "provisioning_state",
+            "pricing_model",
+            "requested_backup_storage_redundancy",
+            "current_backup_storage_redundancy",
+            "zone_redundant",
+        ],
+        "azure/sql_managed_instance_backups — a lost redundancy field reads as "
+        "'not zone-redundant'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedDatabaseProperties",
+        ["status", "creation_date", "earliest_restore_point", "failover_group_id"],
+        "_shared/sql_managed_instance (sql_managed_instance_backups, "
+        "sql_managed_instance_encryption)",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedBackupShortTermRetentionPolicyProperties",
+        ["retention_days"],
+        "azure/sql_managed_instance_backups — a lost field reads as 'no retention'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceLongTermRetentionPolicyProperties",
+        ["weekly_retention", "monthly_retention", "yearly_retention", "week_of_year"],
+        "azure/sql_managed_instance_backups — a lost field reads as 'no long-term "
+        "retention'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "InstanceFailoverGroupProperties",
+        [
+            "managed_instance_pairs",
+            "partner_regions",
+            "read_write_endpoint",
+            "replication_role",
+            "replication_state",
+            "secondary_type",
+        ],
+        "azure/sql_managed_instance_backups — a lost `managed_instance_pairs` reads "
+        "every instance as in no failover group",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "InstanceFailoverGroupReadWriteEndpoint",
+        ["failover_policy", "failover_with_data_loss_grace_period_minutes"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePairInfo",
+        ["primary_managed_instance_id", "partner_managed_instance_id"],
+        "azure/sql_managed_instance_backups — the instance-to-group match",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "PartnerRegionInfo",
+        ["location", "replication_role"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceProperties",
+        [
+            "fully_qualified_domain_name",
+            "public_data_endpoint_enabled",
+            "proxy_override",
+            "minimal_tls_version",
+            "private_endpoint_connections",
+        ],
+        "azure/sql_managed_instance_configuration — a lost field reads as 'private' "
+        "or 'no TLS floor'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePecProperty",
+        ["properties"],
+        "azure/sql_managed_instance_configuration — the connection's fields are "
+        "nested under `properties`, not flattened",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePrivateEndpointConnectionProperties",
+        ["private_endpoint", "private_link_service_connection_state", "provisioning_state"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePrivateEndpointProperty",
+        ["id"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePrivateLinkServiceConnectionStateProperty",
+        ["status"],
+        "azure/sql_managed_instance_configuration — a lost field reads every "
+        "private endpoint as unapproved",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceAdministratorProperties",
+        ["administrator_type", "login", "sid", "tenant_id"],
+        "azure/sql_managed_instance_configuration — a lost `administrator_type` "
+        "reads as 'no Entra admin'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceAzureADOnlyAuthProperties",
+        ["azure_ad_only_authentication"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceEncryptionProtectorProperties",
+        ["server_key_type", "server_key_name", "uri", "thumbprint", "auto_rotation_enabled"],
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedTransparentDataEncryptionProperties",
+        ["state"],
+        "azure/sql_managed_instance_encryption — a lost field reads as 'not encrypted'",
     ),
     (
         "azure.mgmt.keyvault.models",
@@ -1263,16 +1552,421 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     (
         "azure.mgmt.monitor.models",
         "DiagnosticSettingsResource",
-        ["storage_account_id", "workspace_id", "event_hub_authorization_rule_id", "logs"],
-        "azure/key_vault_configuration, azure/diagnostic_settings — monitor 6.x "
-        "flattens `properties`; an unflattened release reads every vault as "
-        "having no audit-log destination",
+        ["storage_account_id", "workspace_id", "event_hub_authorization_rule_id", "event_hub_name", "logs"],
+        "azure/key_vault_configuration, azure/diagnostic_settings, "
+        "azure/sql_managed_instance_configuration — monitor 6.x flattens "
+        "`properties`; an unflattened release reads every vault as having no "
+        "audit-log destination",
     ),
     (
         "azure.mgmt.monitor.models",
         "LogSettings",
         ["category", "category_group", "enabled"],
-        "azure/key_vault_configuration — the AuditEvent / audit-group match",
+        "azure/key_vault_configuration, azure/sql_managed_instance_configuration "
+        "— the AuditEvent / SQLSecurityAuditEvents / audit-group match",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "WebApplicationFirewallPolicy",
+        ["properties", "sku"],
+        "azure/front_door_waf_policies — 2.0.0 moved every policy field under `properties`",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "WebApplicationFirewallPolicyProperties",
+        ["policy_settings", "managed_rules", "custom_rules", "security_policy_links",
+         "provisioning_state", "resource_state"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "PolicySettings",
+        ["enabled_state", "mode", "request_body_check"],
+        "azure/front_door_waf_policies — `mode` decides the blocking verdict",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSet",
+        ["rule_set_type", "rule_set_version", "rule_set_action", "exclusions", "rule_group_overrides"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleGroupOverride",
+        ["rule_group_name", "rules", "exclusions"],
+        "azure/front_door_waf_policies — an override with no `rules` disables the whole group",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleOverride",
+        ["rule_id", "enabled_state", "action", "exclusions"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "CustomRule",
+        ["name", "priority", "enabled_state", "rule_type", "action", "rate_limit_threshold",
+         "rate_limit_duration_in_minutes", "match_conditions", "group_by"],
+        "azure/front_door_waf_policies — rate-limit rules",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "MatchCondition",
+        ["match_variable", "selector", "operator", "negate_condition", "match_value"],
+        "azure/front_door_waf_policies — an Allow rule matching every request makes the policy not blocking",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSetDefinitionProperties",
+        ["rule_set_type", "rule_set_version", "rule_groups"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleGroupDefinition",
+        ["rule_group_name", "rules"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleDefinition",
+        ["rule_id", "default_state", "default_action"],
+        "azure/front_door_waf_policies — default_state decides a rule nobody overrode",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Profile",
+        ["properties", "sku"],
+        "azure/front_door_waf_coverage — sku separates Front Door from classic CDN",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDEndpointProperties",
+        ["host_name", "enabled_state", "deployment_status"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RouteProperties",
+        ["custom_domains", "supported_protocols", "patterns_to_match", "link_to_default_domain",
+         "https_redirect", "enabled_state"],
+        "azure/front_door_waf_coverage — which hosts a route serves",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDDomainProperties",
+        ["host_name", "domain_validation_state"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RouteProperties",
+        ["forwarding_protocol", "origin_group", "origin_path", "rule_sets"],
+        "azure/front_door_tls, azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDDomainProperties",
+        ["tls_settings"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDDomainHttpsParameters",
+        ["certificate_type", "minimum_tls_version", "cipher_suite_set_type", "customized_cipher_suite_set", "secret"],
+        "azure/front_door_tls — minimum_tls_version applies only when the cipher-suite set is Customized",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDDomainHttpsCustomizedCipherSuiteSet",
+        ["cipher_suite_set_for_tls12", "cipher_suite_set_for_tls13"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecretProperties",
+        ["parameters"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "CustomerCertificateParameters",
+        ["subject", "subject_alternative_names", "certificate_authority", "thumbprint", "expiration_date",
+         "secret_source", "secret_version", "use_latest_version"],
+        "azure/front_door_tls — a customer certificate's expiry and Key Vault source",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ManagedCertificateParameters",
+        ["subject", "expiration_date"],
+        "azure/front_door_tls — a managed certificate's expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleProperties",
+        ["order", "match_processing_behavior", "conditions", "actions"],
+        "azure/front_door_tls, azure/front_door_origins — evaluation order and Stop",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RequestSchemeMatchConditionParameters",
+        ["operator", "negate_condition", "match_values"],
+        "azure/front_door_tls — a redirect limited to HTTP requests",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "UrlRedirectActionParameters",
+        ["redirect_type", "destination_protocol"],
+        "azure/front_door_tls — a rule-set HTTP→HTTPS redirect",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RouteConfigurationOverrideActionParameters",
+        ["origin_group_override"],
+        "azure/front_door_origins — a rule that changes the origin group or forwarding protocol",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "OriginGroupOverride",
+        ["origin_group", "forwarding_protocol"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginGroupProperties",
+        ["load_balancing_settings", "health_probe_settings", "session_affinity_state", "authentication"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginProperties",
+        ["azure_origin", "host_name", "http_port", "https_port", "origin_host_header", "priority", "weight",
+         "shared_private_link_resource", "enabled_state", "enforce_certificate_name_check"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SharedPrivateLinkResourceProperties",
+        ["private_link", "private_link_location", "group_id", "status"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "LoadBalancingSettingsParameters",
+        ["sample_size", "successful_samples_required", "additional_latency_in_milliseconds"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "HealthProbeParameters",
+        ["probe_path", "probe_request_type", "probe_protocol", "probe_interval_in_seconds"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "OriginAuthenticationProperties",
+        ["type", "scope", "user_assigned_identity"],
+        "azure/front_door_origins — managed-identity origin authentication",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallParameters",
+        ["waf_policy", "associations"],
+        "azure/front_door_waf_coverage — isProfileLevel is read by wire key, not modeled in 14.x",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallAssociation",
+        ["domains", "patterns_to_match"],
+        "azure/front_door_waf_coverage — routes is read by wire key, not modeled in 14.x",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ActivatedResourceReference",
+        ["id", "is_active"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "DiagnosticSettingsCategoryResource",
+        ["category_type", "category_groups"],
+        "azure/front_door_waf_coverage — a category captured through its group (allLogs, audit)",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "DiagnosticSettingsResource",
+        ["event_hub_name", "marketplace_partner_id"],
+        "azure/front_door_waf_coverage — the remaining WAF-log destinations",
+    ),
+    # --- Front Door: the `properties` pivots azure-mgmt-cdn 14 / frontdoor 2 moved fields under
+    (
+        "azure.mgmt.frontdoor.models",
+        "WebApplicationFirewallPolicy",
+        ["location"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSetList",
+        ["managed_rule_sets"],
+        "azure/front_door_waf_policies — exceptionsList is read by wire key beside it",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleExclusion",
+        ["match_variable", "selector_match_operator", "selector"],
+        "azure/front_door_waf_policies — exclusions",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "CustomRuleList",
+        ["rules"],
+        "azure/front_door_waf_policies — custom and rate-limit rules",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "GroupByVariable",
+        ["variable_name"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSetDefinition",
+        ["properties"],
+        "azure/front_door_waf_policies — rule-set definitions",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ProfileProperties",
+        ["resource_state"],
+        "azure/front_door_*",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Sku",
+        ["name"],
+        "azure/front_door_* — the SKU that separates Front Door from classic CDN",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDEndpoint",
+        ["properties"],
+        "azure/front_door_*",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Route",
+        ["properties"],
+        "azure/front_door_*",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ResourceReference",
+        ["id"],
+        "azure/front_door_* — route origin group, rule sets, certificate secret, private link target",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDDomain",
+        ["properties"],
+        "azure/front_door_tls, azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicy",
+        ["properties"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyProperties",
+        ["parameters", "deployment_status", "provisioning_state"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallParameters",
+        ["type"],
+        "azure/front_door_waf_coverage — only WebApplicationFirewall policies attach a WAF",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Secret",
+        ["properties"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "CustomerCertificateParameters",
+        ["type"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ManagedCertificateParameters",
+        ["type"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AzureFirstPartyManagedCertificateParameters",
+        ["type", "subject", "subject_alternative_names", "certificate_authority", "thumbprint",
+         "expiration_date", "secret_source"],
+        "azure/front_door_tls — a first-party managed certificate's expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleSet",
+        ["id", "name"],
+        "azure/front_door_tls, azure/front_door_origins — the join from a route's ruleSets",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Rule",
+        ["properties"],
+        "azure/front_door_tls, azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "DeliveryRuleRequestSchemeCondition",
+        ["name", "parameters"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "UrlRedirectAction",
+        ["name", "parameters"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "DeliveryRuleRouteConfigurationOverrideAction",
+        ["name", "parameters"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginGroup",
+        ["properties"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginGroupProperties",
+        ["provisioning_state", "deployment_status"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOrigin",
+        ["properties"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginProperties",
+        ["provisioning_state", "deployment_status"],
+        "azure/front_door_origins",
     ),
 ]
 
@@ -1294,6 +1988,183 @@ def test_model_fields_present(
         f"  affected fetchers: {affects}\n"
         f"  This produces WRONG evidence rather than empty evidence, which is "
         f"worse — the control reads as unimplemented."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Front Door: wire-key reads, polymorphic models, the pinned api-version
+# ---------------------------------------------------------------------------
+# Fields azure-mgmt-cdn 14 / azure-mgmt-frontdoor 2 do not model are read by their
+# wire key through the dict-backed hybrid models (`_shared/frontdoor.wire`). If a
+# release drops that backing, `.get` vanishes and the read returns None: WAF scope
+# reads as "none" and the coverage verdict is wrong with no error.
+#
+# (module, model, body, wire-key path, expected value, affected fetchers)
+WIRE_KEY_READS: list[tuple[str, str, dict, list[str], object, str]] = [
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallParameters",
+        {"type": "WebApplicationFirewall", "isProfileLevel": True},
+        ["isProfileLevel"],
+        True,
+        "azure/front_door_waf_coverage — profile-level WAF scope",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallAssociation",
+        {"domains": [], "routes": [{"id": "/r1"}]},
+        ["routes"],
+        [{"id": "/r1"}],
+        "azure/front_door_waf_coverage — route-level WAF scope",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSetList",
+        {"managedRuleSets": [], "exceptionsList": {"exceptions": [{"matchVariable": "RequestUri"}]}},
+        ["exceptionsList", "exceptions"],
+        [{"matchVariable": "RequestUri"}],
+        "azure/front_door_waf_policies — WAF exceptions",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginProperties",
+        {"hostName": "o.example.net", "certificateNameCheckValidationMode": "OriginHostname"},
+        ["certificateNameCheckValidationMode"],
+        "OriginHostname",
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginProperties",
+        {"hostName": "o.example.net", "customCertificateSubjects": ["o.example.net"]},
+        ["customCertificateSubjects"],
+        ["o.example.net"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "OriginAuthenticationProperties",
+        {"type": "SystemAssignedIdentity", "tokenDestinationHeader": "X-Azure-Authorization"},
+        ["tokenDestinationHeader"],
+        "X-Azure-Authorization",
+        "azure/front_door_origins",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "module,model,body,path,expected,affects",
+    WIRE_KEY_READS,
+    ids=[f"{c[1]}.{'.'.join(c[3])}" for c in WIRE_KEY_READS],
+)
+def test_front_door_wire_key_reads(
+    module: str, model: str, body: dict, path: list[str], expected: object, affects: str
+) -> None:
+    """An unmodeled wire key must stay readable with `.get` on the deserialized model."""
+    value: object = _import(module, model)(body)  # type: ignore[operator]
+    for key in path:
+        assert hasattr(value, "get"), (
+            f"{model} no longer supports .get('{key}') — the hybrid model lost its dict backing.\n"
+            f"  affected fetchers: {affects}\n"
+            f"  _shared/frontdoor.wire() would return None and the field would read as absent."
+        )
+        value = value.get(key)  # type: ignore[attr-defined]
+    assert value == expected, f"{model} wire key {'.'.join(path)} read {value!r}, expected {expected!r} ({affects})"
+
+
+# A discriminated field must still deserialize to the subclass that carries the
+# fields the fetcher reads; the base class has none of them, so every read is None.
+#
+# (module, model, body, attribute path, expected class, affected fetchers)
+POLYMORPHIC_READS: list[tuple[str, str, dict, list[object], str, str]] = [
+    (
+        "azure.mgmt.cdn.models",
+        "SecretProperties",
+        {"parameters": {"type": "CustomerCertificate", "expirationDate": "2027-01-01T00:00:00+00:00"}},
+        ["parameters"],
+        "CustomerCertificateParameters",
+        "azure/front_door_tls — certificate expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecretProperties",
+        {"parameters": {"type": "ManagedCertificate", "expirationDate": "2027-01-01T00:00:00+00:00"}},
+        ["parameters"],
+        "ManagedCertificateParameters",
+        "azure/front_door_tls — certificate expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecretProperties",
+        {"parameters": {"type": "AzureFirstPartyManagedCertificate"}},
+        ["parameters"],
+        "AzureFirstPartyManagedCertificateParameters",
+        "azure/front_door_tls — certificate expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleProperties",
+        {"conditions": [{"name": "RequestScheme", "parameters": {
+            "typeName": "DeliveryRuleRequestSchemeConditionParameters", "operator": "Equal", "matchValues": ["HTTP"]}}]},
+        ["conditions", 0],
+        "DeliveryRuleRequestSchemeCondition",
+        "azure/front_door_tls — rule-set HTTP→HTTPS redirect",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleProperties",
+        {"actions": [{"name": "UrlRedirect", "parameters": {
+            "typeName": "DeliveryRuleUrlRedirectActionParameters", "redirectType": "Moved", "destinationProtocol": "Https"}}]},
+        ["actions", 0],
+        "UrlRedirectAction",
+        "azure/front_door_tls — rule-set HTTP→HTTPS redirect",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleProperties",
+        {"actions": [{"name": "RouteConfigurationOverride", "parameters": {
+            "typeName": "DeliveryRuleRouteConfigurationOverrideActionParameters",
+            "originGroupOverride": {"originGroup": {"id": "/og"}, "forwardingProtocol": "HttpOnly"}}}]},
+        ["actions", 0],
+        "DeliveryRuleRouteConfigurationOverrideAction",
+        "azure/front_door_origins — a rule that changes the forwarding protocol",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "module,model,body,path,expected,affects",
+    POLYMORPHIC_READS,
+    ids=[f"{c[1]}->{c[4]}" for c in POLYMORPHIC_READS],
+)
+def test_front_door_polymorphic_reads(
+    module: str, model: str, body: dict, path: list[object], expected: str, affects: str
+) -> None:
+    """A discriminated Front Door field must deserialize to the subclass the fetcher reads."""
+    value: object = _import(module, model)(body)  # type: ignore[operator]
+    for step in path:
+        value = value[step] if isinstance(step, int) else getattr(value, step)  # type: ignore[index]
+    assert type(value).__name__ == expected, (
+        f"{model}.{'.'.join(map(str, path))} deserialized to {type(value).__name__}, not {expected}.\n"
+        f"  affected fetchers: {affects}\n"
+        f"  The base class carries none of the fields read, so they would all be None."
+    )
+
+
+def test_cdn_client_honours_pinned_api_version() -> None:
+    """Security policies and origins are read on a client built with api_version=2026-07-01.
+
+    The per-call `api_version` kwarg is silently ignored by azure-mgmt-cdn 14; the
+    client-level one is what reaches the request. If the constructor stops honouring it,
+    isProfileLevel and associations[].routes stop coming back and WAF scope reads as none.
+    """
+    from azure.mgmt.cdn import CdnManagementClient
+
+    client = CdnManagementClient(_FakeCredential(), SUBSCRIPTION_ID, api_version="2026-07-01")
+    config = getattr(client, "_config", None)
+    assert getattr(config, "api_version", None) == "2026-07-01", (
+        "CdnManagementClient no longer records api_version from its constructor.\n"
+        "  affected fetchers: azure/front_door_waf_coverage, azure/front_door_origins"
     )
 
 
@@ -1324,6 +2195,63 @@ def test_graph_request_builders_present(builder: str, affects: str) -> None:
         f"GraphServiceClient.{builder} is gone.\n"
         f"  affected fetchers: {affects}\n"
         f"  msgraph-sdk is pinned <2; a major bump restructures the builders."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Credentials: the whole SDK surface of the _shared/azure_rest fetchers
+# ---------------------------------------------------------------------------
+# These call ARM, Graph and the Log Analytics query API over plain HTTP with the
+# api-version pinned in code, so no azure-mgmt bump can reshape what they read.
+# What an azure-identity or azure-core bump CAN take away is the token: the
+# credential classes, the keyword that pins the CLI to the target subscription's
+# account, and the get_token -> AccessToken(token, expires_on) path the client
+# caches on.
+REST_FETCHERS = (
+    "azure/sentinel_data_sources, azure/sentinel_analytics_rules, "
+    "azure/sentinel_incidents, azure/sentinel_automation_rules, "
+    "azure/log_analytics_query_audit, azure/log_analytics_deletion_rights, "
+    "azure/log_storage_immutability"
+)
+
+# (class, constructor keywords, affected fetchers)
+CREDENTIAL_SURFACE: list[tuple[str, list[str], str]] = [
+    ("DefaultAzureCredential", [], REST_FETCHERS),
+    ("ChainedTokenCredential", [], REST_FETCHERS),
+    (
+        "AzureCliCredential",
+        ["subscription"],
+        f"{REST_FETCHERS} — without the pin the CLI asks its default account, "
+        f"and a subscription in another tenant refuses that token",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "name,keywords,affects", CREDENTIAL_SURFACE, ids=[c[0] for c in CREDENTIAL_SURFACE]
+)
+def test_credential_surface(name: str, keywords: list[str], affects: str) -> None:
+    """The azure.identity classes _shared/azure_rest builds its token from."""
+    cls = _import("azure.identity", name)
+    assert callable(getattr(cls, "get_token", None)), (
+        f"azure.identity.{name}.get_token is gone.\n  affected fetchers: {affects}"
+    )
+    params = inspect.signature(cls.__init__).parameters  # type: ignore[misc]
+    missing = [k for k in keywords if k not in params]
+    assert not missing, (
+        f"azure.identity.{name} no longer accepts {missing}.\n"
+        f"  affected fetchers: {affects}"
+    )
+
+
+def test_access_token_fields() -> None:
+    """_shared/azure_rest caches on expires_on and sends .token."""
+    from azure.core.credentials import AccessToken
+
+    missing = {"token", "expires_on"} - set(AccessToken._fields)
+    assert not missing, (
+        f"azure.core AccessToken lost {sorted(missing)}.\n"
+        f"  affected fetchers: {REST_FETCHERS}"
     )
 
 

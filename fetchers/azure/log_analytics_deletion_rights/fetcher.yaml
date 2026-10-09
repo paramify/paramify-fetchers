@@ -1,0 +1,65 @@
+name: azure_log_analytics_deletion_rights
+version: 0.1.0
+description: >
+  Who can remove log data from each Log Analytics workspace in the subscription:
+  through the Purge API, the Delete Data API, deleting the workspace, or
+  shortening workspace or table retention (which deletes everything older).
+  Every role assignment that applies at the workspace (made there or inherited
+  from its resource group, subscription, management group or root), active or
+  PIM-eligible, is checked against its role definition, net of notActions. Each
+  grant lists its principal (name resolved where Microsoft Graph allows), role,
+  scope, whether it is active or eligible, and whether each right comes from an
+  explicit grant (Data Purger) or a wildcard such as Log Analytics Contributor's
+  Microsoft.OperationalInsights/* or Contributor's '*'.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_log_analytics_deletion_rights.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+  workspaces:
+    type: string
+    required: false
+    env: SENTINEL_WORKSPACES
+    description: >
+      Comma-separated workspace names or resource ids to limit collection to.
+      Optional — omit to collect every Log Analytics workspace in the subscription.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-MLA-OSM      # Operating SIEM capability — tamper-resistant logging: who can delete it
+
+evidence_set:
+  reference_id: EVD-AZURE-LOG-ANALYTICS-DELETION-RIGHTS
+  name: Azure Log Analytics Deletion Rights
+  instructions: >
+    Script: fetcher.py. ARM REST at each workspace with $filter=atScope():
+    roleAssignments (2022-04-01), PIM roleEligibilityScheduleInstances
+    (2020-10-01), and each role definition. Checked actions: workspaces purge,
+    tables/deleteData, delete, write (retention) and tables/write. A grant holds
+    one when an action pattern matches (case-insensitive, * wildcard) and no
+    notActions does; explicit means the exact action. Group members are not
+    expanded. Names via Graph directoryObjects/getByIds when permitted. Role:
+    Reader.
