@@ -219,6 +219,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "diagnostic_settings",
         ["list"],
         "azure/diagnostic_settings, azure/container_registry_configuration, "
+        "azure/redis_cache_configuration, "
         "azure/app_service_configuration, azure/key_vault_configuration, "
         "azure/sql_managed_instance_configuration",
     ),
@@ -250,6 +251,49 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "network_interfaces",
         ["list_all"],
         "azure/network_security_groups — NIC-level NSG association",
+    ),
+    # --- Azure Cache for Redis (classic) ------------------------------------
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "redis",
+        ["list_by_subscription"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "firewall_rules",
+        ["list"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "access_policy",
+        ["list"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "access_policy_assignment",
+        ["list"],
+        "azure/redis_cache_configuration — who holds Entra data access",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "patch_schedules",
+        ["list_by_redis_resource"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "linked_server",
+        ["list"],
+        "azure/redis_cache_configuration — geo-replication",
     ),
     # --- Managed Redis, DNS, VPN Gateway, Virtual WAN ------------------------
     (
@@ -1129,6 +1173,48 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["priority", "destination_address_prefix", "destination_address_prefixes"],
         "azure/network_security_groups — outbound rules are evaluated in "
         "priority order against their destination",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "RedisResource",
+        [
+            "minimum_tls_version",
+            "enable_non_ssl_port",
+            "public_network_access",
+            "disable_access_key_authentication",
+            "private_endpoint_connections",
+            "subnet_id",
+            "redis_configuration",
+            "zones",
+            "zonal_allocation_policy",
+        ],
+        "azure/redis_cache_configuration — a renamed enable_non_ssl_port reads as the "
+        "non-TLS port off, i.e. TLS-only",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "RedisCommonPropertiesRedisConfiguration",
+        ["aad_enabled", "authnotrequired"],
+        "azure/redis_cache_configuration — a renamed authnotrequired reads every cache "
+        "as requiring auth",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "RedisCacheAccessPolicyAssignment",
+        ["access_policy_name", "object_id", "object_id_alias"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "ScheduleEntry",
+        ["day_of_week", "start_hour_utc", "maintenance_window"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "RedisFirewallRule",
+        ["start_ip", "end_ip"],
+        "azure/redis_cache_configuration",
     ),
     (
         "azure.mgmt.redisenterprise.models",
