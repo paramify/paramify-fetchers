@@ -31,17 +31,16 @@ GROUPS = ("SQLI", "XSS", "PHP")
 NOW = datetime(2026, 10, 8, tzinfo=timezone.utc)
 
 
-def definitions(rule_set_type="Microsoft_DefaultRuleSet"):
+def definitions(rule_set_type="Microsoft_DefaultRuleSet", off_by_default=()):
+    def group(name, state):
+        return {"rule_group_name": name, "rules": [
+            {"rule_id": f"{name}-{i}", "default_state": state, "default_action": "AnomalyScoring"} for i in (1, 2)
+        ]}
+
     return fd.definition_index([{
         "rule_set_type": rule_set_type,
         "rule_set_version": "2.1",
-        "rule_groups": [
-            {"rule_group_name": g, "rules": [
-                {"rule_id": f"{g}-1", "default_state": "Enabled", "default_action": "AnomalyScoring"},
-                {"rule_id": f"{g}-2", "default_state": "Enabled", "default_action": "AnomalyScoring"},
-            ]}
-            for g in GROUPS
-        ],
+        "rule_groups": [group(g, "Enabled") for g in GROUPS] + [group(g, "Disabled") for g in off_by_default],
     }])
 
 
@@ -49,12 +48,13 @@ def override(rule_id, enabled_state="Enabled", action=None):
     return {"rule_id": rule_id, "enabled_state": enabled_state, "action": action, "exclusions": []}
 
 
-def custom_rule(action="Allow", operator="Any", negate=False, rule_type="MatchRule"):
+def custom_rule(action="Allow", operator="Any", negate=False, rule_type="MatchRule", values=("10.0.0.0/8",),
+                variable="RemoteAddr"):
     return {
         "name": "rule1", "priority": 1, "enabled_state": "Enabled", "rule_type": rule_type, "action": action,
         "rate_limit_threshold": None, "rate_limit_duration_in_minutes": None, "match_condition_count": 1,
-        "match_conditions": [{"match_variable": "RemoteAddr", "selector": None, "operator": operator,
-                              "negate_condition": negate, "match_value": ["10.0.0.0/8"]}],
+        "match_conditions": [{"match_variable": variable, "selector": None, "operator": operator,
+                              "negate_condition": negate, "match_value": list(values)}],
         "group_by": [],
     }
 
@@ -101,6 +101,28 @@ def test_group_without_blocking_rule_makes_policy_not_blocking(overrides):
     assert record["default_rule_set_groups_without_blocking_rules"] == ["SQLI"]
 
 
+THREAT_INTEL = ("MS-ThreatIntel-AppSec", "MS-ThreatIntel-SQLI", "MS-ThreatIntel-WebShells")
+
+
+def test_stock_policy_with_groups_off_by_default_is_blocking():
+    record = fd.waf_policy_record(policy(), definitions(off_by_default=THREAT_INTEL))
+    assert record["blocking"] is True
+    assert record["default_rule_set_groups_off_by_default"] == list(THREAT_INTEL)
+    assert record["default_rule_set_groups_without_blocking_rules"] == []
+    assert record["default_rule_set_fully_disabled_groups"] == []
+
+
+@pytest.mark.parametrize("action, off_by_default", [
+    pytest.param("Block", [], id="enabled-to-block"),
+    pytest.param("Log", ["MS-ThreatIntel-SQLI"], id="enabled-to-log"),
+])
+def test_group_off_by_default_leaves_the_list_only_when_a_rule_blocks(action, off_by_default):
+    overrides = [group_override("MS-ThreatIntel-SQLI", [override("MS-ThreatIntel-SQLI-1", action=action)])]
+    record = fd.waf_policy_record(policy(overrides), definitions(off_by_default=["MS-ThreatIntel-SQLI"]))
+    assert record["blocking"] is True
+    assert record["default_rule_set_groups_off_by_default"] == off_by_default
+
+
 def test_allow_override_is_listed_and_not_counted_as_blocking():
     record = fd.waf_policy_record(policy([group_override("XSS", [override("XSS-1", action="Allow")])]), definitions())
     rule_set = record["managed_rule_sets"][0]
@@ -122,6 +144,9 @@ def test_default_rule_set_type_matches_case_insensitively():
 
 @pytest.mark.parametrize("rule, blocking", [
     pytest.param(custom_rule(), False, id="allow-any"),
+    pytest.param(custom_rule(operator="IPMatch", values=["0.0.0.0/0"]), False, id="allow-all-ipv4"),
+    pytest.param(custom_rule(operator="IPMatch", values=["::/0"], variable="SocketAddr"), False, id="allow-all-ipv6"),
+    pytest.param(custom_rule(operator="IPMatch", values=["0.0.0.0/0"], negate=True), True, id="allow-negated-all-ipv4"),
     pytest.param(custom_rule(operator="IPMatch"), True, id="allow-scoped"),
     pytest.param(custom_rule(negate=True), True, id="allow-negated-any"),
     pytest.param(custom_rule(action="Block"), True, id="block-any"),

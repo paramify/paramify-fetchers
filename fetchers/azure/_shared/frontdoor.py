@@ -18,6 +18,7 @@ DEFAULT_RULE_SET_TYPES = ("DefaultRuleSet", "Microsoft_DefaultRuleSet")
 ENFORCING_ACTIONS = ("Block", "Redirect")
 # Managed-rule actions that stop or score a request; Allow and Log let it through.
 BLOCKING_RULE_ACTIONS = ("Block", "Redirect", "AnomalyScoring")
+ALL_ADDRESSES = ("0.0.0.0/0", "::/0")
 # First GA api-version whose security policies carry isProfileLevel and associations[].routes.
 SECURITY_POLICY_API_VERSION = "2026-07-01"
 # Documented API defaults when a route omits them.
@@ -181,7 +182,8 @@ def effective_rule_counts(rule_set: dict, definition: Optional[dict], disabled_g
     """Each defined rule's state after overrides: group override with no rules, else the rule's override, else its default."""
     if definition is None:
         return {"rule_definition_found": False, "total_rules": None, "enabled_rules": None,
-                "blocking_rules": None, "fully_disabled_rule_groups": None, "groups_without_blocking_rules": None}
+                "blocking_rules": None, "fully_disabled_rule_groups": None, "groups_without_blocking_rules": None,
+                "groups_off_by_default": None}
     groups_off = {str(g).lower() for g in disabled_groups}
     overrides = {
         (str(group["rule_group_name"]).lower(), str(rule["rule_id"])): rule
@@ -189,10 +191,15 @@ def effective_rule_counts(rule_set: dict, definition: Optional[dict], disabled_g
         for rule in (group["rules"] or [])
     }
     total = enabled = blocking = 0
-    fully_off, not_blocking = [], []
+    fully_off, not_blocking, off_by_default = [], [], []
     for group in definition["rule_groups"]:
         name = group["rule_group_name"]
         group_enabled = group_blocking = 0
+        # Some versions (DRS 2.2, DefaultRuleSet 1.0) ship groups with every rule off; leaving them off is the stock policy.
+        blocks_by_default = any(
+            (r["default_state"] or "Enabled") == "Enabled" and r["default_action"] in BLOCKING_RULE_ACTIONS
+            for r in group["rules"]
+        )
         for rule in group["rules"]:
             override = overrides.get((str(name).lower(), str(rule["rule_id"])))
             if str(name).lower() in groups_off:
@@ -207,13 +214,16 @@ def effective_rule_counts(rule_set: dict, definition: Optional[dict], disabled_g
                 group_enabled += 1
                 blocking += action in BLOCKING_RULE_ACTIONS
                 group_blocking += action in BLOCKING_RULE_ACTIONS
-        if group["rules"] and not group_enabled:
-            fully_off.append(name)
         if group["rules"] and not group_blocking:
-            not_blocking.append(name)
+            if not blocks_by_default:
+                off_by_default.append(name)
+            else:
+                not_blocking.append(name)
+                if not group_enabled:
+                    fully_off.append(name)
     return {"rule_definition_found": True, "total_rules": total, "enabled_rules": enabled,
             "blocking_rules": blocking, "fully_disabled_rule_groups": sorted(fully_off),
-            "groups_without_blocking_rules": sorted(not_blocking)}
+            "groups_without_blocking_rules": sorted(not_blocking), "groups_off_by_default": sorted(off_by_default)}
 
 
 def rule_set_record(rule_set: dict, definitions: Optional[dict] = None) -> dict:
@@ -252,13 +262,21 @@ def rule_set_record(rule_set: dict, definitions: Optional[dict] = None) -> dict:
     }
 
 
+def matches_every_request(condition: dict) -> bool:
+    if condition["negate_condition"]:
+        return False
+    if condition["operator"] == "Any":
+        return True
+    return (condition["operator"] == "IPMatch" and condition["match_variable"] in ("RemoteAddr", "SocketAddr")
+            and any(str(v).strip() in ALL_ADDRESSES for v in condition["match_value"]))
+
+
 def custom_rule_record(rule: dict) -> dict:
     conditions = rule["match_conditions"]
     return {
         **rule,
         "enabled_state": rule["enabled_state"] or "Enabled",
-        "matches_all_requests": bool(conditions)
-        and all(c["operator"] == "Any" and not c["negate_condition"] for c in conditions),
+        "matches_all_requests": bool(conditions) and all(matches_every_request(c) for c in conditions),
     }
 
 
@@ -316,6 +334,7 @@ def waf_policy_record(policy: dict, definitions: Optional[dict] = None) -> dict:
         "default_rule_set_blocking_rules": core["blocking_rules"] if core else None,
         "default_rule_set_fully_disabled_groups": core["fully_disabled_rule_groups"] if core else None,
         "default_rule_set_groups_without_blocking_rules": core["groups_without_blocking_rules"] if core else None,
+        "default_rule_set_groups_off_by_default": core["groups_off_by_default"] if core else None,
         "associated": bool(policy["security_policy_links"]),
         "blocking": not reasons,
         "not_blocking_reasons": reasons,
