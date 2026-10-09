@@ -52,6 +52,13 @@ azure-mgmt-resourcegraph>=8.0.1,<9
 # Storage, networking, Defender for Cloud.
 azure-mgmt-storage>=25.1.0,<26
 azure-mgmt-network>=31.0.1,<34
+# Front Door WAF policies (Microsoft.Network/FrontDoorWebApplicationFirewallPolicies).
+# 2.0.0 moved every field under `properties`; the fetchers read that shape.
+azure-mgmt-frontdoor>=2.0.0,<3
+# Front Door Standard/Premium profiles, endpoints, routes, domains, security policies.
+# 14.0.0 has no isProfileLevel / association routes; the fetchers pin api-version 2026-07-01
+# on a dedicated client and read both by wire key.
+azure-mgmt-cdn>=14.0.0,<15
 azure-mgmt-security>=7.0.0,<8
 
 # Identity and access. msgraph-sdk pulls msgraph-core, the microsoft-kiota-*

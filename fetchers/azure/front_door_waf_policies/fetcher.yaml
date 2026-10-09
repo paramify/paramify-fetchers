@@ -1,0 +1,93 @@
+name: azure_front_door_waf_policies
+version: 0.1.0
+description: >
+  Every Azure Front Door Standard/Premium WAF policy in the subscription: whether it
+  is enabled, its mode (Prevention or Detection), each managed rule set with its
+  version and anomaly-score action, the rules and rule groups its overrides disable,
+  exclusions, custom and rate-limit rules, and the security policies that attach it
+  to Front Door endpoints and domains. Each policy carries a `blocking` verdict
+  (enabled, Prevention, a Default Rule Set that blocks with every rule group that
+  blocks by default still blocking, and no custom rule allowing all traffic) with the reasons when it does
+  not, so a policy left in Detection mode or with its core rules switched off is
+  visible rather than reading as "WAF present".
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_front_door_waf_policies.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-RVP   # WAF mode, managed rule sets and rate-limit rules: protection against DoS and unwanted activity
+  - KSI-CNA-RNT   # the policy that limits what traffic reaches the system through Front Door
+  - KSI-CNA-MAT   # disabled rules, exclusions and exceptions show what the WAF lets through
+
+evidence_set:
+  reference_id: EVD-AZURE-FRONTDOOR-WAF
+  name: Azure Front Door WAF Policies
+  instructions: >
+    Script: fetcher.py. Azure SDK call (azure-mgmt-frontdoor FrontDoorManagementClient):
+    policies.list_by_subscription(), kept to sku Standard_AzureFrontDoor /
+    Premium_AzureFrontDoor (classic Front Door policies are counted in
+    skipped_policies_by_sku, not evaluated); managed_rule_sets.list() for Microsoft's
+    rule-set definitions. Reader is sufficient — all GETs.
+    Derivations: enabled_state absent reads as Enabled (the API's documented
+    default); mode absent reads as not blocking (no documented default). A managed
+    rule set's effective_action is its ruleSetAction, or Block when absent (the
+    Default Rule Set's documented default); Log means matches are logged, not
+    blocked. A rule-group override with no rules disables the whole group; a rule
+    override with no enabledState is Disabled (both documented API defaults).
+    blocking = enabled AND mode Prevention AND a Default Rule Set
+    (DefaultRuleSet / Microsoft_DefaultRuleSet, matched case-insensitively) whose
+    effective_action is Block or Redirect AND whose definition was found AND in which
+    every rule group that blocks by default still has an enabled blocking rule AND no
+    enabled custom MatchRule with action Allow matches all requests (every condition,
+    not negated, is operator Any or an IPMatch on RemoteAddr / SocketAddr listing
+    0.0.0.0/0 or ::/0; custom rules run before managed rules). not_blocking_reasons names each failed
+    condition: policy_disabled, mode_unset, mode_detection, no_default_rule_set,
+    default_rule_set_log_only, rule_definition_not_found, rule_groups_not_blocking,
+    allow_all_custom_rule. No allowance is made for groups switched off on purpose;
+    default_rule_set_groups_without_blocking_rules names them. Groups Microsoft ships
+    with no rule blocking by default (DRS 2.2 and DefaultRuleSet 1.0 threat-intel
+    groups) do not count against blocking while left off; they are listed in
+    default_rule_set_groups_off_by_default. associated = the
+    policy is referenced by at least one Front Door security policy; which
+    endpoints and domains it actually covers is evidenced by
+    azure_front_door_waf_coverage. Rule counts: each rule in the policy's rule-set
+    definition is Disabled when its whole group is overridden with no rules, else takes
+    its override's enabledState (absent = Disabled), else the definition's
+    defaultState; total_rules / enabled_rules / blocking_rules (enabled, action Block,
+    Redirect or AnomalyScoring; Allow and Log let the request through) follow. Among
+    groups with a rule that blocks by default (enabled, blocking action):
+    fully_disabled_rule_groups (no rule enabled now) and groups_without_blocking_rules
+    (no enabled rule that blocks now). groups_off_by_default: no rule blocks by default
+    and the overrides enable none that does. Beside them, disabled_rules,
+    log_only_rules and allow_rules list the overrides that set each, surfaced per policy
+    as default_rule_set_* for its Default Rule Set, with latest_version_available —
+    no threshold is applied in the fetcher. Maps to KSI-CNA-RVP / KSI-CNA-RNT /
+    KSI-CNA-MAT.
