@@ -193,7 +193,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "SubscriptionClient",
         "subscriptions",
         ["list"],
-        "_shared/azure_common — subscription discovery for all 27 fetchers",
+        "_shared/azure_common — subscription discovery for all 27 fetchers, and "
+        "visible_subscription_ids (not_found vs not_visible)",
     ),
     (
         "azure.mgmt.resource.resources",
@@ -279,20 +280,6 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure-mgmt-dns has no DNSSEC operation",
     ),
     (
-        "azure.mgmt.privatedns",
-        "PrivateDnsManagementClient",
-        "private_zones",
-        ["list"],
-        "azure/dns_configuration",
-    ),
-    (
-        "azure.mgmt.privatedns",
-        "PrivateDnsManagementClient",
-        "virtual_network_links",
-        ["list"],
-        "azure/dns_configuration",
-    ),
-    (
         "azure.mgmt.network",
         "NetworkManagementClient",
         "virtual_network_gateways",
@@ -354,6 +341,42 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "vpn_server_configurations",
         ["list"],
         "azure/virtual_wan_configuration — P2S protocols and auth types",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "private_endpoints",
+        ["list_by_subscription"],
+        "azure/private_endpoint_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "private_dns_zone_groups",
+        ["list"],
+        "azure/private_endpoint_configuration — which private DNS zones publish each endpoint",
+    ),
+    # --- private DNS ---------------------------------------------------------
+    (
+        "azure.mgmt.privatedns",
+        "PrivateDnsManagementClient",
+        "private_zones",
+        ["list"],
+        "azure/private_dns_zone_configuration, azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.privatedns",
+        "PrivateDnsManagementClient",
+        "virtual_network_links",
+        ["list"],
+        "azure/private_dns_zone_configuration, azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.privatedns",
+        "PrivateDnsManagementClient",
+        "record_sets",
+        ["list"],
+        "azure/private_dns_zone_configuration — the privatelink record check",
     ),
     # --- backup: PR #58 widens this to <12 ----------------------------------
     (
@@ -676,7 +699,9 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "ResourceGraphClient",
         None,
         ["resources"],
-        "azure/resource_inventory",
+        "azure/resource_inventory; _shared/azure_common resource_graph_rows — "
+        "azure/private_endpoint_configuration and azure/private_dns_zone_configuration "
+        "lookups",
     ),
     # --- app platform --------------------------------------------------------
     (
@@ -1187,6 +1212,79 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "LogSettings",
         ["category", "category_group", "enabled"],
         "azure/key_vault_configuration — the AuditEvent / audit-group match",
+    ),
+    # --- private endpoints: network is TypeSpec, so pin the Properties models -----
+    (
+        "azure.mgmt.network.models",
+        "PrivateEndpointProperties",
+        [
+            "subnet",
+            "network_interfaces",
+            "private_link_service_connections",
+            "manual_private_link_service_connections",
+            "custom_dns_configs",
+        ],
+        "azure/private_endpoint_configuration — a renamed connections field reads "
+        "as 'endpoint connects to nothing'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "PrivateLinkServiceConnectionProperties",
+        ["private_link_service_id", "group_ids", "private_link_service_connection_state"],
+        "azure/private_endpoint_configuration — the target resource and slot detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "PrivateLinkServiceConnectionState",
+        ["status", "description", "actions_required"],
+        "azure/private_endpoint_configuration — a renamed status reads as no "
+        "endpoint approved",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "PrivateDnsZoneGroupPropertiesFormat",
+        ["private_dns_zone_configs"],
+        "azure/private_endpoint_configuration — a rename reads as 'no private DNS'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "PrivateDnsZonePropertiesFormat",
+        ["private_dns_zone_id", "record_sets"],
+        "azure/private_endpoint_configuration",
+    ),
+    # --- private DNS ---------------------------------------------------------
+    (
+        "azure.mgmt.privatedns.models",
+        "VirtualNetworkLinkProperties",
+        ["virtual_network", "registration_enabled", "resolution_policy", "virtual_network_link_state"],
+        "azure/private_dns_zone_configuration, azure/dns_configuration — a renamed "
+        "virtual_network reads every link as pointing at a deleted VNet",
+    ),
+    (
+        "azure.mgmt.privatedns.models",
+        "RecordSetProperties",
+        ["a_records", "aaaa_records", "cname_record", "fqdn", "ttl", "is_auto_registered"],
+        "azure/private_dns_zone_configuration — a renamed a_records reads every "
+        "privatelink record as having no IP",
+    ),
+    (
+        "azure.mgmt.privatedns.models",
+        "ARecord",
+        ["ipv4_address"],
+        "azure/private_dns_zone_configuration — the IP matched to private endpoints",
+    ),
+    (
+        "azure.mgmt.privatedns.models",
+        "PrivateZoneProperties",
+        ["number_of_record_sets", "number_of_virtual_network_links", "provisioning_state"],
+        "azure/private_dns_zone_configuration, azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.resourcegraph.models",
+        "QueryRequest",
+        ["subscriptions", "query", "options"],
+        "_shared/azure_common resource_graph_rows — an unscoped request "
+        "(subscriptions=None) is how cross-subscription lookups resolve",
     ),
 ]
 

@@ -387,3 +387,115 @@ def write_evidence(output_dir: Path, filename: str, evidence: Dict[str, Any]) ->
 def coverage_percentage(covered: int, total: int) -> int:
     """Integer percentage, matching the AWS/GCP fetchers' summary math (0 when empty)."""
     return (covered * 100) // total if total > 0 else 0
+
+
+# --------------------------------------------------------------------------- #
+# Resource Graph
+# --------------------------------------------------------------------------- #
+
+RESOURCE_GRAPH_MAX_PAGES = 100
+
+
+def resource_graph_rows(
+    cred, query: str, subscriptions: Optional[List[str]] = None
+) -> List[Dict[str, Any]]:
+    """Every row of a Resource Graph query, paged to the end; raises for the caller's guard.
+
+    `subscriptions=None` leaves the request unscoped, so it reads every subscription the
+    credential can see — how a lookup resolves resources outside the target subscription.
+    """
+    from azure.mgmt.resourcegraph import ResourceGraphClient  # lazy
+    from azure.mgmt.resourcegraph.models import (  # lazy
+        QueryRequest,
+        QueryRequestOptions,
+    )
+
+    client = ResourceGraphClient(credential=cred, **arm_client_kwargs())
+    rows: List[Dict[str, Any]] = []
+    skip_token = None
+    for _ in range(RESOURCE_GRAPH_MAX_PAGES):
+        response = client.resources(
+            QueryRequest(
+                subscriptions=subscriptions,
+                query=query,
+                options=QueryRequestOptions(
+                    top=1000, skip_token=skip_token, result_format="objectArray"
+                ),
+            )
+        )
+        rows.extend(model_attr(response, "data") or [])
+        skip_token = model_attr(response, "skip_token")
+        if not skip_token:
+            return rows
+    raise RuntimeError(
+        f"Resource Graph paging did not terminate after {RESOURCE_GRAPH_MAX_PAGES} pages"
+    )
+
+
+def subscription_of(resource_id: Optional[str]) -> Optional[str]:
+    """Lowercased subscription id from an ARM resource ID, or None."""
+    parts = (resource_id or "").split("/")
+    return parts[2].lower() if len(parts) > 2 and parts[1].lower() == "subscriptions" else None
+
+
+def resource_group_scope_of(resource_id: Optional[str]) -> Optional[str]:
+    """Lowercased `/subscriptions/<id>/resourcegroups/<rg>` prefix of an ARM resource ID, or None."""
+    sub = subscription_of(resource_id)
+    rg = resource_group_from_id(resource_id)
+    return f"/subscriptions/{sub}/resourcegroups/{rg.lower()}" if sub and rg else None
+
+
+READABLE_RESOURCE_GROUPS_QUERY = (
+    "ResourceContainers | where type =~ 'microsoft.resources/subscriptions/resourcegroups' "
+    "| project id = tolower(id)"
+)
+
+
+def readable_scopes(cred, collector: Collector) -> Optional[Dict[str, set]]:
+    """The subscriptions and resource groups the credential can read; None when either listing failed.
+
+    Both are needed to call a missing resource deleted: Reader on one resource group of
+    another subscription still lists that subscription, and a resource in one of its
+    other groups is unreadable, not gone.
+    """
+
+    def _subscriptions() -> set:
+        from azure.mgmt.subscription import SubscriptionClient  # lazy
+
+        client = SubscriptionClient(cred, **arm_client_kwargs())
+        return {
+            (model_attr(sub, "subscription_id") or "").lower()
+            for sub in client.subscriptions.list()
+        }
+
+    subscriptions = collector.guard("subscription.subscriptions.list", _subscriptions)
+    groups = collector.guard(
+        "resourcegraph.resources (readable resource groups)",
+        lambda: {r.get("id") for r in resource_graph_rows(cred, READABLE_RESOURCE_GROUPS_QUERY)},
+    )
+    if subscriptions is None or groups is None:
+        return None
+    return {"subscriptions": subscriptions, "resource_groups": groups}
+
+
+def lookup_status(
+    resource_id: Optional[str], found: bool, lookup_ok: bool, scopes: Optional[Dict[str, set]]
+) -> str:
+    """found / not_found / not_visible / unknown for a resource looked up by id.
+
+    A failed lookup is `unknown`, never `not_found`: the evidence must not report a
+    resource deleted because the call that would have found it errored. A resource
+    whose subscription or resource group the credential cannot read is `not_visible`;
+    a resource group that was itself deleted also lands there, which understates
+    rather than overstates. `not_found` therefore means the credential can read the
+    resource group and the resource is not in it.
+    """
+    if found:
+        return "found"
+    if not lookup_ok or scopes is None:
+        return "unknown"
+    if subscription_of(resource_id) not in scopes["subscriptions"]:
+        return "not_visible"
+    if resource_group_scope_of(resource_id) not in scopes["resource_groups"]:
+        return "not_visible"
+    return "not_found"

@@ -25,6 +25,27 @@ schemas and the `paramify` CLI — not the internal code.
   at all. The TUI lists inventories in their own section. Start from
   `fetchers/_template_inventory/`; see `docs/inventory_fetchers.md`.
 
+- **Two Azure fetchers for private connectivity**, read-only on the built-in
+  Reader role. `azure_private_endpoint_configuration` reports each private
+  endpoint's connection status (Approved, Pending, Rejected or Disconnected),
+  subnet, private IPs and private DNS zone groups, and for its target resource
+  whether it still exists and whether public network access is disabled. An App
+  Service slot is checked on the slot, not its parent site. Per endpoint subnet
+  it reports whether the subnet's NSG and route table apply to endpoint traffic,
+  which Azure does only when the subnet's endpoint network policies are on.
+  `azure_private_dns_zone_configuration` reports each private DNS zone's virtual
+  network links and record sets, and checks every IP of each `privatelink` A
+  record against the private endpoints that hold it: backed, ip_mismatch, stale
+  or unverified, with a record that has a dead IP next to a live one reported as
+  partially backed. The match is on the record's own name, because a public name
+  derived from the zone is wrong for Key Vault and AKS. Zone names that exist
+  more than once are found across every subscription the credential can read.
+  Both record whether Microsoft.Network is registered. A failed lookup is
+  reported as unknown, never as deleted or stale, and a resource whose
+  subscription or resource group the credential cannot read is reported as not
+  visible rather than deleted. Shared Resource Graph paging and the readable-scope
+  check live in `_shared/azure_common.py`.
+
 - **Four Azure fetchers for the network edge and cache tier**, read-only on
   the built-in Reader role. `azure_managed_redis_configuration` reports each
   Azure Managed Redis cluster's minimum TLS version, public network access and
