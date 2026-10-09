@@ -592,6 +592,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`fetchers/jira/README.md`](fetchers/jira/README.md) | Jira Cloud API token + the permissions it needs |
 | [`uploaders/paramify_evidence/README.md`](uploaders/paramify_evidence/README.md) | Paramify API key setup + upload options |
 | [`uploaders/paramify_issues/README.md`](uploaders/paramify_issues/README.md) | Intaking raw scan reports into an assessment + why the file is never touched |
+| [`docs/pipelines_guide.md`](docs/pipelines_guide.md) | End-to-end: scan manifest → assessment + close policy → run → `paramify issues upload` → jobs and cycles → verify in Paramify |
 | [`uploaders/paramify_scripts/README.md`](uploaders/paramify_scripts/README.md) | Syncing fetcher entry scripts to Paramify + the association model |
 | [`docs/suggest_validator_guide.md`](docs/suggest_validator_guide.md) | End-to-end: API key → `/suggest-validator` → sync → verify validators in Paramify |
 | [`docs/uploader_design.md`](docs/uploader_design.md) | How the three uploaders work + the shared evidence-set identity model |
