@@ -95,6 +95,7 @@ requires:
     - azure-mgmt-rdbms
     - azure-mgmt-recoveryservices
     - azure-mgmt-recoveryservicesbackup
+    - azure-mgmt-redis
     - azure-mgmt-redisenterprise
     - azure-mgmt-resource
     - azure-mgmt-resource-policy

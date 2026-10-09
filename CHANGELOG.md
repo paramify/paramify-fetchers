@@ -12,6 +12,24 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_redis_cache_configuration`**, for classic Azure Cache for Redis
+  (`Microsoft.Cache/redis`), the sibling of `azure_managed_redis_configuration`.
+  Per cache it reports the minimum TLS version and whether the non-TLS port is
+  enabled, whether authentication is required at all, whether access keys are
+  disabled so only Entra ID can be used, public network access, private
+  endpoints, VNet injection and firewall rules, judged on the distinct addresses
+  all rules admit together so a split or near-total range is visible. For an assessor it also reports who holds Entra data-access
+  policies, whether connection and Entra sign-in audit logs reach a destination
+  (through a new shared `_shared/diagnostics.py`), the maintenance window, and
+  replication, zone redundancy (including Azure's Automatic zonal allocation),
+  geo-replication and persistence, and its summary names the
+  caches behind each failed expectation. `list_keys` is never called and
+  the projection is an allow-list, so access keys and the storage connection
+  strings in the cache's Redis configuration never reach the evidence. A cache
+  without `minimumTlsVersion` accepts TLS 1.0 and is not counted as TLS-only, and
+  any per-cache read that fails is recorded as unknown. Adds `azure-mgmt-redis`.
+  Verified against a live subscription.
+
 - **A third fetcher kind, `kind: inventory`**, for fetchers that list every
   asset of a kind for Paramify's Inventory. An inventory is evidence with a
   record contract: the payload holds `data`, one record per asset each with a
