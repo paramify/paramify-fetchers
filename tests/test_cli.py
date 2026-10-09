@@ -1786,8 +1786,13 @@ def test_pull_artifact_refuses_a_link_artifact():
 # Default custom tags — the off switch is on every command that writes them
 # --------------------------------------------------------------------------- #
 
-@pytest.mark.parametrize("argv", [["upload"], ["scripts", "sync"], ["validators", "sync"]])
-def test_no_tags_flag_on_every_tagging_command(argv):
-    result = runner.invoke(app, [*argv, "-h"])
-    assert result.exit_code == 0, result.output
-    assert "--no-tags" in result.output
+@pytest.mark.parametrize("path", [["upload"], ["scripts", "sync"], ["validators", "sync"]])
+def test_no_tags_flag_on_every_tagging_command(path):
+    # Read the command's declared options rather than its rendered help: with
+    # colour forced (CI), rich styles the option name in pieces, so the literal
+    # "--no-tags" is not a substring of the output.
+    cmd = get_command(app)
+    for part in path:
+        cmd = cmd.commands[part]
+    opts = {opt for param in cmd.params for opt in getattr(param, "opts", [])}
+    assert "--no-tags" in opts
