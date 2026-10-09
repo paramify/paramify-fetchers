@@ -604,6 +604,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`docs/config_injection_design.md`](docs/config_injection_design.md) | Platform/config/auth model |
 | [`docs/design.md`](docs/design.md) | Why the framework is shaped this way + current state of the work |
 | [`docs/versioning.md`](docs/versioning.md) | How we version, the contract, and what 1.0 means |
+| [`docs/versioning_guide.md`](docs/versioning_guide.md) | Pinning a release tag and upgrading: list tags → read the CHANGELOG → switch, reinstall, validate |
 | [`docs/releasing.md`](docs/releasing.md) | How a release is cut |
 | [`docs/private_mirror_workflow.md`](docs/private_mirror_workflow.md) | Keeping a private copy of this repo that still receives upstream releases |
 
