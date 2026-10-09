@@ -39,6 +39,7 @@ set in a customer's package.
 from __future__ import annotations
 
 import importlib
+import inspect
 
 import pytest
 
@@ -193,7 +194,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "SubscriptionClient",
         "subscriptions",
         ["list"],
-        "_shared/azure_common — subscription discovery for all 27 fetchers",
+        "_shared/azure_common — subscription discovery for every subscription-scoped "
+        "fetcher, the _shared/azure_rest ones (sentinel_*, log_*) included",
     ),
     (
         "azure.mgmt.resource.resources",
@@ -1238,6 +1240,63 @@ def test_graph_request_builders_present(builder: str, affects: str) -> None:
         f"GraphServiceClient.{builder} is gone.\n"
         f"  affected fetchers: {affects}\n"
         f"  msgraph-sdk is pinned <2; a major bump restructures the builders."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Credentials: the whole SDK surface of the _shared/azure_rest fetchers
+# ---------------------------------------------------------------------------
+# These call ARM, Graph and the Log Analytics query API over plain HTTP with the
+# api-version pinned in code, so no azure-mgmt bump can reshape what they read.
+# What an azure-identity or azure-core bump CAN take away is the token: the
+# credential classes, the keyword that pins the CLI to the target subscription's
+# account, and the get_token -> AccessToken(token, expires_on) path the client
+# caches on.
+REST_FETCHERS = (
+    "azure/sentinel_data_sources, azure/sentinel_analytics_rules, "
+    "azure/sentinel_incidents, azure/sentinel_automation_rules, "
+    "azure/log_analytics_query_audit, azure/log_analytics_deletion_rights, "
+    "azure/log_storage_immutability"
+)
+
+# (class, constructor keywords, affected fetchers)
+CREDENTIAL_SURFACE: list[tuple[str, list[str], str]] = [
+    ("DefaultAzureCredential", [], REST_FETCHERS),
+    ("ChainedTokenCredential", [], REST_FETCHERS),
+    (
+        "AzureCliCredential",
+        ["subscription"],
+        f"{REST_FETCHERS} — without the pin the CLI asks its default account, "
+        f"and a subscription in another tenant refuses that token",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "name,keywords,affects", CREDENTIAL_SURFACE, ids=[c[0] for c in CREDENTIAL_SURFACE]
+)
+def test_credential_surface(name: str, keywords: list[str], affects: str) -> None:
+    """The azure.identity classes _shared/azure_rest builds its token from."""
+    cls = _import("azure.identity", name)
+    assert callable(getattr(cls, "get_token", None)), (
+        f"azure.identity.{name}.get_token is gone.\n  affected fetchers: {affects}"
+    )
+    params = inspect.signature(cls.__init__).parameters  # type: ignore[misc]
+    missing = [k for k in keywords if k not in params]
+    assert not missing, (
+        f"azure.identity.{name} no longer accepts {missing}.\n"
+        f"  affected fetchers: {affects}"
+    )
+
+
+def test_access_token_fields() -> None:
+    """_shared/azure_rest caches on expires_on and sends .token."""
+    from azure.core.credentials import AccessToken
+
+    missing = {"token", "expires_on"} - set(AccessToken._fields)
+    assert not missing, (
+        f"azure.core AccessToken lost {sorted(missing)}.\n"
+        f"  affected fetchers: {REST_FETCHERS}"
     )
 
 

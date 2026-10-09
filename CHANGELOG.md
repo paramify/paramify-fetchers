@@ -324,6 +324,26 @@ schemas and the `paramify` CLI — not the internal code.
   Microsoft Sentinel is onboarded (the SecurityInsights solution is enabled).
   Nothing in the Azure category recorded where logs are kept or for how long.
   Adds the `azure-mgmt-loganalytics` dependency to the `azure` extra.
+- **Seven Microsoft Sentinel and Log Analytics log-integrity fetchers.** Per
+  Sentinel workspace (`SENTINEL_WORKSPACES`, or every onboarded workspace in the
+  subscription): `azure_sentinel_data_sources` (connectors, plus which tables
+  and alert products actually ingested in the window),
+  `azure_sentinel_analytics_rules`, `azure_sentinel_incidents` (status,
+  classification, time to close) and `azure_sentinel_automation_rules`. Per Log
+  Analytics workspace, Sentinel or not: `azure_log_analytics_query_audit`
+  (whether queries are audited, and weekly human vs app query counts) and
+  `azure_log_analytics_deletion_rights` (who, active or PIM-eligible, can purge
+  or delete log data, delete the workspace or shorten its retention, and
+  whether through a wildcard role). Per subscription:
+  `azure_log_storage_immutability` (immutability policy, legal hold and soft
+  delete on the containers Azure Monitor writes logs to; only a Locked policy or
+  a legal hold counts as protected). They share `_shared/azure_rest`, which
+  calls ARM, Graph and the Log Analytics query API directly, since the only
+  stable Sentinel SDK pins a 2021 API version, and retries throttling and
+  transient server errors, honouring Retry-After. Analytics rules are listed at
+  the stable and the preview API and merged, since NRT rules exist only in
+  preview. Data older than a table's retention is reported as not retained,
+  never as missing.
 
 ### Changed
 
