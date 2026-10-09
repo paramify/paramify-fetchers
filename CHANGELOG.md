@@ -20,9 +20,12 @@ schemas and the `paramify` CLI — not the internal code.
   Tags are added on every run and never removed, so a user's own tags on
   those resources are left alone and resources from earlier runs are
   backfilled. Both are `upload.yaml` knobs under `tags:` — rename the
-  provenance string, drop either tag, or set `tags: false` for none. A token
-  without the custom-tags permission gets one warning and the stage proceeds
-  untagged. Every category file now declares a `display_name`; the category
+  provenance string, drop either tag, or set `tags: false` for none. To
+  switch the feature off without touching a file, set
+  `PARAMIFY_CUSTOM_TAGS=off` in the environment, or pass `--no-tags` to any
+  of the three commands for one run; the Done block says which switch is in
+  effect. A token without the custom-tags permission gets one warning and
+  the stage proceeds untagged. Every category file now declares a `display_name`; the category
   schema gains the optional field. `paramify validators sync` reads the
   repo's `upload.yaml` by default, as the other two stages already did.
 

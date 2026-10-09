@@ -234,6 +234,11 @@ def _tag_posts(fake):
     return [(url.rsplit("/custom-tags/", 1)[1], body["names"]) for url, body in fake.session.posts]
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_tag_switch(monkeypatch):
+    monkeypatch.delenv("PARAMIFY_CUSTOM_TAGS", raising=False)
+
+
 def test_every_script_is_tagged_including_noop_and_drift(wired):
     summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
     posted = dict(_tag_posts(wired))
@@ -280,7 +285,19 @@ def test_tags_off_posts_nothing(wired):
     summary = uploader.sync_scripts(
         "/repo", base_url="https://app.example.com/api/v0", config={"tags": False}
     )
-    assert wired.session.posts == [] and summary["tags"] is None
+    assert wired.session.posts == [] and summary["tags"]["enabled"] is False
+
+
+def test_no_tags_switch_posts_nothing(wired):
+    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0", custom_tags=False)
+    assert wired.session.posts == [] and summary["tags"]["reason"] == "--no-tags"
+    assert all(r["tags"] == [] for r in summary["results"])
+
+
+def test_env_switch_posts_nothing(wired, monkeypatch):
+    monkeypatch.setenv("PARAMIFY_CUSTOM_TAGS", "off")
+    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
+    assert wired.session.posts == [] and summary["tags"]["reason"] == "PARAMIFY_CUSTOM_TAGS=off"
 
 
 def test_missing_tag_permission_does_not_fail_the_sync(monkeypatch):

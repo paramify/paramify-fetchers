@@ -212,6 +212,7 @@ def sync_validators(
     on_event: Optional[Callable[[dict], None]] = None,
     config: Optional[Dict] = None,
     display_names: Optional[Dict[str, str]] = None,
+    custom_tags: bool = True,
 ) -> Dict:
     """Reconcile a list of registry validator dicts against Paramify.
 
@@ -257,6 +258,7 @@ def sync_validators(
         tagger = build_tagger(
             None if (dry_run or client is None) else client.session,
             base_url, config=config, display_names=display_names,
+            override_off=None if custom_tags else "--no-tags",
         )
     except ValueError as e:
         logger.error(str(e))
@@ -264,7 +266,7 @@ def sync_validators(
 
     def _tag(validator_id: Optional[str], category: Optional[str]) -> List[str]:
         """Tag one validator; the names applied, or [] when off, dry-run, or refused."""
-        if tagger is None or dry_run or not validator_id:
+        if dry_run or not validator_id:
             return []
         info = tagger.tag(ENTITY_VALIDATOR, validator_id, category)
         return info["tags"] if info["outcome"] in ("applied", "already") else []
@@ -327,7 +329,7 @@ def sync_validators(
                     created += 1
                     add_result({
                         "key": key, "outcome": "would_create", "evidence_sets": refs,
-                        "tags": tagger.plan(category) if tagger else [],
+                        "tags": tagger.plan(category),
                     })
                     continue
                 assert client is not None  # not dry_run => token present or we raised
@@ -403,7 +405,7 @@ def sync_validators(
         "set_not_found": set_not_found,
         "errors": errors,
         "associate_errors": assoc_errors,
-        "tags": tagger.summary() if tagger else None,
+        "tags": tagger.summary(),
         "results": results,
         "lock_path": str(lock_written) if lock_written else str(lock_file),
         "ok": errors == 0 and assoc_errors == 0,

@@ -564,6 +564,8 @@ def _tags_done_lines(summary: Optional[dict]) -> List[str]:
     """The default-custom-tags lines of a stage's Done block; empty when tags are off."""
     if not summary:
         return []
+    if summary.get("enabled") is False:
+        return [f"tags: off ({summary.get('reason') or 'switched off'})"]
     line = f"tags: applied={summary.get('applied', 0)} failed={summary.get('failed', 0)}"
     if summary.get("provenance"):
         line += f"  provenance={summary['provenance']!r}"
@@ -1135,6 +1137,7 @@ def upload_cmd(
     config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and report what would upload; no API calls"),
     with_validators: bool = typer.Option(False, "--with-validators", help="After upload, sync validators for the sets this run produced (create-or-skip)"),
+    no_tags: bool = typer.Option(False, "--no-tags", help="Skip the default custom tags for this run (PARAMIFY_CUSTOM_TAGS=off does the same from the environment)"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
     """Upload one evidence run to Paramify.
@@ -1149,6 +1152,7 @@ def upload_cmd(
             config_path=config_path,
             dry_run=dry,
             on_event=None if json_out else _human_validator_printer(),
+            custom_tags=not no_tags,
         )
 
     _upload_stage(
@@ -1161,6 +1165,7 @@ def upload_cmd(
         upload_fn=api.upload_run,
         noun="file",
         log_name="upload_log.json",
+        upload_kwargs={"custom_tags": not no_tags},
         after_upload=_sync_after if with_validators else None,
         after_upload_key="validators",
         kind="evidence",
@@ -1225,6 +1230,7 @@ def validators_sync_cmd(
     lock: Optional[str] = typer.Option(None, "--lock", help="Lock file path (default ./.paramify/validators-sync.lock.json)"),
     update: bool = typer.Option(False, "--update", help="Also PATCH existing validators (overwrites customer tuning)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Report planned actions; make no writes"),
+    no_tags: bool = typer.Option(False, "--no-tags", help="Skip the default custom tags for this run (PARAMIFY_CUSTOM_TAGS=off does the same from the environment)"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
     """Create/associate registry validators in Paramify. Create-or-skip by default."""
@@ -1242,6 +1248,7 @@ def validators_sync_cmd(
             update=update,
             lock_path=lock,
             on_event=None if json_out else _human_validator_printer(),
+            custom_tags=not no_tags,
         )
     except Exception as e:  # noqa: BLE001 — surface setup errors to CLI users
         if json_out:
@@ -1296,6 +1303,7 @@ def scripts_sync_cmd(
     force: bool = typer.Option(False, "--force", help="Push scripts whose code drifted without a version bump"),
     reassociate: bool = typer.Option(False, "--reassociate", help="Ensure the association for every fetcher, not just changed ones"),
     all_fetchers: bool = typer.Option(False, "--all", help="Sync every fetcher in the repo, not just the manifest's"),
+    no_tags: bool = typer.Option(False, "--no-tags", help="Skip the default custom tags for this run (PARAMIFY_CUSTOM_TAGS=off does the same from the environment)"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
     """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
@@ -1340,6 +1348,7 @@ def scripts_sync_cmd(
             reassociate=reassociate,
             include=include,
             on_event=None if json_out else _human_scripts_printer(),
+            custom_tags=not no_tags,
         )
     except Exception as e:  # noqa: BLE001
         if json_out:

@@ -76,6 +76,7 @@ Shares the shape of the evidence uploader config so overrides stay consistent:
   as the `service` tag) put on every script the sync sees, and on the set it
   associates to. Same block, same meaning as the evidence uploader's; see
   [`../paramify_evidence/README.md`](../paramify_evidence/README.md).
+  `PARAMIFY_CUSTOM_TAGS=off` or `paramify scripts sync --no-tags` turns it off.
 
 ## Required tooling
 

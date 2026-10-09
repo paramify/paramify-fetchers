@@ -131,12 +131,25 @@ Per-fetcher content tags (`STIG`, `CIS`) and single-valued validator criticality
 the layers coexist, but criticality will need a reconcile step, not just
 another additive tag.
 
+**Turning it off.** Three switches, in order of precedence:
+
+- `--no-tags` on `paramify upload`, `paramify scripts sync` or `paramify
+  validators sync` — this one invocation writes no tags;
+- `PARAMIFY_CUSTOM_TAGS=off` (also `false`, `no`, `0`) in the environment —
+  the feature is off wherever that is set, a shell, a CI job, a container,
+  whatever `upload.yaml` says. Any other value leaves the config in charge;
+- `tags: false` in `upload.yaml` — off for everyone who runs from that config.
+
+A switch that says off wins before the config block is read, so a broken
+block cannot keep tags on. The Done block of each stage says `tags: off
+(<which switch>)` so the reason is never a guess.
+
 **Tagging never fails a stage.** A token without the custom-tags permission
 gets one warning and the rest of the run proceeds untagged; any other error is
 logged per entity and counted. Each stage's summary carries a `tags` block
-(`applied` / `failed` / `skipped` / `disabled`), and each result row the names
-it applied. A dry run shows the planned names and writes nothing. The
-implementation is one module, `framework/custom_tags.py`.
+(`enabled` / `reason` / `applied` / `failed` / `skipped` / `disabled`), and
+each result row the names it applied. A dry run shows the planned names and
+writes nothing. The implementation is one module, `framework/custom_tags.py`.
 
 ## `paramify_evidence` — attach evidence to sets
 

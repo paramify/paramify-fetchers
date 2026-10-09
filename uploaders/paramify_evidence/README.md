@@ -83,7 +83,9 @@ See [`examples/upload.yaml`](../../examples/upload.yaml):
   `service` (`true`: the category's `display_name`, e.g. `AWS`; `false` to
   drop it). `tags: false` turns both off. Additive only: your own tags on a set
   are never touched. Without the custom-tags permission the upload still
-  succeeds, with one warning.
+  succeeds, with one warning. **Off switch:** `PARAMIFY_CUSTOM_TAGS=off` in the
+  environment turns the feature off everywhere, whatever the config says;
+  `paramify upload --no-tags` does it for one run. The Done block says which.
 
 ## Required tooling
 

@@ -271,6 +271,7 @@ def sync_scripts(
     reassociate: bool = False,
     include: Optional[set] = None,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> Dict:
     """Reconcile every fetcher's entry script into Paramify and associate it.
 
@@ -301,7 +302,10 @@ def sync_scripts(
     # Default custom tags on every script and set this sweep touches. Resolved
     # up front so a malformed `tags:` block fails like any other config mistake.
     try:
-        tagger = build_tagger(None, base_url, config=config, root=root)
+        tagger = build_tagger(
+            None, base_url, config=config, root=root,
+            override_off=None if custom_tags else "--no-tags",
+        )
     except ValueError as e:
         logger.error(str(e))
         raise
@@ -312,7 +316,7 @@ def sync_scripts(
     # A client is created whenever a token is available — even in dry-run, where
     # it makes only read-only GETs so the plan reflects the real tenant state.
     client = ParamifyScriptsClient(token, base_url) if token else None
-    if tagger is not None and client is not None and not dry_run:
+    if client is not None and not dry_run:
         tagger.session = client.session
     index: Dict[str, Dict] = {}
     if client is not None:
@@ -331,7 +335,7 @@ def sync_scripts(
 
     def _tag(entity: str, entity_id: Optional[str], category: Optional[str]) -> List[str]:
         """Tag one entity; the names applied, or [] when off, dry-run, or refused."""
-        if tagger is None or dry_run or not entity_id:
+        if dry_run or not entity_id:
             return []
         info = tagger.tag(entity, entity_id, category)
         return info["tags"] if info["outcome"] in ("applied", "already") else []
@@ -365,7 +369,7 @@ def sync_scripts(
                 **base,
                 "outcome": f"would_{action}" if action != "drift" else "would_drift",
                 "reason": note,
-                "tags": tagger.plan(category) if tagger else [],
+                "tags": tagger.plan(category),
             })
             continue
 
@@ -420,7 +424,7 @@ def sync_scripts(
         "dry_run": dry_run,
         "fetchers": len(specs),
         **counts,
-        "tags": tagger.summary() if tagger else None,
+        "tags": tagger.summary(),
         "results": results,
         "ok": counts["errors"] == 0,
     }

@@ -314,8 +314,13 @@ def upload_run(
     base_url: Optional[str] = None,
     dry_run: bool = False,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> Dict:
     """Upload one completed run directory.
+
+    `custom_tags=False` is the `--no-tags` switch: no default custom tags for
+    this run, whatever the config says (PARAMIFY_CUSTOM_TAGS=off does the same
+    from the environment).
 
     The standalone CLI still logs to stderr, while front-ends can pass on_event
     to render upload_start / upload_file / upload_complete in their own UI.
@@ -341,7 +346,10 @@ def upload_run(
     # malformed `tags:` block fails like any other config mistake; the client's
     # session is attached below (a dry run keeps it write-less).
     try:
-        tagger = build_tagger(None, base_url, config=config, root=_REPO_ROOT)
+        tagger = build_tagger(
+            None, base_url, config=config, root=_REPO_ROOT,
+            override_off=None if custom_tags else "--no-tags",
+        )
     except ValueError as e:
         logger.error(str(e))
         raise
@@ -372,7 +380,7 @@ def upload_run(
     })
 
     client = None if dry_run else ParamifyClient(token, base_url)
-    if tagger is not None and client is not None:
+    if client is not None:
         tagger.session = client.session
     results: List[Dict] = []
     uploaded = skipped_dup = skipped_failed = errors = seen = 0
@@ -443,7 +451,7 @@ def upload_run(
                     "file": path.name,
                     "outcome": "would_upload",
                     "reference_id": es["reference_id"],
-                    "tags": tagger.plan(metadata.get("category")) if tagger else [],
+                    "tags": tagger.plan(metadata.get("category")),
                 })
                 continue
 
@@ -457,11 +465,8 @@ def upload_run(
 
             # Tag before the dedup check: a set is tagged once per run whether or
             # not this file is new, which is what backfills sets from older runs.
-            tags: List[str] = []
-            if tagger is not None:
-                tag_info = tagger.tag(ENTITY_EVIDENCE, evidence_id, metadata.get("category"))
-                if tag_info["outcome"] in ("applied", "already"):
-                    tags = tag_info["tags"]
+            tag_info = tagger.tag(ENTITY_EVIDENCE, evidence_id, metadata.get("category"))
+            tags = tag_info["tags"] if tag_info["outcome"] in ("applied", "already") else []
 
             try:
                 channel = resolve_channel(
@@ -539,7 +544,7 @@ def upload_run(
             "skipped_duplicate": skipped_dup,
             "skipped_failed": skipped_failed,
             "errors": errors,
-            "tags": tagger.summary() if tagger else None,
+            "tags": tagger.summary(),
             "results": results,
         }
         log_path = run_dir / "upload_log.json"
@@ -558,7 +563,7 @@ def upload_run(
         "skipped_failed": skipped_failed,
         "errors": errors,
         "files": seen,
-        "tags": tagger.summary() if tagger else None,
+        "tags": tagger.summary(),
         "results": results,
         "log_path": str(log_path) if log_path else None,
         "ok": errors == 0,

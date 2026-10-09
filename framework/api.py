@@ -1304,6 +1304,7 @@ def sync_validators(
     update: bool = False,
     lock_path: Optional[str] = None,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> dict:
     """Sync registry validators to Paramify and associate them to evidence sets.
 
@@ -1328,6 +1329,7 @@ def sync_validators(
         lock_path=lock_path,
         on_event=on_event,
         display_names=category_display_names(root),
+        custom_tags=custom_tags,
     )
 
 
@@ -1387,6 +1389,7 @@ def upload_run(
     *,
     dry_run: bool = False,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> dict:
     """Upload one run directory to Paramify.
 
@@ -1402,6 +1405,7 @@ def upload_run(
         config=config,
         dry_run=dry_run,
         on_event=on_event,
+        custom_tags=custom_tags,
     )
 
 
@@ -1787,6 +1791,7 @@ def scripts_sync(
     reassociate: bool = False,
     include: Optional[set] = None,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> dict:
     """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
 
@@ -1807,6 +1812,7 @@ def scripts_sync(
         reassociate=reassociate,
         include=include,
         on_event=on_event,
+        custom_tags=custom_tags,
     )
 
 

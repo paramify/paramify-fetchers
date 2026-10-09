@@ -1780,3 +1780,14 @@ def test_pull_artifact_refuses_a_link_artifact():
             {"id": "d" * 8, "is_url": True, "download_url": "https://example.test/page"},
             "/tmp",
         )
+
+
+# --------------------------------------------------------------------------- #
+# Default custom tags — the off switch is on every command that writes them
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("argv", [["upload"], ["scripts", "sync"], ["validators", "sync"]])
+def test_no_tags_flag_on_every_tagging_command(argv):
+    result = runner.invoke(app, [*argv, "-h"])
+    assert result.exit_code == 0, result.output
+    assert "--no-tags" in result.output

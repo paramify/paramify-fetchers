@@ -19,6 +19,11 @@ per-fetcher settings, and both can be renamed or switched off:
 
     tags: false                                     # no default tags at all
 
+To switch the whole feature off without touching a file, set
+`PARAMIFY_CUSTOM_TAGS=off` wherever the stage runs (a shell, CI, a container);
+it wins over the config. `--no-tags` on `paramify upload`, `paramify scripts
+sync` and `paramify validators sync` does the same for one invocation.
+
 Writes are **additive and re-asserted on every run**: `POST
 /custom-tags/{entity}/{id}` adds names and auto-creates unknown ones; it never
 replaces the entity's tag set, so a user's own tags survive, and a run reaches
@@ -34,6 +39,7 @@ per entity and counted. See docs/uploader_design.md.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
@@ -42,6 +48,10 @@ logger = logging.getLogger("paramify_custom_tags")
 
 DEFAULT_PROVENANCE_TAG = "Automated by Paramify Fetchers"
 CONFIG_KEY = "tags"
+#: The kill switch: set to off / false / no / 0 and no stage writes a tag,
+#: whatever the config says. Any other value leaves the config in charge.
+ENV_SWITCH = "PARAMIFY_CUSTOM_TAGS"
+_OFF_VALUES = {"0", "false", "no", "off"}
 
 #: The `entity` path segment of `/custom-tags/{entity}/{entityId}` for each
 #: resource type the uploaders create.
@@ -59,10 +69,17 @@ class TagPolicy:
 
     provenance: Optional[str] = DEFAULT_PROVENANCE_TAG
     service: bool = True
+    #: Why the feature is off, when it is — the switch that turned it off, so
+    #: the Done block can say so. None while tags are on.
+    off_reason: Optional[str] = None
 
     @property
     def enabled(self) -> bool:
         return bool(self.provenance) or self.service
+
+
+def _off(reason: str) -> TagPolicy:
+    return TagPolicy(provenance=None, service=False, off_reason=reason)
 
 
 def _clean_tag(value: Any, *, where: str) -> str:
@@ -76,20 +93,35 @@ def _clean_tag(value: Any, *, where: str) -> str:
     return name
 
 
-def resolve_tag_policy(config: Optional[Mapping[str, Any]]) -> TagPolicy:
-    """Read the uploader config's `tags:` block into a TagPolicy.
+def resolve_tag_policy(
+    config: Optional[Mapping[str, Any]],
+    env: Optional[Mapping[str, str]] = None,
+    *,
+    override_off: Optional[str] = None,
+) -> TagPolicy:
+    """The tag policy for one run: the switches first, then the config block.
 
-    Absent block -> the defaults. `tags: false` -> everything off. Inside the
-    block, `provenance` is a string or false/null (off) and `service` a bool.
-    Raises ValueError for a shape it does not understand, like the uploaders do
-    for any other config mistake — a typo must not silently fall back to the
-    defaults.
+    Precedence: `override_off` (a caller's reason, e.g. `--no-tags`), then the
+    `PARAMIFY_CUSTOM_TAGS` env var when it says off, then the config's `tags:`
+    block. Absent block -> the defaults. `tags: false` -> everything off.
+    Inside the block, `provenance` is a string or false/null (off) and
+    `service` a bool. Raises ValueError for a shape it does not understand,
+    like the uploaders do for any other config mistake — a typo must not
+    silently fall back to the defaults. A switch that says off wins before the
+    block is looked at, so a broken block cannot keep the feature on.
     """
+    if override_off:
+        return _off(override_off)
+    src = env if env is not None else os.environ
+    raw_switch = (src.get(ENV_SWITCH) or "").strip()
+    if raw_switch.lower() in _OFF_VALUES:
+        return _off(f"{ENV_SWITCH}={raw_switch}")
+
     block = (config or {}).get(CONFIG_KEY)
     if block is None or block is True:
         return TagPolicy()
     if block is False:
-        return TagPolicy(provenance=None, service=False)
+        return _off(f"`{CONFIG_KEY}: false` in the uploader config")
     if not isinstance(block, Mapping):
         raise ValueError(f"`{CONFIG_KEY}` must be a mapping or false, got {type(block).__name__}")
     unknown = sorted(set(block) - _KNOWN_KEYS)
@@ -174,6 +206,8 @@ class Tagger:
     def plan(self, category: Optional[str]) -> List[str]:
         """The tag names a resource of `category` receives under this policy."""
         names: List[str] = []
+        if not self.policy.enabled:
+            return names
         if self.policy.provenance:
             names.append(self.policy.provenance)
         if self.policy.service and category:
@@ -193,10 +227,13 @@ class Tagger:
         """Add the default tags to one entity. Never raises.
 
         Returns {"outcome": ..., "tags": [...]} where outcome is `applied`,
-        `already` (this run already tagged it), `skipped` (nothing to apply),
-        `forbidden` (the key lacks the permission; the run goes on untagged),
-        `dry_run` (no session) or `error` (logged and counted).
+        `already` (this run already tagged it), `off` (the feature is switched
+        off), `skipped` (nothing to apply), `forbidden` (the key lacks the
+        permission; the run goes on untagged), `dry_run` (no session) or
+        `error` (logged and counted).
         """
+        if not self.policy.enabled:
+            return {"outcome": "off", "tags": []}
         names = self.plan(category)
         if not names:
             return {"outcome": "skipped", "tags": []}
@@ -239,6 +276,8 @@ class Tagger:
 
     def summary(self) -> Dict[str, Any]:
         return {
+            "enabled": self.policy.enabled,
+            "reason": self.policy.off_reason,
             "provenance": self.policy.provenance,
             "service": self.policy.service,
             "applied": self.applied,
@@ -256,17 +295,22 @@ def build_tagger(
     root: Optional[Path] = None,
     display_names: Optional[Mapping[str, str]] = None,
     timeout: int = 30,
-) -> Optional[Tagger]:
-    """The Tagger for one uploader run, or None when the config turns tags off.
+    override_off: Optional[str] = None,
+) -> Tagger:
+    """The Tagger for one uploader run.
 
     `session` is the client's authenticated requests.Session; pass None for a
     dry run, where `plan()` still answers but `tag()` writes nothing. Display
     names come from `display_names`, or are read from `root`'s category files.
-    Raises ValueError for a malformed `tags:` block (a setup error).
+    `override_off` is a caller's reason to switch the feature off for this run
+    (`--no-tags`). When tags are off — by that, by `PARAMIFY_CUSTOM_TAGS`, or
+    by the config — the Tagger still exists but plans and writes nothing, and
+    its summary says why. Raises ValueError for a malformed `tags:` block (a
+    setup error).
     """
-    policy = resolve_tag_policy(config)
+    policy = resolve_tag_policy(config, override_off=override_off)
     if not policy.enabled:
-        return None
+        return Tagger(None, base_url, policy=policy, timeout=timeout)
     names = dict(display_names) if display_names is not None else (
         category_display_names(root) if root is not None else {}
     )

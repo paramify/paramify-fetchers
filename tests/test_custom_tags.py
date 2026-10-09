@@ -42,6 +42,12 @@ BASE = "https://example.test/api/v0"
 NAMES = {"aws": "AWS", "okta": "Okta"}
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_switch(monkeypatch):
+    """The developer's shell must not decide these tests."""
+    monkeypatch.delenv(ct.ENV_SWITCH, raising=False)
+
+
 def _tagger(session=None, policy=None, names=NAMES):
     return ct.Tagger(session, BASE, policy=policy or ct.TagPolicy(), display_names=names)
 
@@ -59,7 +65,80 @@ def test_defaults_when_block_absent():
 def test_false_turns_everything_off():
     p = ct.resolve_tag_policy({"tags": False})
     assert p.provenance is None and p.service is False and not p.enabled
-    assert ct.build_tagger(None, BASE, config={"tags": False}) is None
+    assert "tags: false" in p.off_reason
+    t = ct.build_tagger(None, BASE, config={"tags": False})
+    assert t.plan("aws") == []
+    assert t.tag("evidence", "ev-1", "aws") == {"outcome": "off", "tags": []}
+    assert t.summary()["enabled"] is False and "tags: false" in t.summary()["reason"]
+
+
+# --------------------------------------------------------------------------- #
+# The kill switches: the env var, and a caller's --no-tags
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("value", ["off", "OFF", "false", "no", "0", " off "])
+def test_env_switch_turns_the_feature_off(value):
+    p = ct.resolve_tag_policy({}, env={ct.ENV_SWITCH: value})
+    assert not p.enabled
+    assert p.off_reason == f"{ct.ENV_SWITCH}={value.strip()}"
+
+
+@pytest.mark.parametrize("value", ["", "on", "true", "1", "yes", "banana"])
+def test_env_switch_other_values_leave_the_config_in_charge(value):
+    assert ct.resolve_tag_policy({}, env={ct.ENV_SWITCH: value}) == ct.TagPolicy()
+    assert not ct.resolve_tag_policy({"tags": False}, env={ct.ENV_SWITCH: value}).enabled
+
+
+def test_env_switch_is_read_from_the_process_environment(monkeypatch):
+    monkeypatch.setenv(ct.ENV_SWITCH, "off")
+    t = ct.build_tagger(RecordingSession(), BASE, config={}, display_names=NAMES)
+    assert t.tag("evidence", "ev-1", "aws")["outcome"] == "off"
+    assert t.session is None, "an off tagger holds no session, so it cannot write"
+
+
+def test_env_switch_wins_before_a_broken_block_is_read():
+    # Off means off: a typo in the block must not keep the feature on, and
+    # must not stop the run either.
+    p = ct.resolve_tag_policy({"tags": {"provenence": "x"}}, env={ct.ENV_SWITCH: "off"})
+    assert not p.enabled
+
+
+def test_override_off_wins_over_everything():
+    p = ct.resolve_tag_policy(
+        {"tags": {"provenance": "Robots"}}, env={ct.ENV_SWITCH: "on"}, override_off="--no-tags"
+    )
+    assert not p.enabled and p.off_reason == "--no-tags"
+    t = ct.build_tagger(RecordingSession(), BASE, config={}, display_names=NAMES, override_off="--no-tags")
+    assert t.summary()["reason"] == "--no-tags" and t.plan("aws") == []
+
+
+def test_facade_forwards_the_switch_to_every_stage(monkeypatch, tmp_path):
+    """`--no-tags` reaches each uploader as custom_tags=False."""
+    from types import SimpleNamespace
+
+    from framework import api
+
+    seen = {}
+
+    def stub(name):
+        def run(*_a, **kw):
+            seen[name] = kw
+            return {"ok": True}
+        return run
+
+    monkeypatch.setattr(api, "_load_paramify_uploader",
+                        lambda root: SimpleNamespace(load_config=lambda p: {}, upload_run=stub("upload")))
+    monkeypatch.setattr(api, "_load_paramify_scripts_uploader",
+                        lambda root: SimpleNamespace(load_config=lambda p: {}, sync_scripts=stub("scripts")))
+    monkeypatch.setattr(api, "_load_paramify_validator_syncer",
+                        lambda root: SimpleNamespace(collect_validators=lambda *a, **k: [],
+                                                     sync_validators=stub("validators")))
+    api.upload_run(tmp_path, tmp_path, custom_tags=False)
+    api.scripts_sync(tmp_path, custom_tags=False)
+    api.sync_validators(tmp_path, custom_tags=False)
+    assert {k: v["custom_tags"] for k, v in seen.items()} == {
+        "upload": False, "scripts": False, "validators": False,
+    }
 
 
 def test_rename_provenance_and_drop_service():
@@ -134,6 +213,7 @@ def test_tag_posts_additively_once_per_entity():
         (f"{BASE}/custom-tags/scripts/sc-1", {"names": [ct.DEFAULT_PROVENANCE_TAG, "Okta"]}),
     ]
     assert t.summary() == {
+        "enabled": True, "reason": None,
         "provenance": ct.DEFAULT_PROVENANCE_TAG, "service": True,
         "applied": 2, "failed": 0, "skipped": 0, "disabled": None,
     }

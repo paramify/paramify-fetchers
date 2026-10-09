@@ -443,6 +443,11 @@ def _tag_posts(fake):
     return [(url.rsplit("/custom-tags/", 1)[1], body["names"]) for url, body in fake.session.posts]
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_tag_switch(monkeypatch):
+    monkeypatch.delenv("PARAMIFY_CUSTOM_TAGS", raising=False)
+
+
 def test_every_set_is_tagged_once_per_run(tmp_path, monkeypatch):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -462,6 +467,7 @@ def test_every_set_is_tagged_once_per_run(tmp_path, monkeypatch):
     by_file = {r["file"]: r for r in summary["results"]}
     assert by_file["a.json"]["tags"] == by_file["b.json"]["tags"] == ["Automated by Paramify Fetchers", "AWS"]
     assert summary["tags"] == {
+        "enabled": True, "reason": None,
         "provenance": "Automated by Paramify Fetchers", "service": True,
         "applied": 2, "failed": 0, "skipped": 0, "disabled": None,
     }
@@ -499,7 +505,40 @@ def test_tags_config_renames_and_disables(tmp_path, monkeypatch):
         run_dir, token="tok", base_url="https://app.example.com/api/v0", config={"tags": False}
     )
     assert fake.session.posts == []
-    assert summary["tags"] is None
+    assert summary["tags"]["enabled"] is False and "tags: false" in summary["tags"]["reason"]
+    assert summary["results"][0]["tags"] == []
+
+
+def test_env_switch_turns_tags_off_for_the_run(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_evidence(run_dir, "a.json", reference_id="EVD-A", category="aws")
+    fake = FakeClient()
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+    monkeypatch.setenv("PARAMIFY_CUSTOM_TAGS", "off")
+
+    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
+
+    assert summary["ok"] and summary["uploaded"] == 1
+    assert fake.session.posts == []
+    assert summary["tags"] == {
+        "enabled": False, "reason": "PARAMIFY_CUSTOM_TAGS=off", "provenance": None,
+        "service": False, "applied": 0, "failed": 0, "skipped": 0, "disabled": None,
+    }
+
+
+def test_no_tags_switch_turns_tags_off_for_the_run(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_evidence(run_dir, "a.json", reference_id="EVD-A", category="aws")
+    fake = FakeClient()
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+
+    summary = uploader.upload_run(
+        run_dir, token="tok", base_url="https://app.example.com/api/v0", custom_tags=False
+    )
+    assert fake.session.posts == []
+    assert summary["tags"]["enabled"] is False and summary["tags"]["reason"] == "--no-tags"
     assert summary["results"][0]["tags"] == []
 
 

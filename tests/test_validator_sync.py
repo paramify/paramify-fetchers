@@ -10,6 +10,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SYNCER_PATH = REPO_ROOT / "uploaders" / "paramify_validators" / "syncer.py"
 
@@ -217,6 +219,11 @@ def _tag_posts(c):
     return [(url.rsplit("/custom-tags/", 1)[1], body["names"]) for url, body in c.session.posts]
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_tag_switch(monkeypatch):
+    monkeypatch.delenv("PARAMIFY_CUSTOM_TAGS", raising=False)
+
+
 def test_created_validator_is_tagged_with_its_category(tmp_path):
     c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
     v = {**_alb(), "category": "aws"}
@@ -248,7 +255,21 @@ def test_dry_run_plans_tags_and_posts_none(tmp_path):
 def test_tags_off_posts_none(tmp_path):
     c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
     s = _run([_alb()], c, tmp_path, config={"tags": False})
-    assert c.session.posts == [] and s["tags"] is None
+    assert c.session.posts == [] and s["tags"]["enabled"] is False
+
+
+def test_no_tags_switch_posts_none(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path, custom_tags=False)
+    assert c.session.posts == [] and s["tags"]["reason"] == "--no-tags"
+    assert s["results"][0]["outcome"] == "created" and s["results"][0]["tags"] == []
+
+
+def test_env_switch_posts_none(tmp_path, monkeypatch):
+    monkeypatch.setenv("PARAMIFY_CUSTOM_TAGS", "off")
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path)
+    assert c.session.posts == [] and s["tags"]["reason"] == "PARAMIFY_CUSTOM_TAGS=off"
 
 
 def test_missing_tag_permission_keeps_the_sync_ok(tmp_path):

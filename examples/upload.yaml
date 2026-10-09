@@ -40,6 +40,10 @@ artifact_payload: envelope
 # never removed — your own tags on those resources are left alone. Rename or
 # switch either off here; `tags: false` turns both off. A token without the
 # custom-tags permission gets one warning and the upload proceeds untagged.
+#
+# To turn the feature off without editing this file: PARAMIFY_CUSTOM_TAGS=off
+# in the environment (any source; it wins over this block), or --no-tags on
+# `paramify upload`, `paramify scripts sync` and `paramify validators sync`.
 tags:
   provenance: Automated by Paramify Fetchers   # a string, or false
   service: true                                 # false to drop the category tag
