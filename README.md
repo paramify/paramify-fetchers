@@ -602,6 +602,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`docs/ksi_mapping.md`](docs/ksi_mapping.md) | Which fetchers map to which FedRAMP KSIs, per indicator and per fetcher, plus open gaps |
 | [`docs/run_manifest_reference.md`](docs/run_manifest_reference.md) | Manifest format reference |
 | [`docs/config_injection_design.md`](docs/config_injection_design.md) | Platform/config/auth model |
+| [`docs/config_injection_guide.md`](docs/config_injection_guide.md) | Walkthrough: look up a fetcher's keys → set platform config, fetcher config, and secrets in a manifest → validate → see them reach the fetcher |
 | [`docs/design.md`](docs/design.md) | Why the framework is shaped this way + current state of the work |
 | [`docs/versioning.md`](docs/versioning.md) | How we version, the contract, and what 1.0 means |
 | [`docs/releasing.md`](docs/releasing.md) | How a release is cut |
