@@ -599,6 +599,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`docs/platform_onboarding.md`](docs/platform_onboarding.md) | Onboarding a platform nobody has integrated yet — the claim, the sandbox, and the gates |
 | [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md) | The second kind of fetcher: raw scan reports → assessment issues |
 | [`docs/fetcher_contract.md`](docs/fetcher_contract.md) | The binding runner↔fetcher contract |
+| [`docs/fetcher_contract_guide.md`](docs/fetcher_contract_guide.md) | Checking one fetcher against the contract: discovery, declared env, a fake-credential run, the envelope, and the status file |
 | [`docs/ksi_mapping.md`](docs/ksi_mapping.md) | Which fetchers map to which FedRAMP KSIs, per indicator and per fetcher, plus open gaps |
 | [`docs/run_manifest_reference.md`](docs/run_manifest_reference.md) | Manifest format reference |
 | [`docs/config_injection_design.md`](docs/config_injection_design.md) | Platform/config/auth model |
