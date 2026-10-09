@@ -78,6 +78,14 @@ See [`examples/upload.yaml`](../../examples/upload.yaml):
   with the status noted on the artifact).
 - `artifact_payload` — `envelope` (default, self-describing) or `payload` (bare
   evidence) if Paramify ingestion expects the unwrapped dict.
+- `tags` — the default custom tags put on every evidence set, every run:
+  `provenance` (default `Automated by Paramify Fetchers`, or `false`) and
+  `service` (`true`: the category's `display_name`, e.g. `AWS`; `false` to
+  drop it). `tags: false` turns both off. Additive only: your own tags on a set
+  are never touched. Without the custom-tags permission the upload still
+  succeeds, with one warning. **Off switch:** `PARAMIFY_CUSTOM_TAGS=off` in the
+  environment turns the feature off everywhere, whatever the config says;
+  `paramify upload --no-tags` does it for one run. The Done block says which.
 
 ## Required tooling
 

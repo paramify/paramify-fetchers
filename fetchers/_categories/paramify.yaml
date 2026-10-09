@@ -9,6 +9,7 @@
 # target project's issues and deviations.
 
 name: paramify
+display_name: Paramify
 description: >-
   FedRAMP 20x vulnerability-reporting artifacts generated from Paramify issue
   data (accepted vulnerabilities, vulnerability detail report, and the

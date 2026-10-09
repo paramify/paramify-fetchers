@@ -1,3 +1,4 @@
+display_name: Kubernetes
 description: >
   Kubernetes / EKS evidence fetchers (bash, aws CLI + kubectl). Each fetcher
   reaches EKS through the standard AWS credential chain and `aws eks

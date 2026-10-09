@@ -59,16 +59,30 @@ class FakeSession:
         return self.post_handler(url, json, files)
 
 
+class TagSession:
+    """The session the Tagger posts default custom tags through: records every
+    POST and answers with one scripted status (200 unless told otherwise)."""
+
+    def __init__(self, status=200):
+        self.status = status
+        self.posts = []
+
+    def post(self, url, json=None, timeout=None, **_):
+        self.posts.append((url, json))
+        return FakeResponse(self.status)
+
+
 class FakeClient:
     """Drop-in for ParamifyClient at the upload_run level: lets us drive
     duplicate/partial-failure behavior without any HTTP."""
 
-    def __init__(self, *, fail_files=(), existing=(), channels=()):
+    def __init__(self, *, fail_files=(), existing=(), channels=(), tag_status=200):
         self.fail_files = set(fail_files)
         self.existing = set(existing)
         self.channels = list(channels)
         self.uploaded = []
         self.meta = {}
+        self.session = TagSession(tag_status)
 
     def get_or_create_evidence_set(self, es):
         return {
@@ -94,7 +108,8 @@ def channel(ref, *, stack="stack-1", id_=None):
 
 
 def write_evidence(run_dir, name, *, reference_id="EVD-1", set_name="Set",
-                   status="success", run_id="RID", target=None, enveloped=True):
+                   status="success", run_id="RID", target=None, enveloped=True,
+                   category=None):
     if not enveloped:
         (run_dir / name).write_text(json.dumps({"just": "data"}))
         return
@@ -110,6 +125,8 @@ def write_evidence(run_dir, name, *, reference_id="EVD-1", set_name="Set",
     }
     if target:
         env["metadata"]["target"] = target
+    if category:
+        env["metadata"]["category"] = category
     (run_dir / name).write_text(json.dumps(env))
 
 
@@ -416,3 +433,150 @@ def test_channel_id_rides_in_the_artifact_part_of_the_multipart_body():
 
     assert sent["url"].endswith("/evidence/ev-1/artifacts/upload")
     assert sent["artifact"]["channelId"] == "ch-1"
+
+
+# --------------------------------------------------------------------------- #
+# Default custom tags — provenance + the category's display name, every run
+# --------------------------------------------------------------------------- #
+
+def _tag_posts(fake):
+    return [(url.rsplit("/custom-tags/", 1)[1], body["names"]) for url, body in fake.session.posts]
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_tag_switch(monkeypatch):
+    monkeypatch.delenv("PARAMIFY_CUSTOM_TAGS", raising=False)
+
+
+def test_every_set_is_tagged_once_per_run(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_evidence(run_dir, "a.json", reference_id="EVD-A", category="aws")
+    write_evidence(run_dir, "b.json", reference_id="EVD-A", category="aws", run_id="RID2")
+    write_evidence(run_dir, "c.json", reference_id="EVD-C", category="okta")
+    fake = FakeClient()
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+
+    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
+
+    assert summary["ok"]
+    assert _tag_posts(fake) == [
+        ("evidence/ev-EVD-A", ["Automated by Paramify Fetchers", "AWS"]),
+        ("evidence/ev-EVD-C", ["Automated by Paramify Fetchers", "Okta"]),
+    ]
+    by_file = {r["file"]: r for r in summary["results"]}
+    assert by_file["a.json"]["tags"] == by_file["b.json"]["tags"] == ["Automated by Paramify Fetchers", "AWS"]
+    assert summary["tags"] == {
+        "enabled": True, "reason": None,
+        "provenance": "Automated by Paramify Fetchers", "service": True,
+        "applied": 2, "failed": 0, "skipped": 0, "disabled": None,
+    }
+
+
+def test_duplicate_artifact_still_gets_the_set_tagged(tmp_path, monkeypatch):
+    """Re-asserting on every run is what backfills sets from earlier runs."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_evidence(run_dir, "a.json", reference_id="EVD-A", category="aws")
+    fake = FakeClient(existing=("a.json",))
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+
+    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
+
+    assert summary["results"][0]["outcome"] == "skipped_duplicate"
+    assert summary["results"][0]["tags"] == ["Automated by Paramify Fetchers", "AWS"]
+    assert len(fake.session.posts) == 1
+
+
+def test_tags_config_renames_and_disables(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_evidence(run_dir, "a.json", reference_id="EVD-A", category="aws")
+    fake = FakeClient()
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+
+    cfg = {"tags": {"provenance": "Robots", "service": False}}
+    uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0", config=cfg)
+    assert _tag_posts(fake) == [("evidence/ev-EVD-A", ["Robots"])]
+
+    fake = FakeClient()
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+    summary = uploader.upload_run(
+        run_dir, token="tok", base_url="https://app.example.com/api/v0", config={"tags": False}
+    )
+    assert fake.session.posts == []
+    assert summary["tags"]["enabled"] is False and "tags: false" in summary["tags"]["reason"]
+    assert summary["results"][0]["tags"] == []
+
+
+def test_env_switch_turns_tags_off_for_the_run(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_evidence(run_dir, "a.json", reference_id="EVD-A", category="aws")
+    fake = FakeClient()
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+    monkeypatch.setenv("PARAMIFY_CUSTOM_TAGS", "off")
+
+    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
+
+    assert summary["ok"] and summary["uploaded"] == 1
+    assert fake.session.posts == []
+    assert summary["tags"] == {
+        "enabled": False, "reason": "PARAMIFY_CUSTOM_TAGS=off", "provenance": None,
+        "service": False, "applied": 0, "failed": 0, "skipped": 0, "disabled": None,
+    }
+
+
+def test_no_tags_switch_turns_tags_off_for_the_run(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_evidence(run_dir, "a.json", reference_id="EVD-A", category="aws")
+    fake = FakeClient()
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+
+    summary = uploader.upload_run(
+        run_dir, token="tok", base_url="https://app.example.com/api/v0", custom_tags=False
+    )
+    assert fake.session.posts == []
+    assert summary["tags"]["enabled"] is False and summary["tags"]["reason"] == "--no-tags"
+    assert summary["results"][0]["tags"] == []
+
+
+def test_malformed_tags_block_is_a_setup_error(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_evidence(run_dir, "a.json")
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: FakeClient())
+    with pytest.raises(ValueError, match="unknown key"):
+        uploader.upload_run(
+            run_dir, token="tok", base_url="https://app.example.com/api/v0",
+            config={"tags": {"provenence": "x"}},
+        )
+
+
+def test_missing_tag_permission_warns_and_upload_still_succeeds(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_evidence(run_dir, "a.json", reference_id="EVD-A", category="aws")
+    write_evidence(run_dir, "b.json", reference_id="EVD-B", category="aws")
+    fake = FakeClient(tag_status=403)
+    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+
+    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
+
+    assert summary["ok"] and summary["uploaded"] == 2
+    assert len(fake.session.posts) == 1, "one refusal switches tagging off for the run"
+    assert summary["tags"]["disabled"] and summary["tags"]["applied"] == 0
+    assert all(r["tags"] == [] for r in summary["results"])
+
+
+def test_dry_run_plans_tags_and_posts_nothing(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_evidence(run_dir, "a.json", reference_id="EVD-A", category="aws")
+    summary = uploader.upload_run(
+        run_dir, token="tok", base_url="https://app.example.com/api/v0", dry_run=True
+    )
+    assert summary["results"][0]["outcome"] == "would_upload"
+    assert summary["results"][0]["tags"] == ["Automated by Paramify Fetchers", "AWS"]
+    assert summary["tags"]["applied"] == 0

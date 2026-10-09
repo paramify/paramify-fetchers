@@ -1,3 +1,4 @@
+display_name: Azure
 description: >
   Azure evidence fetchers (python, official azure-mgmt-* SDKs). Each fetcher
   authenticates with azure-identity's DefaultAzureCredential — there is no

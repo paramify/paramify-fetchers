@@ -5,6 +5,12 @@
   "type": ["object", "null"],
   "properties": {
     "description": { "type": "string" },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "How the service is named to people (`AWS`, `Okta`, `SentinelOne`). The uploaders put it on every evidence set, script and validator of this category as a custom tag, next to the provenance tag. Spelled out here because no rule turns a slug like `aws` into its brand name. Omit it and the category's resources get the provenance tag only."
+    },
     "config_schema": {
       "type": "object",
       "description": "Config shared across every fetcher in this category. Each value declares a field; when it has an `env`, the runner injects the resolved value as that env var for every fetcher in the category.",

@@ -1,4 +1,5 @@
 ---
+display_name: Wiz
 description: >
   Wiz cloud security platform (CNAPP), commercial and Wiz for Government.
   Read-only GraphQL fetchers that collect cloud account scan coverage, posture
