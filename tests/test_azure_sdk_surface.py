@@ -219,7 +219,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "diagnostic_settings",
         ["list"],
         "azure/diagnostic_settings, azure/container_registry_configuration, "
-        "azure/app_service_configuration, azure/key_vault_configuration",
+        "azure/app_service_configuration, azure/key_vault_configuration, "
+        "azure/sql_managed_instance_configuration",
     ),
     (
         "azure.mgmt.monitor",
@@ -568,6 +569,70 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["get"],
         "azure/sql_server_configuration",
     ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instances",
+        ["list"],
+        "azure/sql_managed_instance_backups, azure/sql_managed_instance_configuration, "
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_databases",
+        ["list_by_instance"],
+        "azure/sql_managed_instance_backups, azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_backup_short_term_retention_policies",
+        ["get"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_long_term_retention_policies",
+        ["get"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "instance_failover_groups",
+        ["list_by_location"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_administrators",
+        ["list_by_instance"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_azure_ad_only_authentications",
+        ["list_by_instance"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_encryption_protectors",
+        ["get"],
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_database_transparent_data_encryption",
+        ["get"],
+        "azure/sql_managed_instance_encryption",
+    ),
     # --- MySQL / PostgreSQL --------------------------------------------------
     (
         "azure.mgmt.rdbms.mysql_flexibleservers",
@@ -910,6 +975,136 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["state"],
         "azure/sql_encryption_status — azure-mgmt-sql 4 renamed `status` to "
         "`state`; reading the old name yields None, i.e. 'not encrypted'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceProperties",
+        [
+            "state",
+            "provisioning_state",
+            "pricing_model",
+            "requested_backup_storage_redundancy",
+            "current_backup_storage_redundancy",
+            "zone_redundant",
+        ],
+        "azure/sql_managed_instance_backups — a lost redundancy field reads as "
+        "'not zone-redundant'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedDatabaseProperties",
+        ["status", "creation_date", "earliest_restore_point", "failover_group_id"],
+        "_shared/sql_managed_instance (sql_managed_instance_backups, "
+        "sql_managed_instance_encryption)",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedBackupShortTermRetentionPolicyProperties",
+        ["retention_days"],
+        "azure/sql_managed_instance_backups — a lost field reads as 'no retention'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceLongTermRetentionPolicyProperties",
+        ["weekly_retention", "monthly_retention", "yearly_retention", "week_of_year"],
+        "azure/sql_managed_instance_backups — a lost field reads as 'no long-term "
+        "retention'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "InstanceFailoverGroupProperties",
+        [
+            "managed_instance_pairs",
+            "partner_regions",
+            "read_write_endpoint",
+            "replication_role",
+            "replication_state",
+            "secondary_type",
+        ],
+        "azure/sql_managed_instance_backups — a lost `managed_instance_pairs` reads "
+        "every instance as in no failover group",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "InstanceFailoverGroupReadWriteEndpoint",
+        ["failover_policy", "failover_with_data_loss_grace_period_minutes"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePairInfo",
+        ["primary_managed_instance_id", "partner_managed_instance_id"],
+        "azure/sql_managed_instance_backups — the instance-to-group match",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "PartnerRegionInfo",
+        ["location", "replication_role"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceProperties",
+        [
+            "fully_qualified_domain_name",
+            "public_data_endpoint_enabled",
+            "proxy_override",
+            "minimal_tls_version",
+            "private_endpoint_connections",
+        ],
+        "azure/sql_managed_instance_configuration — a lost field reads as 'private' "
+        "or 'no TLS floor'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePecProperty",
+        ["properties"],
+        "azure/sql_managed_instance_configuration — the connection's fields are "
+        "nested under `properties`, not flattened",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePrivateEndpointConnectionProperties",
+        ["private_endpoint", "private_link_service_connection_state", "provisioning_state"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePrivateEndpointProperty",
+        ["id"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePrivateLinkServiceConnectionStateProperty",
+        ["status"],
+        "azure/sql_managed_instance_configuration — a lost field reads every "
+        "private endpoint as unapproved",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceAdministratorProperties",
+        ["administrator_type", "login", "sid", "tenant_id"],
+        "azure/sql_managed_instance_configuration — a lost `administrator_type` "
+        "reads as 'no Entra admin'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceAzureADOnlyAuthProperties",
+        ["azure_ad_only_authentication"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceEncryptionProtectorProperties",
+        ["server_key_type", "server_key_name", "uri", "thumbprint", "auto_rotation_enabled"],
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedTransparentDataEncryptionProperties",
+        ["state"],
+        "azure/sql_managed_instance_encryption — a lost field reads as 'not encrypted'",
     ),
     (
         "azure.mgmt.keyvault.models",
@@ -1271,16 +1466,18 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     (
         "azure.mgmt.monitor.models",
         "DiagnosticSettingsResource",
-        ["storage_account_id", "workspace_id", "event_hub_authorization_rule_id", "logs"],
-        "azure/key_vault_configuration, azure/diagnostic_settings — monitor 6.x "
-        "flattens `properties`; an unflattened release reads every vault as "
-        "having no audit-log destination",
+        ["storage_account_id", "workspace_id", "event_hub_authorization_rule_id", "event_hub_name", "logs"],
+        "azure/key_vault_configuration, azure/diagnostic_settings, "
+        "azure/sql_managed_instance_configuration — monitor 6.x flattens "
+        "`properties`; an unflattened release reads every vault as having no "
+        "audit-log destination",
     ),
     (
         "azure.mgmt.monitor.models",
         "LogSettings",
         ["category", "category_group", "enabled"],
-        "azure/key_vault_configuration — the AuditEvent / audit-group match",
+        "azure/key_vault_configuration, azure/sql_managed_instance_configuration "
+        "— the AuditEvent / SQLSecurityAuditEvents / audit-group match",
     ),
     (
         "azure.mgmt.frontdoor.models",

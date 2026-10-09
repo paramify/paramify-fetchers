@@ -1,0 +1,82 @@
+name: azure_sql_managed_instance_configuration
+version: 0.1.0
+description: >
+  For each Azure SQL Managed Instance in the subscription, reports how it can be
+  reached and who can sign in to it: whether the public data endpoint is enabled
+  (the only path to the instance from outside its virtual network), the connection
+  type (proxy or redirect), the minimum TLS version, its private endpoint
+  connections, the Entra ID administrator and whether Entra-only authentication is
+  enforced, and the diagnostic settings that export its logs, with whether SQL
+  security audit events are among them.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_sql_managed_instance_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-MAT   # public data endpoint off, private endpoints
+  - KSI-IAM-APM   # Entra ID administrator and whether Entra-only auth is enforced
+  - KSI-SVC-SIN   # minimum TLS version
+  - KSI-MLA-LET   # SQL security audit events exported by a diagnostic setting
+
+evidence_set:
+  reference_id: EVD-AZURE-SQLMI-CONFIG
+  name: Azure SQL Managed Instance Configuration
+  instructions: >
+    Script: fetcher.py. Azure SDK calls (Reader is sufficient):
+    azure-mgmt-sql SqlManagementClient (api 2025-01-01) managed_instances.list(),
+    managed_instance_administrators.list_by_instance(),
+    managed_instance_azure_ad_only_authentications.list_by_instance(); and
+    azure-mgmt-monitor diagnostic_settings.list() on each instance's resource id.
+    Every list follows nextLink. Per instance: `state`;
+    `public_data_endpoint_enabled` as Azure returned it (null if omitted), and
+    `private_access_only`, true only when it is explicitly false — an instance is
+    always reachable inside its own virtual network, so the public data endpoint
+    is its only public path; `proxy_override` (Proxy, Redirect or Default);
+    `minimal_tls_version` (None, 1.0, 1.1, 1.2) with
+    `minimal_tls_version_recommended` for 1.2 or higher (an omitted version reads
+    as false); `private_endpoint_connections`
+    with each connection's status (Approved, Pending, Rejected);
+    `administrators` (Entra admin type, login, sid, tenant) and
+    `entra_administrator_configured`; `azure_ad_only_authentication`.
+    `diagnostic_settings` lists every setting with its destinations (workspace,
+    storage account, Event Hub authorization rule and hub name) and enabled log
+    categories; `audit_logs_exported` is true when an
+    enabled log is the SQLSecurityAuditEvents category or the audit or allLogs
+    category group, and `audit_log_destinations` lists where those settings send
+    it (an Event Hub by its authorization rule id, since the hub name is
+    optional). A failed call leaves the fields derived from it null —
+    `administrators` and `entra_administrator_configured`,
+    `azure_ad_only_authentication`, and `diagnostic_settings`,
+    `audit_logs_exported` and `audit_log_destinations` — so an unanswered call
+    is never read as "off"; summary counts count only true values. That proves audit records have a route out of the instance,
+    NOT that auditing is on: Managed Instance auditing is created and started in
+    T-SQL (CREATE SERVER AUDIT ... TO EXTERNAL_MONITOR, STATE = ON), which no ARM
+    call can read.

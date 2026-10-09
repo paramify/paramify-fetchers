@@ -345,6 +345,29 @@ schemas and the `paramify` CLI — not the internal code.
   preview. Data older than a table's retention is reported as not retained,
   never as missing.
 
+- **Three Azure SQL Managed Instance fetchers.** Nothing in the Azure category
+  covered Managed Instance, which has its own API surface apart from SQL
+  Database. All three are Reader-only and fan out per subscription.
+  - `azure_sql_managed_instance_backups` (`EVD-AZURE-SQLMI-BACKUPS`): short- and
+    long-term retention for each database, the instance's backup storage
+    redundancy (requested vs current, so a pending change shows), compute zone
+    redundancy, and the instance failover groups with their failover policy and
+    instance pairs. Azure lists a failover group once from each region it spans,
+    each with its own resource id; the fetcher merges them into one record.
+  - `azure_sql_managed_instance_configuration` (`EVD-AZURE-SQLMI-CONFIG`): the
+    public data endpoint, proxy override, minimum TLS version, private endpoint
+    connections, the Entra admin and Entra-only authentication, and whether a
+    diagnostic setting exports `SQLSecurityAuditEvents`. That shows the audit
+    route only; whether a server audit is on is set in T-SQL, which no ARM call
+    can read.
+  - `azure_sql_managed_instance_encryption` (`EVD-AZURE-SQLMI-ENCRYPTION`): the
+    TDE protector (service-managed or Key Vault key, auto-rotation) and TDE
+    state for each database.
+
+  Any system database the API lists is flagged and left out of every count. A
+  failed call leaves every flag and total derived from it null rather than
+  false or 0, so an unanswered call never reads as "off".
+
 ### Changed
 
 - **The TUI keeps evidence and scan reports apart.** The catalog and the
