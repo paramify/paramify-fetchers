@@ -90,7 +90,7 @@ and more
 
 ## Install
 
-**Prerequisites:** Python 3.10+. The CLIs your fetchers need (`aws`, `jq`, `curl`, `kubectl`, etc.) must be on your `PATH` — install only what applies to the categories you'll run. Each service's credential setup guide is in `fetchers/<category>/README.md`.
+**Prerequisites:** Python 3.10+. The CLIs your fetchers need (`aws`, `jq`, `curl`, `kubectl`, etc.) must be on your `PATH` — install only what applies to the categories you'll run. Most services have a credential setup guide at `fetchers/<category>/README.md`; [Where to read next](#where-to-read-next) lists them.
 
 ```bash
 git clone https://github.com/paramify/paramify-fetchers.git
@@ -200,7 +200,7 @@ export PARAMIFY_UPLOAD_API_TOKEN=<your token>   # see uploaders/paramify_evidenc
 paramify upload                                  # push the latest run
 ```
 
-Each service has a credential setup guide in its fetcher directory — for example, [`fetchers/okta/README.md`](fetchers/okta/README.md) covers creating an Okta API token and the required admin role. See [`examples/`](examples/) for complete worked manifests (multi-region AWS, GitLab fanout, etc.) and [`deploy/README.md`](deploy/README.md) for running on a schedule in Docker.
+Most services have a credential setup guide in their fetcher directory — for example, [`fetchers/okta/README.md`](fetchers/okta/README.md) covers creating an Okta API token and the required admin role. See [`examples/`](examples/) for complete worked manifests (multi-region AWS, GitLab fanout, etc.) and [`deploy/README.md`](deploy/README.md) for running on a schedule in Docker.
 
 The full command surface:
 
