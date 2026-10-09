@@ -1,0 +1,57 @@
+name: azure_log_storage_immutability
+version: 0.1.0
+description: >
+  Whether archived logs in Azure Storage can be altered or deleted. In every
+  storage account in the subscription, finds the blob containers Azure Monitor
+  writes logs to: insights-logs-* (diagnostic settings), insights-activity-logs,
+  insights-metrics-*, and am-* (Log Analytics data export). For each it reports
+  the time-based immutability policy (state Locked or Unlocked, retention days,
+  protected append writes), legal hold, and version-level immutability. Each
+  account also reports its blob soft-delete window and versioning. Per
+  subscription: containers that are locked, unlocked only, on legal hold, or
+  unprotected, and the shortest retention.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_log_storage_immutability.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-MLA-OSM      # Operating SIEM capability — tamper-resistant log storage
+
+evidence_set:
+  reference_id: EVD-AZURE-LOG-STORAGE-IMMUTABILITY
+  name: Azure Log Storage Immutability
+  instructions: >
+    Script: fetcher.py. ARM REST, Microsoft.Storage api-version 2023-05-01:
+    storageAccounts, each account's blobServices/default/containers and
+    blobServices/default. Log containers are found by the names Azure Monitor
+    creates (insights-logs-, insights-activity-logs, insights-metrics-, am-).
+    A container without its own policy inherits the account's default
+    version-level policy. protected means a legal hold or a Locked policy; an
+    Unlocked policy can still be deleted. Lifecycle-management rules are not
+    read. Role: Reader.

@@ -39,6 +39,7 @@ set in a customer's package.
 from __future__ import annotations
 
 import importlib
+import inspect
 
 import pytest
 
@@ -193,7 +194,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "SubscriptionClient",
         "subscriptions",
         ["list"],
-        "_shared/azure_common — subscription discovery for all 27 fetchers",
+        "_shared/azure_common — subscription discovery for every subscription-scoped "
+        "fetcher, the _shared/azure_rest ones (sentinel_*, log_*) included",
     ),
     (
         "azure.mgmt.resource.resources",
@@ -201,6 +203,14 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "providers",
         ["get"],
         "_shared/azure_common — provider registration state (NOT_REGISTERED)",
+    ),
+    (
+        "azure.mgmt.resource.resources",
+        "ResourceManagementClient",
+        "resource_groups",
+        ["list"],
+        "azure/vpn_gateway_configuration — VNet gateways, connections and local "
+        "gateways have no subscription-wide list",
     ),
     # --- monitor: the PR #59 regression -------------------------------------
     (
@@ -240,6 +250,113 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "network_interfaces",
         ["list_all"],
         "azure/network_security_groups — NIC-level NSG association",
+    ),
+    # --- Managed Redis, DNS, VPN Gateway, Virtual WAN ------------------------
+    (
+        "azure.mgmt.redisenterprise",
+        "RedisEnterpriseManagementClient",
+        "redis_enterprise",
+        ["list"],
+        "azure/managed_redis_configuration",
+    ),
+    (
+        "azure.mgmt.redisenterprise",
+        "RedisEnterpriseManagementClient",
+        "databases",
+        ["list_by_cluster"],
+        "azure/managed_redis_configuration — client protocol and access-key auth live here",
+    ),
+    (
+        "azure.mgmt.dns",
+        "DnsManagementClient",
+        "zones",
+        ["list"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.privatedns",
+        "PrivateDnsManagementClient",
+        None,
+        ["send_request"],
+        "azure/dns_configuration — the ARM pipeline for the dnssecConfigs GET; "
+        "azure-mgmt-dns has no DNSSEC operation",
+    ),
+    (
+        "azure.mgmt.privatedns",
+        "PrivateDnsManagementClient",
+        "private_zones",
+        ["list"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.privatedns",
+        "PrivateDnsManagementClient",
+        "virtual_network_links",
+        ["list"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "virtual_network_gateways",
+        ["list"],
+        "azure/vpn_gateway_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "virtual_network_gateway_connections",
+        ["list", "get"],
+        "azure/vpn_gateway_configuration — get is the only call that fills connection_status",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "local_network_gateways",
+        ["list"],
+        "azure/vpn_gateway_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "virtual_wans",
+        ["list"],
+        "azure/virtual_wan_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "virtual_hubs",
+        ["list"],
+        "azure/virtual_wan_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "vpn_gateways",
+        ["list"],
+        "azure/virtual_wan_configuration — site-link connections are read off each gateway",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "vpn_sites",
+        ["list"],
+        "azure/virtual_wan_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "p2_svpn_gateways",
+        ["list"],
+        "azure/virtual_wan_configuration — note the SDK spells it p2_svpn_gateways",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "vpn_server_configurations",
+        ["list"],
+        "azure/virtual_wan_configuration — P2S protocols and auth types",
     ),
     # --- backup: PR #58 widens this to <12 ----------------------------------
     (
@@ -921,6 +1038,87 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/network_security_groups — outbound rules are evaluated in "
         "priority order against their destination",
     ),
+    (
+        "azure.mgmt.redisenterprise.models",
+        "Cluster",
+        ["minimum_tls_version", "public_network_access", "private_endpoint_connections", "encryption"],
+        "azure/managed_redis_configuration — a renamed TLS field reads as no TLS floor",
+    ),
+    (
+        "azure.mgmt.redisenterprise.models",
+        "Database",
+        ["client_protocol", "access_keys_authentication"],
+        "azure/managed_redis_configuration — a renamed client_protocol reads every "
+        "database as Plaintext",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "Zone",
+        ["name_servers", "number_of_record_sets", "zone_type"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.privatedns.models",
+        "VirtualNetworkLinkProperties",
+        ["virtual_network", "registration_enabled", "resolution_policy"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VirtualNetworkGatewayConnectionPropertiesFormat",
+        ["connection_type", "connection_protocol", "ipsec_policies", "connection_status"],
+        "azure/vpn_gateway_configuration — a renamed ipsec_policies reads every tunnel "
+        "as on Azure's default policy",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "IpsecPolicy",
+        ["ike_encryption", "ike_integrity", "dh_group", "ipsec_encryption", "ipsec_integrity", "pfs_group"],
+        "_shared/vpn_crypto — weak-algorithm detection for both VPN fetchers",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VirtualNetworkGatewayPropertiesFormat",
+        ["gateway_type", "active_active", "vpn_client_configuration"],
+        "azure/vpn_gateway_configuration",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VpnClientConfiguration",
+        ["vpn_client_address_pool", "vpn_client_protocols", "vpn_authentication_types"],
+        "azure/vpn_gateway_configuration — the address pool is what tells real P2S "
+        "from the placeholder the list call returns",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VirtualWanProperties",
+        ["disable_vpn_encryption", "type"],
+        "azure/virtual_wan_configuration — a renamed flag reads as encryption on",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VirtualHubProperties",
+        ["azure_firewall", "security_partner_provider"],
+        "azure/virtual_wan_configuration — secured-hub detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VpnConnectionProperties",
+        ["vpn_link_connections"],
+        "azure/virtual_wan_configuration",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VpnSiteLinkConnectionProperties",
+        ["vpn_connection_protocol_type", "ipsec_policies", "connection_status"],
+        "azure/virtual_wan_configuration — IKE version and policy per site link",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VpnServerConfigurationProperties",
+        ["vpn_protocols", "vpn_authentication_types"],
+        "azure/virtual_wan_configuration",
+    ),
     # SiteConfigResource (get_configuration) nests these under `properties`,
     # a SiteConfig; the resource flattens it for attribute access.
     (
@@ -1239,6 +1437,63 @@ def test_graph_request_builders_present(builder: str, affects: str) -> None:
         f"GraphServiceClient.{builder} is gone.\n"
         f"  affected fetchers: {affects}\n"
         f"  msgraph-sdk is pinned <2; a major bump restructures the builders."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Credentials: the whole SDK surface of the _shared/azure_rest fetchers
+# ---------------------------------------------------------------------------
+# These call ARM, Graph and the Log Analytics query API over plain HTTP with the
+# api-version pinned in code, so no azure-mgmt bump can reshape what they read.
+# What an azure-identity or azure-core bump CAN take away is the token: the
+# credential classes, the keyword that pins the CLI to the target subscription's
+# account, and the get_token -> AccessToken(token, expires_on) path the client
+# caches on.
+REST_FETCHERS = (
+    "azure/sentinel_data_sources, azure/sentinel_analytics_rules, "
+    "azure/sentinel_incidents, azure/sentinel_automation_rules, "
+    "azure/log_analytics_query_audit, azure/log_analytics_deletion_rights, "
+    "azure/log_storage_immutability"
+)
+
+# (class, constructor keywords, affected fetchers)
+CREDENTIAL_SURFACE: list[tuple[str, list[str], str]] = [
+    ("DefaultAzureCredential", [], REST_FETCHERS),
+    ("ChainedTokenCredential", [], REST_FETCHERS),
+    (
+        "AzureCliCredential",
+        ["subscription"],
+        f"{REST_FETCHERS} — without the pin the CLI asks its default account, "
+        f"and a subscription in another tenant refuses that token",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "name,keywords,affects", CREDENTIAL_SURFACE, ids=[c[0] for c in CREDENTIAL_SURFACE]
+)
+def test_credential_surface(name: str, keywords: list[str], affects: str) -> None:
+    """The azure.identity classes _shared/azure_rest builds its token from."""
+    cls = _import("azure.identity", name)
+    assert callable(getattr(cls, "get_token", None)), (
+        f"azure.identity.{name}.get_token is gone.\n  affected fetchers: {affects}"
+    )
+    params = inspect.signature(cls.__init__).parameters  # type: ignore[misc]
+    missing = [k for k in keywords if k not in params]
+    assert not missing, (
+        f"azure.identity.{name} no longer accepts {missing}.\n"
+        f"  affected fetchers: {affects}"
+    )
+
+
+def test_access_token_fields() -> None:
+    """_shared/azure_rest caches on expires_on and sends .token."""
+    from azure.core.credentials import AccessToken
+
+    missing = {"token", "expires_on"} - set(AccessToken._fields)
+    assert not missing, (
+        f"azure.core AccessToken lost {sorted(missing)}.\n"
+        f"  affected fetchers: {REST_FETCHERS}"
     )
 
 

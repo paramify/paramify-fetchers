@@ -5,7 +5,7 @@
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-1467ff.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-1467ff.svg)](pyproject.toml)
 [![Version](https://img.shields.io/badge/version-0.4.0--beta-1467ff.svg)](CHANGELOG.md)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/paramify/paramify-fetchers)
+[![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1467ff.svg)](https://deepwiki.com/paramify/paramify-fetchers)
 
 Fetchers are small scripts that collect compliance evidence from your infrastructure and write it to disk as JSON. A separate uploader stage pushes that evidence to Paramify. This repo contains the fetchers, the runner that executes them, and the uploader — the fetchers themselves never talk to Paramify directly.
 
@@ -43,7 +43,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | Category | Fetchers | What it collects |
 |---|---:|---|
 | **AWS** | 80 | Encryption at rest and in transit, IAM and Organizations guardrails, threat detection and vulnerability scanning, logging and config drift, network segmentation, WAF and DDoS protection, backup and high availability, patch compliance, key and secret rotation, and CI/CD pipeline config |
-| **Azure** | 28 | Storage/disk/SQL encryption and CMK use, Entra identity + Conditional Access, RBAC assignments and custom roles, Azure Policy assignments, network security groups, Key Vault config and key rotation, Defender plans and per-resource assessments, VM hardening, the container and PaaS surface (AKS, Container Registry, App Service, Functions, Databricks), diagnostic settings and activity-log alerts, backup, and the managed databases |
+| **Azure** | 39 | Storage/disk/SQL encryption and CMK use, Entra identity + Conditional Access, RBAC assignments and custom roles, Azure Policy assignments, network security groups, Key Vault config and key rotation, Defender plans and per-resource assessments, VM hardening, the container and PaaS surface (AKS, Container Registry, App Service, Functions, Databricks), diagnostic settings and activity-log alerts, backup, the managed databases, Managed Redis TLS and access, DNS zones and DNSSEC, and VPN Gateway / Virtual WAN IPsec and hub security |
 | **GCP** | 19 | Disk/bucket/Cloud SQL/BigQuery/Secret Manager encryption and CMEK use, IAM policy bindings, custom roles and service-account keys, KMS key rotation, GKE cluster and Compute Engine hardening, Cloud Logging sinks, Cloud SQL backups and network exposure, VPC/firewall/DNS segmentation, load-balancer TLS, and API keys |
 | **Datadog** | 13 | Cloud SIEM detection rules, signals and operational config, monitors, log pipelines/indexes/archives, host & container inventory, agent checks, APM services, and incidents with timelines |
 | **Okta** | 8 | Phishing-resistant MFA and passwordless authentication, authenticators, least privilege, just-in-time access, non-user account authentication, suspicious activity management, and account management |
@@ -104,7 +104,7 @@ through the official SDKs rather than a CLI, so each has its own extra and
 neither needs a cloud CLI at runtime.
 
 ```bash
-pip install -e '.[azure]'    # 23 packages; no `az` CLI at runtime
+pip install -e '.[azure]'    # 29 packages; no `az` CLI at runtime
 pip install -e '.[gcp]'      # 12 packages; no `gcloud` at runtime
 ```
 
@@ -406,6 +406,16 @@ CSV/XML/JSON/Nessus structure, so anything added to it breaks the parse. That on
 constraint is what makes this a separate kind with a separate uploader instead of
 a flag on the existing one. Nothing ships in this category yet; to write the
 first, start from [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
+
+### Inventory
+
+A third kind, `kind: inventory`, lists every asset of some kind (cloud resources,
+hosts, devices) as one record per asset, so Paramify's Inventory can be generated
+instead of kept by hand. It uploads to an evidence set like any evidence, and an
+inventory pipeline attached to that set turns each record into an Inventory item.
+Because the pipeline reads the file as the whole estate, `paramify upload` sends
+an inventory only when the run collected all of it. See
+[`docs/inventory_fetchers.md`](docs/inventory_fetchers.md).
 
 ### Show how evidence is generated (optional)
 

@@ -12,6 +12,46 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **A third fetcher kind, `kind: inventory`**, for fetchers that list every
+  asset of a kind for Paramify's Inventory. An inventory is evidence with a
+  record contract: the payload holds `data`, one record per asset each with a
+  unique `unique_asset_identifier`, and `records_included`. The record fields
+  are each fetcher's own. It needs an `evidence_set` and goes to it through
+  `paramify upload`, where an inventory pipeline attached to the set builds
+  Inventory items. A pipeline reads the file as the whole estate, so the
+  runner checks every inventory output when it envelopes it and records the
+  verdict in `metadata.inventory`, and the uploader does not send one that is
+  incomplete: a failed run, a contract break, withheld records, or no records
+  at all. The TUI lists inventories in their own section. Start from
+  `fetchers/_template_inventory/`; see `docs/inventory_fetchers.md`.
+
+- **Four Azure fetchers for the network edge and cache tier**, read-only on
+  the built-in Reader role. `azure_managed_redis_configuration` reports each
+  Azure Managed Redis cluster's minimum TLS version, public network access and
+  private endpoints, and per database the client protocol (Encrypted or
+  Plaintext) and whether access-key authentication is disabled. Classic Azure
+  Cache for Redis is not read. `azure_dns_configuration` reports each public
+  zone's DNSSEC state and signing keys, and each private zone with its virtual
+  network links. The DNS SDK has no DNSSEC operation, so it is read with a
+  direct ARM call, and a 404 "DNSSEC is not enabled" counts as unsigned rather
+  than as a failed collection. `azure_vpn_gateway_configuration` reports VPN
+  gateways, the IKE version, status and IPsec policy of each connection, and
+  point-to-site protocols and sign-in types. A connection with no custom policy
+  is reported against Azure's default, whose IKEv2 main mode uses DH Group 2, so
+  the default does not read as free of weak algorithms. Point-to-site counts only
+  when a client address pool exists, because the list call returns a placeholder
+  on gateways that never set it up.
+  `azure_virtual_wan_configuration` reports Virtual WANs, whether hubs are
+  secured by a firewall, and the IKE version on each site link, along with
+  vWAN VPN sites, point-to-site gateways and server configurations. The DNS,
+  VPN and Virtual WAN fetchers record whether Microsoft.Network is registered,
+  so zero resources can be told apart from a provider that is off. A read that
+  fails (a Redis cluster's databases, a zone's DNSSEC config) or an IKE protocol
+  Azure leaves empty is recorded as null and counted as unknown, never as
+  compliant, unsigned or IKEv1. Both VPN
+  fetchers keep an allow-list of fields, because Azure returns site-link
+  pre-shared keys in plain text to Reader; no key reaches the evidence.
+  Verified against a live subscription.
 - **A Wiz category with twelve fetchers**, for Wiz commercial and Wiz for
   Government, sharing one GraphQL client and one service account. Eleven are
   evidence fetchers: `wiz_scan_coverage`, `wiz_posture_issues`,
@@ -284,6 +324,26 @@ schemas and the `paramify` CLI — not the internal code.
   Microsoft Sentinel is onboarded (the SecurityInsights solution is enabled).
   Nothing in the Azure category recorded where logs are kept or for how long.
   Adds the `azure-mgmt-loganalytics` dependency to the `azure` extra.
+- **Seven Microsoft Sentinel and Log Analytics log-integrity fetchers.** Per
+  Sentinel workspace (`SENTINEL_WORKSPACES`, or every onboarded workspace in the
+  subscription): `azure_sentinel_data_sources` (connectors, plus which tables
+  and alert products actually ingested in the window),
+  `azure_sentinel_analytics_rules`, `azure_sentinel_incidents` (status,
+  classification, time to close) and `azure_sentinel_automation_rules`. Per Log
+  Analytics workspace, Sentinel or not: `azure_log_analytics_query_audit`
+  (whether queries are audited, and weekly human vs app query counts) and
+  `azure_log_analytics_deletion_rights` (who, active or PIM-eligible, can purge
+  or delete log data, delete the workspace or shorten its retention, and
+  whether through a wildcard role). Per subscription:
+  `azure_log_storage_immutability` (immutability policy, legal hold and soft
+  delete on the containers Azure Monitor writes logs to; only a Locked policy or
+  a legal hold counts as protected). They share `_shared/azure_rest`, which
+  calls ARM, Graph and the Log Analytics query API directly, since the only
+  stable Sentinel SDK pins a 2021 API version, and retries throttling and
+  transient server errors, honouring Retry-After. Analytics rules are listed at
+  the stable and the preview API and merged, since NRT rules exist only in
+  preview. Data older than a table's retention is reported as not retained,
+  never as missing.
 
 - **Three Azure SQL Managed Instance fetchers.** Nothing in the Azure category
   covered Managed Instance, which has its own API surface apart from SQL

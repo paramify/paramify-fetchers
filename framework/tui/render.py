@@ -74,6 +74,13 @@ _KIND_ABOUT = {
         "Wrapped in the standard envelope and uploaded to the evidence set the "
         "fetcher names. Upload with ctrl+u on the Paramify tab.",
     ),
+    kinds.INVENTORY: (
+        "Lists every asset of a kind — cloud resources, hosts, devices — one "
+        "record each, for Paramify's Inventory.",
+        "Uploaded to its evidence set with ctrl+u like evidence; an inventory "
+        "pipeline attached to that set builds the Inventory items. Only a run "
+        "that collected every asset is sent.",
+    ),
     kinds.SCAN_REPORT: (
         "Hands over findings a scanner already computed — a Nessus export, a Wiz "
         "CSV, a STIG report — as the tool's own file, never rewritten.",
