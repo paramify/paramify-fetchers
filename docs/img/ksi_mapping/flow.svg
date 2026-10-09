@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 470" width="960" height="470" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <style>
+    .bg { fill: #ffffff; }
+    .lane { fill: #f6f8fa; stroke: #d0d7de; }
+    .lane-skill { fill: #eef4ff; stroke: #9ec0ff; }
+    .box { fill: #ffffff; stroke: #d0d7de; }
+    .you { fill: #fff8e5; stroke: #d4a72c; }
+    .h { fill: #1f2328; font-size: 15px; font-weight: 700; }
+    .sub { fill: #59636e; font-size: 12px; }
+    .t { fill: #1f2328; font-size: 13px; font-weight: 600; }
+    .c { fill: #59636e; font-size: 11.5px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+    .n { fill: #0969da; font-size: 13px; font-weight: 700; }
+    .arrow { stroke: #8c959f; stroke-width: 2; fill: none; }
+    .head { fill: #8c959f; }
+    .key { fill: #59636e; font-size: 12px; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .lane { fill: #161b22; stroke: #30363d; }
+      .lane-skill { fill: #121d2f; stroke: #1f6feb; }
+      .box { fill: #0d1117; stroke: #30363d; }
+      .you { fill: #2b2111; stroke: #9e6a03; }
+      .h, .t { fill: #e6edf3; }
+      .sub, .c, .key { fill: #9198a1; }
+      .n { fill: #58a6ff; }
+      .arrow { stroke: #6e7681; }
+      .head { fill: #6e7681; }
+    }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="head"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="960" height="470" rx="12"/>
+
+  <!-- Lane 1: find coverage -->
+  <rect class="lane" x="16" y="16" width="264" height="400" rx="10"/>
+  <text class="h" x="32" y="44">1 · Find coverage</text>
+  <text class="sub" x="32" y="62">Local, no API key</text>
+
+  <rect class="box" x="32" y="96" width="232" height="100" rx="8"/>
+  <text class="t" x="46" y="124">See every family</text>
+  <text class="c" x="46" y="146">paramify ksi</text>
+  <text class="sub" x="46" y="166">a bar per family, gaps named</text>
+  <text class="sub" x="46" y="184">organizational KSIs set apart</text>
+
+  <rect class="box" x="32" y="232" width="232" height="120" rx="8"/>
+  <text class="t" x="46" y="260">Look up one KSI</text>
+  <text class="c" x="46" y="282">paramify ksi --json | jq</text>
+  <text class="sub" x="46" y="304">its status and every fetcher</text>
+  <text class="sub" x="46" y="322">mapped to it, or the KSIs</text>
+  <text class="sub" x="46" y="340">your own tools leave out</text>
+
+  <path class="arrow" d="M148 196 V230" marker-end="url(#a)"/>
+
+  <!-- Lane 2: the status -->
+  <rect class="lane-skill" x="304" y="16" width="352" height="400" rx="10"/>
+  <text class="h" x="320" y="44">2 · Read its status</text>
+  <text class="sub" x="320" y="62">One of three, per KSI</text>
+
+  <rect class="box" x="320" y="96" width="320" height="80" rx="8"/>
+  <text class="t" x="334" y="122">covered</text>
+  <text class="sub" x="334" y="144">At least one fetcher maps to it.</text>
+  <text class="sub" x="334" y="162">Check that one of yours does.</text>
+
+  <rect class="box" x="320" y="200" width="320" height="80" rx="8"/>
+  <text class="t" x="334" y="226">gap</text>
+  <text class="sub" x="334" y="248">Config could show it, but no</text>
+  <text class="sub" x="334" y="266">fetcher collects it yet.</text>
+
+  <rect class="box" x="320" y="304" width="320" height="80" rx="8"/>
+  <text class="t" x="334" y="330">organizational</text>
+  <text class="sub" x="334" y="352">HR, training or process.</text>
+  <text class="sub" x="334" y="370">Not counted in coverage.</text>
+
+  <!-- Lane 3: act -->
+  <rect class="lane" x="680" y="16" width="264" height="400" rx="10"/>
+  <text class="h" x="696" y="44">3 · Act on it</text>
+  <text class="sub" x="696" y="62">What each status asks of you</text>
+
+  <rect class="you" x="696" y="96" width="232" height="80" rx="8"/>
+  <text class="t" x="710" y="122">Run a mapped fetcher</text>
+  <text class="sub" x="710" y="144">manifest → run → upload</text>
+  <text class="sub" x="710" y="162">then link it to a capability</text>
+
+  <rect class="you" x="696" y="200" width="232" height="80" rx="8"/>
+  <text class="t" x="710" y="226">Build a fetcher, or go manual</text>
+  <text class="sub" x="710" y="248">the agent can onboard a tool;</text>
+  <text class="sub" x="710" y="266">evidence it by hand meanwhile</text>
+
+  <rect class="you" x="696" y="304" width="232" height="80" rx="8"/>
+  <text class="t" x="710" y="330">Evidence it by hand</text>
+  <text class="sub" x="710" y="352">plans, procedures, reviews</text>
+  <text class="sub" x="710" y="370">uploaded in Paramify</text>
+
+  <!-- cross-lane arrows -->
+  <path class="arrow" d="M264 292 H284 V136 H318" marker-end="url(#a)"/>
+  <path class="arrow" d="M284 240 H318" marker-end="url(#a)"/>
+  <path class="arrow" d="M284 292 V344 H318" marker-end="url(#a)"/>
+  <path class="arrow" d="M640 136 H694" marker-end="url(#a)"/>
+  <path class="arrow" d="M640 240 H694" marker-end="url(#a)"/>
+  <path class="arrow" d="M640 344 H694" marker-end="url(#a)"/>
+
+  <!-- key -->
+  <rect class="you" x="16" y="434" width="16" height="16" rx="3"/>
+  <text class="key" x="40" y="447">= a decision you make</text>
+</svg>
