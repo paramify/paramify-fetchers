@@ -422,6 +422,19 @@ Because the pipeline reads the file as the whole estate, `paramify upload` sends
 an inventory only when the run collected all of it. See
 [`docs/inventory_fetchers.md`](docs/inventory_fetchers.md).
 
+### See what a platform has (discovery)
+
+A third kind of fetcher, `kind: discovery`, lists what a set of credentials can
+see in a platform (groups, campaigns, projects and so on) and whether each could
+be read. It is never uploaded; it helps you decide which fetchers to run and how
+to configure them.
+
+```bash
+paramify run manifest.yaml                    # → run-<ts>/discovery/<fetcher>.json
+```
+
+KnowBe4 and AWS have one today (`knowbe4_discovery_beta`, `aws_discovery_beta`). See [`docs/discovery.md`](docs/discovery.md).
+
 ### Show how evidence is generated (optional)
 
 Beyond the evidence itself, you can push each fetcher's **entry script** to
@@ -577,7 +590,7 @@ Directories starting with `_` are not fetchers — the runner skips them.
 
 ## Adding a fetcher
 
-To add evidence collection for a new control or a new tool, see [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md). If nothing covers that platform yet and you want a whole slate rather than one fetcher, start from [`docs/platform_onboarding.md`](docs/platform_onboarding.md). If the tool already produces the findings — a vulnerability scan or a CSPM export — you want an issue-report fetcher instead: [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
+To add evidence collection for a new control or a new tool, see [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md). If nothing covers that platform yet and you want a whole slate rather than one fetcher, start from [`docs/platform_onboarding_guide.md`](docs/platform_onboarding_guide.md). If the tool already produces the findings — a vulnerability scan or a CSPM export — you want an issue-report fetcher instead: [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
 
 ---
 
@@ -608,7 +621,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`docs/validators_guide.md`](docs/validators_guide.md) | By hand: write a validator and its cases → `paramify validators check` → sync → verify in Paramify |
 | [`docs/uploader_design.md`](docs/uploader_design.md) | How the three uploaders work + the shared evidence-set identity model |
 | [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md) | Writing a new fetcher from scratch |
-| [`docs/platform_onboarding.md`](docs/platform_onboarding.md) | Onboarding a platform nobody has integrated yet — the claim, the sandbox, and the gates |
+| [`docs/platform_onboarding_guide.md`](docs/platform_onboarding_guide.md) | End-to-end: `/onboard-platform` through its four gates → commit the fetchers → publish to Paramify |
 | [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md) | The second kind of fetcher: raw scan reports → assessment issues |
 | [`docs/fetcher_contract_guide.md`](docs/fetcher_contract_guide.md) | Checking one fetcher against the contract: discovery, declared env, a fake-credential run, the envelope, and the status file |
 | [`docs/ksi_mapping.md`](docs/ksi_mapping.md) | Which fetchers map to which FedRAMP KSIs, per indicator and per fetcher, plus open gaps |

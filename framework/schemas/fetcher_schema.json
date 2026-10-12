@@ -11,9 +11,9 @@
 
     "kind": {
       "type": "string",
-      "enum": ["evidence", "issue_report", "inventory"],
+      "enum": ["evidence", "issue_report", "inventory", "discovery"],
       "default": "evidence",
-      "description": "What class of output this fetcher produces. `evidence` (the default) writes a JSON payload the runner wraps in the evidence envelope and the paramify_evidence uploader attaches to an evidence set. `inventory` is evidence with a record contract: the payload's `data` is one record per asset, each with a `unique_asset_identifier`, for a Paramify inventory pipeline attached to the evidence set to turn into Inventory items. The uploader sends an inventory only when the run collected all of it (see docs/inventory_fetchers.md). `issue_report` writes the source tool's own file (a scan report) UNMODIFIED into <run>/issue-reports/, where the paramify_issues uploader posts it to an assessment intake. Issue reports are never enveloped: Paramify's intake parser reads the vendor's own structure, so anything added to the file breaks it."
+      "description": "What class of output this fetcher produces. `evidence` (the default) writes a JSON payload the runner wraps in the evidence envelope and the paramify_evidence uploader attaches to an evidence set. `inventory` is evidence with a record contract: the payload's `data` is one record per asset, each with a `unique_asset_identifier`, for a Paramify inventory pipeline attached to the evidence set to turn into Inventory items. The uploader sends an inventory only when the run collected all of it (see docs/inventory_fetchers.md). `issue_report` writes the source tool's own file (a scan report) UNMODIFIED into <run>/issue-reports/, where the paramify_issues uploader posts it to an assessment intake. Issue reports are never enveloped: Paramify's intake parser reads the vendor's own structure, so anything added to the file breaks it. `discovery` enumerates what the credentials can see in a platform and writes a discovery document (framework/schemas/discovery_schema.json) into <run>/discovery/. It is enveloped like evidence but never uploaded. See docs/discovery.md."
     },
 
     "runtime": {
@@ -213,6 +213,19 @@
               "type": { "enum": ["csv", "json", "xml", "nessus"] }
             }
           }
+        }
+      }
+    },
+    {
+      "$comment": "A discovery fetcher reports what exists in a tenant; it is never uploaded, so an evidence_set or ksis would promise an upload and a claim that never happen. Its output is the discovery document (framework/schemas/discovery_schema.json), which is JSON.",
+      "if": {
+        "properties": { "kind": { "const": "discovery" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "not": { "anyOf": [{ "required": ["evidence_set"] }, { "required": ["ksis"] }, { "required": ["validators"] }] },
+        "properties": {
+          "output": { "properties": { "type": { "const": "json" } } }
         }
       }
     }

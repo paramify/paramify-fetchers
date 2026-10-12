@@ -137,6 +137,8 @@ Both `profile` and `region` are optional on every AWS target. Omit either to fal
 
 All 79 AWS fetchers fan out per (region, profile). 12 are global-scope (IAM, S3 encryption, Route 53, etc.) and fan out by profile only. Run `paramify catalog` to browse the full list.
 
+`aws_discovery_beta` is different: it collects no evidence. It lists what the identity can see in the account (about 75 resource types covering every service these fetchers read, in every enabled region, each with its own read status, plus everything AWS Resource Explorer has indexed) so you can decide which fetchers to run. It fans out by profile only and lists every region itself. See [`docs/discovery.md`](../../docs/discovery.md).
+
 ## Notes
 
 - Specify a region in your profile or target even for IAM calls — some IAM APIs are global but the CLI still requires a region to be set.

@@ -185,6 +185,16 @@ class Fetcher:
         """
         return self.kind == "inventory"
 
+    @property
+    def is_discovery(self) -> bool:
+        """True when this fetcher enumerates a platform rather than collecting evidence.
+
+        Decides where the runner points EVIDENCE_DIR (<run>/discovery/), which is
+        also what keeps the output away from both uploaders: they read the run
+        dir's top level and issue-reports/, never discovery/.
+        """
+        return self.kind == "discovery"
+
 
 @dataclass
 class Requires:

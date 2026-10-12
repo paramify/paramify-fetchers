@@ -34,6 +34,7 @@ from framework.contract import (
     TargetInstance,
     effective_secrets,
 )
+from framework.discovery import DISCOVERY_DIR
 from framework.issue_reports import ISSUE_REPORTS_DIR
 from framework.secret_resolver import SecretResolutionError, UnsetSecretError, resolve
 
@@ -271,15 +272,21 @@ def _emit_shadowed(
 
 
 def invocation_dir(fetcher: Fetcher, run_dir: Path) -> Path:
-    """Where this fetcher writes — the run dir, or its issue-reports/ subdir.
+    """Where this fetcher writes — the run dir, or its issue-reports/ or discovery/ subdir.
 
     Redirecting EVIDENCE_DIR is what keeps issue reports out of the fetcher's
     concern entirely: an issue-report fetcher writes to EVIDENCE_DIR exactly like
     every other fetcher, and only the runner knows the path differs. The
     alternative — telling fetchers to write to a subdirectory — makes the layout
     a contributor's responsibility, which is how half of them would get it wrong.
+    Discovery output gets its own subdir for the same reason, and because the
+    evidence uploader collects every top-level *.json in a run.
     """
-    return run_dir / ISSUE_REPORTS_DIR if fetcher.is_issue_report else run_dir
+    if fetcher.is_issue_report:
+        return run_dir / ISSUE_REPORTS_DIR
+    if fetcher.is_discovery:
+        return run_dir / DISCOVERY_DIR
+    return run_dir
 
 
 def _build_env(

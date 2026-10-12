@@ -96,6 +96,26 @@ schemas and the `paramify` CLI — not the internal code.
   fetchers keep an allow-list of fields, because Azure returns site-link
   pre-shared keys in plain text to Reader; no key reaches the evidence.
   Verified against a live subscription.
+
+- **Discovery fetchers (`kind: discovery`)**, a fourth collection kind that
+  lists what a platform's credentials can see instead of collecting evidence.
+  The runner writes their output to `<run>/discovery/`, which neither uploader
+  reads. Every platform writes the same JSON document
+  (`framework/schemas/discovery_schema.json`). Each resource type says whether
+  it could be read (`ok`, `denied`, `not_enabled`, `error`, or `truncated` with
+  a lower-bound count), so a type that could not be read never looks like one
+  with nothing in it. Records about people are counted, never listed. The
+  shared engine in `fetchers/_lib/discovery.py` handles paging, retries and the
+  document, so a platform's fetcher is a table of resources plus its paging. The
+  first is `knowbe4_discovery_beta`: account, groups, training campaigns, modules,
+  policies, phishing campaigns and tests, and user and enrollment counts. It
+  pages by cursor, since KnowBe4 retires the `page` parameter in November 2026.
+  The second is `aws_discovery_beta`: about 75 resource types, at least one for every
+  AWS service an AWS fetcher reads (a test keeps that true), listed in every
+  enabled region through the aws CLI, plus a count per resource type from AWS
+  Resource Explorer wherever it has an index, with each (type, region) pair carrying
+  its own status so a region denied by a service control policy never reads as
+  empty. One document per target account. See `docs/discovery.md`.
 - **A Wiz category with twelve fetchers**, for Wiz commercial and Wiz for
   Government, sharing one GraphQL client and one service account. Eleven are
   evidence fetchers: `wiz_scan_coverage`, `wiz_posture_issues`,

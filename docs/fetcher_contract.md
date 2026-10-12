@@ -29,7 +29,7 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 
 | Field | Type | Purpose |
 |---|---|---|
-| `kind` | enum | `evidence` (default), `inventory` or `issue_report`. See [Collection kinds](#collection-kinds). |
+| `kind` | enum | `evidence` (default), `inventory`, `issue_report` or `discovery`. See [Collection kinds](#collection-kinds). |
 | `runtime.timeout` | int | Max seconds for one invocation before the runner kills it (default 600). Raise for long scanners. |
 | `category` | string | Source-system family (e.g. `okta`, `gitlab`) |
 | `config_schema` | object | Typed config the fetcher accepts (free-form for v0.x) |
@@ -52,14 +52,14 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 `evidence`, which is what every fetcher in this repo was before the field existed
 and what most should stay.
 
-| | `kind: evidence` (default) | `kind: inventory` | `kind: issue_report` |
-|---|---|---|---|
-| Produces | a JSON payload asserting a state | one record per asset under `data` | the source tool's own report file |
-| Writes to | `EVIDENCE_DIR` = `<run>/` | `EVIDENCE_DIR` = `<run>/` | `EVIDENCE_DIR` = `<run>/issue-reports/` |
-| Runner wraps output in the envelope | yes | yes, and checks the payload (`metadata.inventory`) | **no** |
-| Identity block | `evidence_set` | `evidence_set` (required) | `issue_report` |
-| `output.type` | `json`, `csv`, `html` | `json` | `csv`, `json`, `xml`, `nessus` |
-| Uploaded by | `paramify upload` | `paramify upload`, only when complete | `paramify issues upload` |
+| | `kind: evidence` (default) | `kind: inventory` | `kind: issue_report` | `kind: discovery` |
+|---|---|---|---|---|
+| Produces | a JSON payload asserting a state | one record per asset under `data` | the source tool's own report file | a list of what the credentials can see |
+| Writes to | `EVIDENCE_DIR` = `<run>/` | `EVIDENCE_DIR` = `<run>/` | `EVIDENCE_DIR` = `<run>/issue-reports/` | `EVIDENCE_DIR` = `<run>/discovery/` |
+| Runner wraps output in the envelope | yes | yes, and checks the payload (`metadata.inventory`) | **no** | yes |
+| Identity block | `evidence_set` | `evidence_set` (required) | `issue_report` | none (`evidence_set`, `ksis`, `validators` rejected) |
+| `output.type` | `json`, `csv`, `html` | `json` | `csv`, `json`, `xml`, `nessus` | `json` ([`discovery_schema.json`](../framework/schemas/discovery_schema.json)) |
+| Uploaded by | `paramify upload` | `paramify upload`, only when complete | `paramify issues upload` | nothing (the JSON is read directly) |
 
 An inventory fetcher is an evidence fetcher with two more clauses: its payload
 holds `data` (records, each with a unique, non-empty `unique_asset_identifier`)
@@ -79,6 +79,11 @@ Two clauses bind an issue-report fetcher beyond the shared contract below:
    an issue report (or `issue_report` on an evidence fetcher) is rejected at
    discovery, because the result would be a fetcher neither uploader collects.
 
+A discovery fetcher is never uploaded: it describes a tenant rather than making
+a claim about one, so the schema rejects every block that would promise an
+upload. Its document has one shape for every platform. See
+[`discovery.md`](discovery.md).
+
 Everything else — input env, exit codes, `$FETCHER_STATUS_FILE`, fanout, timeouts
 — is identical for every kind. Full detail:
 [`issue_report_fetchers.md`](issue_report_fetchers.md).
@@ -91,7 +96,7 @@ Everything else — input env, exit codes, `$FETCHER_STATUS_FILE`, fanout, timeo
 
 The runner exec's the fetcher's entry script with a tightly controlled environment. The fetcher receives **resolved values**, not env var names — it doesn't need to know whether the runner read the secret from a `.env` file, AWS Secrets Manager, K8s, Vault, or anywhere else.
 
-- **`EVIDENCE_DIR`** — output directory the fetcher writes to. The runner points this at `<run>/issue-reports/` for a `kind: issue_report` fetcher, so a fetcher always writes a bare filename into `EVIDENCE_DIR` and never builds a subdirectory itself
+- **`EVIDENCE_DIR`** — output directory the fetcher writes to. The runner points this at `<run>/issue-reports/` for a `kind: issue_report` fetcher and `<run>/discovery/` for a `kind: discovery` one, so a fetcher always writes a bare filename into `EVIDENCE_DIR` and never builds a subdirectory itself
 - **`FETCHER_STATUS_FILE`** — path the fetcher reports its failure reason to (see [Output](#output)). Deliberately outside `EVIDENCE_DIR`, so it is never collected as evidence; it lives in a per-invocation temp dir that goes away with the invocation
 - **Declared secrets** — every entry from `secrets[]` resolved and set on the env var named in `secrets[].env`. An optional secret (`required: false`) whose reference cannot be resolved is skipped rather than injected, so the fetcher's own credential chain reaches ambient identity — see [Secret references](run_manifest_reference.md#secret-references)
 - **Target fields (fanout only)** — each `target_schema` field with an `env` mapping set to the target's value

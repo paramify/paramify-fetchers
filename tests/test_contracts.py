@@ -147,6 +147,9 @@ def test_every_fetcher_declares_the_identity_its_kind_needs() -> None:
         elif f.is_inventory:
             if f.evidence_set is None or f.issue_report is not None:
                 missing.append(f"{name}: kind=inventory but identity blocks are wrong")
+        elif f.is_discovery:
+            if f.evidence_set is not None or f.issue_report is not None or f.ksis:
+                missing.append(f"{name}: kind=discovery but declares an upload identity or ksis")
         elif f.issue_report is not None:
             missing.append(f"{name}: kind=evidence but declares an issue_report block")
     assert not missing, "\n".join(missing)

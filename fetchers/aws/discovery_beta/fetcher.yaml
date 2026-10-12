@@ -1,0 +1,40 @@
+name: aws_discovery_beta
+version: 0.1.0
+description: Lists what this identity can see in one AWS account — about 75 resource types covering every service the AWS fetchers read, in every region enabled for the account, with whether each could be read per region — plus a count per resource type from AWS Resource Explorer wherever it has an index. A discovery document, not evidence; it is never uploaded. IAM users are counted, never listed.
+category: aws
+kind: discovery
+
+supports_targets: true
+
+config_schema:
+  regions:
+    type: string
+    required: false
+    env: AWS_DISCOVERY_REGIONS
+    description: Comma-separated regions to list (e.g. "us-east-1,us-east-2"). Leave unset to list every region enabled for the account.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  # ~65 regional types across ~17 regions is ~1,200 CLI calls; they run 24 at a
+  # time, which takes about a minute.
+  timeout: 1800
+
+output:
+  type: json
+  path: aws_discovery_beta.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: AWS_DEFAULT_REGION
+    description: Home region for global calls and for listing the account's regions (default us-east-1). Regional types are still listed in every enabled region.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: AWS named profile (credentials resolved from ~/.aws / SSO).
+
+secrets: []
