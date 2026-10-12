@@ -1,0 +1,101 @@
+name: azure_container_workloads_configuration
+version: 0.1.0
+description: >
+  Inventories the container workloads in the subscription: Azure Container Apps environments, apps
+  and jobs (Microsoft.App) and Container Instances container groups (Microsoft.ContainerInstance).
+  For every environment: whether it is internal-only or publicly reachable, whether traffic between
+  containers is encrypted and mutually authenticated, where its logs go, and zone redundancy. For every
+  app and job: its managed identity, whether its secrets come from Key Vault or are stored in the app,
+  whether registries are pulled with an identity or a password, plain environment variables with
+  secret-looking names, whether each image is pinned by digest or runs a mutable tag, and for apps
+  whether ingress is internet-facing, allows insecure HTTP, restricts client IPs or requires sign-in. For every container group: public IP, VNet placement, registry credentials,
+  environment variables, customer-managed key, confidential compute, Azure Files volumes and logging.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_container_workloads_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-ULN   # internal-only environments and VNet placement of container groups
+  - KSI-CNA-MAT   # internet-facing ingress, public IPs and insecure HTTP
+  - KSI-SVC-SIN   # mTLS and encryption between containers, customer-managed keys
+  - KSI-SVC-ASM   # secrets from Key Vault rather than stored in the app, identity-based registry pulls
+  - KSI-MLA-LET   # environment and container group logs exported
+  - KSI-CMT-RMV   # images pinned by digest rather than running a mutable tag
+
+evidence_set:
+  reference_id: EVD-AZURE-CONTAINER-WORKLOADS-CONFIG
+  name: Azure Container Workloads Configuration
+  instructions: >
+    Script: fetcher.py. Azure SDK calls: azure-mgmt-appcontainers ContainerAppsAPIClient
+    managed_environments.list_by_subscription(), container_apps.list_by_subscription() with
+    container_apps_auth_configs.list_by_container_app per app, and jobs.list_by_subscription();
+    azure-mgmt-containerinstance ContainerInstanceManagementClient
+    container_groups.list(); azure-mgmt-monitor diagnostic_settings.list for each environment and
+    container group. No call reads a secret value: Container Apps secrets are recorded by name with
+    whether they are Key Vault references, and the Container Instances list response redacts secure
+    environment variables and registry passwords.
+    Environments: network_exposure is internal when the environment's VNet configuration is internal
+    (no public endpoint), private when publicNetworkAccess is Disabled, and public otherwise (Azure
+    treats unset as Enabled; a consumption-only environment without a VNet is public).
+    mtls_enabled and peer_traffic_encryption_enabled are the environment's peer authentication and
+    peer traffic encryption settings, both off by default. app_logs_destination is log-analytics,
+    azure-monitor or none. audit_logs_exported is true when a diagnostic setting with a destination
+    enables ContainerAppSystemLogs, ContainerAppConsoleLogs or the audit or allLogs group.
+    Apps and jobs: secrets_stored_in_app counts secrets held in the app's own configuration rather than
+    as Key Vault references; registries_password_based counts registries pulled with a password secret
+    instead of a managed identity. plain_env_vars_with_secret_like_names counts environment variables
+    set as plain values (not secretRef) whose names contain secret, password, token, apikey,
+    connectionstring, accesskey, privatekey, credential or similar; it is a name heuristic, so a match
+    means "review", not "secret confirmed". An app is internet_facing when its ingress is external and
+    its environment is not internal-only (environment_internal_only is null when the environment was
+    not in the subscription's list); ingress_allow_insecure allows plain HTTP; ingress_ip_restrictions
+    is the number of client IP rules. auth_enabled is the app's Easy Auth platform switch and
+    unauthenticated_client_action what happens to a caller who is not signed in (RedirectToLoginPage,
+    Return401, Return403, AllowAnonymous); both null when the auth configs could not be read.
+    container_apps_internet_facing_without_auth counts apps reachable from the internet with Easy Auth
+    off, which means the container itself must authenticate callers.
+    Images: image_tag_mutable is true when the reference has no tag or the tag is latest and no digest
+    pins it, so what runs can change without a deployment; image_pinned_by_digest marks an @sha256
+    reference. image_registries lists every registry images are pulled from, for comparison with an
+    approved list; the fetcher does not judge registries.
+    Container groups: public_ip is true for an ipAddress of type Public; subnet_ids is set when the
+    group runs in a virtual network. registries_password_based counts image registry credentials with a
+    username and no managed identity. customer_managed_key is true when encryption properties are set;
+    confidential_compute when a confidential compute policy is set. azure_file_volumes counts Azure
+    Files volumes, whose storage account key is stored in the container group definition.
+    log_analytics_configured is the group's own diagnostics setting; logs_exported is true when a
+    diagnostic setting with a destination enables ContainerInstanceLog, ContainerEvent or the allLogs
+    group. Lists that could not be read are null and set metadata.partial_failure.
+    provider_registration_status_container_apps (Microsoft.App) and
+    provider_registration_status_container_instances (Microsoft.ContainerInstance) are reported
+    separately, so zero resources of either kind can be told from a provider that is off. A summary
+    with total_container_apps 0 proves nothing about app ingress or authentication: there are no apps
+    yet.
