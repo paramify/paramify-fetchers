@@ -2,8 +2,7 @@
 
 Copy our repo into a private repo in your GitHub organization and add ours as a
 read-only remote. You build your own fetchers there and merge each Paramify
-release as it ships. Don't fork it: a fork of a public repo is public
-([why not a fork](private_mirror_workflow.md#why-not-a-fork)).
+release as it ships. Don't fork it: a fork of a public repo is public.
 
 ![What you end up with: Paramify's public repo, your private copy that fetches from it, and an optional public fork that holds only branches you send back](img/private_mirror/repos.svg)
 
@@ -17,8 +16,9 @@ release as it ships. Don't fork it: a fork of a public repo is public
 
 Use GitHub's importer (**+ → Import repository**) with the source
 `https://github.com/paramify/paramify-fetchers.git`, and make the new repo private.
-It copies the full history, which every later merge depends on
-([command-line alternative](private_mirror_workflow.md#alternative-the-command-line)).
+It copies the full history, which every later merge depends on. If your GitHub
+can't import from an outside URL, `git push --mirror` to the new repo from a
+throwaway `git clone --bare` of ours, then delete that clone.
 Then clone your copy:
 
 ![git clone of your-org's private copy, then git log showing Paramify's commits](img/private_mirror/01-clone.png)
@@ -35,8 +35,7 @@ git log --oneline -3
 ## 2. Point it at Paramify's repo
 
 Add ours as `upstream`. Pushing to it is disabled, and our tags land under
-`paramify/` so they never collide with yours
-([why](private_mirror_workflow.md#2-point-your-copy-at-paramifys-repo)).
+`paramify/` so they never collide with yours.
 
 ![The four setup commands, git remote get-url showing upstream's push URL is no_push, and git fetch upstream bringing tags in as paramify/v0.x](img/private_mirror/02-upstream.png)
 
@@ -57,7 +56,7 @@ git fetch upstream
 When we publish a release, fetch and merge its tag. Then resolve any conflicts,
 run the tests, and push to your `main`. Merge tags, not `upstream/main`: a tag is
 a reviewed point your change control can cite
-([how releases are cut](releasing.md)).
+([how releases are cut](releasing_guide.md)).
 
 ![git fetch upstream, then git merge refs/tags/paramify/v0.5.1-beta making a merge commit](img/private_mirror/03-merge.png)
 
@@ -85,10 +84,9 @@ git diff --stat refs/tags/paramify/v0.5.1-beta main
 </details>
 
 **Commit your manifests.** They name secrets without holding them
-([secret references](run_manifest_reference.md#secret-references)). `.gitignore`
+([secret references](run_manifest_guide.md#2-add-a-fetcher-and-close-what-it-reports)). `.gitignore`
 ignores `manifests/*` despite its comment, so keep yours at the repo root or
-`git add -f` them. **Don't bump our version**, or every release merge conflicts
-([why](private_mirror_workflow.md#5-two-things-that-will-fight-you)).
+`git add -f` them. **Don't bump our version**, or every release merge conflicts.
 
 ## 5. Send something back (optional)
 
@@ -123,7 +121,4 @@ git push fork feat/acme-asset-inventory
 | `not something we can merge` | Merge `refs/tags/paramify/<tag>`, not `upstream/<tag>`. |
 | No `paramify/` tags after a fetch, or `would clobber existing tag` | The tag mapping is missing. Re-run [step 2](#2-point-it-at-paramifys-repo)'s last `git config` line and fetch again. |
 
-**More detail:** [why not a fork](private_mirror_workflow.md#why-not-a-fork) ·
-[what Paramify commits to](private_mirror_workflow.md#what-paramify-commits-to) ·
-[security review Q&A](private_mirror_workflow.md#questions-your-security-review-will-ask) ·
-[invite your Paramify contact](https://docs.github.com/en/organizations/managing-user-access-to-your-organizations-repositories/managing-outside-collaborators/adding-outside-collaborators-to-repositories-in-your-organization)
+**More detail:** [invite your Paramify contact](https://docs.github.com/en/organizations/managing-user-access-to-your-organizations-repositories/managing-outside-collaborators/adding-outside-collaborators-to-repositories-in-your-organization)
