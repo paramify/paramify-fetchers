@@ -1,3 +1,4 @@
+display_name: Checkov
 description: >
   Checkov IaC security scanners (bash, the `checkov` CLI + git + jq). These are
   the first "scanner" fetchers: instead of pulling evidence from a vendor API,

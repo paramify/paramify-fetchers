@@ -202,6 +202,7 @@ def discover_platforms(repo_root: Path) -> Dict[str, PlatformSpec]:
                 python_packages=list(requires.get("python_packages") or []),
             ),
             description=data.get("description"),
+            display_name=data.get("display_name"),
         )
 
     return platforms

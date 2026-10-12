@@ -1,3 +1,4 @@
+display_name: Better Stack
 description: >-
   Better Stack public status pages. Reads a status page's public `/index.json`
   document — the same JSON the hosted page renders itself from — for the page's

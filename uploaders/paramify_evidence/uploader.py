@@ -15,7 +15,9 @@ Per evidence file the uploader:
      resolve_channel — artifacts uploaded outside a configured channel do not
      count toward the solution capability),
   5. attaches the evidence as an artifact (idempotent: skips if an artifact with
-     the same filename + run_id already exists on the set).
+     the same filename + run_id already exists on the set),
+  6. puts the default custom tags on the set — provenance + the category's
+     display name — additively, every run (framework/custom_tags.py).
 
 Auth: PARAMIFY_UPLOAD_API_TOKEN (source-agnostic env — .env, secret manager, CI).
 """
@@ -38,9 +40,11 @@ from dotenv import load_dotenv
 # from any cwd, where only its own directory lands on sys.path. Its position in the
 # repo is fixed, so derive the root rather than duplicating the token-resolution
 # rule locally — duplicating it is what let the uploader and the fetchers disagree.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT))
 
 from framework.contract import DEFAULT_EVIDENCE_FREQUENCY  # noqa: E402
+from framework.custom_tags import ENTITY_EVIDENCE, build_tagger  # noqa: E402
 from framework.paramify_auth import (  # noqa: E402
     READ_TOKEN_ENV,
     UPLOAD_TOKEN_ENV,
@@ -310,8 +314,13 @@ def upload_run(
     base_url: Optional[str] = None,
     dry_run: bool = False,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> Dict:
     """Upload one completed run directory.
+
+    `custom_tags=False` is the `--no-tags` switch: no default custom tags for
+    this run, whatever the config says (PARAMIFY_CUSTOM_TAGS=off does the same
+    from the environment).
 
     The standalone CLI still logs to stderr, while front-ends can pass on_event
     to render upload_start / upload_file / upload_complete in their own UI.
@@ -333,6 +342,17 @@ def upload_run(
         msg = f"artifact_payload must be 'envelope' or 'payload', got {artifact_payload!r}"
         logger.error(msg)
         raise ValueError(msg)
+    # Default custom tags for every set this run touches. Resolved up front so a
+    # malformed `tags:` block fails like any other config mistake; the client's
+    # session is attached below (a dry run keeps it write-less).
+    try:
+        tagger = build_tagger(
+            None, base_url, config=config, root=_REPO_ROOT,
+            override_off=None if custom_tags else "--no-tags",
+        )
+    except ValueError as e:
+        logger.error(str(e))
+        raise
 
     run_dir = Path(run_dir)
     if not run_dir.is_dir():
@@ -360,6 +380,8 @@ def upload_run(
     })
 
     client = None if dry_run else ParamifyClient(token, base_url)
+    if client is not None:
+        tagger.session = client.session
     results: List[Dict] = []
     uploaded = skipped_dup = skipped_failed = errors = seen = 0
 
@@ -425,7 +447,12 @@ def upload_run(
                     path.name, es["reference_id"], es["name"],
                     build_artifact_meta(metadata, es["name"])["title"],
                 )
-                add_result({"file": path.name, "outcome": "would_upload", "reference_id": es["reference_id"]})
+                add_result({
+                    "file": path.name,
+                    "outcome": "would_upload",
+                    "reference_id": es["reference_id"],
+                    "tags": tagger.plan(metadata.get("category")),
+                })
                 continue
 
             record = client.get_or_create_evidence_set(es)
@@ -435,6 +462,11 @@ def upload_run(
                 errors += 1
                 add_result({"file": path.name, "outcome": "error", "reference_id": es["reference_id"]})
                 continue
+
+            # Tag before the dedup check: a set is tagged once per run whether or
+            # not this file is new, which is what backfills sets from older runs.
+            tag_info = tagger.tag(ENTITY_EVIDENCE, evidence_id, metadata.get("category"))
+            tags = tag_info["tags"] if tag_info["outcome"] in ("applied", "already") else []
 
             try:
                 channel = resolve_channel(
@@ -463,6 +495,7 @@ def upload_run(
                     "outcome": "skipped_duplicate",
                     "reference_id": es["reference_id"],
                     "evidence_id": evidence_id,
+                    "tags": tags,
                 })
                 continue
             content = artifact_content(envelope, artifact_payload)
@@ -489,6 +522,7 @@ def upload_run(
                 "artifact_id": art.get("id"),
                 "channel": (channel.get("referenceId") if channel else None),
                 "channel_id": (channel.get("id") if channel else None),
+                "tags": tags,
             })
         except Exception as e:
             logger.error("%s: upload failed: %s", path.name, e)
@@ -510,6 +544,7 @@ def upload_run(
             "skipped_duplicate": skipped_dup,
             "skipped_failed": skipped_failed,
             "errors": errors,
+            "tags": tagger.summary(),
             "results": results,
         }
         log_path = run_dir / "upload_log.json"
@@ -528,6 +563,7 @@ def upload_run(
         "skipped_failed": skipped_failed,
         "errors": errors,
         "files": seen,
+        "tags": tagger.summary(),
         "results": results,
         "log_path": str(log_path) if log_path else None,
         "ok": errors == 0,
@@ -553,7 +589,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Upload enveloped evidence to Paramify")
     parser.add_argument("run_dir", nargs="?", help="Run directory to upload (default: latest under --output-dir)")
     parser.add_argument("--output-dir", default="./evidence", help="Base dir to find the latest run in (default ./evidence)")
-    parser.add_argument("--config", help="Uploader config YAML (base_url, overrides, skip_failed, artifact_payload)")
+    parser.add_argument("--config", help="Uploader config YAML (base_url, overrides, skip_failed, artifact_payload, tags)")
     parser.add_argument("--dry-run", action="store_true", help="Resolve and report what would upload; no API calls")
     args = parser.parse_args(argv)
 
