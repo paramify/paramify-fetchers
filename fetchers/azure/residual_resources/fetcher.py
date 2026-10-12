@@ -74,10 +74,12 @@ IDENTITIES_QUERY = (
     " | order by id asc"
 )
 
+# Measured: Bot Service, Database Watcher and others name the identity inside properties, not identity.userAssignedIdentities.
 IDENTITY_REFERENCES_QUERY = (
-    "Resources | where isnotnull(identity.userAssignedIdentities)"
-    " | mv-expand identityId = bag_keys(identity.userAssignedIdentities)"
-    " | project id = tostring(id), identityId = tolower(tostring(identityId)) | order by id asc"
+    "Resources | extend refs = extract_all(@'(/subscriptions/[0-9a-f-]+/resourcegroups/[^/]+/providers/"
+    "microsoft\\.managedidentity/userassignedidentities/[^/\"]+)', tolower(strcat(tostring(identity), tostring(properties))))"
+    " | where array_length(refs) > 0 | mv-expand identityId = refs"
+    " | project id = tostring(id), identityId = tostring(identityId) | order by id asc"
 )
 
 SLOTS_QUERY = (
@@ -209,7 +211,7 @@ def federated_credential_count(arm, identity_id: str) -> int:
 
 def identity_records(subscription_id, cred, collector: Collector, identities: list, references: list, assignments: list):
     """Identity records; federated credentials are read only for identities nothing else uses."""
-    attached = Counter(r.get("identityId") for r in references)
+    attached = Counter(identity for _, identity in {(r.get("id"), r.get("identityId")) for r in references})
     roles = Counter((a.get("principalId") or "").lower() for a in assignments)
     arm = None
     records = []

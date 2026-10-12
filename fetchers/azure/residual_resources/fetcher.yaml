@@ -78,8 +78,11 @@ evidence_set:
     properties.lastModifiedTimeUtc is older than `stale_slot_days`
     (`not_modified_in_<n>_days`), with state and last_modified recorded;
     unused_identity, a user-assigned managed identity
-    (microsoft.managedidentity/userassignedidentities) that no resource lists under
-    identity.userAssignedIdentities (attached_resources), whose principalId holds no
+    (microsoft.managedidentity/userassignedidentities) whose resource id appears in no
+    resource's identity or properties (attached_resources, the number of resources
+    naming it; matched by regex, because Bot Service, Database Watcher, storage
+    encryption and others name the identity inside properties rather than under
+    identity.userAssignedIdentities), whose principalId holds no
     role assignment (role_assignments), and that has no federated identity
     credential (federated_credentials). A federated credential means an outside
     workload, such as a pipeline using workload identity federation, signs in as the
