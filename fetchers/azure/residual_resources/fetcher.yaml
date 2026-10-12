@@ -4,8 +4,9 @@ description: >
   Residual elements left behind in the subscription after changes: managed disks
   attached to nothing, network interfaces with no VM or private endpoint, network
   security groups on no subnet or NIC, public IPs bound to nothing, resource groups
-  holding no resources, and role assignments whose principal no longer exists in
-  Entra ID. Each orphan is listed with its kind, and the summary counts them by
+  holding no resources, user-assigned managed identities nothing uses, App Service
+  deployment slots that are stopped or long untouched, and role assignments whose
+  principal no longer exists in Entra ID. Each orphan is listed with its kind, and the summary counts them by
   kind. This is evidence that the state of the environment is reviewed after
   changes and unwanted leftovers are removed.
 category: azure
@@ -20,6 +21,16 @@ output:
   type: json
   path: azure_residual_resources.json
   aggregation: per_target
+
+config_schema:
+  stale_slot_days:
+    type: integer
+    required: false
+    default: 90
+    env: AZURE_STALE_SLOT_DAYS
+    description: >
+      A deployment slot not modified for this many days counts as stale, as does a
+      slot that is not running.
 
 target_schema:
   subscription_id:
@@ -61,7 +72,24 @@ evidence_set:
     unattached_public_ip, a public IP with no ipConfiguration and no natGateway;
     empty_resource_group, a resource group from ResourceContainers with no row in
     Resources (hidden resource types that Resource Graph does not index are not
-    counted).
+    counted);
+    stale_deployment_slot, an App Service or Function App slot (microsoft.web/sites/slots)
+    whose properties.state is not Running (`stale_reasons: not_running`), or whose
+    properties.lastModifiedTimeUtc is older than `stale_slot_days`
+    (`not_modified_in_<n>_days`), with state and last_modified recorded;
+    unused_identity, a user-assigned managed identity
+    (microsoft.managedidentity/userassignedidentities) that no resource lists under
+    identity.userAssignedIdentities (attached_resources), whose principalId holds no
+    role assignment (role_assignments), and that has no federated identity
+    credential (federated_credentials). A federated credential means an outside
+    workload, such as a pipeline using workload identity federation, signs in as the
+    identity. Resource Graph does not index federated credentials, so they are read
+    with ARM GET <identity id>/federatedIdentityCredentials?api-version=2023-01-31,
+    only for identities with no attachment and no role. Attachments and roles are
+    read in this subscription only: an identity used solely by a resource or a role
+    assignment in another subscription or a management group reads as unused.
+    summary.identities_checked and summary.slots_checked count every identity and
+    slot read.
     Role assignments come from authorizationresources (type
     microsoft.authorization/roleassignments: principalId, principalType,
     roleDefinitionId, scope, createdOn), with role names from azure-mgmt-authorization

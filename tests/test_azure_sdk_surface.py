@@ -327,6 +327,14 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure-mgmt-dns has no DNSSEC operation",
     ),
     (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        None,
+        ["send_request"],
+        "azure/residual_resources — the ARM pipeline for the federatedIdentityCredentials "
+        "GET; without it no identity is ever reported unused",
+    ),
+    (
         "azure.mgmt.privatedns",
         "PrivateDnsManagementClient",
         "private_zones",

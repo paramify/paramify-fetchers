@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Residual elements in one subscription: unattached disks, NICs, NSGs and public IPs, empty resource groups, and role assignments whose principal is gone."""
+"""Residual elements in one subscription: unattached disks, NICs, NSGs and public IPs, empty resource groups, unused identities, stale slots, and role assignments whose principal is gone."""
 
 import asyncio
 import logging
 import os
 import sys
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -19,6 +20,7 @@ from azure_common import (  # noqa: E402
     classify_failure_code,
     credential,
     failure_reason,
+    parse_time,
     report_failure,
     resolve_subscription,
     resource_graph_client,
@@ -32,6 +34,8 @@ from entra_graph import aguard, with_graph_client  # noqa: E402
 logger = logging.getLogger("azure_residual_resources")
 
 GRAPH_BATCH = 1000
+DEFAULT_STALE_SLOT_DAYS = 90
+FIC_API_VERSION = "2023-01-31"
 _PROJECT = " | project id = tostring(id), name, type, resourceGroup, location, tags | order by id asc"
 
 ORPHAN_QUERIES = {
@@ -63,6 +67,26 @@ ORPHAN_QUERIES = {
     ),
 }
 
+IDENTITIES_QUERY = (
+    "Resources | where type =~ 'microsoft.managedidentity/userassignedidentities'"
+    " | project id = tostring(id), name, type, resourceGroup, location, tags,"
+    " principalId = tostring(properties.principalId), clientId = tostring(properties.clientId)"
+    " | order by id asc"
+)
+
+IDENTITY_REFERENCES_QUERY = (
+    "Resources | where isnotnull(identity.userAssignedIdentities)"
+    " | mv-expand identityId = bag_keys(identity.userAssignedIdentities)"
+    " | project id = tostring(id), identityId = tolower(tostring(identityId)) | order by id asc"
+)
+
+SLOTS_QUERY = (
+    "Resources | where type =~ 'microsoft.web/sites/slots'"
+    " | project id = tostring(id), name, type, resourceGroup, location, tags,"
+    " state = tostring(properties.state), lastModified = tostring(properties.lastModifiedTimeUtc)"
+    " | order by id asc"
+)
+
 ASSIGNMENTS_QUERY = (
     "authorizationresources | where type =~ 'microsoft.authorization/roleassignments'"
     " | project id = tostring(id), principalId = tostring(properties.principalId),"
@@ -90,6 +114,42 @@ def resource_record(row: dict, kind: str) -> dict:
     }
 
 
+def stale_slot_days() -> int:
+    raw = os.environ.get("AZURE_STALE_SLOT_DAYS") or ""
+    return int(raw) if raw.strip().isdigit() and int(raw) > 0 else DEFAULT_STALE_SLOT_DAYS
+
+
+def slot_record(row: dict, days: int, now: datetime):
+    """The slot as an orphan when it is stopped or untouched for `days`; None when it is in use."""
+    reasons = []
+    if (row.get("state") or "").lower() != "running":
+        reasons.append("not_running")
+    modified = row.get("lastModified") or ""
+    when = parse_time(modified)
+    if when and now - when > timedelta(days=days):
+        reasons.append(f"not_modified_in_{days}_days")
+    if not reasons:
+        return None
+    return {
+        **resource_record(row, "stale_deployment_slot"),
+        "state": row.get("state") or None,
+        "last_modified": modified or None,
+        "stale_reasons": reasons,
+    }
+
+
+def identity_record(row: dict, attached: int, roles: int, federated) -> dict:
+    unused = attached == 0 and roles == 0 and federated == 0
+    return {
+        **resource_record(row, "unused_identity" if unused else None),
+        "principal_id": row.get("principalId") or None,
+        "client_id": row.get("clientId") or None,
+        "attached_resources": attached,
+        "role_assignments": roles,
+        "federated_credentials": federated,
+    }
+
+
 def assignment_record(row: dict, role_names: dict, found) -> dict:
     principal = (row.get("principalId") or "").lower()
     exists = None if found is None or not principal else principal in found
@@ -106,7 +166,7 @@ def assignment_record(row: dict, role_names: dict, found) -> dict:
     }
 
 
-def summarize(resources: list, assignments: list, principal_check: str) -> dict:
+def summarize(resources: list, assignments: list, principal_check: str, checked: dict) -> dict:
     kinds = Counter(r["orphan_kind"] for r in resources)
     kinds.update(a["orphan_kind"] for a in assignments if a["orphan_kind"])
     principals = {a["principal_id"] for a in assignments if a["principal_id"]}
@@ -120,6 +180,9 @@ def summarize(resources: list, assignments: list, principal_check: str) -> dict:
         "principals_checked": len(principals),
         "principals_missing": len(missing),
         "principal_check": principal_check,
+        "identities_checked": checked.get("identities", 0),
+        "slots_checked": checked.get("slots", 0),
+        "stale_slot_days": checked.get("stale_slot_days"),
     }
 
 
@@ -132,6 +195,40 @@ def role_definition_names(subscription_id, cred) -> dict:
         str(getattr(d, "name", "") or "").lower(): getattr(d, "role_name", None)
         for d in client.role_definitions.list(scope=f"/subscriptions/{subscription_id}")
     }
+
+
+def federated_credential_count(arm, identity_id: str) -> int:
+    from azure.core.rest import HttpRequest  # lazy
+
+    response = arm.send_request(
+        HttpRequest("GET", f"{identity_id}/federatedIdentityCredentials?api-version={FIC_API_VERSION}")
+    )
+    response.raise_for_status()
+    return len(response.json().get("value") or [])
+
+
+def identity_records(subscription_id, cred, collector: Collector, identities: list, references: list, assignments: list):
+    """Identity records; federated credentials are read only for identities nothing else uses."""
+    attached = Counter(r.get("identityId") for r in references)
+    roles = Counter((a.get("principalId") or "").lower() for a in assignments)
+    arm = None
+    records = []
+    for row in identities:
+        n_attached = attached[(row.get("id") or "").lower()]
+        n_roles = roles[(row.get("principalId") or "").lower()] if row.get("principalId") else 0
+        federated = None
+        if n_attached == 0 and n_roles == 0:
+            if arm is None:
+                # Resource Graph does not index federatedIdentityCredentials; any mgmt client is an ARM pipeline for the GET.
+                from azure.mgmt.network import NetworkManagementClient  # lazy
+
+                arm = NetworkManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
+            federated = collector.guard(
+                f"managedidentity.federatedIdentityCredentials.list({row.get('name')})",
+                lambda: federated_credential_count(arm, row["id"]),
+            )
+        records.append(identity_record(row, n_attached, n_roles, federated))
+    return records
 
 
 async def existing_principals(collector: Collector, cred, ids: list):
@@ -158,7 +255,7 @@ async def existing_principals(collector: Collector, cred, ids: list):
 def collect(subscription_id, cred, collector: Collector):
     client = collector.guard("resourcegraph.ResourceGraphClient (init)", lambda: resource_graph_client(cred))
     if client is None:
-        return [], [], {}, "failed"
+        return [], [], {}, "failed", {}
 
     sources, resources = {}, []
 
@@ -179,12 +276,24 @@ def collect(subscription_id, cred, collector: Collector):
         rows = _run(kind, query)
         resources.extend(resource_record(row, kind) for row in rows or [])
 
+    days = stale_slot_days()
+    now = datetime.now(timezone.utc)
+    slots = _run("deployment_slots", SLOTS_QUERY) or []
+    resources.extend(r for r in (slot_record(row, days, now) for row in slots) if r)
+
     rows = _run("role_assignments", ASSIGNMENTS_QUERY)
+    identities = _run("user_assigned_identities", IDENTITIES_QUERY)
+    references = _run("identity_references", IDENTITY_REFERENCES_QUERY)
+    checked = {"slots": len(slots), "stale_slot_days": days, "identities": len(identities or [])}
+    if identities is not None and references is not None and rows is not None:
+        identity_rows = identity_records(subscription_id, cred, collector, identities, references, rows)
+        resources.extend(r for r in identity_rows if r["orphan_kind"])
+
     role_names = collector.guard(
         "authorization.role_definitions.list", lambda: role_definition_names(subscription_id, cred), default={}
     )
     if rows is None:
-        return resources, [], sources, "failed"
+        return resources, [], sources, "failed", checked
 
     ids = sorted({(r.get("principalId") or "").lower() for r in rows if r.get("principalId")})
     found = asyncio.run(existing_principals(collector, cred, ids)) if ids else set()
@@ -194,6 +303,7 @@ def collect(subscription_id, cred, collector: Collector):
         assignments,
         sources,
         "failed" if found is None else "complete",
+        checked,
     )
 
 
@@ -212,9 +322,9 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    resources, assignments, sources, principal_check = [], [], {}, "not_run"
+    resources, assignments, sources, principal_check, checked = [], [], {}, "not_run", {}
     if subscription_id and cred is not None:
-        resources, assignments, sources, principal_check = collect(subscription_id, cred, collector)
+        resources, assignments, sources, principal_check, checked = collect(subscription_id, cred, collector)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -233,7 +343,7 @@ def main() -> int:
             "role_assignments": assignments,
             "sources": sources,
         },
-        summary=summarize(resources, assignments, principal_check),
+        summary=summarize(resources, assignments, principal_check, checked),
     )
 
     filename = f"azure_residual_resources_{sanitize_for_filename(subscription_id or 'unknown')}.json"

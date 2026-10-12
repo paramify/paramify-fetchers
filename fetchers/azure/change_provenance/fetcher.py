@@ -22,6 +22,7 @@ from azure_common import (  # noqa: E402
     credential,
     failure_reason,
     model_attr,
+    parse_time,
     report_failure,
     resolve_subscription,
     resource_graph_client,
@@ -58,20 +59,6 @@ CHANGE_COLUMNS = (
 )
 
 _DURATION = re.compile(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?)?$")
-
-
-def parse_time(value):
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    # Azure emits up to seven fractional digits; fromisoformat takes six.
-    text = re.sub(r"(\.\d{6})\d+", r"\1", str(value).strip().replace("Z", "+00:00"))
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def parse_duration(value):
