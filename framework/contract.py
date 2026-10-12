@@ -115,6 +115,9 @@ class Validator:
     validation_rules: List[Any] = field(default_factory=list)
     attestation_rules: List[Any] = field(default_factory=list)
     path: Optional[Path] = None
+    #: The registry directory the validator sits in (`validators/<category>/`),
+    #: which is the service axis the uploaders tag it by.
+    category: Optional[str] = None
 
 
 @dataclass
@@ -226,6 +229,10 @@ class PlatformSpec:
     credential_env: List[str] = field(default_factory=list)
     requires: "Requires" = field(default_factory=lambda: Requires())
     description: Optional[str] = None
+    #: How the service is named to people (`AWS`, `Okta`): the custom tag the
+    #: uploaders put on every resource of this category. Declared, not derived —
+    #: no rule turns `aws` into `AWS`. None means the category gets no service tag.
+    display_name: Optional[str] = None
 
 
 @dataclass

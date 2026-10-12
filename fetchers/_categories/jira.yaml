@@ -2,6 +2,7 @@
 # Jira Service Management API where the site has it. No ambient identity: one
 # Atlassian account email + API token per site, declared once here and shared by
 # every fetcher in the category.
+display_name: Jira
 description: >-
   Atlassian Jira Cloud and Jira Service Management. Site and project inventory,
   issue schemes, service desks, and recent issue activity — change and incident

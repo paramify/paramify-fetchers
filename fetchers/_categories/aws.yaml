@@ -1,3 +1,4 @@
+display_name: AWS
 description: >
   AWS evidence fetchers (bash, aws CLI + jq). Each fetcher authenticates with
   the standard AWS credential chain. A manifest target may scope a run to a

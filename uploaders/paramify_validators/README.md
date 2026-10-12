@@ -33,6 +33,11 @@ python uploaders/paramify_validators/syncer.py --manifest ... --update
 
 Auth: `PARAMIFY_UPLOAD_API_TOKEN` (same token as the evidence uploader).
 Base URL: `PARAMIFY_API_BASE_URL` (default `https://app.paramify.com/api/v0`).
+Custom tags: every validator the sync sees gets the default custom tags
+(provenance + the registry category's `display_name`), configured by the
+`tags:` block of the uploader config (`--config upload.yaml`; `paramify
+validators sync` reads the repo's `upload.yaml` by default). Off switch:
+`PARAMIFY_CUSTOM_TAGS=off`, or `paramify validators sync --no-tags`.
 
 ## Lock file
 
