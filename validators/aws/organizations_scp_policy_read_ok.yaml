@@ -4,8 +4,8 @@ type: AUTOMATED
 role: integrity
 statement: The service control policies in the evidence were actually read. PolicyRead.Status is ok, or not_enabled for an account that is not in an AWS Organization.
 
-# Guards organizations_scp_guardrails_in_place. From a member account that is
-# neither the management account nor a delegated administrator, the SCP calls
+# Proves the SCP read was complete. From a member account that is neither
+# the management account nor a delegated administrator, the SCP calls
 # are AccessDenied; the evidence then has PolicyRead.Status "denied" and null
 # lists. "denied" and "error" mean the SCPs could not be read, never that there
 # are none, so only ok / not_enabled match and anything else is zero matches.

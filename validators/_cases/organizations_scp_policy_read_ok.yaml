@@ -7,7 +7,7 @@ cases:
   - name: read_ok_zero_scps
     expect: PASS
     note: >
-      an organization that really has no SCPs is a complete read; organizations_scp_guardrails_in_place is what fails it
+      an organization that really has no SCPs is a complete read, not a denied one
     artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":[{"Id":"r-root","PolicyTypes":[]}],"ServiceControlPolicies":[],"OrganizationsInUse":true,"ScpsEnabled":false,"PolicyRead":{"Status":"ok","Reason":null}}]}}'
 
   - name: standalone_account
