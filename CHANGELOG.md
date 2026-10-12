@@ -1285,7 +1285,7 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- [`docs/private_mirror_workflow.md`](docs/private_mirror_workflow.md) — keeping a
+- [`docs/private_mirror_workflow.md`](https://github.com/paramify/paramify-fetchers/blob/v0.3.1-beta/docs/private_mirror_workflow.md) — keeping a
   private copy of this repo that still receives upstream releases, for teams whose
   fetcher work can't be public.
 
