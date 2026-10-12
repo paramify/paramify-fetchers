@@ -1,5 +1,5 @@
 name: azure_key_vault_configuration
-version: 0.1.0
+version: 0.2.0
 description: >
   Every key vault in the subscription with the configuration that governs access to
   the keys and secrets it holds: which authorization model is in force
@@ -9,7 +9,11 @@ description: >
   retention window), how it is exposed to the network (public network access, the
   network ACL default action with its IP and virtual-network rules, private endpoint
   connections), the SKU, and which platform integrations may read it (deployment,
-  disk encryption, template deployment). Management plane only — no key material or
+  disk encryption, template deployment). Also each vault's diagnostic settings:
+  whether the AuditEvent category (the data-plane record of every key, secret and
+  certificate operation) is exported, and to which storage account, Log Analytics
+  workspace, event hub or partner solution — without such a setting those
+  operations are not logged anywhere. Management plane only — no key material or
   secret value is read.
 category: azure
 
@@ -43,11 +47,18 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-IAM-ELP
+  - KSI-IAM-ELP      # Least privilege — the authorization model and access policy verbs
+  - KSI-CNA-MAT      # Minimizing attack surface — public network access, private endpoints
+  - KSI-CNA-RNT      # Restricting network traffic — the network ACL default action and rules
+  - KSI-SVC-SIN      # Securing information — recoverability and the HSM-backed (Premium) SKU
+  - KSI-MLA-LET      # Logging event types — whether AuditEvent is exported, and where
 
 evidence_set:
   reference_id: EVD-AZURE-KEYVAULT-CFG
   name: Azure Key Vault Configuration
   instructions: >
     Script: fetcher.py. Azure SDK calls (azure-mgmt-keyvault KeyVaultManagementClient):
-    vaults.list_by_subscription(). Management plane only.
+    vaults.list_by_subscription(). Then per vault (azure-mgmt-monitor<7
+    MonitorManagementClient): diagnostic_settings.list(resource_uri=<vault resource
+    id without the leading slash>). Reader is sufficient — both are GETs. Management
+    plane only.

@@ -1,0 +1,30 @@
+description: >-
+  Splunk Enterprise logging evidence: index retention and integrity, whether
+  indexes and log sources are still receiving data, what is collected, alert
+  rules and their delivery, and who can read log data. One Splunk deployment
+  per target, each with its own management URL and token.
+
+requires:
+  python_packages:
+    - requests
+    - python-dotenv
+
+secrets:
+  - name: token
+    env: SPLUNK_TOKEN
+    per_target: true
+
+config_schema:
+  max_silence_minutes:
+    type: integer
+    default: 60
+    env: SPLUNK_MAX_SILENCE_MINUTES
+    description: >-
+      A log source, index or stream with no data for longer than this is
+      reported silent or stale. Every row carries the value used.
+
+auth:
+  description: >-
+    A Splunk authentication token (Settings > Tokens) for a collection user
+    whose role is defined in fetchers/splunk/README.md. Requests go to the
+    management port (https://<host>:8089).

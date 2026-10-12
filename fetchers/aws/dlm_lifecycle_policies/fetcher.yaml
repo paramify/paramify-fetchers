@@ -1,5 +1,5 @@
 name: aws_dlm_lifecycle_policies
-version: 0.1.0
+version: 0.2.0
 description: Collects AWS Data Lifecycle Manager (DLM) policies in the target region, including each policy's state, type, target tags, and the full policy details (schedules and retention rules) that govern automated EBS snapshot/AMI backup lifecycles.
 category: aws
 

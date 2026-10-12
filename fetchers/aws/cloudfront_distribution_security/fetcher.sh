@@ -55,35 +55,37 @@ jq -n \
 # carries the WebACLId, ViewerCertificate (incl. MinimumProtocolVersion), and the
 # DefaultCacheBehavior ViewerProtocolPolicy; get-distribution-config supplies the
 # Logging.Enabled flag.
-dist_ids=$(aws cloudfront list-distributions --region us-east-1 \
-    --query 'DistributionList.Items[*].Id' --output text 2>/dev/null)
+#
+# The summaries come from ONE list call. Each distribution used to re-run the
+# whole paginated list-distributions just to pick out its own summary, so the
+# list was fetched N+1 times. get-distribution-config has no bulk form and stays
+# one call per distribution; its responses are streamed to a file (null for a
+# failed call) and joined in the single jq pass below.
+_DISTS_JSON="$(mktemp -t aws_cloudfront_distribution_security_dists.XXXXXX.json)"
+_CONFIGS_JSON="$(mktemp -t aws_cloudfront_distribution_security_configs.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_DISTS_JSON" "$_CONFIGS_JSON"' EXIT
+aws cloudfront list-distributions --region us-east-1 \
+    --query 'DistributionList.Items[*]' --output json > "$_DISTS_JSON" 2>/dev/null
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     echo "aws cloudfront list-distributions failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list CloudFront distributions"
 else
-    for dist_id in $(aws_text_list "$dist_ids"); do
-        summary=$(aws cloudfront list-distributions --region us-east-1 \
-            --query "DistributionList.Items[?Id=='$dist_id'] | [0]" --output json 2>/dev/null)
-        summary_exit=$?
-        if [ $summary_exit -ne 0 ]; then
-            echo "aws cloudfront list-distributions ($dist_id) failed (exit=$summary_exit)" >> "$_FAILURE_LOG"
-            continue
-        fi
-
-        logging_enabled="null"
+    while read -r dist_id; do
+        [ -z "$dist_id" ] && continue
         config=$(aws cloudfront get-distribution-config --id "$dist_id" --region us-east-1 --output json 2>/dev/null)
         config_exit=$?
-        if [ $config_exit -ne 0 ]; then
+        if [ $config_exit -ne 0 ] || [ -z "$config" ]; then
             echo "aws cloudfront get-distribution-config ($dist_id) failed (exit=$config_exit)" >> "$_FAILURE_LOG"
-        else
-            logging_enabled=$(echo "$config" | jq -c '.DistributionConfig.Logging.Enabled // null')
+            config='null'
         fi
+        printf '%s\n' "$config" >> "$_CONFIGS_JSON"
+    done < <(jq -r '.[]?.Id' "$_DISTS_JSON")
 
-        dist_record=$(echo "$summary" | jq \
-            --arg id "$dist_id" --argjson logging "$logging_enabled" \
-            '{
-               "Id": $id,
+    jq --slurpfile dists "$_DISTS_JSON" --slurpfile configs "$_CONFIGS_JSON" '
+        .results += [($dists[0] // []) | to_entries[] | .key as $i | .value
+            | {
+               "Id": .Id,
                "ARN": .ARN,
                "DomainName": .DomainName,
                "Enabled": .Enabled,
@@ -92,11 +94,9 @@ else
                "CloudFrontDefaultCertificate": (.ViewerCertificate.CloudFrontDefaultCertificate // null),
                "WebACLId": (.WebACLId // ""),
                "WafEnabled": ((.WebACLId // "") != ""),
-               "LoggingEnabled": $logging
-             }')
-
-        jq --argjson data "$dist_record" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+               "LoggingEnabled": ($configs[$i].DistributionConfig.Logging.Enabled // null)
+             }]
+    ' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

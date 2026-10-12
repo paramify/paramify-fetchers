@@ -28,7 +28,10 @@ OUTPUT_JSON="$OUTPUT_DIR/aws_emr_encryption_status_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_emr_encryption_status.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_emr_encryption_status_fail.XXXXXX)"
 _ERR="$(mktemp -t aws_emr_encryption_status_err.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_ERR" "$_AWS_ERR_LOG"' EXIT
+_IDS_TXT="$(mktemp -t aws_emr_encryption_status_ids.XXXXXX)"
+_ITEMS_JSON="$(mktemp -t aws_emr_encryption_status_clusters.XXXXXX)"
+_SEC_JSON="$(mktemp -t aws_emr_encryption_status_security_configs.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_ERR" "$_AWS_ERR_LOG" "$_IDS_TXT" "$_ITEMS_JSON" "$_SEC_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_emr_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_emr_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -59,39 +62,69 @@ if [ $list_exit -ne 0 ]; then
         log_error "Failed to list EMR clusters"
     fi
 else
+    # describe-cluster is genuinely one call per cluster: list-clusters has no
+    # SecurityConfiguration. The security configuration a cluster names is
+    # described once per distinct name (a failed describe is re-reported for
+    # each cluster that names it, as before). Responses are appended raw, in
+    # cluster order, and every record is built in the one jq pass below -- one
+    # jq process per cluster instead of seven, and no output rewrite per cluster.
+    _sec_names=()
+    _sec_values=()
     for cluster_id in $(aws_text_list "$cluster_ids"); do
         cluster_details=$(aws emr describe-cluster --cluster-id "$cluster_id" 2>/dev/null)
         if [ $? -ne 0 ]; then
             echo "aws emr describe-cluster ($cluster_id) failed" >> "$_FAILURE_LOG"
             continue
         fi
+        [ -n "$cluster_details" ] || cluster_details='{}'  # keeps the lists aligned
 
-        cluster_name=$(echo "$cluster_details" | jq -r '.Cluster.Name // "unknown"')
-        cluster_arn=$(echo "$cluster_details" | jq -r '.Cluster.ClusterArn // "unknown"')
-        cluster_state=$(echo "$cluster_details" | jq -r '.Cluster.Status.State // "unknown"')
-        security_config_name=$(echo "$cluster_details" | jq -r '.Cluster.SecurityConfiguration // ""')
+        security_config_name=$(printf '%s' "$cluster_details" | jq -r '.Cluster.SecurityConfiguration // ""')
 
-        at_rest_encryption=null
-        in_transit_encryption=null
+        # null = no configuration named, or its describe failed.
+        security_config='null'
         if [ -n "$security_config_name" ]; then
-            security_config=$(aws emr describe-security-configuration --name "$security_config_name" 2>/dev/null)
-            if [ $? -ne 0 ]; then
+            cached=""
+            for k in "${!_sec_names[@]}"; do
+                if [ "${_sec_names[$k]}" = "$security_config_name" ]; then
+                    cached="${_sec_values[$k]}"
+                    break
+                fi
+            done
+            if [ -z "$cached" ]; then
+                cached=$(aws emr describe-security-configuration --name "$security_config_name" 2>/dev/null)
+                [ $? -eq 0 ] || cached="FAILED"
+                [ -n "$cached" ] || cached='null'
+                _sec_names+=("$security_config_name")
+                _sec_values+=("$cached")
+            fi
+            if [ "$cached" = "FAILED" ]; then
                 echo "aws emr describe-security-configuration ($security_config_name) failed" >> "$_FAILURE_LOG"
             else
-                config_json=$(echo "$security_config" | jq -r '.SecurityConfiguration // "{}"')
-                at_rest_encryption=$(echo "$config_json" | jq '.EncryptionConfiguration.EnableAtRestEncryption // false')
-                in_transit_encryption=$(echo "$config_json" | jq '.EncryptionConfiguration.EnableInTransitEncryption // false')
+                security_config="$cached"
             fi
         fi
 
-        cluster_data=$(jq -n \
-            --arg id "$cluster_id" --arg name "$cluster_name" --arg arn "$cluster_arn" \
-            --arg state "$cluster_state" --arg sec_config "$security_config_name" \
-            --argjson at_rest "${at_rest_encryption:-null}" --argjson in_transit "${in_transit_encryption:-null}" \
-            '{id: $id, name: $name, arn: $arn, state: $state, security_configuration: $sec_config, at_rest_encryption: $at_rest, in_transit_encryption: $in_transit}')
-
-        jq --argjson data "$cluster_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+        printf '%s\n' "$cluster_id" >> "$_IDS_TXT"
+        printf '%s\n' "$cluster_details" >> "$_ITEMS_JSON"
+        printf '%s\n' "$security_config" >> "$_SEC_JSON"
     done
+
+    # `raw` reproduces the old `jq -r` -> --arg read; the encryption flags are
+    # read from the configuration's JSON string, null when it does not parse.
+    jq --rawfile ids "$_IDS_TXT" --slurpfile clusters "$_ITEMS_JSON" --slurpfile secs "$_SEC_JSON" '
+        def raw: (if type == "string" then . else tojson end) | sub("\n+$"; "");
+        def flag($f): if . == null then null
+            else (.SecurityConfiguration // "{}" | raw) | try (fromjson | .EncryptionConfiguration[$f] // false) catch null end;
+        ($ids | split("\n")) as $id
+        | .results += [range(0; $clusters | length) as $i | $clusters[$i] as $c | $secs[$i] as $sc | {
+            id: $id[$i],
+            name: ($c.Cluster.Name // "unknown" | raw),
+            arn: ($c.Cluster.ClusterArn // "unknown" | raw),
+            state: ($c.Cluster.Status.State // "unknown" | raw),
+            security_configuration: ($c.Cluster.SecurityConfiguration // "" | raw),
+            at_rest_encryption: ($sc | flag("EnableAtRestEncryption")),
+            in_transit_encryption: ($sc | flag("EnableInTransitEncryption"))
+        }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

@@ -27,7 +27,9 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_kinesis_encryption_status_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_kinesis_encryption_status.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_kinesis_encryption_status_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "${_ERR:-}" "$_AWS_ERR_LOG"' EXIT
+_NAMES_TXT="$(mktemp -t aws_kinesis_encryption_status_names.XXXXXX)"
+_ITEMS_JSON="$(mktemp -t aws_kinesis_encryption_status_summaries.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "${_ERR:-}" "$_AWS_ERR_LOG" "$_NAMES_TXT" "$_ITEMS_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_kinesis_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_kinesis_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -61,24 +63,35 @@ if [ $list_exit -ne 0 ]; then
     rm -f "$_ERR"
 else
     rm -f "$_ERR"
+    # describe-stream-summary is genuinely one call per stream (list-streams has
+    # no EncryptionType). Each response is appended raw, with its name to a
+    # parallel list, and every record is built in the one jq pass below -- not
+    # five jq processes and an output rewrite per stream. `raw` reproduces the old
+    # `jq -r` -> --arg read.
     for stream_name in $(aws_text_list "$stream_names"); do
         summary=$(aws kinesis describe-stream-summary --stream-name "$stream_name" 2>/dev/null)
         if [ $? -ne 0 ]; then
             echo "aws kinesis describe-stream-summary ($stream_name) failed" >> "$_FAILURE_LOG"
             continue
         fi
-
-        arn=$(echo "$summary" | jq -r '.StreamDescriptionSummary.StreamARN // "None"')
-        status=$(echo "$summary" | jq -r '.StreamDescriptionSummary.StreamStatus // "None"')
-        encryption_type=$(echo "$summary" | jq -r '.StreamDescriptionSummary.EncryptionType // "NONE"')
-        kms_key_id=$(echo "$summary" | jq -r '.StreamDescriptionSummary.KeyId // "None"')
-
-        stream_data=$(jq -n --arg name "$stream_name" --arg arn "$arn" --arg status "$status" \
-            --arg enc "$encryption_type" --arg kms "$kms_key_id" \
-            '{name: $name, arn: $arn, status: $status, encryption_type: $enc, kms_key_id: $kms, encrypted_at_rest: ($enc == "KMS")}')
-
-        jq --argjson data "$stream_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+        [ -n "$summary" ] || summary='{}'  # keeps the two lists aligned
+        printf '%s\n' "$stream_name" >> "$_NAMES_TXT"
+        printf '%s\n' "$summary" >> "$_ITEMS_JSON"
     done
+
+    jq --rawfile names "$_NAMES_TXT" --slurpfile summaries "$_ITEMS_JSON" '
+        def raw: (if type == "string" then . else tojson end) | sub("\n+$"; "");
+        ($names | split("\n")) as $n
+        | .results += [range(0; $summaries | length) as $i | $summaries[$i].StreamDescriptionSummary as $s
+            | ($s.EncryptionType // "NONE" | raw) as $enc
+            | {
+                name: $n[$i],
+                arn: ($s.StreamARN // "None" | raw),
+                status: ($s.StreamStatus // "None" | raw),
+                encryption_type: $enc,
+                kms_key_id: ($s.KeyId // "None" | raw),
+                encrypted_at_rest: ($enc == "KMS")
+            }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

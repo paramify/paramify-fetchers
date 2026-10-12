@@ -1,5 +1,5 @@
 name: aws_auto_scaling_high_availability
-version: 0.1.0
+version: 0.2.0
 description: Lists Auto Scaling Groups and the EC2 instances within each (AZ distribution + capacity evidence).
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-AUTO-SCALING-HA
   name: Auto Scaling High Availability
-  instructions: 'Script: auto_scaling_high_availability.sh. Commands executed: aws autoscaling describe-auto-scaling-groups, aws autoscaling describe-launch-configurations'
+  instructions: 'Script: fetcher.sh. Commands executed: aws autoscaling describe-auto-scaling-groups, aws autoscaling describe-auto-scaling-instances'

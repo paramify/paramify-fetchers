@@ -1,5 +1,5 @@
 name: aws_efs_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each EFS file system in the account/region, reports encryption at rest (Encrypted flag, KMS key). Aggregates a per-account encryption-coverage percentage.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-EFS-ENC
   name: EFS Encryption at Rest
-  instructions: 'Script: efs_encryption_status.sh. Commands executed: aws efs describe-file-systems.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws efs describe-file-systems.'

@@ -1,5 +1,5 @@
 name: aws_dms_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each DMS replication instance and endpoint, reports encryption posture (instance KMS key and public accessibility, endpoint SSL mode) demonstrating data protection in transit and at rest.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DMS-ENC
   name: DMS Encryption
-  instructions: 'Script: dms_encryption_status.sh. Commands executed: aws dms describe-replication-instances, aws dms describe-endpoints.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws dms describe-replication-instances, aws dms describe-endpoints.'

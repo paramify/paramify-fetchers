@@ -1,5 +1,5 @@
 name: aws_sagemaker_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each SageMaker notebook instance, training job, and endpoint config, reports KMS volume encryption and inter-container traffic encryption.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-SAGEMAKER-ENC
   name: SageMaker Encryption
-  instructions: 'Script: sagemaker_encryption_status.sh. Commands executed: aws sagemaker list-notebook-instances, aws sagemaker describe-notebook-instance, aws sagemaker list-training-jobs, aws sagemaker describe-training-job, aws sagemaker list-endpoint-configs, aws sagemaker describe-endpoint-config.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws sagemaker list-notebook-instances, aws sagemaker describe-notebook-instance, aws sagemaker list-training-jobs, aws sagemaker describe-training-job, aws sagemaker list-endpoint-configs, aws sagemaker describe-endpoint-config.'

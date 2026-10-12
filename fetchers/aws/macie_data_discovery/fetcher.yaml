@@ -1,5 +1,5 @@
 name: aws_macie_data_discovery
-version: 0.1.0
+version: 0.2.0
 description: Reports Amazon Macie data-discovery posture in a region — the Macie session enabled status, automated sensitive-data discovery status, classification (discovery) jobs, and a sensitive-data findings summary. A disabled session is valid evidence that Macie is not enabled.
 category: aws
 

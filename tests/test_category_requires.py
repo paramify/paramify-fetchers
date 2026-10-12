@@ -152,6 +152,10 @@ def test_python_imports_are_declared_or_core(category):
 
     undeclared: dict[str, set[str]] = {}
     for py in (REPO_ROOT / "fetchers" / category).rglob("*.py"):
+        # A fetcher's own tests/ run in the developer's environment, not on a
+        # customer's runner, so their imports (pytest) are not runtime requirements.
+        if "tests" in py.relative_to(REPO_ROOT / "fetchers" / category).parts:
+            continue
         for root in _import_roots(py):
             if root in sys.stdlib_module_names or root in local or root == "__future__":
                 continue

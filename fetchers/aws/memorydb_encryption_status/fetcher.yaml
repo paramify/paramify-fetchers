@@ -1,5 +1,5 @@
 name: aws_memorydb_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each MemoryDB cluster, reports at-rest encryption (KMS key), in-transit encryption (TLS), and engine. Aggregates a per-target encryption-coverage percentage.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-MEMORYDB-ENC
   name: MemoryDB Encryption
-  instructions: 'Script: memorydb_encryption_status.sh. Commands executed: aws memorydb describe-clusters.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws memorydb describe-clusters.'

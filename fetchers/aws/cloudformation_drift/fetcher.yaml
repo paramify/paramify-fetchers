@@ -1,5 +1,5 @@
 name: aws_cloudformation_drift
-version: 0.1.0
+version: 0.2.0
 description: Lists CloudFormation stacks with their drift status, last drift-check timestamp, and termination-protection setting for change-management evidence.
 category: aws
 
@@ -35,4 +35,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CLOUDFORMATION-DRIFT
   name: AWS CloudFormation Drift
-  instructions: 'Script: aws_cloudformation_drift.sh. Commands executed: aws cloudformation describe-stacks.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws cloudformation describe-stacks.'

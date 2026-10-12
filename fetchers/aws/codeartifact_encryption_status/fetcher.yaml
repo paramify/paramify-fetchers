@@ -1,5 +1,5 @@
 name: aws_codeartifact_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each AWS CodeArtifact domain in the region, reports the KMS encryption key used to encrypt domain assets at rest.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CODEARTIFACT-ENC
   name: CodeArtifact Domain Encryption
-  instructions: 'Script: codeartifact_encryption_status.sh. Commands executed: aws codeartifact list-domains, aws codeartifact describe-domain.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws codeartifact list-domains.'

@@ -5,7 +5,7 @@
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-1467ff.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-1467ff.svg)](pyproject.toml)
 [![Version](https://img.shields.io/badge/version-0.4.0--beta-1467ff.svg)](CHANGELOG.md)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/paramify/paramify-fetchers)
+[![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1467ff.svg)](https://deepwiki.com/paramify/paramify-fetchers)
 
 Fetchers are small scripts that collect compliance evidence from your infrastructure and write it to disk as JSON. A separate uploader stage pushes that evidence to Paramify. This repo contains the fetchers, the runner that executes them, and the uploader — the fetchers themselves never talk to Paramify directly.
 
@@ -27,6 +27,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 <a href="fetchers/okta/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/okta-dark.svg"><img src="fetchers/logos/okta.svg" alt="Okta" width="56" height="56" style="margin: 20px;"></picture></a>
 <a href="fetchers/sentinelone/"><img src="fetchers/logos/sentinelone.svg" alt="SentinelOne" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/crowdstrike/"><img src="fetchers/logos/crowdstrike.svg" alt="CrowdStrike" width="56" height="56" style="margin: 20px;"></a>
+<a href="fetchers/splunk/"><img src="fetchers/logos/splunk.svg" alt="Splunk" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/knowbe4/"><img src="fetchers/logos/knowbe4.svg" alt="KnowBe4" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/gitlab/"><img src="fetchers/logos/gitlab.svg" alt="GitLab" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/k8s/"><img src="fetchers/logos/kubernetes.svg" alt="Kubernetes" width="56" height="56" style="margin: 20px;"></a>
@@ -34,17 +35,20 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 <a href="fetchers/checkov/"><img src="fetchers/logos/checkov.png" alt="Checkov" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/paramify/"><img src="fetchers/logos/paramify.svg" alt="Paramify" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/servicenow/"><img src="fetchers/logos/servicenow.png" alt="ServiceNow" width="56" height="56" style="margin: 20px;"></a>
+<a href="fetchers/betterstack/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/betterstack-dark.svg"><img src="fetchers/logos/betterstack.svg" alt="Better Stack" width="56" height="56" style="margin: 20px;"></picture></a>
+<a href="fetchers/jira/"><img src="fetchers/logos/jira.svg" alt="Jira" width="56" height="56" style="margin: 20px;"></a>
 
 </div>
 
 | Category | Fetchers | What it collects |
 |---|---:|---|
 | **AWS** | 80 | Encryption at rest and in transit, IAM and Organizations guardrails, threat detection and vulnerability scanning, logging and config drift, network segmentation, WAF and DDoS protection, backup and high availability, patch compliance, key and secret rotation, and CI/CD pipeline config |
-| **Azure** | 28 | Storage/disk/SQL encryption and CMK use, Entra identity + Conditional Access, RBAC assignments and custom roles, Azure Policy assignments, network security groups, Key Vault config and key rotation, Defender plans and per-resource assessments, VM hardening, the container and PaaS surface (AKS, Container Registry, App Service, Functions, Databricks), diagnostic settings and activity-log alerts, backup, and the managed databases |
+| **Azure** | 40 | Storage/disk/SQL encryption and CMK use, Entra identity + Conditional Access, RBAC assignments and custom roles, Azure Policy assignments, network security groups, Key Vault config and key rotation, Defender plans and per-resource assessments, VM hardening, the container and PaaS surface (AKS, Container Registry, App Service, Functions, Databricks), diagnostic settings and activity-log alerts, backup, the managed databases, Azure Cache for Redis and Managed Redis TLS and access, DNS zones and DNSSEC, and VPN Gateway / Virtual WAN IPsec and hub security |
 | **GCP** | 19 | Disk/bucket/Cloud SQL/BigQuery/Secret Manager encryption and CMEK use, IAM policy bindings, custom roles and service-account keys, KMS key rotation, GKE cluster and Compute Engine hardening, Cloud Logging sinks, Cloud SQL backups and network exposure, VPC/firewall/DNS segmentation, load-balancer TLS, and API keys |
 | **Datadog** | 13 | Cloud SIEM detection rules, signals and operational config, monitors, log pipelines/indexes/archives, host & container inventory, agent checks, APM services, and incidents with timelines |
 | **Okta** | 8 | Phishing-resistant MFA and passwordless authentication, authenticators, least privilege, just-in-time access, non-user account authentication, suspicious activity management, and account management |
 | **CrowdStrike** | 7 | Managed host inventory, Spotlight vulnerabilities, detections, prevention policies, Zero Trust Assessment, FileVantage file integrity, and host firewall policies and rules |
+| **Splunk** | 7 | Index retention and data integrity control, index and log-source freshness, configured inputs against the data actually received, alert rules with their run and fire history, alert delivery outcomes, and who can search or delete which indexes |
 | **SentinelOne** | 5 | Agents, activities, cloud detection rules, XDR assets, user config |
 | **KnowBe4** | 4 | Security-awareness, high-risk, developer, and module-based training summaries |
 | **GitLab** | 4 | CI/CD pipeline config, merge-request and project summaries, significant change notifications |
@@ -53,6 +57,8 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | **Paramify** | 3 | FedRAMP 20x vulnerability reporting — accepted vulnerability info, vulnerability detail, and historical VER activity |
 | **Checkov** | 2 | IaC scans over cloned Terraform / Kubernetes source |
 | **ServiceNow** | 2 | Customer service cases and ITSM change records |
+| **Better Stack** | 1 | Public status page components, their reported uptime and status history, and published incident reports |
+| **Jira** | 1 | Site and project inventory, issue schemes, Jira Service Management service desks, and recent issue activity with change and incident rollups |
 
 <!-- BEGIN:fetcher-chart -->
 <div align="center">
@@ -73,7 +79,6 @@ More integrations are in progress. To request a fetcher or upvote what should be
 <img src="fetchers/logos/qualys.svg" alt="SSL Labs" width="56" height="56" style="margin: 20px;">
 <img src="fetchers/logos/wiz.jpeg" alt="Wiz" width="56" height="56" style="margin: 20px;">
 <picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/github-dark.svg"><img src="fetchers/logos/github.svg" alt="GitHub" width="56" height="56" style="margin: 20px;"></picture>
-<img src="fetchers/logos/splunk.svg" alt="Splunk" width="56" height="56" style="margin: 20px;">
 <img src="fetchers/logos/jira.svg" alt="Jira" width="56" height="56" style="margin: 20px;">
 <picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/tenable-dark.svg"><img src="fetchers/logos/tenable.svg" alt="Tenable" width="56" height="56" style="margin: 20px;"></picture>
 
@@ -99,7 +104,7 @@ through the official SDKs rather than a CLI, so each has its own extra and
 neither needs a cloud CLI at runtime.
 
 ```bash
-pip install -e '.[azure]'    # 23 packages; no `az` CLI at runtime
+pip install -e '.[azure]'    # 30 packages; no `az` CLI at runtime
 pip install -e '.[gcp]'      # 12 packages; no `gcloud` at runtime
 ```
 
@@ -118,6 +123,11 @@ The fastest way in. `paramify tui` browses the catalog, builds and validates a
 manifest, runs it, and reviews evidence — all without leaving the keyboard:
 
 ![The paramify terminal UI](docs/demo/tui.gif)
+
+**Sending scan reports** (Nessus, Wiz, STIG results and the like) into Paramify
+pipelines is its own short setup — a manifest for the scanners, an assessment and
+close policy for each, then send from the Paramify tab. The walkthrough, with
+recordings, is [`docs/pipelines.md`](docs/pipelines.md).
 
 > **Zero-credential first run:** the bundled `demo_hello` fetcher emits synthetic
 > evidence, so you can watch the whole collect → envelope pipeline before wiring
@@ -205,7 +215,7 @@ paramify run      <manifest>   # run it
 paramify runs                  # past runs under an output dir (newest first)
 paramify evidence <file>       # read one evidence file, or an issue-report sidecar
 paramify upload   [run-dir]    # push a run's evidence to Paramify (default: latest run)
-paramify issues   upload       # push a run's issue reports to assessment intake
+paramify issues   upload       # send a run's issue reports into assessment pipelines
 paramify programs <sub>        # list workspace programs; turn them into targets
 paramify assessments <sub>     # list workspace assessments; point issue reports at one
 paramify capabilities <sub>    # read solution capabilities and the narratives they claim
@@ -388,7 +398,7 @@ it to a Paramify **assessment**, where it becomes issues rather than evidence:
 ```bash
 paramify assessments select my_scanner_report   # pick the assessment by name, once
 paramify run manifest.yaml                      # raw report → run-<ts>/issue-reports/
-paramify issues upload                          # → POST /assessment/{id}/intake
+paramify issues upload                          # → POST /pipelines/{id}/intake + /process
 ```
 
 The file is never wrapped or rewritten — the intake parser reads the vendor's own
@@ -396,6 +406,16 @@ CSV/XML/JSON/Nessus structure, so anything added to it breaks the parse. That on
 constraint is what makes this a separate kind with a separate uploader instead of
 a flag on the existing one. Nothing ships in this category yet; to write the
 first, start from [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
+
+### Inventory
+
+A third kind, `kind: inventory`, lists every asset of some kind (cloud resources,
+hosts, devices) as one record per asset, so Paramify's Inventory can be generated
+instead of kept by hand. It uploads to an evidence set like any evidence, and an
+inventory pipeline attached to that set turns each record into an Inventory item.
+Because the pipeline reads the file as the whole estate, `paramify upload` sends
+an inventory only when the run collected all of it. See
+[`docs/inventory_fetchers.md`](docs/inventory_fetchers.md).
 
 ### Show how evidence is generated (optional)
 
@@ -536,7 +556,7 @@ fetchers/
 comparators/                    # cross-source comparators (template only so far)
 uploaders/
   paramify_evidence/            # push evidence to Paramify (built)
-  paramify_issues/              # push raw scan reports to assessment intake (built)
+  paramify_issues/              # send raw scan reports into assessment pipelines (built)
   paramify_scripts/             # push fetcher entry scripts + associate to evidence sets (built)
 examples/                       # sample run manifests
 tests/                          # framework test suite (pytest)
@@ -551,7 +571,7 @@ Directories starting with `_` are not fetchers — the runner skips them.
 
 ## Adding a fetcher
 
-To add evidence collection for a new control or a new tool, see [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md). If the tool already produces the findings — a vulnerability scan or a CSPM export — you want an issue-report fetcher instead: [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
+To add evidence collection for a new control or a new tool, see [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md). If nothing covers that platform yet and you want a whole slate rather than one fetcher, start from [`docs/platform_onboarding.md`](docs/platform_onboarding.md). If the tool already produces the findings — a vulnerability scan or a CSPM export — you want an issue-report fetcher instead: [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
 
 ---
 
@@ -565,14 +585,18 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`fetchers/sentinelone/README.md`](fetchers/sentinelone/README.md) | SentinelOne service user + API token |
 | [`fetchers/crowdstrike/README.md`](fetchers/crowdstrike/README.md) | CrowdStrike Falcon API client, scopes, and cloud/GovCloud selection |
 | [`fetchers/knowbe4/README.md`](fetchers/knowbe4/README.md) | KnowBe4 Reporting API key |
+| [`fetchers/splunk/README.md`](fetchers/splunk/README.md) | Splunk token, the collection role, port 8089, and how to add a Splunk fetcher |
 | [`fetchers/rippling/README.md`](fetchers/rippling/README.md) | Rippling Developer Hub token + scopes |
 | [`fetchers/k8s/README.md`](fetchers/k8s/README.md) | Kubernetes / EKS credential setup |
 | [`fetchers/checkov/README.md`](fetchers/checkov/README.md) | Checkov setup + git token for IaC scanning |
+| [`fetchers/jira/README.md`](fetchers/jira/README.md) | Jira Cloud API token + the permissions it needs |
 | [`uploaders/paramify_evidence/README.md`](uploaders/paramify_evidence/README.md) | Paramify API key setup + upload options |
 | [`uploaders/paramify_issues/README.md`](uploaders/paramify_issues/README.md) | Intaking raw scan reports into an assessment + why the file is never touched |
 | [`uploaders/paramify_scripts/README.md`](uploaders/paramify_scripts/README.md) | Syncing fetcher entry scripts to Paramify + the association model |
+| [`docs/suggest_validator_guide.md`](docs/suggest_validator_guide.md) | End-to-end: API key → `/suggest-validator` → sync → verify validators in Paramify |
 | [`docs/uploader_design.md`](docs/uploader_design.md) | How the three uploaders work + the shared evidence-set identity model |
 | [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md) | Writing a new fetcher from scratch |
+| [`docs/platform_onboarding.md`](docs/platform_onboarding.md) | Onboarding a platform nobody has integrated yet — the claim, the sandbox, and the gates |
 | [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md) | The second kind of fetcher: raw scan reports → assessment issues |
 | [`docs/fetcher_contract.md`](docs/fetcher_contract.md) | The binding runner↔fetcher contract |
 | [`docs/ksi_mapping.md`](docs/ksi_mapping.md) | Which fetchers map to which FedRAMP KSIs, per indicator and per fetcher, plus open gaps |

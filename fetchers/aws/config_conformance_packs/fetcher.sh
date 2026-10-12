@@ -181,14 +181,17 @@ fetch_config_rule_metadata() {
 }
 
 # Query every rule separately, then exhaust that rule's NextToken chain.
+# Pages are appended to one stream and merged once at the end: merging each page
+# into the accumulated file re-parsed every evaluation read so far, quadratic in
+# a Moderate pack's tens of thousands of evaluations.
 fetch_resource_evaluation_pages() {
     local pack="$1" rules_file="$2" output_file="$3"
     local page_file="$_TMP_DIR/resource_evaluations_page.json"
-    local merge_file="$_TMP_DIR/resource_evaluations_merge.json"
+    local pages_file="$_TMP_DIR/resource_evaluations_pages.json"
     local rule next_token previous_token request_json page_count ec
     local had_failure=0
 
-    jq -n --arg pack "$pack" '{ConformancePackName: $pack, ConformancePackRuleEvaluationResults: []}' > "$output_file"
+    : > "$pages_file"
     while IFS= read -r rule; do
         [ -z "$rule" ] && continue
         next_token=""
@@ -207,18 +210,14 @@ fetch_resource_evaluation_pages() {
                 had_failure=1
                 break
             fi
-            if ! jq -s '
-              .[0] as $all | .[1] as $page |
-              {ConformancePackName: ($page.ConformancePackName // $all.ConformancePackName),
-               ConformancePackRuleEvaluationResults:
-                 (($all.ConformancePackRuleEvaluationResults // []) + ($page.ConformancePackRuleEvaluationResults // []))}
-            ' "$output_file" "$page_file" > "$merge_file"; then
+            # Reading the token also proves the page parses; a page that does
+            # not is left out, as the per-page merge left it out.
+            if ! next_token=$(jq -r '.NextToken // empty' "$page_file" 2>/dev/null); then
                 record_failure "invalid get-conformance-pack-compliance-details response ($pack rule $rule page $page_count)"
                 had_failure=1
                 break
             fi
-            mv "$merge_file" "$output_file"
-            next_token=$(jq -r '.NextToken // empty' "$page_file")
+            cat "$page_file" >> "$pages_file"
             [ -z "$next_token" ] && break
             if [ "$next_token" = "$previous_token" ]; then
                 record_failure "get-conformance-pack-compliance-details ($pack rule $rule) returned a repeated NextToken"
@@ -229,6 +228,11 @@ fetch_resource_evaluation_pages() {
             page_count=$((page_count + 1))
         done
     done < <(jq -r '.ConformancePackRuleComplianceList[]?.ConfigRuleName' "$rules_file" | sort -u)
+
+    jq -s --arg pack "$pack" '
+      {ConformancePackName: (reduce .[] as $page ($pack; $page.ConformancePackName // .)),
+       ConformancePackRuleEvaluationResults: [.[] | (.ConformancePackRuleEvaluationResults // [])[]]}
+    ' "$pages_file" > "$output_file"
     return "$had_failure"
 }
 

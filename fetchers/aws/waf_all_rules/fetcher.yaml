@@ -1,5 +1,5 @@
 name: aws_waf_all_rules
-version: 0.1.0
+version: 0.2.0
 description: Lists all WAFv2 REGIONAL Web ACLs and captures every rule in each WebACL (full rule objects, no filtering).
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-WAF-ALL-RULES
   name: WAF All Rules
-  instructions: 'Script: waf_all_rules.sh. Commands executed: aws wafv2 list-web-acls, aws wafv2 get-web-acl, aws wafv2 list-rule-groups'
+  instructions: 'Script: fetcher.sh. Commands executed: aws wafv2 list-web-acls, aws wafv2 get-web-acl'

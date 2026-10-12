@@ -1,5 +1,5 @@
 name: aws_rds_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each RDS instance and Aurora cluster, reports encryption at rest (StorageEncrypted, KMS key, engine). Aggregates a per-account encryption-coverage percentage.
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-RDS-ENC
   name: RDS Encryption
-  instructions: 'Script: rds_encryption_status.sh. Commands executed: aws rds describe-db-instances, aws rds describe-db-clusters'
+  instructions: 'Script: fetcher.sh. Commands executed: aws rds describe-db-instances, aws rds describe-db-clusters'

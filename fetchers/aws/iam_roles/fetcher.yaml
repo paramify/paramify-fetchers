@@ -1,5 +1,5 @@
 name: aws_iam_roles
-version: 0.1.0
+version: 0.2.0
 description: Lists IAM roles with their trust policy, attached managed policies, instance profiles, and tags. Includes the account password policy. Honors EXCLUDE_AWS_MANAGED_ROLES=true to skip AWS-managed roles.
 category: aws
 
@@ -42,4 +42,4 @@ ksis:
 evidence_set:
   reference_id: EVD-IAM-ROLES
   name: IAM Roles
-  instructions: 'Script: iam_roles.sh. Commands executed: aws iam list-roles, aws iam get-role, aws iam list-attached-role-policies, aws iam list-instance-profiles-for-role, aws iam get-account-password-policy'
+  instructions: 'Script: fetcher.sh. Commands executed: aws iam list-roles, aws iam get-account-authorization-details --filter Role, aws iam get-account-password-policy'

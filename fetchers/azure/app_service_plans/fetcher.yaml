@@ -1,0 +1,52 @@
+name: azure_app_service_plans
+version: 0.1.0
+description: >
+  Every App Service plan in the subscription with its SKU (name and tier — Free and
+  Shared carry no SLA), provisioned instance count (sku.capacity), zone redundancy,
+  scaling settings, and the web apps and function apps running on it, each with the
+  availability fields the site list returns. App Service availability is a property
+  of the plan, not the app: this shows which workloads survive the loss of an
+  instance or an availability zone.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_app_service_plans.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-OFA   # zone redundancy and instance count of the compute App Service runs on
+
+evidence_set:
+  reference_id: EVD-AZURE-APPSVC-PLANS
+  name: Azure App Service Plans
+  instructions: >
+    Script: fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Web"), then
+    azure-mgmt-web WebSiteManagementClient app_service_plans.list(detailed=True) and
+    web_apps.list(); sites are joined to plans by server_farm_id. Reader is
+    sufficient — all GETs. Maps to KSI-CNA-OFA.

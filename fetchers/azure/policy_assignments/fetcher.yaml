@@ -1,5 +1,5 @@
 name: azure_policy_assignments
-version: 0.1.0
+version: 0.2.0
 description: >
   Every Azure Policy assignment in effect on the subscription — its own and the ones
   inherited from a management group: display name, the referenced policy definition
@@ -8,7 +8,12 @@ description: >
   Default) or audit-only (DoNotEnforce). Each referenced definition is resolved to
   its display name and to BuiltIn vs Custom where the run's permissions allow;
   a definition that cannot be read is reported as unavailable rather than failing
-  the collection.
+  the collection. Each assignment's policy EFFECT is resolved too — deny, modify,
+  deployIfNotExists, audit, disabled and the rest — for every member of an
+  initiative, following parameterized effects through the assignment's value, then
+  the initiative's default, then the definition's default; so the evidence says
+  which assignments actually enforce (an enforcing effect under enforcementMode
+  Default) and which only audit.
 category: azure
 
 supports_targets: true
@@ -44,6 +49,8 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 ksis:
   - KSI-SVC-ACM
   - KSI-CNA-EIS
+  - KSI-CNA-IBP      # which best-practice policies are assigned, and whether they deny or only audit
+  - KSI-MLA-EVC      # configuration is evaluated against policy, with the effect that evaluation has
 
 evidence_set:
   reference_id: EVD-AZURE-POLICY-ASSIGN
@@ -52,5 +59,8 @@ evidence_set:
     Script: fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Authorization"),
     then azure-mgmt-resource-policy PolicyClient policy_assignments.list() and, per
     distinct definition, policy_definitions / policy_set_definitions get_built_in(), get()
-    or get_at_management_group(). Reader, plus management-group read for MG-scoped custom
+    or get_at_management_group(). For initiatives, policy_definitions.list_built_in() once
+    to read built-in member definitions, and the same getters for custom members; each
+    effect is read from policyRule.then.effect and resolved through the assignment and
+    definition parameters. Reader, plus management-group read for MG-scoped custom
     definitions.

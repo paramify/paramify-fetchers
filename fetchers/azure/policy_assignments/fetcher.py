@@ -12,9 +12,18 @@ best-effort by design — a management-group-scoped custom definition is frequen
 unreadable with subscription-scoped Reader and the assignment record is complete
 without it, so a failed lookup is reported as `policy_definition.status: "unavailable"`
 and does NOT fail the run. Every other API call here is guarded normally.
+
+`enforced` says only that enforcementMode is Default. Whether an assignment can change
+anything is the definition's EFFECT: an enforced assignment of an audit-effect policy
+blocks nothing. So each assignment also carries `policy_effects` — the effect of its
+definition, or of every member of its initiative, resolved through the parameter chain
+(assignment value, then initiative default, then definition default) — and
+`actually_enforces`, which needs both an enforcing effect and enforcementMode Default.
+Resolution is best-effort in the same way as the display name.
 """
 
 import logging
+import re
 import os
 import sys
 from pathlib import Path
@@ -72,6 +81,45 @@ SUBSCRIPTION_SCOPE = "subscription"
 MANAGEMENT_GROUP_SCOPE = "management_group"
 UNKNOWN_SCOPE = "unknown"
 
+# Policy effects, keyed by their lower-case form: ARM compares effects
+# case-insensitively and definitions spell them every way ("Deny", "deny",
+# "DeployIfNotExists"), so the evidence carries one canonical spelling.
+CANONICAL_EFFECTS = {
+    "deny": "deny",
+    "denyaction": "denyAction",
+    "modify": "modify",
+    "deployifnotexists": "deployIfNotExists",
+    "append": "append",
+    "audit": "audit",
+    "auditifnotexists": "auditIfNotExists",
+    "manual": "manual",
+    "disabled": "disabled",
+}
+# The effects that change or block a request, or remediate a resource. `append` and
+# `denyAction` are included: they alter or refuse the request just as deny/modify do.
+ENFORCING_EFFECTS = frozenset({"deny", "denyAction", "modify", "deployIfNotExists", "append"})
+# The effects that only report. `manual` is attestation, which enforces nothing.
+AUDIT_EFFECTS = frozenset({"audit", "auditIfNotExists", "manual"})
+DISABLED_EFFECT = "disabled"
+UNRESOLVED_EFFECT = "unresolved"
+
+# Assignment-level effect classes (`effect_class`).
+EFFECT_CLASS_ENFORCING = "enforcing"
+EFFECT_CLASS_AUDIT_ONLY = "audit_only"
+EFFECT_CLASS_DISABLED = "disabled"
+EFFECT_CLASS_UNRESOLVED = "unresolved"
+
+# Where a resolved effect's value came from (`effect_source`).
+SOURCE_LITERAL = "literal"
+SOURCE_ASSIGNMENT = "assignment_parameter"
+SOURCE_INITIATIVE_REFERENCE = "initiative_reference"
+SOURCE_INITIATIVE_DEFAULT = "initiative_default"
+SOURCE_DEFINITION_DEFAULT = "definition_default"
+
+# "[parameters('effect')]" — the one expression form the effect chain can follow.
+# Anything else ("[if(...)]", a concat) is reported as unresolved with its raw text.
+PARAMETER_REFERENCE = re.compile(r"^\[\s*parameters\(\s*'([^']+)'\s*\)\s*\]$", re.IGNORECASE)
+
 
 # --- projection: the only azure-mgmt model access ---
 
@@ -116,14 +164,65 @@ def project_policy_assignment(assignment) -> dict:
     }
 
 
+def _get_ci(mapping, key):
+    """Case-insensitive dict read — policy rule keys and parameter names are both."""
+    if not isinstance(mapping, dict):
+        return None
+    if key in mapping:
+        return mapping[key]
+    lowered = str(key).lower()
+    for name, value in mapping.items():
+        if str(name).lower() == lowered:
+            return value
+    return None
+
+
+def _parameter_defaults(parameters) -> dict:
+    """{name: defaultValue} from a definition's {name: ParameterDefinitionsValue}.
+
+    A parameter with no default maps to None, so "declared without a default" and "not
+    declared" stay distinguishable (`in` vs a None value).
+    """
+    if not parameters:
+        return {}
+    defaults = {}
+    for name, holder in parameters.items():
+        value = model_attr(holder, "default_value")
+        if value is None and hasattr(holder, "get"):
+            value = holder.get("defaultValue")
+        defaults[str(name)] = value
+    return defaults
+
+
 def project_policy_definition(definition) -> dict:
     """Read a `PolicyDefinition` / `PolicySetDefinition` into a flat dict. `policy_type` is
     an SDK `str` enum ("BuiltIn", "Custom", "Static") that `model_attr` unwraps.
+
+    `effect_expression` is the raw `policyRule.then.effect` (a literal or a
+    "[parameters('...')]" reference), `parameter_defaults` the definition's declared
+    defaults, and `members` an initiative's definition references with the parameter
+    values it passes each one. `policy_rule` arrives as a plain dict on every SDK
+    generation — it is free-form JSON in the API — so it is read with dict access.
+    None of these reach the evidence's `policy_definition` block; they feed the effect
+    resolution.
     """
+    rule = model_attr(definition, "policy_rule")
+    members = []
+    for reference in model_attr(definition, "policy_definitions") or []:
+        members.append(
+            {
+                "reference_id": model_attr(reference, "policy_definition_reference_id"),
+                "policy_definition_id": model_attr(reference, "policy_definition_id"),
+                "parameters": _parameter_values(model_attr(reference, "parameters")),
+            }
+        )
     return {
         "display_name": model_attr(definition, "display_name"),
         "policy_type": model_attr(definition, "policy_type"),
         "description": model_attr(definition, "description"),
+        "effect_expression": _get_ci(_get_ci(rule, "then"), "effect"),
+        "parameter_defaults": _parameter_defaults(model_attr(definition, "parameters")),
+        "members": members,
     }
 
 
@@ -196,6 +295,189 @@ def definition_block(status: str, reference: dict, definition: dict | None, reas
     }
 
 
+def canonical_effect(value):
+    """A resolved effect value in its canonical spelling, or None if it is not one."""
+    if not isinstance(value, str):
+        return None
+    return CANONICAL_EFFECTS.get(value.strip().lower())
+
+
+def parameter_reference(value):
+    """The parameter name in "[parameters('name')]", else None."""
+    if not isinstance(value, str):
+        return None
+    match = PARAMETER_REFERENCE.match(value.strip())
+    return match.group(1) if match else None
+
+
+def _has_ci(mapping: dict, key: str) -> bool:
+    return any(str(name).lower() == str(key).lower() for name in (mapping or {}))
+
+
+def _resolved(value, source):
+    effect = canonical_effect(value)
+    if effect is None:
+        return UNRESOLVED_EFFECT, None
+    return effect, source
+
+
+def resolve_definition_effect(
+    definition: dict | None,
+    assignment_parameters: dict,
+    reference_parameters: dict | None = None,
+    initiative_defaults: dict | None = None,
+) -> dict:
+    """Follow a definition's effect through the parameter chain to a concrete value.
+
+    A single definition assigned directly reads its parameter from the assignment,
+    else the definition's default. An initiative member is one hop longer: the
+    initiative passes the member a value (`reference_parameters`), usually itself
+    "[parameters('<initiative param>')]", which then reads from the assignment, else
+    the initiative's default. A member parameter the initiative does not pass falls
+    back to the member definition's own default. Returns the effect, where it came
+    from, and the raw expression, so an unresolved one says why.
+    """
+    if not definition:
+        return {"effect": UNRESOLVED_EFFECT, "effect_source": None, "effect_expression": None,
+                "reason": "definition not readable"}
+    expression = definition.get("effect_expression")
+    record = {"effect_expression": expression, "reason": None}
+
+    def _done(effect, source, reason=None):
+        return {**record, "effect": effect, "effect_source": source,
+                "reason": reason if effect == UNRESOLVED_EFFECT else None}
+
+    if canonical_effect(expression):
+        return _done(*_resolved(expression, SOURCE_LITERAL))
+    name = parameter_reference(expression)
+    if name is None:
+        return _done(UNRESOLVED_EFFECT, None, "effect is not a literal or a parameter reference")
+
+    defaults = definition.get("parameter_defaults") or {}
+    if reference_parameters is None:
+        # Assigned directly: the assignment's value, else the definition's default.
+        if _has_ci(assignment_parameters, name):
+            return _done(*_resolved(_get_ci(assignment_parameters, name), SOURCE_ASSIGNMENT))
+        if _get_ci(defaults, name) is not None:
+            return _done(*_resolved(_get_ci(defaults, name), SOURCE_DEFINITION_DEFAULT))
+        return _done(UNRESOLVED_EFFECT, None, f"parameter '{name}' has no value or default")
+
+    # An initiative member.
+    if not _has_ci(reference_parameters, name):
+        if _get_ci(defaults, name) is not None:
+            return _done(*_resolved(_get_ci(defaults, name), SOURCE_DEFINITION_DEFAULT))
+        return _done(UNRESOLVED_EFFECT, None, f"parameter '{name}' has no value or default")
+    passed = _get_ci(reference_parameters, name)
+    if canonical_effect(passed):
+        return _done(*_resolved(passed, SOURCE_INITIATIVE_REFERENCE))
+    outer = parameter_reference(passed)
+    if outer is None:
+        return _done(UNRESOLVED_EFFECT, None, "initiative passes an expression, not a parameter")
+    if _has_ci(assignment_parameters, outer):
+        return _done(*_resolved(_get_ci(assignment_parameters, outer), SOURCE_ASSIGNMENT))
+    if _get_ci(initiative_defaults or {}, outer) is not None:
+        return _done(*_resolved(_get_ci(initiative_defaults, outer), SOURCE_INITIATIVE_DEFAULT))
+    return _done(UNRESOLVED_EFFECT, None, f"initiative parameter '{outer}' has no value or default")
+
+
+def effect_class(member_effects: list[str], enforced: bool) -> str:
+    """Classify an assignment by what its effects can actually do.
+
+    enforcementMode DoNotEnforce evaluates every effect but acts on none, so any
+    non-disabled effect under it is audit-only. Under Default, one enforcing member
+    makes the assignment enforcing. Only resolved effects count; with none resolved,
+    or with unresolved members and nothing but `disabled` resolved, the class is
+    unresolved rather than a guess.
+    """
+    resolved = [e for e in member_effects if e != UNRESOLVED_EFFECT]
+    if not resolved:
+        return EFFECT_CLASS_UNRESOLVED
+    active = [e for e in resolved if e != DISABLED_EFFECT]
+    if not active:
+        return (
+            EFFECT_CLASS_UNRESOLVED
+            if len(resolved) < len(member_effects)
+            else EFFECT_CLASS_DISABLED
+        )
+    if enforced and any(e in ENFORCING_EFFECTS for e in active):
+        return EFFECT_CLASS_ENFORCING
+    return EFFECT_CLASS_AUDIT_ONLY
+
+
+def effects_block(
+    assignment: dict, reference: dict, definition: dict | None, members: list[dict] | None
+) -> dict:
+    """The assignment's `policy_effects`: one member for a definition, N for an initiative.
+
+    `members` are the initiative's references, each already paired with its looked-up
+    member definition (`definition` key); None for a single-definition assignment.
+    """
+    params = assignment.get("parameters") or {}
+    rows = []
+    if reference.get("kind") == DEFINITION_KIND:
+        rows.append(
+            {
+                "reference_id": None,
+                "policy_definition_name": reference.get("name"),
+                "display_name": (definition or {}).get("display_name"),
+                **resolve_definition_effect(definition, params),
+            }
+        )
+    elif reference.get("kind") == SET_DEFINITION_KIND and definition:
+        initiative_defaults = definition.get("parameter_defaults") or {}
+        for member in members or []:
+            member_definition = member.get("definition")
+            rows.append(
+                {
+                    "reference_id": member.get("reference_id"),
+                    "policy_definition_name": parse_definition_reference(
+                        member.get("policy_definition_id")
+                    ).get("name"),
+                    "display_name": (member_definition or {}).get("display_name"),
+                    **resolve_definition_effect(
+                        member_definition,
+                        params,
+                        reference_parameters=member.get("parameters") or {},
+                        initiative_defaults=initiative_defaults,
+                    ),
+                }
+            )
+    effects = [row["effect"] for row in rows]
+    counts = {name: 0 for name in sorted(set(CANONICAL_EFFECTS.values()))}
+    counts[UNRESOLVED_EFFECT] = 0
+    for effect in effects:
+        counts[effect] = counts.get(effect, 0) + 1
+    unresolved = counts[UNRESOLVED_EFFECT]
+    klass = effect_class(effects, assignment.get("enforced", True))
+    return {
+        "status": (
+            UNAVAILABLE if not rows or unresolved == len(rows)
+            else "partial" if unresolved else RESOLVED
+        ),
+        "effect_class": klass,
+        "member_count": len(rows),
+        "resolved_member_count": len(rows) - unresolved,
+        "enforcing_member_count": sum(1 for e in effects if e in ENFORCING_EFFECTS),
+        "audit_member_count": sum(1 for e in effects if e in AUDIT_EFFECTS),
+        "disabled_member_count": counts[DISABLED_EFFECT],
+        "effect_counts": counts,
+        "members": sorted(
+            rows, key=lambda r: (r.get("reference_id") or "", r.get("policy_definition_name") or "")
+        ),
+    }
+
+
+def apply_effects(record: dict, block: dict) -> None:
+    """Attach the effects block and its two headline fields to an assignment record."""
+    record["policy_effects"] = block
+    record["effect_class"] = block["effect_class"]
+    record["actually_enforces"] = block["effect_class"] == EFFECT_CLASS_ENFORCING
+    # Enforcing effects that enforcementMode DoNotEnforce is holding back.
+    record["enforcing_effects_not_enforced"] = (
+        not record.get("enforced", True) and block["enforcing_member_count"] > 0
+    )
+
+
 def assignment_record(assignment: dict) -> dict:
     """Normalize one projected policy assignment into an evidence record.
 
@@ -228,6 +510,11 @@ def assignment_record(assignment: dict) -> dict:
         # Filled in by the definition enrichment; always present, so the evidence never
         # has two layouts to read.
         "policy_definition": definition_block(UNAVAILABLE, reference, None, "not resolved"),
+        # Filled in by the effect resolution; present from the start for the same reason.
+        "effect_class": EFFECT_CLASS_UNRESOLVED,
+        "actually_enforces": False,
+        "enforcing_effects_not_enforced": False,
+        "policy_effects": None,
     }
 
 
@@ -276,6 +563,44 @@ def summarize(assignments: list[dict]) -> dict:
             a["name"] == SECURITY_CENTER_BUILTIN_ASSIGNMENT and a["enforced"]
             for a in assignments
         ),
+        **summarize_effects(assignments),
+    }
+
+
+def summarize_effects(assignments: list[dict]) -> dict:
+    """What the assignments can DO, by effect — beside `enforced_assignments`, not instead.
+
+    New keys throughout: `audit_only_assignments` already means enforcementMode
+    DoNotEnforce, which is a different fact from "every effect is audit".
+    """
+    total = len(assignments)
+    by_class = {
+        klass: 0
+        for klass in (
+            EFFECT_CLASS_ENFORCING,
+            EFFECT_CLASS_AUDIT_ONLY,
+            EFFECT_CLASS_DISABLED,
+            EFFECT_CLASS_UNRESOLVED,
+        )
+    }
+    member_counts: dict[str, int] = {}
+    for assignment in assignments:
+        by_class[assignment["effect_class"]] = by_class.get(assignment["effect_class"], 0) + 1
+        for effect, count in ((assignment.get("policy_effects") or {}).get("effect_counts") or {}).items():
+            member_counts[effect] = member_counts.get(effect, 0) + count
+    actually = by_class[EFFECT_CLASS_ENFORCING]
+    return {
+        "actually_enforcing_assignments": actually,
+        "actually_enforcing_percentage": coverage_percentage(actually, total),
+        "audit_effect_only_assignments": by_class[EFFECT_CLASS_AUDIT_ONLY],
+        "disabled_effect_assignments": by_class[EFFECT_CLASS_DISABLED],
+        "unresolved_effect_assignments": by_class[EFFECT_CLASS_UNRESOLVED],
+        "assignments_by_effect_class": by_class,
+        "enforcing_effects_not_enforced_assignments": sum(
+            1 for a in assignments if a["enforcing_effects_not_enforced"]
+        ),
+        # Across every assignment's members; an initiative assigned twice counts twice.
+        "member_policy_effect_counts": dict(sorted(member_counts.items())),
     }
 
 
@@ -345,12 +670,37 @@ def _lookup_definition(client, reference: dict, subscription_id):
         return None, UNAVAILABLE, exc
 
 
+def _built_in_definitions(client) -> dict[str, dict]:
+    """Every built-in policy definition, projected, keyed by lower-cased name.
+
+    One paged list (about 3,700 definitions, a couple of seconds) instead of one GET per
+    initiative member: a single Microsoft cloud security benchmark assignment has over
+    200 members. Best-effort like the other lookups — on failure the members fall back
+    to individual GETs.
+    """
+    try:
+        return {
+            str(model_attr(d, "name") or "").lower(): project_policy_definition(d)
+            for d in client.policy_definitions.list_built_in()
+        }
+    except Exception as exc:  # noqa: BLE001 — boundary: enrichment only
+        logger.warning(
+            "policy.policy_definitions.list_built_in failed — resolving initiative members "
+            "one at a time: %s",
+            " ".join(str(exc).split())[:200],
+        )
+        return {}
+
+
 def collect_policy_assignments(subscription_id, cred, collector: Collector) -> list[dict]:
     """One policy_assignments.list(), then one cached definition GET per definition.
 
     `list()` at subscription scope returns the subscription's own assignments AND the ones
     it inherits from its management groups — what "in effect here" means. Lookups are
     cached by definition id, so an initiative assigned five times costs one GET.
+
+    Initiative members are then read to resolve effects: built-ins from one
+    list_built_in(), anything else by the same getters as above, cached by id.
     """
     client = collector.guard("policy.PolicyClient (init)", lambda: policy_client(cred, subscription_id))
     if client is None:
@@ -366,13 +716,46 @@ def collect_policy_assignments(subscription_id, cred, collector: Collector) -> l
     assignments = collector.guard("policy.policy_assignments.list", _list, default=[])
 
     cache: dict[str, dict] = {}
+    projected: dict[str, dict | None] = {}
     for assignment in assignments:
         definition_id = assignment.get("policy_definition_id") or ""
         if definition_id not in cache:
             reference = parse_definition_reference(definition_id)
             definition, status, reason = _lookup_definition(client, reference, subscription_id)
             cache[definition_id] = definition_block(status, reference, definition, reason)
+            projected[definition_id] = definition
         assignment["policy_definition"] = cache[definition_id]
+
+    # --- effects: read each initiative's members, then resolve per assignment ---
+    has_initiative = any(
+        (d or {}).get("members") for d in projected.values()
+    )
+    built_ins = _built_in_definitions(client) if has_initiative else {}
+    member_cache: dict[str, dict | None] = {}
+
+    def _member_definition(member_id: str):
+        key = member_id.lower()
+        if key not in member_cache:
+            reference = parse_definition_reference(member_id)
+            found = (
+                built_ins.get(str(reference.get("name") or "").lower())
+                if reference.get("source_scope") == BUILT_IN_SCOPE
+                else None
+            )
+            if found is None:
+                found, _, _ = _lookup_definition(client, reference, subscription_id)
+            member_cache[key] = found
+        return member_cache[key]
+
+    for assignment in assignments:
+        definition_id = assignment.get("policy_definition_id") or ""
+        definition = projected.get(definition_id)
+        reference = parse_definition_reference(definition_id)
+        members = [
+            {**member, "definition": _member_definition(member.get("policy_definition_id") or "")}
+            for member in (definition or {}).get("members") or []
+        ]
+        apply_effects(assignment, effects_block(assignment, reference, definition, members))
 
     return sorted(assignments, key=lambda r: r.get("id") or "")
 

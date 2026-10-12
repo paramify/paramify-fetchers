@@ -131,7 +131,11 @@ fi
 
 # Absence of the target topic is valid evidence -> not a failure.
 if [ "$(echo "$topics" | jq 'length')" -gt 0 ]; then
-    echo "$topics" | jq -c '.[]' | while read -r topic; do
+    # Only the configured topic is processed, so it is picked out in one jq pass
+    # (the last ':'-separated ARN field is the name) instead of spawning two jq
+    # processes and an awk for every topic in the account.
+    echo "$topics" | jq -c --arg name "$SNS_TOPIC_NAME" \
+        '.[] | select((.TopicArn | tostring | split(":") | last) == $name)' | while read -r topic; do
         topic_arn=$(echo "$topic" | jq -r '.TopicArn')
         topic_name=$(echo "$topic_arn" | awk -F':' '{print $NF}')
 

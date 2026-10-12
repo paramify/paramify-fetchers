@@ -27,7 +27,8 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_codepipeline_config_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_codepipeline_config.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_codepipeline_config_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_ITEMS_JSON="$(mktemp -t aws_codepipeline_config_pipelines.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ITEMS_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_codepipeline_config %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_codepipeline_config %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -55,6 +56,9 @@ if [ $list_exit -ne 0 ]; then
     echo "aws codepipeline list-pipelines (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list pipelines"
 else
+    # get-pipeline is genuinely one call per pipeline (list-pipelines carries only
+    # name/version/type). Each definition is appended raw and reduced in the one
+    # jq pass below -- not a jq process and an output rewrite per pipeline.
     for pipeline_name in $(aws_text_list "$pipeline_names"); do
         pipeline_def=$(aws codepipeline get-pipeline --name "$pipeline_name" --output json 2>/dev/null)
         get_exit=$?
@@ -62,11 +66,14 @@ else
             echo "aws codepipeline get-pipeline ($pipeline_name) failed" >> "$_FAILURE_LOG"
             continue
         fi
+        printf '%s\n' "$pipeline_def" >> "$_ITEMS_JSON"
+    done
 
-        # Keep only the fields that demonstrate change-management config:
-        # stages (with per-action source providers) and artifact-store KMS
-        # encryption.
-        pipeline_data=$(echo "$pipeline_def" | jq '{
+    # Keep only the fields that demonstrate change-management config:
+    # stages (with per-action source providers) and artifact-store KMS
+    # encryption.
+    jq --slurpfile pipelines "$_ITEMS_JSON" '
+        .results += [$pipelines[] | try {
             "name": .pipeline.name,
             "pipelineType": .pipeline.pipelineType,
             "stages": [.pipeline.stages[]? | {
@@ -91,10 +98,7 @@ else
                     | map({"region": .key, "encryptionKey": (.value.encryptionKey // null)})
                 )
             }
-        }')
-
-        jq --argjson data "$pipeline_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+        } catch empty]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

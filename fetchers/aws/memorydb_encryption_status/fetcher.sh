@@ -49,10 +49,9 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": {"clusters": [], "summary": {}}}' \
   > "$OUTPUT_JSON"
 
-total_clusters=0
-encrypted_clusters=0
-
-cluster_names=$(aws memorydb describe-clusters --query 'Clusters[*].Name' --output text 2>"$_ERR")
+# One describe returns every cluster's TLS and KMS fields; the per-name
+# describe this replaced re-fetched them one CLI process at a time.
+clusters=$(aws memorydb describe-clusters --query 'Clusters[*].{Name:Name,ARN:ARN,Engine:Engine,TLSEnabled:TLSEnabled,KmsKeyId:KmsKeyId}' --output json 2>"$_ERR")
 list_exit=$?
 if [ $list_exit -ne 0 ] && aws_service_unavailable "$_ERR"; then
     log_info "MemoryDB not in use for this account (not subscribed / not enabled); recording not-enabled status"
@@ -63,41 +62,18 @@ if [ $list_exit -ne 0 ] && aws_service_unavailable "$_ERR"; then
 elif [ $list_exit -ne 0 ]; then
     echo "aws memorydb describe-clusters (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list MemoryDB clusters"
-else
-    for cluster_name in $(aws_text_list "$cluster_names"); do
-        total_clusters=$((total_clusters + 1))
-        cluster_details=$(aws memorydb describe-clusters --cluster-name "$cluster_name" 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws memorydb describe-clusters ($cluster_name) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-
-        name=$(echo "$cluster_details" | jq -r '.Clusters[0].Name')
-        arn=$(echo "$cluster_details" | jq -r '.Clusters[0].ARN // "None"')
-        engine=$(echo "$cluster_details" | jq -r '.Clusters[0].Engine // "None"')
-        tls_enabled=$(echo "$cluster_details" | jq -r '.Clusters[0].TLSEnabled // false')
-        kms_key_id=$(echo "$cluster_details" | jq -r '.Clusters[0].KmsKeyId // "None"')
-
-        at_rest_encrypted=false
-        [ "$kms_key_id" != "None" ] && at_rest_encrypted=true
-
-        cluster_data=$(jq -n --arg name "$name" --arg arn "$arn" --arg engine "$engine" \
-            --argjson tls "$tls_enabled" --arg kms "$kms_key_id" --argjson atrest "$at_rest_encrypted" \
-            '{name: $name, arn: $arn, engine: $engine, tls_enabled: $tls, at_rest_encrypted: $atrest, kms_key_id: $kms}')
-
-        jq --argjson data "$cluster_data" '.results.clusters += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-
-        if [ "$at_rest_encrypted" = "true" ] && [ "$tls_enabled" = "true" ]; then
-            encrypted_clusters=$((encrypted_clusters + 1))
-        fi
-    done
+    clusters='[]'
 fi
 
-percentage=0
-[ $total_clusters -gt 0 ] && percentage=$(( (encrypted_clusters * 100) / total_clusters ))
-
-jq --arg total "$total_clusters" --arg encrypted "$encrypted_clusters" --arg percentage "$percentage" \
-    '.results.summary = {total_clusters: ($total | tonumber), encrypted_clusters: ($encrypted | tonumber), encryption_percentage: ($percentage | tonumber)}' \
-    "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+printf '%s' "$clusters" | jq --slurpfile clusters /dev/stdin '
+    [$clusters[0][]? | (.KmsKeyId // "None") as $kms
+        | {name: (.Name | tostring), arn: (.ARN // "None"), engine: (.Engine // "None"),
+           tls_enabled: (.TLSEnabled // false), at_rest_encrypted: ($kms != "None"), kms_key_id: $kms}] as $rows
+    | ($rows | length) as $total
+    | ([$rows[] | select(.at_rest_encrypted and .tls_enabled == true)] | length) as $encrypted
+    | .results.clusters += $rows
+    | .results.summary = {total_clusters: $total, encrypted_clusters: $encrypted,
+        encryption_percentage: (if $total > 0 then ($encrypted * 100 / $total | floor) else 0 end)}
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

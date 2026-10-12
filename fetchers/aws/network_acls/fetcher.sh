@@ -46,24 +46,16 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": []}' \
   > "$OUTPUT_JSON"
 
-nacl_ids=$(aws ec2 describe-network-acls --query 'NetworkAcls[*].NetworkAclId' --output text 2>/dev/null)
+# One describe returns every NACL with its entries; the per-NACL describe this
+# replaced re-fetched the same objects one CLI process at a time.
+nacls=$(aws ec2 describe-network-acls --query 'NetworkAcls[*].{Id:NetworkAclId,VpcId:VpcId,IsDefault:IsDefault,Entries:Entries}' --output json 2>/dev/null)
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     echo "aws ec2 describe-network-acls (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list network ACLs"
 else
-    for nacl_id in $(aws_text_list "$nacl_ids"); do
-        nacl_detail=$(aws ec2 describe-network-acls \
-            --network-acl-ids "$nacl_id" \
-            --query 'NetworkAcls[0].{Id:NetworkAclId,VpcId:VpcId,IsDefault:IsDefault,Entries:Entries}' \
-            --output json 2>/dev/null)
-        detail_exit=$?
-        if [ $detail_exit -ne 0 ]; then
-            echo "aws ec2 describe-network-acls ($nacl_id) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-
-        nacl_data=$(echo "$nacl_detail" | jq '{
+    printf '%s' "$nacls" | jq --slurpfile nacls /dev/stdin '
+        .results += [$nacls[0][]? | {
             "NetworkAclId": .Id,
             "VpcId": .VpcId,
             "IsDefault": .IsDefault,
@@ -76,10 +68,7 @@ else
                 "ToPort": (.PortRange.To // null),
                 "CidrBlock": (.CidrBlock // .Ipv6CidrBlock // null)
             }]
-        }')
-
-        jq --argjson data "$nacl_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+        }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

@@ -1,0 +1,62 @@
+key: betterstack_status_page_availability_threshold
+name: Status Page Availability Meets Baseline
+type: AUTOMATED
+role: configuration
+statement: The lowest availability reported by any component on the status page is above 0.999.
+
+# THE FIGURE THIS READS IS BETTER STACK'S OWN.
+# `availability` is copied into the evidence out of the status page response
+# unchanged — the same number the status page UI renders, where 0.999915 reads
+# as "99.991% uptime". Neither the fetcher nor this validator recomputes it.
+# Better Stack counts HARD DOWNTIME ONLY in that figure: degraded and
+# maintenance periods are excluded. See the fetcher's
+# evidence_set.instructions.
+#
+# WHY IT ANCHORS ON `lowest_reported_availability` AND NOT ON THE COMPONENTS.
+# MATCH_GROUP reads the FIRST match only, so a pattern anchored on the
+# per-component fields compares whichever component the page happens to list
+# first. On status.paramify.com that is Homepage at 1.0, and the page would
+# pass even with a later component at zero. The fetcher already selects the
+# component reporting the LOWEST availability into this one block, so reading
+# it compares the weakest component instead: clear the baseline here and every
+# component clears it.
+#
+# GENERIC ACROSS STATUS PAGES. The anchor is that block and the key order the
+# fetcher emits, not any component's name, so it holds for a page with one
+# component or fifty and for any customer. The `component` group captures the
+# selected component's `public_name` so a reader can see which one was
+# compared; nothing asserts on it.
+#
+# THE EXPONENT GUARD. `[0-9][0-9.]*` with a trailing `(?![0-9.eE])` refuses a
+# value this rule cannot compare. Python serializes a small float in exponent
+# form, so a component at 1e-05 — 0.001% uptime — is written to the evidence
+# as `1e-05`, and a bare `[\d.]+` captures "1" out of it and scores
+# 1 > 0.999 PASS. Measured against an artifact the real fetcher emitted. With
+# the guard the pattern does not match, MATCH_GROUP reads nothing, and the
+# comparison against a CUSTOM_TEXT scores "" > "0.999" = false, so the
+# validator FAILS. That is also why this file needs no separate presence rule:
+# the vacuous pass happens when BOTH sides read nothing, and the right-hand
+# side here is a literal.
+#
+# ECMAScript, not Python: Paramify applies `g` and `s` and never `m`, and
+# named groups are `(?<name>…)`. Naming does not renumber anything, so
+# `availability` is still groupNumber 2 — `component` is 1.
+#
+# Known edge: a component whose `public_name` is null would not match, so the
+# validator fails rather than passing. Failing closed on a page we cannot read
+# is the right direction, but it is a false alarm if Better Stack ever ships a
+# component with no public name.
+regex: '"lowest_reported_availability":\s*\{\s*"public_name":\s*"(?<component>[^"]+)",\s*"status_page_resource_id":\s*"[^"]*",\s*"availability":\s*(?<availability>[0-9][0-9.]*)(?![0-9.eE])'
+rules_summary: MATCH_GROUP[2] GREATER_THAN 0.999
+validation_rules:
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # availability
+    criteria: GREATER_THAN
+    value: { type: CUSTOM_TEXT, customText: "0.999" }
+    disposition: PASS
+
+# Collection health is asserted once for this set by
+# validators/common/collection_succeeded.yaml, which is the set's single
+# `completeness` validator and where EVD-BETTERSTACK-PUBLIC-STATUS-PAGE is
+# listed. This file carries only the availability assertion.
+evidence_sets:
+  - EVD-BETTERSTACK-PUBLIC-STATUS-PAGE

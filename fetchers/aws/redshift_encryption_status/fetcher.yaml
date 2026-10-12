@@ -1,5 +1,5 @@
 name: aws_redshift_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each Redshift cluster, reports encryption at rest (Encrypted, KMS key) and in-transit enforcement (require_ssl parameter). Aggregates a per-account encryption-coverage percentage.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-REDSHIFT-ENC
   name: Redshift Encryption
-  instructions: 'Script: redshift_encryption_status.sh. Commands executed: aws redshift describe-clusters, aws redshift describe-cluster-parameters.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws redshift describe-clusters, aws redshift describe-cluster-parameters.'

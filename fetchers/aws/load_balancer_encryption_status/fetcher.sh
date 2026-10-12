@@ -48,39 +48,6 @@ jq -n \
 
 # --- per-script data collection (ported from upstream) ---
 
-# Function to check load balancer encryption
-check_load_balancer_encryption() {
-    local lb_arn=$1
-    local lb_type=$2
-
-    # Get listeners with their SSL policies
-    local listeners
-    listeners=$(aws elbv2 describe-listeners --load-balancer-arn "$lb_arn" \
-        --query "Listeners[*].{Port:Port,Protocol:Protocol,SslPolicy:SslPolicy}" \
-        2>/dev/null)
-    local ec=$?
-    if [ $ec -ne 0 ]; then
-        echo "aws elbv2 describe-listeners ($lb_arn) failed (exit=$ec)" >> "$_FAILURE_LOG"
-    fi
-
-    # Check if any listener uses HTTPS/SSL with secure policy
-    local is_encrypted=false
-
-    # Use a for loop to avoid subshell issues
-    local ssl_policies
-    ssl_policies=$(echo "$listeners" | jq -r '.[] | select(.Protocol == "HTTPS" or .Protocol == "TLS") | .SslPolicy')
-    for ssl_policy in $ssl_policies; do
-        if [[ -n "$ssl_policy" ]]; then
-            if [[ "$ssl_policy" == *"FIPS"* ]] || [[ "$ssl_policy" == *"TLS13"* ]] || [[ "$ssl_policy" == *"TLS-1-2"* ]]; then
-                is_encrypted=true
-                break
-            fi
-        fi
-    done
-
-    echo "$is_encrypted"
-}
-
 log_info "Checking load balancer encryption"
 
 # Get all load balancers
@@ -91,66 +58,57 @@ if [ $ec -ne 0 ]; then
     load_balancers='{"LoadBalancers":[]}'
 fi
 
-# Process ALBs
-alb_count=0
-alb_encrypted=0
-alb_details=()
-
-# Process NLBs
-nlb_count=0
-nlb_encrypted=0
-nlb_details=()
-
-# Process each load balancer
+# One describe-listeners per ALB/NLB (there is no bulk form), read for both the
+# encryption check and the reported ssl_policy -- it used to be called twice per
+# load balancer. Each response is streamed to a file after a small header
+# ({arn, type}); a failed call is streamed as null. One jq pass then applies the
+# rules the per-LB shell code did:
+#   encrypted  -- some HTTPS/TLS listener's SslPolicy contains FIPS, TLS13 or
+#                 TLS-1-2 (false when the call failed);
+#   ssl_policy -- the FIRST listener's SslPolicy, whatever its protocol, "none"
+#                 when absent, and "" when the call failed (the old pipe into jq
+#                 printed nothing on empty input).
+_LISTENERS_JSON="$(mktemp -t aws_load_balancer_encryption_status_listeners.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_LISTENERS_JSON"' EXIT
 while IFS=$'\t' read -r arn type; do
-    if [[ "$type" == "application" ]]; then
-        alb_count=$((alb_count + 1))
-        is_encrypted=$(check_load_balancer_encryption "$arn" "application")
-        if [[ "$is_encrypted" == "true" ]]; then
-            alb_encrypted=$((alb_encrypted + 1))
-        fi
-        # Get SSL policy details for the output
-        ssl_policy=$(aws elbv2 describe-listeners --load-balancer-arn "$arn" \
-            --query "Listeners[*].{Port:Port,Protocol:Protocol,SslPolicy:SslPolicy}" \
-            2>/dev/null | jq -r '.[0].SslPolicy // "none"')
-        alb_details+=("{\"arn\":\"$arn\",\"encrypted\":$is_encrypted,\"ssl_policy\":\"$ssl_policy\"}")
-    elif [[ "$type" == "network" ]]; then
-        nlb_count=$((nlb_count + 1))
-        is_encrypted=$(check_load_balancer_encryption "$arn" "network")
-        if [[ "$is_encrypted" == "true" ]]; then
-            nlb_encrypted=$((nlb_encrypted + 1))
-        fi
-        # Get SSL policy details for the output
-        ssl_policy=$(aws elbv2 describe-listeners --load-balancer-arn "$arn" \
-            --query "Listeners[*].{Port:Port,Protocol:Protocol,SslPolicy:SslPolicy}" \
-            2>/dev/null | jq -r '.[0].SslPolicy // "none"')
-        nlb_details+=("{\"arn\":\"$arn\",\"encrypted\":$is_encrypted,\"ssl_policy\":\"$ssl_policy\"}")
+    [[ "$type" == "application" || "$type" == "network" ]] || continue
+    listeners=$(aws elbv2 describe-listeners --load-balancer-arn "$arn" \
+        --query "Listeners[*].{Port:Port,Protocol:Protocol,SslPolicy:SslPolicy}" \
+        --output json 2>/dev/null)
+    ec=$?
+    if [ $ec -ne 0 ] || [ -z "$listeners" ]; then
+        echo "aws elbv2 describe-listeners ($arn) failed (exit=$ec)" >> "$_FAILURE_LOG"
+        listeners='null'
     fi
+    printf '{"arn":"%s","type":"%s"}\n%s\n' "$arn" "$type" "$listeners" >> "$_LISTENERS_JSON"
 done < <(echo "$load_balancers" | jq -r '.LoadBalancers[] | [.LoadBalancerArn, .Type] | @tsv')
 
-# Update JSON with load balancer information
-jq --arg alb_count "$alb_count" --arg alb_encrypted "$alb_encrypted" \
-   --arg nlb_count "$nlb_count" --arg nlb_encrypted "$nlb_encrypted" \
-   --argjson alb_details "[$(IFS=,; echo "${alb_details[*]}")]" \
-   --argjson nlb_details "[$(IFS=,; echo "${nlb_details[*]}")]" \
-   '.results.load_balancers.alb.total = ($alb_count | tonumber) |
-    .results.load_balancers.alb.encrypted = ($alb_encrypted | tonumber) |
-    .results.load_balancers.alb.details = $alb_details |
-    .results.load_balancers.nlb.total = ($nlb_count | tonumber) |
-    .results.load_balancers.nlb.encrypted = ($nlb_encrypted | tonumber) |
-    .results.load_balancers.nlb.details = $nlb_details' \
-   "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-
-# Update summary in JSON
-jq --arg alb_count "$alb_count" --arg alb_encrypted "$alb_encrypted" \
-   --arg nlb_count "$nlb_count" --arg nlb_encrypted "$nlb_encrypted" \
-   '.summary = {
-      alb_total: ($alb_count | tonumber),
-      alb_encrypted: ($alb_encrypted | tonumber),
-      nlb_total: ($nlb_count | tonumber),
-      nlb_encrypted: ($nlb_encrypted | tonumber),
-      formatted_summary: ("ALB: " + $alb_encrypted + "/" + $alb_count + ", NLB: " + $nlb_encrypted + "/" + $nlb_count)
-   }' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+jq --slurpfile stream "$_LISTENERS_JSON" '
+    [range(0; $stream | length; 2) as $i | $stream[$i] + {listeners: $stream[$i + 1]}] as $lbs
+    | def details($t): [$lbs[] | select(.type == $t) | {
+        arn: .arn,
+        encrypted: (if .listeners == null then false else
+            any(.listeners[] | select(.Protocol == "HTTPS" or .Protocol == "TLS") | (.SslPolicy | tostring);
+                test("FIPS|TLS13|TLS-1-2")) end),
+        ssl_policy: (if .listeners == null then "" else (.listeners[0].SslPolicy // "none") end)
+      }];
+      details("application") as $alb | details("network") as $nlb
+    | ($alb | length) as $alb_count | ([$alb[] | select(.encrypted)] | length) as $alb_encrypted
+    | ($nlb | length) as $nlb_count | ([$nlb[] | select(.encrypted)] | length) as $nlb_encrypted
+    | .results.load_balancers.alb.total = $alb_count
+    | .results.load_balancers.alb.encrypted = $alb_encrypted
+    | .results.load_balancers.alb.details = $alb
+    | .results.load_balancers.nlb.total = $nlb_count
+    | .results.load_balancers.nlb.encrypted = $nlb_encrypted
+    | .results.load_balancers.nlb.details = $nlb
+    | .summary = {
+        alb_total: $alb_count,
+        alb_encrypted: $alb_encrypted,
+        nlb_total: $nlb_count,
+        nlb_encrypted: $nlb_encrypted,
+        formatted_summary: ("ALB: \($alb_encrypted)/\($alb_count), NLB: \($nlb_encrypted)/\($nlb_count)")
+      }
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 log_info "$(jq -r '.summary.formatted_summary' "$OUTPUT_JSON")"
 

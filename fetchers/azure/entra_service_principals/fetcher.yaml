@@ -1,0 +1,78 @@
+name: azure_entra_service_principals
+version: 0.1.0
+description: >
+  Every Microsoft Entra ID service principal, the tenant's non-user accounts, with
+  its type (application, managed identity, legacy, social IdP), whether it is
+  enabled, who owns the application behind it (Microsoft first-party, this tenant,
+  or another tenant), and every credential it can present: secrets and
+  certificates held on the service principal, plus, for applications registered
+  in this tenant, the application's own secrets, certificates and federated
+  identity credentials. Summarizes how non-user accounts authenticate (managed
+  identity, federated, certificate, secret) and which stored credentials are
+  expired, expire within 30 days, or never expire.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_entra_service_principals.json
+  aggregation: per_target
+
+target_schema:
+  # Microsoft Graph data is TENANT-scoped, so the fanout unit here is the tenant,
+  # not the subscription: one target per Entra tenant. Two targets differing only
+  # by subscription_id would collect byte-identical evidence.
+  tenant_id:
+    type: string
+    required: false
+    env: AZURE_TENANT_ID
+    description: >
+      Entra tenant id to collect from, and the discriminator for this fetcher's
+      output filename. Optional — omit to use whichever tenant the ambient
+      credential authenticates into, in which case the tenant is read back from
+      Microsoft Graph's organization endpoint.
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id. Optional and NOT used to scope collection — Graph data
+      is tenant-wide. Set it only to correlate this tenant's evidence with the
+      subscription-scoped Azure evidence from the same manifest; it is recorded in
+      the payload metadata and nowhere else.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-tenant runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+# Microsoft Graph permission (application permission, admin consent):
+#   Application.Read.All   — /servicePrincipals, /applications and their
+#                            federatedIdentityCredentials. Directory.Read.All also
+#                            covers them.
+#   Organization.Read.All  — optional; the tenant name/domain recorded as provenance.
+# A denied read is recorded as an API failure and the run exits non-zero.
+
+ksis:
+  - KSI-IAM-SNU
+
+evidence_set:
+  reference_id: EVD-AZURE-ENTRA-SERVICE-PRINCIPALS
+  name: Microsoft Entra ID Service Principals and Non-User Account Credentials
+  instructions: >
+    Script: fetcher.py. Microsoft Graph calls (permission: Application.Read.All):
+    GET /servicePrincipals with
+    $select=id,appId,displayName,servicePrincipalType,accountEnabled,appOwnerOrganizationId,alternativeNames,passwordCredentials,keyCredentials;
+    GET /applications with $select=id,appId,displayName,passwordCredentials,keyCredentials
+    and $expand=federatedIdentityCredentials (only this tenant's own applications,
+    never one call per application); GET /organization. Both collections paged via
+    @odata.nextLink and joined on appId.

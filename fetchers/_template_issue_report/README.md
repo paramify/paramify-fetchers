@@ -3,8 +3,8 @@
 \<One sentence: which report this pulls, from which tool, over what scope.>
 
 This is an **issue-report** fetcher (`kind: issue_report`): it hands Paramify the
-scan report the tool already produces, and Paramify's assessment intake parses it
-into issues. It is not evidence, and it goes to an assessment rather than an
+scan report the tool already produces, and the assessment's Paramify pipeline
+parses it into issues. It is not evidence, and it goes to an assessment rather than an
 evidence set. See [docs/issue_report_fetchers.md](../../docs/issue_report_fetchers.md).
 
 ## Report
@@ -34,7 +34,7 @@ secret env mounts, CI secret blocks. None is privileged.
 python fetchers/<category>/<short_name>/fetcher.py
 
 # Through the framework, which puts it in <run>/issue-reports/ and records it:
-paramify assessments select <fetcher_name>   # once, to pick the assessment
+paramify assessments select <fetcher_name>   # once, to pick the assessment and its close policy
 paramify run manifests/<your>.yaml
 paramify issues upload
 ```

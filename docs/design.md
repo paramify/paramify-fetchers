@@ -350,7 +350,7 @@ paramify-fetchers/
 ├── uploaders/
 │   ├── paramify_evidence/            # BUILT — get-or-create evidence set + multipart upload
 │   ├── paramify_scripts/             # BUILT — sync entry scripts + associate to evidence sets
-│   └── paramify_issues/              # BUILT — POST /assessment/{id}/intake, byte-for-byte
+│   └── paramify_issues/              # BUILT — POST /pipelines/{id}/intake + /process, byte-for-byte
 │
 ├── deploy/                           # containerized bundle — the MVP deployment
 │   ├── Dockerfile / docker-compose.yml / entrypoint.sh / crontab
@@ -369,7 +369,8 @@ paramify-fetchers/
     ├── run_manifest_reference.md     # manifest format reference
     ├── config_injection_design.md    # platform/config/auth injection model
     ├── envelope_design.md            # evidence envelope format
-    ├── issue_report_fetchers.md      # the second kind: raw scan reports → assessment intake
+    ├── issue_report_fetchers.md      # the second kind: raw scan reports → assessment pipelines
+    ├── pipelines.md                  # sending scan reports from the TUI, with recordings
     ├── packaging_design.md           # proposed `paramify package` (not built)
     └── onboarding/                   # hands-on guided tutorial (Lathe)
 ```

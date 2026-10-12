@@ -1,5 +1,5 @@
 name: aws_glue_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each Glue security configuration, reports S3, CloudWatch, and job-bookmark encryption modes and KMS keys; also reports per-region data-catalog encryption-at-rest and connection-password encryption settings.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-GLUE-ENC
   name: Glue Encryption
-  instructions: 'Script: glue_encryption_status.sh. Commands executed: aws glue get-security-configurations, aws glue get-data-catalog-encryption-settings.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws glue get-security-configurations, aws glue get-data-catalog-encryption-settings.'

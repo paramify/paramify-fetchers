@@ -1,5 +1,5 @@
 name: aws_access_analyzer_findings
-version: 0.1.0
+version: 0.2.0
 description: Lists AWS IAM Access Analyzer analyzers and their status, plus the active external-access findings reported by each ACTIVE analyzer (finding id, status, resource, resource type, and external principal). No analyzers or no active findings is valid evidence.
 category: aws
 

@@ -64,7 +64,7 @@ class FakeClient:
         self.updated.append(script_id)
         return {"id": script_id}
 
-    def get_or_create_evidence_set(self, reference_id, name):
+    def get_or_create_evidence_set(self, reference_id, name, frequency=None):
         return "ev-" + reference_id
 
     def associate_script(self, evidence_id, script_id):
@@ -141,6 +141,16 @@ def test_reassociate_covers_noop(wired):
     uploader.sync_scripts(".", reassociate=True)
     associated_ids = {sid for _, sid in wired.associated}
     assert "sid-f_noop" in associated_ids   # noop normally skips association
+
+
+def test_reference_carries_frequency_with_override():
+    """A set this stage creates first must get the same frequency the evidence
+    uploader would have given it — the evidence uploader never patches it later."""
+    es = {"reference_id": "EVD-1", "name": "n", "frequency": "WEEKLY"}
+    assert uploader._resolve_reference("f", es, {})["frequency"] == "WEEKLY"
+    assert uploader._resolve_reference("f", es, {"f": {"frequency": "DAILY"}})["frequency"] == "DAILY"
+    bare = {"reference_id": "EVD-1", "name": "n"}
+    assert uploader._resolve_reference("f", bare, {})["frequency"] == "THREE_DAY"
 
 
 def test_https_guard_rejects_http():

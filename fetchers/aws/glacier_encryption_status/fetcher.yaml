@@ -1,5 +1,5 @@
 name: aws_glacier_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each S3 Glacier vault in the region, reports the vault access policy and vault lock policy (state and policy document) so reviewers can confirm data-at-rest access controls and immutability.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-GLACIER-ENC
   name: S3 Glacier Vault Encryption and Lock
-  instructions: 'Script: glacier_encryption_status.sh. Commands executed: aws glacier list-vaults, aws glacier get-vault-access-policy, aws glacier get-vault-lock.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws glacier list-vaults, aws glacier get-vault-access-policy, aws glacier get-vault-lock.'

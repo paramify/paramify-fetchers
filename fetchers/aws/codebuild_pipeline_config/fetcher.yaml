@@ -1,5 +1,5 @@
 name: aws_codebuild_pipeline_config
-version: 0.1.0
+version: 0.2.0
 description: Collects AWS CodeBuild project configuration (source, environment, logging, and artifact encryption) for build-pipeline change-management evidence.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CODEBUILD-CONFIG
   name: AWS CodeBuild Pipeline Configuration
-  instructions: 'Script: aws_codebuild_pipeline_config.sh. Commands executed: aws codebuild list-projects, aws codebuild batch-get-projects (collects per-project source, environment, logsConfig, and artifacts encryption).'
+  instructions: 'Script: fetcher.sh. Commands executed: aws codebuild list-projects, aws codebuild batch-get-projects (collects per-project source, environment, logsConfig, and artifacts encryption).'

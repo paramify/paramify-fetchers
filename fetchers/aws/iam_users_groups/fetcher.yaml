@@ -1,5 +1,5 @@
 name: aws_iam_users_groups
-version: 0.1.0
+version: 0.2.0
 description: Inventories IAM users (groups, access keys, MFA devices, login profile) and IAM groups (attached policies) for access-review evidence.
 category: aws
 
@@ -35,4 +35,4 @@ ksis:
 evidence_set:
   reference_id: EVD-IAM-USERS-GROUPS
   name: IAM Users and Groups
-  instructions: 'Script: iam_users_groups.sh. Commands executed: aws iam list-users, aws iam list-groups, aws iam get-user, aws iam get-group'
+  instructions: 'Script: fetcher.sh. Commands executed: aws iam list-users, aws iam list-groups, aws iam get-account-authorization-details --filter User Group, aws iam list-access-keys, aws iam list-mfa-devices, aws iam get-login-profile'

@@ -6,7 +6,7 @@
 regenerates it.>
 
 THE ONE RULE: write the tool's bytes to disk exactly as received. No parsing, no
-re-serializing, no added fields. Paramify's assessment intake parses the vendor's
+re-serializing, no added fields. Paramify's file intake preset parses the vendor's
 own format, so a "helpful" normalization here is a broken import there. If you
 find yourself calling json.dump or csv.writer, this should probably be an
 evidence fetcher instead — see ../_template/.

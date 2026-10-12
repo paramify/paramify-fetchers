@@ -12,6 +12,253 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_redis_cache_configuration`**, for classic Azure Cache for Redis
+  (`Microsoft.Cache/redis`), the sibling of `azure_managed_redis_configuration`.
+  Per cache it reports the minimum TLS version and whether the non-TLS port is
+  enabled, whether authentication is required at all, whether access keys are
+  disabled so only Entra ID can be used, public network access, private
+  endpoints, VNet injection and firewall rules, judged on the distinct addresses
+  all rules admit together so a split or near-total range is visible. For an assessor it also reports who holds Entra data-access
+  policies, whether connection and Entra sign-in audit logs reach a destination
+  (through a new shared `_shared/diagnostics.py`), the maintenance window, and
+  replication, zone redundancy (including Azure's Automatic zonal allocation),
+  geo-replication and persistence, and its summary names the
+  caches behind each failed expectation. `list_keys` is never called and
+  the projection is an allow-list, so access keys and the storage connection
+  strings in the cache's Redis configuration never reach the evidence. A cache
+  without `minimumTlsVersion` accepts TLS 1.0 and is not counted as TLS-only, and
+  any per-cache read that fails is recorded as unknown. Adds `azure-mgmt-redis`.
+  Verified against a live subscription.
+
+- **A third fetcher kind, `kind: inventory`**, for fetchers that list every
+  asset of a kind for Paramify's Inventory. An inventory is evidence with a
+  record contract: the payload holds `data`, one record per asset each with a
+  unique `unique_asset_identifier`, and `records_included`. The record fields
+  are each fetcher's own. It needs an `evidence_set` and goes to it through
+  `paramify upload`, where an inventory pipeline attached to the set builds
+  Inventory items. A pipeline reads the file as the whole estate, so the
+  runner checks every inventory output when it envelopes it and records the
+  verdict in `metadata.inventory`, and the uploader does not send one that is
+  incomplete: a failed run, a contract break, withheld records, or no records
+  at all. The TUI lists inventories in their own section. Start from
+  `fetchers/_template_inventory/`; see `docs/inventory_fetchers.md`.
+
+- **Four Azure fetchers for the network edge and cache tier**, read-only on
+  the built-in Reader role. `azure_managed_redis_configuration` reports each
+  Azure Managed Redis cluster's minimum TLS version, public network access and
+  private endpoints, and per database the client protocol (Encrypted or
+  Plaintext) and whether access-key authentication is disabled. Classic Azure
+  Cache for Redis is not read. `azure_dns_configuration` reports each public
+  zone's DNSSEC state and signing keys, and each private zone with its virtual
+  network links. The DNS SDK has no DNSSEC operation, so it is read with a
+  direct ARM call, and a 404 "DNSSEC is not enabled" counts as unsigned rather
+  than as a failed collection. `azure_vpn_gateway_configuration` reports VPN
+  gateways, the IKE version, status and IPsec policy of each connection, and
+  point-to-site protocols and sign-in types. A connection with no custom policy
+  is reported against Azure's default, whose IKEv2 main mode uses DH Group 2, so
+  the default does not read as free of weak algorithms. Point-to-site counts only
+  when a client address pool exists, because the list call returns a placeholder
+  on gateways that never set it up.
+  `azure_virtual_wan_configuration` reports Virtual WANs, whether hubs are
+  secured by a firewall, and the IKE version on each site link, along with
+  vWAN VPN sites, point-to-site gateways and server configurations. The DNS,
+  VPN and Virtual WAN fetchers record whether Microsoft.Network is registered,
+  so zero resources can be told apart from a provider that is off. A read that
+  fails (a Redis cluster's databases, a zone's DNSSEC config) or an IKE protocol
+  Azure leaves empty is recorded as null and counted as unknown, never as
+  compliant, unsigned or IKEv1. Both VPN
+  fetchers keep an allow-list of fields, because Azure returns site-link
+  pre-shared keys in plain text to Reader; no key reaches the evidence.
+  Verified against a live subscription.
+- **A Wiz category with twelve fetchers**, for Wiz commercial and Wiz for
+  Government, sharing one GraphQL client and one service account. Eleven are
+  evidence fetchers: `wiz_scan_coverage`, `wiz_posture_issues`,
+  `wiz_infrastructure_vulnerabilities`, `wiz_container_vulnerabilities`,
+  `wiz_cloud_configuration_posture`, `wiz_host_configuration_posture`,
+  `wiz_threat_detections`, `wiz_file_integrity_monitoring`,
+  `wiz_attack_surface_findings`, `wiz_code_findings` and
+  `wiz_tenant_security_settings`. The last five read Wiz modules a tenant may
+  not have; each checks the tenant's schema at run time, selects only the
+  fields that exist, and lists the missing ones in the evidence. A missing
+  scope or licence fails the collection rather than reading as no findings.
+  The twelfth, `wiz_stig_compliance_report`, is an issue report: one CSV row per
+  STIG control, rule and resource for one enabled Wiz framework, for a
+  CONFIGURATION assessment's pipeline. Wiz's own compliance CSV exists only as
+  a saved report, and creating or rerunning one is a write, so the rows are
+  built from GraphQL queries instead, in a fixed column set and sorted order so
+  the same Wiz state gives the same file. Every result is reported, not just
+  PASS and FAIL, so a check that moves to ERROR is not read as fixed. Any Wiz
+  error, Wiz's 10,000-row cap, an empty result, a disabled framework, or a
+  finding Wiz returns without its control mapping fails the run with no file
+  written.
+  None of the twelve writes to Wiz: the client refuses to send a mutation.
+- **Two more Wiz issue reports, `wiz_issues_report` and
+  `wiz_vulnerability_findings`**, on the same read-only client and config
+  names. `wiz_issues_report` sends Wiz's own Issues CSV to a CONFIGURATION
+  assessment. The report is created once in Wiz and scheduled there; the
+  fetcher finds it by `report_id` or exact `report_name`, and downloads its
+  last run only if that run completed within `max_report_age_hours` (default
+  26). It never creates, edits or reruns a report, so the service account
+  needs `read:reports` and nothing that writes. `wiz_vulnerability_findings`
+  pages through every vulnerability finding and writes the legacy Paramify
+  column layout for a VULNERABILITY assessment, with an optional `project_id`
+  filter. Both export everything on every run (no delta mode, since a delta
+  processed with a cycle close resolves every issue it leaves out), and any
+  read failure, an empty export (unless `allow_empty`), or an interrupted
+  download fails the run with no file written. See
+  `docs/wiz_pipeline_fetchers.md`.
+- **`paramify issues upload` names the cycle an upload landed on**, and warns
+  when newer cycles exist. Uploads land on the assessment's oldest open cycle,
+  so an old cycle left open takes every new scan while the newer cycles show
+  nothing. The TUI's Paramify tab shows the same warning. An HTTP 409 now
+  quotes Paramify's reason instead of assuming no cycle is in progress, since
+  work aimed at a cycle other than the in-progress one is refused the same way.
+- **The issues uploader only reads reports inside the run's `issue-reports/`.**
+  A report path in `_issue_reports.json` that resolves outside it, or a report
+  that is a symlink, is refused and nothing is read, so an edited index cannot
+  send another file to Paramify as a scan report.
+- **`_issue_reports.json` is written atomically, and a corrupt one never closes
+  a cycle.** An index that cannot be read is kept beside the new one as
+  `_issue_reports.json.corrupt`, and the new index is marked `cannot_close`:
+  the uploader processes that run's reports but does not close the cycle,
+  because the index can no longer show that every target succeeded. The TUI's
+  Run tab shows why a fetcher failed next to its status, and focus returns to
+  the Paramify tab when a send finishes, so its keys work without pressing 5
+  again.
+- **Evidence sets carry a collection frequency.** `evidence_set.frequency` in
+  `fetcher.yaml` takes Paramify's evidence frequency values (`DAILY`,
+  `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `QUARTERLY`, `BIANNUAL`,
+  `ANNUAL`, `NOT_SET`) and defaults to `THREE_DAY`, so every fetcher has one
+  without a change to its file. The runner copies it into the envelope's
+  `metadata.evidence_set`, and both uploaders send it when they create a set.
+  Sets that already exist keep the frequency they have. The uploader config can
+  override it per fetcher, like `name` and `instructions`.
+- **`docs/pipelines.md`: sending scan reports from the TUI**, step by step
+  with three recordings. It covers a manifest for the scanners, pointing each
+  fetcher at an assessment and choosing its close policy, running and sending
+  from the Paramify tab, and jobs and manual closes. It explains how cycles
+  work, lists what each error means, and maps every step to its command.
+- **`paramify issues jobs` and `paramify issues close`.** `jobs` lists an
+  assessment's pipeline jobs and retries or cancels one (`--retry`, `--cancel`);
+  a failed job blocks every job queued behind it on the same assessment until
+  one of those happens, and nothing does it automatically. `close` closes an
+  assessment's current cycle on its own, after confirmation, for assessments
+  whose cycle is filled by several runs, and prints how many open issues the
+  close auto-closed.
+  The TUI's Paramify tab has both: `j` lists jobs and retries or cancels one,
+  `C` closes one of the manifest's assessments' cycles behind a warning. The
+  reports themselves are sent with `i`, which replaces `ctrl+i` (most terminals
+  send the same byte for ctrl+i and Tab, so it never fired). The run console
+  says when a run left issue reports to send, and the assessment picker no
+  longer blocks the app while it lists the workspace's assessments.
+- **`close_cycle`, a reserved config key on every issue-report entry** —
+  `after_run` or `never`, with no default. Closing a cycle auto-closes every
+  open issue the cycle never saw, so it states how the customer fills the
+  assessment's cycles: one report per cycle closes after each complete run;
+  several files per cycle close only when the last is in. `paramify assessments
+  select` asks for it (or takes `--close-cycle`), and so does the TUI's
+  assessment picker. `paramify validate` reports an entry without one, reading
+  entry and `platforms.<category>` config the way the runner does.
+- **Issue-report invocations in the sidecar.** `_issue_reports.json` (schema
+  1.1) gains `invocations`: one entry per issue-report invocation, including a
+  failed one that wrote no file and an entry that raised before running. Before
+  this, a failed target that wrote nothing left no trace, and a run missing one
+  framework's report looked complete.
+- **A Splunk category with seven fetchers**, one Splunk Enterprise deployment per
+  target, each with its own management URL (port 8089) and bearer token.
+  `splunk_index_retention` (retention, archive-or-delete on freeze, data
+  integrity control), `splunk_index_activity`, `splunk_log_source_freshness`,
+  `splunk_data_inputs`, `splunk_alert_rules` (Splunk Web's own alert definition,
+  with run and fire history from `_internal` and `_audit`),
+  `splunk_alert_delivery` and `splunk_role_index_access` (effective index access
+  after inheritance and denials, delete rights, dormant accounts). This closes
+  KSI-MLA-ALA. Every fetcher is a `collect(client, config)` function handed to a
+  shared `run()`, which checks the token's capabilities first and fails the
+  collection, rather than publishing a partial list, when Splunk returns less
+  than everything: a `count` cut short of `paging.total`, a search answered with
+  a warning, or an index list that disagrees with `indexes.conf` and the search
+  peers. Tested against Splunk Enterprise 10.4.3, where a role with no
+  capabilities saw 1 of 4 users and 127 of 176 saved searches, and stock `admin`
+  12 of 26 roles, each time with a `paging.total` that agreed. The collection role
+  is in `fetchers/splunk/README.md`. Splunk Cloud is not yet supported.
+
+- **A Better Stack category and its first fetcher** —
+  `betterstack_public_status_page`, which GETs a public status page's own
+  `/index.json` and records it as evidence. No credential: a Better Stack status
+  page publishes that document to anyone who can reach the page, so the fetcher
+  sends nothing and the category declares no secrets. The response is kept
+  verbatim — `data` and `included` exactly as the page returns them, nothing
+  removed, renamed, recomputed or flattened — alongside the URL actually
+  fetched and a collection timestamp. The one field added to it,
+  `lowest_reported_availability`, is a selection rather than a calculation: it
+  names the component reporting the lowest availability and copies that value
+  out of the response unchanged, so the evidence carries the same figure the
+  status page UI shows (0.999915 reads there as "99.991% uptime"). It exists
+  because a Paramify `MATCH_GROUP` rule reads one capture group while the
+  number of components varies per page — naming the weakest component gives
+  such a rule one field to compare that still speaks for the whole page. Ties
+  break on the lowest resource id so an unchanged page selects the same
+  component every run, and the field is omitted rather than invented when no
+  component reports a numeric availability. Completeness is enforced rather
+  than assumed: every id named under `data.relationships` and every status
+  update a report references must be present in `included`, and a shortfall
+  fails the collection instead of producing a populated-looking partial
+  payload, as do a non-200, a body that is not JSON, and a body that is not a
+  status page document. The fetcher fans out per status page and is generic —
+  it knows nothing about any particular page — and `fetcher.yaml`'s
+  `evidence_set.instructions` states plainly what the evidence cannot show:
+  that Better Stack's `availability` counts hard downtime only, with degraded
+  and maintenance periods excluded from it, and that `/index.json` carries no
+  monitor configuration and so proves nothing about check frequency, what is
+  actually probed, or monitoring regions.
+- **A validator for the Better Stack status page set**
+  (`validators/betterstack/`, with behaviour cases under `validators/_cases/`).
+  One `configuration` check: a `MATCH_GROUP` rule comparing a component's
+  reported `availability` against a 0.999 baseline, anchored on the shape of a
+  status_page_resource rather than on any component's name, so it holds for any
+  customer's page. Collection health stays where it belongs, in the shared
+  `validators/common/collection_succeeded.yaml`, which the set is listed on.
+- **`azure_app_service_plans`** — every App Service plan with its SKU name and
+  tier, instance count (`sku.capacity`), zone redundancy and scaling settings,
+  plus the web apps and function apps running on it (joined by
+  `server_farm_id`). App Service availability is a property of the plan, not the
+  app, so nothing in the existing Azure evidence showed whether an app survives
+  losing an instance or a zone. The summary counts zone-redundant plans,
+  multi-instance plans, single-instance plans, and plans on a no-SLA tier (Free,
+  Shared); consumption and elastic plans are flagged `platform_scaled`, since
+  their capacity is not a fixed instance count. Reader-only; evidence set
+  `EVD-AZURE-APPSVC-PLANS`.
+
+- **`azure_defender_regulatory_compliance`** (`EVD-AZURE-DEFENDER-REG-COMPLIANCE`)
+  — Defender for Cloud's regulatory compliance grading, nested standard → control
+  → assessment with passed / failed / skipped counts at each level, and headline
+  keys for the Microsoft cloud security benchmark (`mcsb_failed_controls`,
+  `mcsb_failed_control_names`, ...). `azure_defender_assessments` has the same
+  results flat, one row per resource and check; this groups them by benchmark
+  control. A subscription with Microsoft.Security unregistered, or with no
+  Standard-tier Defender plan (the service refuses regulatory compliance on the
+  free tier), reports it as `regulatory_compliance_status` and exits 0.
+
+- **`azure_policy_compliance`** (`EVD-AZURE-POLICY-COMPLIANCE`) — what the assigned
+  Azure Policies found, where `azure_policy_assignments` only says what is
+  assigned. From `azure-mgmt-policyinsights` (a new pinned dependency of the
+  `azure` extra): the subscription-wide and per-assignment counts of
+  non-compliant resources and policies from `policy_states` summarize, a bounded
+  list of the non-compliant (resource, policy) records
+  (`max_non_compliant_resources`, default 1000, with a truncation flag), and the
+  remediation tasks with their deployment counts. The evaluation window the
+  service applied is recorded, and `resources_evaluated` tells "nothing
+  non-compliant" from "nothing evaluated".
+
+- **A Jira category, and its first fetcher: `jira_site_inventory`.** One
+  evidence set covering a Jira Cloud site end to end: deployment info, every
+  project the account can browse (type, lead, issue types, issue count), the
+  issue types, priorities and statuses in use, Jira Service Management service
+  desks where the site has JSM, and every issue updated in the lookback window
+  (90 days, or an explicit `jql`) with rollups by project, type, status and
+  priority, time to resolution, and separate change and incident counts.
+  Account email + API token, declared once on the category; no Jira admin
+  needed. See [`fetchers/jira/README.md`](fetchers/jira/README.md).
 - **A fanout target editor in the TUI** (`t` on the Manifest tab). A fanout
   fetcher runs once per target, so its targets are the run plan — but the page
   showed only how many there were, and there was no way to change one: fixing a
@@ -52,9 +299,216 @@ schemas and the `paramify` CLI — not the internal code.
   `--dry-run` previews without writing. The per-instance Paramify id is resolved
   at sync time and cached in a gitignored `.paramify/` lock — never written back
   to the shared registry.
+- **`azure_entra_service_principals`**, the tenant's non-user accounts. The
+  Azure category saw app registrations but not service principals, so a managed
+  identity, a principal for another tenant's app, or a secret held directly on a
+  service principal was invisible. Every service principal is now reported with
+  its type, its owner (Microsoft first-party, this tenant, or another tenant) and
+  every credential it can present, including federated identity credentials on
+  this tenant's applications. The summary counts managed-identity, federated,
+  certificate-based and secret-based principals, and credentials that are
+  expired, expire within 30 days, or never expire. It makes two paged Graph reads
+  per tenant, never one per principal, and needs `Application.Read.All`.
+- **`azure_entra_authentication_policy`** shows which sign-in methods the tenant
+  allows. `azure_entra_mfa_status` shows what users have registered, but not
+  whether the tenant still accepts SMS alongside the FIDO2 keys they registered.
+  Every method in the authentication methods policy is reported with its state,
+  targets and settings. SMS and Voice are flagged weak, and FIDO2 (passkeys
+  included) and X.509 certificates phishing-resistant. The fetcher also reports
+  the registration campaign, the policy's migration state (legacy MFA/SSPR
+  policies still apply until it completes), security defaults, and Entra password
+  protection (custom banned-password list, smart lockout). It reports the Entra
+  ID licence tier too, because a custom banned-password list is only enforced
+  with P1. Needs `Policy.Read.All` and `Directory.Read.All`. An `az login`
+  session cannot read the methods policy, because the Azure CLI's client is not
+  pre-authorized for `Policy.Read.All`.
+- **`azure_resource_inventory`** — an automatically generated inventory of every
+  resource in the subscription, from one Azure Resource Graph query over the
+  `Resources` table: id, name, type, location, resource group, tags, SKU, kind and
+  provisioning state, with counts by type and by location and the number of
+  untagged resources. The per-service fetchers each see only their own resource
+  types, so nothing listed the subscription as a whole. The query is paged to the
+  end; a truncated result, or a page count that disagrees with Resource Graph's own
+  total, is a collection failure rather than a shorter inventory. Adds the
+  `azure-mgmt-resourcegraph` dependency to the `azure` extra.
+- **`azure_log_analytics_workspaces`** — every Log Analytics workspace with its
+  SKU, workspace retention, daily ingestion cap, public network access for
+  ingestion and query, access control mode
+  (`enableLogAccessUsingOnlyResourcePermissions`), and whether shared-key auth is
+  disabled. Per-table retention is summarized as counts by plan and retention
+  plus the minimum across tables, with only the tables that override the
+  workspace default, or are custom, listed by name — a workspace carries several
+  hundred built-in tables. Also the workspace's data export rules and whether
+  Microsoft Sentinel is onboarded (the SecurityInsights solution is enabled).
+  Nothing in the Azure category recorded where logs are kept or for how long.
+  Adds the `azure-mgmt-loganalytics` dependency to the `azure` extra.
+- **Seven Microsoft Sentinel and Log Analytics log-integrity fetchers.** Per
+  Sentinel workspace (`SENTINEL_WORKSPACES`, or every onboarded workspace in the
+  subscription): `azure_sentinel_data_sources` (connectors, plus which tables
+  and alert products actually ingested in the window),
+  `azure_sentinel_analytics_rules`, `azure_sentinel_incidents` (status,
+  classification, time to close) and `azure_sentinel_automation_rules`. Per Log
+  Analytics workspace, Sentinel or not: `azure_log_analytics_query_audit`
+  (whether queries are audited, and weekly human vs app query counts) and
+  `azure_log_analytics_deletion_rights` (who, active or PIM-eligible, can purge
+  or delete log data, delete the workspace or shorten its retention, and
+  whether through a wildcard role). Per subscription:
+  `azure_log_storage_immutability` (immutability policy, legal hold and soft
+  delete on the containers Azure Monitor writes logs to; only a Locked policy or
+  a legal hold counts as protected). They share `_shared/azure_rest`, which
+  calls ARM, Graph and the Log Analytics query API directly, since the only
+  stable Sentinel SDK pins a 2021 API version, and retries throttling and
+  transient server errors, honouring Retry-After. Analytics rules are listed at
+  the stable and the preview API and merged, since NRT rules exist only in
+  preview. Data older than a table's retention is reported as not retained,
+  never as missing.
+
+- **Three Azure SQL Managed Instance fetchers.** Nothing in the Azure category
+  covered Managed Instance, which has its own API surface apart from SQL
+  Database. All three are Reader-only and fan out per subscription.
+  - `azure_sql_managed_instance_backups` (`EVD-AZURE-SQLMI-BACKUPS`): short- and
+    long-term retention for each database, the instance's backup storage
+    redundancy (requested vs current, so a pending change shows), compute zone
+    redundancy, and the instance failover groups with their failover policy and
+    instance pairs. Azure lists a failover group once from each region it spans,
+    each with its own resource id; the fetcher merges them into one record.
+  - `azure_sql_managed_instance_configuration` (`EVD-AZURE-SQLMI-CONFIG`): the
+    public data endpoint, proxy override, minimum TLS version, private endpoint
+    connections, the Entra admin and Entra-only authentication, and whether a
+    diagnostic setting exports `SQLSecurityAuditEvents`. That shows the audit
+    route only; whether a server audit is on is set in T-SQL, which no ARM call
+    can read.
+  - `azure_sql_managed_instance_encryption` (`EVD-AZURE-SQLMI-ENCRYPTION`): the
+    TDE protector (service-managed or Key Vault key, auto-rotation) and TDE
+    state for each database.
+
+  Any system database the API lists is flagged and left out of every count. A
+  failed call leaves every flag and total derived from it null rather than
+  false or 0, so an unanswered call never reads as "off".
 
 ### Changed
 
+- **The TUI keeps evidence and scan reports apart.** The catalog and the
+  add-fetcher picker group by kind first (**Evidence**, **Scan reports**) and
+  platform second, so a platform that ships both, like Wiz, no longer lists
+  them in one folder. Highlighting a section heading explains what that kind
+  is and how it is sent. A fetcher's contract states its kind and where its
+  output goes: the evidence set, or for a scan report the type of assessment it
+  needs, its format, and how it is sent. The manifest table replaces the `mode`
+  column (the `targets` column already shows `—` for a fetcher that runs once)
+  with `kind`, and adds a last `sends to` column: the evidence set, or the
+  assessment and close policy, or `no assessment — press A`. The manifest's
+  detail pane shows the same. The TUI now says "scan report" wherever it said
+  "issue report"; `kind: issue_report` in `fetcher.yaml` is unchanged. The
+  catalog descriptor (`paramify catalog --json`) gains an `evidence_set` block
+  and `issue_report.format`.
+- **TUI fixes found while recording that walkthrough.** On a manifest with no
+  evidence and no scripts, nothing on the Paramify tab held focus, so its keys
+  did nothing. Enter in a picker's filter box now takes the highlighted option.
+  The confirm dialog wraps long messages instead of cutting them off, which had
+  hidden the auto-close warning. The jobs list shows each job's assessment by
+  name and its error. A queued or running job is marked as waiting, not failed.
+- **`paramify upload` and `paramify issues upload` pick the newest run of
+  their own kind** when no run is named, not simply the newest run: evidence
+  and pipeline manifests usually share an output directory, and each command
+  used to pick up the other's run (`issues upload` then failed with "this run
+  collected no issue reports" while the scan run sat beside it). Both take
+  `-f MANIFEST` to use only that manifest's runs, reading its output directory
+  when `--output-dir` is not given. The standalone uploaders and each panel of
+  the TUI's Paramify tab choose the same way; the TUI scopes to the active
+  manifest's runs once it has any.
+- **`paramify issues upload` sends reports into Paramify pipelines** instead of
+  `POST /assessment/{id}/intake`, which it no longer calls. Per assessment it
+  uploads each report bare to `POST /pipelines/{id}/intake`, then queues one
+  `POST /pipelines/{id}/process` naming exactly those artifacts, then waits for
+  the job and prints its counts (created, updated, seen-closed, auto-closed). The
+  call is `PROCESS_CLOSE` only when the assessment's `close_cycle` is `after_run`
+  and every target bound to it in the run succeeded and uploaded; otherwise
+  `PROCESS`, with the reason the close was skipped. The pipeline puts an upload
+  on its oldest open cycle, so `effectiveDate` no longer routes it. The API key
+  needs `PIPELINE_INTAKE`, plus `PIPELINE_PROCESS`, plus `PIPELINE_CLOSE` to
+  close. A job that fails, is blocked behind a failed job, or outlasts
+  `--wait-timeout` (default 900 s) fails the command; `--no-wait` queues and
+  exits. The intake log now also records each job, so a re-run processes files
+  an interrupted run uploaded but never processed, and waits on a job it left
+  running. The TUI's issue-report panel shows the planned operation per
+  assessment and warns in the confirm when a run will close a cycle.
+- **AWS fetchers finish in large accounts** (67 fetchers, minor version
+  bumps). Many made several AWS CLI calls, and started several `jq` processes,
+  per resource, so an account with thousands of snapshots, roles or security
+  groups ran past the runner's 600-second timeout. They now read each resource
+  type with one paginated or batch call where AWS offers one, and build their
+  records in a single `jq` pass. Measured against an account with 2,925 EBS
+  snapshots, 912 IAM roles, 1,003 customer-managed policies and 1,009 security
+  groups: `ebs_snapshot_status`, `iam_roles`, `iam_policies` and
+  `security_groups` each timed out before and now finish in 2–26 seconds with
+  2–4 calls, and every fetcher that finished before and after produced
+  byte-identical evidence. Fetchers with no bulk form of their per-item call
+  (S3 bucket settings, SQS queue attributes, KMS key details) still make one
+  call per item, but no longer start a process or rewrite the output per item.
+  The evidence-set instructions in each `fetcher.yaml` now list the commands
+  the fetcher actually runs.
+
+- **`azure_network_security_groups` shows outbound posture and NIC coverage**
+  (0.1.0 → 0.2.0). Only an NSG's custom rules were read, so the platform's
+  default AllowInternetOutBound — which permits all Internet egress unless a
+  custom rule overrides it — never appeared, and every NSG looked like it said
+  nothing about outbound traffic. Each NSG now also carries its
+  `default_security_rules`, and the summary adds outbound counts, including
+  `unrestricted_internet_outbound_groups` (rules evaluated in priority order).
+  Network interfaces are now listed too, with the NSG on the NIC or inherited
+  from its subnet; `nics_without_any_nsg` counts the ones with neither, which
+  subnet coverage alone could not show. Rules gain `priority` and destination
+  address fields. Existing fields and summary keys are unchanged.
+
+- **`azure_app_service_configuration` shows access restrictions and diagnostic
+  settings** (0.1.0 → 0.2.0). The access-restriction rules for the main site and
+  the SCM (deployment) site were already returned by the per-app configuration
+  call but dropped from the evidence, so nothing showed whether an app accepts
+  traffic from anywhere. Each app's `configuration` now carries both rule lists,
+  their default actions, `scm_ip_security_restrictions_use_main`, and an
+  evaluated `main_site_allows_all_traffic` / `scm_site_allows_all_traffic`; the
+  summary counts the apps where either site lets every caller through. Each app
+  also gains `monitor_diagnostic_settings` (one `diagnostic_settings.list` per
+  app, still Reader-only), counted as `apps_with_diagnostic_settings` and
+  `apps_with_enabled_logs`. Existing fields and summary keys are unchanged.
+
+- **`azure_rbac_role_assignments` 0.2.0 collects resource-group and resource-level
+  grants.** The fetcher listed with `atScope()`, which returns only assignments at
+  the subscription scope and above, so a role granted on one resource group or one
+  resource — a Contributor on a single Key Vault, a data role on a storage account —
+  never reached the evidence. A second, unfiltered listing now fills
+  `results.role_assignments_below_subscription` (the unfiltered result minus the
+  `atScope()` set, same record shape), with new `below_subscription_*` and
+  `all_scopes_*` summary keys, including `all_scopes_assignments_by_scope_level`.
+  Every existing key is still computed over the subscription-and-above set and
+  means what it did. Also mapped to `KSI-CNA-DFP`, `KSI-IAM-JIT` and
+  `KSI-MLA-ALA`.
+- **`azure_policy_assignments` 0.2.0 resolves each assignment's policy effect.**
+  `enforced` only ever meant enforcementMode Default, so an enforced assignment of
+  an audit-only initiative read the same as one that denies. Each assignment now
+  carries `policy_effects` — the effect of its definition, or of every member of
+  its initiative, with `[parameters('effect')]`-style effects followed through the
+  assignment's parameter value, then the initiative's default, then the
+  definition's default, and the source of each recorded — plus `effect_class`
+  (`enforcing` / `audit_only` / `disabled` / `unresolved`) and `actually_enforces`
+  (an enforcing effect — deny, denyAction, modify, deployIfNotExists, append — under
+  enforcementMode Default). New summary keys: `actually_enforcing_assignments`,
+  `audit_effect_only_assignments`, `assignments_by_effect_class`,
+  `member_policy_effect_counts` and others; the existing `audit_only_assignments`
+  still means DoNotEnforce. Also mapped to `KSI-CNA-IBP` and `KSI-MLA-EVC`.
+- **`azure_key_vault_configuration` 0.2.0 records each vault's audit logging.**
+  A vault's data-plane operations — who read or changed which key, secret or
+  certificate — are logged only if a diagnostic setting exports the `AuditEvent`
+  category, and the evidence did not say whether one did. Each vault now carries
+  its diagnostic settings, `audit_logging_enabled` (true when a setting with a
+  destination exports `AuditEvent` directly or through the `audit` / `allLogs`
+  group), and the destinations the audit events reach. The summary adds
+  `vaults_with_audit_logging`, `vaults_without_audit_logging`,
+  `vaults_audit_logging_unknown` (the read failed — neither logged nor unlogged)
+  and `audit_logging_percentage`. Existing fields are unchanged. The fetcher now
+  also maps to `KSI-MLA-LET`, and to `KSI-CNA-MAT`, `KSI-CNA-RNT` and
+  `KSI-SVC-SIN`, which its network and SKU fields already evidenced.
 - **The TUI saves manifest edits as they are made.** Adding a fetcher, editing an
   entry, adding / editing / removing a target, picking an assessment, removing an
   entry, and changing the output dir all write the file immediately. Edits used
@@ -117,6 +571,40 @@ schemas and the `paramify` CLI — not the internal code.
   it and only `gitlab/significant_change_notifications` still carries one; it stays
   in the schema, marked deprecated, so that fetcher's data remains shape-checked
   until it migrates to the registry. New validators belong in `validators/`.
+
+### Fixed
+
+- **`aws_security_groups` shows all-traffic and IPv6 rules** (0.2.0 → 0.3.0).
+  A rule with no port range — protocol `-1`, "All traffic" — was dropped from
+  the evidence, so an inbound all-traffic rule from `0.0.0.0/0` and every
+  default allow-all egress rule were invisible. Such rules are now kept, with
+  `FromPort` and `ToPort` set to `null`. IPv6 ranges were never read, so a rule
+  open only to `::/0` looked closed; each rule now carries `IPv6CIDRs` (IPv6
+  ranges joined with `", "`) after `CIDRs`. Existing keys and their order are
+  unchanged.
+
+- **`aws_auto_scaling_high_availability` lists each group's instances.** A
+  query error left `Instances` empty for every Auto Scaling group.
+
+- **`aws_organizations_scp` keeps the organization record when one SCP cannot
+  be read.** A single unparseable policy used to drop the whole organization
+  from the evidence.
+
+- **AWS failure reports name the fetcher** instead of `aws__shared`, and an
+  expired `aws login` session is reported as expired credentials.
+
+- **`azure_defender_assessments` collects again, with severity** (fetcher
+  0.1.1). A missing import made every run fail with a `NameError`, so the
+  evidence set published zero assessments and reported the provider as
+  `unknown`. Behind that, `assessments.list` returns no metadata, so severity,
+  categories and assessment type were null on every record and
+  `unhealthy_by_severity` was always empty. It now reads each check's metadata
+  from `assessments_metadata.list_by_subscription()` — one extra call, joined on
+  the assessment name. And `resource_id` / `resource_source` were null on every
+  record, so the evidence couldn't say *which* resource failed a check: the
+  service returns `resourceDetails` with PascalCase keys the SDK doesn't
+  deserialize. Both are now read from the raw payload, with the assessed
+  resource's id taken from the assessment id as a last resort.
 
 ## [0.5.1-beta] - 2026-09-02
 

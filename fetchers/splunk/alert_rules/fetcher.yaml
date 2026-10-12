@@ -1,0 +1,70 @@
+name: splunk_alert_rules
+version: 0.1.0
+description: >-
+  Every alert on a Splunk deployment: what it watches for, who it notifies, and
+  how often it ran and fired.
+category: splunk
+
+supports_targets: true
+
+target_schema:
+  name:
+    type: string
+    required: true
+    env: SPLUNK_TARGET_NAME
+    description: Label for this Splunk deployment, used in the evidence filename.
+  base_url:
+    type: string
+    required: true
+    env: SPLUNK_BASE_URL
+    description: Management URL of the search head or standalone instance, e.g. https://splunk.example.com:8089
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: SPLUNK_VERIFY_SSL
+    description: Verify the management port's TLS certificate. Set false only for a self-signed test instance.
+  ca_bundle:
+    type: string
+    required: false
+    env: SPLUNK_CA_BUNDLE
+    description: >-
+      Path to the CA bundle that signed the management port's certificate, for
+      a deployment on a private CA. When set, TLS is verified against it and
+      verify_ssl is ignored.
+
+config_schema:
+  alert_lookback_days:
+    type: integer
+    default: 30
+    env: SPLUNK_ALERT_LOOKBACK_DAYS
+    description: >-
+      How far back to count scheduler runs (index=_internal, default retention
+      30 days) and alert fires (index=_audit) per alert.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: splunk_alert_rules.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-MLA-OSM
+  - KSI-MLA-RVL
+
+evidence_set:
+  reference_id: EVD-SPLUNK-ALERT-RULES
+  name: Splunk Alert Rules
+  instructions: >-
+    Every scheduled search Splunk classes as an alert (`alerts[]`), plus the
+    other scheduled searches, read from every app. The rule is Splunk Web's own
+    (`metadata.alert_definition`), and Splunk's server-side answer must agree.
+    `has_notification_action` is true when any action other than a
+    record-keeping one is set. Runs come from the scheduler log and fires from
+    `_audit`, over `lookback_days`. Needs `admin_all_objects`, without which
+    Splunk hides admin-only searches.

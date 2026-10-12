@@ -1,0 +1,120 @@
+name: wiz_cloud_configuration_posture
+version: 0.1.0
+description: >-
+  Summarizes Wiz cloud configuration (CSPM) rule results for one security
+  framework, NIST SP 800-53 Revision 5 by default: pass rate, open failures by
+  severity and age, top failing rules, per cloud account.
+category: wiz
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: wiz_cloud_configuration_posture.json
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read-only scopes).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov) or
+      https://api.us17.app.wiz.io/graphql (commercial).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: >-
+      Token URL from Tenant Info > Authentication URL. Defaults to Wiz for Gov.
+      Commercial tenants use https://auth.app.wiz.io/oauth/token.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  page_size:
+    type: integer
+    required: false
+    env: WIZ_PAGE_SIZE
+    default: 100
+    description: Records per GraphQL page (max 500).
+  sla_critical_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_CRITICAL_DAYS
+    default: 30
+    description: Remediation window reported for CRITICAL findings.
+  sla_high_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_HIGH_DAYS
+    default: 30
+    description: Remediation window reported for HIGH findings.
+  sla_medium_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_MEDIUM_DAYS
+    default: 90
+    description: Remediation window reported for MEDIUM findings.
+  sla_low_days:
+    type: integer
+    required: false
+    env: WIZ_SLA_LOW_DAYS
+    default: 180
+    description: Remediation window reported for LOW findings.
+  max_records:
+    type: integer
+    required: false
+    env: WIZ_MAX_RECORDS
+    default: 50000
+    description: Safety cap on records pulled. Hitting it is reported as a failure, never silent truncation.
+  include_raw_findings:
+    type: boolean
+    required: false
+    env: WIZ_INCLUDE_RAW_FINDINGS
+    default: true
+    description: Include every result row in the evidence. Set false on large estates to keep only the summary.
+  security_framework:
+    type: string
+    required: false
+    env: WIZ_SECURITY_FRAMEWORK
+    default: NIST SP 800-53 Revision 5
+    description: >-
+      Exact Wiz framework name to evaluate, e.g. "NIST SP 800-53 Revision 5" or
+      "FedRAMP (High, Moderate, and Low levels)". Looked up by name at run time.
+
+evidence_set:
+  reference_id: EVD-WIZ-CLOUD-CONFIG-POSTURE
+  name: Wiz Cloud Configuration Posture
+  instructions: >-
+    Script: fetcher.py. Read-only service account (scopes
+    read:cloud_configuration, read:security_frameworks). Resolves the framework
+    by name via securityFrameworks, then pages configurationFindings filtered to
+    that framework and to PASS/FAIL results. Summarizes pass rate, open failures
+    by severity and age against remediation windows, top failing rules and
+    results per cloud account. Flags a result set of exactly 10,000 rows as
+    probable truncation.
+  description: >-
+    Wiz cloud configuration rule results against a named security framework,
+    evidencing that cloud resource configuration is continuously assessed
+    against a baseline.
+
+ksis:
+  - KSI-MLA-EVC
+  - KSI-CNA-EIS

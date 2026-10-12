@@ -1,0 +1,10 @@
+---
+description: >
+  Wiz cloud security platform (CNAPP), commercial and Wiz for Government.
+  Read-only GraphQL fetchers that collect cloud account scan coverage, posture
+  issues, and host and container vulnerability findings, authenticated with a
+  Wiz service account (OAuth2 client credentials). Eleven are evidence
+  fetchers. Three are issue reports for Paramify assessment pipelines:
+  wiz_stig_compliance_report and wiz_vulnerability_findings, assembled from
+  read-only queries, and wiz_issues_report, which downloads the last run of an
+  Issues report scheduled in Wiz. None writes to Wiz.

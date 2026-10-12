@@ -1,12 +1,16 @@
 name: azure_network_security_groups
-version: 0.1.0
+version: 0.2.0
 description: >
   Every network security group in the subscription with its inline security rules
   (destination port range, protocol, source address prefix, access, direction) —
   enough to show whether an admin port such as SSH (22) or RDP (3389) is reachable
   from the Internet — plus every virtual network with its subnets' NSG association
   and DDoS protection state, which shows whether segmentation is actually enforced
-  rather than merely defined.
+  rather than merely defined. Each NSG also carries its default (platform) rules, so
+  the effective outbound posture is visible: an NSG whose first catch-all Internet
+  rule is the default AllowInternetOutBound permits all egress. Every network
+  interface is listed with its effective NSG coverage, on the NIC itself or
+  inherited from its subnet; a NIC with neither is unfiltered.
 category: azure
 
 supports_targets: true
@@ -42,11 +46,15 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 ksis:
   - KSI-CNA-RNT
   - KSI-CNA-MAT
+  - KSI-CNA-ULN   # subnet and NIC NSG association: which workloads sit behind a filter
+  - KSI-CNA-DFP   # inbound and outbound rules, default rules included, define what traffic is allowed
 
 evidence_set:
   reference_id: EVD-AZURE-NSG
   name: Azure Network Security Groups
   instructions: >
     Script: fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient):
-    network_security_groups.list_all(), virtual_networks.list_all(). Maps to
-    KSI-CNA-RNT / KSI-CNA-MAT.
+    network_security_groups.list_all() (security_rules and default_security_rules),
+    virtual_networks.list_all(), network_interfaces.list_all(). Reader is
+    sufficient — all GETs. Maps to KSI-CNA-RNT / KSI-CNA-MAT / KSI-CNA-ULN /
+    KSI-CNA-DFP.

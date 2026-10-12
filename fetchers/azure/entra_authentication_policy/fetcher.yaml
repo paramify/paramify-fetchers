@@ -1,0 +1,81 @@
+name: azure_entra_authentication_policy
+version: 0.1.0
+description: >
+  Which sign-in methods the Microsoft Entra ID tenant allows: every method in the
+  authentication methods policy with its state, targets and settings, with SMS and
+  Voice flagged weak and FIDO2 (including passkeys) and X.509 certificates flagged
+  phishing-resistant, plus the registration campaign and the policy's migration
+  state. Also security defaults, and Entra password protection (custom
+  banned-password list and smart lockout) with the tenant's Entra ID licence tier,
+  since enforcing a custom banned-password list needs P1. Windows Hello for
+  Business is configured through device management, not this policy, and is not
+  covered.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_entra_authentication_policy.json
+  aggregation: per_target
+
+target_schema:
+  # Microsoft Graph data is TENANT-scoped, so the fanout unit here is the tenant,
+  # not the subscription: one target per Entra tenant. Two targets differing only
+  # by subscription_id would collect byte-identical evidence.
+  tenant_id:
+    type: string
+    required: false
+    env: AZURE_TENANT_ID
+    description: >
+      Entra tenant id to collect from, and the discriminator for this fetcher's
+      output filename. Optional — omit to use whichever tenant the ambient
+      credential authenticates into, in which case the tenant is read back from
+      Microsoft Graph's organization endpoint.
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id. Optional and NOT used to scope collection — Graph data
+      is tenant-wide. Set it only to correlate this tenant's evidence with the
+      subscription-scoped Azure evidence from the same manifest; it is recorded in
+      the payload metadata and nowhere else.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-tenant runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+# Microsoft Graph permissions (application permissions, admin consent):
+#   Policy.Read.All        — authenticationMethodsPolicy and
+#                            identitySecurityDefaultsEnforcementPolicy
+#   Directory.Read.All     — groupSettings, groupSettingTemplates, subscribedSkus
+#                            (Organization.Read.All also covers subscribedSkus)
+# An `az login` session CANNOT read the authentication methods policy or security
+# defaults: the Azure CLI's first-party client is not pre-authorized for
+# Policy.Read.All, so both return 403 however privileged the signed-in user is.
+# Run it as an app registration or managed identity holding the permissions above.
+# A denied read is recorded as an API failure and the run exits non-zero; the
+# fields it would have filled read null, never false.
+
+ksis:
+  - KSI-IAM-APM
+
+evidence_set:
+  reference_id: EVD-AZURE-ENTRA-AUTH-METHODS-POLICY
+  name: Microsoft Entra ID Authentication Methods Policy
+  instructions: >
+    Script: fetcher.py. Microsoft Graph calls: GET /policies/authenticationMethodsPolicy
+    and GET /policies/identitySecurityDefaultsEnforcementPolicy (Policy.Read.All);
+    GET /groupSettings and GET /groupSettingTemplates/5cf42378-d67d-4f36-ba46-e8b86229381d
+    (Password Rule Settings) and GET /subscribedSkus (Directory.Read.All);
+    GET /organization. Collections paged via @odata.nextLink.

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Inventory payload",
+  "description": "The payload a `kind: inventory` fetcher writes (the envelope's `payload`). Only the outer shape is fixed: each fetcher chooses its own record fields, and a Paramify inventory pipeline maps them to Inventory fields. Checked by framework/inventory.py when the output is enveloped. See docs/inventory_fetchers.md.",
+  "type": "object",
+  "required": ["data", "records_included"],
+  "properties": {
+    "data": {
+      "type": "array",
+      "description": "One record per asset. The inventory pipeline's data path is `payload.data`.",
+      "items": {
+        "type": "object",
+        "required": ["unique_asset_identifier"],
+        "properties": {
+          "unique_asset_identifier": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The asset's stable ID in its own system (an ARN, an Azure resource ID). Unique within the file: the pipeline matches Inventory items on it."
+          }
+        }
+      }
+    },
+    "records_included": {
+      "type": "boolean",
+      "description": "False when the fetcher withheld its records because collection was incomplete. `data` is then empty."
+    }
+  },
+  "if": {
+    "properties": { "records_included": { "const": false } },
+    "required": ["records_included"]
+  },
+  "then": {
+    "properties": { "data": { "maxItems": 0 } }
+  }
+}

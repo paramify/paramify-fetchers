@@ -55,6 +55,15 @@ class TargetField:
     description: Optional[str] = None
 
 
+# How often a set expects a new artifact — the `frequency` enum on Paramify's
+# /evidence endpoints (API 0.10.0). Every fetcher defaults to THREE_DAY.
+EVIDENCE_FREQUENCIES = (
+    "NOT_SET", "DAILY", "THREE_DAY", "WEEKLY", "BIWEEKLY",
+    "MONTHLY", "QUARTERLY", "BIANNUAL", "ANNUAL",
+)
+DEFAULT_EVIDENCE_FREQUENCY = "THREE_DAY"
+
+
 @dataclass
 class EvidenceSet:
     """Paramify evidence-set identity for a fetcher (1 fetcher = 1 evidence set).
@@ -67,6 +76,7 @@ class EvidenceSet:
     name: str
     instructions: Optional[str] = None
     description: Optional[str] = None
+    frequency: str = DEFAULT_EVIDENCE_FREQUENCY
 
 
 @dataclass
@@ -161,6 +171,17 @@ class Fetcher:
         """
         return self.kind == "issue_report"
 
+    @property
+    def is_inventory(self) -> bool:
+        """True when this fetcher's evidence is an asset inventory.
+
+        An inventory is evidence in every other respect (enveloped, sent to its
+        evidence set by the evidence uploader). The difference is the payload
+        contract, checked when the output is enveloped, and that the uploader
+        only sends one the run collected completely. See framework/inventory.py.
+        """
+        return self.kind == "inventory"
+
 
 @dataclass
 class Requires:
@@ -195,6 +216,14 @@ class PlatformSpec:
     config_schema: Dict[str, ConfigField] = field(default_factory=dict)
     secrets: List["Secret"] = field(default_factory=list)
     passthrough_env: List[str] = field(default_factory=list)
+    #: Env vars that constitute an explicit identity CHOICE when a target sets
+    #: one (AWS_PROFILE). Setting one supersedes `credential_env` for that
+    #: invocation — see executor._drop_superseded_credentials.
+    selector_env: List[str] = field(default_factory=list)
+    #: Static credential vars a selector displaces. Listed separately from
+    #: passthrough_env because they stay passable for ambient (target-less)
+    #: collection; they are only dropped when a target names an identity.
+    credential_env: List[str] = field(default_factory=list)
     requires: "Requires" = field(default_factory=lambda: Requires())
     description: Optional[str] = None
 

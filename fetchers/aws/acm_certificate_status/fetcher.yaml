@@ -1,5 +1,5 @@
 name: aws_acm_certificate_status
-version: 0.1.0
+version: 0.2.0
 description: For each ACM certificate in the target region, reports validation status, expiry (NotAfter / days remaining), key algorithm, renewal eligibility, and the resources currently using the certificate.
 category: aws
 

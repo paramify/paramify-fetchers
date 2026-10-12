@@ -55,7 +55,10 @@ if [ $list_exit -ne 0 ]; then
     echo "aws ec2 describe-instances (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list EC2 instances"
 else
-    jq --argjson data "$instances" '.results += [$data[][]]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+    # Fed on stdin, not --argjson: Linux caps one argv string at 128 KiB, which
+    # the whole instance list passes at a few hundred instances -- jq then fails
+    # and results stay [] with nothing logged.
+    printf '%s' "$instances" | jq --slurpfile data /dev/stdin '.results += [$data[0][][]]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

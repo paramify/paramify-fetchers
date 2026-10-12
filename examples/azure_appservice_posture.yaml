@@ -1,6 +1,7 @@
 # Azure application-platform and governance evidence — the App Service web apps and
-# function apps that serve the workload, and the Azure Policy assignments plus
-# Databricks workspaces that govern and process around it.
+# function apps that serve the workload, the App Service plans they run on, and the
+# Azure Policy assignments plus Databricks workspaces that govern and process around
+# it.
 #
 # Auth is azure-identity's DefaultAzureCredential — there is no secret to set.
 #   - Local:      az login          (cached CLI token under $HOME)
@@ -10,7 +11,7 @@
 # See fetchers/_categories/azure.yaml for the full resolution order.
 #
 # Read-only access needed: the built-in **Reader** role on each subscription in
-# `targets` covers three of the four fetchers.
+# `targets` covers four of the five fetchers.
 #
 # azure_function_app_configuration needs MORE than Reader. Two of its calls are ARM
 # POST /action operations, so grant Reader plus a custom role carrying exactly:
@@ -46,6 +47,11 @@ run:
 
   fetchers:
     - use: azure_app_service_configuration
+      targets:
+        - subscription_id: 00000000-0000-0000-0000-000000000000
+          environment: preprod
+
+    - use: azure_app_service_plans
       targets:
         - subscription_id: 00000000-0000-0000-0000-000000000000
           environment: preprod

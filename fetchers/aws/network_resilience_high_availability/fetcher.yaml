@@ -1,5 +1,5 @@
 name: aws_network_resilience_high_availability
-version: 0.1.0
+version: 0.2.0
 description: Lists VPC subnets and NAT gateways across availability zones for network resilience evidence.
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-NETWORK-RESILIENCE-HA
   name: Network Resilience High Availability
-  instructions: 'Script: network_resilience_high_availability.sh. Commands executed: aws ec2 describe-vpcs, aws ec2 describe-subnets, aws ec2 describe-route-tables'
+  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 describe-subnets, aws ec2 describe-nat-gateways'

@@ -1,5 +1,5 @@
 name: aws_apigateway_tls_enforcement
-version: 0.1.0
+version: 0.2.0
 description: Collects API Gateway REST API endpoint configuration, stage-level security settings (client certificate, WAF, logging, tracing, cache encryption), and custom domain name TLS minimum version (securityPolicy).
 category: aws
 

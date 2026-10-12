@@ -27,6 +27,7 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from framework.config_loader import discover_fetchers, discover_platforms
+from framework.contract import DEFAULT_EVIDENCE_FREQUENCY, EVIDENCE_FREQUENCIES
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHERS_ROOT = REPO_ROOT / "fetchers"
@@ -133,7 +134,8 @@ def test_template_yaml_matches_schema(yaml_path: Path) -> None:
 
 def test_every_fetcher_declares_the_identity_its_kind_needs() -> None:
     """An evidence fetcher needs an evidence_set to reach an evidence set; an
-    issue report needs an issue_report block to reach an assessment. The schema
+    issue report needs an issue_report block to reach an assessment; an
+    inventory needs an evidence_set for its pipeline to read. The schema
     enforces this per file — this asserts it across the discovered set, so a
     fetcher that would be silently ignored by both uploaders fails the suite.
     """
@@ -142,9 +144,46 @@ def test_every_fetcher_declares_the_identity_its_kind_needs() -> None:
         if f.is_issue_report:
             if f.issue_report is None or f.evidence_set is not None:
                 missing.append(f"{name}: kind=issue_report but identity blocks are wrong")
+        elif f.is_inventory:
+            if f.evidence_set is None or f.issue_report is not None:
+                missing.append(f"{name}: kind=inventory but identity blocks are wrong")
         elif f.issue_report is not None:
             missing.append(f"{name}: kind=evidence but declares an issue_report block")
     assert not missing, "\n".join(missing)
+
+
+def test_every_evidence_fetcher_has_a_frequency() -> None:
+    """A fetcher.yaml that omits evidence_set.frequency gets the default, so every
+    evidence set the uploader creates carries one."""
+    bad = [
+        f"{name}: {f.evidence_set.frequency!r}"
+        for name, f in discover_fetchers(REPO_ROOT).items()
+        if f.evidence_set and f.evidence_set.frequency not in EVIDENCE_FREQUENCIES
+    ]
+    assert not bad, "\n".join(bad)
+
+
+def test_frequency_enum_matches_the_contract() -> None:
+    """The schema enum and the Python constant are two copies of Paramify's list;
+    they must not drift."""
+    schema = json.loads((SCHEMAS_ROOT / "fetcher_schema.json").read_text())
+    freq = schema["properties"]["evidence_set"]["properties"]["frequency"]
+    assert tuple(freq["enum"]) == EVIDENCE_FREQUENCIES
+    assert freq["default"] == DEFAULT_EVIDENCE_FREQUENCY == "THREE_DAY"
+
+
+def test_schema_rejects_an_unknown_frequency() -> None:
+    validator = Draft202012Validator(json.loads((SCHEMAS_ROOT / "fetcher_schema.json").read_text()))
+    doc = {
+        "name": "x_y", "version": "0.1.0", "description": "d",
+        "runtime": {"type": "python", "entry": "fetcher.py"},
+        "output": {"type": "json", "path": "o.json"},
+        "secrets": [],
+        "evidence_set": {"reference_id": "EVD-X", "name": "X", "frequency": "EVERY_THREE_DAYS"},
+    }
+    assert list(validator.iter_errors(doc))
+    doc["evidence_set"]["frequency"] = "THREE_DAY"
+    assert not list(validator.iter_errors(doc))
 
 
 def test_issue_report_template_varies_its_filename_per_target() -> None:

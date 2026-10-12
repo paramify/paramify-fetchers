@@ -1,0 +1,29 @@
+# Jira fetchers are python (requests) against the Jira Cloud REST API, plus the
+# Jira Service Management API where the site has it. No ambient identity: one
+# Atlassian account email + API token per site, declared once here and shared by
+# every fetcher in the category.
+description: >-
+  Atlassian Jira Cloud and Jira Service Management. Site and project inventory,
+  issue schemes, service desks, and recent issue activity — change and incident
+  tickets included. One account email, API token and site URL per tenant.
+
+requires:
+  python_packages:
+    - requests
+
+secrets:
+  - name: email
+    env: JIRA_EMAIL
+    description: Email of the Atlassian account the API token belongs to.
+  - name: api_token
+    env: JIRA_API_TOKEN
+    description: >-
+      Atlassian API token (id.atlassian.com → Security → API tokens). The account
+      needs only Browse Projects on the projects to be collected; no Jira admin.
+
+config_schema:
+  base_url:
+    type: string
+    required: true
+    env: JIRA_BASE_URL
+    description: Jira Cloud site URL, e.g. https://<site>.atlassian.net

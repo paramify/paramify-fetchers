@@ -1,5 +1,5 @@
 name: aws_database_high_availability
-version: 0.1.0
+version: 0.2.0
 description: Collects RDS DB instances and Aurora DB clusters with their Multi-AZ deployment and availability-zone configuration as evidence of database high availability.
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DATABASE-HA
   name: Database High Availability
-  instructions: 'Script: database_high_availability.sh. Commands executed: aws rds describe-db-instances, aws rds describe-db-clusters'
+  instructions: 'Script: fetcher.sh. Commands executed: aws rds describe-db-instances, aws rds describe-db-clusters'

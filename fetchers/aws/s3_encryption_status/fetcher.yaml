@@ -1,5 +1,5 @@
 name: aws_s3_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each S3 bucket in the account, reports server-side encryption configuration (algorithm, KMS key, bucket key) plus aggregate encryption coverage percentage.
 category: aws
 
@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-S3-ENC
   name: S3 Encryption
-  instructions: 'Script: s3_encryption_status.sh. Commands executed: aws s3api list-buckets, aws s3api get-bucket-encryption'
+  instructions: 'Script: fetcher.sh. Commands executed: aws s3api list-buckets, aws s3api get-bucket-encryption'

@@ -1,0 +1,58 @@
+name: azure_resource_inventory
+version: 0.1.0
+description: >
+  An automatically generated inventory of every resource in the subscription, read
+  from Azure Resource Graph's `Resources` table rather than service by service: each
+  resource's id, name, type, location, resource group, tags, SKU and kind where the
+  resource type has them, and its provisioning state. Summarized as the total count
+  and the counts by resource type and by location, plus how many resources carry no
+  tags at all. The inventory is paged to the end — a result Resource Graph reports as
+  truncated, or a page count that disagrees with its own total, is a collection
+  failure rather than a short list. Resource Graph indexes ARM resources only:
+  resource groups and subscriptions live in its separate `ResourceContainers` table
+  and are not counted here.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_resource_inventory.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-PIY-GIV      # Generating inventories — a complete, automatically generated resource inventory
+
+evidence_set:
+  reference_id: EVD-AZURE-RESOURCE-INVENTORY
+  name: Azure Resource Inventory
+  instructions: >
+    Script: fetcher.py. Azure SDK call (azure-mgmt-resourcegraph ResourceGraphClient):
+    resources(QueryRequest(subscriptions=[<subscription_id>], query="Resources |
+    project id, name, type, location, resourceGroup, tags, sku, kind,
+    provisioningState = tostring(properties.provisioningState) | order by id asc",
+    options=QueryRequestOptions(top=1000, skip_token=<previous page's $skipToken>,
+    result_format="objectArray"))), repeated until no $skipToken is returned. Reader
+    is sufficient — Resource Graph returns only the resources the caller can read.

@@ -9,7 +9,7 @@ re-upload. See docs/uploader_design.md.
 
 Per evidence file the uploader:
   1. reads the envelope `metadata.evidence_set` (skips with a warning if absent),
-  2. applies any customer override (reference_id / name / instructions),
+  2. applies any customer override (reference_id / name / instructions / frequency),
   3. get-or-creates the evidence set by reference_id,
   4. picks the channel to upload through, where the set has any (see
      resolve_channel — artifacts uploaded outside a configured channel do not
@@ -40,6 +40,7 @@ from dotenv import load_dotenv
 # rule locally — duplicating it is what let the uploader and the fetchers disagree.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from framework.contract import DEFAULT_EVIDENCE_FREQUENCY  # noqa: E402
 from framework.paramify_auth import (  # noqa: E402
     READ_TOKEN_ENV,
     UPLOAD_TOKEN_ENV,
@@ -101,7 +102,13 @@ class ParamifyClient:
 
     def create_evidence_set(self, es: Dict) -> Optional[Dict]:
         """Create the evidence set; on 'already exists' fall back to find (idempotent)."""
-        body = {"referenceId": es["reference_id"], "name": es["name"], "automated": True}
+        body = {
+            "referenceId": es["reference_id"],
+            "name": es["name"],
+            "automated": True,
+            # Envelopes written before the field existed carry no frequency.
+            "frequency": es.get("frequency") or DEFAULT_EVIDENCE_FREQUENCY,
+        }
         if es.get("description"):
             body["description"] = es["description"]
         if es.get("instructions"):
@@ -168,10 +175,12 @@ def is_enveloped(obj) -> bool:
 
 
 def find_latest_run(output_dir: Path) -> Optional[Path]:
+    """The newest run that holds evidence — not simply the newest run, which is
+    often a pipeline manifest's (issue reports only) sharing the same output dir."""
     if not output_dir.is_dir():
         return None
     runs = sorted((p for p in output_dir.glob("run-*") if p.is_dir()), reverse=True)
-    return runs[0] if runs else None
+    return next((r for r in runs if any(iter_evidence_files(r))), None)
 
 
 def iter_evidence_files(run_dir: Path):
@@ -193,7 +202,7 @@ def resolve_evidence_set(metadata: Dict, overrides: Dict) -> Optional[Dict]:
         return None
     ov = override_for(metadata, overrides)
     resolved = dict(es)
-    for key in ("reference_id", "name", "instructions", "description"):
+    for key in ("reference_id", "name", "instructions", "description", "frequency"):
         if key in ov:
             resolved[key] = ov[key]
     return resolved
@@ -386,6 +395,20 @@ def upload_run(
                 )
                 errors += 1
                 add_result({"file": path.name, "outcome": "error", "reason": "missing/incomplete evidence_set"})
+                continue
+
+            # An inventory pipeline reads the artifact as the whole estate, so a
+            # partial or empty one would read as assets that are gone. The runner
+            # judged completeness when it enveloped the file (framework/inventory.py);
+            # this is not optional the way skip_failed is.
+            inventory = metadata.get("inventory")
+            if isinstance(inventory, dict) and inventory.get("complete") is not True:
+                why = "; ".join(inventory.get("incomplete_because") or ["not marked complete"])
+                reason = f"incomplete inventory not sent: {why}"
+                logger.warning("%s: %s", path.name, reason)
+                skipped_failed += 1
+                add_result({"file": path.name, "outcome": "skipped_failed",
+                            "reference_id": es["reference_id"], "reason": reason})
                 continue
 
             if metadata.get("status") == "failed" and skip_failed:

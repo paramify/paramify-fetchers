@@ -62,13 +62,16 @@ if [ $list_exit -ne 0 ]; then
 fi
 stacks="${stacks:-[]}"
 
-stack_count=$(echo "$stacks" | jq 'length')
-i=0
-while [ "$i" -lt "$stack_count" ]; do
-    stack=$(echo "$stacks" | jq ".[$i]")
-    i=$((i + 1))
-    stack_name=$(echo "$stack" | jq -r '.StackName')
+# The per-stack describe below stays one call per stack. Its answers are
+# streamed to a file, one JSON value per stack, and merged into the list in one
+# jq pass -- the loop used to re-parse the whole stack list, spawn four jq
+# processes and rewrite the output file for every stack.
+_STACKS_JSON="$(mktemp -t aws_cloudformation_drift_stacks.XXXXXX.json)"
+_TP_JSON="$(mktemp -t aws_cloudformation_drift_tp.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_STACKS_JSON" "$_TP_JSON"' EXIT
+printf '%s' "$stacks" > "$_STACKS_JSON"
 
+while read -r stack_name; do
     # Per-stack describe to obtain EnableTerminationProtection (absent in the list form).
     term_protection=$(aws cloudformation describe-stacks \
         --stack-name "$stack_name" \
@@ -81,9 +84,11 @@ while [ "$i" -lt "$stack_count" ]; do
     fi
     term_protection="${term_protection:-null}"
 
-    record=$(echo "$stack" | jq --argjson tp "$term_protection" '. + {"EnableTerminationProtection": $tp}')
-    jq --argjson rec "$record" '.results += [$rec]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-done
-unset i
+    printf '%s\n' "$term_protection" >> "$_TP_JSON"
+done < <(jq -r '.[]?.StackName' "$_STACKS_JSON" 2>/dev/null)
+
+jq --slurpfile stacks "$_STACKS_JSON" --slurpfile tp "$_TP_JSON" '
+    .results += [($stacks[0] // []) | to_entries[] | .value + {"EnableTerminationProtection": $tp[.key]}]
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

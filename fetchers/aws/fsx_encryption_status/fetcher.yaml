@@ -1,5 +1,5 @@
 name: aws_fsx_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: For each FSx file system in the region, reports encryption at rest (KMS key ID and file-system type). Aggregates a per-target encryption-coverage percentage.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-FSX-ENC
   name: FSx Encryption
-  instructions: 'Script: fsx_encryption_status.sh. Commands executed: aws fsx describe-file-systems.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws fsx describe-file-systems.'

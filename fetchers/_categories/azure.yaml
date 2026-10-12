@@ -75,6 +75,7 @@ secrets:
 requires:
   python_packages:
     - azure-identity
+    - azure-mgmt-cdn
     - azure-keyvault-keys
     - azure-mgmt-authorization
     - azure-mgmt-compute
@@ -82,15 +83,23 @@ requires:
     - azure-mgmt-containerservice
     - azure-mgmt-cosmosdb
     - azure-mgmt-databricks
+    - azure-mgmt-dns
+    - azure-mgmt-frontdoor
     - azure-mgmt-keyvault
+    - azure-mgmt-loganalytics
     - azure-mgmt-monitor
     - azure-mgmt-network
+    - azure-mgmt-policyinsights
     - azure-mgmt-postgresqlflexibleservers
+    - azure-mgmt-privatedns
     - azure-mgmt-rdbms
     - azure-mgmt-recoveryservices
     - azure-mgmt-recoveryservicesbackup
+    - azure-mgmt-redis
+    - azure-mgmt-redisenterprise
     - azure-mgmt-resource
     - azure-mgmt-resource-policy
+    - azure-mgmt-resourcegraph
     - azure-mgmt-security
     - azure-mgmt-sql
     - azure-mgmt-storage

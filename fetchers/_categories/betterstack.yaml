@@ -1,0 +1,20 @@
+description: >-
+  Better Stack public status pages. Reads a status page's public `/index.json`
+  document — the same JSON the hosted page renders itself from — for the page's
+  identity, its components and their reported availability and 90-day status
+  history, and its published status reports and updates.
+
+# No secrets and no `auth:` block. A Better Stack status page publishes
+# `/index.json` to anyone who can reach the page, so these fetchers need no
+# credential at all — which is also the limit of what this category can prove
+# (see the fetcher's evidence_set.instructions). Anything that needs a Better
+# Stack API token — monitor configuration, check frequency, probe regions — is a
+# different category of evidence and would need its own fetcher and a secret.
+#
+# No `requires:` block either. The one dependency is `requests`, which is a core
+# dependency of the framework itself (pyproject.toml [project].dependencies), so
+# installing the package installs it; doctor checking for it would be theatre.
+# That matches gitlab / okta / sentinelone, the other requests-only categories.
+# Declare a `requires.python_packages` list here the moment a fetcher in this
+# category imports anything that is not core — tests/test_category_requires.py
+# fails the suite otherwise.

@@ -1,5 +1,5 @@
 name: aws_detect_new_aws_resource
-version: 0.2.0
+version: 0.3.0
 description: Verifies the new-resource detection pipeline (AWS Config recorders, a configurable EventBridge rule and its targets/schedule, a configurable SNS topic and subscriptions) and validates enabled state, event-pattern presence and SNS target linkage. Monitoring intervals are checked only for scheduled rules.
 category: aws
 
@@ -46,4 +46,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DETECT-NEW-RESOURCE
   name: Detect New AWS Resource
-  instructions: 'Script: detect_new_aws_resource.sh. Commands executed: aws configservice describe-configuration-recorders, aws events list-rules, aws sns list-topics'
+  instructions: 'Script: fetcher.sh. Commands executed: aws configservice describe-configuration-recorders, aws configservice describe-configuration-recorder-status, aws configservice describe-delivery-channels, aws events list-rules, aws events describe-rule, aws events list-targets-by-rule, aws sns list-topics, aws sns list-subscriptions-by-topic'

@@ -1,0 +1,59 @@
+name: splunk_index_retention
+version: 0.1.0
+description: >-
+  Every index on a Splunk deployment, how long it keeps data, and whether that
+  data is tamper-evident.
+category: splunk
+
+supports_targets: true
+
+target_schema:
+  name:
+    type: string
+    required: true
+    env: SPLUNK_TARGET_NAME
+    description: Label for this Splunk deployment, used in the evidence filename.
+  base_url:
+    type: string
+    required: true
+    env: SPLUNK_BASE_URL
+    description: Management URL of the search head or standalone instance, e.g. https://splunk.example.com:8089
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: SPLUNK_VERIFY_SSL
+    description: Verify the management port's TLS certificate. Set false only for a self-signed test instance.
+  ca_bundle:
+    type: string
+    required: false
+    env: SPLUNK_CA_BUNDLE
+    description: >-
+      Path to the CA bundle that signed the management port's certificate, for
+      a deployment on a private CA. When set, TLS is verified against it and
+      verify_ssl is ignored.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: splunk_index_retention.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-MLA-OSM
+
+evidence_set:
+  reference_id: EVD-SPLUNK-INDEX-RETENTION
+  name: Splunk Index Retention and Integrity
+  instructions: >-
+    Every index, event and metric, with `retention_days` (frozenTimePeriodInSecs
+    in days; 0 freezes immediately), whether frozen data is archived rather than
+    deleted (`archives_on_freeze`), and whether data integrity control is on
+    (`data_integrity_control`: Splunk hashes each bucket, verifiable with
+    `splunk check-integrity`). The collection fails unless the list matches
+    indexes.conf and every index the search peers can search.

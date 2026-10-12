@@ -1,0 +1,67 @@
+name: splunk_role_index_access
+version: 0.1.0
+description: >-
+  Every role and user on a Splunk deployment, the indexes each can effectively
+  search, and who can delete events.
+category: splunk
+
+supports_targets: true
+
+target_schema:
+  name:
+    type: string
+    required: true
+    env: SPLUNK_TARGET_NAME
+    description: Label for this Splunk deployment, used in the evidence filename.
+  base_url:
+    type: string
+    required: true
+    env: SPLUNK_BASE_URL
+    description: Management URL of the search head or standalone instance, e.g. https://splunk.example.com:8089
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: SPLUNK_VERIFY_SSL
+    description: Verify the management port's TLS certificate. Set false only for a self-signed test instance.
+  ca_bundle:
+    type: string
+    required: false
+    env: SPLUNK_CA_BUNDLE
+    description: >-
+      Path to the CA bundle that signed the management port's certificate, for
+      a deployment on a private CA. When set, TLS is verified against it and
+      verify_ssl is ignored.
+
+config_schema:
+  dormant_days:
+    type: integer
+    default: 90
+    env: SPLUNK_DORMANT_DAYS
+    description: Days without a successful login before a user is reported dormant.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: splunk_role_index_access.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-MLA-ALA
+
+evidence_set:
+  reference_id: EVD-SPLUNK-ROLE-INDEX-ACCESS
+  name: Splunk Role and Index Access
+  instructions: >-
+    Every role and user with the indexes it can effectively search: own and
+    inherited grants minus denials, expanded against the real index list. `*`
+    covers every non-internal index and `_*` every internal one; neither crosses
+    over. Also who holds `delete_by_keyword` and other log-privilege
+    capabilities, who can search each index, and dormant or never-used accounts
+    (`dormant_days`). Needs `list_all_roles` and `list_all_users`, without which
+    Splunk hides roles and users.

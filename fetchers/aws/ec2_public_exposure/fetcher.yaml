@@ -1,5 +1,5 @@
 name: aws_ec2_public_exposure
-version: 0.1.0
+version: 0.2.0
 description: Lists EC2 instances with their public IP/DNS, IMDSv2 metadata options (http_tokens, http_endpoint), and attached security groups.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-EC2-PUBLIC-EXPOSURE
   name: EC2 Public Exposure
-  instructions: 'Script: ec2_public_exposure.sh. Commands executed: aws ec2 describe-instances.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 describe-instances.'

@@ -213,6 +213,63 @@ def _apply_config(
                 secret_sink.add(value)
 
 
+def _drop_superseded_credentials(
+    env: Dict[str, str],
+    target_set_env: List[str],
+    platform_spec: Optional[PlatformSpec],
+    shadow_sink: Optional[List[Tuple[str, str]]] = None,
+) -> None:
+    """Remove static credentials that a target's identity selector supersedes.
+
+    A target naming `profile: Audit` is an explicit statement of WHICH identity
+    to collect as. Static keys reach the same invocation through passthrough_env
+    or a manifest `secrets:` block, and the AWS credential chain consults env
+    keys BEFORE a profile's assume-role config whenever the profile is selected
+    via AWS_PROFILE — the `--profile` FLAG suppresses the env provider, the env
+    var does not. One stale key in the deployment therefore defeats every target
+    of a multi-account fanout at once, and the failure names the wrong culprit:
+    InvalidClientTokenId against a ~/.aws/config that is perfectly correct.
+
+    Dropping is the only resolution that honours the manifest. Letting the key
+    win collects the WRONG ACCOUNT's evidence under a target labelled with the
+    right one — evidence that looks valid and is attributed to an account it did
+    not come from, which is worse than a failed run.
+
+    Scoped to targets deliberately: a target-LESS entry means "collect here", so
+    ambient keys remain exactly how local dev and non-AWS runners authenticate.
+    """
+    if platform_spec is None or not target_set_env:
+        return
+    selectors = sorted(set(platform_spec.selector_env) & set(target_set_env))
+    if not selectors:
+        return
+    for var in platform_spec.credential_env:
+        if var in env:
+            del env[var]
+            if shadow_sink is not None:
+                shadow_sink.append((var, selectors[0]))
+
+
+def _emit_shadowed(
+    shadowed: List[Tuple[str, str]], on_note: Optional[Callable[[str], None]]
+) -> None:
+    """Say which static credentials the target's selector displaced.
+
+    Silence would be its own trap: the run goes green and nobody learns a stale
+    key is still sitting in the deployment, ready to break every entry whose
+    target does NOT name a profile.
+    """
+    if on_note is None or not shadowed:
+        return
+    names = ", ".join(sorted({var for var, _ in shadowed}))
+    selector = shadowed[0][1]
+    plural = "s" if len({var for var, _ in shadowed}) > 1 else ""
+    on_note(
+        f"target selects {selector}; ignored ambient credential{plural} {names} "
+        f"for this invocation — env keys outrank a profile's assume-role config"
+    )
+
+
 def invocation_dir(fetcher: Fetcher, run_dir: Path) -> Path:
     """Where this fetcher writes — the run dir, or its issue-reports/ subdir.
 
@@ -234,6 +291,7 @@ def _build_env(
     platform_cfg: Optional[PlatformConfig] = None,
     secret_sink: Optional[set] = None,
     note_sink: Optional[List[Tuple[str, str]]] = None,
+    shadow_sink: Optional[List[Tuple[str, str]]] = None,
 ) -> Dict[str, str]:
     """Build the env dict to pass to a single fetcher invocation.
 
@@ -299,6 +357,7 @@ def _build_env(
         if secret_sink is not None:
             secret_sink.add(resolved)
 
+    target_set: List[str] = []
     if target is not None:
         for field_name, field_spec in fetcher.target_schema.items():
             if not field_spec.env:
@@ -310,6 +369,11 @@ def _build_env(
                 )
             if value is not None:
                 env[field_spec.env] = str(value)
+                target_set.append(field_spec.env)
+
+    # Last, so it sees every credential the steps above injected, from either
+    # source: passthrough_env (ambient) or a manifest `secrets:` block.
+    _drop_superseded_credentials(env, target_set, platform_spec, shadow_sink)
 
     return env
 
@@ -524,8 +588,9 @@ def run_entry(
 
     Per-target failures are isolated — they don't abort sibling targets.
     When on_line is provided, each invocation streams its stdout lines to it.
-    on_note reports how the invocation was assembled — currently an optional
-    secret dropped because its reference could not be resolved.
+    on_note reports how the invocation was assembled — an optional secret
+    dropped because its reference could not be resolved, and a static credential
+    ignored because the target named an identity that supersedes it.
 
     `output_dir` is the run directory. An issue-report fetcher is pointed at its
     issue-reports/ subdirectory instead, and reports its outputs relative to the
@@ -564,9 +629,11 @@ def run_entry(
         try:
             secrets_seen = set()
             notes = []
+            shadowed: List[Tuple[str, str]] = []
             env = _build_env(fetcher, entry, target, inv_dir, platform_spec, platform_cfg,
-                             secrets_seen, notes)
+                             secrets_seen, notes, shadowed)
             _emit_notes(notes, on_note)
+            _emit_shadowed(shadowed, on_note)
             results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir))
         except (RuntimeError, SecretResolutionError) as e:
             now = _utc_now()

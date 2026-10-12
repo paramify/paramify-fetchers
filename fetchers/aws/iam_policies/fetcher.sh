@@ -49,54 +49,50 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": []}' \
   > "$OUTPUT_JSON"
 
-policies=$(aws iam list-policies --scope Local --query 'Policies[*].[PolicyName,PolicyId,Arn]' --output json 2>/dev/null)
+# Two paginated calls cover every customer-managed policy, instead of three per
+# policy (get-policy, get-policy-version, list-entities-for-policy), which ran
+# past the runner's timeout in accounts with hundreds of policies.
+# get-account-authorization-details returns each policy's metadata and every
+# version's document, plus each user, group and role with what it attaches; the
+# entity lists are that relation inverted. It needs
+# iam:GetAccountAuthorizationDetails (in ReadOnlyAccess and SecurityAudit).
+_POLICIES_JSON="$(mktemp -t aws_iam_policies_list.XXXXXX.json)"
+_GAAD_JSON="$(mktemp -t aws_iam_policies_gaad.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_POLICIES_JSON" "$_GAAD_JSON"' EXIT
+
+aws iam list-policies --scope Local --query 'Policies[*].Arn' --output json > "$_POLICIES_JSON" 2>/dev/null
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     echo "aws iam list-policies failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list IAM policies"
+elif [ "$(jq 'length' "$_POLICIES_JSON" 2>/dev/null || echo 0)" -eq 0 ]; then
+    :  # no customer-managed policies: nothing to describe
+elif ! aws iam get-account-authorization-details --filter LocalManagedPolicy User Group Role \
+        --query '{Policies:Policies,Users:UserDetailList[*].{Name:UserName,Attached:AttachedManagedPolicies[*].PolicyArn,Boundary:PermissionsBoundary.PermissionsBoundaryArn},Groups:GroupDetailList[*].{Name:GroupName,Attached:AttachedManagedPolicies[*].PolicyArn},Roles:RoleDetailList[*].{Name:RoleName,Attached:AttachedManagedPolicies[*].PolicyArn,Boundary:PermissionsBoundary.PermissionsBoundaryArn}}' \
+        --output json > "$_GAAD_JSON" 2>/dev/null; then
+    # Without it no policy can be described -- as when get-policy failed for each.
+    echo "aws iam get-account-authorization-details (policies) failed" >> "$_FAILURE_LOG"
 else
-    echo "$policies" | jq -c '.[]' | while read -r policy; do
-        policy_arn=$(echo "$policy" | jq -r '.[2]')
-
-        policy_data=$(aws iam get-policy --policy-arn "$policy_arn" --query 'Policy' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam get-policy ($policy_arn) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-
-        default_version=$(echo "$policy_data" | jq -r '.DefaultVersionId')
-
-        policy_doc=$(aws iam get-policy-version --policy-arn "$policy_arn" --version-id "$default_version" --query 'PolicyVersion.Document' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam get-policy-version ($policy_arn, $default_version) failed" >> "$_FAILURE_LOG"
-            policy_doc='{}'
-        fi
-
-        attached_entities=$(aws iam list-entities-for-policy --policy-arn "$policy_arn" --query '[PolicyGroups[*].GroupName,PolicyUsers[*].UserName,PolicyRoles[*].RoleName]' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam list-entities-for-policy ($policy_arn) failed" >> "$_FAILURE_LOG"
-            attached_entities='[[],[],[]]'
-        fi
-
-        policy_info=$(jq -n \
-            --argjson policy "$policy_data" \
-            --argjson doc "$policy_doc" \
-            --argjson entities "$attached_entities" \
-            '{
-                "PolicyName": $policy.PolicyName,
-                "PolicyId": $policy.PolicyId,
-                "Arn": $policy.Arn,
-                "CreateDate": $policy.CreateDate,
-                "UpdateDate": $policy.UpdateDate,
-                "Description": $policy.Description,
-                "PolicyDocument": $doc,
-                "AttachedGroups": $entities[0],
-                "AttachedUsers": $entities[1],
-                "AttachedRoles": $entities[2]
-            }')
-
-        jq --argjson policy "$policy_info" '.results += [$policy]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # list-entities-for-policy, with no usage filter, named entities that attach
+    # the policy OR use it as their permissions boundary; both are kept.
+    jq --slurpfile arns "$_POLICIES_JSON" --slurpfile gaad "$_GAAD_JSON" '
+        $gaad[0] as $g
+        | (reduce $g.Policies[]? as $p ({}; .[$p.Arn] = $p)) as $by_arn
+        | def using($entities; $arn): [$entities[]? | select(any((.Attached // [])[]; . == $arn) or .Boundary == $arn) | .Name];
+          .results += [$arns[0][]? | . as $arn | $by_arn[$arn] | select(. != null)
+            | {
+                "PolicyName": .PolicyName,
+                "PolicyId": .PolicyId,
+                "Arn": .Arn,
+                "CreateDate": .CreateDate,
+                "UpdateDate": .UpdateDate,
+                "Description": .Description,
+                "PolicyDocument": (first(.PolicyVersionList[]? | select(.IsDefaultVersion) | .Document) // {}),
+                "AttachedGroups": using($g.Groups; $arn),
+                "AttachedUsers": using($g.Users; $arn),
+                "AttachedRoles": using($g.Roles; $arn)
+            }]
+    ' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

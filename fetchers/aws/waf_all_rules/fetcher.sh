@@ -22,7 +22,8 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_waf_all_rules_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_waf_all_rules.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_waf_all_rules_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_ITEMS_JSON="$(mktemp -t aws_waf_all_rules_acls.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ITEMS_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_waf_all_rules %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_waf_all_rules %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -58,11 +59,15 @@ if [ -z "$web_acls" ]; then
 fi
 
 if [ -n "$web_acls" ]; then
+    # get-web-acl is genuinely one call per Web ACL (list-web-acls returns
+    # summaries only). Each response is appended raw and its full WebACL object
+    # is added in the one jq pass below, not a jq process and an output rewrite
+    # per ACL.
     while IFS=$'\t' read -r acl_id acl_name; do
         # Extract ID from ARN if necessary (ARN format: arn:partition:wafv2:region:account:scope/webacl/name/id)
         # The ID is the last segment after the final slash
         if [[ "$acl_id" == arn:* ]]; then
-            acl_id=$(echo "$acl_id" | awk -F'/' '{print $NF}')
+            acl_id="${acl_id##*/}"
         fi
 
         # Skip if we don't have both ID and name
@@ -77,14 +82,13 @@ if [ -n "$web_acls" ]; then
             echo "aws wafv2 get-web-acl failed for $acl_name ($acl_id) (exit=$ec)" >> "$_FAILURE_LOG"
             continue
         fi
-
-        # Extract the full WebACL object and store it
-        # This captures ALL WebACL data: Id, Name, ARN, Description, Scope, DefaultAction, Rules (with full details), VisibilityConfig, Capacity, etc.
-        webacl_full=$(echo "$acl_details" | jq '.WebACL')
-
-        # Store the complete WebACL object with ALL its data (including full rule objects with all fields)
-        jq --argjson webacl "$webacl_full" '.results += [$webacl]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+        printf '%s\n' "$acl_details" >> "$_ITEMS_JSON"
     done <<< "$web_acls"
+
+    # Store the complete WebACL object with ALL its data: Id, Name, ARN,
+    # Description, Scope, DefaultAction, Rules (with full details),
+    # VisibilityConfig, Capacity, etc.
+    jq --slurpfile acls "$_ITEMS_JSON" '.results += [$acls[] | .WebACL]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

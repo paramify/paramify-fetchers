@@ -1,7 +1,7 @@
 ---
 name: create-fetcher
 description: >
-  Create a new Paramify fetcher — evidence or issue report — or port an existing
+  Create a new Paramify fetcher — evidence, inventory or issue report — or port an existing
   one from another source. Use when the user wants to add a fetcher,
   integrate a new tool or data source (aws, azure, okta, gitlab, k8s, a
   vulnerability scanner, …), or scaffold a fetcher for a category. Runs a short
@@ -19,6 +19,18 @@ restate them here.
 The golden rules below are for an **evidence** fetcher, the default and the
 common case. Phase 0 checks whether you're actually writing an issue report,
 which has its own contract in `docs/issue_report_fetchers.md`.
+
+**Is this a whole new platform?** If nothing under `fetchers/` covers this tool
+yet and the goal is a slate rather than one fetcher, you want
+`onboard-platform` — it researches the API, stands up a sandbox with real data
+in it, and calls this skill per fetcher with the control claim already
+established. This skill on its own is the right entry point for adding a
+fetcher to a platform that already has some.
+
+**Called from `onboard-platform`?** The claim is already on disk at
+`.onboarding/<platform>/claim.md`. Read it and start Phase 2 from that control,
+not from "what evidence" — and note that skill owns the populated-evidence gate
+this one cannot reach (Phase 4).
 
 **Golden rules**
 - One fetcher = one evidence set. Directory is `fetchers/<category>/<short_name>/`;
@@ -44,8 +56,9 @@ which has its own contract in `docs/issue_report_fetchers.md`.
    ```
 
 3. **Decide the kind.** Does the source tool already compute the findings — is
-   this a vulnerability scan, a CSPM export, a Nessus file — or is the fetcher
-   asserting a state (MFA on, buckets encrypted)?
+   this a vulnerability scan, a CSPM export, a Nessus file — is the fetcher
+   listing every asset of a kind for Paramify's Inventory, or is it asserting a
+   state (MFA on, buckets encrypted)?
    - **Tool computes findings → ISSUE REPORT.** Copy
      `fetchers/_template_issue_report/` (not `_template/`) and follow
      `docs/issue_report_fetchers.md` for the rest of the build. Shared parts
@@ -58,11 +71,22 @@ which has its own contract in `docs/issue_report_fetchers.md`.
      run `suggest-validator`. The Phase 4 smoke test below expects a JSON
      evidence file — skip it. The check for this kind is: after a real run, the
      file in `<run>/issue-reports/` is byte-identical to the tool's own export.
+   - **Fetcher lists assets for Inventory → INVENTORY.** Copy
+     `fetchers/_template_inventory/` (not `_template/`) and read
+     `docs/inventory_fetchers.md`. It is an evidence fetcher with
+     `kind: inventory`, a required `evidence_set`, and a payload of `data`
+     (one record per asset, each with a unique `unique_asset_identifier`) plus
+     `records_included`. All or nothing: any failed page or unreadable asset
+     writes `data: []`, `records_included: false` and exits non-zero. Everything
+     below applies. In the Phase 4 smoke test, also check the envelope's
+     `metadata.inventory.complete` is true. Test the failure paths, not only the
+     happy one. A list of resources that backs a configuration claim (an IAM
+     role list proving least privilege) is evidence, not inventory.
    - **Fetcher asserts a state → EVIDENCE.** Continue below.
 
    Don't ask this as a question if the tool makes it obvious; a scanner is an
-   issue report, an identity provider is evidence. Ask only when the same tool
-   could plausibly be either.
+   issue report, an identity provider is evidence, "for the Inventory" is
+   inventory. Ask only when the same tool could plausibly be more than one.
 
 4. **Decide port vs new.** Ask: "Do you already have a working script that
    collects this evidence (in another repo, a local file, etc.)?"
@@ -163,6 +187,11 @@ single confirmation before building.
    Keep status output to one `logger.info`/`log_info` "Evidence saved to …"
    line on success. Mirror the reference fetcher's shape.
 
+   **Comments are rare and one line.** A one-line module docstring saying what
+   is collected; a comment only where the code would otherwise mislead (a
+   measured platform quirk, a non-obvious guard). What each field means and how
+   it is derived goes in `evidence_set.instructions`, not a docstring.
+
 5. **Wire failure → exit code** per `docs/authoring_a_fetcher.md` §"Detecting
    collection failures": track collection failures, exit non-zero if any
    occurred (Python: an `api_failures` list; bash: a temp-file counter).
@@ -221,6 +250,12 @@ The skill verifies **wiring**, not data — it can't hit the user's real tenant.
    that run produces real evidence, the `suggest-validator` skill can read it and
    propose a regex validator for the field that proves the control.
 
+   A green smoke test on an **empty** payload looks identical to one on a real
+   one, which is why "exit 0" is not the bar anywhere downstream. If you were
+   called from `onboard-platform`, hand back here — that skill runs against the
+   sandbox in `sandbox.json` and gates on *populated* evidence plus a validator
+   proven to fail.
+
 5. **Wire it into a manifest.** A fetcher on disk does not run until it's in a
    manifest's `run.fetchers:`. To add it and fill in the secrets/config/targets
    it needs, use the `wire-manifest` skill (or, quickly:
@@ -241,3 +276,4 @@ ones that bite most often:
 - A CLI arg parser for `--output-dir`/`--profile`/`--region` → read everything
   from env.
 - Forgetting `chmod +x` on a bash entry script.
+- A multi-paragraph docstring restating `evidence_set.instructions` → one line.

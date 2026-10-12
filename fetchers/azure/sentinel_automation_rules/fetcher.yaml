@@ -1,0 +1,60 @@
+name: azure_sentinel_automation_rules
+version: 0.1.0
+description: >
+  For every Microsoft Sentinel workspace in the subscription: each automation
+  rule with its order, what it triggers on (incidents or alerts, created or
+  updated), its conditions, whether it is enabled and unexpired, and its actions.
+  Actions include running a playbook (with the Logic App id), changing incident
+  status, severity, classification or owner, and adding a task. Per workspace:
+  active rules, active actions by type, and the playbooks they run.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_sentinel_automation_rules.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+  workspaces:
+    type: string
+    required: false
+    env: SENTINEL_WORKSPACES
+    description: >
+      Comma-separated workspace names or resource ids to limit collection to.
+      Optional — omit to collect every Sentinel-onboarded workspace in the
+      subscription.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-IAM-SUS      # Responding to suspicious activity — automated response on incidents
+  - KSI-MLA-RVL      # Reviewing logs — incidents are routed, notified and tasked automatically
+
+evidence_set:
+  reference_id: EVD-AZURE-SENTINEL-AUTOMATION-RULES
+  name: Azure Sentinel Automation Rules
+  instructions: >
+    Script: fetcher.py. ARM REST per Sentinel workspace: automationRules at
+    api-version 2025-09-01, every nextLink followed. active means
+    triggeringLogic.isEnabled is true and expirationTimeUtc is absent or in the
+    future. Condition values are counted, not copied. Playbook internals (Logic
+    Apps) are not read. Role: Microsoft Sentinel Reader.

@@ -50,28 +50,38 @@ jq -n \
 
 # --- per-script data collection (ported from prowler codebuild_service) ---
 
+_PROJECTS_JSON="$(mktemp -t aws_codebuild_pipeline_config_projects.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_PROJECTS_JSON"' EXIT
+
 # List all project names in this region. An empty list is valid evidence
 # (no CodeBuild projects) -> not logged as a failure.
-project_names=$(aws codebuild list-projects --query 'projects[*]' --output text 2>/dev/null)
+project_names=$(aws codebuild list-projects --query 'projects[*]' --output json 2>/dev/null)
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     echo "aws codebuild list-projects failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list CodeBuild projects"
 else
-    for project_name in $(aws_text_list "$project_names"); do
-        # batch-get-projects returns the full project config; keep only the
-        # KSI-CMT-VTD fields: source, environment, logging, artifact encryption.
-        project_info=$(aws codebuild batch-get-projects \
-            --names "$project_name" \
-            --query 'projects[0]' \
-            --output json 2>/dev/null)
+    # batch-get-projects takes up to 100 names per call; it was being called with
+    # one name at a time. A failed batch skips its projects, as a failed
+    # single-name call skipped one.
+    while read -r batch; do
+        [ -z "$batch" ] && continue
+        # shellcheck disable=SC2086  # batch is space-separated project names (no spaces allowed in them)
+        batch_info=$(aws codebuild batch-get-projects --names $batch --query 'projects' --output json 2>/dev/null)
         get_exit=$?
         if [ $get_exit -ne 0 ]; then
-            echo "aws codebuild batch-get-projects ($project_name) failed (exit=$get_exit)" >> "$_FAILURE_LOG"
+            echo "aws codebuild batch-get-projects ($batch) failed (exit=$get_exit)" >> "$_FAILURE_LOG"
             continue
         fi
+        printf '%s\n' "$batch_info" >> "$_PROJECTS_JSON"
+    done < <(printf '%s' "$project_names" | jq -r '[.[]?] | _nwise(100) | join(" ")')
 
-        project_data=$(echo "$project_info" | jq '{
+    # batch-get-projects returns the full project config; keep only the
+    # KSI-CMT-VTD fields: source, environment, logging, artifact encryption.
+    # Rows follow list-projects order, whatever order a batch came back in.
+    printf '%s' "$project_names" | jq --slurpfile names /dev/stdin --slurpfile batches "$_PROJECTS_JSON" '
+        (reduce ($batches | add // [])[] as $p ({}; .[$p.name] = $p)) as $by_name
+        | .results += [$names[0][]? | $by_name[.] | select(. != null) | {
             name: .name,
             arn: .arn,
             serviceRole: .serviceRole,
@@ -107,10 +117,7 @@ else
                     encryptionDisabled: (.logsConfig.s3Logs.encryptionDisabled)
                 }
             }
-        }')
-
-        jq --argjson data "$project_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+        }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish
