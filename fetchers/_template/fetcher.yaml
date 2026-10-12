@@ -1,5 +1,5 @@
 # Template fetcher.yaml. Copy this directory to fetchers/<category>/<short_name>/
-# and fill in the placeholders. See docs/porting_playbook.md for the full procedure.
+# and fill in the placeholders. See docs/authoring_fetcher_guide.md (a port: docs/porting_guide.md).
 #
 # Validated against framework/schemas/fetcher_schema.json.
 
