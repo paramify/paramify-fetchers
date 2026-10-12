@@ -20,7 +20,9 @@ The shipped validators are TEMPLATES (~80% right); customers tune them in
 Paramify. That is why the default is create-or-skip and why the per-instance
 validator id lives in a customer-side lock file, never in the shared registry.
 
-Auth: PARAMIFY_UPLOAD_API_TOKEN (source-agnostic env — .env, secret manager, CI).
+Auth: PARAMIFY_UPLOAD_API_TOKEN, falling back to PARAMIFY_API_TOKEN, resolved by
+framework.paramify_auth exactly as the other uploaders do (source-agnostic env —
+.env, secret manager, CI).
 """
 
 import argparse
@@ -37,7 +39,10 @@ import requests
 from dotenv import load_dotenv
 
 # Also runnable directly from any cwd, where only its own directory lands on
-# sys.path; the repo root is a fixed two levels up.
+# sys.path. Position in the repo is fixed, so derive the root rather than
+# duplicating the token-resolution and duplicate-refusal rules locally — the
+# syncer carrying its own copies is how it came to disagree with the other
+# uploaders about both (GitHub #83).
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from framework.custom_tags import (  # noqa: E402
@@ -45,10 +50,17 @@ from framework.custom_tags import (  # noqa: E402
     build_tagger,
     category_display_names,
 )
+from framework.paramify_auth import (  # noqa: E402
+    DEFAULT_BASE_URL,
+    READ_TOKEN_ENV,
+    UPLOAD_TOKEN_ENV,
+    resolve_base_url,
+    resolve_upload_token,
+)
+from framework.paramify_responses import already_present  # noqa: E402
 
 logger = logging.getLogger("paramify_validators_syncer")
 
-DEFAULT_BASE_URL = "https://app.paramify.com/api/v0"
 DEFAULT_LOCK_PATH = "./.paramify/validators-sync.lock.json"
 _REQUEST_TIMEOUT = 30
 
@@ -116,13 +128,23 @@ class ValidatorClient:
             params={"referenceId": reference_id},
             timeout=self.timeout,
         )
-        r.raise_for_status()
+        if r.status_code != 200:
+            # ParamifyError, not requests.HTTPError: the sync loop's per-set
+            # isolation and its callers reason about this module's own errors.
+            raise ParamifyError(
+                f"find evidence set {reference_id} failed "
+                f"(HTTP {r.status_code}): {r.text[:300]}"
+            )
         for ev in r.json().get("evidences", []):
             if ev.get("referenceId") == reference_id:
                 return ev.get("id")
         return None
 
     def associate_validator(self, evidence_id: str, validator_id: str) -> None:
+        """CONNECT a validator to an evidence set. Tolerant of an already-connected
+        state, read with the rule shared by every uploader: the API has no
+        association read-back, so a repeat CONNECT is the only way to assert the
+        link, and a refusal that says it already holds is success, not failure."""
         body = {
             "associationType": "CONNECT",
             "subjectType": "VALIDATOR",
@@ -133,11 +155,14 @@ class ValidatorClient:
             json=body,
             timeout=self.timeout,
         )
-        if r.status_code not in (200, 201, 204):
-            raise ParamifyError(
-                f"associate validator {validator_id} to set {evidence_id} failed "
-                f"(HTTP {r.status_code}): {r.text[:300]}"
-            )
+        if r.status_code in (200, 201, 204):
+            return
+        if already_present(r.status_code, r.text):
+            return  # already associated — the state we wanted holds
+        raise ParamifyError(
+            f"associate validator {validator_id} to set {evidence_id} failed "
+            f"(HTTP {r.status_code}): {r.text[:300]}"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -224,12 +249,7 @@ def sync_validators(
     load_dotenv()
     config = config or {}
     paramify_cfg = config.get("paramify") or {}
-    base_url = (
-        paramify_cfg.get("base_url")
-        or base_url
-        or os.environ.get("PARAMIFY_API_BASE_URL")
-        or DEFAULT_BASE_URL
-    )
+    base_url, _ = resolve_base_url(paramify_cfg.get("base_url") or base_url)
     url_error = _base_url_error(base_url)
     if url_error:
         logger.error(url_error)
@@ -240,14 +260,15 @@ def sync_validators(
     )
     lock = load_lock(lock_file)
 
-    token = token or os.environ.get("PARAMIFY_UPLOAD_API_TOKEN")
+    if token is None:
+        token, _ = resolve_upload_token()
     if client is None:
         # Build a client whenever we have a token — even in dry-run, so reads can
         # report create-vs-skip precisely. Writes stay gated on `not dry_run`.
         if token:
             client = ValidatorClient(token, base_url)
         elif not dry_run:
-            msg = "PARAMIFY_UPLOAD_API_TOKEN is not set"
+            msg = f"{UPLOAD_TOKEN_ENV} is not set (nor its fallback {READ_TOKEN_ENV})"
             logger.error(msg)
             raise ValueError(msg)
 

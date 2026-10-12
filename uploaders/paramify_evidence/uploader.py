@@ -51,6 +51,7 @@ from framework.paramify_auth import (  # noqa: E402
     resolve_base_url,
     resolve_upload_token,
 )
+from framework.paramify_responses import already_present  # noqa: E402
 
 logger = logging.getLogger("paramify_evidence_uploader")
 
@@ -105,7 +106,12 @@ class ParamifyClient:
         return None
 
     def create_evidence_set(self, es: Dict) -> Optional[Dict]:
-        """Create the evidence set; on 'already exists' fall back to find (idempotent)."""
+        """Create the evidence set; when it already exists, fall back to find (idempotent).
+
+        The API refuses a repeat `referenceId` with a message rather than
+        returning the existing set; `already_present` is the shared reading of
+        that refusal (400 today, 409 permitted by spec 0.9.2).
+        """
         body = {
             "referenceId": es["reference_id"],
             "name": es["name"],
@@ -120,7 +126,7 @@ class ParamifyClient:
         r = self.session.post(f"{self.base_url}/evidence", json=body, timeout=self.timeout)
         if r.status_code in (200, 201):
             return r.json()
-        if r.status_code == 400 and "already exists" in r.text.lower():
+        if already_present(r.status_code, r.text):
             return self.find_evidence_set(es["reference_id"])
         raise ParamifyError(
             f"create evidence set {es['reference_id']} failed (HTTP {r.status_code}): {r.text[:300]}"

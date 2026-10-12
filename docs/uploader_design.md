@@ -42,6 +42,14 @@ All three share the same operational contract:
 - **HTTPS-only token guard** — a non-https `base_url` is rejected before the token
   is ever sent, so the bearer token can't leak over plaintext. `localhost` is the
   only exception (local testing).
+- **One reading of "already there"** — the API has no get-or-create for evidence
+  sets and no read-back for associations, so a repeat create or CONNECT is
+  refused rather than ignored: HTTP 400 with a message naming the duplicate on
+  the live API, and spec 0.9.2 permits the same refusal as a 409. Every uploader
+  reads that refusal through `framework/paramify_responses.py`, which accepts
+  either status **only when the message says so** — a bare 400 is a validation
+  error and a bare 409 is a conflict we do not understand, and both stay
+  failures. That one rule is what makes re-running any stage idempotent.
 - **`--dry-run` / `--config` / `--json`** — preview read-only, point at a config,
   or emit a machine-readable summary. With no `--config`, every stage falls back
   to `./upload.yaml` at the repo root if it exists — which is how the TUI, which
@@ -245,8 +253,8 @@ The script's **display name is the evidence set's `name`**. After a create or
 update (or for every fetcher under `--reassociate`), the script is **CONNECTed**
 to the fetcher's evidence set — which is get-or-created by `reference_id` exactly
 as the evidence uploader does. The CONNECT is tolerant of an already-connected
-script (the API has no pre-check), so re-runs are idempotent. Only `SCRIPT`
-associations are automated.
+script (the API has no pre-check), read with the shared "already there" rule
+above, so re-runs are idempotent. Only `SCRIPT` associations are automated.
 
 ### Flags beyond the shared set
 

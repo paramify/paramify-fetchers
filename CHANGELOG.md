@@ -616,6 +616,20 @@ schemas and the `paramify` CLI — not the internal code.
   from a non-management account: a read-only delegation policy, or a profile
   that assumes a role in the management account.
 
+- **Every uploader reads "already exists" / "already connected" the same way.**
+  The API refuses a repeat evidence-set create or a repeat CONNECT instead of
+  ignoring it, and each uploader held its own test for that refusal: the scripts
+  uploader treated a repeat CONNECT as success, the validator syncer failed on
+  it, and the evidence-set fallbacks recognised the refusal only as an HTTP 400.
+  API spec 0.9.2 permits the same refusal as a 409 Conflict on every operation,
+  which the 400-only tests would have missed. One shared rule
+  (`framework/paramify_responses.py`) now accepts 400 or 409 when the message
+  names the duplicate, and nothing else, so re-running any stage stays
+  idempotent on either code. The validator syncer also resolves its token like
+  the other uploaders (`PARAMIFY_UPLOAD_API_TOKEN`, falling back to
+  `PARAMIFY_API_TOKEN`) and reports a failed evidence-set lookup as its own
+  error rather than a bare HTTP exception.
+
 - **`aws_security_groups` shows all-traffic and IPv6 rules** (0.2.0 → 0.3.0).
   A rule with no port range — protocol `-1`, "All traffic" — was dropped from
   the evidence, so an inbound all-traffic rule from `0.0.0.0/0` and every

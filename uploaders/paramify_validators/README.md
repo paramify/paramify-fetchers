@@ -16,7 +16,9 @@ upload (the evidence sets it associates to should already exist). See
 3. **Associate on create only** — right after creating, it CONNECTs the validator
    to each of its `evidence_sets` (`POST /evidence/{id}/associate`,
    `subjectType: VALIDATOR`). It never re-asserts wiring on a validator that
-   already existed.
+   already existed. A CONNECT the API refuses because the link already holds
+   counts as success, read with the same rule every uploader uses
+   (`framework/paramify_responses.py`).
 
 ## Run it
 
@@ -31,7 +33,8 @@ python uploaders/paramify_validators/syncer.py --manifest examples/aws_ambient.y
 python uploaders/paramify_validators/syncer.py --manifest ... --update
 ```
 
-Auth: `PARAMIFY_UPLOAD_API_TOKEN` (same token as the evidence uploader).
+Auth: `PARAMIFY_UPLOAD_API_TOKEN`, falling back to `PARAMIFY_API_TOKEN` — resolved
+exactly as the evidence uploader resolves it.
 Base URL: `PARAMIFY_API_BASE_URL` (default `https://app.paramify.com/api/v0`).
 Custom tags: every validator the sync sees gets the default custom tags
 (provenance + the registry category's `display_name`), configured by the
@@ -63,4 +66,6 @@ Paramify after its id is cached.
 - **Association happens only at create time.** If a CONNECT fails (e.g. the
   evidence set doesn't exist yet), a later run sees the validator as existing and
   won't retry the association. Run `paramify upload` first so the sets exist, or
-  re-create after fixing.
+  re-create after fixing. (Re-asserting the link is safe — a repeat CONNECT the
+  API refuses as already connected is read as success — the syncer just does not
+  do it yet on the skip path.)

@@ -580,3 +580,26 @@ def test_dry_run_plans_tags_and_posts_nothing(tmp_path):
     assert summary["results"][0]["outcome"] == "would_upload"
     assert summary["results"][0]["tags"] == ["Automated by Paramify Fetchers", "AWS"]
     assert summary["tags"]["applied"] == 0
+
+
+# --------------------------------------------------------------------------- #
+def test_create_on_409_already_exists_falls_back_to_find():
+    # Spec 0.9.2 lists 409 Conflict on every operation; the same refusal on the
+    # new code must take the same fallback (GitHub #83).
+    gets = [FakeResponse(200, {"evidences": []}),
+            FakeResponse(200, {"evidences": [{"id": "ev-9", "referenceId": "EVD-1"}]})]
+    c = _client_with_session(
+        get_handler=lambda url, params: gets.pop(0),
+        post_handler=lambda url, j, f: FakeResponse(409, text="Evidence already exists"),
+    )
+    assert c.get_or_create_evidence_set({"reference_id": "EVD-1", "name": "n"})["id"] == "ev-9"
+
+
+def test_create_bare_409_raises():
+    # A 409 that does not say "already" is a conflict we do not understand.
+    c = _client_with_session(
+        get_handler=lambda url, params: FakeResponse(200, {"evidences": []}),
+        post_handler=lambda url, j, f: FakeResponse(409, text='{"statusMessage":"Conflict"}'),
+    )
+    with pytest.raises(uploader.ParamifyError):
+        c.get_or_create_evidence_set({"reference_id": "EVD-1", "name": "n"})
