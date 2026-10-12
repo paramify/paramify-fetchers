@@ -76,9 +76,11 @@ secrets:
 requires:
   python_packages:
     - azure-identity
-    - azure-mgmt-cdn
     - azure-keyvault-keys
+    - azure-mgmt-apimanagement
     - azure-mgmt-authorization
+    - azure-mgmt-cdn
+    - azure-mgmt-cognitiveservices
     - azure-mgmt-compute
     - azure-mgmt-containerregistry
     - azure-mgmt-containerservice
@@ -89,6 +91,7 @@ requires:
     - azure-mgmt-keyvault
     - azure-mgmt-loganalytics
     - azure-mgmt-monitor
+    - azure-mgmt-msi
     - azure-mgmt-network
     - azure-mgmt-policyinsights
     - azure-mgmt-postgresqlflexibleservers

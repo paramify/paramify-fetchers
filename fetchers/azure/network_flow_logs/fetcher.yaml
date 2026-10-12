@@ -1,0 +1,88 @@
+name: azure_network_flow_logs
+version: 0.1.0
+description: >
+  Inventories Azure Network Watcher and flow logs in the subscription, and works out which virtual
+  networks' traffic is logged. For every Network Watcher: its region. For every flow log: what it
+  logs (a virtual network, subnet, network interface or — legacy — a network security group),
+  whether it is enabled, the storage account it writes to and how long it keeps records, and
+  whether Traffic Analytics sends it to a Log Analytics workspace. For every virtual network and
+  subnet: whether an enabled flow log covers it, and through which target.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_network_flow_logs.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-MLA-LET   # network traffic is logged, per virtual network and subnet
+  - KSI-MLA-OSM   # Traffic Analytics sends flow logs to the Log Analytics workspace
+
+evidence_set:
+  reference_id: EVD-AZURE-NETWORK-FLOW-LOGS
+  name: Azure Network Watcher and Flow Logs
+  instructions: >
+    Script: fetcher.py. Azure SDK calls: azure-mgmt-network NetworkManagementClient
+    network_watchers.list_all(); flow_logs.list(resource_group, watcher) for each watcher;
+    virtual_networks.list_all() for each VNet's subnets; and, when an NSG flow log exists,
+    network_security_groups.list_all() to see where each NSG is attached.
+    Flow logs: target_type comes from targetResourceId (virtual_network, subnet, network_interface, or
+    network_security_group). legacy_nsg_flow_log marks the last: Microsoft stopped allowing new NSG flow
+    logs after 30 June 2025 and retires them on 30 September 2027, in favour of VNet flow logs.
+    retained_indefinitely is true when no retention policy is enabled or it is set to 0 days, because
+    storage keeps flow log records until a policy deletes them; retention_days is the policy's days
+    otherwise, and null when retained indefinitely. enabled_filtering_criteria is the VNet flow log's
+    filter, when it logs only matching traffic. target_attached is whether the target can produce
+    records: an NSG attached to a subnet or network interface, or a VNet or subnet that exists; null
+    for network interface targets and when the NSG list could not be read. storage_account_name and
+    storage_account_resource_group locate the destination; whether that storage is immutable is
+    evidenced by azure_log_storage_immutability, which reads the insights-logs-* containers flow logs
+    write to. traffic_analytics_enabled, traffic_analytics_interval_minutes (10 or 60) and
+    traffic_analytics_workspace_id say whether and how often records are analysed into a Log Analytics
+    workspace.
+    Subnets: in_use is true when anything is deployed in the subnet (IP configurations, private
+    endpoints, service association or resource navigation links, application gateway IP
+    configurations). nsg_supported is false for GatewaySubnet, AzureFirewallSubnet,
+    AzureFirewallManagementSubnet and RouteServerSubnet, which cannot take an NSG and so cannot be
+    covered by an NSG flow log. coverage is vnet or subnet for an enabled, unfiltered VNet flow log on
+    the VNet or the subnet; nsg for an enabled NSG flow log on the subnet's NSG; vnet_filtered or
+    subnet_filtered when the only VNet flow log is filtered; none when nothing logs it; and unknown
+    when it is not covered by what was read but its region's flow logs could not be listed (that also
+    sets metadata.partial_failure). flow_log_sources lists every match. A VNet is full when every subnet
+    is covered unfiltered, partial when some are, none when none are, and unknown when any is unknown.
+    Flow logs on network interfaces are listed but not counted towards subnet coverage.
+    network_watcher_in_region is null when the watcher list could not be read.
+    Summary: subnets_in_use_covered over subnets_in_use is the share of subnets with workloads whose
+    traffic is logged (subnets_covered over total_subnets counts empty subnets too);
+    subnets_in_use_without_nsg counts in-use subnets no NSG flow log can reach, which a VNet flow log
+    would cover. enabled_flow_logs_retained_under_90_days and enabled_flow_logs_retained_under_365_days
+    count enabled flow logs with a finite retention shorter than that; minimum_retention_days is the
+    smallest finite retention, null when all are indefinite. regions_without_network_watcher_count
+    counts regions with VNets and no Network Watcher. provider_registration_status (registered /
+    not_registered / unknown) is the Microsoft.Network resource provider's state, so zero flow logs on
+    an unregistered subscription reads as "service not in use" rather than "in use, none configured".

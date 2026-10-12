@@ -169,6 +169,35 @@ def list_diagnostic_settings(monitor, resource_id: str) -> List[Dict[str, Any]]:
     )
 
 
+def _compact(name) -> str:
+    return "".join(ch for ch in str(name or "").lower() if ch.isalnum())
+
+
+def logs_exported(
+    diagnostics: Optional[List[Dict[str, Any]]],
+    categories: tuple = ("audit",),
+    groups: tuple = ("audit", "alllogs"),
+) -> Optional[bool]:
+    """Whether a diagnostic setting with a destination enables one of `categories` or `groups`.
+
+    None when the settings could not be read, so an unread resource never reads as "not logged".
+    Names are compared case- and punctuation-insensitively ("allLogs" == "alllogs").
+    """
+    if diagnostics is None:
+        return None
+    for setting in diagnostics:
+        if not any(
+            setting.get(k) for k in ("workspace_id", "storage_account_id", "event_hub_authorization_rule_id")
+        ):
+            continue
+        for log in setting.get("logs") or []:
+            if not log.get("enabled"):
+                continue
+            if _compact(log.get("category")) in categories or _compact(log.get("category_group")) in groups:
+                return True
+    return False
+
+
 NOT_FOUND_MARKERS = ("(resourcenotfound)", "(404)", "was not found", "could not be found")
 
 
