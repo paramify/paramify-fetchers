@@ -169,6 +169,35 @@ def list_diagnostic_settings(monitor, resource_id: str) -> List[Dict[str, Any]]:
     )
 
 
+def _compact(name) -> str:
+    return "".join(ch for ch in str(name or "").lower() if ch.isalnum())
+
+
+def logs_exported(
+    diagnostics: Optional[List[Dict[str, Any]]],
+    categories: tuple = ("audit",),
+    groups: tuple = ("audit", "alllogs"),
+) -> Optional[bool]:
+    """Whether a diagnostic setting with a destination enables one of `categories` or `groups`.
+
+    None when the settings could not be read, so an unread resource never reads as "not logged".
+    Names are compared case- and punctuation-insensitively ("allLogs" == "alllogs").
+    """
+    if diagnostics is None:
+        return None
+    for setting in diagnostics:
+        if not any(
+            setting.get(k) for k in ("workspace_id", "storage_account_id", "event_hub_authorization_rule_id")
+        ):
+            continue
+        for log in setting.get("logs") or []:
+            if not log.get("enabled"):
+                continue
+            if _compact(log.get("category")) in categories or _compact(log.get("category_group")) in groups:
+                return True
+    return False
+
+
 NOT_FOUND_MARKERS = ("(resourcenotfound)", "(404)", "was not found", "could not be found")
 
 
@@ -338,6 +367,47 @@ def arm_client_kwargs() -> Dict[str, Any]:
     """
     endpoint = arm_endpoint()
     return {"base_url": endpoint, "credential_scopes": [f"{endpoint}/.default"]}
+
+
+# --------------------------------------------------------------------------- #
+# ARM REST through an SDK client's pipeline
+# --------------------------------------------------------------------------- #
+#
+# For resource types the pinned SDKs cannot read: the SDK is years behind the API
+# (azure-mgmt-machinelearningservices has no AI hubs) or drops values it has no model
+# for (Foundry connection auth types). The client's pipeline supplies the credential,
+# retries and the cloud's endpoint; the api-version is pinned in the path, so the read
+# cannot drift under an SDK bump the way a model field can.
+
+def arm_request(client, path: str) -> Dict[str, Any]:
+    """GET one ARM path (relative to the cloud's ARM endpoint, or absolute) as JSON.
+
+    A 404 raises ResourceNotFoundError so `is_not_found` / `get_optional` treat it like
+    an SDK 404.
+    """
+    from azure.core.exceptions import HttpResponseError, ResourceNotFoundError  # lazy
+    from azure.core.rest import HttpRequest  # lazy
+
+    url = path if path.startswith("https://") else arm_endpoint() + path
+    response = client._client.send_request(HttpRequest("GET", url))
+    if response.status_code == 404:
+        raise ResourceNotFoundError(response=response)
+    if response.status_code >= 400:
+        raise HttpResponseError(response=response)
+    return response.json()
+
+
+def arm_list(client, path: str, max_pages: int = 100) -> List[Dict[str, Any]]:
+    """Every item of an ARM list call, following nextLink to the end."""
+    items: List[Dict[str, Any]] = []
+    url = path
+    for _ in range(max_pages):
+        body = arm_request(client, url)
+        items.extend(body.get("value") or [])
+        url = body.get("nextLink")
+        if not url:
+            return items
+    raise RuntimeError(f"ARM paging did not terminate after {max_pages} pages for {path}")
 
 
 def resolve_subscription(collector: Collector) -> Dict[str, Optional[str]]:
