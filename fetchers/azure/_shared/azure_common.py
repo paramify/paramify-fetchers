@@ -431,11 +431,8 @@ def resource_graph_client(cred):
 
 
 def resource_graph_rows(client, subscription_id: str, query: str) -> Dict[str, Any]:
-    """Every row of `query`, or an exception if Resource Graph returned fewer than it counted.
-
-    The query must project at least one non-dynamic column and must not use
-    `limit`/`take`/`sample`, or Resource Graph withholds `$skipToken`.
-    """
+    """Every row of `query`, or an exception if Resource Graph returned fewer than it counted."""
+    # Resource Graph withholds $skipToken unless the query projects a non-dynamic column and skips limit/take/sample.
     from azure.mgmt.resourcegraph.models import (  # lazy
         QueryRequest,
         QueryRequestOptions,

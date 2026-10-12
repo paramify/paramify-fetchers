@@ -36,7 +36,8 @@ logger = logging.getLogger("azure_change_provenance")
 
 MAX_LOOKBACK_DAYS = 14
 DEPLOYMENT_HISTORY_CAP = 800
-WINDOW_SLACK = timedelta(minutes=2)
+# Measured: Resource Graph restamps a change up to 5 minutes after the operation.
+WINDOW_SLACK = timedelta(minutes=10)
 CHANGE_TABLES = ("resourcechanges", "resourcecontainerchanges")
 
 CHANGE_COLUMNS = (
@@ -135,6 +136,11 @@ def pipeline_principals() -> set:
     return {p.strip().lower() for p in raw.split(",") if p.strip()}
 
 
+def anonymous(change: dict) -> bool:
+    who = {(change["changed_by"] or "").lower(), (change["changed_by_type"] or "").lower()}
+    return not change["changed_by"] or bool(who & {"system", "unspecified"})
+
+
 def attribute(changes: list, deployments: list, pipelines: frozenset = frozenset()) -> list:
     """Mark each change as made by a deployment, a pipeline identity, the platform, or directly."""
     by_correlation = {d["correlation_id"].lower(): d for d in deployments if d["correlation_id"]}
@@ -143,32 +149,44 @@ def attribute(changes: list, deployments: list, pipelines: frozenset = frozenset
         for rid in d["output_resource_ids"]:
             by_output.setdefault(rid.lower(), []).append(d)
 
+    def own(change):
+        deployment = by_correlation.get((change["correlation_id"] or "").lower())
+        if deployment:
+            return "deployment", "correlation_id", deployment
+        if (change["changed_by"] or "").lower() in pipelines:
+            return "pipeline", None, None
+        return "direct", None, None
+
+    named = [c for c in changes if not anonymous(c)]
+    verdicts = {c["change_id"]: own(c) for c in named}
+    named_by_target: dict = {}
+    for c in named:
+        named_by_target.setdefault((c["target_resource_id"] or "").lower(), []).append(c)
+
+    # Measured: callerless rows reuse unrelated correlationIds, so they take the nearest named change to the resource.
+    def inherited(change):
+        target = (change["target_resource_id"] or "").lower()
+        when = parse_time(change["timestamp"])
+        near = [
+            (abs(parse_time(c["timestamp"]) - when), c)
+            for c in named_by_target.get(target, [])
+            if when and parse_time(c["timestamp"])
+        ]
+        near = [n for n in near if n[0] <= WINDOW_SLACK]
+        if near:
+            origin, _, d = verdicts[min(near, key=lambda n: n[0])[1]["change_id"]]
+            return origin, "same_resource", d
+        for d in by_output.get(target, []):
+            start, end = parse_time(d["started"]), parse_time(d["timestamp"])
+            if when and start and end and start - WINDOW_SLACK <= when <= end + WINDOW_SLACK:
+                return "deployment", "deployment_window", d
+        if "system" in ((change["changed_by_type"] or "").lower(), (change["changed_by"] or "").lower()):
+            return "platform", None, None
+        return "unattributed", None, None
+
     attributed = []
     for change in changes:
-        found, how = None, None
-        correlation = (change["correlation_id"] or "").lower()
-        if correlation in by_correlation:
-            found, how = by_correlation[correlation], "correlation_id"
-        else:
-            when = parse_time(change["timestamp"])
-            for d in by_output.get((change["target_resource_id"] or "").lower(), []):
-                start, end = parse_time(d["started"]), parse_time(d["timestamp"])
-                if when and start and end and start - WINDOW_SLACK <= when <= end + WINDOW_SLACK:
-                    found, how = d, "deployment_window"
-                    break
-        caller = (change["changed_by"] or "").lower()
-        caller_type = (change["changed_by_type"] or "").lower()
-        if found:
-            origin = "deployment"
-        elif caller and caller in pipelines:
-            origin = "pipeline"
-        elif "system" in (caller_type, caller):
-            origin = "platform"
-        # Measured: Unspecified rows are side effects that share the correlationId of a change that names its caller.
-        elif "unspecified" in (caller_type, caller):
-            origin = "unattributed"
-        else:
-            origin = "direct"
+        origin, how, found = inherited(change) if anonymous(change) else verdicts[change["change_id"]]
         attributed.append({
             **change,
             "origin": origin,
