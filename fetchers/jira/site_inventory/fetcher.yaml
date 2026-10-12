@@ -1,0 +1,67 @@
+name: jira_site_inventory
+version: 0.1.0
+description: >-
+  Inventories a Jira Cloud site — deployment info, projects with leads and issue
+  counts, issue types, priorities, statuses, Jira Service Management service
+  desks — and summarizes recent issue activity by project, type, status and
+  priority, including change and incident tickets and time to resolution.
+category: jira
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: jira_site_inventory.json
+
+# JIRA_EMAIL / JIRA_API_TOKEN are declared once on the category
+# (fetchers/_categories/jira.yaml), as is JIRA_BASE_URL.
+secrets: []
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    env: JIRA_LOOKBACK_DAYS
+    default: 90
+    description: >-
+      Collect issues updated within this many days. Ignored when `jql` is set.
+  jql:
+    type: string
+    required: false
+    env: JIRA_ISSUE_JQL
+    description: >-
+      Explicit JQL for the issue query, e.g. `project in (OPS, CHG) AND
+      updated >= -30d`. Overrides lookback_days entirely when set.
+  max_issues:
+    type: integer
+    required: false
+    env: JIRA_MAX_ISSUES
+    default: 2000
+    description: >-
+      Stop collecting issues after this many. The evidence records whether the
+      cap was hit (metadata.issues_truncated).
+
+evidence_set:
+  reference_id: EVD-JIRA-SITE-INVENTORY
+  name: Jira Site Inventory and Issue Activity
+  instructions: >-
+    Script: fetcher.py. Authenticates to the Jira Cloud REST API with an account
+    email + API token (basic auth). Reads GET /rest/api/3/serverInfo,
+    /rest/api/3/myself, /rest/api/3/project/search (expand=lead,insight,issueTypes),
+    /rest/api/3/issuetype, /rest/api/3/priority/search and /rest/api/3/status;
+    lists service desks via GET /rest/servicedeskapi/servicedesk when Jira
+    Service Management is present; and pages recent issues through
+    POST /rest/api/3/search/jql (nextPageToken). Output: jira_site_inventory.json
+  description: >-
+    The projects, issue schemes and recent ticket activity of a Jira site,
+    evidencing that changes and incidents are tracked, assigned and resolved in a
+    system of record.
+
+ksis:
+  - KSI-CMT-LMC
+  - KSI-INR-RPI

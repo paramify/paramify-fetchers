@@ -20,7 +20,7 @@ from textual.widgets import Button, DataTable, Input, Static
 
 from framework import api
 from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
-from framework.tui import palette, render
+from framework.tui import kinds, palette, render
 from framework.tui.components.forms import env_name_from_ref
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
 from framework.tui.modals import (
@@ -93,7 +93,12 @@ class ManifestPage(ButtonRowNav, Vertical):
         dt = self.query_one("#manifest-entries", DataTable)
         dt.cursor_type = "row"
         dt.zebra_stripes = True
-        dt.add_columns("fetcher", "mode", "secrets", "config", "targets", "status")
+        # kind + sends to: the two kinds go to different places, and a scan
+        # report goes nowhere until the manifest names its assessment. Sends to
+        # is last because it is the widest: on a narrow terminal it is what runs
+        # off the edge, not status (the detail pane shows it in full). No mode
+        # column: targets already reads "—" for a fetcher that runs once.
+        dt.add_columns("fetcher", "kind", "secrets", "config", "targets", "status", "sends to")
         self.rebuild()
 
     # -- state access ----------------------------------------------------- #
@@ -170,11 +175,12 @@ class ManifestPage(ButtonRowNav, Vertical):
             status = palette.pill("✓", "ok") if not errs else palette.pill(f"⚠ {len(errs)}", "warn")
             dt.add_row(
                 use,
-                "fanout" if fanout else "single",
+                render.kind_pill(kinds.kind_of(d)) if d else "—",
                 f"{sset}/{stot}",
                 f"{cset}/{ctot}",
                 str(ntargets) if fanout else "—",
                 status,
+                render.destination_cell(d, self._config_view.get(use)) if d else "—",
                 key=use,
             )
             row_keys.append(use)
@@ -343,16 +349,16 @@ class ManifestPage(ButtonRowNav, Vertical):
             return
         existing = {e.get("use") for e in self._entries()}
         cat = getattr(self.app, "catalog_data", None)
-        groups = []
-        if cat:
-            for c in cat["categories"]:
-                # Pass every fetcher (not just addable ones): the picker shows the
-                # already-added ones greyed out so a fully-added category — e.g.
-                # datadog once all 13 are in — still appears instead of vanishing.
-                names = [f["name"] for f in c["fetchers"]]
-                if names:
-                    groups.append((c["name"], names))
-        if not groups:
+        # Grouped like the catalog, kind first: a platform that ships both kinds
+        # (wiz) would otherwise list its evidence and its scan reports as one.
+        # Every fetcher is passed (not just addable ones): the picker shows the
+        # already-added ones greyed out so a fully-added category — e.g. datadog
+        # once all 13 are in — still appears instead of vanishing.
+        sections = [
+            (kinds.heading(kind), [(c, [f["name"] for f in fs]) for c, fs in groups])
+            for kind, groups in kinds.sections(cat)
+        ]
+        if not sections:
             self.notify("No fetchers discovered.")
             return
 
@@ -386,7 +392,7 @@ class ManifestPage(ButtonRowNav, Vertical):
         self.app.push_screen(
             MultiPickerModal(
                 "Add fetchers",
-                groups,
+                sections,
                 subtitle="enter/space opens a platform or toggles a fetcher · ✓ = already in manifest · type to filter",
                 disabled=existing,
             ),
@@ -605,13 +611,14 @@ class ManifestPage(ButtonRowNav, Vertical):
         use, m = self._selected, self._manifest
         if not use or m is None:
             # Silence here read as a broken key on a new, empty manifest.
-            self.notify("Add an issue-report fetcher first (a), then select it.",
+            self.notify("Add a scan report first (a), then select it.",
                         severity="warning")
             return
         d = self._descriptors().get(use)
-        if not d or d.get("kind") != "issue_report":
+        if not d or kinds.kind_of(d) != kinds.SCAN_REPORT:
             self.notify(
-                "Only issue-report fetchers go to an assessment.", severity="warning"
+                "Only scan reports go to an assessment; evidence goes to the "
+                "evidence set its fetcher names.", severity="warning"
             )
             return
 
@@ -666,7 +673,7 @@ class ManifestPage(ButtonRowNav, Vertical):
             PickerModal(
                 f"Assessment for {use}",
                 options,
-                subtitle=f"{assessment_type or 'any type'} — its reports are sent into this pipeline",
+                subtitle=f"{assessment_type or 'any type'} — the scan report is sent to this assessment's pipeline",
             ),
             done,
         )

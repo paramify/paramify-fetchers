@@ -5,7 +5,7 @@
 This is an **issue-report** fetcher (`kind: issue_report`): it hands Paramify the
 scan report the tool already produces, and the assessment's Paramify pipeline
 parses it into issues. It is not evidence, and it goes to an assessment rather than an
-evidence set. See [docs/issue_report_fetchers.md](../../docs/issue_report_fetchers.md).
+evidence set. See [docs/issue_report_fetchers_guide.md](../../docs/issue_report_fetchers_guide.md).
 
 ## Report
 

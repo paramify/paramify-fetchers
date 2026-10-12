@@ -1,0 +1,79 @@
+name: wiz_scan_coverage
+version: 0.1.0
+description: >-
+  Lists every cloud account Wiz is connected to with its connection status and
+  last scan time, plus Wiz connector status, so an assessor can see Wiz
+  coverage is complete and current.
+category: wiz
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 600
+
+output:
+  type: json
+  path: wiz_scan_coverage.json
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read-only scopes).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov) or
+      https://api.us17.app.wiz.io/graphql (commercial).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: >-
+      Token URL from Tenant Info > Authentication URL. Defaults to Wiz for Gov.
+      Commercial tenants use https://auth.app.wiz.io/oauth/token.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  page_size:
+    type: integer
+    required: false
+    env: WIZ_PAGE_SIZE
+    default: 100
+    description: Records per GraphQL page (max 500).
+  stale_scan_days:
+    type: integer
+    required: false
+    env: WIZ_STALE_SCAN_DAYS
+    default: 7
+    description: Days since last scan before an account is listed as stale.
+
+evidence_set:
+  reference_id: EVD-WIZ-SCAN-COVERAGE
+  name: Wiz Scan Coverage
+  instructions: >-
+    Script: fetcher.py. Authenticates to the Wiz OAuth2 token URL with a read-
+    only service account (scopes read:cloud_accounts, read:connectors) and pages
+    the cloudAccounts and connectors GraphQL connections. Summarizes accounts by
+    provider and status, accounts not CONNECTED, accounts not scanned within the
+    stale window, and disabled connectors.
+  description: >-
+    Wiz cloud account and connector coverage, evidencing that the authorization
+    boundary is connected to and continuously scanned by Wiz.
+
+ksis:
+  - KSI-PIY-GIV
+  - KSI-CNA-EIS

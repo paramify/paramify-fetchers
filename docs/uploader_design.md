@@ -42,6 +42,14 @@ All three share the same operational contract:
 - **HTTPS-only token guard** — a non-https `base_url` is rejected before the token
   is ever sent, so the bearer token can't leak over plaintext. `localhost` is the
   only exception (local testing).
+- **One reading of "already there"** — the API has no get-or-create for evidence
+  sets and no read-back for associations, so a repeat create or CONNECT is
+  refused rather than ignored: HTTP 400 with a message naming the duplicate on
+  the live API, and spec 0.9.2 permits the same refusal as a 409. Every uploader
+  reads that refusal through `framework/paramify_responses.py`, which accepts
+  either status **only when the message says so** — a bare 400 is a validation
+  error and a bare 409 is a conflict we do not understand, and both stay
+  failures. That one rule is what makes re-running any stage idempotent.
 - **`--dry-run` / `--config` / `--json`** — preview read-only, point at a config,
   or emit a machine-readable summary. With no `--config`, every stage falls back
   to `./upload.yaml` at the repo root if it exists — which is how the TUI, which
@@ -97,6 +105,59 @@ Two API limits shape this:
 - **`POST /evidence` takes no stack or channel.** A set the uploader creates
   itself comes back with no channels and nothing can attach one; it uploads
   unchanneled until someone adds a channel in the app.
+
+## Default custom tags (shared)
+
+Every evidence set, script and validator the three stages create or maintain
+gets two Paramify custom tags, so a user who has the fetchers create resources
+sees tagging working out of the box and can filter the fetchers' work from the
+hand-made rest:
+
+- a **provenance** tag — `Automated by Paramify Fetchers` unless renamed;
+- a **service** tag — the category's `display_name` from
+  `fetchers/_categories/<category>.yaml` (`AWS`, `Okta`, `SentinelOne`).
+  Declared, not derived: no rule turns `aws` into `AWS`. A category without one
+  gets the provenance tag only.
+
+Both are project-wide knobs in `upload.yaml`, which all three stages read:
+
+```yaml
+tags:
+  provenance: Automated by Paramify Fetchers   # a string, or false
+  service: true                                 # false to drop the category tag
+# tags: false                                   # no default tags at all
+```
+
+**Writes are additive and re-asserted on every run.** `POST
+/custom-tags/{entity}/{id}` adds names (creating unknown ones) and never
+replaces the entity's tag set, so a user's own tags survive and a run reaches
+resources an earlier run created before tagging existed. The cost: a renamed or
+disabled default leaves its old tag behind once, because additive writes cannot
+remove it. `PATCH`, which could, would clobber user tags and is never used.
+Per-fetcher content tags (`STIG`, `CIS`) and single-valued validator criticality
+(`P1`/`P2`) are expected later as a layer on top; additive writes are what let
+the layers coexist, but criticality will need a reconcile step, not just
+another additive tag.
+
+**Turning it off.** Three switches, in order of precedence:
+
+- `--no-tags` on `paramify upload`, `paramify scripts sync` or `paramify
+  validators sync` — this one invocation writes no tags;
+- `PARAMIFY_CUSTOM_TAGS=off` (also `false`, `no`, `0`) in the environment —
+  the feature is off wherever that is set, a shell, a CI job, a container,
+  whatever `upload.yaml` says. Any other value leaves the config in charge;
+- `tags: false` in `upload.yaml` — off for everyone who runs from that config.
+
+A switch that says off wins before the config block is read, so a broken
+block cannot keep tags on. The Done block of each stage says `tags: off
+(<which switch>)` so the reason is never a guess.
+
+**Tagging never fails a stage.** A token without the custom-tags permission
+gets one warning and the rest of the run proceeds untagged; any other error is
+logged per entity and counted. Each stage's summary carries a `tags` block
+(`enabled` / `reason` / `applied` / `failed` / `skipped` / `disabled`), and
+each result row the names it applied. A dry run shows the planned names and
+writes nothing. The implementation is one module, `framework/custom_tags.py`.
 
 ## `paramify_evidence` — attach evidence to sets
 
@@ -192,8 +253,8 @@ The script's **display name is the evidence set's `name`**. After a create or
 update (or for every fetcher under `--reassociate`), the script is **CONNECTed**
 to the fetcher's evidence set — which is get-or-created by `reference_id` exactly
 as the evidence uploader does. The CONNECT is tolerant of an already-connected
-script (the API has no pre-check), so re-runs are idempotent. Only `SCRIPT`
-associations are automated.
+script (the API has no pre-check), read with the shared "already there" rule
+above, so re-runs are idempotent. Only `SCRIPT` associations are automated.
 
 ### Flags beyond the shared set
 

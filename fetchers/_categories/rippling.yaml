@@ -1,3 +1,4 @@
+display_name: Rippling
 description: >
   Rippling Platform API. Employee roster, current employees, and managed
   devices. Single API token per tenant.

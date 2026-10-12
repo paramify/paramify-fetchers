@@ -28,7 +28,7 @@ block (the evidence the fetcher actually produced, untouched).
     "collected_at": "2026-05-28T19:03:38Z",
     "status": "success",
     "exit_code": 0,
-    "evidence_set": { "reference_id": "...", "name": "...", "instructions": "..." }
+    "evidence_set": { "reference_id": "...", "name": "...", "instructions": "...", "frequency": "THREE_DAY" }
   },
   "payload": { "...": "the fetcher's raw evidence dict, exactly as written" }
 }
@@ -58,7 +58,7 @@ one ad-hoc shape per fetcher.
 | `status` | `success`\|`failed` | derived from `exit_code` | Did collection succeed |
 | `exit_code` | int | runner | Raw exit code (incl. 124 = timeout) |
 | `error` | string (optional) | runner | Bounded stderr tail, with injected secret values redacted (see *Secrets in stderr* below); present only when `status` = `failed` |
-| `evidence_set` | object (optional) | fetcher.yaml | `reference_id`/`name` (+ `instructions`/`description` when present) for uploader routing; present when the fetcher declares one |
+| `evidence_set` | object (optional) | fetcher.yaml | `reference_id`/`name`/`frequency` (+ `instructions`/`description` when present) for uploader routing; present when the fetcher declares one |
 
 `schema_version` (top level) versions the envelope format itself, so it can
 evolve without breaking consumers.

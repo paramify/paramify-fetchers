@@ -1,0 +1,63 @@
+name: azure_sentinel_analytics_rules
+version: 0.1.0
+description: >
+  For every Microsoft Sentinel workspace in the subscription: each analytics
+  (detection) rule with its kind, enabled state, severity, MITRE tactics and
+  techniques, source template, schedule and threshold, and whether it creates
+  incidents. Also enabled-rule counts by kind, whether the Fusion multistage
+  correlation rule is present and enabled, and how many of the workspace's rule
+  templates are in use. Rules are listed at the stable and the preview
+  api-version and merged by id, because the stable schema has no NRT kind.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_sentinel_analytics_rules.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+  workspaces:
+    type: string
+    required: false
+    env: SENTINEL_WORKSPACES
+    description: >
+      Comma-separated workspace names or resource ids to limit collection to.
+      Optional — omit to collect every Sentinel-onboarded workspace in the
+      subscription.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-MLA-OSM      # Operating SIEM capability — the detections the SIEM runs
+  - KSI-MLA-RVL      # Reviewing logs — logs are persistently reviewed by enabled rules
+
+evidence_set:
+  reference_id: EVD-AZURE-SENTINEL-ANALYTICS-RULES
+  name: Azure Sentinel Analytics Rules
+  instructions: >
+    Script: fetcher.py. ARM REST per Sentinel workspace: alertRules at
+    api-version 2025-09-01 and 2025-10-01-preview, merged by rule id (seen_in
+    records which listing returned each), plus alertRuleTemplates at 2025-09-01.
+    enabled is properties.enabled. Fusion is kind Fusion or template
+    f71aba3d-28fb-450b-b192-4e76a83015c8; Fusion is disabled by design on
+    workspaces onboarded to the Defender portal. Rule query text is not
+    collected. Role: Microsoft Sentinel Reader.

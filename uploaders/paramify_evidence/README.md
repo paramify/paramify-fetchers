@@ -32,7 +32,7 @@ export PARAMIFY_UPLOAD_API_TOKEN=<paste key here>
 
 1 fetcher = 1 **evidence set** (a Paramify container). Each fetcher declares its
 evidence-set identity in its `fetcher.yaml` `evidence_set` block (`reference_id`,
-`name`, `instructions`); the runner copies that into every evidence file's
+`name`, `instructions`, `frequency`); the runner copies that into every evidence file's
 envelope (`metadata.evidence_set`). The uploader reads it from the envelope, so
 it needs only the run directory — not the `fetchers/` tree.
 
@@ -72,12 +72,20 @@ failed to upload or was missing its evidence-set block.
 
 See [`examples/upload.yaml`](../../examples/upload.yaml):
 - `paramify.base_url` — default `https://app.paramify.com/api/v0`.
-- `overrides.<fetcher_name>.reference_id` (and optionally `name`/`instructions`) —
+- `overrides.<fetcher_name>.reference_id` (and optionally `name`/`instructions`/`frequency`) —
   map a fetcher to a different evidence set for your program.
 - `skip_failed` — skip files whose run status was `failed` (default: upload anyway,
   with the status noted on the artifact).
 - `artifact_payload` — `envelope` (default, self-describing) or `payload` (bare
   evidence) if Paramify ingestion expects the unwrapped dict.
+- `tags` — the default custom tags put on every evidence set, every run:
+  `provenance` (default `Automated by Paramify Fetchers`, or `false`) and
+  `service` (`true`: the category's `display_name`, e.g. `AWS`; `false` to
+  drop it). `tags: false` turns both off. Additive only: your own tags on a set
+  are never touched. Without the custom-tags permission the upload still
+  succeeds, with one warning. **Off switch:** `PARAMIFY_CUSTOM_TAGS=off` in the
+  environment turns the feature off everywhere, whatever the config says;
+  `paramify upload --no-tags` does it for one run. The Done block says which.
 
 ## Required tooling
 

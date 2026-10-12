@@ -222,6 +222,10 @@ class RunPage(Vertical):
             st["ok"] += 1
         else:
             st["fail"] += 1
+            # Keep the first reason: for a fanout the rest usually repeat it, and
+            # the log has every one.
+            if ev.get("error") and not st.get("reason"):
+                st["reason"] = ev["error"]
 
         total = st.get("total") or 1
         if not st.get("fanout") and total <= 1:
@@ -257,7 +261,7 @@ class RunPage(Vertical):
             # Reports go through their own upload, so a run that collected any is
             # not finished after the evidence upload. Say where to send them.
             msg.append(
-                f"   {issue_reports} issue report(s) ready — Paramify tab, i to send",
+                f"   {issue_reports} scan report(s) ready — Paramify tab, i to send",
                 style=palette.WARN,
             )
         if metadata_path:
@@ -282,12 +286,15 @@ class RunPage(Vertical):
         done = st.get("ok", 0) + st.get("fail", 0)
         if status == "running" and total:
             return f"{done}/{total}…"
+        info = ""
         if total and total > 1:
             info = f"{st.get('ok', 0)}/{total} ok"
             if st.get("fail"):
                 info += f"  · {st['fail']} failed"
-            return info
-        return ""
+        # A failed invocation says why, so the table is enough to see what to fix.
+        if st.get("reason") and status in ("failed", "partial", "timeout"):
+            info = f"{info}  · {st['reason']}" if info else st["reason"]
+        return info
 
     def _paint_row(self, use: str) -> None:
         """Update (or create) one status row in place — preserves cursor/scroll."""

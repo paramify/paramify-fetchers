@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sync validators from the central registry to Paramify and associate them.
 
-A separate stage from evidence upload (per docs/validators_design.md): it reads
+A separate stage from evidence upload (docs/validators_guide.md, step 6): it reads
 the `validators/` registry, scopes to the validators whose `evidence_sets`
 intersect the sets a manifest produces, and for each one:
 
@@ -11,13 +11,18 @@ intersect the sets a manifest produces, and for each one:
      never patched unless `--update` is passed, so customer tuning survives,
   3. **associates on create only** — after creating, CONNECTs the validator to
      each of its evidence sets (`POST /evidence/{id}/associate`); it never
-     re-asserts wiring on a validator that already existed.
+     re-asserts wiring on a validator that already existed,
+  4. puts the default custom tags on it — provenance + the registry category's
+     display name — additively, on every run, created or not
+     (framework/custom_tags.py).
 
 The shipped validators are TEMPLATES (~80% right); customers tune them in
 Paramify. That is why the default is create-or-skip and why the per-instance
 validator id lives in a customer-side lock file, never in the shared registry.
 
-Auth: PARAMIFY_UPLOAD_API_TOKEN (source-agnostic env — .env, secret manager, CI).
+Auth: PARAMIFY_UPLOAD_API_TOKEN, falling back to PARAMIFY_API_TOKEN, resolved by
+framework.paramify_auth exactly as the other uploaders do (source-agnostic env —
+.env, secret manager, CI).
 """
 
 import argparse
@@ -33,9 +38,29 @@ from urllib.parse import urlparse
 import requests
 from dotenv import load_dotenv
 
+# Also runnable directly from any cwd, where only its own directory lands on
+# sys.path. Position in the repo is fixed, so derive the root rather than
+# duplicating the token-resolution and duplicate-refusal rules locally — the
+# syncer carrying its own copies is how it came to disagree with the other
+# uploaders about both (GitHub #83).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from framework.custom_tags import (  # noqa: E402
+    ENTITY_VALIDATOR,
+    build_tagger,
+    category_display_names,
+)
+from framework.paramify_auth import (  # noqa: E402
+    DEFAULT_BASE_URL,
+    READ_TOKEN_ENV,
+    UPLOAD_TOKEN_ENV,
+    resolve_base_url,
+    resolve_upload_token,
+)
+from framework.paramify_responses import already_present  # noqa: E402
+
 logger = logging.getLogger("paramify_validators_syncer")
 
-DEFAULT_BASE_URL = "https://app.paramify.com/api/v0"
 DEFAULT_LOCK_PATH = "./.paramify/validators-sync.lock.json"
 _REQUEST_TIMEOUT = 30
 
@@ -103,13 +128,23 @@ class ValidatorClient:
             params={"referenceId": reference_id},
             timeout=self.timeout,
         )
-        r.raise_for_status()
+        if r.status_code != 200:
+            # ParamifyError, not requests.HTTPError: the sync loop's per-set
+            # isolation and its callers reason about this module's own errors.
+            raise ParamifyError(
+                f"find evidence set {reference_id} failed "
+                f"(HTTP {r.status_code}): {r.text[:300]}"
+            )
         for ev in r.json().get("evidences", []):
             if ev.get("referenceId") == reference_id:
                 return ev.get("id")
         return None
 
     def associate_validator(self, evidence_id: str, validator_id: str) -> None:
+        """CONNECT a validator to an evidence set. Tolerant of an already-connected
+        state, read with the rule shared by every uploader: the API has no
+        association read-back, so a repeat CONNECT is the only way to assert the
+        link, and a refusal that says it already holds is success, not failure."""
         body = {
             "associationType": "CONNECT",
             "subjectType": "VALIDATOR",
@@ -120,11 +155,14 @@ class ValidatorClient:
             json=body,
             timeout=self.timeout,
         )
-        if r.status_code not in (200, 201, 204):
-            raise ParamifyError(
-                f"associate validator {validator_id} to set {evidence_id} failed "
-                f"(HTTP {r.status_code}): {r.text[:300]}"
-            )
+        if r.status_code in (200, 201, 204):
+            return
+        if already_present(r.status_code, r.text):
+            return  # already associated — the state we wanted holds
+        raise ParamifyError(
+            f"associate validator {validator_id} to set {evidence_id} failed "
+            f"(HTTP {r.status_code}): {r.text[:300]}"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -198,6 +236,8 @@ def sync_validators(
     lock_path: Optional[str] = None,
     on_event: Optional[Callable[[dict], None]] = None,
     config: Optional[Dict] = None,
+    display_names: Optional[Dict[str, str]] = None,
+    custom_tags: bool = True,
 ) -> Dict:
     """Reconcile a list of registry validator dicts against Paramify.
 
@@ -209,12 +249,7 @@ def sync_validators(
     load_dotenv()
     config = config or {}
     paramify_cfg = config.get("paramify") or {}
-    base_url = (
-        paramify_cfg.get("base_url")
-        or base_url
-        or os.environ.get("PARAMIFY_API_BASE_URL")
-        or DEFAULT_BASE_URL
-    )
+    base_url, _ = resolve_base_url(paramify_cfg.get("base_url") or base_url)
     url_error = _base_url_error(base_url)
     if url_error:
         logger.error(url_error)
@@ -225,16 +260,37 @@ def sync_validators(
     )
     lock = load_lock(lock_file)
 
-    token = token or os.environ.get("PARAMIFY_UPLOAD_API_TOKEN")
+    if token is None:
+        token, _ = resolve_upload_token()
     if client is None:
         # Build a client whenever we have a token — even in dry-run, so reads can
         # report create-vs-skip precisely. Writes stay gated on `not dry_run`.
         if token:
             client = ValidatorClient(token, base_url)
         elif not dry_run:
-            msg = "PARAMIFY_UPLOAD_API_TOKEN is not set"
+            msg = f"{UPLOAD_TOKEN_ENV} is not set (nor its fallback {READ_TOKEN_ENV})"
             logger.error(msg)
             raise ValueError(msg)
+
+    # Default custom tags on every validator this run sees, created or existing.
+    # `display_names` maps registry category -> service tag; the facade reads it
+    # from the category files, since this function has no repo root of its own.
+    try:
+        tagger = build_tagger(
+            None if (dry_run or client is None) else client.session,
+            base_url, config=config, display_names=display_names,
+            override_off=None if custom_tags else "--no-tags",
+        )
+    except ValueError as e:
+        logger.error(str(e))
+        raise
+
+    def _tag(validator_id: Optional[str], category: Optional[str]) -> List[str]:
+        """Tag one validator; the names applied, or [] when off, dry-run, or refused."""
+        if dry_run or not validator_id:
+            return []
+        info = tagger.tag(ENTITY_VALIDATOR, validator_id, category)
+        return info["tags"] if info["outcome"] in ("applied", "already") else []
 
     _emit(on_event, {
         "event": "sync_start",
@@ -286,6 +342,7 @@ def sync_validators(
 
             payload = build_payload(v)
             refs = v.get("evidence_sets", [])
+            category = v.get("category")
 
             # ---- create (absent) -> create, then associate on create only ----
             if existing_id is None:
@@ -293,12 +350,14 @@ def sync_validators(
                     created += 1
                     add_result({
                         "key": key, "outcome": "would_create", "evidence_sets": refs,
+                        "tags": tagger.plan(category),
                     })
                     continue
                 assert client is not None  # not dry_run => token present or we raised
                 vid = client.create_validator(payload)
                 lock[key] = vid  # persist before associating so a re-run won't recreate
                 created += 1
+                tags = _tag(vid, category)
                 # A failed association must NOT undo/duplicate the created validator
                 # nor mark the whole validator an error — isolate per set.
                 assoc, missing, failed = [], [], []
@@ -318,7 +377,7 @@ def sync_validators(
                         logger.error("%s: associate to %s failed: %s", key, ref, ae)
                 result = {
                     "key": key, "outcome": "created", "validator_id": vid,
-                    "associated": assoc, "set_not_found": missing,
+                    "associated": assoc, "set_not_found": missing, "tags": tags,
                 }
                 if failed:
                     result["associate_failed"] = failed
@@ -332,7 +391,8 @@ def sync_validators(
                 else:
                     assert client is not None  # not dry_run => token present or we raised
                     client.update_validator(existing_id, payload)
-                    add_result({"key": key, "outcome": "updated", "validator_id": existing_id})
+                    add_result({"key": key, "outcome": "updated", "validator_id": existing_id,
+                                "tags": _tag(existing_id, category)})
                 updated += 1
                 continue
 
@@ -342,6 +402,7 @@ def sync_validators(
                 "outcome": "would_skip_exists" if dry_run else "skipped_exists",
                 "validator_id": existing_id,
                 "adopted": adopted,
+                "tags": _tag(existing_id, category),
             })
         except Exception as e:  # per-validator isolation
             logger.error("%s: sync failed: %s", key, e)
@@ -365,6 +426,7 @@ def sync_validators(
         "set_not_found": set_not_found,
         "errors": errors,
         "associate_errors": assoc_errors,
+        "tags": tagger.summary(),
         "results": results,
         "lock_path": str(lock_written) if lock_written else str(lock_file),
         "ok": errors == 0 and assoc_errors == 0,
@@ -392,6 +454,7 @@ def _validator_to_dict(v) -> Dict:
         "validation_rules": v.validation_rules,
         "attestation_rules": v.attestation_rules,
         "evidence_sets": v.evidence_sets,
+        "category": getattr(v, "category", None),
     }
 
 
@@ -439,6 +502,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Sync registry validators to Paramify")
     parser.add_argument("--root", default=".", help="Repo root containing validators/ (default .)")
     parser.add_argument("--manifest", help="Scope to validators for this manifest's fetchers")
+    parser.add_argument("--config", help="Uploader config YAML (base_url, tags, validators.lock_path)")
     parser.add_argument("--lock", help=f"Lock file path (default {DEFAULT_LOCK_PATH})")
     parser.add_argument("--update", action="store_true", help="Also PATCH existing validators (overwrites tuning)")
     parser.add_argument("--dry-run", action="store_true", help="Report planned actions; make no writes")
@@ -454,9 +518,16 @@ def main(argv=None) -> int:
         logger.info("No validators in scope — nothing to sync.")
         return 0
 
+    config: Dict = {}
+    if args.config:
+        import yaml
+
+        config = yaml.safe_load(Path(args.config).read_text()) or {}
+
     try:
         summary = sync_validators(
-            validators, dry_run=args.dry_run, update=args.update, lock_path=args.lock
+            validators, dry_run=args.dry_run, update=args.update, lock_path=args.lock,
+            config=config, display_names=category_display_names(root),
         )
     except ValueError:
         return 1

@@ -139,5 +139,5 @@ the agent reported in phase 5.
 | App verdicts differ from what the agent reported | The app copy was edited, or is out of date. `--update` overwrites it with the repo version ([sync options](../uploaders/paramify_validators/README.md#run-it)). |
 
 **More detail:** [the skill](../.claude/skills/suggest-validator/SKILL.md) ·
-[validator design](validators_design.md) ·
+[writing one by hand](validators_guide.md) ·
 [sync internals](../uploaders/paramify_validators/README.md)

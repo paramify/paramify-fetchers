@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/) applied
-to the contract (see [`docs/versioning.md`](docs/versioning.md)). "The contract"
+to the contract (see [`docs/versioning_guide.md`](docs/versioning_guide.md)). "The contract"
 is the public API surface — the `fetcher.yaml` / category / manifest / envelope
 schemas and the `paramify` CLI — not the internal code.
 
@@ -12,7 +12,180 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- **`docs/pipelines.md`: sending scan reports from the TUI**, step by step
+- **Default custom tags on everything the uploaders create.** Every evidence
+  set, script and validator that `paramify upload`, `paramify scripts sync`
+  and `paramify validators sync` create or maintain now carries two custom
+  tags: a provenance tag, `Automated by Paramify Fetchers`, and a service tag
+  from the category's new `display_name` (`AWS`, `Okta`, `SentinelOne`).
+  Tags are added on every run and never removed, so a user's own tags on
+  those resources are left alone and resources from earlier runs are
+  backfilled. Both are `upload.yaml` knobs under `tags:` — rename the
+  provenance string, drop either tag, or set `tags: false` for none. To
+  switch the feature off without touching a file, set
+  `PARAMIFY_CUSTOM_TAGS=off` in the environment, or pass `--no-tags` to any
+  of the three commands for one run; the Done block says which switch is in
+  effect. A token without the custom-tags permission gets one warning and
+  the stage proceeds untagged. Every category file now declares a `display_name`; the category
+  schema gains the optional field. `paramify validators sync` reads the
+  repo's `upload.yaml` by default, as the other two stages already did.
+
+- **`azure_redis_cache_configuration`**, for classic Azure Cache for Redis
+  (`Microsoft.Cache/redis`), the sibling of `azure_managed_redis_configuration`.
+  Per cache it reports the minimum TLS version and whether the non-TLS port is
+  enabled, whether authentication is required at all, whether access keys are
+  disabled so only Entra ID can be used, public network access, private
+  endpoints, VNet injection and firewall rules, judged on the distinct addresses
+  all rules admit together so a split or near-total range is visible. For an assessor it also reports who holds Entra data-access
+  policies, whether connection and Entra sign-in audit logs reach a destination
+  (through a new shared `_shared/diagnostics.py`), the maintenance window, and
+  replication, zone redundancy (including Azure's Automatic zonal allocation),
+  geo-replication and persistence, and its summary names the
+  caches behind each failed expectation. `list_keys` is never called and
+  the projection is an allow-list, so access keys and the storage connection
+  strings in the cache's Redis configuration never reach the evidence. A cache
+  without `minimumTlsVersion` accepts TLS 1.0 and is not counted as TLS-only, and
+  any per-cache read that fails is recorded as unknown. Adds `azure-mgmt-redis`.
+  Verified against a live subscription.
+
+- **A third fetcher kind, `kind: inventory`**, for fetchers that list every
+  asset of a kind for Paramify's Inventory. An inventory is evidence with a
+  record contract: the payload holds `data`, one record per asset each with a
+  unique `unique_asset_identifier`, and `records_included`. The record fields
+  are each fetcher's own. It needs an `evidence_set` and goes to it through
+  `paramify upload`, where an inventory pipeline attached to the set builds
+  Inventory items. A pipeline reads the file as the whole estate, so the
+  runner checks every inventory output when it envelopes it and records the
+  verdict in `metadata.inventory`, and the uploader does not send one that is
+  incomplete: a failed run, a contract break, withheld records, or no records
+  at all. The TUI lists inventories in their own section. Start from
+  `fetchers/_template_inventory/`; see `docs/inventory_fetchers_guide.md`.
+
+- **Four Azure fetchers for the network edge and cache tier**, read-only on
+  the built-in Reader role. `azure_managed_redis_configuration` reports each
+  Azure Managed Redis cluster's minimum TLS version, public network access and
+  private endpoints, and per database the client protocol (Encrypted or
+  Plaintext) and whether access-key authentication is disabled. Classic Azure
+  Cache for Redis is not read. `azure_dns_configuration` reports each public
+  zone's DNSSEC state and signing keys, and each private zone with its virtual
+  network links. The DNS SDK has no DNSSEC operation, so it is read with a
+  direct ARM call, and a 404 "DNSSEC is not enabled" counts as unsigned rather
+  than as a failed collection. `azure_vpn_gateway_configuration` reports VPN
+  gateways, the IKE version, status and IPsec policy of each connection, and
+  point-to-site protocols and sign-in types. A connection with no custom policy
+  is reported against Azure's default, whose IKEv2 main mode uses DH Group 2, so
+  the default does not read as free of weak algorithms. Point-to-site counts only
+  when a client address pool exists, because the list call returns a placeholder
+  on gateways that never set it up.
+  `azure_virtual_wan_configuration` reports Virtual WANs, whether hubs are
+  secured by a firewall, and the IKE version on each site link, along with
+  vWAN VPN sites, point-to-site gateways and server configurations. The DNS,
+  VPN and Virtual WAN fetchers record whether Microsoft.Network is registered,
+  so zero resources can be told apart from a provider that is off. A read that
+  fails (a Redis cluster's databases, a zone's DNSSEC config) or an IKE protocol
+  Azure leaves empty is recorded as null and counted as unknown, never as
+  compliant, unsigned or IKEv1. Both VPN
+  fetchers keep an allow-list of fields, because Azure returns site-link
+  pre-shared keys in plain text to Reader; no key reaches the evidence.
+  Verified against a live subscription.
+
+- **Evidence samples: one record per fetcher, captured once.** A fetcher can
+  now carry a `sample.json` beside its `fetcher.yaml` that shows what it
+  collects without anyone running it. Where the payload repeats a record (one
+  entry per instance, user or subnet), the sample keeps the most filled-in
+  one, with how many were seen and how often each field was filled in. New
+  commands: `paramify samples status`, `paramify samples show <fetcher>` and
+  `paramify samples backfill`, which builds samples from past runs under
+  `./evidence`. Backfill replaces emails, person names, logins, account ids,
+  UUIDs, long hex ids, IP addresses and target values with stable fakes of the
+  same shape, and does not write a sample in which any identifier from any
+  scanned file survives. Free text is not rewritten, so a backfilled sample
+  starts `"reviewed": false` and needs a person to read it before it is
+  committed. See
+  [`docs/evidence_samples.md`](docs/evidence_samples.md).
+
+- **Discovery fetchers (`kind: discovery`)**, a fourth collection kind that
+  lists what a platform's credentials can see instead of collecting evidence.
+  The runner writes their output to `<run>/discovery/`, which neither uploader
+  reads. Every platform writes the same JSON document
+  (`framework/schemas/discovery_schema.json`). Each resource type says whether
+  it could be read (`ok`, `denied`, `not_enabled`, `error`, or `truncated` with
+  a lower-bound count), so a type that could not be read never looks like one
+  with nothing in it. Records about people are counted, never listed. The
+  shared engine in `fetchers/_lib/discovery.py` handles paging, retries and the
+  document, so a platform's fetcher is a table of resources plus its paging. The
+  first is `knowbe4_discovery_beta`: account, groups, training campaigns, modules,
+  policies, phishing campaigns and tests, and user and enrollment counts. It
+  pages by cursor, since KnowBe4 retires the `page` parameter in November 2026.
+  The second is `aws_discovery_beta`: about 75 resource types, at least one for every
+  AWS service an AWS fetcher reads (a test keeps that true), listed in every
+  enabled region through the aws CLI, plus a count per resource type from AWS
+  Resource Explorer wherever it has an index, with each (type, region) pair carrying
+  its own status so a region denied by a service control policy never reads as
+  empty. One document per target account. See `docs/discovery.md`.
+- **A Wiz category with twelve fetchers**, for Wiz commercial and Wiz for
+  Government, sharing one GraphQL client and one service account. Eleven are
+  evidence fetchers: `wiz_scan_coverage`, `wiz_posture_issues`,
+  `wiz_infrastructure_vulnerabilities`, `wiz_container_vulnerabilities`,
+  `wiz_cloud_configuration_posture`, `wiz_host_configuration_posture`,
+  `wiz_threat_detections`, `wiz_file_integrity_monitoring`,
+  `wiz_attack_surface_findings`, `wiz_code_findings` and
+  `wiz_tenant_security_settings`. The last five read Wiz modules a tenant may
+  not have; each checks the tenant's schema at run time, selects only the
+  fields that exist, and lists the missing ones in the evidence. A missing
+  scope or licence fails the collection rather than reading as no findings.
+  The twelfth, `wiz_stig_compliance_report`, is an issue report: one CSV row per
+  STIG control, rule and resource for one enabled Wiz framework, for a
+  CONFIGURATION assessment's pipeline. Wiz's own compliance CSV exists only as
+  a saved report, and creating or rerunning one is a write, so the rows are
+  built from GraphQL queries instead, in a fixed column set and sorted order so
+  the same Wiz state gives the same file. Every result is reported, not just
+  PASS and FAIL, so a check that moves to ERROR is not read as fixed. Any Wiz
+  error, Wiz's 10,000-row cap, an empty result, a disabled framework, or a
+  finding Wiz returns without its control mapping fails the run with no file
+  written.
+  None of the twelve writes to Wiz: the client refuses to send a mutation.
+- **Two more Wiz issue reports, `wiz_issues_report` and
+  `wiz_vulnerability_findings`**, on the same read-only client and config
+  names. `wiz_issues_report` sends Wiz's own Issues CSV to a CONFIGURATION
+  assessment. The report is created once in Wiz and scheduled there; the
+  fetcher finds it by `report_id` or exact `report_name`, and downloads its
+  last run only if that run completed within `max_report_age_hours` (default
+  26). It never creates, edits or reruns a report, so the service account
+  needs `read:reports` and nothing that writes. `wiz_vulnerability_findings`
+  pages through every vulnerability finding and writes the legacy Paramify
+  column layout for a VULNERABILITY assessment, with an optional `project_id`
+  filter. Both export everything on every run (no delta mode, since a delta
+  processed with a cycle close resolves every issue it leaves out), and any
+  read failure, an empty export (unless `allow_empty`), or an interrupted
+  download fails the run with no file written. See
+  `docs/wiz_pipeline_fetchers.md`.
+- **`paramify issues upload` names the cycle an upload landed on**, and warns
+  when newer cycles exist. Uploads land on the assessment's oldest open cycle,
+  so an old cycle left open takes every new scan while the newer cycles show
+  nothing. The TUI's Paramify tab shows the same warning. An HTTP 409 now
+  quotes Paramify's reason instead of assuming no cycle is in progress, since
+  work aimed at a cycle other than the in-progress one is refused the same way.
+- **The issues uploader only reads reports inside the run's `issue-reports/`.**
+  A report path in `_issue_reports.json` that resolves outside it, or a report
+  that is a symlink, is refused and nothing is read, so an edited index cannot
+  send another file to Paramify as a scan report.
+- **`_issue_reports.json` is written atomically, and a corrupt one never closes
+  a cycle.** An index that cannot be read is kept beside the new one as
+  `_issue_reports.json.corrupt`, and the new index is marked `cannot_close`:
+  the uploader processes that run's reports but does not close the cycle,
+  because the index can no longer show that every target succeeded. The TUI's
+  Run tab shows why a fetcher failed next to its status, and focus returns to
+  the Paramify tab when a send finishes, so its keys work without pressing 5
+  again.
+- **Evidence sets carry a collection frequency.** `evidence_set.frequency` in
+  `fetcher.yaml` takes Paramify's evidence frequency values (`DAILY`,
+  `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `QUARTERLY`, `BIANNUAL`,
+  `ANNUAL`, `NOT_SET`) and defaults to `THREE_DAY`, so every fetcher has one
+  without a change to its file. The runner copies it into the envelope's
+  `metadata.evidence_set`, and both uploaders send it when they create a set.
+  Sets that already exist keep the frequency they have. The uploader config can
+  override it per fetcher, like `name` and `instructions`.
+- **`docs/pipelines_guide.md`: sending scan reports from the TUI**, step by step
   with three recordings. It covers a manifest for the scanners, pointing each
   fetcher at an assessment and choosing its close policy, running and sending
   from the Paramify tab, and jobs and manual closes. It explains how cycles
@@ -129,6 +302,15 @@ schemas and the `paramify` CLI — not the internal code.
   service applied is recorded, and `resources_evaluated` tells "nothing
   non-compliant" from "nothing evaluated".
 
+- **A Jira category, and its first fetcher: `jira_site_inventory`.** One
+  evidence set covering a Jira Cloud site end to end: deployment info, every
+  project the account can browse (type, lead, issue types, issue count), the
+  issue types, priorities and statuses in use, Jira Service Management service
+  desks where the site has JSM, and every issue updated in the lookback window
+  (90 days, or an explicit `jql`) with rollups by project, type, status and
+  priority, time to resolution, and separate change and incident counts.
+  Account email + API token, declared once on the category; no Jira admin
+  needed. See [`fetchers/jira/README.md`](fetchers/jira/README.md).
 - **A fanout target editor in the TUI** (`t` on the Manifest tab). A fanout
   fetcher runs once per target, so its targets are the run plan — but the page
   showed only how many there were, and there was no way to change one: fixing a
@@ -147,7 +329,7 @@ schemas and the `paramify` CLI — not the internal code.
   uploads unchanneled exactly as before. A set with more than one channel errors
   that file rather than guessing, until the rules for choosing exist. The channel
   is recorded per file in `upload_log.json`, since the API does not report it back
-  on an artifact. See [`docs/uploader_design.md`](docs/uploader_design.md).
+  on an artifact. See [`docs/uploader_guide.md`](docs/uploader_guide.md).
 - **A default uploader config at `./upload.yaml`.** Every upload stage falls back
   to it when no `--config` is given, which is how the TUI — which passes no path —
   reaches base_url and the per-fetcher overrides at all. Both front-ends now name
@@ -159,7 +341,7 @@ schemas and the `paramify` CLI — not the internal code.
   `evidence_sets` list of `reference_id`s, so a validator that applies to four
   fetchers is one file naming four sets rather than four copies drifting apart.
   A fetcher's validators are the reverse lookup on its `evidence_set.reference_id`.
-  See [`docs/validators_design.md`](docs/validators_design.md).
+  See [`docs/validators_guide.md`](docs/validators_guide.md).
 - **Validator sync** — `paramify validators sync` and `paramify upload
   --with-validators` (engine in `uploaders/paramify_validators/`). Pushes registry
   validators to Paramify (`POST /validators`) and CONNECTs each to its evidence
@@ -212,9 +394,66 @@ schemas and the `paramify` CLI — not the internal code.
   Microsoft Sentinel is onboarded (the SecurityInsights solution is enabled).
   Nothing in the Azure category recorded where logs are kept or for how long.
   Adds the `azure-mgmt-loganalytics` dependency to the `azure` extra.
+- **Seven Microsoft Sentinel and Log Analytics log-integrity fetchers.** Per
+  Sentinel workspace (`SENTINEL_WORKSPACES`, or every onboarded workspace in the
+  subscription): `azure_sentinel_data_sources` (connectors, plus which tables
+  and alert products actually ingested in the window),
+  `azure_sentinel_analytics_rules`, `azure_sentinel_incidents` (status,
+  classification, time to close) and `azure_sentinel_automation_rules`. Per Log
+  Analytics workspace, Sentinel or not: `azure_log_analytics_query_audit`
+  (whether queries are audited, and weekly human vs app query counts) and
+  `azure_log_analytics_deletion_rights` (who, active or PIM-eligible, can purge
+  or delete log data, delete the workspace or shorten its retention, and
+  whether through a wildcard role). Per subscription:
+  `azure_log_storage_immutability` (immutability policy, legal hold and soft
+  delete on the containers Azure Monitor writes logs to; only a Locked policy or
+  a legal hold counts as protected). They share `_shared/azure_rest`, which
+  calls ARM, Graph and the Log Analytics query API directly, since the only
+  stable Sentinel SDK pins a 2021 API version, and retries throttling and
+  transient server errors, honouring Retry-After. Analytics rules are listed at
+  the stable and the preview API and merged, since NRT rules exist only in
+  preview. Data older than a table's retention is reported as not retained,
+  never as missing.
+
+- **Three Azure SQL Managed Instance fetchers.** Nothing in the Azure category
+  covered Managed Instance, which has its own API surface apart from SQL
+  Database. All three are Reader-only and fan out per subscription.
+  - `azure_sql_managed_instance_backups` (`EVD-AZURE-SQLMI-BACKUPS`): short- and
+    long-term retention for each database, the instance's backup storage
+    redundancy (requested vs current, so a pending change shows), compute zone
+    redundancy, and the instance failover groups with their failover policy and
+    instance pairs. Azure lists a failover group once from each region it spans,
+    each with its own resource id; the fetcher merges them into one record.
+  - `azure_sql_managed_instance_configuration` (`EVD-AZURE-SQLMI-CONFIG`): the
+    public data endpoint, proxy override, minimum TLS version, private endpoint
+    connections, the Entra admin and Entra-only authentication, and whether a
+    diagnostic setting exports `SQLSecurityAuditEvents`. That shows the audit
+    route only; whether a server audit is on is set in T-SQL, which no ARM call
+    can read.
+  - `azure_sql_managed_instance_encryption` (`EVD-AZURE-SQLMI-ENCRYPTION`): the
+    TDE protector (service-managed or Key Vault key, auto-rotation) and TDE
+    state for each database.
+
+  Any system database the API lists is flagged and left out of every count. A
+  failed call leaves every flag and total derived from it null rather than
+  false or 0, so an unanswered call never reads as "off".
 
 ### Changed
 
+- **The TUI keeps evidence and scan reports apart.** The catalog and the
+  add-fetcher picker group by kind first (**Evidence**, **Scan reports**) and
+  platform second, so a platform that ships both, like Wiz, no longer lists
+  them in one folder. Highlighting a section heading explains what that kind
+  is and how it is sent. A fetcher's contract states its kind and where its
+  output goes: the evidence set, or for a scan report the type of assessment it
+  needs, its format, and how it is sent. The manifest table replaces the `mode`
+  column (the `targets` column already shows `—` for a fetcher that runs once)
+  with `kind`, and adds a last `sends to` column: the evidence set, or the
+  assessment and close policy, or `no assessment — press A`. The manifest's
+  detail pane shows the same. The TUI now says "scan report" wherever it said
+  "issue report"; `kind: issue_report` in `fetcher.yaml` is unchanged. The
+  catalog descriptor (`paramify catalog --json`) gains an `evidence_set` block
+  and `issue_report.format`.
 - **TUI fixes found while recording that walkthrough.** On a manifest with no
   evidence and no scripts, nothing on the Paramify tab held focus, so its keys
   did nothing. Enter in a picker's filter box now takes the highlighted option.
@@ -387,6 +626,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Every uploader reads "already exists" / "already connected" the same way.**
+  The API refuses a repeat evidence-set create or a repeat CONNECT instead of
+  ignoring it, and each uploader held its own test for that refusal: the scripts
+  uploader treated a repeat CONNECT as success, the validator syncer failed on
+  it, and the evidence-set fallbacks recognised the refusal only as an HTTP 400.
+  API spec 0.9.2 permits the same refusal as a 409 Conflict on every operation,
+  which the 400-only tests would have missed. One shared rule
+  (`framework/paramify_responses.py`) now accepts 400 or 409 when the message
+  names the duplicate, and nothing else, so re-running any stage stays
+  idempotent on either code. The validator syncer also resolves its token like
+  the other uploaders (`PARAMIFY_UPLOAD_API_TOKEN`, falling back to
+  `PARAMIFY_API_TOKEN`) and reports a failed evidence-set lookup as its own
+  error rather than a bare HTTP exception.
 - **`aws_security_groups` shows all-traffic and IPv6 rules** (0.2.0 → 0.3.0).
   A rule with no port range — protocol `-1`, "All traffic" — was dropped from
   the evidence, so an inbound all-traffic rule from `0.0.0.0/0` and every
@@ -556,7 +808,7 @@ schemas and the `paramify` CLI — not the internal code.
   (`paramify assessments list` / `select`), the same way `paramify programs
   target` picks a program UUID without anyone typing one. Start from
   [`fetchers/_template_issue_report/`](fetchers/_template_issue_report/) and
-  [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md). Written
+  [`docs/issue_report_fetchers.md`](https://github.com/paramify/paramify-fetchers/blob/v0.5.0-beta/docs/issue_report_fetchers.md). Written
   against Paramify REST API v0 spec 0.6.0
   ([API documentation](https://app.paramify.com/api/documentation/)).
 
@@ -599,7 +851,7 @@ schemas and the `paramify` CLI — not the internal code.
   [`fetchers/_lib/status.sh`](fetchers/_lib/status.sh) and
   [`fetchers/_lib/fetcher_status.py`](fetchers/_lib/fetcher_status.py), both
   named `report_failure` — and
-  [`docs/fetcher_contract.md`](docs/fetcher_contract.md) mandates it. It logs
+  [`docs/fetcher_contract.md`](https://github.com/paramify/paramify-fetchers/blob/v0.5.0-beta/docs/fetcher_contract.md) mandates it. It logs
   *and* reports, so it is the whole failure path; logging inside the helper is
   what guarantees the reason is the last line on stderr, which is what the
   fallback reads. The same nine-line status write previously existed as **27
@@ -719,7 +971,7 @@ schemas and the `paramify` CLI — not the internal code.
   percentage is now taken over the keys actually read, with
   `readable_keys` / `unreadable_keys` added to the summary beside `total_keys`.
   A validator keying on the old shape should be checked. This is payload, not
-  contract, so no bump ([`docs/versioning.md`](docs/versioning.md)).
+  contract, so no bump ([`docs/versioning.md`](https://github.com/paramify/paramify-fetchers/blob/v0.5.0-beta/docs/versioning.md)).
 
   Collection still fails where the evidence would be empty or wrong: the caller
   identity, `kms list-keys`, or **every** key being unreadable — that last guard
@@ -1104,7 +1356,7 @@ schemas and the `paramify` CLI — not the internal code.
   `--reassociate` / `--json`. Backed by the `uploaders/paramify_scripts/` uploader.
   Only `SCRIPT` associations are automated; control / solution-capability / validator
   linkage stays Paramify-side.
-- [`docs/uploader_design.md`](docs/uploader_design.md) — a dedicated uploader design
+- [`docs/uploader_design.md`](https://github.com/paramify/paramify-fetchers/blob/v0.3.0-beta/docs/uploader_design.md) — a dedicated uploader design
   doc covering both built uploaders and the shared evidence-set identity model, and
   a README section + docs-table entries pointing to it.
 
@@ -1149,7 +1401,7 @@ schemas and the `paramify` CLI — not the internal code.
 ## [0.2.0-beta] - 2026-07-10
 
 First public release — a beta / pre-release. Pre-1.0, so the contract may still
-change before 1.0 (see [`docs/versioning.md`](docs/versioning.md)).
+change before 1.0 (see [`docs/versioning.md`](https://github.com/paramify/paramify-fetchers/blob/v0.2.0-beta/docs/versioning.md)).
 
 ### Added
 
@@ -1177,9 +1429,9 @@ change before 1.0 (see [`docs/versioning.md`](docs/versioning.md)).
   `api.ksi_coverage()`.
 - Optional `validators` metadata on `fetcher.yaml` (regex checks over the
   evidence payload).
-- Versioning & contract policy ([`docs/versioning.md`](docs/versioning.md)), this
+- Versioning & contract policy ([`docs/versioning.md`](https://github.com/paramify/paramify-fetchers/blob/v0.2.0-beta/docs/versioning.md)), this
   changelog, and the manual release runbook
-  ([`docs/releasing.md`](docs/releasing.md)).
+  ([`docs/releasing.md`](https://github.com/paramify/paramify-fetchers/blob/v0.2.0-beta/docs/releasing.md)).
 
 ### Changed
 

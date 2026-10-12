@@ -44,13 +44,26 @@ def test_code_hash_stable_and_sensitive():
 # Fake client at the sync_scripts boundary
 # --------------------------------------------------------------------------- #
 
+class TagSession:
+    """What the Tagger posts default custom tags through; records every POST."""
+
+    def __init__(self, status=200):
+        self.status = status
+        self.posts = []
+
+    def post(self, url, json=None, timeout=None, **_):
+        self.posts.append((url, json))
+        return type("R", (), {"status_code": self.status, "text": ""})()
+
+
 class FakeClient:
-    def __init__(self, existing):
+    def __init__(self, existing, tag_status=200):
         # existing: list of {id, name, description}
         self._existing = existing
         self.created = []
         self.updated = []
         self.associated = []
+        self.session = TagSession(tag_status)
 
     def list_scripts(self):
         return self._existing
@@ -64,7 +77,7 @@ class FakeClient:
         self.updated.append(script_id)
         return {"id": script_id}
 
-    def get_or_create_evidence_set(self, reference_id, name):
+    def get_or_create_evidence_set(self, reference_id, name, frequency=None):
         return "ev-" + reference_id
 
     def associate_script(self, evidence_id, script_id):
@@ -143,6 +156,16 @@ def test_reassociate_covers_noop(wired):
     assert "sid-f_noop" in associated_ids   # noop normally skips association
 
 
+def test_reference_carries_frequency_with_override():
+    """A set this stage creates first must get the same frequency the evidence
+    uploader would have given it — the evidence uploader never patches it later."""
+    es = {"reference_id": "EVD-1", "name": "n", "frequency": "WEEKLY"}
+    assert uploader._resolve_reference("f", es, {})["frequency"] == "WEEKLY"
+    assert uploader._resolve_reference("f", es, {"f": {"frequency": "DAILY"}})["frequency"] == "DAILY"
+    bare = {"reference_id": "EVD-1", "name": "n"}
+    assert uploader._resolve_reference("f", bare, {})["frequency"] == "THREE_DAY"
+
+
 def test_https_guard_rejects_http():
     with pytest.raises(ValueError):
         uploader.sync_scripts(".", base_url="http://not-secure.example.com", dry_run=True)
@@ -201,3 +224,155 @@ def test_sync_forwards_include_to_discovery(monkeypatch):
     monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: FakeClient(_existing_for_specs()))
     uploader.sync_scripts(".", include={"f_bump"})
     assert seen["include"] == {"f_bump"}
+
+
+# --------------------------------------------------------------------------- #
+# Default custom tags — every script the sweep sees, and the set it links to
+# --------------------------------------------------------------------------- #
+
+def _tag_posts(fake):
+    return [(url.rsplit("/custom-tags/", 1)[1], body["names"]) for url, body in fake.session.posts]
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_tag_switch(monkeypatch):
+    monkeypatch.delenv("PARAMIFY_CUSTOM_TAGS", raising=False)
+
+
+def test_every_script_is_tagged_including_noop_and_drift(wired):
+    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
+    posted = dict(_tag_posts(wired))
+    # SPECS carry no category, so only the provenance tag applies.
+    # The fake names a created script after its display name ("New").
+    assert posted == {
+        "scripts/sid-New": ["Automated by Paramify Fetchers"],
+        "evidence/ev-EVD-NEW": ["Automated by Paramify Fetchers"],
+        "scripts/sid-f_bump": ["Automated by Paramify Fetchers"],
+        "evidence/ev-EVD-BUMP": ["Automated by Paramify Fetchers"],
+        "scripts/sid-f_drift": ["Automated by Paramify Fetchers"],
+        "scripts/sid-f_noop": ["Automated by Paramify Fetchers"],
+    }
+    by = _by_fetcher(summary)
+    assert by["f_noop"]["tags"] == ["Automated by Paramify Fetchers"]
+    assert by["f_drift"]["outcome"] == "drift_skipped" and by["f_drift"]["tags"]
+    assert summary["tags"]["applied"] == 6 and summary["tags"]["disabled"] is None
+
+
+def test_service_tag_uses_the_category_display_name(monkeypatch):
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
+    spec = {**SPECS[0], "category": "aws"}
+    monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: [spec])
+    fake = FakeClient([])
+    monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: fake)
+    real_build_tagger = uploader.build_tagger
+    monkeypatch.setattr(uploader, "build_tagger",
+                        lambda session, base_url, **kw: real_build_tagger(
+                            session, base_url, config=kw.get("config"), display_names={"aws": "AWS"}))
+
+    uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
+    posted = dict(_tag_posts(fake))
+    assert posted["scripts/sid-New"] == ["Automated by Paramify Fetchers", "AWS"]
+    assert posted["evidence/ev-EVD-NEW"] == ["Automated by Paramify Fetchers", "AWS"]
+
+
+def test_dry_run_plans_tags_without_posting(wired):
+    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0", dry_run=True)
+    assert wired.session.posts == []
+    assert all(r["tags"] == ["Automated by Paramify Fetchers"] for r in summary["results"])
+
+
+def test_tags_off_posts_nothing(wired):
+    summary = uploader.sync_scripts(
+        "/repo", base_url="https://app.example.com/api/v0", config={"tags": False}
+    )
+    assert wired.session.posts == [] and summary["tags"]["enabled"] is False
+
+
+def test_no_tags_switch_posts_nothing(wired):
+    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0", custom_tags=False)
+    assert wired.session.posts == [] and summary["tags"]["reason"] == "--no-tags"
+    assert all(r["tags"] == [] for r in summary["results"])
+
+
+def test_env_switch_posts_nothing(wired, monkeypatch):
+    monkeypatch.setenv("PARAMIFY_CUSTOM_TAGS", "off")
+    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
+    assert wired.session.posts == [] and summary["tags"]["reason"] == "PARAMIFY_CUSTOM_TAGS=off"
+
+
+def test_missing_tag_permission_does_not_fail_the_sync(monkeypatch):
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
+    monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: list(SPECS))
+    fake = FakeClient(_existing_for_specs(), tag_status=403)
+    monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: fake)
+
+    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
+    assert summary["ok"] and summary["errors"] == 0
+    assert len(fake.session.posts) == 1
+    assert summary["tags"]["disabled"]
+
+
+# --------------------------------------------------------------------------- #
+# ParamifyScriptsClient — the HTTP boundary for create-set and CONNECT (GitHub #83)
+# --------------------------------------------------------------------------- #
+
+class _Resp:
+    def __init__(self, status_code, json_data=None, text=""):
+        self.status_code = status_code
+        self._json = {} if json_data is None else json_data
+        self.text = text
+
+    def json(self):
+        return self._json
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+class _Session:
+    def __init__(self, get=None, post=None):
+        self.headers = {}
+        self._get, self._post = get, post
+        self.posts = []
+
+    def get(self, url, params=None, timeout=None):
+        return self._get(url, params)
+
+    def post(self, url, json=None, timeout=None):
+        self.posts.append((url, json))
+        return self._post(url, json)
+
+
+def _client(get=None, post=None):
+    c = uploader.ParamifyScriptsClient("tok", "https://app.example.com/api/v0")
+    c.session = _Session(get, post)
+    return c
+
+
+@pytest.mark.parametrize("status, text", [
+    (400, "Script already connected to evidence"),   # as observed live
+    (409, "Script already connected to evidence"),   # same refusal on the code 0.9.2 permits
+])
+def test_associate_tolerates_already_connected(status, text):
+    c = _client(post=lambda url, body: _Resp(status, text=text))
+    c.associate_script("ev-1", "s-1")  # no raise: the state we wanted holds
+    assert c.session.posts[0][1] == {"associationType": "CONNECT", "subjectType": "SCRIPT", "subjectId": "s-1"}
+
+
+@pytest.mark.parametrize("status, text", [
+    (400, "subjectId must be a uuid"),
+    (409, '{"statusMessage":"Conflict","error":{"message":"Conflict"}}'),
+    (403, "forbidden"),
+])
+def test_associate_other_refusals_raise(status, text):
+    c = _client(post=lambda url, body: _Resp(status, text=text))
+    with pytest.raises(uploader.ParamifyError):
+        c.associate_script("ev-1", "s-1")
+
+
+def test_create_evidence_set_falls_back_to_find_on_409():
+    gets = [_Resp(200, {"evidences": [{"id": "ev-7", "referenceId": "EVD-X"}]})]
+    c = _client(get=lambda url, params: gets.pop(0),
+                post=lambda url, body: _Resp(409, text="Evidence already exists"))
+    assert c.create_evidence_set("EVD-X", "X") == "ev-7"

@@ -24,7 +24,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Button, Checkbox, DataTable, RichLog, Static
+from textual.widgets import Button, Checkbox, DataTable, RichLog, Static, TabbedContent
 
 from framework import api
 from framework.tui import palette
@@ -162,7 +162,7 @@ class UploadPage(ButtonRowNav, Vertical):
         self._upload_kind = "evidence"
 
         self.query_one("#evidence-panel", Vertical).border_title = "evidence upload"
-        self.query_one("#issues-panel", Vertical).border_title = "issue reports"
+        self.query_one("#issues-panel", Vertical).border_title = "scan reports"
         self.query_one("#scripts-panel", Vertical).border_title = "scripts sync"
         log_panel = self.query_one("#upload-log-panel", Vertical)
         log_panel.border_title = "log"
@@ -195,12 +195,34 @@ class UploadPage(ButtonRowNav, Vertical):
         they exist for.
         """
         self.rebuild()
+        self._focus_first_action()
+
+    def _focus_first_action(self) -> None:
         for bid in ("#upload-submit", "#issues-submit", "#scripts-preview"):
             button = self.query_one(bid, Button)
             if not button.disabled:
                 button.focus()
                 return
         self.query_one("#issues-summary", DataTable).focus()
+
+    def _refocus_if_lost(self) -> None:
+        """Put focus back in this page after an operation, if it fell out.
+
+        Starting a send disables every button, and the one that held focus
+        takes it with it, so focus drops to the tab strip, where `i`, `j` and `C`
+        (this page's keys) do nothing until the user presses 5 again. So when an
+        operation ends, return focus to the page. Left alone when the user has
+        meanwhile moved to another tab or a modal is open, or when focus is
+        still somewhere usable in the page.
+        """
+        if self.screen is not self.app.screen:
+            return  # a modal is on top
+        if self.screen.query_one(TabbedContent).active != "tab-upload":
+            return  # the user went elsewhere; don't pull them back
+        focused = self.app.focused
+        if focused is not None and not focused.disabled and focused in self.walk_children():
+            return
+        self._focus_first_action()
 
     @property
     def _busy(self) -> bool:
@@ -317,7 +339,7 @@ class UploadPage(ButtonRowNav, Vertical):
             table.add_row("status", Text(f"cannot list runs: {exc}", style=palette.FAIL))
             return
         if latest is None:
-            table.add_row("status", Text("no run collected issue reports", style="dim"))
+            table.add_row("status", Text("no run collected scan reports", style="dim"))
             return
 
         self._issues_run_dir = latest["dir"]
@@ -464,7 +486,7 @@ class UploadPage(ButtonRowNav, Vertical):
         pf = self._issues_preflight
         run_dir = self._issues_run_dir
         if not run_dir or not pf or not pf.get("ok"):
-            self.notify("No issue reports ready to send.")
+            self.notify("No scan reports ready to send.")
             return
 
         def go(ok: bool) -> None:
@@ -475,7 +497,7 @@ class UploadPage(ButtonRowNav, Vertical):
             p for p in pf.get("assessments") or [] if p.get("operation") == "PROCESS_CLOSE"
         ]
         question = (
-            f"Send {pf['file_count']} issue report(s) into their Paramify "
+            f"Send {pf['file_count']} scan report(s) into their assessments' "
             f"pipelines at {pf['base_url']} and process them?"
         )
         if closing:
@@ -487,8 +509,8 @@ class UploadPage(ButtonRowNav, Vertical):
 
     def _start_intake(self, run_dir: str) -> None:
         self._uploading = True
-        self._upload_kind = "issue report"
-        self._begin_log(Text("sending issue reports...", style=palette.WARN))
+        self._upload_kind = "scan report"
+        self._begin_log(Text("sending scan reports...", style=palette.WARN))
         self._issues_worker(run_dir, self.app.root_path)
 
     @work(thread=True, exclusive=True)
@@ -633,6 +655,12 @@ class UploadPage(ButtonRowNav, Vertical):
                 f"  [OK] queued {ev.get('operation')} job {ev.get('job_id')}"
                 f"  assessment={ev.get('assessment_id')}{why}", style=palette.OK,
             ))
+            if ev.get("newer_cycles"):
+                log.write(Text(
+                    f"  [WARN] landed on cycle {ev.get('cycle_name')!r}, the oldest open "
+                    f"cycle; {ev['newer_cycles']} newer cycle(s) show nothing until it is "
+                    f"closed", style=palette.WARN,
+                ))
         elif etype == "job_status":
             self._set_banner(Text(
                 f"job {ev.get('job_id')} {ev.get('status')} on {ev.get('assessment_id')}",
@@ -791,7 +819,7 @@ class UploadPage(ButtonRowNav, Vertical):
             return
         choices = self._manifest_assessments()
         if not choices:
-            self.notify("No issue-report entry in this manifest points at an assessment.")
+            self.notify("No scan report in this manifest points at an assessment.")
             return
 
         def chosen(aid):
@@ -973,6 +1001,9 @@ class UploadPage(ButtonRowNav, Vertical):
         has_fetchers = bool(self._scripts_preflight and self._scripts_preflight.get("fetcher_count", 0) > 0)
         self.query_one("#scripts-preview", Button).disabled = not has_fetchers
         self.query_one("#scripts-submit", Button).disabled = not has_fetchers
+        # After a refresh, so the modal that started the operation has handed
+        # focus back (to a button that is disabled now) before we look.
+        self.call_after_refresh(self._refocus_if_lost)
 
     def _set_banner(self, renderable) -> None:
         self.query_one("#upload-banner", Static).update(renderable)

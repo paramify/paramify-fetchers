@@ -9,7 +9,7 @@ pointed them away from the real problem.
 
 That was never one fetcher's mistake. It was the contract not saying where a
 failure reason goes, so 16 fetchers independently invented the same wrong answer.
-The contract says it now (docs/fetcher_contract.md § Output), and this file is
+The contract says it now (docs/fetcher_contract_guide.md, step 6), and this file is
 what keeps it true — an unenforced rule is a suggestion, and the next fetcher
 someone writes has no memory of this.
 
@@ -51,8 +51,8 @@ FETCHERS = REPO_ROOT / "fetchers"
 # `write_status` is the deprecated alias azure_common and gcp_common still
 # expose; 46 azure and gcp call sites use it. It is accepted here so this scan
 # could be tightened without renaming those in the same change. Remove it from
-# this tuple in the pass that renames them — see docs/fetcher_contract.md
-# § Output, which names `report_failure` as the one name.
+# this tuple in the pass that renames them — see docs/fetcher_contract_guide.md,
+# step 6, which names `report_failure` as the one name.
 _PY_REPORT_NAMES = ("report_failure", "write_status")
 _SH_REPORT = re.compile(r"report_failure|FETCHER_STATUS_FILE")
 

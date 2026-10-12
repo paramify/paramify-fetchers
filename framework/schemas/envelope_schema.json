@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Evidence Envelope",
-  "description": "Standard wrapper the runner places around every JSON evidence file. metadata = facts about the collection; payload = the fetcher's raw output. See docs/envelope_design.md.",
+  "description": "Standard wrapper the runner places around every JSON evidence file. metadata = facts about the collection; payload = the fetcher's raw output. See docs/envelope_guide.md.",
   "type": "object",
   "required": ["schema_version", "metadata", "payload"],
   "properties": {
@@ -34,7 +34,8 @@
             "reference_id": { "type": "string" },
             "name": { "type": "string" },
             "instructions": { "type": "string" },
-            "description": { "type": "string" }
+            "description": { "type": "string" },
+            "frequency": { "type": "string" }
           }
         }
       }

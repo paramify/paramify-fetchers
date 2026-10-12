@@ -30,6 +30,11 @@ findings?**
   [`issue_report_fetchers.md`](issue_report_fetchers.md). Read that instead, then
   come back here for the parts that are shared (secrets, categories, fanout,
   failure reporting).
+- **Neither — you are listing every asset of a kind** (cloud resources, hosts,
+  devices) for Paramify's Inventory. That is an **inventory** fetcher: evidence
+  whose payload is one record per asset, with an all-or-nothing rule. Everything
+  in this document applies; [`inventory_fetchers.md`](inventory_fetchers.md)
+  adds the record contract.
 
 ---
 
@@ -296,4 +301,5 @@ When in doubt, mirror the shape of one of these:
 - **Single-target bash:** [`fetchers/okta/authenticators/`](../fetchers/okta/authenticators/)
 - **Fanout Python (per-target secret):** [`fetchers/gitlab/ci_cd_pipeline_config/`](../fetchers/gitlab/ci_cd_pipeline_config/)
 - **AWS region/profile fanout (bash):** [`fetchers/aws/auto_scaling_high_availability/`](../fetchers/aws/auto_scaling_high_availability/)
+- **Inventory:** start from [`fetchers/_template_inventory/`](../fetchers/_template_inventory/) and [`inventory_fetchers.md`](inventory_fetchers.md).
 - **Issue report:** no shipped example yet — start from [`fetchers/_template_issue_report/`](../fetchers/_template_issue_report/) and [`issue_report_fetchers.md`](issue_report_fetchers.md).

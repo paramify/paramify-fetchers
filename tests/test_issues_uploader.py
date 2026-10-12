@@ -100,8 +100,10 @@ class FakeClient:
     """
 
     def __init__(self, *, fail_files=(), raise_on=None, process_error=None,
-                 job_statuses=None, job_extra=None, id_suffix=""):
+                 job_statuses=None, job_extra=None, id_suffix="", cycles=None):
         self.id_suffix = id_suffix
+        # None: the cycle lookup fails, as it does for a key that cannot read cycles.
+        self.cycles = cycles
         self.fail_files = set(fail_files)
         self.raise_on = raise_on or {}
         self.process_error = process_error
@@ -129,6 +131,11 @@ class FakeClient:
                                "artifact_ids": list(artifact_ids), "operation": operation})
         return {"id": f"job-{len(self.processed)}", "status": "QUEUED",
                 "type": operation, "cycleId": "cyc-1"}
+
+    def list_cycles(self, assessment_id):
+        if self.cycles is None:
+            raise uploader.AccessDenied("HTTP 403 on list cycles")
+        return self.cycles
 
     def get_job(self, job_id):
         i = min(self.polls, len(self.job_statuses) - 1)
@@ -805,7 +812,7 @@ def test_error_message_falls_back_to_body_text_on_non_json():
     (404, "AssessmentRefused", "not found"),
     (401, "AccessDenied", "PIPELINE_INTAKE"),
     (403, "AccessDenied", "PIPELINE_CLOSE"),
-    (409, "NoCycleInProgress", "no cycle in progress"),
+    (409, "NoCycleInProgress", "refused .* \\(HTTP 409\\): x"),
     (501, "IntakeNotEnabled", "not enabled"),
     (500, "ParamifyError", "failed"),
 ])
@@ -887,3 +894,218 @@ def test_intake_without_an_artifact_id_is_an_error():
     client.session = session
     with pytest.raises(uploader.ParamifyError, match="no artifact id"):
         client.intake(ASSESSMENT, "scan.csv", RAW_CSV, "text/csv", {})
+
+
+# --------------------------------------------------------------------------- #
+# Path containment: the index is untrusted input
+# --------------------------------------------------------------------------- #
+
+SECRET = b"API_TOKEN=hunter2-do-not-upload\n"
+
+
+def _outside_file(tmp_path):
+    outside = tmp_path / "outside" / "secrets.env"
+    outside.parent.mkdir()
+    outside.write_bytes(SECRET)
+    return outside
+
+
+def _assert_never_sent(client):
+    """0 bytes of the outside file reached the (mock) Paramify."""
+    assert not any(SECRET in item["content"] for item in client.sent)
+
+
+def test_a_symlink_to_a_file_outside_the_run_is_not_uploaded(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}, {"name": "ok.csv"}])
+    link = run_dir / "issue-reports" / "scan.csv"
+    link.unlink()
+    link.symlink_to(_outside_file(tmp_path))
+
+    client = FakeClient()
+    summary = run_upload(run_dir, client)
+
+    _assert_never_sent(client)
+    assert [s["file"] for s in client.sent] == ["ok.csv"], "the other report still goes"
+    outcomes = {r["file"]: r for r in summary["results"]}
+    assert outcomes["scan.csv"]["outcome"] == "error"
+    assert "symlink" in outcomes["scan.csv"]["reason"]
+    assert outcomes["ok.csv"]["outcome"] == "uploaded"
+
+
+def test_a_symlink_never_reaches_the_http_layer(tmp_path):
+    """Same property one level down: the real client's session sees no POST."""
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    link = run_dir / "issue-reports" / "scan.csv"
+    link.unlink()
+    link.symlink_to(_outside_file(tmp_path))
+
+    session = FakeSession()
+    real = uploader.ParamifyClient("t", "https://example.test/api/v0")
+    real.session = session
+    original = uploader.ParamifyClient
+    uploader.ParamifyClient = lambda *a, **k: real
+    try:
+        uploader.upload_run(run_dir, token="t", base_url="https://example.test/api/v0")
+    finally:
+        uploader.ParamifyClient = original
+    assert session.posts == []
+
+
+def _point_index_at(run_dir, target):
+    index_path = run_dir / "issue-reports" / "_issue_reports.json"
+    index = json.loads(index_path.read_text())
+    index["reports"][0]["file"] = target
+    index_path.write_text(json.dumps(index))
+
+
+def test_an_index_entry_that_climbs_out_of_issue_reports_is_not_read(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    outside = _outside_file(tmp_path)
+    climbing = "../../outside/secrets.env"
+    assert (run_dir / "issue-reports" / climbing).resolve() == outside.resolve()
+    _point_index_at(run_dir, climbing)
+
+    client = FakeClient()
+    summary = run_upload(run_dir, client)
+    assert client.sent == []
+    assert summary["results"][0]["outcome"] == "error"
+    assert "outside" in summary["results"][0]["reason"]
+
+
+def test_an_absolute_index_entry_is_not_read(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    _point_index_at(run_dir, str(_outside_file(tmp_path)))
+    client = FakeClient()
+    summary = run_upload(run_dir, client)
+    assert client.sent == []
+    assert summary["results"][0]["outcome"] == "error"
+
+
+def test_a_symlinked_directory_is_not_followed(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    outside = _outside_file(tmp_path)
+    (run_dir / "issue-reports" / "linked").symlink_to(outside.parent, target_is_directory=True)
+    _point_index_at(run_dir, "linked/secrets.env")
+
+    client = FakeClient()
+    run_upload(run_dir, client)
+    assert client.sent == []
+
+
+def test_a_refused_path_blocks_the_close(tmp_path):
+    """An unreadable report means the run is incomplete: never PROCESS_CLOSE."""
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}, {"name": "ok.csv"}],
+                       close_cycle="after_run")
+    link = run_dir / "issue-reports" / "scan.csv"
+    link.unlink()
+    link.symlink_to(_outside_file(tmp_path))
+    client = FakeClient()
+    run_upload(run_dir, client)
+    assert [p["operation"] for p in client.processed] == ["PROCESS"]
+
+
+def test_a_symlink_is_refused_in_a_dry_run_too(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    link = run_dir / "issue-reports" / "scan.csv"
+    link.unlink()
+    link.symlink_to(_outside_file(tmp_path))
+    summary = run_upload(run_dir, FakeClient(), dry_run=True)
+    assert summary["results"][0]["outcome"] == "error"
+
+
+# --------------------------------------------------------------------------- #
+# A sidecar that had to be restarted can never close the cycle
+# --------------------------------------------------------------------------- #
+
+def _flag_cannot_close(run_dir, reason="the earlier _issue_reports.json was unreadable"):
+    path = run_dir / "issue-reports" / "_issue_reports.json"
+    index = json.loads(path.read_text())
+    index["cannot_close"] = reason
+    path.write_text(json.dumps(index))
+
+
+def test_close_decision_refuses_a_run_flagged_cannot_close():
+    group = {"policies": {"after_run"}, "invocations": [{"status": "success"}],
+             "records": [], "name": None, "cannot_close": "index restarted"}
+    operation, why = uploader.close_decision(group, files_ok=True)
+    assert operation == "PROCESS"
+    assert "close skipped" in why and "index restarted" in why
+
+
+def test_corrupt_sidecar_dry_run_shows_the_close_skipped(tmp_path):
+    """End to end: framework restarts a corrupt sidecar -> uploader previews PROCESS."""
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}], close_cycle="after_run")
+    # Control: a healthy after_run run would close.
+    events = []
+    run_upload(run_dir, FakeClient(), dry_run=True, on_event=events.append)
+    assert [e["operation"] for e in events if e["event"] == "process_plan"] == ["PROCESS_CLOSE"]
+
+    _flag_cannot_close(run_dir)
+    events = []
+    client = FakeClient()
+    run_upload(run_dir, client, dry_run=True, on_event=events.append)
+    [plan] = [e for e in events if e["event"] == "process_plan"]
+    assert plan["operation"] == "PROCESS"
+    assert "close skipped" in (plan.get("close_skipped") or "")
+
+
+def test_a_real_upload_of_a_cannot_close_run_sends_process_not_close(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}], close_cycle="after_run")
+    _flag_cannot_close(run_dir)
+    client = FakeClient()
+    run_upload(run_dir, client)
+    assert [p["operation"] for p in client.processed] == ["PROCESS"]
+
+
+# --------------------------------------------------------------------------- #
+# Cycle placement: uploads land on the oldest open cycle, not the newest
+# --------------------------------------------------------------------------- #
+
+OLD_CYCLE = {"id": "cyc-1", "name": "June 2026", "startDate": "2026-06-01T00:00:00.000Z"}
+NEW_CYCLE = {"id": "cyc-2", "name": "October 1-31, 2026", "startDate": "2026-10-01T00:00:00.000Z"}
+
+
+def test_landing_on_an_old_cycle_is_named(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    events = []
+    summary = run_upload(run_dir, FakeClient(cycles=[NEW_CYCLE, OLD_CYCLE]),
+                         on_event=events.append)
+    queued = next(e for e in events if e["event"] == "job_queued")
+    assert queued["cycle_name"] == "June 2026"
+    assert queued["newer_cycles"] == 1
+    assert summary["assessments"][0]["job"]["cycle_name"] == "June 2026"
+    log = json.loads((run_dir / "issue-reports" / "_intake_log.json").read_text())
+    assert log["jobs"][ASSESSMENT][0]["newer_cycles"] == 1
+
+
+def test_landing_on_the_newest_cycle_warns_nothing(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    events = []
+    run_upload(run_dir, FakeClient(cycles=[OLD_CYCLE]), on_event=events.append)
+    queued = next(e for e in events if e["event"] == "job_queued")
+    assert queued["cycle_name"] == "June 2026"
+    assert queued["newer_cycles"] == 0
+
+
+def test_a_failed_cycle_lookup_never_fails_the_upload(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    events = []
+    summary = run_upload(run_dir, FakeClient(cycles=None), on_event=events.append)
+    assert summary["ok"]
+    queued = next(e for e in events if e["event"] == "job_queued")
+    assert queued["cycle_name"] is None and queued["newer_cycles"] == 0
+
+
+
+def test_cycles_sharing_a_start_date_are_ordered_by_creation(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    same_day = [
+        {"id": "cyc-1", "name": "October 1-31, 2026", "startDate": "2026-10-01T00:00:00.000Z",
+         "createdAt": "2026-10-01T22:03:01.000Z"},
+        {"id": "cyc-2", "name": "October 1-31, 2026", "startDate": "2026-10-01T00:00:00.000Z",
+         "createdAt": "2026-10-01T22:47:04.000Z"},
+    ]
+    events = []
+    run_upload(run_dir, FakeClient(cycles=same_day), on_event=events.append)
+    queued = next(e for e in events if e["event"] == "job_queued")
+    assert queued["newer_cycles"] == 1

@@ -5,7 +5,7 @@ call ONLY this module. They never re-implement discovery, validation, manifest
 editing, or execution; they differ only in how they render the JSON-able values
 these functions return.
 
-Design constraints (see docs/config_injection_design.md, CLAUDE.md):
+Design constraints:
 - The editable artifact is the manifest (customer-side values). Declarations
   (fetcher.yaml, fetchers/_categories/*.yaml) are read-only — they generate the
   form via catalog(); we never write into fetchers/.
@@ -36,9 +36,11 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 
+from framework import samples as _samples
 from framework import yaml_io
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import ConfigField, Secret, TargetField, effective_secrets
+from framework.custom_tags import category_display_names
 from framework.envelope import ENVELOPE_KEYS, is_enveloped, wrap_outputs
 from framework.issue_reports import (
     ASSESSMENT_ID_FIELD,
@@ -143,12 +145,23 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
         "secrets": [_secret_descriptor(s) for s in effective_secrets(f, platform_spec)],
         "target_schema": [_target_descriptor(t) for t in f.target_schema.values()],
     }
+    # Where the output goes, so a front-end can say so before anything runs.
+    # Evidence names its destination in fetcher.yaml; an issue report names only
+    # the kind of assessment it fits, and the manifest picks which one.
+    if f.evidence_set is not None:
+        d["evidence_set"] = {
+            "reference_id": f.evidence_set.reference_id,
+            "name": f.evidence_set.name,
+            "frequency": f.evidence_set.frequency,
+        }
     if f.issue_report is not None:
         # What kind of assessment this report can go to, so a front-end can
-        # filter the assessment picker without re-reading fetcher.yaml.
+        # filter the assessment picker without re-reading fetcher.yaml. The
+        # format is the tool's own (csv, nessus, …), never one we convert to.
         d["issue_report"] = {
             "assessment_type": f.issue_report.assessment_type,
             "title": f.issue_report.title,
+            "format": f.output_type,
         }
     return d
 
@@ -189,6 +202,7 @@ def catalog(root: Path) -> dict:
         categories.append({
             "name": name,
             "description": spec.description if spec else None,
+            "display_name": spec.display_name if spec else None,
             "platform": platform_block,
             "fetchers": [
                 _fetcher_descriptor(f, spec)
@@ -932,7 +946,7 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
         # intaken, so the gap is reported here rather than at upload time — after
         # someone has already paid for a scan. It is deliberately NOT a required
         # config field: making it one would block collecting without a Paramify
-        # connection, which the framework is supposed to allow (docs/design.md).
+        # connection, which the framework is supposed to allow (docs/architecture_guide.md, step 3).
         if fetcher.is_issue_report:
             from framework.runner.executor import merged_config  # lazy: import cycle
 
@@ -1011,6 +1025,14 @@ def _manifest_id(path, root: Path) -> str:
         return str(p.relative_to(Path(root).resolve()))
     except ValueError:
         return str(p)
+
+
+def _last_line(text: Optional[str]) -> str:
+    """Last non-blank line of `text`, or ''."""
+    for line in reversed((text or "").splitlines()):
+        if line.strip():
+            return line.strip()
+    return ""
 
 
 def run(
@@ -1131,14 +1153,24 @@ def run(
                 record_issue_reports(r, fetcher, run_id, run_dir, assessment)
             if r.exit_code != 0:
                 overall_ok = False
-            emit({
+            result_event = {
                 "event": "fetcher_result",
                 "fetcher": entry.use,
                 "exit_code": r.exit_code,
                 "duration_sec": r.duration_sec,
                 "target": r.target,
                 "outputs": r.outputs,
-            })
+            }
+            if r.exit_code != 0:
+                # Why it failed, for a front-end to show next to the status: what
+                # the fetcher reported via $FETCHER_STATUS_FILE, else the last
+                # line it wrote to stderr (the same precedence the sidecar uses).
+                reason = r.error or _last_line(r.stderr)
+                if reason:
+                    result_event["error"] = reason
+                if r.error_code:
+                    result_event["error_code"] = r.error_code
+            emit(result_event)
         all_results.extend(results)
 
     completed_at = _iso_now()
@@ -1273,6 +1305,7 @@ def sync_validators(
     update: bool = False,
     lock_path: Optional[str] = None,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> dict:
     """Sync registry validators to Paramify and associate them to evidence sets.
 
@@ -1283,6 +1316,9 @@ def sync_validators(
     """
     syncer = _load_paramify_validator_syncer(root)
     validators = syncer.collect_validators(root, manifest_path, reference_ids)
+    # The same default config as the other stages (<root>/upload.yaml), so the
+    # base URL and the default tags do not depend on which stage is running.
+    config_path = _upload_config(root, config_path)
     config: dict = {}
     if config_path:
         config = yaml_io.load_path(Path(config_path)) or {}
@@ -1293,6 +1329,8 @@ def sync_validators(
         update=update,
         lock_path=lock_path,
         on_event=on_event,
+        display_names=category_display_names(root),
+        custom_tags=custom_tags,
     )
 
 
@@ -1352,6 +1390,7 @@ def upload_run(
     *,
     dry_run: bool = False,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> dict:
     """Upload one run directory to Paramify.
 
@@ -1367,6 +1406,7 @@ def upload_run(
         config=config,
         dry_run=dry_run,
         on_event=on_event,
+        custom_tags=custom_tags,
     )
 
 
@@ -1752,6 +1792,7 @@ def scripts_sync(
     reassociate: bool = False,
     include: Optional[set] = None,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> dict:
     """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
 
@@ -1772,6 +1813,7 @@ def scripts_sync(
         reassociate=reassociate,
         include=include,
         on_event=on_event,
+        custom_tags=custom_tags,
     )
 
 
@@ -1951,6 +1993,109 @@ def read_issue_report(path) -> dict:
     if rec is None:
         raise ValueError(f"{p.name} is not listed in the issue-report index")
     return rec
+
+
+# --------------------------------------------------------------------------- #
+# Evidence samples — one representative record per fetcher (framework/samples.py)
+# --------------------------------------------------------------------------- #
+
+def sample_status(root: Path, fetchers: Optional[dict] = None) -> List[dict]:
+    """One row per evidence fetcher: whether it has a committed sample, and if
+    so where it came from, whether a person has reviewed it, and whether it was
+    captured from the fetcher's current version. Issue-report fetchers are left
+    out — their output is the vendor's own file, not an evidence payload."""
+    fetchers = fetchers if fetchers is not None else discover_fetchers(root)
+    rows = []
+    for name in sorted(fetchers):
+        f = fetchers[name]
+        if f.is_issue_report:
+            continue
+        doc = _samples.read_sample(f.path)
+        row = {"fetcher": name, "category": f.category, "version": f.version,
+               "has_sample": doc is not None}
+        if doc is not None:
+            row.update({
+                "source": doc.get("source"),
+                "reviewed": bool(doc.get("reviewed")),
+                "captured_on": doc.get("captured_on"),
+                "sample_version": doc.get("fetcher_version"),
+                "current": doc.get("fetcher_version") == f.version,
+                "records": {c["path"]: c["records"] for c in doc.get("collections") or []},
+            })
+        rows.append(row)
+    return rows
+
+
+def read_sample(root: Path, name: str, fetchers: Optional[dict] = None) -> dict:
+    """The committed sample for one fetcher. Raises ValueError if the fetcher is
+    unknown or has no sample yet."""
+    fetchers = fetchers if fetchers is not None else discover_fetchers(root)
+    f = fetchers.get(name)
+    if f is None:
+        raise ValueError(f"unknown fetcher: {name}")
+    doc = _samples.read_sample(f.path)
+    if doc is None:
+        raise ValueError(f"{name} has no sample yet ({_samples.SAMPLE_FILENAME} beside its fetcher.yaml)")
+    return doc
+
+
+def backfill_samples(
+    root: Path,
+    evidence_dir,
+    only: Optional[List[str]] = None,
+    scrub: Optional[List[str]] = None,
+    force: bool = False,
+    dry_run: bool = False,
+    fetchers: Optional[dict] = None,
+) -> dict:
+    """Build a sample for every fetcher that has evidence with records under
+    `evidence_dir` (searched recursively), from the best file it has: one with
+    records, from the current fetcher version, that succeeded, and showed the
+    most. Existing samples are kept unless `force`.
+
+    Sanitizing uses the identifiers of EVERY scanned file, not only the chosen
+    one, so an account id from one run is caught in another's sample. A sample
+    that still contains a known identifier after sanitizing is not written; it
+    is reported under "blocked" with what leaked.
+
+    Returns {"written": [...], "skipped": [...], "blocked": [...],
+    "no_records": [...], "unknown": [...]}, each a list of row dicts.
+    """
+    fetchers = fetchers if fetchers is not None else discover_fetchers(root)
+    candidates = _samples.scan_evidence(Path(evidence_dir))
+    extra = _samples.collect_all_needles(candidates)
+    out: Dict[str, List[dict]] = {
+        "written": [], "skipped": [], "blocked": [], "no_records": [], "unknown": [],
+    }
+    for name in sorted(candidates):
+        if only and name not in only:
+            continue
+        f = fetchers.get(name)
+        if f is None or f.is_issue_report:
+            out["unknown"].append({"fetcher": name})
+            continue
+        best = _samples.best_candidate(candidates[name], f.version)
+        if not _samples.has_records(best.profiled):
+            out["no_records"].append({"fetcher": name, "files": len(candidates[name])})
+            continue
+        if _samples.read_sample(f.path) is not None and not force:
+            out["skipped"].append({"fetcher": name, "reason": "sample exists (use --force)"})
+            continue
+        doc, leaks = _samples.build_sample(best, scrub=scrub or (), extra=extra)
+        row = {
+            "fetcher": name,
+            "source_file": str(best.path),
+            "sample_version": doc["fetcher_version"],
+            "current": doc["fetcher_version"] == f.version,
+            "records": {c["path"]: c["records"] for c in doc["collections"]},
+        }
+        if leaks:
+            out["blocked"].append({**row, "leaks": leaks})
+            continue
+        if not dry_run:
+            row["path"] = str(_samples.write_sample(f.path, doc))
+        out["written"].append(row)
+    return out
 
 
 def preview_issue_report(path) -> str:

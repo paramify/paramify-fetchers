@@ -1,6 +1,7 @@
 # GitLab fetchers are python (requests) against the GitLab REST API. Every one is
 # fanned out per project, because a token's reach is per project and a failure on
 # one must not take the others down with it.
+display_name: GitLab
 description: >-
   GitLab change-management evidence. CI/CD pipeline configuration, merge-request
   history, project settings, and significant-change notifications. Fanned out per

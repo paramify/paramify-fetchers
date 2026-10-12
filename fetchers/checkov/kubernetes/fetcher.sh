@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 [ -f .env ] && { set -a; . .env; set +a; }
 
 . "$SCRIPT_DIR/../_shared/clone.sh"
-# The one place a fetcher reports WHY it failed (docs/fetcher_contract.md § Output).
+# The one place a fetcher reports WHY it failed (docs/fetcher_contract_guide.md, step 6).
 source "$(dirname "$0")/../../_lib/status.sh"
 FETCHER="$COMPONENT"   # attributes report_failure's log line to this fetcher
 

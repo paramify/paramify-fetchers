@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paramify.com/schemas/fetchers/discovery.json",
+  "title": "Discovery document",
+  "description": "What one set of credentials can see in one platform: a list of resource types, each with whether it could be read and what is there. Written by a `kind: discovery` fetcher, enveloped by the runner like evidence, never uploaded. Platform-agnostic on purpose: one renderer reads every platform's document. See docs/discovery.md.",
+  "type": "object",
+  "required": ["schema_version", "platform", "collected_at", "resources"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "platform": {
+      "type": "string",
+      "description": "The fetcher category this document describes (knowbe4, aws, ...)."
+    },
+    "identity": {
+      "type": ["string", "null"],
+      "description": "Who the credentials authenticated as, in the platform's own terms (an account name, an ARN, a tenant). Null when the platform has no way to say."
+    },
+    "scope": {
+      "type": "object",
+      "description": "Where the enumeration looked: region, account, tenant, subscription. Free-form per platform, flat string/number values.",
+      "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+    },
+    "collected_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "resources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/resource" }
+    }
+  },
+  "$defs": {
+    "resource": {
+      "type": "object",
+      "required": ["type", "status", "source"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Singular snake_case name of the resource type (group, training_campaign). Stable: later features refer to resources by this name."
+        },
+        "label": {
+          "type": "string",
+          "description": "How a person reads the type name, singular: \"EC2 instance\", \"Security Hub\". Optional; the page falls back to the type with common acronyms cased."
+        },
+        "note": {
+          "type": "string",
+          "description": "How to read this type's count when the general rules would mislead, e.g. an inventory service that only sees the regions where it is turned on. Shown with the type."
+        },
+        "scope": {
+          "type": "object",
+          "description": "Where this entry was listed, when a platform lists the same type in several places: {\"region\": \"us-east-2\"}, {\"subscription\": \"...\"}. Each (type, scope) pair is its own entry with its own status, so a type denied in one region and readable in the rest says exactly that. Omitted for a type listed once (a global service, a SaaS tenant).",
+          "minProperties": 1,
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        },
+        "status": {
+          "enum": ["ok", "not_enabled", "denied", "error"],
+          "description": "ok: listed in full. not_enabled: the platform said the feature is off or not licensed. denied: the credentials may not read it. error: anything else, including throttling. denied and error are gaps (we could not tell) and must never be read as 'there are none'. not_enabled is an answer: the platform said the feature is off, so there is nothing of that type to list."
+        },
+        "count": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "How many were seen. With truncated: true this is a lower bound. Null when nothing could be read."
+        },
+        "truncated": {
+          "type": "boolean",
+          "default": false,
+          "description": "True when listing stopped partway, so count and items are incomplete."
+        },
+        "items": {
+          "type": ["array", "null"],
+          "description": "Identifying fields only (id, name, a few attributes), never the full object: discovery says what exists, evidence fetchers say how it is configured. Null for count-only types, which is how a type holding personal data (users) stays out of the document.",
+          "items": {
+            "type": "object",
+            "required": ["id", "name"],
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": ["string", "null"] }
+            },
+            "additionalProperties": true
+          }
+        },
+        "summary": {
+          "type": "object",
+          "description": "Small aggregates over the full set, e.g. a count per status. Values are numbers or flat objects of numbers.",
+          "additionalProperties": true
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why the status is not ok, in the platform's words where possible."
+        },
+        "source": {
+          "type": "string",
+          "description": "The call that produced this entry (GET /v1/groups), so a reader can reproduce it."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "not": { "const": "ok" } } } },
+          "then": { "required": ["reason"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "ok" } } },
+          "then": { "required": ["count"], "properties": { "count": { "type": "integer" } } }
+        }
+      ]
+    }
+  }
+}
