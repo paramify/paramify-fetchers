@@ -94,7 +94,7 @@ class FakeClient:
     def artifact_exists(self, evidence_id, filename, run_id):
         return filename in self.existing
 
-    def upload_artifact(self, evidence_id, filename, content, meta):
+    def upload_artifact(self, evidence_id, filename, content, meta, content_type="application/json"):
         if filename in self.fail_files:
             raise uploader.ParamifyError(f"HTTP 500 on {filename}")
         self.uploaded.append(filename)

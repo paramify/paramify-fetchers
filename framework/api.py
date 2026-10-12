@@ -41,6 +41,9 @@ from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import ConfigField, Secret, TargetField, effective_secrets
 from framework.custom_tags import category_display_names
 from framework.envelope import ENVELOPE_KEYS, is_enveloped, wrap_outputs
+from framework.inventory import INVENTORY_DIR
+from framework.inventory import read_index as read_inventory_index
+from framework.inventory import record_outputs as record_inventory
 from framework.issue_reports import (
     ASSESSMENT_ID_FIELD,
     ASSESSMENT_NAME_FIELD,
@@ -1144,12 +1147,14 @@ def run(
             continue
 
         for r in results:
-            # Exactly one of these applies: an issue report is never enveloped
-            # (wrap_outputs returns early on kind), and only an issue report gets
-            # a sidecar record.
+            # Exactly one of these applies: issue reports and inventory files are
+            # never enveloped (wrap_outputs returns early on kind), and each of
+            # those kinds gets its own sidecar record instead.
             wrap_outputs(r, fetcher, run_id, run_dir)
             if fetcher.is_issue_report:
                 record_issue_reports(r, fetcher, run_id, run_dir, assessment)
+            elif fetcher.is_inventory:
+                record_inventory(r, fetcher, run_id, run_dir)
             if r.exit_code != 0:
                 overall_ok = False
             result_event = {
@@ -1197,6 +1202,12 @@ def run(
         "issue_reports": sum(
             1 for r in all_results for name in r.outputs
             if name.startswith(f"{ISSUE_REPORTS_DIR}/")
+        ),
+        # Inventory files go up with `paramify upload` like evidence; counted so a
+        # front-end can say what the run collected.
+        "inventory": sum(
+            1 for r in all_results for name in r.outputs
+            if name.startswith(f"{INVENTORY_DIR}/")
         ),
     }
     emit({"event": "run_complete", **summary})
@@ -1276,6 +1287,14 @@ def reference_ids_from_run(run_dir) -> set:
         if not isinstance(meta, dict):
             continue
         es = meta.get("evidence_set")
+        if isinstance(es, dict) and es.get("reference_id"):
+            refs.add(es["reference_id"])
+    try:
+        index = read_inventory_index(run_path)
+    except ValueError:
+        index = None
+    for rec in (index or {}).get("files") or []:
+        es = rec.get("evidence_set") if isinstance(rec, dict) else None
         if isinstance(es, dict) and es.get("reference_id"):
             refs.add(es["reference_id"])
     return refs
@@ -1839,6 +1858,15 @@ def _run_summary(run_dir: Path) -> dict:
     files: list = []
     seen = set()
     report_prefix = f"{ISSUE_REPORTS_DIR}/"
+    inventory_prefix = f"{INVENTORY_DIR}/"
+
+    def kind_of_output(name: str) -> str:
+        if name.startswith(report_prefix):
+            return "issue_report"
+        if name.startswith(inventory_prefix):
+            return "inventory"
+        return "evidence"
+
     for inv in invocations:
         for name in inv.get("outputs") or []:
             seen.add(name)
@@ -1848,9 +1876,10 @@ def _run_summary(run_dir: Path) -> dict:
                 "fetcher": inv.get("fetcher_name"),
                 "target": inv.get("target"),
                 "exit_code": inv.get("exit_code"),
-                # An issue report is a raw vendor file, so a viewer must not try
-                # to read it as an envelope — a .nessus or .csv is not JSON at all.
-                "kind": "issue_report" if name.startswith(report_prefix) else "evidence",
+                # Issue reports and inventory files are raw source files, so a
+                # viewer must not try to read them as an envelope — a .nessus or
+                # .csv is not JSON at all.
+                "kind": kind_of_output(name),
             })
     # Any JSON outputs not recorded in the metadata (e.g. legacy/direct runs).
     for p in sorted(run_dir.glob("*.json")):
@@ -1864,14 +1893,16 @@ def _run_summary(run_dir: Path) -> dict:
     # Same fallback for reports, so a run dir with no metadata is not treated as
     # empty and skipped by list_runs while holding uploadable reports. Any
     # extension, since the format is the vendor's.
-    reports_dir = run_dir / ISSUE_REPORTS_DIR
-    if reports_dir.is_dir():
-        for p in sorted(reports_dir.iterdir()):
-            name = f"{ISSUE_REPORTS_DIR}/{p.name}"
+    for subdir, kind in ((ISSUE_REPORTS_DIR, "issue_report"), (INVENTORY_DIR, "inventory")):
+        raw_dir = run_dir / subdir
+        if not raw_dir.is_dir():
+            continue
+        for p in sorted(raw_dir.iterdir()):
+            name = f"{subdir}/{p.name}"
             if not p.is_file() or p.name.startswith("_") or name in seen:
                 continue
             files.append({"name": name, "path": str(p), "fetcher": None, "target": None,
-                          "exit_code": None, "kind": "issue_report"})
+                          "exit_code": None, "kind": kind})
     files.sort(key=lambda f: f["name"])
 
     name = run_dir.name
@@ -1889,6 +1920,7 @@ def _run_summary(run_dir: Path) -> dict:
         # front-end needs to know whether this run has anything to intake, and
         # `paramify upload` alone would leave those reports unsent.
         "issue_reports": sum(1 for f in files if f["kind"] == "issue_report"),
+        "inventory": sum(1 for f in files if f["kind"] == "inventory"),
     }
 
 
@@ -1921,11 +1953,15 @@ RUN_KINDS = ("evidence", "issue_report")
 
 
 def run_has(run: dict, kind: str) -> bool:
-    """Whether a list_runs entry holds anything for this kind's upload."""
+    """Whether a list_runs entry holds anything for this kind's upload.
+
+    The kinds are the two upload commands. `evidence` is what `paramify upload`
+    sends, which includes inventory files: they go to evidence sets too.
+    """
     if kind == "issue_report":
         return bool(run.get("issue_reports"))
     if kind == "evidence":
-        return any(f.get("kind") == "evidence" for f in run.get("files") or [])
+        return any(f.get("kind") in ("evidence", "inventory") for f in run.get("files") or [])
     raise ValueError(f"unknown run kind {kind!r}; expected one of {RUN_KINDS}")
 
 
@@ -1992,6 +2028,52 @@ def read_issue_report(path) -> dict:
     if rec is None:
         raise ValueError(f"{p.name} is not listed in the issue-report index")
     return rec
+
+
+def read_inventory_file(path) -> dict:
+    """Return the sidecar record for one inventory file.
+
+    The file is the source system's own export, so `read_evidence` cannot open
+    it as an envelope. Raises ValueError if the sidecar is missing or the file
+    is not listed.
+    """
+    p = Path(path)
+    if not p.is_file():
+        raise ValueError(f"no such inventory file: {p}")
+    index = read_inventory_index(p.parent.parent)
+    if index is None:
+        raise ValueError(f"no inventory index next to {p.name}")
+    rec = next((r for r in index.get("files") or [] if r.get("file") == p.name), None)
+    if rec is None:
+        raise ValueError(f"{p.name} is not listed in the inventory index")
+    return rec
+
+
+def preview_inventory_file(path) -> str:
+    """Human-readable sidecar record for one inventory file."""
+    p = Path(path)
+    rec = read_inventory_file(p)
+    es = rec.get("evidence_set") or {}
+    lines = [
+        f"{p.name}   (inventory — the source's own file, never enveloped)",
+        f"fetcher: {rec.get('fetcher_name', '?')}  v{rec.get('fetcher_version', '?')}  [{rec.get('category', '?')}]",
+        f"status: {rec.get('status', '?')}   exit {rec.get('exit_code', '?')}   collected {rec.get('collected_at', '?')}",
+        f"format: {rec.get('format', '?')}   {rec.get('bytes', '?')} bytes",
+        f"evidence set: {es.get('reference_id', '?')} ({es.get('name', '?')})",
+    ]
+    tgt = rec.get("target")
+    if isinstance(tgt, dict) and tgt:
+        lines.append("target: " + "  ".join(f"{k}={v}" for k, v in tgt.items()))
+    if rec.get("complete"):
+        lines.append("complete: yes — `paramify upload` sends it")
+    else:
+        why = "; ".join(rec.get("incomplete_because") or ["not marked complete"])
+        lines.append(f"complete: no — not sent: {why}")
+    if rec.get("sha256"):
+        lines.append(f"sha256: {rec['sha256']}")
+    if rec.get("error"):
+        lines.append(f"error: {rec['error']}")
+    return "\n".join(lines)
 
 
 def preview_issue_report(path) -> str:

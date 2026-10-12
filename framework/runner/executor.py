@@ -34,6 +34,7 @@ from framework.contract import (
     TargetInstance,
     effective_secrets,
 )
+from framework.inventory import INVENTORY_DIR
 from framework.issue_reports import ISSUE_REPORTS_DIR
 from framework.secret_resolver import SecretResolutionError, UnsetSecretError, resolve
 
@@ -271,7 +272,7 @@ def _emit_shadowed(
 
 
 def invocation_dir(fetcher: Fetcher, run_dir: Path) -> Path:
-    """Where this fetcher writes — the run dir, or its issue-reports/ subdir.
+    """Where this fetcher writes — the run dir, or its issue-reports/ or inventory/ subdir.
 
     Redirecting EVIDENCE_DIR is what keeps issue reports out of the fetcher's
     concern entirely: an issue-report fetcher writes to EVIDENCE_DIR exactly like
@@ -279,7 +280,11 @@ def invocation_dir(fetcher: Fetcher, run_dir: Path) -> Path:
     alternative — telling fetchers to write to a subdirectory — makes the layout
     a contributor's responsibility, which is how half of them would get it wrong.
     """
-    return run_dir / ISSUE_REPORTS_DIR if fetcher.is_issue_report else run_dir
+    if fetcher.is_issue_report:
+        return run_dir / ISSUE_REPORTS_DIR
+    if fetcher.is_inventory:
+        return run_dir / INVENTORY_DIR
+    return run_dir
 
 
 def _build_env(

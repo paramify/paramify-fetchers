@@ -21,6 +21,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Static
 
 from framework import api
+from framework.inventory import INVENTORY_DIR
 from framework.issue_reports import ISSUE_REPORTS_DIR
 from framework.tui import palette
 from framework.tui.modals import PreviewModal
@@ -165,6 +166,14 @@ class EvidencePage(Vertical):
                 text = api.preview_issue_report(p)
             except Exception as exc:
                 self.notify(f"Cannot read scan report: {exc}", severity="error", timeout=8)
+                return
+            self.app.push_screen(PreviewModal(text, title=p.name))
+            return
+        if p.parent.name == INVENTORY_DIR:
+            try:
+                text = api.preview_inventory_file(p)
+            except Exception as exc:
+                self.notify(f"Cannot read inventory file: {exc}", severity="error", timeout=8)
                 return
             self.app.push_screen(PreviewModal(text, title=p.name))
             return

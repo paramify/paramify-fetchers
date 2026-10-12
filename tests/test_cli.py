@@ -372,6 +372,8 @@ API_TO_CLI = {
     "read_evidence": "evidence",
     "read_issue_report": "evidence",
     "preview_issue_report": "evidence",
+    "read_inventory_file": "evidence",
+    "preview_inventory_file": "evidence",
     "issues_upload_preflight": "issues upload",
     "issues_upload_run": "issues upload",
     "list_assessments": "assessments list",

@@ -45,6 +45,11 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from framework.contract import DEFAULT_EVIDENCE_FREQUENCY  # noqa: E402
 from framework.custom_tags import ENTITY_EVIDENCE, build_tagger  # noqa: E402
+from framework.inventory import CONTENT_TYPES as INVENTORY_CONTENT_TYPES  # noqa: E402
+from framework.inventory import INVENTORY_DIR  # noqa: E402
+from framework.inventory import read_index as read_inventory_index  # noqa: E402
+from framework.inventory import resolve_file as resolve_inventory_file  # noqa: E402
+from framework.inventory import sidecar_path as inventory_sidecar_path  # noqa: E402
 from framework.paramify_auth import (  # noqa: E402
     READ_TOKEN_ENV,
     UPLOAD_TOKEN_ENV,
@@ -154,9 +159,12 @@ class ParamifyClient:
                 return True
         return False
 
-    def upload_artifact(self, evidence_id: str, filename: str, content: bytes, artifact_meta: Dict) -> Dict:
+    def upload_artifact(
+        self, evidence_id: str, filename: str, content: bytes, artifact_meta: Dict,
+        content_type: str = "application/json",
+    ) -> Dict:
         files = {
-            "file": (filename, content, "application/json"),
+            "file": (filename, content, content_type),
             "artifact": ("artifact.json", json.dumps(artifact_meta), "application/json"),
         }
         r = self.session.post(
@@ -184,7 +192,10 @@ def find_latest_run(output_dir: Path) -> Optional[Path]:
     if not output_dir.is_dir():
         return None
     runs = sorted((p for p in output_dir.glob("run-*") if p.is_dir()), reverse=True)
-    return next((r for r in runs if any(iter_evidence_files(r))), None)
+    return next(
+        (r for r in runs if any(iter_evidence_files(r)) or inventory_sidecar_path(r).exists()),
+        None,
+    )
 
 
 def iter_evidence_files(run_dir: Path):
@@ -370,165 +381,188 @@ def upload_run(
         raise ValueError(msg)
 
     files = list(iter_evidence_files(run_dir))
+    # Inventory files are raw source exports beside the envelopes, listed in
+    # their own sidecar (framework/inventory.py). An unreadable index is reported
+    # once rather than aborting the evidence it sits beside.
+    inventory_error = None
+    try:
+        inventory_index = read_inventory_index(run_dir)
+    except ValueError as e:
+        inventory_index, inventory_error = None, str(e)
+    inventory_files = [r for r in (inventory_index or {}).get("files") or [] if isinstance(r, dict)]
+
     logger.info("Uploading evidence from %s%s", run_dir, " (dry-run)" if dry_run else "")
     _emit(on_event, {
         "event": "upload_start",
         "run_dir": str(run_dir),
         "base_url": base_url,
         "dry_run": dry_run,
-        "files": len(files),
+        "files": len(files) + len(inventory_files),
     })
 
     client = None if dry_run else ParamifyClient(token, base_url)
     if client is not None:
         tagger.session = client.session
     results: List[Dict] = []
-    uploaded = skipped_dup = skipped_failed = errors = seen = 0
+    counts = {"uploaded": 0, "skipped_duplicate": 0, "skipped_failed": 0, "errors": 0}
 
     def add_result(result: Dict) -> None:
         results.append(result)
         _emit(on_event, {"event": "upload_file", **result})
 
+    def fail(name: str, reason: str, **extra) -> None:
+        logger.error("%s: %s", name, reason)
+        counts["errors"] += 1
+        add_result({"file": name, "outcome": "error", "reason": reason, **extra})
+
+    def send(name: str, metadata: Dict, content: Callable[[], bytes], content_type: str) -> None:
+        """Route one file to its evidence set: everything after reading it."""
+        es = resolve_evidence_set(metadata, overrides)
+        if not es or not es.get("reference_id") or not es.get("name"):
+            fail(name, "missing/incomplete evidence_set")
+            return
+
+        # An inventory pipeline reads the artifact as the whole estate, so a
+        # partial or empty file would read as assets that are gone. The runner
+        # judged completeness from the file when it indexed it; this is not
+        # optional the way skip_failed is.
+        if "complete" in metadata and metadata.get("complete") is not True:
+            why = "; ".join(metadata.get("incomplete_because") or ["not marked complete"])
+            reason = f"incomplete inventory not sent: {why}"
+            logger.warning("%s: %s", name, reason)
+            counts["skipped_failed"] += 1
+            add_result({"file": name, "outcome": "skipped_failed",
+                        "reference_id": es["reference_id"], "reason": reason})
+            return
+
+        if metadata.get("status") == "failed" and skip_failed:
+            logger.info("%s: status=failed and skip_failed set; skipping", name)
+            counts["skipped_failed"] += 1
+            add_result({"file": name, "outcome": "skipped_failed", "reference_id": es["reference_id"]})
+            return
+
+        if dry_run:
+            # Title only — the channel needs the set's record, and a dry-run
+            # makes no API calls at all.
+            logger.info(
+                "would upload %s → set %s (%s) as %r",
+                name, es["reference_id"], es["name"],
+                build_artifact_meta(metadata, es["name"])["title"],
+            )
+            add_result({
+                "file": name,
+                "outcome": "would_upload",
+                "reference_id": es["reference_id"],
+                "tags": tagger.plan(metadata.get("category")),
+            })
+            return
+
+        assert client is not None
+        record = client.get_or_create_evidence_set(es)
+        evidence_id = (record or {}).get("id")
+        if not evidence_id:
+            fail(name, f"could not get or create evidence set {es['reference_id']}",
+                 reference_id=es["reference_id"])
+            return
+
+        # Tag before the dedup check: a set is tagged once per run whether or
+        # not this file is new, which is what backfills sets from older runs.
+        tag_info = tagger.tag(ENTITY_EVIDENCE, evidence_id, metadata.get("category"))
+        tags = tag_info["tags"] if tag_info["outcome"] in ("applied", "already") else []
+
+        try:
+            channel = resolve_channel(
+                record.get("channels"),
+                where=f"evidence set {es['reference_id']}",
+            )
+        except ChannelError as e:
+            # Before the dedup check on purpose: an unroutable set is worth
+            # reporting on every file it affects, not just new ones.
+            fail(name, str(e), reference_id=es["reference_id"], evidence_id=evidence_id)
+            return
+
+        if client.artifact_exists(evidence_id, name, metadata.get("run_id")):
+            logger.info("%s: artifact already uploaded for this run; skipping", name)
+            counts["skipped_duplicate"] += 1
+            add_result({
+                "file": name,
+                "outcome": "skipped_duplicate",
+                "reference_id": es["reference_id"],
+                "evidence_id": evidence_id,
+                "tags": tags,
+            })
+            return
+        meta_art = build_artifact_meta(
+            metadata, es["name"], channel_id=channel["id"] if channel else None
+        )
+        art = client.upload_artifact(evidence_id, name, content(), meta_art, content_type)
+        counts["uploaded"] += 1
+        logger.info(
+            "uploaded %s → set %s%s artifact %s",
+            name,
+            es["reference_id"],
+            f" via {channel.get('referenceId') or channel['id']}" if channel else "",
+            art.get("id"),
+        )
+        # The channel is logged because it cannot be read back: an artifact
+        # response carries no channelId, so upload_log.json is the only
+        # record of where each artifact was sent.
+        add_result({
+            "file": name,
+            "outcome": "uploaded",
+            "reference_id": es["reference_id"],
+            "evidence_id": evidence_id,
+            "artifact_id": art.get("id"),
+            "channel": (channel.get("referenceId") if channel else None),
+            "channel_id": (channel.get("id") if channel else None),
+            "tags": tags,
+        })
+
+    seen = 0
     for path in files:
         seen += 1
         try:
             envelope = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError) as e:
-            logger.error("%s: cannot read as JSON (%s)", path.name, e)
-            errors += 1
-            add_result({"file": path.name, "outcome": "error", "reason": f"cannot read as JSON ({e})"})
+            fail(path.name, f"cannot read as JSON ({e})")
             continue
 
         # Per-file isolation: one bad file (malformed envelope, API error, etc.)
         # must never abort the batch — the uploader processes arbitrary run dirs.
         try:
             if not is_enveloped(envelope):
-                logger.error("%s: not envelope-wrapped (no metadata/payload); skipping", path.name)
-                errors += 1
-                add_result({"file": path.name, "outcome": "error", "reason": "not envelope-wrapped"})
+                fail(path.name, "not envelope-wrapped")
                 continue
-
-            metadata = envelope["metadata"]
-            es = resolve_evidence_set(metadata, overrides)
-            if not es or not es.get("reference_id") or not es.get("name"):
-                logger.error(
-                    "%s: evidence_set missing or incomplete (need reference_id and name); skipping",
-                    path.name,
-                )
-                errors += 1
-                add_result({"file": path.name, "outcome": "error", "reason": "missing/incomplete evidence_set"})
-                continue
-
-            # An inventory pipeline reads the artifact as the whole estate, so a
-            # partial or empty one would read as assets that are gone. The runner
-            # judged completeness when it enveloped the file (framework/inventory.py);
-            # this is not optional the way skip_failed is.
-            inventory = metadata.get("inventory")
-            if isinstance(inventory, dict) and inventory.get("complete") is not True:
-                why = "; ".join(inventory.get("incomplete_because") or ["not marked complete"])
-                reason = f"incomplete inventory not sent: {why}"
-                logger.warning("%s: %s", path.name, reason)
-                skipped_failed += 1
-                add_result({"file": path.name, "outcome": "skipped_failed",
-                            "reference_id": es["reference_id"], "reason": reason})
-                continue
-
-            if metadata.get("status") == "failed" and skip_failed:
-                logger.info("%s: status=failed and skip_failed set; skipping", path.name)
-                skipped_failed += 1
-                add_result({"file": path.name, "outcome": "skipped_failed", "reference_id": es["reference_id"]})
-                continue
-
-            if dry_run:
-                # Title only — the channel needs the set's record, and a dry-run
-                # makes no API calls at all.
-                logger.info(
-                    "would upload %s → set %s (%s) as %r",
-                    path.name, es["reference_id"], es["name"],
-                    build_artifact_meta(metadata, es["name"])["title"],
-                )
-                add_result({
-                    "file": path.name,
-                    "outcome": "would_upload",
-                    "reference_id": es["reference_id"],
-                    "tags": tagger.plan(metadata.get("category")),
-                })
-                continue
-
-            record = client.get_or_create_evidence_set(es)
-            evidence_id = (record or {}).get("id")
-            if not evidence_id:
-                logger.error("%s: could not get or create evidence set %s", path.name, es["reference_id"])
-                errors += 1
-                add_result({"file": path.name, "outcome": "error", "reference_id": es["reference_id"]})
-                continue
-
-            # Tag before the dedup check: a set is tagged once per run whether or
-            # not this file is new, which is what backfills sets from older runs.
-            tag_info = tagger.tag(ENTITY_EVIDENCE, evidence_id, metadata.get("category"))
-            tags = tag_info["tags"] if tag_info["outcome"] in ("applied", "already") else []
-
-            try:
-                channel = resolve_channel(
-                    record.get("channels"),
-                    where=f"evidence set {es['reference_id']}",
-                )
-            except ChannelError as e:
-                # Before the dedup check on purpose: an unroutable set is worth
-                # reporting on every file it affects, not just new ones.
-                logger.error("%s: %s", path.name, e)
-                errors += 1
-                add_result({
-                    "file": path.name,
-                    "outcome": "error",
-                    "reference_id": es["reference_id"],
-                    "evidence_id": evidence_id,
-                    "reason": str(e),
-                })
-                continue
-
-            if client.artifact_exists(evidence_id, path.name, metadata.get("run_id")):
-                logger.info("%s: artifact already uploaded for this run; skipping", path.name)
-                skipped_dup += 1
-                add_result({
-                    "file": path.name,
-                    "outcome": "skipped_duplicate",
-                    "reference_id": es["reference_id"],
-                    "evidence_id": evidence_id,
-                    "tags": tags,
-                })
-                continue
-            content = artifact_content(envelope, artifact_payload)
-            meta_art = build_artifact_meta(
-                metadata, es["name"], channel_id=channel["id"] if channel else None
-            )
-            art = client.upload_artifact(evidence_id, path.name, content, meta_art)
-            uploaded += 1
-            logger.info(
-                "uploaded %s → set %s%s artifact %s",
-                path.name,
-                es["reference_id"],
-                f" via {channel.get('referenceId') or channel['id']}" if channel else "",
-                art.get("id"),
-            )
-            # The channel is logged because it cannot be read back: an artifact
-            # response carries no channelId, so upload_log.json is the only
-            # record of where each artifact was sent.
-            add_result({
-                "file": path.name,
-                "outcome": "uploaded",
-                "reference_id": es["reference_id"],
-                "evidence_id": evidence_id,
-                "artifact_id": art.get("id"),
-                "channel": (channel.get("referenceId") if channel else None),
-                "channel_id": (channel.get("id") if channel else None),
-                "tags": tags,
-            })
+            send(path.name, envelope["metadata"],
+                 lambda env=envelope: artifact_content(env, artifact_payload), "application/json")
         except Exception as e:
             logger.error("%s: upload failed: %s", path.name, e)
-            errors += 1
+            counts["errors"] += 1
             add_result({"file": path.name, "outcome": "error", "error": str(e)[:300]})
-            continue
+
+    if inventory_error:
+        seen += 1
+        fail(INVENTORY_DIR, inventory_error)
+    for rec in inventory_files:
+        seen += 1
+        name = str(rec.get("file"))
+        try:
+            inv_path = resolve_inventory_file(run_dir, rec.get("file"))
+            content_type = INVENTORY_CONTENT_TYPES.get(rec.get("format") or "")
+            if content_type is None:
+                fail(name, f"unsupported inventory format {rec.get('format')!r}")
+                continue
+            # The file is sent as the source system wrote it: read, never parsed.
+            send(name, rec, inv_path.read_bytes, content_type)
+        except ValueError as e:
+            fail(name, f"refused: {e}")
+        except Exception as e:
+            logger.error("%s: upload failed: %s", name, e)
+            counts["errors"] += 1
+            add_result({"file": name, "outcome": "error", "error": str(e)[:300]})
+
+    uploaded, skipped_dup = counts["uploaded"], counts["skipped_duplicate"]
+    skipped_failed, errors = counts["skipped_failed"], counts["errors"]
 
     if seen == 0:
         msg = f"no evidence files found in {run_dir} — nothing to upload (wrong directory?)"
