@@ -12,6 +12,40 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Four Azure fetchers: flow logs, AI services, managed identities and API
+  Management**, read-only on the built-in Reader role. `azure_network_flow_logs`
+  reports every Network Watcher and flow log (target, retention, storage
+  destination, Traffic Analytics) and works out which virtual networks and
+  subnets have their traffic logged, counting subnets with workloads apart from
+  empty ones and those Azure allows no NSG on; legacy NSG flow logs are marked,
+  since Microsoft retires them in September 2027. A flow log with no retention
+  policy keeps records indefinitely, and a filtered VNet flow log is not full
+  coverage. `azure_ai_services_configuration`
+  reports each Azure AI services account (Foundry, OpenAI, Language, Speech,
+  Document Intelligence) and AI Search service: network exposure, whether API
+  keys still work, customer-managed keys, managed identity and whether audit
+  logs are exported; every model deployment with its publisher, where it may
+  process data (global, data zone or regional) and its content filter and
+  Prompt Shields protection, judged on the four harm categories because
+  Microsoft's own default annotates some filters rather than blocking them;
+  custom filter policies weaker than the default; and every Foundry connection
+  agents use, with whether it holds a stored secret. `azure_managed_identity_configuration` reports every user-
+  and system-assigned identity with what it is attached to, its federated
+  credentials (GitHub subject breadth, flexible matching expressions,
+  audiences), its Microsoft Graph application permissions, and its role
+  assignments judged by what each role's permissions allow (full control,
+  granting access, reading keys, full data access) rather than by name.
+  `azure_api_management_configuration` reports each API Management service's
+  network exposure, legacy TLS and every switchable cipher (unset switches
+  follow Azure's documented defaults, which leave the CBC and RSA-key-exchange
+  suites on), whether legacy management API versions are blocked, certificate
+  expiry, developer portal sign-up, its subscriptions including the built-in
+  all-access one, which security policies apply at global, product, API and
+  operation level, how each API is protected, its backends and whether gateway
+  logs are exported; policy XML, named-value contents and subscription keys are
+  never written to the evidence. Adds
+  azure-mgmt-cognitiveservices, azure-mgmt-msi and azure-mgmt-apimanagement.
+
 - **Default custom tags on everything the uploaders create.** Every evidence
   set, script and validator that `paramify upload`, `paramify scripts sync`
   and `paramify validators sync` create or maintain now carries two custom
