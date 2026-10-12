@@ -123,7 +123,7 @@ schemas and the `paramify` CLI — not the internal code.
   processed with a cycle close resolves every issue it leaves out), and any
   read failure, an empty export (unless `allow_empty`), or an interrupted
   download fails the run with no file written. See
-  `docs/wiz_pipeline_fetchers.md`.
+  `docs/wiz_pipeline_guide.md`.
 - **`paramify issues upload` names the cycle an upload landed on**, and warns
   when newer cycles exist. Uploads land on the assessment's oldest open cycle,
   so an old cycle left open takes every new scan while the newer cycles show
