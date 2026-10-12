@@ -498,7 +498,7 @@ PLAYBOOK = {"id": PB, "name": "pb", "properties": {
                     "body": {"accountEnabled": False}}}}}}}}}}
 NOT_A_PLAYBOOK = {"id": f"{RG}/providers/Microsoft.Logic/workflows/etl", "name": "etl",
                   "properties": {"state": "Enabled", "definition": {"triggers": {"Recurrence": {"type": "Recurrence"}},
-                                                                     "actions": {}}}}
+                                                                     "actions": {"Compose": {"type": "Compose", "inputs": "noop"}}}}}
 
 EXTRA_ARM = {
     ("/providers/microsoft.aadiam/diagnosticSettings", "2017-04-01"): {"value": [

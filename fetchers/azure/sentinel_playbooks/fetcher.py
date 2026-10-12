@@ -52,8 +52,13 @@ def connection_apis(workflow: Dict[str, Any]) -> Dict[str, str]:
     return {key: (basename(conn.get("id")) or key).lower() for key, conn in value.items() if isinstance(conn, dict)}
 
 
+def as_dict(value: Any) -> Dict[str, Any]:
+    # Inputs and bodies can be a string, array or expression (a Compose action's "inputs": "text").
+    return value if isinstance(value, dict) else {}
+
+
 def api_of(step: Dict[str, Any], apis: Dict[str, str]) -> Optional[str]:
-    connection = ((step.get("inputs") or {}).get("host") or {}).get("connection") or {}
+    connection = as_dict(as_dict(as_dict(step.get("inputs")).get("host")).get("connection"))
     if connection.get("referenceName"):
         # Standard workflows name a connections.json entry, which by default carries the managed API's name.
         return apis.get(connection["referenceName"], connection["referenceName"].lower())
@@ -122,16 +127,16 @@ def analyse(workflow: Dict[str, Any]) -> Dict[str, Any]:
             "name": name,
             "type": trigger.get("type"),
             "api": api,
-            "kind": trigger_kind((trigger.get("inputs") or {}).get("path")) if api == SENTINEL_API else "other",
+            "kind": trigger_kind(as_dict(trigger.get("inputs")).get("path")) if api == SENTINEL_API else "other",
         })
     used, emails, dynamic = set(), set(), 0
     capabilities = {"account_containment": False, "device_isolation": False, "email": False, "teams": False, "incident_update": False}
     for _, action in walk_actions(definition.get("actions") or {}):
-        inputs = action.get("inputs") or {}
+        inputs = as_dict(action.get("inputs"))
         api = api_of(action, apis)
         if api:
             used.add(api)
-        text = json.dumps(inputs, sort_keys=True).lower()
+        text = json.dumps(action.get("inputs"), sort_keys=True).lower()
         path = (inputs.get("path") or "").lower()
         if any(marker in text for marker in ACCOUNT_CONTAINMENT_MARKERS):
             capabilities["account_containment"] = True
@@ -139,7 +144,7 @@ def analyse(workflow: Dict[str, Any]) -> Dict[str, Any]:
             capabilities["device_isolation"] = True
         if api in EMAIL_APIS and "mail" in path:
             capabilities["email"] = True
-            found, dyn = recipients(inputs.get("body") or {})
+            found, dyn = recipients(as_dict(inputs.get("body")))
             emails.update(found)
             dynamic += dyn
         if api in TEAMS_APIS:
