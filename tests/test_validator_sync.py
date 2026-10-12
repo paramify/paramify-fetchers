@@ -10,6 +10,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SYNCER_PATH = REPO_ROOT / "uploaders" / "paramify_validators" / "syncer.py"
 
@@ -26,12 +28,25 @@ syncer = _load_syncer()
 BASE = "https://example.test/api/v0"
 
 
+class TagSession:
+    """What the Tagger posts default custom tags through; records every POST."""
+
+    def __init__(self, status=200):
+        self.status = status
+        self.posts = []
+
+    def post(self, url, json=None, timeout=None, **_):
+        self.posts.append((url, json))
+        return type("R", (), {"status_code": self.status, "text": ""})()
+
+
 class FakeClient:
-    def __init__(self, existing=None, evidence_sets=None):
+    def __init__(self, existing=None, evidence_sets=None, tag_status=200):
         self.existing = existing or []            # [{"id","name"}]
         self.evidence_sets = evidence_sets or {}  # reference_id -> evidence_id
         self.created, self.updated, self.associated = [], [], []
         self._n = 0
+        self.session = TagSession(tag_status)
 
     def list_validators(self):
         return self.existing
@@ -194,3 +209,71 @@ def test_missing_key_isolated_not_crash(tmp_path):
     bad = {k: val for k, val in _alb().items() if k != "key"}
     s = _run([bad, _alb()], c, tmp_path)  # must not raise
     assert s["errors"] == 1 and s["created"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# Default custom tags — on create, on skip, on update; never in a dry run
+# --------------------------------------------------------------------------- #
+
+def _tag_posts(c):
+    return [(url.rsplit("/custom-tags/", 1)[1], body["names"]) for url, body in c.session.posts]
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_tag_switch(monkeypatch):
+    monkeypatch.delenv("PARAMIFY_CUSTOM_TAGS", raising=False)
+
+
+def test_created_validator_is_tagged_with_its_category(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    v = {**_alb(), "category": "aws"}
+    s = _run([v], c, tmp_path, display_names={"aws": "AWS"})
+    assert _tag_posts(c) == [("validators/new-1", ["Automated by Paramify Fetchers", "AWS"])]
+    assert s["results"][0]["tags"] == ["Automated by Paramify Fetchers", "AWS"]
+    assert s["tags"]["applied"] == 1
+
+
+def test_existing_validator_is_tagged_on_skip_and_update(tmp_path):
+    c = FakeClient(existing=[{"id": "ex-9", "name": "ALB Encryption In Transit"}])
+    s = _run([_alb()], c, tmp_path)
+    assert s["results"][0]["outcome"] == "skipped_exists"
+    assert _tag_posts(c) == [("validators/ex-9", ["Automated by Paramify Fetchers"])]
+
+    c2 = FakeClient(existing=[{"id": "ex-9", "name": "ALB Encryption In Transit"}])
+    s2 = _run([_alb()], c2, tmp_path, update=True)
+    assert s2["results"][0]["outcome"] == "updated"
+    assert _tag_posts(c2) == [("validators/ex-9", ["Automated by Paramify Fetchers"])]
+
+
+def test_dry_run_plans_tags_and_posts_none(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path, dry_run=True)
+    assert c.session.posts == []
+    assert s["results"][0]["tags"] == ["Automated by Paramify Fetchers"]
+
+
+def test_tags_off_posts_none(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path, config={"tags": False})
+    assert c.session.posts == [] and s["tags"]["enabled"] is False
+
+
+def test_no_tags_switch_posts_none(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path, custom_tags=False)
+    assert c.session.posts == [] and s["tags"]["reason"] == "--no-tags"
+    assert s["results"][0]["outcome"] == "created" and s["results"][0]["tags"] == []
+
+
+def test_env_switch_posts_none(tmp_path, monkeypatch):
+    monkeypatch.setenv("PARAMIFY_CUSTOM_TAGS", "off")
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path)
+    assert c.session.posts == [] and s["tags"]["reason"] == "PARAMIFY_CUSTOM_TAGS=off"
+
+
+def test_missing_tag_permission_keeps_the_sync_ok(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"}, tag_status=403)
+    s = _run([_alb(), {**_alb(), "key": "second", "name": "Second"}], c, tmp_path)
+    assert s["ok"] and s["errors"] == 0 and len(c.created) == 2
+    assert len(c.session.posts) == 1 and s["tags"]["disabled"]

@@ -46,6 +46,11 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from framework.contract import DEFAULT_EVIDENCE_FREQUENCY  # noqa: E402
+from framework.custom_tags import (  # noqa: E402
+    ENTITY_EVIDENCE,
+    ENTITY_SCRIPT,
+    build_tagger,
+)
 from framework.paramify_auth import (  # noqa: E402
     READ_TOKEN_ENV,
     UPLOAD_TOKEN_ENV,
@@ -239,6 +244,7 @@ def _discover_specs(root: Path, include: Optional[set] = None) -> List[Dict]:
             continue
         specs.append({
             "fetcher_name": f.name,
+            "category": f.category,
             "version": str(f.version),
             "entry": f.runtime_entry,
             "code": code,
@@ -265,6 +271,7 @@ def sync_scripts(
     reassociate: bool = False,
     include: Optional[set] = None,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> Dict:
     """Reconcile every fetcher's entry script into Paramify and associate it.
 
@@ -292,12 +299,25 @@ def sync_scripts(
     root = Path(root)
     specs = _discover_specs(root, include)
 
+    # Default custom tags on every script and set this sweep touches. Resolved
+    # up front so a malformed `tags:` block fails like any other config mistake.
+    try:
+        tagger = build_tagger(
+            None, base_url, config=config, root=root,
+            override_off=None if custom_tags else "--no-tags",
+        )
+    except ValueError as e:
+        logger.error(str(e))
+        raise
+
     logger.info("Syncing %d fetcher script(s) → %s%s", len(specs), base_url, " (dry-run)" if dry_run else "")
     _emit(on_event, {"event": "sync_start", "base_url": base_url, "dry_run": dry_run, "fetchers": len(specs)})
 
     # A client is created whenever a token is available — even in dry-run, where
     # it makes only read-only GETs so the plan reflects the real tenant state.
     client = ParamifyScriptsClient(token, base_url) if token else None
+    if client is not None and not dry_run:
+        tagger.session = client.session
     index: Dict[str, Dict] = {}
     if client is not None:
         for s in client.list_scripts():
@@ -313,8 +333,16 @@ def sync_scripts(
         results.append(result)
         _emit(on_event, {"event": "sync_item", **result})
 
+    def _tag(entity: str, entity_id: Optional[str], category: Optional[str]) -> List[str]:
+        """Tag one entity; the names applied, or [] when off, dry-run, or refused."""
+        if dry_run or not entity_id:
+            return []
+        info = tagger.tag(entity, entity_id, category)
+        return info["tags"] if info["outcome"] in ("applied", "already") else []
+
     for spec in specs:
         name = spec["fetcher_name"]
+        category = spec.get("category")
         sha = code_hash(spec["code"])
         cur = index.get(name)
         ref = _resolve_reference(name, spec["evidence_set"], overrides)
@@ -337,7 +365,12 @@ def sync_scripts(
             note = None
             if action == "drift":
                 note = "entry file changed but version not bumped" + (" (would push: --force)" if force else " (skipped)")
-            add_result({**base, "outcome": f"would_{action}" if action != "drift" else "would_drift", "reason": note})
+            add_result({
+                **base,
+                "outcome": f"would_{action}" if action != "drift" else "would_drift",
+                "reason": note,
+                "tags": tagger.plan(category),
+            })
             continue
 
         try:
@@ -361,7 +394,8 @@ def sync_scripts(
                 else:
                     logger.warning("%s: entry file changed but version %s not bumped — skipped (use --force)", name, spec["version"])
                     add_result({**base, "outcome": "drift_skipped",
-                                "reason": "entry changed but version not bumped; rerun with --force"})
+                                "reason": "entry changed but version not bumped; rerun with --force",
+                                "tags": _tag(ENTITY_SCRIPT, script_id, category)})
                     continue
             else:  # noop
                 counts["noop"] += 1
@@ -372,9 +406,12 @@ def sync_scripts(
                     raise ParamifyError(f"could not get or create evidence set {ref['reference_id']}")
                 client.associate_script(evidence_id, script_id)
                 counts["associated"] += 1
-                add_result({**base, "outcome": action, "script_id": script_id, "evidence_id": evidence_id, "associated": True})
+                _tag(ENTITY_EVIDENCE, evidence_id, category)
+                add_result({**base, "outcome": action, "script_id": script_id, "evidence_id": evidence_id,
+                            "associated": True, "tags": _tag(ENTITY_SCRIPT, script_id, category)})
             else:
-                add_result({**base, "outcome": action, "script_id": script_id, "associated": False})
+                add_result({**base, "outcome": action, "script_id": script_id, "associated": False,
+                            "tags": _tag(ENTITY_SCRIPT, script_id, category)})
 
         except Exception as e:  # noqa: BLE001 — one bad fetcher must not abort the sweep
             logger.error("%s: sync failed: %s", name, e)
@@ -387,6 +424,7 @@ def sync_scripts(
         "dry_run": dry_run,
         "fetchers": len(specs),
         **counts,
+        "tags": tagger.summary(),
         "results": results,
         "ok": counts["errors"] == 0,
     }
@@ -410,7 +448,7 @@ def main(argv=None) -> int:
 
     parser = argparse.ArgumentParser(description="Sync fetcher entry scripts to Paramify and associate them to evidence sets")
     parser.add_argument("--root", help="Repo root (default: auto-detected)")
-    parser.add_argument("--config", help="Uploader config YAML (base_url, overrides)")
+    parser.add_argument("--config", help="Uploader config YAML (base_url, overrides, tags)")
     parser.add_argument("--dry-run", action="store_true", help="Report the plan; read-only (no writes)")
     parser.add_argument("--force", action="store_true", help="Push scripts whose code drifted without a version bump")
     parser.add_argument("--reassociate", action="store_true", help="Ensure the script↔evidence-set association for every fetcher, not just changed ones")
