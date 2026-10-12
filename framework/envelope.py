@@ -11,7 +11,6 @@ import json
 import logging
 from pathlib import Path
 
-from framework import inventory
 from framework.contract import Fetcher, InvocationResult
 
 logger = logging.getLogger("framework.envelope")
@@ -77,11 +76,11 @@ def wrap_outputs(
     because a JSON scan report is still a scan report — its identity lives in the
     sidecar index instead (see framework/issue_reports.py).
 
-    An inventory output is also checked against the inventory contract, and the
-    verdict goes in `metadata.inventory` (see framework/inventory.py). The
-    payload is left as the fetcher wrote it.
+    An inventory fetcher is skipped for the same reason: its file is the source
+    system's own export, parsed by Paramify's inventory pipeline, and its
+    identity lives in its own sidecar (see framework/inventory.py).
     """
-    if fetcher.is_issue_report:
+    if fetcher.is_issue_report or fetcher.is_inventory:
         return
 
     meta = build_metadata(result, fetcher, run_id)
@@ -96,17 +95,9 @@ def wrap_outputs(
             continue
         if is_enveloped(raw):
             continue
-        file_meta = meta
-        if fetcher.is_inventory:
-            file_meta = {**meta, "inventory": inventory.check(raw, result.exit_code)}
-            if file_meta["inventory"].get("problems"):
-                logger.warning(
-                    "envelope: %s breaks the inventory contract: %s",
-                    name, "; ".join(file_meta["inventory"]["problems"]),
-                )
         envelope = {
             "schema_version": ENVELOPE_SCHEMA_VERSION,
-            "metadata": file_meta,
+            "metadata": meta,
             "payload": raw,
         }
         # default=str for the same reason api.py uses it on _run_metadata.json:

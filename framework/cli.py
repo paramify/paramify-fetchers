@@ -85,6 +85,7 @@ import typer
 
 from framework import api, paramify_auth
 from framework import cli_style as style
+from framework.inventory import INVENTORY_DIR
 from framework.issue_reports import (
     CLOSE_CYCLE_FIELD,
     CLOSE_CYCLE_VALUES,
@@ -982,14 +983,19 @@ def runs_cmd(
 
 @app.command("evidence")
 def evidence_cmd(
-    path: str = typer.Argument(..., help="Path to an evidence JSON file, or an issue-report file"),
+    path: str = typer.Argument(..., help="Path to an evidence JSON file, or an issue-report or inventory file"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
-    """Read & display one evidence file (or the sidecar record of an issue report)."""
+    """Read & display one evidence file (or the sidecar record of an issue report or inventory file)."""
     p = Path(path)
-    if p.parent.name == ISSUE_REPORTS_DIR:
+    raw_views = {
+        ISSUE_REPORTS_DIR: (api.read_issue_report, api.preview_issue_report),
+        INVENTORY_DIR: (api.read_inventory_file, api.preview_inventory_file),
+    }
+    if p.parent.name in raw_views:
+        read_raw, preview_raw = raw_views[p.parent.name]
         try:
-            rec = api.read_issue_report(p)
+            rec = read_raw(p)
         except ValueError as e:
             if json_out:
                 typer.echo(json.dumps({"error": str(e)}, indent=2))
@@ -999,7 +1005,7 @@ def evidence_cmd(
         if json_out:
             typer.echo(json.dumps(rec, indent=2, default=str))
             return
-        typer.echo(api.preview_issue_report(p))
+        typer.echo(preview_raw(p))
         return
     try:
         ev = api.read_evidence(path)
