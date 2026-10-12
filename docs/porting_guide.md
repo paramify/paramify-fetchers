@@ -2,19 +2,19 @@
 
 A port moves a working collection script, such as one from Paramify's older
 `evidence-fetchers` repo, into this repo as a fetcher. Port it as-is: keep what
-it collects and how, and change only the plumbing around it
-([why](porting_playbook.md)). You end with a fetcher the runner discovers, runs,
-and wraps in an envelope. The running example ports a made-up script,
-`sentinelone_exclusions.py`, to the fetcher `sentinelone_exclusions`.
+it collects and how, and change only the plumbing around it. You end with a
+fetcher the runner discovers, runs, and wraps in an envelope. The running
+example ports a made-up script, `sentinelone_exclusions.py`, to the fetcher
+`sentinelone_exclusions`.
 
 ![Flow: check the source and target path, port it in six steps, then prove it with a fake-credential smoke test and a real run](img/porting/flow.svg)
 
 **You need:** [the repo installed](../README.md#install) · the source script,
 plus any shared module it imports · credentials for a real tenant, for step 7
 
-No script to start from? [Write a new fetcher](authoring_a_fetcher.md). If the
+No script to start from? [Write a new fetcher](authoring_fetcher_guide.md). If the
 source exports scanner findings (Nessus, Wiz), write an
-[issue-report fetcher](issue_report_fetchers.md) instead. Your AI agent can do
+[issue-report fetcher](issue_report_fetchers_guide.md) instead. Your AI agent can do
 the port: the `create-fetcher` skill follows these steps
 ([AI agent](../README.md#drive-it-with-an-ai-agent)).
 
@@ -25,7 +25,8 @@ the port: the `create-fetcher` skill follows these steps
 Say in one sentence what the script does, and pick its names: the directory is
 the short name (`exclusions`), and `name:` adds the category
 (`sentinelone_exclusions`). A script that loops over projects, regions, or hosts
-becomes a [fanout fetcher](authoring_a_fetcher.md#fanout-when-one-fetcher-should-run-against-n-targets).
+becomes a fanout fetcher, with `supports_targets: true`
+([new fetcher's `fetcher.yaml`](authoring_fetcher_guide.md#2-fill-in-fetcheryaml)).
 Then check that nothing is in the way:
 
 ![The path is free, the sentinelone category yaml exists, and the category has no _shared/ module](img/porting/01-preflight.png)
@@ -39,10 +40,10 @@ ls fetchers/<category>/_shared/ 2>/dev/null && echo "category has shared code" |
 ```
 </details>
 
-A new category needs [one-time setup](porting_playbook.md#per-category-setup-once-per-category)
-first. Porting from `evidence-fetchers` also has
-[source checks](porting_playbook.md#pre-flight-before-every-port) that need
-access to that private repo.
+A new category needs `fetchers/_categories/<category>.yaml` first; an empty file
+will do. Porting from `evidence-fetchers` adds one pre-flight check, which needs
+access to that private repo: the script must still exist there under
+`fetchers/<category>/`.
 
 ## 2. List the env vars it reads
 
@@ -63,9 +64,10 @@ grep -nE 'os\.(environ|getenv)|getenv\(' <source script>
 ## 3. Create the directory
 
 Name the directory with the short name only. Copy just the template's
-`fetcher.yaml` and `fetcher.py`; the [reference ports](porting_playbook.md#reference-ports)
-ship nothing else. A bash port starts `fetcher.sh` from the
-[bash skeleton](porting_playbook.md#bash-fetchersh) instead.
+`fetcher.yaml` and `fetcher.py`; a port like
+[`sentinelone/agents`](../fetchers/sentinelone/agents/) ships nothing else. A
+bash port writes `fetcher.sh` instead, modeled on
+[`okta/authenticators`](../fetchers/okta/authenticators/fetcher.sh).
 
 ![mkdir and cp create fetchers/sentinelone/exclusions with fetcher.py and fetcher.yaml](img/porting/03-create-dir.png)
 
@@ -80,13 +82,12 @@ ls fetchers/<category>/<short_name>
 
 ## 4. Fill in `fetcher.yaml`
 
-Fill it in as for a [new fetcher](authoring_a_fetcher.md#fetcheryaml), with
+Fill it in as for a [new fetcher](authoring_fetcher_guide.md#2-fill-in-fetcheryaml), with
 `version: 0.1.0` and one secret per env var from step 2. The template has no
 `evidence_set` block, so add one. Copy its values from the source's catalog
 entry if it has one; if not, make up a stable `reference_id`.
 **Don't base `reference_id` on a KSI ID:** KSI IDs get renumbered, and changing
-`reference_id` orphans the evidence set in every workspace
-([why](porting_playbook.md#4-fill-in-fetcheryaml)).
+`reference_id` orphans the evidence set in every workspace.
 
 ```yaml
 name: sentinelone_exclusions
@@ -131,13 +132,9 @@ paramify describe <category>_<short_name>
 ## 5. Write the entry script
 
 Move the collection code into the entry script unchanged, and rebuild only `main()`
-on the [Python or bash skeleton](porting_playbook.md#5-write-the-entry-script): read
-`EVIDENCE_DIR` instead of an `--output-dir` flag, log instead of `print`, and
-exit 1 with `report_failure` when collection fails
-([what not to port](porting_playbook.md#what-to-deliberately-not-do) ·
-[exit codes](porting_playbook.md#exit-code-convention) ·
-[say why you failed](porting_playbook.md#say-why-you-failed)).
-The example's whole change, with `get_exclusions` untouched:
+on the template's `fetcher.py`: read `EVIDENCE_DIR` instead of an `--output-dir`
+flag, log instead of `print`, and exit 1 with `report_failure` when collection
+fails. The example's whole change, with `get_exclusions` untouched:
 
 ```diff
 --- sentinelone_exclusions.py
@@ -203,8 +200,6 @@ The example's whole change, with `get_exclusions` untouched:
 +    sys.exit(main())
 ```
 
-A bash port also needs `chmod +x fetcher.sh`.
-
 ## 6. Smoke-test it with fake credentials
 
 Before you touch a real tenant, run it with fake values. The wiring works if it
@@ -239,7 +234,7 @@ paramify validate manifest.yaml
 </details>
 
 Run it, then open the evidence file. The runner wraps it in an
-[envelope](envelope_design.md#field-reference-metadata): `metadata` should carry
+[evidence envelope](envelope_guide.md#2-read-its-envelope): `metadata` should carry
 your `evidence_set`, and `payload` should match what the old script wrote. These
 pictures ran against a local stand-in for the SentinelOne API, with synthetic
 data.
@@ -263,15 +258,12 @@ Next, [upload the run](../README.md#collect-then-upload) and
 
 | Symptom | Fix |
 |---|---|
-| `paramify list` fails with `schema validation failed` | The message names the file and the field. Fix `fetcher.yaml` against the [field list](porting_playbook.md#4-fill-in-fetcheryaml). |
-| `ModuleNotFoundError` in the smoke test | Fix the imports: put the `_shared/` directory on `sys.path` as the [skeleton](porting_playbook.md#python-fetcherpy) does. |
+| `paramify list` fails with `schema validation failed` | The message names the file and the field. Fix `fetcher.yaml` against [step 4](#4-fill-in-fetcheryaml). |
+| `ModuleNotFoundError` in the smoke test | Fix the imports: put the `_shared/` directory on `sys.path`, as the commented-out line in the template's `fetcher.py` does. |
 | `Missing required env var`, or a `KeyError` naming one | The env var name in `fetcher.yaml` or your test command doesn't match the script. Re-check [step 2](#2-list-the-env-vars-it-reads). |
 | The smoke test exits 0 with empty data | The script catches the failure and reports success, as the example's source did. Exit 1 with `report_failure` ([step 5](#5-write-the-entry-script)). |
 | `Secret reference ${env:…} could not be resolved` | The runner reads secrets from its own environment, not from `.env`. Export them in the shell you run from. |
 | A failed run's `metadata.error` reads "Evidence saved to …" | Nothing reported the reason, so the runner used the end of stderr. Call `report_failure` after the saved line. |
 
-**More detail:** [known interim violations](porting_playbook.md#known-interim-violations) ·
-[AWS fanout shape](porting_playbook.md#aws-fanout-shape) ·
-[reference ports](porting_playbook.md#reference-ports) ·
-[the fetcher contract](fetcher_contract.md) ·
-[design rationale](design.md)
+**More detail:** [checking against the contract](fetcher_contract_guide.md) ·
+[following one run](architecture_guide.md)
