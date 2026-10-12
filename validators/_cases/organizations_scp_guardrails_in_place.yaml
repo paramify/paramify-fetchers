@@ -1,0 +1,25 @@
+validator: organizations_scp_guardrails_in_place
+cases:
+  - name: enabled_with_custom_scp
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":[{"Id":"r-root","PolicyTypes":[{"Type":"SERVICE_CONTROL_POLICY","Status":"ENABLED"}]}],"ServiceControlPolicies":[{"Id":"p-FullAWSAccess","Name":"FullAWSAccess","AwsManaged":true,"Targets":[{"TargetId":"r-root"}]},{"Id":"p-deny","Name":"DenyLeaveOrg","AwsManaged":false,"Targets":[{"TargetId":"ou-a"}]}],"OrganizationsInUse":true,"ScpsEnabled":true,"PolicyRead":{"Status":"ok","Reason":null}}]}}'
+
+  - name: zero_scps
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":[{"Id":"r-root","PolicyTypes":[]}],"ServiceControlPolicies":[],"OrganizationsInUse":true,"ScpsEnabled":false,"PolicyRead":{"Status":"ok","Reason":null}}]}}'
+
+  - name: only_full_aws_access
+    expect: FAIL
+    note: >
+      FullAWSAccess alone allows everything; it is not a guardrail
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":[{"Id":"r-root","PolicyTypes":[{"Type":"SERVICE_CONTROL_POLICY","Status":"ENABLED"}]}],"ServiceControlPolicies":[{"Id":"p-FullAWSAccess","Name":"FullAWSAccess","AwsManaged":true,"Targets":[{"TargetId":"r-root"}]}],"OrganizationsInUse":true,"ScpsEnabled":true,"PolicyRead":{"Status":"ok","Reason":null}}]}}'
+
+  - name: member_account_denied
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error_code":"not_authorized"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":null,"ServiceControlPolicies":null,"OrganizationsInUse":true,"ScpsEnabled":null,"PolicyRead":{"Status":"denied","Reason":"list-roots: An error occurred (AccessDeniedException) when calling the ListRoots operation: You don''t have permissions to access this resource."}}]}}'
+
+  - name: scps_enabled_renamed
+    expect: FAIL
+    note: >
+      the flag renamed upstream; the presence rule catches it
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":[{"Id":"r-root","PolicyTypes":[{"Type":"SERVICE_CONTROL_POLICY","Status":"ENABLED"}]}],"ServiceControlPolicies":[{"Id":"p-FullAWSAccess","Name":"FullAWSAccess","AwsManaged":true,"Targets":[{"TargetId":"r-root"}]},{"Id":"p-deny","Name":"DenyLeaveOrg","AwsManaged":false,"Targets":[{"TargetId":"ou-a"}]}],"OrganizationsInUse":true,"SCPsEnabled":true,"PolicyRead":{"Status":"ok","Reason":null}}]}}'
