@@ -275,8 +275,15 @@ def requested_projects() -> List[str]:
 
 def list_projects(client: DevOpsClient, collector: DevOpsCollector) -> List[Dict[str, Any]]:
     """Every well-formed project the PAT can read, narrowed to AZURE_DEVOPS_PROJECTS; a named one missing is a failure."""
-    listed = collector.guard("core.projects.list",
-                             lambda: client.list("_apis/projects", params={"stateFilter": "wellFormed", "$top": 500}))
+    def read():
+        try:
+            return client.list("_apis/projects", params={"stateFilter": "wellFormed", "$top": 500})
+        except DevOpsError as exc:
+            if exc.status == 404:  # the organization itself does not exist
+                raise ValueError(f"organization {client.org!r} not found at {client.base}: {exc}") from exc
+            raise
+
+    listed = collector.guard("core.projects.list", read)
     if listed is None:
         return []
     wanted = requested_projects()
