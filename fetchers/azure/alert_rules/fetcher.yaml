@@ -1,0 +1,88 @@
+name: azure_alert_rules
+version: 0.1.0
+description: >
+  Every Azure Monitor metric alert, log search (scheduled query) alert and smart
+  detector alert rule in the subscription — enabled state, severity, scopes, the
+  metric criteria or KQL query it fires on — resolved through its action groups to
+  the receivers it actually notifies, and checked against alert processing rules that
+  suppress notifications or add action groups. Per rule: whether it routes to an
+  enabled receiver, whether a processing rule suppresses it, and whether it reaches a
+  person. Activity log alerts are a separate evidence set (azure_activity_log_alerts).
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_alert_rules.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-MLA-RVL
+
+evidence_set:
+  reference_id: EVD-AZURE-ALERT-RULES
+  name: Azure Monitor Alert Rules
+  instructions: >
+    Script: fetcher.py. Reader (or Monitoring Reader) at subscription scope. Raw ARM
+    GETs through azure-mgmt-core's ARMPipelineClient, following nextLink to the end
+    (results.pages_read): Microsoft.Insights/metricAlerts (api 2018-03-01),
+    Microsoft.Insights/scheduledQueryRules (2023-12-01),
+    microsoft.alertsManagement/smartDetectorAlertRules (2021-04-01),
+    Microsoft.Insights/actionGroups (2023-01-01) and
+    Microsoft.AlertsManagement/actionRules — alert processing rules (2021-08-08).
+    REST rather than azure-mgmt-monitor 6.x, which drops nextLink on metric alerts and
+    action groups and reads log alerts in the 2018 schema. A provider that is not
+    registered is skipped and reported in provider_registration_status. Per rule:
+    enabled (smart detector state == Enabled); is_alerting_rule is false only for
+    LogToMetric log rules. action_group_ids come from actions[].actionGroupId (metric),
+    actions.actionGroups[] (log search) or actionGroups.groupIds[] (smart detector),
+    and are resolved in resolved_action_groups; groups in another subscription are fetched by id, and stay unresolved
+    (unresolved_action_group_ids) on 403/404; an id that is not an ARM action group
+    path is never fetched and stays unresolved. A group is deliverable when enabled and
+    holding at least one enabled receiver — email and SMS receivers count only with
+    status Enabled (Disabled and NotSpecified send nothing); other receiver types carry
+    no status. notifies_people: deliverable through an email, SMS, voice, app push,
+    ARM role or ITSM receiver; webhook, Logic App, Function, runbook and Event Hub
+    receivers hand off to code that may or may not notify anyone. Receiver targets omit
+    URL paths and query strings (webhook host only; Logic App / Function resource ids,
+    not callback URLs) and mask phone numbers to the last four digits. A processing
+    rule matches when enabled, its schedule is not known to be inactive, and its scopes
+    overlap the alert rule's: scope_match "full" when they contain every alert scope,
+    "partial" when they cover only some of what the alert fires on (a narrower scope, or
+    some of several alert scopes). It applies_to_every_fire when full, with no
+    conditions and a schedule known to be active (or none). Such a
+    RemoveAllActionGroups rule sets suppressed true; any other matching one sets
+    suppressed null. AddActionGroups rules add their groups (added_by_processing_rule,
+    applies_to_every_fire as for the rule). Verdicts are true, false or null, and null
+    means unknown, never "no". routes_to_enabled_receiver / routes_to_person: true when
+    a resolved group on every notification is deliverable / notifies people; null when
+    only an unresolved group or a sometimes-added group might; false otherwise (and for
+    a disabled rule). reaches_human: false when the rule is disabled, routes nowhere or
+    is suppressed; true when it routes to a person and is not suppressed; otherwise
+    null. The summary counts null verdicts apart (*_unknown, *_possibly_*);
+    all_enabled_rules_reach_human is null when none is false but some are unknown.
+    muteActionsDuration (log) and throttling.duration (smart detector) are reported as
+    mute_actions_duration, not evaluated.

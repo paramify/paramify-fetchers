@@ -5,10 +5,11 @@ Ported from prowler/providers/azure/services/network/network_service.py
 (Apache-2.0); the "open to the Internet" match replicates Prowler's
 network_ssh_internet_access_restricted check. Beyond Prowler: each NSG's default
 rules (where the platform's AllowInternetOutBound lives, so outbound posture is
-readable at all) and each network interface's effective NSG coverage, NIC-level or
-inherited from its subnet.
+readable at all), each network interface's effective NSG coverage, NIC-level or
+inherited from its subnet, and which subnets of a VNet reach each other on every port.
 """
 
+import ipaddress
 import logging
 import os
 import sys
@@ -20,9 +21,11 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import (  # noqa: E402
     NOT_REGISTERED,
+    PLATFORM_SUBNET_NAMES,
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
+    arm_id_key,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -30,11 +33,11 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
 
 logger = logging.getLogger("azure_network_security_groups")
@@ -54,6 +57,10 @@ INTERNET_DESTINATION_PREFIXES = ("Internet", "*", "0.0.0.0/0")
 
 # --- projection: the only code here that touches an azure-mgmt model ---
 
+def _ids(models) -> list:
+    return [model_attr(m, "id") for m in (models or []) if model_attr(m, "id")]
+
+
 def project_security_rule(rule) -> dict:
     """Read a `SecurityRule` model's attributes into a flat snake_case dict."""
     return {
@@ -69,6 +76,10 @@ def project_security_rule(rule) -> dict:
         "priority": model_attr(rule, "priority"),
         "destination_address_prefix": model_attr(rule, "destination_address_prefix"),
         "destination_address_prefixes": model_attr(rule, "destination_address_prefixes"),
+        "source_application_security_group_ids": _ids(model_attr(rule, "source_application_security_groups")),
+        "destination_application_security_group_ids": _ids(
+            model_attr(rule, "destination_application_security_groups")
+        ),
     }
 
 
@@ -121,6 +132,9 @@ def project_subnet(subnet) -> dict:
         "id": model_attr(subnet, "id"),
         "name": model_attr(subnet, "name"),
         "nsg_id": model_attr(model_attr(subnet, "network_security_group"), "id"),
+        "address_prefixes": [
+            p for p in [model_attr(subnet, "address_prefix"), *(model_attr(subnet, "address_prefixes") or [])] if p
+        ],
     }
 
 
@@ -159,6 +173,8 @@ def security_rule_record(rule: dict) -> dict:
         "priority": rule.get("priority"),
         "destination_address_prefix": rule.get("destination_address_prefix"),
         "destination_address_prefixes": rule.get("destination_address_prefixes") or [],
+        "source_application_security_group_ids": rule.get("source_application_security_group_ids") or [],
+        "destination_application_security_group_ids": rule.get("destination_application_security_group_ids") or [],
     }
 
 
@@ -188,6 +204,8 @@ def subnet_record(subnet: dict) -> dict:
         "id": subnet.get("id"),
         "name": subnet.get("name"),
         "nsg_id": subnet.get("nsg_id"),
+        "address_prefixes": subnet.get("address_prefixes") or [],
+        "platform_subnet": (subnet.get("name") or "").lower() in PLATFORM_SUBNET_NAMES,
     }
 
 
@@ -204,12 +222,7 @@ def virtual_network_record(vnet: dict) -> dict:
     }
 
 
-def _arm_id_key(resource_id) -> str:
-    """ARM ids are case-insensitive, and Azure does not keep one spelling: an NSG's
-    back-reference to a subnet and the VNet's own subnet id differ in case (seen
-    live). Compare on this, never on the raw string.
-    """
-    return str(resource_id or "").lower()
+_arm_id_key = arm_id_key
 
 
 def network_interface_record(nic: dict, subnet_nsg_by_id: dict) -> dict:
@@ -275,6 +288,14 @@ def _destinations(rule: dict) -> list:
     return [rule.get("destination_address_prefix"), *(rule.get("destination_address_prefixes") or [])]
 
 
+def _sources(rule: dict) -> list:
+    return [rule.get("source_address_prefix"), *(rule.get("source_address_prefixes") or [])]
+
+
+def _ports(rule: dict) -> list:
+    return [rule.get("destination_port_range"), *(rule.get("destination_port_ranges") or [])]
+
+
 def rule_allows_internet_outbound(rule: dict) -> bool:
     """An outbound Allow rule whose destination includes the public Internet."""
     return (
@@ -288,11 +309,10 @@ def _is_catch_all_internet_outbound(rule: dict) -> bool:
     """An outbound rule covering every port and protocol to an Internet destination —
     the shape of the platform's AllowInternetOutBound and of a rule overriding it.
     """
-    ports = [rule.get("destination_port_range"), *(rule.get("destination_port_ranges") or [])]
     return (
         rule.get("direction") == "Outbound"
         and rule.get("protocol") == "*"
-        and "*" in ports
+        and "*" in _ports(rule)
         and any(d in INTERNET_DESTINATION_PREFIXES for d in _destinations(rule))
     )
 
@@ -340,15 +360,156 @@ def _port_in_range(port_range, port: int) -> bool:
 
 def rule_opens_port_to_internet(rule: dict, port: int) -> bool:
     """Prowler's fail condition for "port <n> reachable from the Internet"."""
-    ranges = [rule.get("destination_port_range"), *(rule.get("destination_port_ranges") or [])]
-    sources = [rule.get("source_address_prefix"), *(rule.get("source_address_prefixes") or [])]
     return (
-        any(_port_in_range(r, port) for r in ranges)
+        any(_port_in_range(r, port) for r in _ports(rule))
         and rule.get("protocol") in ANY_TCP_PROTOCOLS
-        and any(s in INTERNET_SOURCE_PREFIXES for s in sources)
+        and any(s in INTERNET_SOURCE_PREFIXES for s in _sources(rule))
         and rule.get("access") == "Allow"
         and rule.get("direction") == "Inbound"
     )
+
+
+# --- east-west: can one workload subnet reach another in its VNet on every port? ---
+
+# Pairs are within one VNet, so the VirtualNetwork tag covers both ends.
+EVERY_SUBNET = ("*", "0.0.0.0/0", "VirtualNetwork")
+EAST_WEST_STATES = ("segmented", "partial", "unsegmented", "undetermined", "no_peer_subnets")
+
+
+def _networks(values) -> list:
+    nets = []
+    for value in values:
+        try:
+            nets.append(ipaddress.ip_network(str(value), strict=False))
+        except ValueError:
+            pass
+    return nets
+
+
+def _port_span(value):
+    text = str(value).strip()
+    if text == "*":
+        return 0, 65535
+    low, _, high = text.partition("-")
+    try:
+        return int(low), int(high or low)
+    except ValueError:
+        return None
+
+
+def covers_all_ports(values) -> bool:
+    """Do these destination port ranges, merged, cover every usable port (1-65535)?"""
+    reach = 0
+    for low, high in sorted(span for v in values if v and (span := _port_span(v))):
+        if low > reach + 1:
+            return False
+        reach = max(reach, high)
+    return reach >= 65535
+
+
+def prefix_coverage(rule_prefixes: list, subnet_prefixes: list) -> str:
+    """How much of a subnet's address space a rule's source or destination covers: full, partial or none."""
+    values = [p for p in rule_prefixes if p]
+    if any(v in EVERY_SUBNET for v in values):
+        return "full"
+    rule_nets, subnet_nets = _networks(values), _networks(subnet_prefixes)
+    merged = [n for version in (4, 6) for n in ipaddress.collapse_addresses(r for r in rule_nets if r.version == version)]
+    if subnet_nets and all(any(s.version == r.version and s.subnet_of(r) for r in merged) for s in subnet_nets):
+        return "full"
+    if any(s.version == r.version and s.overlaps(r) for s in subnet_nets for r in rule_nets):
+        return "partial"
+    return "none"
+
+
+def pair_access(group: dict, direction: str, source_prefixes: list, destination_prefixes: list) -> str:
+    """allow, deny or asg: the first rule, in priority order, that decides all-port traffic between two ranges.
+
+    An Allow decides once it covers every port (any protocol, or TCP) and touches both ranges; a Deny only once it
+    covers every port and protocol and all of both ranges. A deciding Allow scoped to an application security group
+    gives asg, since which NICs it covers is not in the rule.
+    """
+    rules = sorted(
+        (r for r in (*group["security_rules"], *group.get("default_security_rules", [])) if r["direction"] == direction),
+        key=lambda r: r["priority"] if isinstance(r.get("priority"), int) else 1 << 30,
+    )
+    for rule in rules:
+        all_ports = covers_all_ports(_ports(rule))
+        broad_allow = rule["access"] == "Allow" and all_ports and rule.get("protocol") in ANY_TCP_PROTOCOLS
+        full_deny = rule["access"] == "Deny" and all_ports and rule.get("protocol") == "*"
+        if not (broad_allow or full_deny):
+            continue
+        src = "asg" if rule.get("source_application_security_group_ids") else prefix_coverage(_sources(rule), source_prefixes)
+        dst = (
+            "asg" if rule.get("destination_application_security_group_ids")
+            else prefix_coverage(_destinations(rule), destination_prefixes)
+        )
+        if broad_allow and "none" not in (src, dst):
+            return "asg" if "asg" in (src, dst) else "allow"
+        if full_deny and src == dst == "full":
+            return "deny"
+    return "allow"
+
+
+def subnet_pair_reach(source: dict, destination: dict, groups_by_id: dict) -> str:
+    """open, segmented or undetermined: all-port traffic from one subnet to another, through both subnets' NSGs."""
+    sides = []
+    for subnet, direction in ((source, "Outbound"), (destination, "Inbound")):
+        nsg_id = subnet.get("nsg_id")
+        group = groups_by_id.get(_arm_id_key(nsg_id)) if nsg_id else None
+        if not nsg_id:
+            sides.append("allow")
+        elif group is None:
+            sides.append("unresolved")
+        else:
+            sides.append(pair_access(group, direction, source["address_prefixes"], destination["address_prefixes"]))
+    if "deny" in sides:
+        return "segmented"
+    return "open" if set(sides) == {"allow"} else "undetermined"
+
+
+def east_west_record(subnet: dict, peers: list[dict], groups_by_id: dict) -> dict:
+    """Which other workload subnets in the VNet reach this one on every port."""
+    reach = {p["name"]: subnet_pair_reach(p, subnet, groups_by_id) for p in peers}
+    by_verdict = {v: sorted(n for n, r in reach.items() if r == v) for v in ("open", "segmented", "undetermined")}
+    if not peers:
+        state = "no_peer_subnets"
+    elif len(by_verdict["open"]) == len(peers):
+        state = "unsegmented"
+    elif by_verdict["open"]:
+        state = "partial"
+    elif by_verdict["undetermined"]:
+        state = "undetermined"
+    else:
+        state = "segmented"
+    return {
+        "east_west_segmentation": state,
+        "open_from_subnets": by_verdict["open"],
+        "segmented_from_subnets": by_verdict["segmented"],
+        "undetermined_from_subnets": by_verdict["undetermined"],
+    }
+
+
+NO_EAST_WEST = {
+    "east_west_segmentation": None,
+    "open_from_subnets": [],
+    "segmented_from_subnets": [],
+    "undetermined_from_subnets": [],
+}
+
+
+def with_east_west(virtual_networks: list[dict], security_groups: list[dict]) -> list[dict]:
+    """Each VNet with every subnet's east-west verdict; platform subnets are left out on both ends."""
+    groups_by_id = {_arm_id_key(g["id"]): g for g in security_groups}
+    result = []
+    for vnet in virtual_networks:
+        workload = [s for s in vnet["subnets"] if not s["platform_subnet"]]
+        subnets = [
+            {**s, **NO_EAST_WEST} if s["platform_subnet"]
+            else {**s, **east_west_record(s, [p for p in workload if p["id"] != s["id"]], groups_by_id)}
+            for s in vnet["subnets"]
+        ]
+        result.append({**vnet, "subnets": subnets})
+    return result
 
 
 def summarize(
@@ -423,6 +584,16 @@ def summarize(
         "nic_nsg_coverage_percentage": coverage_percentage(
             sum(1 for n in nics if n["protected_by_nsg"]), len(nics)
         ),
+        # --- east-west: workload subnets reachable on every port from others in their VNet ---
+        "workload_subnets_by_east_west_segmentation": {
+            state: sum(1 for s in subnets if s.get("east_west_segmentation") == state)
+            for state in EAST_WEST_STATES
+        },
+        "east_west_subnet_pairs": sum(
+            len(s.get(k) or []) for s in subnets
+            for k in ("open_from_subnets", "segmented_from_subnets", "undetermined_from_subnets")
+        ),
+        "open_east_west_subnet_pairs": sum(len(s.get("open_from_subnets") or []) for s in subnets),
     }
 
 
@@ -471,6 +642,7 @@ def collect_network(
     )
     subnet_index = subnet_nsg_index(vnets)
     nics = [network_interface_record(n, subnet_index) for n in raw_nics]
+    vnets = with_east_west(vnets, groups)
 
     return (
         sorted(groups, key=lambda r: r.get("id") or ""),

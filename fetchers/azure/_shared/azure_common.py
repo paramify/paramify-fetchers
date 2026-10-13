@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 # One implementation per runtime lives in fetchers/_lib; a category-shared module
 # may RE-EXPORT it and must not reimplement it (docs/fetcher_contract_guide.md, step 6).
@@ -58,6 +58,27 @@ def resource_group_from_id(resource_id: Optional[str]) -> Optional[str]:
         if part.lower() == "resourcegroups" and index + 1 < len(parts):
             return parts[index + 1] or None
     return None
+
+
+def arm_id_key(resource_id: Optional[str]) -> str:
+    """ARM ids are case-insensitive and Azure mixes spellings (seen live); compare on this."""
+    return str(resource_id or "").lower()
+
+
+# Subnets Azure itself routes and filters; their names are reserved, compared lower-cased.
+PLATFORM_SUBNET_NAMES = frozenset({
+    "gatewaysubnet",
+    "azurebastionsubnet",
+    "azurefirewallsubnet",
+    "azurefirewallmanagementsubnet",
+    "routeserversubnet",
+})
+
+
+def vnet_id_of(subnet_id: Optional[str]) -> str:
+    """Lower-cased VNet id from a subnet (or subnet child) id; empty when there is none."""
+    key = arm_id_key(subnet_id)
+    return key.split("/subnets/")[0] if "/subnets/" in key else ""
 
 
 def dig(obj: Any, *path: str) -> Any:
@@ -369,45 +390,17 @@ def arm_client_kwargs() -> Dict[str, Any]:
     return {"base_url": endpoint, "credential_scopes": [f"{endpoint}/.default"]}
 
 
-# --------------------------------------------------------------------------- #
-# ARM REST through an SDK client's pipeline
-# --------------------------------------------------------------------------- #
-#
-# For resource types the pinned SDKs cannot read: the SDK is years behind the API
-# (azure-mgmt-machinelearningservices has no AI hubs) or drops values it has no model
-# for (Foundry connection auth types). The client's pipeline supplies the credential,
-# retries and the cloud's endpoint; the api-version is pinned in the path, so the read
-# cannot drift under an SDK bump the way a model field can.
+def enabled_subscription_ids(cred) -> Iterator[str]:
+    """Every *enabled* subscription the credential can see, lazily."""
+    from azure.mgmt.subscription import SubscriptionClient  # lazy
 
-def arm_request(client, path: str) -> Dict[str, Any]:
-    """GET one ARM path (relative to the cloud's ARM endpoint, or absolute) as JSON.
-
-    A 404 raises ResourceNotFoundError so `is_not_found` / `get_optional` treat it like
-    an SDK 404.
-    """
-    from azure.core.exceptions import HttpResponseError, ResourceNotFoundError  # lazy
-    from azure.core.rest import HttpRequest  # lazy
-
-    url = path if path.startswith("https://") else arm_endpoint() + path
-    response = client._client.send_request(HttpRequest("GET", url))
-    if response.status_code == 404:
-        raise ResourceNotFoundError(response=response)
-    if response.status_code >= 400:
-        raise HttpResponseError(response=response)
-    return response.json()
-
-
-def arm_list(client, path: str, max_pages: int = 100) -> List[Dict[str, Any]]:
-    """Every item of an ARM list call, following nextLink to the end."""
-    items: List[Dict[str, Any]] = []
-    url = path
-    for _ in range(max_pages):
-        body = arm_request(client, url)
-        items.extend(body.get("value") or [])
-        url = body.get("nextLink")
-        if not url:
-            return items
-    raise RuntimeError(f"ARM paging did not terminate after {max_pages} pages for {path}")
+    client = SubscriptionClient(cred, **arm_client_kwargs())
+    for sub in client.subscriptions.list():
+        # SubscriptionState serializes as "Enabled", its repr as
+        # "SubscriptionState.ENABLED"; both contain "enabled", while "Disabled",
+        # "Warned", "PastDue" and "Deleted" do not.
+        if "enabled" in str(getattr(sub, "state", "")).lower() and getattr(sub, "subscription_id", None):
+            yield sub.subscription_id
 
 
 def resolve_subscription(collector: Collector) -> Dict[str, Optional[str]]:
@@ -420,19 +413,9 @@ def resolve_subscription(collector: Collector) -> Dict[str, Optional[str]]:
     if explicit:
         return {"subscription_id": explicit, "subscription_source": "target"}
 
-    def _discover() -> Optional[str]:
-        from azure.mgmt.subscription import SubscriptionClient  # lazy
-
-        client = SubscriptionClient(credential(), **arm_client_kwargs())
-        for sub in client.subscriptions.list():
-            # SubscriptionState serializes as "Enabled", its repr as
-            # "SubscriptionState.ENABLED"; both contain "enabled", while "Disabled",
-            # "Warned", "PastDue" and "Deleted" do not.
-            if "enabled" in str(getattr(sub, "state", "")).lower():
-                return getattr(sub, "subscription_id", None)
-        return None
-
-    subscription_id = collector.guard("subscription.subscriptions.list", _discover)
+    subscription_id = collector.guard(
+        "subscription.subscriptions.list", lambda: next(enabled_subscription_ids(credential()), None)
+    )
     return {
         "subscription_id": subscription_id,
         "subscription_source": "ambient_default" if subscription_id else "unresolved",
@@ -520,6 +503,11 @@ def write_evidence(output_dir: Path, filename: str, evidence: Dict[str, Any]) ->
     with open(path, "w") as f:
         json.dump(evidence, f, indent=2, sort_keys=True, default=str)
     return path
+
+
+def sorted_counts(counter) -> Dict[str, int]:
+    """A Counter as a plain dict in key order, so evidence diffs stay stable."""
+    return {key: counter[key] for key in sorted(counter)}
 
 
 def coverage_percentage(covered: int, total: int) -> int:

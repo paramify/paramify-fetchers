@@ -1,0 +1,75 @@
+name: azure_ddos_protection
+version: 0.1.0
+description: >
+  Whether every public IP address — the subscription's Internet entry points — is
+  covered by Azure DDoS Protection, either through a DDoS protection plan on its
+  virtual network (Network Protection) or its own IP Protection, with what each IP is
+  attached to. Also every DDoS protection plan and which virtual networks use one.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_ddos_protection.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-RVP   # DoS protection on every public entry point
+
+evidence_set:
+  reference_id: EVD-AZURE-DDOS
+  name: Azure DDoS Protection
+  instructions: >
+    Script: fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient),
+    all reads, Reader is sufficient: ddos_protection_plans.list(),
+    virtual_networks.list_all(), public_ip_addresses.list_all(),
+    network_interfaces.list_all(), load_balancers.list_all(); plus the
+    Microsoft.Network registration state.
+    attached_to_type is read from the public IP's ipConfiguration id
+    (network_interface, load_balancer, bastion_host, azure_firewall,
+    virtual_network_gateway, application_gateway, other), or nat_gateway when a NAT
+    gateway holds it, or unattached; internet_facing is any attached IP. The IP's
+    virtual network is found by matching the attached resource against the subnets'
+    ipConfigurations and applicationGatewayIPConfigurations back-references, then
+    against network interfaces' subnets. A public load balancer frontend takes the
+    VNet of its backend pools — each pool's backendIPConfigurations (VM or scale-set
+    NIC IP configurations, matched the same way) and, for pools configured by IP
+    address, the pool's virtualNetwork and each backend address's virtualNetwork or
+    subnet — when they all sit in one VNet, since its protection follows that VNet.
+    effective_protection: "not_supported" for an IP held by a NAT gateway, which
+    Microsoft documents DDoS Protection cannot protect (counted apart from the
+    unprotected ones); "ip_protection" when the IP's ddosSettings.protectionMode is
+    Enabled; "disabled" when Disabled;
+    otherwise (VirtualNetworkInherited, which is also what an unset mode means)
+    "network_protection" when its virtual network has enableDdosProtection true and a
+    ddosProtectionPlan, "none" when that network has no plan or the IP is
+    unattached, and "unknown" when no single virtual network could be found for it —
+    a load balancer with empty backend pools or backends in several VNets, or a
+    resource type not listed above. This is configuration only: it does not show that
+    protection is reviewed for effectiveness (DDoS alerts, mitigation reports), and
+    Front Door / Application Gateway WAF policy is collected elsewhere. Maps to
+    KSI-CNA-RVP.

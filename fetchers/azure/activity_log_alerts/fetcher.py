@@ -13,6 +13,7 @@ case-insensitively.
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -37,6 +38,14 @@ from azure_common import (  # noqa: E402
     write_evidence,
     report_failure,
 )
+from alert_routing import (  # noqa: E402
+    add_referenced_groups,
+    collect_action_groups,
+    collect_processing_rules,
+    route,
+    tri_state,
+)
+from arm_rest import arm_rest_client  # noqa: E402
 
 logger = logging.getLogger("azure_activity_log_alerts")
 
@@ -78,6 +87,17 @@ MONITORED_OPERATIONS = {
     # monitor_alert_create_update_security_solution / ..._delete_...
     "create_update_security_solution": ("Microsoft.Security/securitySolutions/write",),
     "delete_security_solution": ("Microsoft.Security/securitySolutions/delete",),
+}
+
+# App Service deployment and configuration changes, kept out of the CIS map so its totals do not move.
+CHANGE_OPERATIONS = {
+    "create_update_web_app": ("Microsoft.Web/sites/write", "Microsoft.Web/sites/slots/write"),
+    "update_web_app_configuration": ("Microsoft.Web/sites/config/write", "Microsoft.Web/sites/slots/config/write"),
+    "deploy_web_app": ("Microsoft.Web/sites/deployments/write", "Microsoft.Web/sites/slots/deployments/write"),
+    "swap_web_app_slots": (
+        "Microsoft.Web/sites/slotsswap/action",
+        "Microsoft.Web/sites/slots/slotsswap/action",
+    ),
 }
 
 # monitor_alert_service_health_exists is not an operationName alert: it needs BOTH
@@ -215,13 +235,17 @@ def alert_record(alert: dict) -> dict:
     }
 
 
-def operation_coverage(alerts: list[dict]) -> dict:
-    """Which of MONITORED_OPERATIONS at least one enabled alert fires on."""
+def operation_coverage(alerts: list[dict], operations_map=MONITORED_OPERATIONS) -> dict:
+    """Which operations in `operations_map` at least one of `alerts` fires on."""
     covered = {name for alert in alerts for name in alert["monitored_operations"]}
     return {
         key: any(operation.lower() in covered for operation in operations)
-        for key, operations in MONITORED_OPERATIONS.items()
+        for key, operations in operations_map.items()
     }
+
+
+def with_routing(alert: dict, groups: dict, processing_rules: list[dict]) -> dict:
+    return {**alert, **route(alert["enabled"], alert["action_groups"], alert["scopes"], groups, processing_rules)}
 
 
 def summarize(alerts: list[dict]) -> dict:
@@ -247,6 +271,35 @@ def summarize(alerts: list[dict]) -> dict:
             key for key, is_covered in coverage.items() if not is_covered
         ),
         "service_health_alert_configured": any(alert["service_health_alert"] for alert in alerts),
+        **routing_summary(alerts),
+    }
+
+
+def coverage_reaching_human(alerts: list[dict], operations_map: dict) -> dict:
+    """Per operation: True if an alert that reaches a person covers it, None if only one that might, else False."""
+    sure = operation_coverage([a for a in alerts if a.get("reaches_human") is True], operations_map)
+    maybe = operation_coverage([a for a in alerts if a.get("enabled") and a.get("reaches_human") is None], operations_map)
+    return {key: True if sure[key] else None if maybe[key] else False for key in operations_map}
+
+
+def routing_summary(alerts: list[dict]) -> dict:
+    """Coverage again, counting only alerts that reach a person, plus the App Service change map."""
+    enabled = [a for a in alerts if a.get("enabled")]
+    change = coverage_reaching_human(alerts, CHANGE_OPERATIONS)
+    return {
+        "alerts_routing_to_enabled_receiver": sum(1 for a in enabled if a.get("routes_to_enabled_receiver") is True),
+        "alerts_routing_unknown": sum(1 for a in enabled if a.get("routes_to_enabled_receiver") is None),
+        "alerts_suppressed": sum(1 for a in enabled if a.get("suppressed") is True),
+        "alerts_possibly_suppressed": sum(1 for a in enabled if a.get("suppressed") is None),
+        "alerts_reaching_human": sum(1 for a in enabled if a.get("reaches_human") is True),
+        "alerts_reaching_human_unknown": sum(1 for a in enabled if a.get("reaches_human") is None),
+        "monitored_operation_coverage_reaching_human": coverage_reaching_human(alerts, MONITORED_OPERATIONS),
+        "change_operation_coverage": change,
+        "change_operations_covered": sum(1 for v in change.values() if v is True),
+        "change_operations_possibly_covered": sum(1 for v in change.values() if v is None),
+        "change_operations_total": len(CHANGE_OPERATIONS),
+        "all_change_operations_covered": tri_state(change.values()),
+        "uncovered_change_operations": sorted(k for k, v in change.items() if v is False),
     }
 
 
@@ -293,7 +346,10 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     alerts: list[dict] = []
+    group_records: list[dict] = []
+    processing_rules: list[dict] = []
     registration = REGISTRATION_UNKNOWN
+    alerts_mgmt = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # ARM returns an empty list, not an error, for an unregistered provider.
         registration = provider_registration_status(
@@ -306,6 +362,25 @@ def main() -> int:
                 subscription_id,
             )
         alerts = collect_activity_log_alerts(subscription_id, cred, collector)
+        alerts_mgmt = provider_registration_status(collector, subscription_id, cred, "Microsoft.AlertsManagement")
+        rest = collector.guard("arm_rest.ARMPipelineClient (init)", lambda: arm_rest_client(cred))
+        if rest is not None:
+            if registration != NOT_REGISTERED:
+                groups = collector.guard(
+                    "Microsoft.Insights/actionGroups list", lambda: collect_action_groups(rest, subscription_id)
+                )
+                group_records = groups["groups"] if groups else []
+            if alerts_mgmt != NOT_REGISTERED:
+                apr = collector.guard(
+                    "Microsoft.AlertsManagement/actionRules list",
+                    lambda: collect_processing_rules(rest, subscription_id, datetime.now(timezone.utc)),
+                )
+                processing_rules = apr["rules"] if apr else []
+            by_id = {(g["id"] or "").lower(): g for g in group_records}
+            referenced = [g for a in alerts for g in a["action_groups"]]
+            referenced += [g for p in processing_rules for g in p["added_action_group_ids"]]
+            add_referenced_groups(rest, referenced, by_id, collector)
+            alerts = [with_routing(a, by_id, processing_rules) for a in alerts]
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -325,7 +400,13 @@ def main() -> int:
             "monitored_operations": {
                 key: list(operations) for key, operations in MONITORED_OPERATIONS.items()
             },
+            "change_operations": {
+                key: list(operations) for key, operations in CHANGE_OPERATIONS.items()
+            },
+            "action_groups": sorted(group_records, key=lambda g: (g["id"] or "").lower()),
+            "processing_rules": sorted(processing_rules, key=lambda p: (p["id"] or "").lower()),
             "provider_registration_status": registration,
+            "alerts_management_registration_status": alerts_mgmt,
         },
         summary={**summarize(alerts), "provider_registration_status": registration},
     )

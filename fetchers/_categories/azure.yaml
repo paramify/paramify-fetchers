@@ -104,6 +104,7 @@ requires:
     - azure-mgmt-redis
     - azure-mgmt-redisenterprise
     - azure-mgmt-resource
+    - azure-mgmt-resource-deployments
     - azure-mgmt-resource-policy
     - azure-mgmt-resourcegraph
     - azure-mgmt-security
