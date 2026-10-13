@@ -1,0 +1,90 @@
+name: azure_devops_pipelines
+version: 0.1.0
+description: >
+  For every project in an Azure DevOps organization: each pipeline and what its
+  final YAML tests, scans, validates, deploys and signs, in stage order; its
+  completed runs and published test results over the lookback; each deployment
+  environment's approvals and checks and the deployments made to it, each traced
+  to the run, branch and commit it came from and the tests that run published;
+  each repository's default-branch policies (minimum reviewers, build
+  validation); and the project's pipeline settings. This is evidence that changes
+  reach production by redeploying version-controlled code through pipelines that
+  test and validate them, behind approvals, and of which artifacts are signed.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: azure_devops_pipelines.json
+  aggregation: per_target
+
+target_schema:
+  organization_url:
+    type: string
+    required: true
+    env: AZURE_DEVOPS_ORG_URL
+    description: >
+      The Azure DevOps organization, as https://dev.azure.com/<org>,
+      https://<org>.visualstudio.com or just <org>. One target per organization.
+  projects:
+    type: string
+    required: false
+    env: AZURE_DEVOPS_PROJECTS
+    description: >
+      Comma-separated project names or ids to limit collection to. Optional:
+      omit to collect every project the PAT can read. A named project that is
+      missing fails the run.
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    default: 30
+    env: AZURE_DEVOPS_LOOKBACK_DAYS
+    description: >
+      Pipeline runs, test runs and environment deployments from this many days
+      back are collected.
+
+secrets:
+  - name: pat
+    env: AZURE_DEVOPS_PAT
+    per_target: true
+    description: >
+      Personal access token for the organization with Build (Read), Code (Read),
+      Test Management (Read), Project and Team (Read) and Environment (Read &
+      manage). Azure DevOps has no read-only environment scope; the fetcher only
+      reads.
+
+ksis:
+  - KSI-CMT-RMV      # changes ship by pipeline redeployment from version control
+  - KSI-CMT-VTD      # tests and validation run in the pipeline, results per run and per deployment
+  - KSI-SVC-VRI      # artifact signing, signature verification and SBOM steps; artifact-evaluation checks
+
+evidence_set:
+  reference_id: EVD-AZURE-DEVOPS-PIPELINES
+  name: Azure DevOps Pipelines
+  instructions: >
+    Script: fetcher.py. Azure DevOps REST 7.1 per project, every continuation
+    token followed. Pipelines: build/definitions; each YAML pipeline's final YAML
+    comes from a preview run (pipelines/{id}/preview, previewRun true, nothing is
+    queued), so templates are expanded (`templates_expanded`). When the preview
+    is refused (a 400: invalid YAML or a parameter with no default) the YAML file
+    is read from the default branch instead, unexpanded, and `yaml_error` says
+    why. Classic pipelines are listed, not analysed. `analysis.steps` sorts steps
+    into test, security_scan, iac_validation, infrastructure_deploy,
+    application_deploy, signing, signature_verification and sbom by task name
+    and inputs, or by the tools a script runs; `tests_before_first_deploy` is in
+    YAML order. Runs: completed build/builds since the window start. Test runs:
+    test/runs queried in 7-day slices, attributed to a pipeline by build.
+    Environments: distributedtask/environments, their checks
+    (pipelines/checks/configurations, settings expanded) and deployment records
+    in the window, each joined to its run for branch, commit and that run's test
+    results. Repositories: git/repositories with the enabled policy
+    configurations that apply to the default branch. Pipeline general settings:
+    build/generalsettings. A failed call names the PAT scope it needs.
