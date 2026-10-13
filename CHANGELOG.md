@@ -464,6 +464,29 @@ schemas and the `paramify` CLI — not the internal code.
   summary counts unknown verdicts apart rather than as "no". Read through raw ARM REST, since `azure-mgmt-monitor` 6.x drops
   `nextLink` on metric alerts and action groups and reads log alerts in the 2018
   schema. Reader-only.
+- **`azure_change_provenance`** (`EVD-AZURE-CHANGE-PROVENANCE`) — every
+  control-plane change in the subscription over Resource Graph's 14 days of change
+  history, attributed by correlationId to the ARM deployment that made it, to a
+  configured pipeline identity, or to a direct edit. A deployment a person ran,
+  from the CLI or through the Portal's create wizards, is `manual_deployment` and
+  does not count as a redeployment. Changes Azure records with no caller take the
+  origin of the nearest named change to the same resource, then of a deployment
+  whose run and outputs cover them, and are otherwise `platform` or
+  `unattributed`. The summary gives `percent_redeployed`, a
+  `percent_redeployed_conservative` that counts unattributed changes against it,
+  direct edits by client, caller and resource type, and the direct changes in
+  resource groups deleted since, whose deployment history went with them.
+  Reader-only. Maps to `KSI-CMT-RMV`.
+- **`azure_residual_resources`** (`EVD-AZURE-RESIDUAL-RESOURCES`) — leftovers in
+  the subscription: unattached disks, NICs, NSGs, public IPs and NAT gateways,
+  disconnected private endpoints, private DNS zones linked to no network, App
+  Service plans hosting nothing, empty resource groups, user-assigned identities
+  with no attachment, role or federated credential, stopped or long-untouched
+  deployment slots, and role assignments whose principal Entra ID no longer has.
+  Cross-tenant `ForeignGroup` principals are never reported deleted, and the run
+  fails rather than guess when Microsoft Graph is signed in to a tenant other than
+  the subscription's. Needs Reader, plus Microsoft Graph `Directory.Read.All`
+  (admin-consented) when it runs as a service principal. Maps to `KSI-SVC-PRR`.
 
 ### Changed
 
@@ -604,6 +627,10 @@ schemas and the `paramify` CLI — not the internal code.
   unchanged.
 - **`azure_diagnostic_settings` also maps to `KSI-MLA-OSM`**, which its
   subscription activity-log export already evidenced.
+- **`KSI-SVC-PRR` counts as config-evidenceable.** Its residual elements are a
+  state of the environment a fetcher can show, so `framework/reference/ksis.yaml`
+  marks it evidenceable and `docs/ksi_mapping.md` lists it as covered by
+  `azure_residual_resources`: 35 of 37 evidenceable indicators.
 - **The TUI saves manifest edits as they are made.** Adding a fetcher, editing an
   entry, adding / editing / removing a target, picking an assessment, removing an
   entry, and changing the output dir all write the file immediately. Edits used

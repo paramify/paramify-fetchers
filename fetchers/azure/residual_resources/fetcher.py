@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Residual elements in one subscription: unattached disks, NICs, NSGs and public IPs, empty resource groups, unused identities, stale slots, and role assignments whose principal is gone."""
+"""Residual elements in one subscription: unattached or idle network, compute and DNS resources, empty resource groups and plans, unused identities, stale slots, and role assignments whose principal is gone."""
 
 import asyncio
 import logging
@@ -13,29 +13,30 @@ from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from arm_rest import arm_rest_client, list_all  # noqa: E402
 from azure_common import (  # noqa: E402
     Collector,
     arm_client_kwargs,
     build_payload,
     classify_failure_code,
-    credential,
     failure_reason,
     report_failure,
     resolve_subscription,
-    resource_graph_client,
-    resource_graph_rows,
     sanitize_for_filename,
     sorted_counts,
     write_evidence,
 )
-from azure_rest import parse_time  # noqa: E402
+from azure_rest import parse_time, pinned_credential  # noqa: E402
 from entra_graph import aguard, with_graph_client  # noqa: E402
+from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_residual_resources")
 
 GRAPH_BATCH = 1000
 DEFAULT_STALE_SLOT_DAYS = 90
 FIC_API_VERSION = "2023-01-31"
+# Groups from another tenant (CSP/GDAP partners); this tenant's directory can never return them.
+FOREIGN_PRINCIPAL_TYPES = frozenset({"foreigngroup"})
 _PROJECT = " | project id = tostring(id), name, type, resourceGroup, location, tags | order by id asc"
 
 ORPHAN_QUERIES = {
@@ -58,14 +59,36 @@ ORPHAN_QUERIES = {
         "Resources | where type =~ 'microsoft.network/publicipaddresses'"
         " and isnull(properties.ipConfiguration) and isnull(properties.natGateway)" + _PROJECT
     ),
-    "empty_resource_group": (
-        "ResourceContainers | where type =~ 'microsoft.resources/subscriptions/resourcegroups'"
-        " | extend rg = tolower(name)"
-        " | join kind=leftouter (Resources | summarize resources = count() by rg = tolower(resourceGroup)) on rg"
-        " | where isnull(resources) or resources == 0"
-        " | project id = tostring(id), name, type, resourceGroup = name, location, tags | order by id asc"
+    "unattached_nat_gateway": (
+        "Resources | where type =~ 'microsoft.network/natgateways'"
+        " and coalesce(array_length(properties.subnets), 0) == 0" + _PROJECT
+    ),
+    "disconnected_private_endpoint": (
+        "Resources | where type =~ 'microsoft.network/privateendpoints'"
+        " and (tostring(properties.privateLinkServiceConnections[0].properties.privateLinkServiceConnectionState.status)"
+        " =~ 'Disconnected' or tostring(properties.manualPrivateLinkServiceConnections[0].properties"
+        ".privateLinkServiceConnectionState.status) =~ 'Disconnected')" + _PROJECT
+    ),
+    "unlinked_private_dns_zone": (
+        "Resources | where type =~ 'microsoft.network/privatednszones'"
+        " and toint(properties.numberOfVirtualNetworkLinks) == 0" + _PROJECT
+    ),
+    "empty_app_service_plan": (
+        "Resources | where type =~ 'microsoft.web/serverfarms' and toint(properties.numberOfSites) == 0" + _PROJECT
     ),
 }
+
+# Two paged queries rather than a join: a join over a summarize is not paged and could drop groups unnoticed.
+RESOURCE_GROUPS_QUERY = (
+    "ResourceContainers | where type =~ 'microsoft.resources/subscriptions/resourcegroups'"
+    " | project id = tostring(id), name, type, resourceGroup = name, location, tags | order by id asc"
+)
+OCCUPIED_GROUPS_QUERY = "Resources | summarize resources = count() by id = tolower(resourceGroup) | order by id asc"
+
+SUBSCRIPTION_QUERY = (
+    "ResourceContainers | where type =~ 'microsoft.resources/subscriptions'"
+    " | project id = tostring(id), tenantId = tostring(tenantId) | order by id asc"
+)
 
 IDENTITIES_QUERY = (
     "Resources | where type =~ 'microsoft.managedidentity/userassignedidentities'"
@@ -78,7 +101,7 @@ IDENTITIES_QUERY = (
 IDENTITY_REFERENCES_QUERY = (
     "Resources | extend refs = extract_all(@'(/subscriptions/[0-9a-f-]+/resourcegroups/[^/]+/providers/"
     "microsoft\\.managedidentity/userassignedidentities/[^/\"]+)', tolower(strcat(tostring(identity), tostring(properties))))"
-    " | where array_length(refs) > 0 | mv-expand identityId = refs"
+    " | where array_length(refs) > 0 | mv-expand identityId = refs limit 2000"
     " | project id = tostring(id), identityId = tostring(identityId) | order by id asc"
 )
 
@@ -114,6 +137,11 @@ def resource_record(row: dict, kind: str) -> dict:
         "tags": tags if isinstance(tags, dict) else {},
         "orphan_kind": kind,
     }
+
+
+def empty_groups(groups: list, occupied: list) -> list:
+    taken = {(r.get("id") or "").lower() for r in occupied}
+    return [resource_record(g, "empty_resource_group") for g in groups if (g.get("name") or "").lower() not in taken]
 
 
 def stale_slot_days() -> int:
@@ -152,13 +180,18 @@ def identity_record(row: dict, attached: int, roles: int, federated) -> dict:
     }
 
 
+def foreign(row: dict) -> bool:
+    return (row.get("principalType") or "").lower() in FOREIGN_PRINCIPAL_TYPES
+
+
 def assignment_record(row: dict, role_names: dict, found) -> dict:
     principal = (row.get("principalId") or "").lower()
-    exists = None if found is None or not principal else principal in found
+    exists = None if found is None or not principal or foreign(row) else principal in found
     return {
         "id": row.get("id"),
         "principal_id": row.get("principalId") or None,
         "principal_type": row.get("principalType") or None,
+        "foreign_principal": foreign(row),
         "role_definition_id": row.get("roleDefinitionId") or None,
         "role_name": role_names.get(_guid(row.get("roleDefinitionId"))),
         "scope": row.get("scope") or None,
@@ -181,6 +214,7 @@ def summarize(resources: list, assignments: list, principal_check: str, checked:
         "deleted_principal_assignments": kinds["deleted_principal_assignment"],
         "principals_checked": len(principals),
         "principals_missing": len(missing),
+        "foreign_principal_assignments": sum(1 for a in assignments if a["foreign_principal"]),
         "principal_check": principal_check,
         "identities_checked": checked.get("identities", 0),
         "slots_checked": checked.get("slots", 0),
@@ -200,13 +234,7 @@ def role_definition_names(subscription_id, cred) -> dict:
 
 
 def federated_credential_count(arm, identity_id: str) -> int:
-    from azure.core.rest import HttpRequest  # lazy
-
-    response = arm.send_request(
-        HttpRequest("GET", f"{identity_id}/federatedIdentityCredentials?api-version={FIC_API_VERSION}")
-    )
-    response.raise_for_status()
-    return len(response.json().get("value") or [])
+    return len(list_all(arm, f"{identity_id}/federatedIdentityCredentials", FIC_API_VERSION)["items"])
 
 
 def identity_records(subscription_id, cred, collector: Collector, identities: list, references: list, assignments: list):
@@ -221,10 +249,8 @@ def identity_records(subscription_id, cred, collector: Collector, identities: li
         federated = None
         if n_attached == 0 and n_roles == 0:
             if arm is None:
-                # Resource Graph does not index federatedIdentityCredentials; any mgmt client is an ARM pipeline for the GET.
-                from azure.mgmt.network import NetworkManagementClient  # lazy
-
-                arm = NetworkManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
+                # Resource Graph does not index federatedIdentityCredentials.
+                arm = arm_rest_client(cred)
             federated = collector.guard(
                 f"managedidentity.federatedIdentityCredentials.list({row.get('name')})",
                 lambda: federated_credential_count(arm, row["id"]),
@@ -233,7 +259,7 @@ def identity_records(subscription_id, cred, collector: Collector, identities: li
     return records
 
 
-async def existing_principals(collector: Collector, cred, ids: list):
+async def existing_principals(collector: Collector, cred, ids: list, home_tenant=None):
     """Lower-cased ids of the principals Microsoft Graph still has, or None if the lookup failed."""
     from msgraph.generated.directory_objects.get_by_ids.get_by_ids_post_request_body import (  # lazy
         GetByIdsPostRequestBody,
@@ -248,7 +274,25 @@ async def existing_principals(collector: Collector, cred, ids: list):
             found |= {str(getattr(o, "id", "") or "").lower() for o in (getattr(response, "value", None) or [])}
         return found
 
+    async def _tenant(client):
+        orgs = getattr(await client.organization.get(), "value", None) or []
+        if not orgs or not getattr(orgs[0], "id", None):
+            raise RuntimeError("organization.get() named no tenant")
+        return str(orgs[0].id).lower()
+
     async def _work(client):
+        tenant = await aguard(collector, "msgraph.organization.get", lambda: _tenant(client))
+        if tenant is None:
+            return None
+        if home_tenant and tenant != home_tenant.lower():
+            collector.record(
+                "msgraph.directory_objects.get_by_ids",
+                RuntimeError(
+                    f"Microsoft Graph is signed in to tenant {tenant}, but the subscription belongs to tenant "
+                    f"{home_tenant.lower()}, so its principals cannot be looked up; sign in to the subscription's tenant"
+                ),
+            )
+            return None
         return await aguard(collector, "msgraph.directory_objects.get_by_ids", lambda: _lookup(client))
 
     return await with_graph_client(collector, cred, _work, default=None)
@@ -263,7 +307,7 @@ def collect(subscription_id, cred, collector: Collector):
 
     def _run(label, query):
         result = collector.guard(
-            f"resourcegraph.resources ({label})", lambda: resource_graph_rows(client, subscription_id, query)
+            f"resourcegraph.resources ({label})", lambda: query_all(client, subscription_id, query)
         )
         if result is not None:
             sources[label] = {
@@ -277,6 +321,10 @@ def collect(subscription_id, cred, collector: Collector):
     for kind, query in ORPHAN_QUERIES.items():
         rows = _run(kind, query)
         resources.extend(resource_record(row, kind) for row in rows or [])
+    groups = _run("resource_groups", RESOURCE_GROUPS_QUERY)
+    occupied = _run("occupied_resource_groups", OCCUPIED_GROUPS_QUERY)
+    if groups is not None and occupied is not None:
+        resources.extend(empty_groups(groups, occupied))
 
     days = stale_slot_days()
     now = datetime.now(timezone.utc)
@@ -297,8 +345,9 @@ def collect(subscription_id, cred, collector: Collector):
     if rows is None:
         return resources, [], sources, "failed", checked
 
-    ids = sorted({(r.get("principalId") or "").lower() for r in rows if r.get("principalId")})
-    found = asyncio.run(existing_principals(collector, cred, ids)) if ids else set()
+    home = (_run("subscription", SUBSCRIPTION_QUERY) or [{}])[0].get("tenantId") or None
+    ids = sorted({(r.get("principalId") or "").lower() for r in rows if r.get("principalId") and not foreign(r)})
+    found = asyncio.run(existing_principals(collector, cred, ids, home)) if ids else set()
     assignments = [assignment_record(row, role_names, found) for row in rows]
     return (
         sorted(resources, key=lambda r: (r["orphan_kind"], r["id"] or "")),
@@ -322,7 +371,7 @@ def main() -> int:
 
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
-    cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
+    cred = collector.guard("azure.identity.DefaultAzureCredential", lambda: pinned_credential(subscription_id))
 
     resources, assignments, sources, principal_check, checked = [], [], {}, "not_run", {}
     if subscription_id and cred is not None:

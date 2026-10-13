@@ -416,62 +416,6 @@ def provider_registration_status(
 
 
 # --------------------------------------------------------------------------- #
-# Resource Graph — paged to the end, short or truncated results raise
-# --------------------------------------------------------------------------- #
-
-RESOURCE_GRAPH_PAGE_SIZE = 1000
-RESOURCE_GRAPH_MAX_PAGES = 1000
-
-
-def resource_graph_client(cred):
-    """Tenant-scoped client: the subscription goes in each request, not the client."""
-    from azure.mgmt.resourcegraph import ResourceGraphClient  # lazy
-
-    return ResourceGraphClient(credential=cred, **arm_client_kwargs())
-
-
-def resource_graph_rows(client, subscription_id: str, query: str) -> Dict[str, Any]:
-    """Every row of `query`, or an exception if Resource Graph returned fewer than it counted."""
-    # Resource Graph withholds $skipToken unless the query projects a non-dynamic column and skips limit/take/sample.
-    from azure.mgmt.resourcegraph.models import (  # lazy
-        QueryRequest,
-        QueryRequestOptions,
-    )
-
-    rows: List[dict] = []
-    total_records = None
-    skip_token = None
-    pages = 0
-    seen_tokens = set()
-    while True:
-        response = client.resources(
-            QueryRequest(
-                subscriptions=[subscription_id],
-                query=query,
-                options=QueryRequestOptions(
-                    top=RESOURCE_GRAPH_PAGE_SIZE, skip_token=skip_token, result_format="objectArray"
-                ),
-            )
-        )
-        pages += 1
-        total_records = model_attr(response, "total_records")
-        if str(model_attr(response, "result_truncated") or "").lower() == "true":
-            raise RuntimeError("Resource Graph reported the result as truncated")
-        rows.extend(model_attr(response, "data") or [])
-        skip_token = model_attr(response, "skip_token")
-        if not skip_token:
-            break
-        if skip_token in seen_tokens or pages >= RESOURCE_GRAPH_MAX_PAGES:
-            raise RuntimeError(f"Resource Graph paging did not terminate after {pages} page(s)")
-        seen_tokens.add(skip_token)
-    if total_records is not None and len(rows) != total_records:
-        raise RuntimeError(
-            f"Resource Graph reported {total_records} rows but paging returned {len(rows)}"
-        )
-    return {"rows": rows, "total_records": total_records, "pages": pages}
-
-
-# --------------------------------------------------------------------------- #
 # Payload assembly / output
 # --------------------------------------------------------------------------- #
 

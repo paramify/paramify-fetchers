@@ -3,12 +3,18 @@ version: 0.1.0
 description: >
   Residual elements left behind in the subscription after changes: managed disks
   attached to nothing, network interfaces with no VM or private endpoint, network
-  security groups on no subnet or NIC, public IPs bound to nothing, resource groups
+  security groups on no subnet or NIC, public IPs bound to nothing, NAT gateways on
+  no subnet, private endpoints whose connection was disconnected, private DNS zones
+  linked to no virtual network, App Service plans hosting no app, resource groups
   holding no resources, user-assigned managed identities nothing uses, App Service
   deployment slots that are stopped or long untouched, and role assignments whose
-  principal no longer exists in Entra ID. Each orphan is listed with its kind, and the summary counts them by
-  kind. This is evidence that the state of the environment is reviewed after
-  changes and unwanted leftovers are removed.
+  principal no longer exists in Entra ID. Each orphan is listed with its kind, and
+  the summary counts them by kind. This is evidence that the state of the
+  environment is reviewed after changes and unwanted leftovers are removed.
+  Permissions: Reader on the subscription, plus Microsoft Graph Directory.Read.All
+  (application permission, admin-consented) when it runs as a service principal or
+  managed identity; a signed-in member user needs nothing extra. Without it the
+  deleted-principal check fails and so does the run.
 category: azure
 
 supports_targets: true
@@ -57,22 +63,35 @@ evidence_set:
   reference_id: EVD-AZURE-RESIDUAL-RESOURCES
   name: Azure Residual Resources
   instructions: >
-    Script: fetcher.py. Needs Reader on the subscription and, for the principal
-    check, directory read in Microsoft Graph (a signed-in member user has it by
-    default; an application needs Directory.Read.All). Every query is an Azure
-    Resource Graph query (azure-mgmt-resourcegraph ResourceGraphClient.resources,
+    Script: fetcher.py. Permissions: Reader on the subscription, and for the
+    principal check Microsoft Graph directory read: a service principal or managed
+    identity needs the Directory.Read.All application permission with admin consent;
+    a signed-in member user has it by default. Every query is an Azure Resource Graph
+    query (azure-mgmt-resourcegraph ResourceGraphClient.resources,
     subscriptions=[<subscription_id>]). Each is paged with $skipToken to the end,
-    and the run fails if Resource Graph returns fewer rows than it counted. The
-    queries are recorded in results.sources. The orphan kinds are:
+    and the run fails if Resource Graph returns fewer rows than it counted or
+    reports the result truncated. The queries are recorded in results.sources. The
+    orphan kinds are:
     unattached_disk, a compute disk whose diskState is Unattached;
     unattached_nic, a network interface with no virtualMachine, privateEndpoint or
     privateLinkService and no hostedWorkloads;
     unattached_nsg, a network security group with no networkInterfaces and no
     subnets;
     unattached_public_ip, a public IP with no ipConfiguration and no natGateway;
-    empty_resource_group, a resource group from ResourceContainers with no row in
-    Resources (hidden resource types that Resource Graph does not index are not
-    counted);
+    unattached_nat_gateway, a NAT gateway with no subnets;
+    disconnected_private_endpoint, a private endpoint whose
+    privateLinkServiceConnections or manualPrivateLinkServiceConnections connection
+    has privateLinkServiceConnectionState.status Disconnected, meaning the target
+    resource was deleted or its owner removed the connection;
+    unlinked_private_dns_zone, a private DNS zone whose numberOfVirtualNetworkLinks is
+    0, so no network resolves it;
+    empty_app_service_plan, an App Service plan (microsoft.web/serverfarms) whose
+    numberOfSites is 0;
+    empty_resource_group, a resource group from ResourceContainers whose name matches
+    no resourceGroup in Resources, read as two paged queries (every resource group,
+    and the resource count per resource group) rather than one join, because a
+    summarize joined into a query is not paged and could drop groups unnoticed.
+    Hidden resource types that Resource Graph does not index are not counted;
     stale_deployment_slot, an App Service or Function App slot (microsoft.web/sites/slots)
     whose properties.state is not Running (`stale_reasons: not_running`), or whose
     properties.lastModifiedTimeUtc is older than `stale_slot_days`
@@ -87,24 +106,34 @@ evidence_set:
     credential (federated_credentials). A federated credential means an outside
     workload, such as a pipeline using workload identity federation, signs in as the
     identity. Resource Graph does not index federated credentials, so they are read
-    with ARM GET <identity id>/federatedIdentityCredentials?api-version=2023-01-31,
-    only for identities with no attachment and no role. Attachments and roles are
-    read in this subscription only: an identity used solely by a resource or a role
-    assignment in another subscription or a management group reads as unused.
-    summary.identities_checked and summary.slots_checked count every identity and
-    slot read.
+    with ARM GET <identity id>/federatedIdentityCredentials?api-version=2023-01-31
+    (following nextLink), only for identities with no attachment and no role; if
+    that read fails, federated_credentials is null and the identity is not reported
+    unused. Attachments and roles are read in this subscription only: an identity
+    used solely by a resource or a role assignment in another subscription or a
+    management group reads as unused. summary.identities_checked and
+    summary.slots_checked count every identity and slot read.
     Role assignments come from authorizationresources (type
     microsoft.authorization/roleassignments: principalId, principalType,
     roleDefinitionId, scope, createdOn), with role names from azure-mgmt-authorization
     AuthorizationManagementClient.role_definitions.list(scope=/subscriptions/<id>),
     because Resource Graph does not index built-in roles. Only assignments made at
     the subscription or below are listed; assignments inherited from a management
-    group or the tenant root belong to that scope and are not reviewed here. Every
-    distinct principalId is looked up through Microsoft Graph POST
-    /directoryObjects/getByIds, in batches of 1000. An id Graph does not return
-    has `principal_exists: false` and `orphan_kind: deleted_principal_assignment`.
-    ARM keeps the assignment and its stored principalType after the principal is
-    deleted, so only the directory lookup can tell. If the lookup fails,
+    group or the tenant root belong to that scope and are not reviewed here. Azure
+    Lighthouse delegations do not appear in role assignment listings from either
+    tenant, so a managing tenant's delegated access is reviewed under the
+    subscription's Service providers page, not here. Every distinct principalId is
+    looked up through Microsoft Graph POST /directoryObjects/getByIds, in batches of
+    1000, after GET /organization confirms that Graph is signed in to the tenant the
+    subscription belongs to (the tenantId of the subscription in ResourceContainers);
+    in any other tenant every principal would read as deleted, so a mismatch fails
+    the run instead. An id Graph does not return has `principal_exists: false` and
+    `orphan_kind: deleted_principal_assignment`. ARM keeps the assignment and its
+    stored principalType after the principal is deleted, so only the directory lookup
+    can tell. Assignments whose principalType is ForeignGroup name a group in another
+    tenant, such as a CSP partner's, which this directory can never return; they are
+    not looked up, have `foreign_principal: true` and `principal_exists: null`, and
+    are counted in summary.foreign_principal_assignments. If the lookup fails,
     principal_exists is null, summary.principal_check reads "failed", and the run
     fails. A principal created in the last few minutes can still be replicating
     and read as missing; created_on lets a reviewer rule that out.

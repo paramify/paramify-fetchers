@@ -335,14 +335,6 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure-mgmt-dns has no DNSSEC operation",
     ),
     (
-        "azure.mgmt.network",
-        "NetworkManagementClient",
-        None,
-        ["send_request"],
-        "azure/residual_resources — the ARM pipeline for the federatedIdentityCredentials "
-        "GET; without it no identity is ever reported unused",
-    ),
-    (
         "azure.mgmt.privatedns",
         "PrivateDnsManagementClient",
         "private_zones",
@@ -805,7 +797,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         None,
         ["send_request"],
         "_shared/arm_rest — azure/alert_rules, azure/activity_log_alerts "
-        "(action groups, alert processing rules)",
+        "(action groups, alert processing rules), azure/residual_resources "
+        "(federated identity credentials)",
     ),
     # --- Resource Graph: the inventory query sits on the client itself --------
     (
@@ -2287,7 +2280,7 @@ def test_arm_rest_requests_absolute_urls() -> None:
 # Microsoft Graph
 # ---------------------------------------------------------------------------
 GRAPH_BUILDERS = [
-    ("organization", "_shared/entra_graph — tenant name resolution"),
+    ("organization", "_shared/entra_graph — tenant name resolution; azure/residual_resources — tenant check"),
     ("applications", "azure/entra_app_registrations"),
     ("users", "azure/entra_mfa_status"),
     ("directory_roles", "azure/entra_privileged_roles"),

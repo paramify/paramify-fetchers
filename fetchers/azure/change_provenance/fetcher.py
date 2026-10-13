@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Control-plane changes in one subscription, each attributed to an ARM deployment or to a direct edit."""
+"""Control-plane changes in one subscription, each attributed to a pipeline or ARM deployment, a manual deployment, or a direct edit."""
 
 import logging
 import os
@@ -19,19 +19,17 @@ from azure_common import (  # noqa: E402
     build_payload,
     classify_failure_code,
     coverage_percentage,
-    credential,
     failure_reason,
     model_attr,
     report_failure,
     resolve_subscription,
-    resource_graph_client,
-    resource_graph_rows,
     resource_group_from_id,
     sanitize_for_filename,
     sorted_counts,
     write_evidence,
 )
-from azure_rest import parse_time  # noqa: E402
+from azure_rest import parse_time, pinned_credential  # noqa: E402
+from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_change_provenance")
 
@@ -40,6 +38,8 @@ DEPLOYMENT_HISTORY_CAP = 800
 # Measured: Resource Graph keeps restamping a change for hours (10 minutes after the operation within 12 hours).
 WINDOW_SLACK = timedelta(minutes=10)
 CHANGE_TABLES = ("resourcechanges", "resourcecontainerchanges")
+# The Portal's create wizards name their deployments Microsoft.Web-WebApp-Portal-…, Microsoft.Template-…, CreateVm-….
+PORTAL_DEPLOYMENT = re.compile(r"^(microsoft\.|createvm-)|-portal-", re.IGNORECASE)
 
 CHANGE_COLUMNS = (
     " | where todatetime(properties.changeAttributes.timestamp) > ago({days}d)"
@@ -128,8 +128,19 @@ def anonymous(change: dict) -> bool:
     return not change["changed_by"] or bool(who & {"system", "unspecified"})
 
 
+def deployment_origin(change: dict, deployment: dict, pipelines: frozenset) -> str:
+    """A deployment run by a pipeline identity or an application, or a manual one run by a person or the Portal."""
+    if (change["changed_by"] or "").lower() in pipelines:
+        return "deployment"
+    by_person = (change["changed_by_type"] or "").lower() == "user"
+    from_portal = (change["client_type"] or "").lower() == "azure portal" or bool(
+        PORTAL_DEPLOYMENT.search(deployment["name"] or "")
+    )
+    return "manual_deployment" if by_person or from_portal else "deployment"
+
+
 def attribute(changes: list, deployments: list, pipelines: frozenset = frozenset()) -> list:
-    """Mark each change as made by a deployment, a pipeline identity, the platform, or directly."""
+    """Mark each change as made by a deployment, a manual deployment, a pipeline identity, the platform, or directly."""
     by_correlation = {d["correlation_id"].lower(): d for d in deployments if d["correlation_id"]}
     by_output: dict = {}
     for d in deployments:
@@ -139,7 +150,7 @@ def attribute(changes: list, deployments: list, pipelines: frozenset = frozenset
     def own(change):
         deployment = by_correlation.get((change["correlation_id"] or "").lower())
         if deployment:
-            return "deployment", "correlation_id", deployment
+            return deployment_origin(change, deployment, pipelines), "correlation_id", deployment
         if (change["changed_by"] or "").lower() in pipelines:
             return "pipeline", None, None
         return "direct", None, None
@@ -147,8 +158,18 @@ def attribute(changes: list, deployments: list, pipelines: frozenset = frozenset
     named = [c for c in changes if not anonymous(c)]
     verdicts = {c["change_id"]: own(c) for c in named}
     named_by_target: dict = {}
+    run_as: dict = {}
     for c in named:
         named_by_target.setdefault((c["target_resource_id"] or "").lower(), []).append(c)
+        origin, _, d = verdicts[c["change_id"]]
+        if d:
+            run_as.setdefault(d["id"], set()).add(origin)
+
+    def window_origin(d):
+        seen = run_as.get(d["id"])
+        if seen:
+            return "manual_deployment" if "manual_deployment" in seen else "deployment"
+        return "manual_deployment" if PORTAL_DEPLOYMENT.search(d["name"] or "") else "deployment"
 
     # Measured: callerless rows reuse unrelated correlationIds, so they take the nearest named change to the resource.
     def inherited(change):
@@ -166,7 +187,7 @@ def attribute(changes: list, deployments: list, pipelines: frozenset = frozenset
         for d in by_output.get(target, []):
             start, end = parse_time(d["started"]), parse_time(d["timestamp"])
             if when and start and end and start - WINDOW_SLACK <= when <= end + WINDOW_SLACK:
-                return "deployment", "deployment_window", d
+                return window_origin(d), "deployment_window", d
         if "system" in ((change["changed_by_type"] or "").lower(), (change["changed_by"] or "").lower()):
             return "platform", None, None
         return "unattributed", None, None
@@ -184,24 +205,54 @@ def attribute(changes: list, deployments: list, pipelines: frozenset = frozenset
     return sorted(attributed, key=lambda c: (c["timestamp"] or "", c["change_id"] or ""))
 
 
-def summarize(changes: list, deployments: list, at_cap: list) -> dict:
+def deployment_runs(deployments: list, changes: list) -> list:
+    """Each deployment with who ran it and its origin, read from the changes it matched by correlationId."""
+    matched: dict = {}
+    for c in changes:
+        if c["attribution"] == "correlation_id":
+            matched.setdefault(c["deployment_id"], []).append(c)
+    runs = []
+    for d in deployments:
+        mine = matched.get(d["id"], [])
+        origins = {c["origin"] for c in mine}
+        runs.append({
+            **d,
+            "run_by": sorted({c["changed_by"] for c in mine if c["changed_by"]}),
+            "origin": ("manual_deployment" if "manual_deployment" in origins else "deployment") if origins else None,
+        })
+    return runs
+
+
+def summarize(changes: list, deployments: list, at_cap: list, groups=None) -> dict:
+    """`groups` is the lower-cased resource groups that still exist, or None when they could not be listed."""
     origins = Counter(c["origin"] for c in changes)
     direct = [c for c in changes if c["origin"] == "direct"]
     redeployed = origins["deployment"] + origins["pipeline"]
+    outside = origins["direct"] + origins["manual_deployment"]
     return {
         "total_changes": len(changes),
         "changes_via_deployment": origins["deployment"],
         "changes_via_pipeline": origins["pipeline"],
+        "manual_deployment_changes": origins["manual_deployment"],
         "direct_changes": origins["direct"],
         "platform_changes": origins["platform"],
         "unattributed_changes": origins["unattributed"],
-        "percent_redeployed": coverage_percentage(redeployed, redeployed + origins["direct"]),
+        "percent_redeployed": coverage_percentage(redeployed, redeployed + outside),
+        "percent_redeployed_conservative": coverage_percentage(
+            redeployed, redeployed + outside + origins["unattributed"]
+        ),
+        "manual_deployment_changes_by_changed_by": sorted_counts(
+            Counter(c["changed_by"] or "none" for c in changes if c["origin"] == "manual_deployment")
+        ),
         "direct_changes_by_changed_by_type": sorted_counts(Counter(c["changed_by_type"] or "none" for c in direct)),
         "attribution_by_method": sorted_counts(Counter(c["attribution"] for c in changes if c["attribution"])),
         "direct_changes_by_client_type": sorted_counts(Counter(c["client_type"] or "none" for c in direct)),
         "direct_changes_by_changed_by": sorted_counts(Counter(c["changed_by"] or "none" for c in direct)),
         "direct_changes_by_resource_type": sorted_counts(
             Counter(c["target_resource_type"] or "unknown" for c in direct)
+        ),
+        "direct_changes_in_deleted_resource_groups": None if groups is None else sum(
+            1 for c in direct if c["resource_group"] and c["resource_group"].lower() not in groups
         ),
         "deployments_in_history": len(deployments),
         "deployments_matched_to_changes": len({c["deployment_id"] for c in changes if c["deployment_id"]}),
@@ -219,7 +270,10 @@ def lookback_days(collector: Collector) -> int:
             ValueError(f"invalid lookback {raw!r}: expected an integer from 1 to {MAX_LOOKBACK_DAYS}"),
         )
         return MAX_LOOKBACK_DAYS
-    return min(max(days, 1), MAX_LOOKBACK_DAYS)
+    clamped = min(max(days, 1), MAX_LOOKBACK_DAYS)
+    if clamped != days:
+        logger.warning("AZURE_CHANGE_LOOKBACK_DAYS=%d is outside 1-%d; using %d", days, MAX_LOOKBACK_DAYS, clamped)
+    return clamped
 
 
 def collect_changes(subscription_id, cred, days: int, collector: Collector):
@@ -230,7 +284,7 @@ def collect_changes(subscription_id, cred, days: int, collector: Collector):
     for table in CHANGE_TABLES:
         query = table + CHANGE_COLUMNS.format(days=days)
         result = collector.guard(
-            f"resourcegraph.resources ({table})", lambda q=query: resource_graph_rows(client, subscription_id, q)
+            f"resourcegraph.resources ({table})", lambda q=query: query_all(client, subscription_id, q)
         )
         if result is None:
             continue
@@ -260,7 +314,7 @@ def collect_deployments(subscription_id, cred, collector: Collector):
 
     clients = collector.guard("deployments.DeploymentsMgmtClient (init)", _clients)
     if clients is None:
-        return [], [], 0
+        return [], [], None
     deploy, resources = clients
 
     deployments = collector.guard(
@@ -271,10 +325,9 @@ def collect_deployments(subscription_id, cred, collector: Collector):
     groups = collector.guard(
         "resource.resource_groups.list",
         lambda: sorted(model_attr(g, "name") for g in resources.resource_groups.list()),
-        default=[],
     )
     at_cap = []
-    for group in groups:
+    for group in groups or []:
         rows = collector.guard(
             f"deployments.list_by_resource_group({group})",
             lambda g=group: [deployment_record(d, "resource_group") for d in deploy.deployments.list_by_resource_group(g)],
@@ -284,7 +337,7 @@ def collect_deployments(subscription_id, cred, collector: Collector):
         if len(rows) >= DEPLOYMENT_HISTORY_CAP:
             at_cap.append(group)
         deployments.extend(rows)
-    return sorted(deployments, key=lambda d: d["id"] or ""), at_cap, len(groups)
+    return sorted(deployments, key=lambda d: d["id"] or ""), at_cap, groups
 
 
 def main() -> int:
@@ -301,12 +354,12 @@ def main() -> int:
 
     sub = resolve_subscription(collector)
     subscription_id = sub["subscription_id"]
-    cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
+    cred = collector.guard("azure.identity.DefaultAzureCredential", lambda: pinned_credential(subscription_id))
 
-    changes, sources, deployments, at_cap, groups_read = [], {}, [], [], 0
+    changes, sources, deployments, at_cap, groups = [], {}, [], [], None
     if subscription_id and cred is not None:
         changes, sources = collect_changes(subscription_id, cred, days, collector)
-        deployments, at_cap, groups_read = collect_deployments(subscription_id, cred, collector)
+        deployments, at_cap, groups = collect_deployments(subscription_id, cred, collector)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -318,20 +371,21 @@ def main() -> int:
 
     pipelines = pipeline_principals()
     attributed = attribute(changes, deployments, frozenset(pipelines))
+    existing = None if groups is None else {g.lower() for g in groups}
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
             "changes": attributed,
-            "deployments": deployments,
+            "deployments": deployment_runs(deployments, attributed),
             "lookback_days": days,
             "pipeline_principals": sorted(pipelines),
             "window_start": iso(datetime.now(timezone.utc) - timedelta(days=days)),
             "change_sources": sources,
-            "resource_groups_read": groups_read,
+            "resource_groups_read": len(groups or []),
         },
-        summary=summarize(attributed, deployments, at_cap),
+        summary=summarize(attributed, deployments, at_cap, existing),
     )
 
     filename = f"azure_change_provenance_{sanitize_for_filename(subscription_id or 'unknown')}.json"
