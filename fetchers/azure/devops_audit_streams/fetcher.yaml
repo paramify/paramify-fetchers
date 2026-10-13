@@ -1,0 +1,67 @@
+name: azure_devops_audit_streams
+version: 0.1.0
+description: >
+  For one Azure DevOps organization: whether auditing is on (the Log Audit
+  Events policy), every audit stream with its target type, status and reason,
+  and last update, and the newest event in the 90-day audit log. For an Azure
+  Monitor Logs stream, whether the workspace's AzureDevOpsAuditing table
+  received this organization's rows in the window. Stream tokens and keys are
+  never written.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_devops_audit_streams.json
+  aggregation: per_target
+
+target_schema:
+  organization_url:
+    type: string
+    required: true
+    env: AZURE_DEVOPS_ORG_URL
+    description: >
+      Azure DevOps organization URL, e.g. https://dev.azure.com/contoso (a
+      legacy https://contoso.visualstudio.com URL also works).
+
+config_schema:
+  audit_window_days:
+    type: integer
+    required: false
+    default: 7
+    env: AZURE_DEVOPS_AUDIT_WINDOW_DAYS
+    description: >
+      How many days back an Azure Monitor Logs stream's AzureDevOpsAuditing
+      rows are counted, and how recent the newest audit event must be to show
+      auditing is on when the policy cannot be read.
+
+secrets:
+  - name: pat
+    env: AZURE_DEVOPS_PAT
+    per_target: true
+    description: >
+      Read-only personal access token with the Read Audit Log scope
+      (vso.auditlog), from a user with the View audit log permission. The
+      Azure Monitor ingestion check uses the ambient Azure credential instead
+      (see _categories/azure.yaml) and needs Log Analytics Reader on the
+      stream's workspace.
+
+ksis:
+  - KSI-MLA-LET      # Logging event types — ADO audit events are logged and exported past ADO's 90 days
+
+evidence_set:
+  reference_id: EVD-AZURE-DEVOPS-AUDIT-STREAMS
+  name: Azure DevOps Audit Streams
+  instructions: >
+    Script: fetcher.py. Azure DevOps REST: OrganizationPolicy
+    Policy.LogAuditEvents (best effort; else auditing reads on when the audit
+    log holds an event in the window), auditservice _apis/audit/streams and
+    _apis/audit/auditlog, ignoring audit-log reads. consumerInputs keep only
+    URL, host, workspace and tenant identifiers. Azure Monitor Logs streams:
+    AzureDevOpsAuditing rows for this organization's ScopeId over the window.
+    Needs: PAT with vso.auditlog and View audit log; Log Analytics Reader.
