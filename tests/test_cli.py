@@ -1496,10 +1496,10 @@ def test_a_refused_mutation_creates_nothing(sandbox):
 def workspace(tmp_path, monkeypatch):
     """A self-contained repo-shaped tree holding manifests/demo.yaml.
 
-    Deliberately NOT the real repo: .gitignore ignores manifests/*, so this
-    repo's own manifests are untracked local state. A test that reads them
-    passes on a developer's machine and fails in CI, where the directory does
-    not exist at all — which is exactly what happened.
+    Deliberately NOT the real repo: it tracks nothing under manifests/, so
+    any manifests there are a developer's untracked local state. A test that
+    reads them passes on a developer's machine and fails in CI, where the
+    directory does not exist at all — which is exactly what happened.
     """
     for d in ("fetchers", "framework", "manifests"):
         (tmp_path / d).mkdir()

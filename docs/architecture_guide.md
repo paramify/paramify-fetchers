@@ -55,8 +55,6 @@ paramify validate manifests/status-pages.yaml
 The result holds no secret values, so it's safe to commit. A fetcher that
 needs a secret gets a `${env:VAR}` reference here
 ([setting secrets in a manifest](run_manifest_guide.md#2-add-a-fetcher-and-close-what-it-reports)).
-**`.gitignore` ignores `manifests/*`** despite its own comment, so commit it
-with `git add -f`.
 
 ```yaml
 run:

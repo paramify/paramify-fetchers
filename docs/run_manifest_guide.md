@@ -176,7 +176,6 @@ The manifest is runnable. Next: [run it, then upload](../README.md#collect-then-
 | A `paramify_*` fetcher reports missing targets | Its targets are Paramify programs. `paramify programs target -f daily` writes them by name. |
 | Doctor says a CLI is `not found on PATH` | Install it ([install](../README.md#install)). |
 | Doctor lists a variable as `missing` that's in `.env` | `run` and `doctor` read only the environment, not `.env`. Export the variables first. |
-| `git add` says the manifest is ignored | `.gitignore` has `manifests/*`, despite its comment. Use `git add -f`. The file holds no secret values. |
 
 **More detail:** [config, secrets and passthrough](config_injection_guide.md) ·
 [example manifests](../examples/)

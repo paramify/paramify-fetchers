@@ -94,8 +94,5 @@ deploy/ecs/
 .vscode/
 *.swp
 
-# --- Manifests ---
-manifests/*
-
 # Downloaded third-party CrowdStrike response captures (tools/crowdstrike_corpus.py)
 tests/fixtures/crowdstrike_corpus/

@@ -626,6 +626,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`git add` no longer refuses a manifest under `manifests/`.** `.gitignore`
+  had picked up a `manifests/*` rule, under the comment saying run manifests
+  are deliberately not ignored. Anyone committing a manifest there, including
+  teams keeping a private copy of this repo, needed `git add -f`. The rule is
+  gone, as is the `git add -f` workaround in the architecture and run-manifest
+  guides. Maintainers who keep local manifests out of `git status` can list
+  `/manifests/` in `.git/info/exclude`.
 - **Every uploader reads "already exists" / "already connected" the same way.**
   The API refuses a repeat evidence-set create or a repeat CONNECT instead of
   ignoring it, and each uploader held its own test for that refusal: the scripts
