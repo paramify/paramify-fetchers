@@ -186,7 +186,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2.4`, `ac-6.9`, `ac-17.1`, `ac-20.1`, `au-2`, `au-7.1`, `au-12`, `si-4.4`, `si-4.5`, `si-7.7`
 
-*16 fetchers:* [`aws_vpc_flow_logs`](../fetchers/aws/vpc_flow_logs), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage), [`azure_key_vault_configuration`](../fetchers/azure/key_vault_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_redis_cache_configuration`](../fetchers/azure/redis_cache_configuration), [`azure_resource_diagnostic_settings`](../fetchers/azure/resource_diagnostic_settings), [`azure_sentinel_data_sources`](../fetchers/azure/sentinel_data_sources), [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration), [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration), [`datadog_log_indexes`](../fetchers/datadog/log_indexes), [`datadog_log_pipelines`](../fetchers/datadog/log_pipelines), [`splunk_data_inputs`](../fetchers/splunk/data_inputs), [`splunk_log_source_freshness`](../fetchers/splunk/log_source_freshness)
+*17 fetchers:* [`aws_vpc_flow_logs`](../fetchers/aws/vpc_flow_logs), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_devops_audit_streams`](../fetchers/azure/devops_audit_streams), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage), [`azure_key_vault_configuration`](../fetchers/azure/key_vault_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_redis_cache_configuration`](../fetchers/azure/redis_cache_configuration), [`azure_resource_diagnostic_settings`](../fetchers/azure/resource_diagnostic_settings), [`azure_sentinel_data_sources`](../fetchers/azure/sentinel_data_sources), [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration), [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration), [`datadog_log_indexes`](../fetchers/datadog/log_indexes), [`datadog_log_pipelines`](../fetchers/datadog/log_pipelines), [`splunk_data_inputs`](../fetchers/splunk/data_inputs), [`splunk_log_source_freshness`](../fetchers/splunk/log_source_freshness)
 
 #### ✅ `KSI-MLA-OSM` — Operating SIEM Capability
 
@@ -427,7 +427,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-232 of 240 fetchers carry a mapping.
+233 of 241 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -514,7 +514,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (61)
+### azure  (62)
 
 | Fetcher | Indicators |
 |---|---|
@@ -532,6 +532,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_defender_assessments`](../fetchers/azure/defender_assessments) | `KSI-CNA-EIS`, `KSI-SVC-EIS` |
 | [`azure_defender_plans`](../fetchers/azure/defender_plans) | `KSI-CNA-EIS`, `KSI-SVC-EIS` |
 | [`azure_defender_regulatory_compliance`](../fetchers/azure/defender_regulatory_compliance) | `KSI-CNA-IBP` |
+| [`azure_devops_audit_streams`](../fetchers/azure/devops_audit_streams) | `KSI-MLA-LET` |
 | [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines) | `KSI-CMT-RMV`, `KSI-CMT-VTD`, `KSI-SVC-VRI` |
 | [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings) | `KSI-CMT-LMC`, `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_disk_encryption_status`](../fetchers/azure/disk_encryption_status) | `KSI-SVC-SIN` |
