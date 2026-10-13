@@ -12,6 +12,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_app_service_backups`** (`EVD-AZURE-APPSVC-BACKUPS`) — for each App
+  Service web app: whether its plan tier supports backups, its automatic backups
+  (count, newest and oldest), its custom backup configuration (storage container,
+  interval, retention, linked databases) and custom backup history (counts by
+  status, latest status, latest success, the 20 newest), with `backed_up`,
+  `effective_backup_interval_hours` and `latest_restore_point` for comparing
+  against a recovery point objective. The web app list is checked against Azure
+  Resource Graph. The custom configuration is a POST needing
+  `Microsoft.Web/sites/config/list/action`; without it those fields are null and
+  the run fails, never reporting "not configured". SAS tokens and database
+  connection strings are never written. `_shared/app_service.py` now holds the
+  web-app client and kind filter that `azure_app_service_configuration` also uses.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default

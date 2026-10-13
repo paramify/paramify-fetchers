@@ -1,0 +1,99 @@
+name: azure_app_service_backups
+version: 0.1.0
+description: >
+  For each App Service web app in the subscription, reports how it is backed up:
+  whether its plan tier supports backups at all (Free and Shared do not), its
+  automatic backups (hourly, kept 30 days, stored by the platform in the same
+  datacenter) with how many restore points exist and the newest and oldest, its
+  custom backup configuration (storage account and container, schedule interval,
+  retention, linked databases) and its custom backup history (count by status, the
+  latest status, the latest successful backup and the 20 most recent). Each app
+  gets `backed_up`, the shortest backup interval it has and its latest restore
+  point, so backups can be compared against a recovery point objective. The web
+  app list is checked against Azure Resource Graph. Function apps and deployment
+  slots are not read. Reading the custom backup configuration needs
+  Microsoft.Web/sites/config/list/action, which Reader lacks; without it those
+  fields are null and the run reports a failure.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_app_service_backups.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-RPL-ABO   # backup existence, interval and retention per web app, to compare with recovery objectives
+
+evidence_set:
+  reference_id: EVD-AZURE-APPSVC-BACKUPS
+  name: Azure App Service Backups
+  instructions: >
+    Script: fetcher.py. Permissions: Reader, plus
+    Microsoft.Web/sites/config/list/action for the custom backup configuration
+    (a custom role holding it is enough). Calls (azure-mgmt-web
+    WebSiteManagementClient, api 2025-05-01): web_apps.list(), keeping kinds that
+    start with "app" (function apps excluded); then per web app
+    web_apps.list_snapshots() (GET sites/{name}/snapshots, the automatic backups
+    `az webapp config snapshot list` shows), web_apps.list_backups() (GET
+    sites/{name}/backups, custom backup history) and
+    web_apps.get_backup_configuration() (POST sites/{name}/config/backup/list).
+    Apps on a Free or Shared plan (`plan_tier`, the site's sku) get none of these
+    calls: App Service backs up only Basic, Standard, Premium and Isolated, so
+    `backups_supported` is false and every backup verdict is false. Completeness:
+    Azure Resource Graph "Resources | where type =~ 'microsoft.web/sites'" is paged
+    to the end; a web app it lists that web_apps.list() did not is read with
+    web_apps.get() and added (`inventory_check.added_from_resource_graph`), or
+    reported in `resource_graph_stale` when the GET says it no longer exists.
+    Per app: `automatic_backups` is the count of automatic backups with the
+    newest (`latest`) and oldest times, with the platform's fixed 1-hour interval
+    and 30-day retention; `has_automatic_backups` is true when there is at least
+    one. `custom_backup_configuration_found` is false when the configuration
+    call returned 404 (none configured) and null when it failed, for example
+    403 for a Reader-only identity; `custom_backup_configured` is true when a
+    configuration names a storage container, `scheduled_custom_backup_enabled`
+    when it also has an enabled schedule, with `custom_backup_interval_hours`
+    (frequency_interval x frequency_unit) and `custom_backup_retention_days`
+    (0 keeps backups forever: `custom_backup_retention_indefinite`). A failed
+    read leaves these null, never false. Storage URLs are reduced to account,
+    container and path: the SAS token is dropped, and database connection strings
+    are never read. `custom_backup_history` has the count, counts by status,
+    `latest_status`, `latest_succeeded` (creation time of the newest Succeeded
+    backup) and the 20 newest backups. `backed_up` is true when the app has
+    automatic backups or an enabled custom schedule, false when it has neither,
+    and null when either is unknown and the other is not true.
+    `effective_backup_interval_hours` is the shorter interval of the two and
+    `latest_restore_point` the newer of the latest automatic backup and the
+    latest successful custom backup. Automatic backups stay in the app's
+    datacenter; only custom backups land in a storage account. Summary counts
+    apps by plan tier, with automatic backups, with a custom configuration
+    (and unknown), with a custom schedule, whose latest custom backup failed
+    (Failed, TimedOut, PartiallySucceeded or Skipped), backed up, not backed up
+    and unknown; `all_web_apps_backed_up` is false if any app is not backed up,
+    null if any is unknown or there are no apps; and
+    `longest_effective_backup_interval_hours` is the longest interval among apps
+    that have one. Deployment slots are not read.
