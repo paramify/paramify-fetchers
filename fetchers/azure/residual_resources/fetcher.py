@@ -20,7 +20,6 @@ from azure_common import (  # noqa: E402
     classify_failure_code,
     credential,
     failure_reason,
-    parse_time,
     report_failure,
     resolve_subscription,
     resource_graph_client,
@@ -29,6 +28,7 @@ from azure_common import (  # noqa: E402
     sorted_counts,
     write_evidence,
 )
+from azure_rest import parse_time  # noqa: E402
 from entra_graph import aguard, with_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_residual_resources")

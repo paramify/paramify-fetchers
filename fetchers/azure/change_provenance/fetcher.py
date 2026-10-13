@@ -22,7 +22,6 @@ from azure_common import (  # noqa: E402
     credential,
     failure_reason,
     model_attr,
-    parse_time,
     report_failure,
     resolve_subscription,
     resource_graph_client,
@@ -32,6 +31,7 @@ from azure_common import (  # noqa: E402
     sorted_counts,
     write_evidence,
 )
+from azure_rest import parse_time  # noqa: E402
 
 logger = logging.getLogger("azure_change_provenance")
 

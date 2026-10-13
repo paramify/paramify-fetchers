@@ -508,20 +508,6 @@ def write_evidence(output_dir: Path, filename: str, evidence: Dict[str, Any]) ->
     return path
 
 
-def parse_time(value):
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    # Azure emits up to seven fractional digits; fromisoformat takes six.
-    text = re.sub(r"(\.\d{6})\d+", r"\1", str(value).strip().replace("Z", "+00:00"))
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-
-
 def sorted_counts(counter) -> Dict[str, int]:
     """A Counter as a plain dict in key order, so evidence diffs stay stable."""
     return {key: counter[key] for key in sorted(counter)}
