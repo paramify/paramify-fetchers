@@ -292,6 +292,10 @@ def test_failed_resource_graph_query_still_collects_the_listed_apps(monkeypatch)
     assert summary["resource_graph_web_apps"] is None
 
 
+def test_resource_graph_query_does_not_assign_to_kind():
+    assert "kind =" not in backups.WEB_SITES_QUERY.replace("kind ==", "")
+
+
 @pytest.mark.parametrize("values,expected", [
     ([True, True], True),
     ([True, None], None),

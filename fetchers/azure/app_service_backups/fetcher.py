@@ -51,9 +51,10 @@ FAILED_STATUSES = ("failed", "timedout", "partiallysucceeded", "skipped")
 RECENT_BACKUPS = 20
 WORKERS = 4
 
+# `kind` is a KQL keyword: projecting `kind = tostring(kind)` fails with ParserFailure (measured).
 WEB_SITES_QUERY = (
     "Resources | where type =~ 'microsoft.web/sites'"
-    " | project id = tostring(id), name, kind = tostring(kind) | order by id asc"
+    " | project id = tostring(id), name, kind | order by id asc"
 )
 
 # A backup's storage URL carries its SAS token in the query string.
