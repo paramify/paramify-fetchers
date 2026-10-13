@@ -90,7 +90,7 @@ def call(table, name):
     return fn
 
 
-SNAPSHOTS = [ns(time="2026-09-13T23:01:00.9388571"), ns(time="2026-10-13T20:14:12.2391630")]
+SNAPSHOTS = [ns(time="2026-09-02T04:05:06.1234567"), ns(time="2026-10-03T07:08:09.7654321")]
 
 
 def web_client(*, sites=None, snapshots=None, history=None, config=None, gets=None):
@@ -143,7 +143,7 @@ def test_backed_up_apps_and_their_intervals(monkeypatch):
     assert sorted(apps) == ["web-basic", "web-free", "web-std"]
 
     std = apps["web-std"]
-    assert std["automatic_backups"] == {"count": 2, "latest": "2026-10-13T20:14:12Z", "oldest": "2026-09-13T23:01:00Z",
+    assert std["automatic_backups"] == {"count": 2, "latest": "2026-10-03T07:08:09Z", "oldest": "2026-09-02T04:05:06Z",
                                         "interval_hours": 1, "retention_days": 30}
     assert std["custom_backup_configured"] is True
     assert std["scheduled_custom_backup_enabled"] is True
@@ -157,7 +157,7 @@ def test_backed_up_apps_and_their_intervals(monkeypatch):
     assert std["custom_backup_history"]["recent"][0]["name"] == "nightly_3"
     assert std["backed_up"] is True
     assert std["effective_backup_interval_hours"] == 1
-    assert std["latest_restore_point"] == "2026-10-13T20:14:12Z"
+    assert std["latest_restore_point"] == "2026-10-13T00:00:00Z"
 
     basic = apps["web-basic"]
     assert basic["custom_backup_configuration_found"] is False
