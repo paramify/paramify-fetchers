@@ -104,8 +104,12 @@ evidence_set:
     with 10 minutes of slack either side (`attribution: deployment_window`). Failing
     both, it is `origin: platform` when changedBy or changedByType is "System",
     meaning a background change by Azure itself, and `origin: unattributed`
-    otherwise, a change Azure records no caller for. The slack is wide because
-    Resource Graph restamps a fresh change up to 5 minutes after the operation.
+    otherwise, a change Azure records no caller for. Resource Graph keeps
+    restamping a change's timestamp for hours after the operation (measured: 10
+    minutes later within 12 hours), so a callerless row whose named partner has
+    drifted past the window falls back to platform or unattributed. Changes that
+    name their caller are unaffected, since they match deployments by
+    correlationId alone.
     summary.percent_redeployed is deployment plus pipeline changes over
     deployment, pipeline and direct changes. Platform and unattributed changes are
     excluded. Two limits apply. ARM keeps at most 800

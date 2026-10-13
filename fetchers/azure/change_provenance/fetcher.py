@@ -37,7 +37,7 @@ logger = logging.getLogger("azure_change_provenance")
 
 MAX_LOOKBACK_DAYS = 14
 DEPLOYMENT_HISTORY_CAP = 800
-# Measured: Resource Graph restamps a change up to 5 minutes after the operation.
+# Measured: Resource Graph keeps restamping a change for hours (10 minutes after the operation within 12 hours).
 WINDOW_SLACK = timedelta(minutes=10)
 CHANGE_TABLES = ("resourcechanges", "resourcecontainerchanges")
 
