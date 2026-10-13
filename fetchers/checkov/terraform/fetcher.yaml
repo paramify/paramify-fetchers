@@ -1,5 +1,5 @@
 name: checkov_terraform
-version: 0.1.0
+version: 0.1.1
 description: >
   Runs Checkov IaC security scanning over a Terraform repo. Clones the repo
   (generic git, any host) and scans its .tf files, emitting passed/failed/skipped
@@ -71,7 +71,7 @@ config_schema:
   skip_resources:
     type: string
     env: CHECKOV_SKIP_RESOURCES
-    description: CSV of resource patterns (wildcards ok); merged with defaults; filtered post-scan.
+    description: CSV of resource globs matched against the whole resource name (* is the only wildcard, e.g. aws_s3_bucket.dev_*); merged with defaults; filtered post-scan.
   skip_paths:
     type: string
     env: CHECKOV_SKIP_PATHS

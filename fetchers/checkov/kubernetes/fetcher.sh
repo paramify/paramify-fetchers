@@ -97,7 +97,8 @@ if [ -z "$(find "$CLONE_DIR" \( -name '*.yaml' -o -name '*.yml' \) -type f -prin
 fi
 
 # --- build checkov args ---
-CHECKOV_ARGS="--framework kubernetes --output json --quiet --repo-id $REPO_ID --branch $BRANCH"
+# No --quiet: it strips passed_checks, skipped_checks and parsing_errors from the JSON.
+CHECKOV_ARGS="--framework kubernetes --output json --repo-id $REPO_ID --branch $BRANCH"
 [ "${CHECKOV_SOFT_FAIL:-true}" = "true" ] && CHECKOV_ARGS="$CHECKOV_ARGS --soft-fail"
 [ "${CHECKOV_COMPACT:-true}" = "true" ]   && CHECKOV_ARGS="$CHECKOV_ARGS --compact"
 [ -n "${CHECKOV_K8S_CHECKS:-}" ]          && CHECKOV_ARGS="$CHECKOV_ARGS --check $CHECKOV_K8S_CHECKS"

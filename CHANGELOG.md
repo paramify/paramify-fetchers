@@ -739,6 +739,26 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`checkov_terraform` counts passed checks, and `skip_resources` no longer
+  hides every failure** (fetcher 0.1.1). Two bugs:
+  - **Passes not counted.** `--quiet` strips `passed_checks` and
+    `skipped_checks` from checkov's JSON output. Every run therefore reported
+    `passed_checks: 0` and an `aggregate_percentage` of 0. One `.tf` file that
+    checkov passes 8 times and fails 10 times was recorded as 0 passed and
+    10 failed. `--quiet` is gone, and the counts now match checkov's own
+    summary.
+  - **Skip patterns hid every failure.** The post-scan `skip_resources` filter
+    tested each resource name against itself as a regex. Any pattern at all,
+    even one matching nothing, therefore dropped every failed check, so the
+    scan read as clean. A pattern is now a glob over the whole resource name
+    (`*` is the only wildcard; a module resource needs a leading `*`), and a
+    filter error fails the run instead of being ignored. With no
+    `skip_resources` set (the shipped default file is all comments), nothing
+    was filtered.
+- **`checkov_kubernetes` counts passed checks** (fetcher 0.1.1). It had the
+  same `--quiet` bug: a Deployment that checkov passes 70 times and fails 19
+  times was recorded as 0 passed. It never had a `skip_resources` filter, so
+  the second `checkov_terraform` bug did not affect it.
 - **Every uploader reads "already exists" / "already connected" the same way.**
   The API refuses a repeat evidence-set create or a repeat CONNECT instead of
   ignoring it, and each uploader held its own test for that refusal: the scripts

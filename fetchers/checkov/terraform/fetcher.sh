@@ -41,10 +41,10 @@ log_error() { printf '%s ERROR %s %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$COMP
 
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-CLONE_DIR=""; RAW=""; ERR=""; NORM=""; PAT=""
+CLONE_DIR=""; RAW=""; ERR=""; NORM=""
 cleanup() {
     [ -n "$CLONE_DIR" ] && rm -rf "$CLONE_DIR"
-    for f in "$RAW" "$ERR" "$NORM" "$PAT"; do [ -n "$f" ] && rm -f "$f"; done
+    for f in "$RAW" "$ERR" "$NORM" "${NORM:+$NORM.f}"; do [ -n "$f" ] && rm -f "$f"; done
 }
 trap cleanup EXIT
 
@@ -112,7 +112,8 @@ if [ "$SCAN_MODE" = "directory" ] && \
 fi
 
 # --- build checkov args ---
-CHECKOV_ARGS="--framework terraform --output json --quiet --repo-id $REPO_ID --branch $BRANCH"
+# No --quiet: it strips passed_checks, skipped_checks and parsing_errors from the JSON.
+CHECKOV_ARGS="--framework terraform --output json --repo-id $REPO_ID --branch $BRANCH"
 [ "${CHECKOV_SOFT_FAIL:-true}" = "true" ] && CHECKOV_ARGS="$CHECKOV_ARGS --soft-fail"
 [ "${CHECKOV_COMPACT:-true}" = "true" ]   && CHECKOV_ARGS="$CHECKOV_ARGS --compact"
 [ "${CHECKOV_DOWNLOAD_EXTERNAL_MODULES:-true}" = "true" ] && export DOWNLOAD_EXTERNAL_MODULES=True
@@ -187,15 +188,19 @@ fi
 [ -n "${CHECKOV_SKIP_RESOURCES:-}" ] && SKIP_RESOURCES_LIST="${SKIP_RESOURCES_LIST:+$SKIP_RESOURCES_LIST,}$CHECKOV_SKIP_RESOURCES"
 
 if [ -n "$SKIP_RESOURCES_LIST" ]; then
-    PAT="$(mktemp)"
-    echo "$SKIP_RESOURCES_LIST" | tr ',' '\n' | sed 's/\*/.*/g' | jq -R . | jq -s . > "$PAT"
-    jq --slurpfile pats "$PAT" '
-        .results.failed_checks = ((.results.failed_checks // []) | map(
-            (.resource // "") as $r
-            | if $r == "" then .
-              elif (any($pats[0][]; $r | test(.))) then empty
-              else . end))
-    ' "$NORM" > "$NORM.f" && mv "$NORM.f" "$NORM"
+    # Each pattern is a glob over the whole resource name; * is the only wildcard.
+    if ! jq --arg list "$SKIP_RESOURCES_LIST" '
+        ($list | split(",") | map(gsub("^\\s+|\\s+$"; "") | select(length > 0)
+            | "^" + (gsub("(?<c>[.+?^${}()|\\[\\]\\\\])"; "\\\(.c)") | gsub("\\*"; ".*")) + "$")) as $pats
+        | .results.failed_checks = ((.results.failed_checks // []) | map(select((.resource // "") as $r
+            | $r == "" or all($pats[]; . as $p | $r | test($p) | not))))
+    ' "$NORM" > "$NORM.f"; then
+        MSG="skip_resources filter failed for patterns: $SKIP_RESOURCES_LIST"
+        write_status_json error "$MSG" "$COMMIT_SHA"
+        report_failure "$MSG" bad_config
+        exit 1
+    fi
+    mv "$NORM.f" "$NORM"
 fi
 
 PASSED=$(jq '(.results.passed_checks // []) | length' "$NORM")

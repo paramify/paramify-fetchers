@@ -27,6 +27,8 @@ never logged.
 ## Config knobs
 Two-tier skip model: shipped defaults in `../_shared/skip-checks.default.txt` and
 `skip-resources.default.txt` are **merged** with the config values below.
+`skip_resources` entries are globs over the whole resource name (`*` is the only
+wildcard), so a module resource needs a leading `*`: `*aws_s3_bucket.dev_*`.
 
 `soft_fail` (default true), `compact` (true), `download_external_modules` (true),
 `evaluate_variables` (true), `repo_id`, `skip_checks`, `skip_resources`,

@@ -1,5 +1,5 @@
 name: checkov_kubernetes
-version: 0.1.0
+version: 0.1.1
 description: >
   Runs Checkov IaC security scanning over the Kubernetes manifests in a repo.
   Clones the repo (generic git, any host) and scans its .yaml/.yml files with the
