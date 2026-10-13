@@ -47,7 +47,12 @@ CLOSED_ISSUE_STATUSES = ("CLOSED",)
 # the FedRAMP package owner). Absent level => no rating emitted.
 LEVEL_TO_NRATING = {"CHILL": 1, "LOW": 2, "MODERATE": 3, "HIGH": 4, "CRITICAL": 5}
 
+# Not emitted. FedRAMP's "Fully Mitigated" means the vulnerability is still
+# detected but its impact is negligible, and no mapping from Paramify data to
+# that state has been decided. Closed issues are no longer detected, so they
+# are Remediated.
 DISPOSITION_FULLY = "Fully Mitigated"
+DISPOSITION_REMEDIATED = "Remediated"
 DISPOSITION_PARTIALLY = "Partially Mitigated"
 DISPOSITION_FALSE_POSITIVE = "False Positive"
 
@@ -323,14 +328,14 @@ def acceptance_rationale(issue: Dict) -> str:
 
 # --- VDT field derivations --------------------------------------------------
 def _final_disposition(issue: Dict) -> Optional[str]:
-    """False Positive (accepted FP deviation) > Fully Mitigated (closed) >
+    """False Positive (accepted FP deviation) > Remediated (closed) >
     Partially Mitigated (open with accepted risk-adjustment or milestone) > omit.
     Milestones are read from the `milestones` array embedded in the /issues
     response -- no per-issue calls."""
     if _accepted_deviations(issue, ("FALSE_POSITIVE",)):
         return DISPOSITION_FALSE_POSITIVE
     if issue.get("status") in CLOSED_ISSUE_STATUSES:
-        return DISPOSITION_FULLY
+        return DISPOSITION_REMEDIATED
     if issue.get("status") in OPEN_ISSUE_STATUSES and (
         _accepted_deviations(issue, ("RISK_ADJUSTMENT",)) or issue.get("milestones")
     ):
@@ -448,6 +453,7 @@ def _detail_counts(details: List[Dict]) -> Dict[str, Any]:
     return {
         "dispositions": {
             "fullyMitigated": disp[DISPOSITION_FULLY],
+            "remediated": disp[DISPOSITION_REMEDIATED],
             "partiallyMitigated": disp[DISPOSITION_PARTIALLY],
             "falsePositive": disp[DISPOSITION_FALSE_POSITIVE],
             "inProgress": disp[DISPOSITION_IN_PROGRESS],
