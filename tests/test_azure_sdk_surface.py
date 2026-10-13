@@ -222,7 +222,15 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure/diagnostic_settings, azure/container_registry_configuration, "
         "azure/redis_cache_configuration, "
         "azure/app_service_configuration, azure/key_vault_configuration, "
-        "azure/sql_managed_instance_configuration",
+        "azure/sql_managed_instance_configuration, "
+        "azure/resource_diagnostic_settings",
+    ),
+    (
+        "azure.mgmt.monitor",
+        "MonitorManagementClient",
+        "diagnostic_settings_category",
+        ["list"],
+        "azure/resource_diagnostic_settings — which resources emit logs",
     ),
     (
         "azure.mgmt.monitor",
@@ -790,6 +798,15 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list"],
         "azure/log_analytics_workspaces — Sentinel onboarding (SecurityInsights)",
     ),
+    # --- raw ARM GETs for what azure-mgmt-monitor 6.x pages or models wrong ----
+    (
+        "azure.mgmt.core",
+        "ARMPipelineClient",
+        None,
+        ["send_request"],
+        "_shared/arm_rest — azure/alert_rules, azure/activity_log_alerts "
+        "(action groups, alert processing rules)",
+    ),
     # --- Resource Graph: the inventory query sits on the client itself --------
     (
         "azure.mgmt.resourcegraph",
@@ -797,7 +814,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         None,
         ["resources"],
         "azure/resource_inventory, azure/front_door_origins (origin regions), "
-        "azure/change_provenance, azure/residual_resources",
+        "azure/resource_diagnostic_settings, azure/change_provenance, azure/residual_resources",
     ),
     # --- deployment history: left azure-mgmt-resource for its own distribution -
     (
@@ -1520,14 +1537,15 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure.mgmt.resourcegraph.models",
         "QueryRequestOptions",
         ["skip_token", "top", "result_format"],
-        "azure/resource_inventory — paging; without skip_token the inventory "
-        "stops at the first 1000 resources",
+        "azure/resource_inventory, azure/resource_diagnostic_settings — paging; "
+        "without skip_token the inventory stops at the first 1000 resources",
     ),
     (
         "azure.mgmt.resourcegraph.models",
         "QueryResponse",
         ["skip_token", "total_records", "result_truncated", "data"],
-        "azure/resource_inventory — the page loop and its completeness check",
+        "azure/resource_inventory, azure/resource_diagnostic_settings — the page "
+        "loop and its completeness check",
     ),
     (
         "msgraph.generated.directory_objects.get_by_ids.get_by_ids_post_request_body",
@@ -1589,6 +1607,13 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/sql_managed_instance_configuration — monitor 6.x flattens "
         "`properties`; an unflattened release reads every vault as having no "
         "audit-log destination",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "DiagnosticSettingsCategoryResource",
+        ["category_type", "category_groups"],
+        "azure/resource_diagnostic_settings — Logs vs Metrics decides the coverage "
+        "denominator; category_groups decides which categories `audit` covers",
     ),
     (
         "azure.mgmt.monitor.models",
@@ -2198,6 +2223,64 @@ def test_cdn_client_honours_pinned_api_version() -> None:
         "CdnManagementClient no longer records api_version from its constructor.\n"
         "  affected fetchers: azure/front_door_waf_coverage, azure/front_door_origins"
     )
+
+
+def test_arm_rest_requests_absolute_urls() -> None:
+    """ARMPipelineClient.send_request sends a relative path as given; the auth policy then refuses it as non-https."""
+    import sys
+    from pathlib import Path
+
+    from azure.core.pipeline.transport import HttpTransport
+    from azure.mgmt.core import ARMPipelineClient
+
+    shared = Path(__file__).resolve().parent.parent / "fetchers" / "azure" / "_shared"
+    sys.path[:0] = [str(shared.parent.parent / "_lib"), str(shared)]
+    import arm_rest
+
+    class _Response:
+        status_code = 200
+
+        def __init__(self, body):
+            self._body = body
+
+        def read(self):
+            return b""
+
+        def close(self):
+            pass
+
+        def json(self):
+            return self._body
+
+    class _Transport(HttpTransport):
+        def __init__(self, pages):
+            self.pages, self.urls = list(pages), []
+
+        def send(self, request, **kwargs):
+            self.urls.append(request.url)
+            return _Response(self.pages.pop(0))
+
+        def open(self):
+            pass
+
+        def close(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    next_link = "https://management.azure.com/subscriptions/s/next?api-version=1&$skiptoken=a"
+    transport = _Transport([{"value": [1], "nextLink": next_link}, {"value": [2]}])
+    client = ARMPipelineClient(base_url="https://management.azure.com", policies=[], transport=transport)
+
+    assert arm_rest.list_all(client, "/subscriptions/s/providers/P/things", "1") == {"items": [1, 2], "pages": 2}
+    assert transport.urls == [
+        "https://management.azure.com/subscriptions/s/providers/P/things?api-version=1",
+        next_link,
+    ], "affected fetchers: azure/alert_rules, azure/activity_log_alerts"
 
 
 # ---------------------------------------------------------------------------

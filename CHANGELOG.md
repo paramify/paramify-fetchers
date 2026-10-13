@@ -438,6 +438,33 @@ schemas and the `paramify` CLI — not the internal code.
   failed call leaves every flag and total derived from it null rather than
   false or 0, so an unanswered call never reads as "off".
 
+- **`azure_resource_diagnostic_settings`** (`EVD-AZURE-RESOURCE-DIAG-SETTINGS`)
+  — resource-level logging across the whole subscription. `azure_diagnostic_settings`
+  reads only the subscription's activity log export, and the per-service fetchers
+  only their own types, so nothing showed which resources' logs go nowhere. Every
+  resource Resource Graph lists, plus the blob, file, queue and table services
+  each storage account's kind has, is checked for the log categories its type emits and the
+  diagnostic settings that export them: `has_enabled_log_setting`,
+  `destination_types`, `sends_to_log_analytics`, `uncaptured_log_categories` and
+  `captures_all_audit_categories`. The summary gives log-setting and Log
+  Analytics coverage of the log-emitting resources, with the uncovered ones
+  counted by type; metrics-only and unsupported types are outside the
+  denominator. A row count that disagrees with Resource Graph's total, or any
+  read error other than an unsupported type or a since-deleted resource, fails
+  the run. One `ResourceTypeNotSupported` answer covers the rest of that type.
+  Reader-only; about 14 resources a second, timeout 3600s.
+- **`azure_alert_rules`** (`EVD-AZURE-ALERT-RULES`) — every metric alert, log
+  search alert and smart detector rule, resolved through its action groups to
+  the receivers it notifies and checked against alert processing rules that
+  suppress or add notifications. A processing rule scoped narrower than the
+  alert is a partial match. Per rule: `routes_to_enabled_receiver`,
+  `routes_to_person` (email, SMS, voice, app push, ARM role or ITSM; webhooks,
+  Logic Apps, Functions, runbooks and Event Hubs may or may not reach anyone),
+  `suppressed` and `reaches_human`, each true, false or null when unknown. The
+  summary counts unknown verdicts apart rather than as "no". Read through raw ARM REST, since `azure-mgmt-monitor` 6.x drops
+  `nextLink` on metric alerts and action groups and reads log alerts in the 2018
+  schema. Reader-only.
+
 ### Changed
 
 - **The TUI keeps evidence and scan reports apart.** The catalog and the
@@ -561,6 +588,22 @@ schemas and the `paramify` CLI — not the internal code.
   and `audit_logging_percentage`. Existing fields are unchanged. The fetcher now
   also maps to `KSI-MLA-LET`, and to `KSI-CNA-MAT`, `KSI-CNA-RNT` and
   `KSI-SVC-SIN`, which its network and SKU fields already evidenced.
+- **`azure_activity_log_alerts` 0.2.0 says whether an alert reaches a person.**
+  A rule with an action group counted as monitoring even when the group was
+  disabled, had no enabled receiver, or an alert processing rule removed its
+  notifications. Each rule now carries `resolved_action_groups` (enabled state
+  and enabled receivers; webhook host only, phone numbers masked),
+  `routes_to_enabled_receiver`, `routes_to_person`, `suppressed` and
+  `reaches_human`, decided as in `azure_alert_rules` (true, false, or null when
+  unknown), from raw ARM reads of action groups and processing rules. A second
+  map, `change_operation_coverage`, covers App Service create / update,
+  configuration, deployment and slot swap, at site and slot level, counting
+  only alerts that reach a person (null where only one that might covers it);
+  `monitored_operation_coverage_reaching_human` does the same for the existing
+  map. `action_groups` and `monitored_operation_coverage` are
+  unchanged.
+- **`azure_diagnostic_settings` also maps to `KSI-MLA-OSM`**, which its
+  subscription activity-log export already evidenced.
 - **The TUI saves manifest edits as they are made.** Adding a fetcher, editing an
   entry, adding / editing / removing a target, picking an assessment, removing an
   entry, and changing the output dir all write the file immediately. Edits used
