@@ -127,7 +127,7 @@ manifest, runs it, and reviews evidence — all without leaving the keyboard:
 **Sending scan reports** (Nessus, Wiz, STIG results and the like) into Paramify
 pipelines is its own short setup — a manifest for the scanners, an assessment and
 close policy for each, then send from the Paramify tab. The walkthrough, with
-recordings, is [`docs/pipelines.md`](docs/pipelines.md).
+recordings, is [`docs/pipelines_guide.md`](docs/pipelines_guide.md).
 
 > **Zero-credential first run:** the bundled `demo_hello` fetcher emits synthetic
 > evidence, so you can watch the whole collect → envelope pipeline before wiring
@@ -410,7 +410,7 @@ CSV/XML/JSON/Nessus structure, so anything added to it breaks the parse. That on
 constraint is what makes this a separate kind with a separate uploader instead of
 a flag on the existing one. Wiz ships the first three — STIG compliance, Issues
 report and vulnerability findings (see [`fetchers/wiz/README.md`](fetchers/wiz/README.md#issue-reports));
-to write another, start from [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
+to write another, start from [`docs/issue_report_fetchers_guide.md`](docs/issue_report_fetchers_guide.md).
 
 ### Inventory
 
@@ -420,7 +420,7 @@ instead of kept by hand. It uploads to an evidence set like any evidence, and an
 inventory pipeline attached to that set turns each record into an Inventory item.
 Because the pipeline reads the file as the whole estate, `paramify upload` sends
 an inventory only when the run collected all of it. See
-[`docs/inventory_fetchers.md`](docs/inventory_fetchers.md).
+[`docs/inventory_fetchers_guide.md`](docs/inventory_fetchers_guide.md).
 
 ### See what a platform has (discovery)
 
@@ -548,7 +548,7 @@ design (peering connections and endpoints are omitted above for brevity).
 > structured exit-code categories (still binary `0`/`1`, plus `124` for a runner
 > timeout-kill) are not built yet. Issue-report collection is built end to end —
 > contract, runner, uploader, template — and Wiz ships the first three vendor
-> fetchers in that category. See `docs/design.md` for what's deferred.
+> fetchers in that category.
 
 ---
 
@@ -616,6 +616,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`fetchers/servicenow/README.md`](fetchers/servicenow/README.md) | ServiceNow service-account basic auth + the per-instance endpoint URLs |
 | [`uploaders/paramify_evidence/README.md`](uploaders/paramify_evidence/README.md) | Paramify API key setup + upload options |
 | [`uploaders/paramify_issues/README.md`](uploaders/paramify_issues/README.md) | Intaking raw scan reports into an assessment + why the file is never touched |
+| [`docs/pipelines_guide.md`](docs/pipelines_guide.md) | End-to-end: scan manifest → assessment + close policy → run → `paramify issues upload` → jobs and cycles → verify in Paramify |
 | [`uploaders/paramify_scripts/README.md`](uploaders/paramify_scripts/README.md) | Syncing fetcher entry scripts to Paramify + the association model |
 | [`docs/suggest_validator_guide.md`](docs/suggest_validator_guide.md) | End-to-end: API key → `/suggest-validator` → sync → verify validators in Paramify |
 | [`docs/validators_guide.md`](docs/validators_guide.md) | By hand: write a validator and its cases → `paramify validators check` → sync → verify in Paramify |
@@ -623,13 +624,15 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 | [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md) | Writing a new fetcher from scratch |
 | [`docs/platform_onboarding_guide.md`](docs/platform_onboarding_guide.md) | End-to-end: `/onboard-platform` through its four gates → commit the fetchers → publish to Paramify |
 | [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md) | The second kind of fetcher: raw scan reports → assessment issues |
-| [`docs/fetcher_contract_guide.md`](docs/fetcher_contract_guide.md) | Checking one fetcher against the contract: discovery, declared env, a fake-credential run, the envelope, and the status file |
+| [`docs/inventory_fetchers_guide.md`](docs/inventory_fetchers_guide.md) | End-to-end: run an inventory fetcher → check its records → upload → set up the inventory pipeline in Paramify |
+| [`docs/fetcher_contract.md`](docs/fetcher_contract.md) | The binding runner↔fetcher contract |
 | [`docs/ksi_mapping.md`](docs/ksi_mapping.md) | Which fetchers map to which FedRAMP KSIs, per indicator and per fetcher, plus open gaps |
+| [`docs/ksi_mapping_guide.md`](docs/ksi_mapping_guide.md) | Finding the fetchers that cover a KSI with `paramify ksi`, reading covered / gap / organizational, and declaring a fetcher's `ksis` |
 | [`docs/run_manifest_reference.md`](docs/run_manifest_reference.md) | Manifest format reference |
-| [`docs/config_injection_design.md`](docs/config_injection_design.md) | Platform/config/auth model |
+| [`docs/config_injection_guide.md`](docs/config_injection_guide.md) | Walkthrough: look up a fetcher's keys → set platform config, fetcher config, and secrets in a manifest → validate → see them reach the fetcher |
 | [`docs/design.md`](docs/design.md) | Why the framework is shaped this way + current state of the work |
 | [`docs/versioning.md`](docs/versioning.md) | How we version, the contract, and what 1.0 means |
-| [`docs/releasing.md`](docs/releasing.md) | How a release is cut |
+| [`docs/releasing_guide.md`](docs/releasing_guide.md) | Step by step: changelog and version → release PR → tag → GitHub Release |
 | [`docs/private_mirror_workflow.md`](docs/private_mirror_workflow.md) | Keeping a private copy of this repo that still receives upstream releases |
 
 ## License

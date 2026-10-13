@@ -55,7 +55,7 @@ _TIMEOUT_EXIT_CODE = 124
 # can't blank out unrelated text and corrupt the evidence. This masks only what
 # the runner injected verbatim; a secret the fetcher DERIVES at runtime or
 # transforms (encodes/truncates) won't match, so fetchers must still never print
-# secrets — see docs/envelope_design.md.
+# secrets.
 _REDACTION_PLACEHOLDER = "***REDACTED***"
 _MIN_SECRET_LEN_TO_MASK = 5
 

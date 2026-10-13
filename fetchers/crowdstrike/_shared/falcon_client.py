@@ -15,7 +15,7 @@ Falcon has three pagination styles and this module covers all three:
   - after token              — /spotlight/combined/vulnerabilities/v1
   - integer offset           — /alerts/queries/alerts/v2, /policy/combined/*
 
-Collection-failure convention (see docs/authoring_a_fetcher.md): a failed call
+Collection-failure convention (see docs/authoring_fetcher_guide.md, step 3): a failed call
 appends to `api_failures` and returns None rather than raising, so one bad
 endpoint does not lose the evidence already collected. The caller exits
 non-zero when `api_failures` is non-empty. Authentication failure is the one

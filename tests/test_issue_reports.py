@@ -651,7 +651,7 @@ def test_an_entry_that_raises_before_running_is_recorded(tmp_path, monkeypatch):
 
 def test_assessment_is_configurable_but_not_required_to_collect(tmp_path):
     """A missing assessment must not stop collection: the framework is supposed to
-    run with no Paramify connection at all (docs/design.md). If assessment_id were
+    run with no Paramify connection at all (docs/architecture_guide.md, step 3). If assessment_id were
     a required config field, this run would raise instead."""
     write_issue_report_fetcher(tmp_path)
     manifest = {"run": {"output_dir": str(tmp_path / "out"),

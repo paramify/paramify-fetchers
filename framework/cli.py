@@ -16,6 +16,11 @@ Read / discover:
   paramify manifests [--json]                  # discovered run manifests
   paramify runs [--output-dir DIR] [--json]    # past runs under an output dir
     paramify evidence <path> [--json]            # read one evidence file (or issue-report sidecar)
+    paramify samples status [--json]             # which fetchers have a committed evidence sample
+    paramify samples show <fetcher> [--json]     # one fetcher's sample: one record + field coverage
+    paramify samples backfill [--evidence DIR] [--fetcher NAME ...] [--scrub WORD ...]
+                              [--force] [--dry-run] [--json]
+                             # build samples from local evidence (sanitized, leak-checked)
   paramify upload [run-dir] [--dry-run] [--json]
 
 Paramify workspace (live lookups; needs PARAMIFY_API_TOKEN with read scope):
@@ -65,9 +70,9 @@ Two upload commands: evidence fetchers write enveloped JSON that `paramify
 upload` attaches to evidence sets, while `kind: issue_report` fetchers write raw
 scan files to <run>/issue-reports/ that `paramify issues upload` sends into the
 assessment's pipeline and processes. A run of both needs both commands. See
-docs/issue_report_fetchers.md. `kind: inventory` fetchers are evidence whose
+docs/issue_report_fetchers_guide.md. `kind: inventory` fetchers are evidence whose
 records an inventory pipeline turns into Inventory; `paramify upload` sends one
-only when the run collected all of it. See docs/inventory_fetchers.md.
+only when the run collected all of it. See docs/inventory_fetchers_guide.md.
 """
 
 from __future__ import annotations
@@ -158,6 +163,13 @@ issues_app = typer.Typer(
     help="Send issue reports (scan results) into Paramify pipelines, and manage their jobs.",
 )
 app.add_typer(issues_app, name="issues")
+
+samples_app = typer.Typer(
+    no_args_is_help=True,
+    context_settings=_HELP_OPTS,
+    help="Evidence samples: one sanitized record per fetcher, to show what it collects.",
+)
+app.add_typer(samples_app, name="samples")
 
 
 @app.callback()
@@ -1026,6 +1038,132 @@ def evidence_cmd(
     typer.echo(style.highlight_json(
         json.dumps(ev["payload"], indent=2, default=str, ensure_ascii=False)
     ))
+
+
+# --------------------------------------------------------------------------- #
+# Evidence samples
+# --------------------------------------------------------------------------- #
+
+@samples_app.command("status")
+def samples_status(
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Which evidence fetchers have a committed sample, and which still need one.
+
+    A sample is `sample.json` beside the fetcher's fetcher.yaml. UNREVIEWED means
+    a backfill wrote it and nobody has read it yet; OLD means it was captured
+    from an earlier fetcher version, whose fields may have changed.
+    """
+    rows = api.sample_status(api.find_repo_root())
+    if json_out:
+        typer.echo(json.dumps({"ok": True, "fetchers": rows}, indent=2))
+        return
+    have = [r for r in rows if r["has_sample"]]
+    width = max(len(r["fetcher"]) for r in rows)
+    for r in rows:
+        if not r["has_sample"]:
+            typer.echo(f"  {style.dim('—')}  {style.dim(r['fetcher'])}")
+            continue
+        notes = []
+        if not r["reviewed"]:
+            notes.append(style.warn("UNREVIEWED"))
+        if not r["current"]:
+            notes.append(style.warn(f"OLD v{r['sample_version']}"))
+        counts = ", ".join(f"{p} ×{n}" for p, n in r["records"].items() if n)
+        typer.echo(
+            f"  {style.ok('✓')}  {r['fetcher']:<{width}}  "
+            + style.dim(f"{r['source']} {r['captured_on'] or ''}  {counts}")
+            + (("  " + " ".join(notes)) if notes else "")
+        )
+    unreviewed = sum(1 for r in have if not r["reviewed"])
+    typer.echo(
+        f"\n{len(have)} of {len(rows)} evidence fetchers have a sample"
+        + (f"; {unreviewed} unreviewed" if unreviewed else "") + "."
+    )
+
+
+@samples_app.command("show")
+def samples_show(
+    fetcher: str = typer.Argument(..., help="Fetcher name"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Show one fetcher's sample: how many records were seen, how often each
+    field was filled in, and the one record kept."""
+    try:
+        doc = api.read_sample(api.find_repo_root(), fetcher)
+    except ValueError as e:
+        if json_out:
+            typer.echo(json.dumps({"error": str(e)}, indent=2))
+        else:
+            _err(str(e))
+        raise typer.Exit(1)
+    if json_out:
+        typer.echo(json.dumps(doc, indent=2, ensure_ascii=False))
+        return
+    typer.echo(
+        f"{style.name(doc['fetcher_name'])}  v{doc.get('fetcher_version')}  "
+        + style.dim(f"{doc.get('source')} sample, captured {doc.get('captured_on')}")
+        + ("" if doc.get("reviewed") else "  " + style.warn("UNREVIEWED"))
+    )
+    for c in doc.get("collections") or []:
+        n = c["records"]
+        typer.echo(style.head(f"\n{c['path']}") + style.dim(f"  — {n} seen, 1 kept"))
+        for field_name, present in c["fields"].items():
+            typer.echo(f"  {field_name:<40} " + style.dim(f"{present}/{n}"))
+    typer.echo(style.head("\npayload:"))
+    typer.echo(style.highlight_json(json.dumps(doc["payload"], indent=2, ensure_ascii=False)))
+
+
+@samples_app.command("backfill")
+def samples_backfill(
+    evidence: str = typer.Option(
+        "./evidence", "--evidence", "-e",
+        help="Directory of past runs to draw from (searched recursively)",
+    ),
+    only: Optional[List[str]] = typer.Option(
+        None, "--fetcher", help="Only this fetcher (repeatable)"
+    ),
+    scrub: Optional[List[str]] = typer.Option(
+        None, "--scrub",
+        help="A word to replace with 'example' wherever it appears, any case "
+             "(repeatable) — an org or tenant name the rules cannot know",
+    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite samples that already exist"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report what would be written"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Build `sample.json` for every fetcher with records in local evidence.
+
+    For each fetcher it picks the best past file (has records, current version,
+    succeeded, shows the most), keeps the most filled-in record of each
+    repeated collection, and replaces identifiers (emails, names, account ids,
+    UUIDs, IPs, target values) with stable fakes. A sample in which any known
+    identifier survives is not written. Free text (descriptions, resource
+    names) is not rewritten, so every sample starts unreviewed: read it before
+    you commit it.
+    """
+    result = api.backfill_samples(
+        api.find_repo_root(), evidence, only=only, scrub=scrub, force=force, dry_run=dry_run,
+    )
+    if json_out:
+        typer.echo(json.dumps({"ok": not result["blocked"], **result}, indent=2))
+        raise typer.Exit(1 if result["blocked"] else 0)
+    verb = "would write" if dry_run else "wrote"
+    for r in result["written"]:
+        old = "" if r["current"] else "  " + style.warn(f"OLD v{r['sample_version']}")
+        counts = ", ".join(f"{p} ×{n}" for p, n in r["records"].items() if n)
+        typer.echo(f"  {style.ok('✓')}  {r['fetcher']}  " + style.dim(counts) + old)
+    for r in result["blocked"]:
+        _err(f"  {style.fail('✗')}  {r['fetcher']}  leaked: {', '.join(r['leaks'])}")
+    typer.echo(
+        f"\n{verb} {len(result['written'])}; "
+        f"{len(result['skipped'])} already had a sample; "
+        f"{len(result['no_records'])} had only empty evidence; "
+        f"{len(result['blocked'])} blocked."
+    )
+    if result["written"] and not dry_run:
+        typer.echo(style.dim("Read each sample before committing: paramify samples show <fetcher>"))
+    raise typer.Exit(1 if result["blocked"] else 0)
 
 
 # --------------------------------------------------------------------------- #

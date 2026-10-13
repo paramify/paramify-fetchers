@@ -10,7 +10,7 @@ If any page, call or record fails, write no records (`data: []`,
 `records_included: false`) and exit non-zero. The framework checks the shape
 when it envelopes the file, and the uploader sends only a complete inventory,
 but the fetcher is the only one that knows a page went missing.
-See docs/inventory_fetchers.md.
+See docs/inventory_fetchers_guide.md.
 """
 
 import json

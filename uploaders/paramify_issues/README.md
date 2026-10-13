@@ -15,7 +15,7 @@ kind:
 
 A pipeline is identified by its assessment id, so `assessment_id` is all the
 manifest needs. For setting it up and sending from the TUI, start with
-[`docs/pipelines.md`](../../docs/pipelines.md); this page is the reference.
+[`docs/pipelines_guide.md`](../../docs/pipelines_guide.md); this page is the reference.
 
 Run it after a run that included `kind: issue_report` fetchers:
 

@@ -5,7 +5,7 @@
 # the payload's `data`, each with a `unique_asset_identifier`. It goes to an
 # evidence set like any evidence, and an inventory pipeline attached to that set
 # in Paramify turns each record into an Inventory item. See
-# docs/inventory_fetchers.md.
+# docs/inventory_fetchers_guide.md.
 #
 # Use `kind: evidence` (the default, see ../_template/) when you are asserting a
 # configuration state, and `kind: issue_report` (../_template_issue_report/)

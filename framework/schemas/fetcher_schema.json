@@ -13,7 +13,7 @@
       "type": "string",
       "enum": ["evidence", "issue_report", "inventory", "discovery"],
       "default": "evidence",
-      "description": "What class of output this fetcher produces. `evidence` (the default) writes a JSON payload the runner wraps in the evidence envelope and the paramify_evidence uploader attaches to an evidence set. `inventory` is evidence with a record contract: the payload's `data` is one record per asset, each with a `unique_asset_identifier`, for a Paramify inventory pipeline attached to the evidence set to turn into Inventory items. The uploader sends an inventory only when the run collected all of it (see docs/inventory_fetchers.md). `issue_report` writes the source tool's own file (a scan report) UNMODIFIED into <run>/issue-reports/, where the paramify_issues uploader posts it to an assessment intake. Issue reports are never enveloped: Paramify's intake parser reads the vendor's own structure, so anything added to the file breaks it. `discovery` enumerates what the credentials can see in a platform and writes a discovery document (framework/schemas/discovery_schema.json) into <run>/discovery/. It is enveloped like evidence but never uploaded. See docs/discovery.md."
+      "description": "What class of output this fetcher produces. `evidence` (the default) writes a JSON payload the runner wraps in the evidence envelope and the paramify_evidence uploader attaches to an evidence set. `inventory` is evidence with a record contract: the payload's `data` is one record per asset, each with a `unique_asset_identifier`, for a Paramify inventory pipeline attached to the evidence set to turn into Inventory items. The uploader sends an inventory only when the run collected all of it (see docs/inventory_fetchers_guide.md). `issue_report` writes the source tool's own file (a scan report) UNMODIFIED into <run>/issue-reports/, where the paramify_issues uploader posts it to an assessment intake. Issue reports are never enveloped: Paramify's intake parser reads the vendor's own structure, so anything added to the file breaks it."
     },
 
     "runtime": {
@@ -130,7 +130,7 @@
 
     "issue_report": {
       "type": "object",
-      "description": "Paramify assessment-intake identity for a `kind: issue_report` fetcher — the analogue of `evidence_set`, and equally fetcher-knowledge. Deliberately holds no assessmentId: which assessment a report goes to is a per-customer choice that lives in the manifest (`config.assessment_id`, written by `paramify assessments select`). See docs/issue_report_fetchers.md.",
+      "description": "Paramify assessment-intake identity for a `kind: issue_report` fetcher — the analogue of `evidence_set`, and equally fetcher-knowledge. Deliberately holds no assessmentId: which assessment a report goes to is a per-customer choice that lives in the manifest (`config.assessment_id`, written by `paramify assessments select`). See docs/issue_report_fetchers_guide.md.",
       "required": ["assessment_type"],
       "properties": {
         "assessment_type": {

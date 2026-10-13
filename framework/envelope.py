@@ -4,7 +4,7 @@ Fetchers write raw evidence dicts; the runner calls `wrap_outputs()` after each
 invocation to add the `{schema_version, metadata, payload}` wrapper so every
 evidence file is self-describing and the uploader has one shape to read. This
 keeps the v0.x "fetchers write raw dicts" interim clause true — the framework
-adds the envelope, not the fetcher. See docs/envelope_design.md.
+adds the envelope, not the fetcher. See docs/envelope_guide.md.
 """
 
 import json

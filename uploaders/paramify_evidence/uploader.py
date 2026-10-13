@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Upload enveloped evidence from a run directory to Paramify.
 
-A separate stage (per docs/design.md): reads a completed `run-<timestamp>/`
+A separate stage (docs/architecture_guide.md, step 5): reads a completed `run-<timestamp>/`
 directory of envelope-wrapped evidence files and pushes each to Paramify as an
 artifact on its evidence set. It reads nothing from fetcher source and needs only
 the run directory plus a Paramify API token, so it can be pointed at an old run to
