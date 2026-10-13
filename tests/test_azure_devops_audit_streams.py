@@ -46,10 +46,14 @@ def iso(dt):
     return dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def entry(action, when, area="Project"):
+def entry(action, when, area="Project", scope_type="organization", scope_id=SCOPE):
+    name = f"{ORG} (Organization)" if scope_type == "organization" else "Payments (Project)"
     return {"id": f"{action}-{when.timestamp()}", "actionId": action, "area": area, "category": "modify",
-            "timestamp": iso(when), "scopeType": "organization", "scopeId": SCOPE,
-            "scopeDisplayName": f"{ORG} (Organization)"}
+            "timestamp": iso(when), "scopeType": scope_type, "scopeId": scope_id, "scopeDisplayName": name}
+
+
+PROJECT_SCOPE = "9f1c2d3e-4b5a-6978-8a9b-0c1d2e3f4a5b"
+SCOPED_COLUMNS = ["ScopeId", "ScopeDisplayName", "ScopeType", "Rows", "LastEvent"]
 
 
 def page(entries, token=None, has_more=False):
@@ -294,6 +298,27 @@ def test_an_oldest_first_page_does_not_stop_the_search(fakes):
     assert len(devops.calls) == 2
 
 
+def test_a_project_event_does_not_set_the_organization_scope(fakes):
+    devops, _, _ = fakes
+    devops.routes["_apis/audit/auditlog"] = [page([
+        entry("Git.RefUpdatePoliciesBypassed", NOW - timedelta(hours=2), scope_type="project", scope_id=PROJECT_SCOPE),
+        entry("Policy.PolicyValueUpdated", NOW - timedelta(hours=3)),
+    ])]
+    log = mod.newest_events(devops, NOW)
+    assert log["organization_scope_id"] == SCOPE
+    assert log["newest_event_older_than_1h"]["action_id"] == "Git.RefUpdatePoliciesBypassed"
+    assert log["newest_organization_event_older_than_1h"]["action_id"] == "Policy.PolicyValueUpdated"
+
+
+def test_an_entry_without_a_scope_type_counts_as_the_organization(fakes):
+    devops, _, _ = fakes
+    bare = {k: v for k, v in entry("Project.CreateCompleted", NOW - timedelta(days=2)).items() if k != "scopeType"}
+    devops.routes["_apis/audit/auditlog"] = [page([bare])]
+    log = mod.newest_events(devops, NOW)
+    assert log["organization_scope_id"] == SCOPE
+    assert log["newest_organization_event_older_than_1h"]["action_id"] == "Project.CreateCompleted"
+
+
 def test_the_page_cap_marks_the_search_incomplete(fakes):
     devops, _, _ = fakes
     devops.routes["_apis/audit/auditlog"] = [page([entry("AuditLog.AccessLog", NOW, area="Auditing")],
@@ -361,6 +386,47 @@ def test_an_enabled_stream_that_delivers_nothing_is_visible(fakes):
 def test_no_rows_is_not_missing_when_nothing_happened_in_the_window(fakes):
     devops, logs, _ = fakes
     devops.routes["_apis/audit/auditlog"] = [page([entry("Project.CreateCompleted", NOW - timedelta(days=30))])]
+    logs.query = Resp(200, table(["ScopeId", "ScopeDisplayName", "Rows", "LastEvent"], []))
+    results, summary, _ = run(devops)
+    ingestion = stream(results, 2)["ingestion"]
+    assert ingestion["rows_expected"] is False and ingestion["missing_rows"] is False
+    assert summary["azure_monitor_streams_missing_rows"] == 0
+
+
+def test_project_rows_are_not_other_organizations(fakes):
+    devops, logs, _ = fakes
+    logs.query = Resp(200, table(SCOPED_COLUMNS, [
+        [SCOPE, f"{ORG} (Organization)", "Organization", 40, iso(NOW - timedelta(hours=3))],
+        [PROJECT_SCOPE, "Payments (Project)", "Project", 25, iso(NOW - timedelta(hours=2))],
+        ["other-scope", "fabrikam (Organization)", "Organization", 7, iso(NOW - timedelta(hours=3))],
+    ]))
+    results, _, collector = run(devops)
+    ingestion = stream(results, 2)["ingestion"]
+    assert collector.ok and ingestion["rows_in_window"] == 40 and ingestion["received_rows"] is True
+    assert ingestion["other_organizations"] == ["fabrikam (Organization)"]
+    assert ingestion["project_rows_unattributed"] == 25
+    query = next(c for c in logs.calls if c[0] == "POST")[2]
+    assert "column_ifexists('ScopeType', '')" in query and query.rstrip().endswith("ScopeDisplayName, ScopeType")
+
+
+def test_only_project_activity_does_not_make_organization_rows_expected(fakes):
+    devops, logs, _ = fakes
+    devops.routes["_apis/audit/auditlog"] = [page([
+        entry("Git.RefUpdatePoliciesBypassed", NOW - timedelta(hours=2), scope_type="project", scope_id=PROJECT_SCOPE),
+    ])]
+    logs.query = Resp(200, table(SCOPED_COLUMNS, [
+        [PROJECT_SCOPE, "Payments (Project)", "Project", 25, iso(NOW - timedelta(hours=2))],
+    ]))
+    results, summary, _ = run(devops)
+    ingestion = stream(results, 2)["ingestion"]
+    assert ingestion["rows_expected"] is False and ingestion["missing_rows"] is False
+    assert ingestion["other_organizations"] == [] and summary["azure_monitor_streams_missing_rows"] == 0
+
+
+def test_a_stream_newer_than_the_last_event_expects_no_rows(fakes):
+    devops, logs, _ = fakes
+    body = streams_body()["value"][1]
+    devops.routes["_apis/audit/streams"] = {"value": [{**body, "createdTime": iso(NOW - timedelta(days=1))}]}
     logs.query = Resp(200, table(["ScopeId", "ScopeDisplayName", "Rows", "LastEvent"], []))
     results, summary, _ = run(devops)
     ingestion = stream(results, 2)["ingestion"]

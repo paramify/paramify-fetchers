@@ -23,7 +23,10 @@ schemas and the `paramify` CLI — not the internal code.
   For an Azure Monitor Logs stream it counts this organization's
   `AzureDevOpsAuditing` rows in the workspace over the window, and `missing_rows`
   flags an enabled stream that delivered nothing while the organization was
-  active. Stream tokens and keys are never written.
+  active. The organization is matched on organization-level events and rows
+  only: project-level rows carry the project's id, so they are counted apart
+  rather than as other organizations, and a stream is only expected to have
+  delivered events newer than itself. Stream tokens and keys are never written.
 - **`azure_devops_pipelines`** (`EVD-AZURE-DEVOPS-PIPELINES`): the first Azure DevOps
   fetcher, one target per organization with a PAT (`AZURE_DEVOPS_PAT`). Each YAML
   pipeline's final YAML comes from a preview run, so templates are expanded and

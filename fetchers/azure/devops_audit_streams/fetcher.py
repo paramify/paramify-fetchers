@@ -54,7 +54,8 @@ _GUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 _MS_DATE = re.compile(r"/Date\((-?\d+)\)/")
 INGESTION_QUERY = (
     f"{TABLE} | where TimeGenerated > ago({{days}}d) "
-    "| summarize Rows = count(), LastEvent = max(TimeGenerated) by ScopeId, ScopeDisplayName"
+    "| extend ScopeType = tostring(column_ifexists('ScopeType', '')) "
+    "| summarize Rows = count(), LastEvent = max(TimeGenerated) by ScopeId, ScopeDisplayName, ScopeType"
 )
 
 logger = logging.getLogger(NAME)
@@ -156,6 +157,12 @@ def policy_value(body: Any) -> Optional[bool]:
     return None
 
 
+def organization_scoped(entry: Dict[str, Any]) -> bool:
+    """An organization-level audit entry or table row; one with no scope type can't be told apart, so it counts."""
+    kind = str(entry.get("scopeType") or entry.get("ScopeType") or "").strip().lower()
+    return kind in ("", "organization")
+
+
 def _event(found: Optional[tuple]) -> Optional[Dict[str, Any]]:
     if not found:
         return None
@@ -165,10 +172,11 @@ def _event(found: Optional[tuple]) -> Optional[Dict[str, Any]]:
 
 
 def newest_events(client, now: datetime) -> Dict[str, Any]:
-    """Newest audit event that is not a read of the log, and the newest old enough to have been streamed."""
+    """Newest audit event that is not a read of the log, the newest old enough to have been streamed, and the
+    newest organization-level one old enough: project events carry the project's scopeId, not the organization's."""
     params = {"startTime": iso(now - timedelta(days=RETENTION_DAYS)), "endTime": iso(now),
               "batchSize": str(AUDIT_PAGE_SIZE)}
-    newest = settled = None
+    newest = settled = settled_org = None
     scope_id = None
     read = pages = 0
     complete = True
@@ -183,7 +191,9 @@ def newest_events(client, now: datetime) -> Dict[str, Any]:
         read += len(entries)
         stamps = []
         for entry in entries:
-            scope_id = scope_id or entry.get("scopeId")
+            org_level = organization_scoped(entry)
+            if org_level:
+                scope_id = scope_id or entry.get("scopeId")
             when = when_of(entry.get("timestamp"))
             if when is None:
                 continue
@@ -194,9 +204,11 @@ def newest_events(client, now: datetime) -> Dict[str, Any]:
                 newest = (when, entry)
             if when <= now - STREAM_DELAY and (settled is None or when > settled[0]):
                 settled = (when, entry)
+            if org_level and when <= now - STREAM_DELAY and (settled_org is None or when > settled_org[0]):
+                settled_org = (when, entry)
         token = page.get("continuationToken")
         newest_first = stamps == sorted(stamps, reverse=True)
-        if (settled and newest_first) or not page.get("hasMore") or not token:
+        if (settled_org and newest_first) or not page.get("hasMore") or not token:
             break
         if pages >= MAX_AUDIT_PAGES:
             complete = False
@@ -208,6 +220,7 @@ def newest_events(client, now: datetime) -> Dict[str, Any]:
         "complete": complete,
         "newest_event": _event(newest),
         "newest_event_older_than_1h": _event(settled),
+        "newest_organization_event_older_than_1h": _event(settled_org),
         "organization_scope_id": scope_id,
     }
 
@@ -253,13 +266,16 @@ def ingestion(az, ref: Dict[str, str], org: str, scope_id: Optional[str], days: 
         rows = []
         result["notes"].append(f"{TABLE} table does not exist in the workspace")
     mine = [r for r in rows if matches_org(r, org, scope_id)]
+    others = [r for r in rows if not matches_org(r, org, scope_id)]
     last = max((w for w in (when_of(r.get("LastEvent")) for r in mine) if w), default=None)
     result["rows_in_window"] = sum(int(r.get("Rows") or 0) for r in mine)
     result["received_rows"] = result["rows_in_window"] > 0
     result["last_event"] = iso(last) if last else None
     result["other_organizations"] = sorted(
-        {r.get("ScopeDisplayName") or r.get("ScopeId") or "" for r in rows if not matches_org(r, org, scope_id)}
+        {r.get("ScopeDisplayName") or r.get("ScopeId") or "" for r in others if organization_scoped(r)}
     )
+    # A project's rows carry its own ScopeId, and the table does not say which organization owns the project.
+    result["project_rows_unattributed"] = sum(int(r.get("Rows") or 0) for r in others if not organization_scoped(r))
     return result
 
 
@@ -319,7 +335,8 @@ def collect(client, collector) -> tuple:
     audit_log = audit_call("audit.auditlog.query", lambda: newest_events(client, now))
     enabled, source = auditing_state(policy, when_of(dig(audit_log, "newest_event", "timestamp")), now, days)
 
-    settled = when_of(dig(audit_log, "newest_event_older_than_1h", "timestamp"))
+    # Compared with the organization's own rows, so the event must be organization-level too.
+    settled = when_of(dig(audit_log, "newest_organization_event_older_than_1h", "timestamp"))
     expected = bool(settled and settled >= now - timedelta(days=days))
     scope_id = dig(audit_log, "organization_scope_id")
     clients: Dict[Optional[str], AzureRestClient] = {}
@@ -343,11 +360,14 @@ def collect(client, collector) -> tuple:
         if key not in checked:
             checked[key] = collector.guard(f"loganalytics.query({TABLE}, {key})", lambda ref=ref: check(ref))
         found = checked[key]
+        # An event from before the stream existed was never streamed.
+        created = when_of(stream["created_time"])
+        stream_expected = expected and (created is None or (settled is not None and settled >= created))
         stream["ingestion"] = None if found is None else {
             **found,
             "window_days": days,
-            "rows_expected": expected,
-            "missing_rows": stream["delivering"] and expected and not found["received_rows"],
+            "rows_expected": stream_expected,
+            "missing_rows": stream["delivering"] and stream_expected and not found["received_rows"],
         }
 
     results = {

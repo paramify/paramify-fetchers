@@ -63,5 +63,7 @@ evidence_set:
     log holds an event in the window), auditservice _apis/audit/streams and
     _apis/audit/auditlog, ignoring audit-log reads. consumerInputs keep only
     URL, host, workspace and tenant identifiers. Azure Monitor Logs streams:
-    AzureDevOpsAuditing rows for this organization's ScopeId over the window.
+    this organization's organization-level AzureDevOpsAuditing rows over the
+    window (project rows: project_rows_unattributed), expected only after an
+    organization-level event newer than the stream.
     Needs: PAT with vso.auditlog and View audit log; Log Analytics Reader.
