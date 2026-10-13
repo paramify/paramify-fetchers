@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 from azure_common import (
     Collector,
+    classify_failure_code,
     current_timestamp,
     failure_reason,
     report_failure,
@@ -65,7 +66,9 @@ def failure_code(exc: BaseException) -> str:
         return "target_unreachable"
     if isinstance(exc, ValueError):
         return "bad_config"
-    return "internal_error"
+    # ARM and Log Analytics errors, for fetchers that also read Azure.
+    code = classify_failure_code([{"type": type(exc).__name__, "message": str(exc)}])
+    return "internal_error" if code == "partial_failure" else code
 
 
 class DevOpsCollector(Collector):

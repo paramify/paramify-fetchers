@@ -261,6 +261,15 @@ def test_run_org_reports_the_ado_failure_code(monkeypatch, tmp_path):
     assert "VS403403" in evidence["metadata"]["api_failures"][0]["message"]
 
 
+@pytest.mark.parametrize("exc,code", [
+    (RuntimeError("(403) InsufficientAccessError: The provided credentials have insufficient access"), "not_authorized"),
+    (RuntimeError("(429) TooManyRequests"), "rate_limited"),
+    (KeyError("boom"), "internal_error"),
+])
+def test_azure_side_errors_keep_their_contract_code(exc, code):
+    assert dr.failure_code(exc) == code
+
+
 def test_run_org_turns_an_unexpected_exception_into_internal_error(monkeypatch, tmp_path):
     def collect(c, col):
         raise KeyError("boom")
