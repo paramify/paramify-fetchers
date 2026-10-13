@@ -1,5 +1,5 @@
 name: azure_network_security_groups
-version: 0.2.0
+version: 0.3.0
 description: >
   Every network security group in the subscription with its inline security rules
   (destination port range, protocol, source address prefix, access, direction) —
@@ -10,7 +10,9 @@ description: >
   the effective outbound posture is visible: an NSG whose first catch-all Internet
   rule is the default AllowInternetOutBound permits all egress. Every network
   interface is listed with its effective NSG coverage, on the NIC itself or
-  inherited from its subnet; a NIC with neither is unfiltered.
+  inherited from its subnet; a NIC with neither is unfiltered. Each workload subnet
+  says which other subnets in its VNet can reach it on every port (east-west
+  segmentation), through both subnets' NSGs.
 category: azure
 
 supports_targets: true
@@ -45,7 +47,7 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 ksis:
   - KSI-CNA-RNT
-  - KSI-CNA-MAT
+  - KSI-CNA-MAT   # admin ports open to the Internet, and east-west reach between subnets (lateral movement)
   - KSI-CNA-ULN   # subnet and NIC NSG association: which workloads sit behind a filter
   - KSI-CNA-DFP   # inbound and outbound rules, default rules included, define what traffic is allowed
 
@@ -56,5 +58,26 @@ evidence_set:
     Script: fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient):
     network_security_groups.list_all() (security_rules and default_security_rules),
     virtual_networks.list_all(), network_interfaces.list_all(). Reader is
-    sufficient — all GETs. Maps to KSI-CNA-RNT / KSI-CNA-MAT / KSI-CNA-ULN /
-    KSI-CNA-DFP.
+    sufficient — all GETs. East-west segmentation, per workload subnet in
+    virtual_networks[].subnets: for every other workload subnet in the same VNet
+    (GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet,
+    AzureFirewallManagementSubnet and RouteServerSubnet are left out on both ends),
+    the source subnet's NSG outbound rules and this subnet's NSG inbound rules,
+    custom and default, are each walked in priority order. An Allow decides once it
+    covers every port (protocol any or TCP; a rule's port ranges are merged, so
+    0-1023 plus 1024-65535 counts, and port 0 is not needed) and touches both
+    address ranges; a Deny
+    decides only once it covers every port and protocol and all of both ranges
+    (the VirtualNetwork tag, * and 0.0.0.0/0 cover any subnet of the VNet; CIDRs
+    are matched, adjacent ones merged). A subnet with no NSG does not filter. The
+    pair is "segmented" when either side reaches a Deny first, "open" when both
+    allow, and "undetermined" when the deciding Allow is scoped to an application
+    security group or an NSG is in another subscription. Narrower allows (one port,
+    one protocol) do not make a pair open: segmentation here means no other tier
+    reaches the subnet on every port. east_west_segmentation is "segmented" (open
+    from none), "partial" (open from some), "unsegmented" (open from all),
+    "undetermined", or "no_peer_subnets"; open_from_subnets,
+    segmented_from_subnets and undetermined_from_subnets name the other subnets.
+    Not considered: NIC-level NSGs (they can only narrow a pair this calls open),
+    traffic within one subnet, and peered VNets. Maps to KSI-CNA-RNT / KSI-CNA-MAT /
+    KSI-CNA-ULN / KSI-CNA-DFP.
