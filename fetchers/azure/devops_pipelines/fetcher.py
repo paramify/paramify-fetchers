@@ -562,7 +562,7 @@ def collect_project(client, collector, project, since: datetime, until: datetime
                  lambda: client.list(f"{pid}/_apis/git/repositories"), default=[])
     policies = call(collector, f"policy.configurations.list({pname})", SCOPE_CODE,
                     lambda: client.list(f"{pid}/_apis/policy/configurations", params={"$top": 1000}), default=[])
-    live = [p for p in policies if p.get("isEnabled") and not p.get("isDeleted")]
+    live = [p for p in policies if p.get("isEnabled") and not p.get("isDeleted") and isinstance(p.get("settings"), dict)]
     names = {p["id"]: p["name"] for p in pipelines}
     repositories = [repository_record(r, live, names)
                     for r in sorted(repos, key=lambda r: r.get("name") or "") if not r.get("isDisabled")]

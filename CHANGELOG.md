@@ -12,6 +12,28 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_devops_pipelines`** (`EVD-AZURE-DEVOPS-PIPELINES`): the first Azure DevOps
+  fetcher, one target per organization with a PAT (`AZURE_DEVOPS_PAT`). Each YAML
+  pipeline's final YAML comes from a preview run, so templates are expanded and
+  nothing is queued. If the preview is refused, the file is read from the default
+  branch instead. Steps are sorted into test, security scan, IaC validation,
+  infrastructure and application deploy, signing, signature verification and SBOM,
+  and `tests_before_first_deploy` reports whether tests come before the first
+  deploy. The fetcher also collects:
+  - completed runs and published test runs over the lookback; test runs are queried
+    in 7-day slices, the most the API allows;
+  - each environment's approvals, branch control, required-template and
+    artifact-evaluation checks;
+  - every deployment in the window, joined to its run's branch, commit and test
+    results;
+  - each repository's default-branch policies (minimum reviewers, build validation);
+  - the project's pipeline settings.
+
+  A failed call names the PAT scope it needs. Environments need Environment (Read &
+  manage), because Azure DevOps has no read-only scope for them. The shared client
+  (`fetchers/azure/_shared/devops_rest.py`) handles PAT auth and continuation
+  paging. It sends the PAT only to the host it paged from and never follows a
+  redirect, and it keeps the TF/VS error code on every failure.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
