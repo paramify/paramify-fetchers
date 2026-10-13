@@ -12,6 +12,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
+  over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
+  Code (Read). It records Bicep and ARM checks together, each tagged with its
+  framework, with per-framework counts.
+
+  A scan that checked nothing never reads as clean. These cases exit non-zero:
+  - no `.bicep` files and no ARM `deploymentTemplate` JSON (`no_files`; counts
+    are null, not 0)
+  - files present but checkov ran zero checks (`no_checks`), e.g. resources
+    declared only through `br/public:avm` registry modules
+  - files checkov could not parse (`partial`; each is listed, and can be
+    excluded with `skip_paths` once reviewed)
+
+  The `org@` prefix of an Azure DevOps clone URL is dropped, and `clone_token`
+  is optional, so public repos can be scanned.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
