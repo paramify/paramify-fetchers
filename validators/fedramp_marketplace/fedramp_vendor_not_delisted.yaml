@@ -1,0 +1,25 @@
+key: fedramp_vendor_not_delisted
+name: No Third-Party Vendor Is Delisted From the FedRAMP Marketplace
+type: AUTOMATED
+role: configuration
+statement: No third-party vendor package checked has been delisted from, or is missing from, the FedRAMP Marketplace.
+
+# Delisted means dropped from data.json or a latest changelog row of "No Status Found (Delisted)"; FedRAMP's two files lag each other, so either signal counts.
+#
+# Reads the fetcher's own count in `summary`, which is written ahead of the
+# vendor list, so MATCH_GROUP's first match is always the summary. The
+# presence rule makes a missing summary (failed run, renamed key) fail rather
+# than pass vacuously.
+regex: '"vendors_delisted_or_not_listed":\s*(?<vendors_delisted_or_not_listed>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # vendors_delisted_or_not_listed
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-FEDRAMP-VENDOR-CERTIFICATION
+  - EVD-FEDRAMP-WORKSPACE-VENDOR-CERTIFICATION

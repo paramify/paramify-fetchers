@@ -15,7 +15,7 @@ python tools/gen_ksi_mapping.py
 
 ## Coverage
 
-**34 of 36** config-evidenceable indicators covered — **94.4%**. Plus 10 organizational indicators (evidenced by HR, training or process, not cloud config), for 46 total.
+**35 of 36** config-evidenceable indicators covered — **97.2%**. Plus 10 organizational indicators (evidenced by HR, training or process, not cloud config), for 46 total.
 
 | Family | | Covered | Gaps |
 |---|---|---|---|
@@ -26,7 +26,7 @@ python tools/gen_ksi_mapping.py
 | `CMT` | Change Management | `██████████` 3/3 | — |
 | `RPL` | Recovery Planning | `█████░░░░░` 1/2 | `KSI-RPL-TRC` |
 | `PIY` | Policy and Inventory | `██████████` 1/1 | — |
-| `SCR` | Supply Chain Risk | `█████░░░░░` 1/2 | `KSI-SCR-MIT` |
+| `SCR` | Supply Chain Risk | `██████████` 2/2 | — |
 | `CED` | Cybersecurity Education | `██████████` 1/1 | — |
 | `INR` | Incident Response | `██████████` 2/2 | — |
 
@@ -362,15 +362,15 @@ python tools/gen_ksi_mapping.py
 
 *Organizational — evidenced by HR, training or process, not cloud config.*
 
-### SCR — Supply Chain Risk  (1/2)
+### SCR — Supply Chain Risk  (2/2)
 
-#### ❌ `KSI-SCR-MIT` — Mitigating Supply Chain Risk
+#### ✅ `KSI-SCR-MIT` — Mitigating Supply Chain Risk
 
 > Persistently identify, review, and mitigate potential supply chain risks.
 
 *Controls:* `ac-20`, `ra-3.1`, `sa-9`, `sa-10`, `sa-11`, `sa-15.3`, `sa-22`, `si-7.1`, `sr-5`, `sr-6`, `ca-7.4`, `sc-18`
 
-*No fetcher covers this yet — a capability gap, not a mapping gap.*
+*2 fetchers:* `fedramp_marketplace_vendor_certification_status`, `fedramp_marketplace_workspace_vendor_certification_status`
 
 #### ✅ `KSI-SCR-MON` — Monitoring Supply Chain Risk
 
@@ -378,7 +378,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-20`, `ca-3`, `ir-6.3`, `ps-7`, `ra-5`, `sa-9`, `si-5`, `sr-5`, `sr-6`, `sr-8`
 
-*2 fetchers:* [`aws_ecr_image_scanning`](../fetchers/aws/ecr_image_scanning), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning)
+*4 fetchers:* [`aws_ecr_image_scanning`](../fetchers/aws/ecr_image_scanning), [`aws_inspector_vulnerability_scanning`](../fetchers/aws/inspector_vulnerability_scanning), `fedramp_marketplace_vendor_certification_status`, `fedramp_marketplace_workspace_vendor_certification_status`
 
 ### CED — Cybersecurity Education  (1/1)
 
@@ -418,16 +418,15 @@ python tools/gen_ksi_mapping.py
 
 ## Open gaps
 
-2 config-evidenceable indicators that nothing covers. Each is a **fetcher backlog item** — the evidence does not exist yet, rather than existing and being unmapped.
+1 config-evidenceable indicator that nothing covers. Each is a **fetcher backlog item** — the evidence does not exist yet, rather than existing and being unmapped.
 
 | Indicator | | What would be needed |
 |---|---|---|
 | `KSI-RPL-TRC` | Testing Recovery Capabilities | The capability to recover from incidents and contingencies aligned with defined recovery objectives is persistently tested. |
-| `KSI-SCR-MIT` | Mitigating Supply Chain Risk | Persistently identify, review, and mitigate potential supply chain risks. |
 
 ## By fetcher
 
-225 of 231 fetchers carry a mapping.
+227 of 235 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -616,6 +615,13 @@ python tools/gen_ksi_mapping.py
 | [`datadog_siem_detection_rules`](../fetchers/datadog/siem_detection_rules) | `KSI-MLA-OSM`, `KSI-MLA-RVL` |
 | [`datadog_siem_signals`](../fetchers/datadog/siem_signals) | `KSI-MLA-RVL` |
 
+### fedramp  (2)
+
+| Fetcher | Indicators |
+|---|---|
+| `fedramp_marketplace_vendor_certification_status` | `KSI-SCR-MIT`, `KSI-SCR-MON` |
+| `fedramp_marketplace_workspace_vendor_certification_status` | `KSI-SCR-MIT`, `KSI-SCR-MON` |
+
 ### gcp  (19)
 
 | Fetcher | Indicators |
@@ -741,4 +747,4 @@ python tools/gen_ksi_mapping.py
 
 ### Unmapped
 
-[`demo_hello`](../fetchers/demo/hello), [`servicenow_cases`](../fetchers/servicenow/cases), [`servicenow_changes`](../fetchers/servicenow/changes), [`wiz_issues_report`](../fetchers/wiz/issues_report), [`wiz_stig_compliance_report`](../fetchers/wiz/stig_compliance_report), [`wiz_vulnerability_findings`](../fetchers/wiz/vulnerability_findings) — deliberately carry no mapping.
+[`aws_discovery_beta`](../fetchers/aws/discovery_beta), [`demo_hello`](../fetchers/demo/hello), [`knowbe4_discovery_beta`](../fetchers/knowbe4/discovery_beta), [`servicenow_cases`](../fetchers/servicenow/cases), [`servicenow_changes`](../fetchers/servicenow/changes), [`wiz_issues_report`](../fetchers/wiz/issues_report), [`wiz_stig_compliance_report`](../fetchers/wiz/stig_compliance_report), [`wiz_vulnerability_findings`](../fetchers/wiz/vulnerability_findings) — deliberately carry no mapping.
