@@ -8,7 +8,7 @@ import logging
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -380,7 +380,15 @@ def _with(graph):
     return fake
 
 
-def test_principal_lookup_in_the_subscriptions_tenant(monkeypatch):
+@pytest.fixture
+def no_graph_sdk(monkeypatch):
+    """Stand in for msgraph's request body, which CI's test job does not install."""
+    body = ModuleType("get_by_ids_post_request_body")
+    body.GetByIdsPostRequestBody = lambda ids: SimpleNamespace(ids=ids)
+    monkeypatch.setitem(sys.modules, "msgraph.generated.directory_objects.get_by_ids.get_by_ids_post_request_body", body)
+
+
+def test_principal_lookup_in_the_subscriptions_tenant(monkeypatch, no_graph_sdk):
     graph = FakeGraph("TENANT-A", present={"p1"})
     monkeypatch.setattr(rr, "with_graph_client", _with(graph))
     collector = Collector(logging.getLogger("test"))
@@ -388,7 +396,7 @@ def test_principal_lookup_in_the_subscriptions_tenant(monkeypatch):
     assert collector.ok and graph.lookups == [["p1", "p2"]]
 
 
-def test_principal_lookup_refuses_another_tenant(monkeypatch):
+def test_principal_lookup_refuses_another_tenant(monkeypatch, no_graph_sdk):
     graph = FakeGraph("tenant-b")
     monkeypatch.setattr(rr, "with_graph_client", _with(graph))
     collector = Collector(logging.getLogger("test"))
