@@ -1,0 +1,91 @@
+name: checkov_bicep
+version: 0.1.0
+description: >
+  Runs Checkov IaC security scanning over the Bicep and ARM templates in a repo.
+  Clones the repo (generic git, any host, including Azure DevOps) and scans its
+  .bicep files and ARM deploymentTemplate .json files, emitting
+  passed/failed/skipped checks plus an aggregate pass percentage. A repo with nothing to scan
+  fails the run instead of reading as clean. One repo per invocation; the runner
+  fans out across repos.
+category: checkov
+
+supports_targets: true
+
+runtime:
+  type: bash
+  entry: fetcher.sh
+  timeout: 1800
+
+output:
+  type: json
+  path: checkov_bicep.json
+  aggregation: per_target
+
+target_schema:
+  repo_url:
+    type: string
+    required: true
+    env: CHECKOV_REPO_URL
+    description: Clone URL of the repo to scan (https://host/group/project.git, or an Azure DevOps https://dev.azure.com/org/project/_git/repo URL; any user@ prefix is dropped).
+  branch:
+    type: string
+    required: false
+    default: main
+    env: CHECKOV_CLONE_BRANCH
+    description: Branch/ref to clone (falls back to the repo default if absent).
+
+secrets:
+  - name: clone_token
+    env: GIT_CLONE_TOKEN
+    per_target: true
+    required: false         # public repos clone without one; Azure DevOps needs a PAT with Code (Read)
+
+config_schema:
+  soft_fail:
+    type: boolean
+    default: true
+    env: CHECKOV_SOFT_FAIL
+    description: Findings do not fail the scan (findings are evidence, not a fetch failure).
+  compact:
+    type: boolean
+    default: true
+    env: CHECKOV_COMPACT
+    description: Compact checkov output (omits code blocks).
+  repo_id:
+    type: string
+    default: evidence-fetchers-bicep
+    env: CHECKOV_REPO_ID
+    description: Label only — appears in checkov's output.
+  skip_checks:
+    type: string
+    env: CHECKOV_SKIP_CHECKS
+    description: CSV of check IDs to skip; merged with _shared/skip-checks.default.txt.
+  skip_resources:
+    type: string
+    env: CHECKOV_SKIP_RESOURCES
+    description: CSV of resource patterns (wildcards ok, e.g. Microsoft.Storage/storageAccounts.dev*); merged with defaults; filtered post-scan.
+  skip_paths:
+    type: string
+    env: CHECKOV_SKIP_PATHS
+    description: CSV of paths to skip during the scan. Also how to exclude a file checkov cannot parse, which otherwise fails the run.
+  checks:
+    type: string
+    env: CHECKOV_BICEP_CHECKS
+    description: CSV allowlist of check IDs to run (overrides skips for those checks).
+  external_checks_dir:
+    type: string
+    env: CHECKOV_EXTERNAL_CHECKS_DIR
+    description: Path to a custom checks directory.
+  git_username:
+    type: string
+    default: oauth2
+    env: CHECKOV_GIT_USERNAME
+    description: Basic-auth username paired with GIT_CLONE_TOKEN (any value works for an Azure DevOps PAT).
+
+ksis:
+  - KSI-MLA-EVC
+
+evidence_set:
+  reference_id: EVD-CHECKOV-BICEP
+  name: Checkov Bicep/ARM IaC Scan
+  instructions: 'Script: checkov_bicep/fetcher.sh. Shallow-clones the target repo, counts its .bicep files and ARM templates (.json whose $schema is a deploymentTemplate), and runs the checkov CLI (--framework bicep,arm) over them, merging default + configured skip-checks/skip-resources. Records passed/failed/skipped checks from both frameworks (each check tagged with check_type), per-framework counts in summary.by_framework, file_counts, and repo+commit provenance. status is success only when at least one check ran and every file parsed: no Bicep/ARM files (no_files), zero checks evaluated (no_checks, e.g. resources only behind registry modules), or files checkov could not parse (partial, listed in results.parsing_errors and metadata.api_failures) all exit non-zero, and summary counts are null when nothing was scanned.'
