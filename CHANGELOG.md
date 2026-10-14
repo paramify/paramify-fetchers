@@ -540,6 +540,36 @@ schemas and the `paramify` CLI — not the internal code.
   fails rather than guess when Microsoft Graph is signed in to a tenant other than
   the subscription's. Needs Reader, plus Microsoft Graph `Directory.Read.All`
   (admin-consented) when it runs as a service principal. Maps to `KSI-SVC-PRR`.
+- **Three Azure Application Gateway fetchers.** All three are Reader-only and
+  fan out per subscription. They share `_shared/app_gateway.py`, which fails
+  the run when `list_all` returns a different number of gateways than Resource
+  Graph counts. Resource Graph can lag behind `list_all`, so a mismatch is
+  counted once more after 30 seconds before the run fails.
+  - `azure_app_gateway_tls_listeners` (`EVD-AZURE-APPGW-TLS-LISTENERS`): every
+    L7 and L4 listener, with its protocol, a public or private frontend,
+    whether a plain-HTTP listener only redirects to HTTPS, and the effective
+    minimum TLS version along with where it comes from. The source is the SSL
+    profile, then the gateway's `sslPolicy`, then the default predefined policy.
+    An L4 Tcp listener always counts as plaintext, even when TLS passes through
+    it to the backend.
+  - `azure_app_gateway_backend_tls` (`EVD-AZURE-APPGW-BACKEND-TLS`): every
+    backend setting, with its protocol, whether the certificate chain and SNI
+    are validated, its trusted roots and its probe protocol, plus which rules
+    use it. Only settings that are in use count towards the totals.
+  - `azure_app_gateway_waf` (`EVD-AZURE-APPGW-WAF`): the WAF that applies to
+    each HTTP(S) listener. A path rule's policy overrides the listener's, which
+    overrides the gateway's, which overrides the legacy configuration. The
+    fetcher reports whether that WAF is enabled in Prevention mode, and each
+    policy's disabled managed rules, exclusions and rate-limit rules. A policy
+    in another subscription is read with a direct GET. If the identity is
+    refused (401 or 403) or the policy no longer exists (404), the policy is
+    recorded as unreadable, the listener's result is null rather than
+    "enforcing", and the run does not fail. Any other error does fail it.
+
+  These fetchers were run against a live subscription with one gateway. SSL
+  profiles, attached WAF policies and L4 listeners have not yet been
+  exercised against live data. `tests/test_azure_app_gateway_verdicts.py`
+  covers those paths against modelled gateways.
 
 ### Changed
 
