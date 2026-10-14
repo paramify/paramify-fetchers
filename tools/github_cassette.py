@@ -52,7 +52,8 @@ def graphql_key(body: dict) -> str:
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # Hypermedia and long text no fetcher reads (tests/test_github_schema.py knows every field that is read).
 DROPPED = {"node_id", "_links", "gravatar_id", "description", "body", "references", "identifiers", "cvss",
-           "cvss_severities", "cwes", "vulnerabilities", "license", "topics", "repo", "base"}
+           "cvss_severities", "cwes", "vulnerabilities", "license", "topics", "repo", "base",
+           "copyrightText"}
 
 
 def redact(text: str) -> str:

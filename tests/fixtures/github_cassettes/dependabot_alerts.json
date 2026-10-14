@@ -3815,7 +3815,6 @@
      "packages": [
       {
        "SPDXID": "SPDXRef-pypi-django-2.2-bb20f9",
-       "copyrightText": "(c) ,h document.createElement 'strong h.className select2-results group, (c) 2007-2012 Steven Levithan <http://xregexp.com/>, (c) 2008-2012 Steven Levithan <http://xregexp.com/>, (c) 2009-2012 Steven Levithan <http://xregexp.com/>, (c) 2010-2012 Steven Levithan <http://xregexp.com/>, (c) 2012 Steven Levithan <http://xregexp.com/>, (c) 2013, (c) JS Foundation and other contributors, (c), Better News, (c), Good News, (c), Hello Jack & Jill, Copyright (c) 1991 - 1995, Stichting Mathematisch Centrum Amsterdam, Copyright (c) 1995-1998, 2000-2010 Free Software Foundation, Inc., Copyright (c) 1995-2001 Corporation for National Research Initiatives, Copyright (c) 2001-2003, Patrick K. O'Brien and Contributors, Copyright (c) 2001-present Python Software Foundation, Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018 Python Software Foundation, Copyright (c) 2002 Drew Perttula., Copyright (c) 2007-2009 Justin Bronn, Copyright (c) 2007-2009, Justin Bronn, Copyright (c) 2007-2012 Steven Levithan <http://xregexp.com/>, Copyright (c) 2007, Robert Coup <redacted@example.com>, Copyright (c) 2007, Sally, Copyright (c) 2007, Sally Smith, Copyright (c) 2007, Sally Smith Hard-coded, Copyright (c) 2008-2009 Aryeh Leib Taurog, Copyright (c) 2008-2009 Aryeh Leib Taurog, http://www.aryehleib.com, Copyright (c) 2008, Yahoo! Inc., Copyright (c) 2009 Oyvind Sean Kinsey, redacted@example.com, Copyright (c) 2009 Simon Willison., Copyright (c) 2009, Stanislaus Madueke, Copyright (c) 2010 Gary Wilson Jr. <redacted@example.com> and contributors., Copyright (c) 2010 Guilherme Gondim., Copyright (c) 2010-2015 Benjamin Peterson, Copyright (c) 2011-2014, The Dojo Foundation, Copyright (c) 2012-2015 Kevin Brown, Igor Vaynberg, and Select2 contributors, Copyright (c) 2013 Python Software Foundation, Copyright (c) 2014 Code Charm Ltd, Copyright (c) Django Software Foundation and individual contributors., Copyright 2006 Google Inc. https://code.google.com/p/google-diff-match-patch, copyright Django Software Foundation and contributors, COPYRIGHT Django Software Foundation and contributors, Copyright jQuery Foundation and other contributors, Copyright jQuery Foundation and other contributors, https://jquery.org, Copyright JS Foundation and other contributors, copyright Python (Monty) Pictures.",
        "downloadLocation": "NOASSERTION",
        "externalRefs": [
         {
@@ -3831,7 +3830,6 @@
       },
       {
        "SPDXID": "SPDXRef-pypi-requests-2.19.0-98184d",
-       "copyrightText": "copyright (c) 2012 by Kenneth Reitz, copyright (c) 2012 by Kenneth Reitz., copyright (c) 2017 by Kenneth Reitz, copyright (c) 2017 by Kenneth Reitz., Copyright 2018 Kenneth Reitz",
        "downloadLocation": "NOASSERTION",
        "externalRefs": [
         {
