@@ -12,18 +12,32 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- **`azure_app_service_backups`** (`EVD-AZURE-APPSVC-BACKUPS`) — for each App
-  Service web app: whether its plan tier supports backups, its automatic backups
-  (count, newest and oldest), its custom backup configuration (storage container,
-  interval, retention, linked databases) and custom backup history (counts by
-  status, latest status, latest success, the 20 newest), with `backed_up`,
-  `effective_backup_interval_hours` and `latest_restore_point` for comparing
-  against a recovery point objective. The web app list is checked against Azure
-  Resource Graph. The custom configuration is a POST needing
-  `Microsoft.Web/sites/config/list/action`; without it those fields are null and
-  the run fails, never reporting "not configured". SAS tokens and database
-  connection strings are never written. `_shared/app_service.py` now holds the
-  web-app client and kind filter that `azure_app_service_configuration` also uses.
+- **`azure_app_service_backups`** (`EVD-AZURE-APPSVC-BACKUPS`, KSI-RPL-ABO). For
+  each App Service web app, whether it is actually
+  being backed up, judged from its restore points: automatic backups plus
+  successful custom backups.
+  - **Observed backups.** It reports `latest_restore_point_age_hours` at run time
+    and `largest_restore_point_gap_hours` inside `restore_point_window_hours`
+    (default 48). `backed_up` is true only when the newest restore point is inside
+    that window. `effective_backup_interval_hours` is the observed interval, and
+    `configured_backup_interval_hours` is kept separate.
+  - **Recovery point objective.** Set the optional `recovery_point_objective_hours`
+    and each app reports `meets_recovery_point_objective`.
+  - **Custom backups.** It also reports each app's custom backup configuration and
+    history, and restores made from custom backups within
+    `restore_test_window_days`.
+  - **Backup storage.** It reports the region, replication and version immutability
+    of the storage accounts custom backups go to.
+  - **Exclusions.** Function apps and deployment slots are listed in
+    `results.exclusions` with counts and the reason.
+  - **Permissions.** Reader is enough. The custom configuration needs the opt-in
+    `Microsoft.Web/sites/config/list/action`. Without it the configuration is
+    recorded as `not_authorized` (unknown), not as a collection failure.
+  - **Checks and limits.** The web app list is checked against Azure Resource
+    Graph, and `results.limitations` states what the evidence does not cover. SAS
+    tokens and database connection strings are never written.
+  - **Shared module.** `_shared/app_service.py` now holds the web-app client and
+    kind filter that `azure_app_service_configuration` also uses.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default

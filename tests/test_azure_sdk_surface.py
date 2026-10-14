@@ -1522,8 +1522,9 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     (
         "azure.mgmt.web.models",
         "BackupItemProperties",
-        ["name", "status", "scheduled", "created", "finished_time_stamp", "storage_account_url", "log"],
-        "azure/app_service_backups — custom backup history",
+        ["name", "status", "scheduled", "created", "finished_time_stamp", "last_restore_time_stamp",
+         "storage_account_url", "log"],
+        "azure/app_service_backups — custom backup history; a renamed created reads as 'no restore point'",
     ),
     (
         "azure.mgmt.web.models",

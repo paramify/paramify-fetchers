@@ -1,19 +1,21 @@
 name: azure_app_service_backups
 version: 0.1.0
 description: >
-  For each App Service web app in the subscription, reports how it is backed up:
-  whether its plan tier supports backups at all (Free and Shared do not), its
-  automatic backups (hourly, kept 30 days, stored by the platform in the same
-  datacenter) with how many restore points exist and the newest and oldest, its
-  custom backup configuration (storage account and container, schedule interval,
-  retention, linked databases) and its custom backup history (count by status, the
-  latest status, the latest successful backup and the 20 most recent). Each app
-  gets `backed_up`, the shortest backup interval it has and its latest restore
-  point, so backups can be compared against a recovery point objective. The web
-  app list is checked against Azure Resource Graph. Function apps and deployment
-  slots are not read. Reading the custom backup configuration needs
-  Microsoft.Web/sites/config/list/action, which Reader lacks; without it those
-  fields are null and the run reports a failure.
+  For each App Service web app in the subscription, reports whether it is actually
+  being backed up, from the restore points that exist: its automatic backups (hourly,
+  kept 30 days, held by the platform) and its successful custom backups. Per app: the
+  newest restore point and its age at run time, the largest gap between consecutive
+  restore points in a recent window, and the configured intervals as separate fields.
+  An app counts as backed up only when its newest restore point is inside the window.
+  Optionally, each app is checked against a recovery point objective. Also reports
+  each app's custom backup configuration (storage account and container, interval,
+  retention, linked databases), its custom backup history including restores made
+  from it, and the region, replication and version immutability of the storage
+  accounts custom backups go to. Function apps and deployment slots are listed as
+  exclusions with the reason, and the web app list is checked against Azure Resource
+  Graph. Reader is enough. The custom backup configuration additionally needs
+  Microsoft.Web/sites/config/list/action, which is opt-in. Without it those fields
+  are recorded as unknown, and the run does not fail.
 category: azure
 
 supports_targets: true
@@ -26,6 +28,36 @@ output:
   type: json
   path: azure_app_service_backups.json
   aggregation: per_target
+
+config_schema:
+  restore_point_window_hours:
+    type: integer
+    required: false
+    default: 48
+    env: AZURE_APP_SERVICE_BACKUP_WINDOW_HOURS
+    description: >
+      How recent an app's newest restore point must be for the app to count as backed
+      up. Gaps between restore points are also measured over this window. Keep it at
+      or under 72: the platform keeps every hourly automatic backup for only 3 days,
+      then every 3rd and later every 6th, so a wider window reads that thinning as
+      gaps.
+  recovery_point_objective_hours:
+    type: integer
+    required: false
+    env: AZURE_APP_SERVICE_RPO_HOURS
+    description: >
+      The defined recovery point objective, in hours. When set, each app reports
+      `meets_recovery_point_objective`. It is true when both the newest restore point's
+      age and the largest gap inside the window are within the objective. Leave it
+      unset and those fields are null.
+  restore_test_window_days:
+    type: integer
+    required: false
+    default: 365
+    env: AZURE_APP_SERVICE_RESTORE_WINDOW_DAYS
+    description: >
+      How far back a restore from a custom backup counts toward
+      `custom_backup_restored_in_window`.
 
 target_schema:
   subscription_id:
@@ -47,53 +79,87 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-RPL-ABO   # backup existence, interval and retention per web app, to compare with recovery objectives
+  - KSI-RPL-ABO   # observed restore-point age and gaps per web app, against the recovery point objective
+
+  # No RPL-TRC: `custom_backup_restored_in_window` is supporting evidence of a
+  # restore, but it sees only restores made from custom backups. Left an honest gap.
 
 evidence_set:
   reference_id: EVD-AZURE-APPSVC-BACKUPS
   name: Azure App Service Backups
   instructions: >
-    Script: fetcher.py. Permissions: Reader, plus
-    Microsoft.Web/sites/config/list/action for the custom backup configuration
-    (a custom role holding it is enough). Calls (azure-mgmt-web
-    WebSiteManagementClient, api 2025-05-01): web_apps.list(), keeping kinds that
-    start with "app" (function apps excluded); then per web app
-    web_apps.list_snapshots() (GET sites/{name}/snapshots, the automatic backups
-    `az webapp config snapshot list` shows), web_apps.list_backups() (GET
-    sites/{name}/backups, custom backup history) and
-    web_apps.get_backup_configuration() (POST sites/{name}/config/backup/list).
-    Apps on a Free or Shared plan (`plan_tier`, the site's sku) get none of these
-    calls: App Service backs up only Basic, Standard, Premium and Isolated, so
-    `backups_supported` is false and every backup verdict is false. Completeness:
-    Azure Resource Graph "Resources | where type =~ 'microsoft.web/sites'" is paged
-    to the end; a web app it lists that web_apps.list() did not is read with
-    web_apps.get() and added (`inventory_check.added_from_resource_graph`), or
-    reported in `resource_graph_stale` when the GET says it no longer exists.
-    Per app: `automatic_backups` is the count of automatic backups with the
-    newest (`latest`) and oldest times, with the platform's fixed 1-hour interval
-    and 30-day retention; `has_automatic_backups` is true when there is at least
-    one. `custom_backup_configuration_found` is false when the configuration
-    call returned 404 (none configured) and null when it failed, for example
-    403 for a Reader-only identity; `custom_backup_configured` is true when a
-    configuration names a storage container, `scheduled_custom_backup_enabled`
-    when it also has an enabled schedule, with `custom_backup_interval_hours`
-    (frequency_interval x frequency_unit) and `custom_backup_retention_days`
-    (0 keeps backups forever: `custom_backup_retention_indefinite`). A failed
-    read leaves these null, never false. Storage URLs are reduced to account,
-    container and path: the SAS token is dropped, and database connection strings
-    are never read. `custom_backup_history` has the count, counts by status,
-    `latest_status`, `latest_succeeded` (creation time of the newest Succeeded
-    backup) and the 20 newest backups. `backed_up` is true when the app has
-    automatic backups or an enabled custom schedule, false when it has neither,
-    and null when either is unknown and the other is not true.
-    `effective_backup_interval_hours` is the shorter interval of the two and
-    `latest_restore_point` the newer of the latest automatic backup and the
-    latest successful custom backup. Automatic backups stay in the app's
-    datacenter; only custom backups land in a storage account. Summary counts
-    apps by plan tier, with automatic backups, with a custom configuration
-    (and unknown), with a custom schedule, whose latest custom backup failed
-    (Failed, TimedOut, PartiallySucceeded or Skipped), backed up, not backed up
-    and unknown; `all_web_apps_backed_up` is false if any app is not backed up,
-    null if any is unknown or there are no apps; and
-    `longest_effective_backup_interval_hours` is the longest interval among apps
-    that have one. Deployment slots are not read.
+    Script: fetcher.py. Permissions: Reader. Optional (opt-in):
+    Microsoft.Web/sites/config/list/action for the custom backup configuration.
+    Microsoft documents that action as listing security-sensitive settings such as
+    publishing credentials, app settings and connection strings, so it is not
+    required. Calls (azure-mgmt-web WebSiteManagementClient, api 2025-05-01):
+    web_apps.list(); then per web app web_apps.list_snapshots() (GET
+    sites/{name}/snapshots, the automatic backups `az webapp config snapshot list`
+    shows), web_apps.list_backups() (GET sites/{name}/backups, custom backup history)
+    and web_apps.get_backup_configuration() (POST sites/{name}/config/backup/list).
+    Azure Resource Graph lists every microsoft.web/sites and microsoft.web/sites/slots
+    resource, paged to the end. A web app it lists that web_apps.list() did not is
+    read with web_apps.get() and added (`inventory_check.added_from_resource_graph`),
+    or reported in `resource_graph_stale` when the GET says it no longer exists.
+    Scope: web apps (kinds starting with "app"), production slot only. Function apps
+    and deployment slots are listed in `results.exclusions` with a count and the
+    reason for each, and counted in `summary.excluded_function_apps` and
+    `excluded_deployment_slots`. Apps on a Free or Shared plan (`plan_tier`, the
+    site's sku) get no backup calls: App Service backs up only Basic, Standard,
+    Premium and Isolated, so `backups_supported` is false and the app is not backed
+    up.
+    Observed restore points (`results.evaluated_at` is the run time). An app's
+    restore points are its automatic backup times plus the creation times of its
+    Succeeded custom backups. `latest_restore_point_age_hours` is the age of the
+    newest one. `restore_points_in_window` counts those within
+    `restore_point_window_hours` (default 48), and `largest_restore_point_gap_hours`
+    is the largest gap between consecutive restore points inside that window.
+    `backed_up` is true when the newest restore point is inside the window, false
+    when it is older or there is none and both reads succeeded, and null when a read
+    failed and nothing fresh was seen. `effective_backup_interval_hours` is the
+    larger of the age and the largest gap, and is null with fewer than two restore
+    points in the window. `configured_backup_interval_hours` is the configured
+    interval (1 hour for automatic backups, or the custom schedule's
+    frequency_interval x frequency_unit), kept separate because it is a setting, not
+    an observation. With `recovery_point_objective_hours` set,
+    `meets_recovery_point_objective` is false when the age exceeds it or the
+    effective interval does, true when the effective interval is within it, and
+    null when that is unknown or no objective is set.
+    Automatic backups (`automatic_backups`: count, newest, oldest) are taken hourly
+    and kept 30 days, held by Microsoft in the app's own datacenter, cannot be
+    downloaded, and do not include linked databases. Database backups are evidenced
+    by the database services' own fetchers.
+    Custom backups: `custom_backup_configuration_status` is found, not_configured
+    (404), not_authorized (403: the opt-in permission is not granted, recorded as
+    unknown and not as a collection failure), error (any other failure, which fails
+    the run) or not_read (Free/Shared). `custom_backup_configured` is true when a
+    configuration names a storage container, and `scheduled_custom_backup_enabled`
+    when it also has an enabled schedule, with `custom_backup_interval_hours` and
+    `custom_backup_retention_days` (0 keeps backups forever:
+    `custom_backup_retention_indefinite`). These are null whenever the
+    configuration is unknown, never false. `custom_backup_history` has the count,
+    counts by status, `latest_status`, `latest_succeeded`, `latest_restore` (the
+    newest last_restored across the app's backups) and the 20 newest backups.
+    `custom_backup_restored_in_window` is true when a restore from a custom backup
+    happened within `restore_test_window_days` (default 365). This is supporting
+    evidence for recovery testing only: restores from automatic backups leave no
+    record here. Storage URLs are reduced to account, container and path, with the
+    SAS token dropped, and database connection strings are never read.
+    `results.custom_backup_storage_accounts` resolves each storage account custom
+    backups use through Resource Graph in this subscription: `location`,
+    `replication` (sku), `geo_redundant` (GRS, RA-GRS, GZRS, RA-GZRS) and
+    account-level `immutable_storage_with_versioning`. `resolved` is false for an
+    account outside this subscription. Container immutability policies and legal
+    holds are not read; `azure_storage_encryption_status` reports the account's
+    other settings. `results.limitations` lists these limits in the evidence
+    itself.
+    Summary counts apps by plan tier, backed up / not / unknown,
+    `all_web_apps_backed_up` (false if any app is not backed up, null if any is
+    unknown or there are no apps), `max_latest_restore_point_age_hours`,
+    `largest_restore_point_gap_hours`, `longest_effective_backup_interval_hours`,
+    `longest_configured_backup_interval_hours`, apps meeting and missing the
+    recovery point objective with `all_web_apps_meet_recovery_point_objective`,
+    custom backup configuration counts including not_authorized, apps whose
+    latest custom backup failed (Failed, TimedOut, PartiallySucceeded or Skipped),
+    apps with a custom backup restore in the window, exclusions, and storage
+    account counts.
