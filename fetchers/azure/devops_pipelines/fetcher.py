@@ -511,9 +511,12 @@ def check_record(check: Dict[str, Any]) -> Dict[str, Any]:
     }
     if kind == "approval":
         record.update(
-            approvers=[a.get("displayName") for a in settings.get("approvers") or []],
+            # A check made through the API or Terraform may carry approver ids without names.
+            approvers=[{"id": a.get("id"), "display_name": a.get("displayName") or None}
+                       for a in settings.get("approvers") or []],
             min_required_approvers=settings.get("minRequiredApprovers"),
-            requester_cannot_be_approver=settings.get("requesterCannotBeApprover"),
+            # Omitted when false, ADO's default: the requester may approve their own run.
+            requester_cannot_be_approver=bool(settings.get("requesterCannotBeApprover")),
         )
     elif kind == "branch_control":
         record.update(

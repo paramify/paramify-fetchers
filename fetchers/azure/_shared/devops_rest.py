@@ -305,7 +305,8 @@ def collecting_identity(client: DevOpsClient, collector: DevOpsCollector) -> Opt
     if not isinstance(user, dict):
         return None
     account = ((user.get("properties") or {}).get("Account") or {}).get("$value")
-    return {"id": user.get("id"), "display_name": user.get("providerDisplayName"), "account": account}
+    # "login" marks this as a person's record, so sample redaction replaces the display name too.
+    return {"id": user.get("id"), "display_name": user.get("providerDisplayName"), "login": account}
 
 
 def _start() -> Path:

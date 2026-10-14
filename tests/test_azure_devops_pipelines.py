@@ -310,7 +310,7 @@ def test_collects_the_organization_and_exits_zero(tmp_path):
     code, evidence, status, _ = run(tmp_path)
     assert code == 0 and status is None
     assert evidence["metadata"]["partial_failure"] is False
-    assert evidence["metadata"]["collecting_identity"]["account"] == "reader@example.com"
+    assert evidence["metadata"]["collecting_identity"]["login"] == "reader@example.com"
     s = evidence["summary"]
     assert (s["pipelines_total"], s["yaml_pipelines"], s["classic_pipelines"]) == (3, 2, 1)
     assert s["yaml_pipelines_analyzed"] == 2 and s["yaml_pipelines_with_templates_expanded"] == 1
@@ -407,7 +407,8 @@ def test_environment_checks_and_deployments_carry_provenance_and_test_results(tm
     assert prod["approval_required"] and prod["branch_control"]
     assert prod["required_template"] is False  # the only required-template check is disabled
     approval = next(c for c in prod["checks"] if c["kind"] == "approval")
-    assert approval["approvers"] == ["Release Managers"] and approval["requester_cannot_be_approver"] is True
+    assert approval["approvers"] == [{"id": "g1", "display_name": "Release Managers"}]
+    assert approval["requester_cannot_be_approver"] is True
     branch = next(c for c in prod["checks"] if c["kind"] == "branch_control")
     assert branch["allowed_branches"] == ["refs/heads/main"] and branch["requires_branch_protection"] is True
     assert prod["deployments_in_window"] == 2
@@ -682,6 +683,15 @@ def test_invalid_yaml_is_recorded_on_the_pipeline_not_raised(tmp_path):
 ])
 def test_policy_scope_matching(scope, branch, applies):
     assert mod.scope_matches(scope, "r1", branch) is applies
+
+
+def test_an_api_made_approval_keeps_approver_ids_and_reads_an_omitted_flag_as_false():
+    # As $expand=settings returns a check created through the REST API with requesterCannotBeApprover false.
+    record = mod.check_record({"id": 1, "type": {"name": "Approval"}, "settings": {
+        "approvers": [{"id": "a1b2", "displayName": ""}], "blockedApprovers": [], "executionOrder": 1,
+        "instructions": "", "minRequiredApprovers": 1}})
+    assert record["approvers"] == [{"id": "a1b2", "display_name": None}]
+    assert record["requester_cannot_be_approver"] is False
 
 
 def test_unknown_task_check_keeps_its_definition_name():

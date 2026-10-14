@@ -247,7 +247,7 @@ def test_run_org_writes_evidence_and_exits_zero(monkeypatch, tmp_path):
     assert code == 0 and status is None
     assert evidence["metadata"]["organization"] == "contoso"
     assert evidence["metadata"]["collecting_identity"] == {
-        "id": "u1", "display_name": "Evidence Reader", "account": "reader@example.com"}
+        "id": "u1", "display_name": "Evidence Reader", "login": "reader@example.com"}
     assert evidence["results"] == {"x": 1} and evidence["summary"] == {"n": 1}
 
 
@@ -256,6 +256,20 @@ def test_run_org_asks_who_it_is_collecting_as(monkeypatch, tmp_path):
     client = dr.DevOpsClient(ORG, "pat", session)
     assert dr.collecting_identity(client, dr.DevOpsCollector(dr._LOGGER))["id"] == "u1"
     assert session.calls[0]["params"] == {"api-version": "7.1-preview.1"}
+
+
+def test_sample_redaction_treats_the_collecting_identity_as_a_person():
+    from framework import samples
+
+    payload = {"metadata": {"collecting_identity": {
+        "id": "3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f", "display_name": "Ada Lovelace", "login": "ada@contoso.com"}},
+        "results": {"approvers": ["Ada Lovelace"]}}
+    needles = samples.collect_needles({"payload": payload})
+    identity = samples.sanitize(payload, needles)["metadata"]["collecting_identity"]
+    assert identity["id"].startswith("00000000-0000-4000-8000-")
+    assert (identity["display_name"], identity["login"]) == ("Person1", "user1@example.com")
+    # The name is known now, so it cannot survive anywhere else in the sample unnoticed.
+    assert samples.find_leaks(samples.sanitize(payload, needles), needles) == ["Ada Lovelace"]
 
 
 def test_an_unreadable_identity_is_a_failure_not_a_guess(monkeypatch, tmp_path):
