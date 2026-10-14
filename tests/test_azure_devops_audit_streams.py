@@ -545,6 +545,8 @@ class FakeAdoSession:
             (f"dev.azure.com/{ORG}/" if "Policy" in path else f"auditservice.dev.azure.com/{ORG}/") + path: body
             for path, body in FakeDevOps().routes.items()
         }
+        self.routes[f"dev.azure.com/{ORG}/_apis/connectionData"] = {
+            "authenticatedUser": {"id": "u1", "providerDisplayName": "Audit Reader"}}
         self.calls = []
 
     def request(self, method, url, headers=None, params=None, timeout=None, allow_redirects=True, json=None):
@@ -582,10 +584,12 @@ def test_main_writes_evidence_for_the_organization(ado, tmp_path):
     evidence = json.loads(text)
     assert code == 0 and evidence["metadata"]["partial_failure"] is False
     assert evidence["metadata"]["organization"] == ORG
+    assert evidence["metadata"]["collecting_identity"]["display_name"] == "Audit Reader"
     assert evidence["summary"]["streams"] == 3 and evidence["summary"]["azure_monitor_streams_with_rows"] == 1
     for secret in ("pat-do-not-write", SPLUNK_TOKEN, GRID_KEY, LAW_KEY):
         assert secret not in text
     assert {(u, p["api-version"]) for _, u, p in ado.calls} == {
+        (f"https://dev.azure.com/{ORG}/_apis/connectionData", "7.1-preview.1"),
         (f"https://dev.azure.com/{ORG}/_apis/OrganizationPolicy/Policies/Policy.LogAuditEvents", "5.0-preview"),
         (f"https://auditservice.dev.azure.com/{ORG}/_apis/audit/streams", "7.1-preview.1"),
         (f"https://auditservice.dev.azure.com/{ORG}/_apis/audit/auditlog", "7.1-preview.1"),

@@ -43,6 +43,18 @@ SCOPE_CODE = "Code (Read)"
 SCOPE_TEST = "Test Management (Read)"
 SCOPE_ENV = "Environment (Read & manage)"
 SCOPE_PROJECT = "Project and Team (Read)"
+SCOPE_RELEASE = "Release (Read)"
+
+NOT_COLLECTED = (
+    "Projects, pipelines and repositories the collecting identity (metadata.collecting_identity) cannot see.",
+    "Classic release pipelines: definitions and deployments in the window are counted, but their stages, "
+    "approvals, gates and tasks are not read.",
+    "Classic build pipelines: listed, their steps not analysed.",
+    "Approval decisions: environment checks are configuration at collection time; who approved each deployment, "
+    "and when, is not collected.",
+    "Branch policy bypass: identities allowed to bypass policies when completing a pull request, or to push "
+    "without one, are not collected.",
+)
 
 TEST_TASKS = {"publishtestresults", "vstest", "publishcodecoverageresults"}
 SCAN_TASKS = re.compile(r"^(advancedsecurity-|microsoftsecuritydevops|credscan|sonarqube|sonarcloud|whitesource|mend|"
@@ -72,6 +84,9 @@ SIGN_TEXT = re.compile(r"\b(cosign sign|notation sign|signtool(\.exe)? sign|azur
 VERIFY_TEXT = re.compile(r"\b(cosign verify(-attestation)?|notation verify|signtool(\.exe)? verify|jarsigner -verify|"
                          r"gpg\b[^\n]*--verify|nuget verify|sha(256|512)sum (-c|--check)|get-authenticodesignature)\b")
 SBOM_TEXT = re.compile(r"\b(sbom-tool generate|syft|cyclonedx|cosign attest|slsa-)")
+
+UNCONDITIONAL = {"", "succeeded()", "always()", "succeededorfailed()"}
+RUNS_AFTER_FAILURE = re.compile(r"\b(always|succeededorfailed|failed|canceled|or|not)\(")
 
 CHECK_KINDS = (("branchprotection", "branch_control"), ("businesshours", "business_hours"),
                ("artifact", "evaluate_artifact"), ("restapi", "invoke_rest_api"),
@@ -177,93 +192,202 @@ def environment_name(job: Dict[str, Any]) -> Optional[str]:
     return str(env).split(".")[0] if env else None
 
 
-def iter_jobs(doc: Dict[str, Any]) -> Iterator[Tuple[Optional[str], Dict[str, Any]]]:
-    """(stage name, job) in YAML order; a pipeline of bare steps is one implicit job."""
+def truthy(value: Any) -> bool:
+    return str(value).strip().lower() == "true"
+
+
+def stage_list(doc: Dict[str, Any]) -> List[Tuple[Dict[str, Any], List[Dict[str, Any]]]]:
+    """(stage, jobs) in YAML order; a pipeline of jobs or bare steps is one implicit stage."""
+    def jobs_of(value):
+        return [j for j in value if isinstance(j, dict)] if isinstance(value, list) else []
     if isinstance(doc.get("stages"), list):
-        for stage in doc["stages"]:
-            if isinstance(stage, dict):
-                for job in stage.get("jobs") or []:
-                    if isinstance(job, dict):
-                        yield stage.get("stage"), job
-    elif isinstance(doc.get("jobs"), list):
-        for job in doc["jobs"]:
-            if isinstance(job, dict):
-                yield None, job
-    elif isinstance(doc.get("steps"), list):
-        yield None, {"job": None, "steps": doc["steps"]}
+        return [(s, jobs_of(s.get("jobs"))) for s in doc["stages"] if isinstance(s, dict)]
+    if isinstance(doc.get("jobs"), list):
+        return [({}, jobs_of(doc["jobs"]))]
+    if isinstance(doc.get("steps"), list):
+        return [({}, [{"steps": doc["steps"]}])]
+    return []
+
+
+def names(value: Any) -> List[str]:
+    return [str(v) for v in (value if isinstance(value, list) else [value]) if v is not None]
+
+
+def condition(node: Dict[str, Any]) -> str:
+    return re.sub(r"\s+", "", str(node.get("condition") or "")).lower()
+
+
+def stops_after_failure(node: Dict[str, Any]) -> bool:
+    # A custom condition replaces the default succeeded(), so it gates only if it keeps succeeded().
+    text = condition(node)
+    return not text or ("succeeded(" in text and not RUNS_AFTER_FAILURE.search(text))
+
+
+def gating_gap(step: Dict[str, Any], job: Dict[str, Any], stage: Dict[str, Any]) -> Optional[str]:
+    """Why a failing test step would not stop what depends on it; None when it would."""
+    # A failing step fails its job whatever its own condition, so always() on a test step still gates.
+    task = task_name(step)
+    if task == "publishcodecoverageresults" or (
+            task == "publishtestresults" and not truthy(input_value(step, "failtaskonfailedtests"))):
+        return "publishes results without failing on failed tests"
+    if truthy(step.get("continueOnError")):
+        return "continueOnError on the step"
+    if truthy(job.get("continueOnError")):
+        return "continueOnError on the job"
+    for scope, node in (("step", step), ("job", job), ("stage", stage)):
+        if condition(node) not in UNCONDITIONAL:
+            return f"{scope} condition may skip it: {node.get('condition')}"
+    return None
 
 
 def analyze_yaml(text: str) -> Dict[str, Any]:
-    """What a pipeline's YAML tests, scans, validates, deploys and signs, step by step in YAML order."""
+    """What a pipeline's YAML tests, scans, validates, deploys and signs, and whether a failing test stops each deploy."""
     doc = yaml.safe_load(text) or {}
     if not isinstance(doc, dict):
         raise ValueError("pipeline YAML is not a mapping")
     found: Dict[str, List[Dict[str, Any]]] = {k: [] for k in (
         "test", "security_scan", "iac_validation", "infrastructure_deploy", "application_deploy",
         "signing", "signature_verification", "sbom")}
-    stages, deployment_jobs, order = [], [], []
-    for stage, job in iter_jobs(doc):
-        if stage and stage not in stages:
-            stages.append(stage)
-        job_name = job.get("deployment") or job.get("job")
-        if "deployment" in job:
-            deployment_jobs.append({"stage": stage, "job": job_name, "environment": environment_name(job)})
-            order.append("deploy")
-        for step in collect_steps(job):
-            label = step.get("displayName") or step.get("task") or next(
-                (k for k in ("script", "bash", "pwsh", "powershell", "checkout", "download", "publish", "template")
-                 if k in step), "step")
-            for category in classify_step(step):
-                found[category].append({"stage": stage, "job": job_name, "step": str(label)})
-                order.append("deploy" if category.endswith("_deploy") else category)
+    layout = stage_list(doc)
+    stage_names = [s.get("stage") for s, _ in layout]
+    deployment_jobs: List[Dict[str, Any]] = []
+    tests: List[Tuple[int, int, int]] = []
+    deploys: List[Tuple[int, int, Optional[int], Dict[str, Any]]] = []
+    job_steps: Dict[Tuple[int, int], List[Dict[str, Any]]] = {}
+    for si, (stage, jobs) in enumerate(layout):
+        for ji, job in enumerate(jobs):
+            job_name = job.get("deployment") or job.get("job")
+            if "deployment" in job:
+                deployment_jobs.append({"stage": stage.get("stage"), "job": job_name, "environment": environment_name(job)})
+                deploys.append((si, ji, None, {"stage": stage.get("stage"), "job": job_name, "step": None}))
+            steps = job_steps[(si, ji)] = [s for s in collect_steps(job) if str(s.get("enabled")).lower() != "false"]
+            for k, step in enumerate(steps):
+                label = step.get("displayName") or step.get("task") or next(
+                    (key for key in ("script", "bash", "pwsh", "powershell", "checkout", "download", "publish", "template")
+                     if key in step), "step")
+                where = {"stage": stage.get("stage"), "job": job_name, "step": str(label)}
+                for category in classify_step(step):
+                    entry = dict(where)
+                    if category == "test":
+                        gap = gating_gap(step, job, stage)
+                        entry.update(gating=gap is None, not_gating_reason=gap)
+                        if gap is None:
+                            tests.append((si, ji, k))
+                    elif category.endswith("_deploy") and not any(d[:3] == (si, ji, k) for d in deploys):
+                        deploys.append((si, ji, k, where))
+                    found[category].append(entry)
+
+    def stage_deps(si: int) -> List[str]:
+        stage = layout[si][0]
+        if "dependsOn" in stage:
+            return names(stage["dependsOn"])
+        return [str(stage_names[si - 1])] if si else []
+
+    def stopped(test: Tuple[int, int, int], deploy: Tuple[int, int, Optional[int], Dict[str, Any]]) -> bool:
+        """Whether this test failing keeps this deploy from running, following dependsOn and conditions."""
+        ts, tj, tk = test
+        ds, dj, dk, _ = deploy
+        if ds == ts and dj == tj:
+            return dk is not None and dk > tk and stops_after_failure(job_steps[(ds, dj)][dk])
+        if ds == ts:
+            jobs = layout[ts][1]
+            blocked = {tj}
+            changed = True
+            while changed:
+                changed = False
+                for ji, job in enumerate(jobs):
+                    if ji not in blocked and stops_after_failure(job) and any(
+                            (jobs[b].get("deployment") or jobs[b].get("job")) in names(job.get("dependsOn")) for b in blocked):
+                        blocked.add(ji)
+                        changed = True
+            return dj in blocked
+        blocked_stages = {ts}
+        changed = True
+        while changed:
+            changed = False
+            for si, (stage, _) in enumerate(layout):
+                if si not in blocked_stages and stops_after_failure(stage) and any(
+                        str(stage_names[b]) in stage_deps(si) for b in blocked_stages):
+                    blocked_stages.add(si)
+                    changed = True
+        return ds in blocked_stages
+
+    def ungated_reason(deploy: Tuple[int, int, Optional[int], Dict[str, Any]]) -> str:
+        si, ji, k, _ = deploy
+        if not tests:
+            return "no gating test step"
+        stage, job = layout[si][0], layout[si][1][ji]
+        for scope, node in (("step", job_steps[(si, ji)][k] if k is not None else {}), ("job", job), ("stage", stage)):
+            if not stops_after_failure(node):
+                return f"{scope} condition runs it after a failure: {node.get('condition')}"
+        return "not downstream of a gating test (runs before or in parallel with the tests)"
+
+    ungated = [{**d[3], "reason": ungated_reason(d)} for d in deploys if not any(stopped(t, d) for t in tests)]
     extends = doc.get("extends") if isinstance(doc.get("extends"), dict) else None
-    first_test = order.index("test") if "test" in order else None
-    first_deploy = order.index("deploy") if "deploy" in order else None
     return {
-        "stages": stages,
+        "stages": [n for n in stage_names if n],
         "deployment_jobs": deployment_jobs,
         "environments": sorted({d["environment"] for d in deployment_jobs if d["environment"]}),
         "extends_template": extends.get("template") if extends else None,
         "steps": found,
         "tests": bool(found["test"]),
-        "deploys": first_deploy is not None,
-        "tests_before_first_deploy": first_test is not None and (first_deploy is None or first_test < first_deploy),
+        "deploys": bool(deploys),
+        "tests_gate_deploys": None if not deploys else not ungated,
+        "ungated_deploys": ungated,
     }
 
 
 # --- collection ------------------------------------------------------------------
 
+def head_commit(client, collector, project, repo: Dict[str, Any], branch: str, heads: Dict[Any, Any]) -> Optional[str]:
+    """The commit at the tip of an Azure Repos branch, once per repository and branch."""
+    key = (repo["id"], branch)
+    if key not in heads:
+        refs = call(collector, f"git.refs.list({project['name']}/{repo.get('name')}:{branch})", SCOPE_CODE,
+                    lambda: client.list(f"{project['id']}/_apis/git/repositories/{repo['id']}/refs",
+                                        params={"filter": f"heads/{branch}"}))
+        heads[key] = next((r.get("objectId") for r in refs or [] if r.get("name") == f"refs/heads/{branch}"), None)
+    return heads[key]
+
+
 def read_yaml(client: DevOpsClient, collector: DevOpsCollector, project: Dict[str, Any],
-              definition: Dict[str, Any]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """(yaml text, source, error): the preview run's finalYaml, else the file on the default branch."""
+              definition: Dict[str, Any], heads: Dict[Any, Any]) -> Dict[str, Any]:
+    """The preview run's finalYaml, else the file on the default branch; pinned to the head commit on Azure Repos."""
     pid, pipeline_id = project["id"], definition["id"]
-    error = None
+    repo = definition.get("repository") or {}
+    branch = re.sub(r"^refs/heads/", "", repo.get("defaultBranch") or "")
+    azure_repo = repo.get("type") == "TfsGit" and bool(repo.get("id"))
+    commit = head_commit(client, collector, project, repo, branch, heads) if azure_repo and branch else None
+    found: Dict[str, Any] = {"text": None, "source": None, "error": None, "commit": commit, "object_id": None}
+    body: Dict[str, Any] = {"previewRun": True}
+    if commit:
+        body["resources"] = {"repositories": {"self": {"refName": f"refs/heads/{branch}", "version": commit}}}
     try:
-        body = client.post(f"{pid}/_apis/pipelines/{pipeline_id}/preview", {"previewRun": True})
-        if body.get("finalYaml"):
-            return body["finalYaml"], "preview", None
-        error = "preview returned no finalYaml"
+        preview = client.post(f"{pid}/_apis/pipelines/{pipeline_id}/preview", body)
+        if preview.get("finalYaml"):
+            return {**found, "text": preview["finalYaml"], "source": "preview"}
+        found["error"] = "preview returned no finalYaml"
     except DevOpsError as exc:
-        error = str(exc)
+        found["error"] = str(exc)
         # A 400 is the pipeline's own problem (invalid YAML, a parameter with no default), not a collection failure.
         if exc.status != 400:
             collector.record(f"pipelines.preview({project['name']}/{definition.get('name')})", exc)
-    repo = definition.get("repository") or {}
     path = (definition.get("process") or {}).get("yamlFilename")
-    if repo.get("type") != "TfsGit" or not path or not repo.get("id"):
-        return None, None, error
-    branch = re.sub(r"^refs/heads/", "", repo.get("defaultBranch") or "")
+    if not azure_repo or not path:
+        return found
     params = {"path": path, "includeContent": "true", "$format": "json"}
-    if branch:
-        params.update({"versionDescriptor.version": branch, "versionDescriptor.versionType": "branch"})
+    if commit or branch:
+        params.update({"versionDescriptor.version": commit or branch,
+                       "versionDescriptor.versionType": "commit" if commit else "branch"})
     item = call(collector, f"git.items.get({project['name']}/{repo.get('name')}:{path})", SCOPE_CODE,
                 lambda: client.get(f"{pid}/_apis/git/repositories/{repo['id']}/items", params=params))
     if item and item.get("content") is not None:
-        return item["content"], "repository", error
-    return None, None, error
+        found.update(text=item["content"], source="repository", commit=item.get("commitId") or commit,
+                     object_id=item.get("objectId"))
+    return found
 
 
-def pipeline_record(client, collector, project, definition, runs, tests) -> Dict[str, Any]:
+def pipeline_record(client, collector, project, definition, runs, tests, heads) -> Dict[str, Any]:
     process = definition.get("process") or {}
     repo = definition.get("repository") or {}
     is_yaml = process.get("type") == YAML_PROCESS
@@ -278,6 +402,8 @@ def pipeline_record(client, collector, project, definition, runs, tests) -> Dict
                        "default_branch": repo.get("defaultBranch")},
         "yaml_source": None,
         "templates_expanded": False,
+        "yaml_commit": None,
+        "yaml_object_id": None,
         "yaml_sha256": None,
         "yaml_error": None,
         "analysis": None,
@@ -286,11 +412,13 @@ def pipeline_record(client, collector, project, definition, runs, tests) -> Dict
     }
     if not is_yaml:
         return record
-    text, source, error = read_yaml(client, collector, project, definition)
-    record.update(yaml_source=source, templates_expanded=source == "preview", yaml_error=error)
+    found = read_yaml(client, collector, project, definition, heads)
+    text = found["text"]
+    record.update(yaml_source=found["source"], templates_expanded=found["source"] == "preview", yaml_error=found["error"])
     if text is None:
         return record
-    record["yaml_sha256"] = hashlib.sha256(text.encode()).hexdigest()
+    record.update(yaml_commit=found["commit"], yaml_object_id=found["object_id"],
+                  yaml_sha256=hashlib.sha256(text.encode()).hexdigest())
     try:
         record["analysis"] = analyze_yaml(text)
     except (yaml.YAMLError, ValueError) as exc:
@@ -331,9 +459,15 @@ def test_summary(test_runs: List[Dict[str, Any]]) -> Dict[str, Any]:
         "automated": sum(1 for r in test_runs if r.get("isAutomated")),
         "total_tests": sum(r.get("totalTests") or 0 for r in test_runs),
         "passed_tests": sum(r.get("passedTests") or 0 for r in test_runs),
-        "failed_tests": sum(r.get("unanalyzedTests") or 0 for r in test_runs),
+        "not_passed_tests": not_passed(test_runs),
         "last_completed": iso(max((c for c in completed if c), default=None)),
     }
+
+
+def not_passed(test_runs: List[Dict[str, Any]]) -> int:
+    # From the totals, not unanalyzedTests, which drops as failures are triaged.
+    return sum(max((r.get("totalTests") or 0) - (r.get("passedTests") or 0) - (r.get("notApplicableTests") or 0), 0)
+               for r in test_runs)
 
 
 def list_test_runs(client, collector, project, since: datetime, until: datetime) -> Optional[List[Dict[str, Any]]]:
@@ -437,7 +571,7 @@ def deployment_record(rec: Dict[str, Any], builds: Dict[Any, Dict[str, Any]],
         "from_default_branch": (build.get("sourceBranch") == default_branch) if build and default_branch else None,
         "run_test_runs": len(run_tests),
         "run_tests_passed": sum(r.get("passedTests") or 0 for r in run_tests),
-        "run_tests_failed": sum(r.get("unanalyzedTests") or 0 for r in run_tests),
+        "run_tests_not_passed": not_passed(run_tests),
     }
 
 
@@ -485,8 +619,11 @@ def repository_record(repo: Dict[str, Any], policies: List[Dict[str, Any]], pipe
         return [p for p in applied if (p.get("type") or {}).get("id") == type_id]
 
     reviewers = of(MIN_REVIEWERS_POLICY)
-    strongest = max(reviewers, key=lambda p: (bool(p.get("isBlocking")), p["settings"].get("minimumApproverCount") or 0),
-                    default=None)
+    strongest = max(reviewers, key=lambda p: (bool(p.get("isBlocking")), independent_approvers(p),
+                                              p["settings"].get("minimumApproverCount") or 0), default=None)
+    blocking = bool(strongest and strongest.get("isBlocking"))
+    required = (strongest["settings"].get("minimumApproverCount") or 0) if strongest else 0
+    independent = independent_approvers(strongest) if strongest else 0
     builds = [{
         "pipeline_id": p["settings"].get("buildDefinitionId"),
         "pipeline": pipeline_names.get(p["settings"].get("buildDefinitionId")),
@@ -502,6 +639,7 @@ def repository_record(repo: Dict[str, Any], policies: List[Dict[str, Any]], pipe
             "count": strongest["settings"].get("minimumApproverCount"),
             "blocking": bool(strongest.get("isBlocking")),
             "creator_vote_counts": strongest["settings"].get("creatorVoteCounts"),
+            "independent_approvers": independent,
             "reset_on_source_push": strongest["settings"].get("resetOnSourcePush"),
             "block_last_pusher_vote": strongest["settings"].get("blockLastPusherVote"),
         },
@@ -509,9 +647,32 @@ def repository_record(repo: Dict[str, Any], policies: List[Dict[str, Any]], pipe
         "required_reviewer_policies": len(of(REQUIRED_REVIEWERS_POLICY)),
         "comment_resolution_required": any(p.get("isBlocking") for p in of(COMMENTS_POLICY)),
         "work_item_linking_required": any(p.get("isBlocking") for p in of(WORK_ITEM_POLICY)),
-        "requires_review": bool(strongest and strongest.get("isBlocking")
-                                and (strongest["settings"].get("minimumApproverCount") or 0) >= 1),
+        "requires_review": blocking and independent >= 1,
+        "self_approval_satisfies_review": blocking and required >= 1 and independent == 0,
         "requires_build_validation": any(b["blocking"] for b in builds),
+    }
+
+
+def independent_approvers(policy: Dict[str, Any]) -> int:
+    """Approvals the policy needs from someone other than the pull request's author."""
+    count = policy["settings"].get("minimumApproverCount") or 0
+    return max(count - 1, 0) if policy["settings"].get("creatorVoteCounts") else count
+
+
+def classic_releases(client, collector, project, since: datetime, until: datetime) -> Dict[str, Any]:
+    """Classic release pipelines are counted, not analysed: their definitions and deployments started in the window."""
+    pid, pname = project["id"], project["name"]
+    definitions = call(collector, f"release.definitions.list({pname})", SCOPE_RELEASE,
+                       lambda: client.list(f"{pid}/_apis/release/definitions", service="vsrm"))
+    deployments = call(collector, f"release.deployments.list({pname})", SCOPE_RELEASE,
+                       lambda: client.list(f"{pid}/_apis/release/deployments", service="vsrm", params={
+                           "minStartedTime": iso(since), "maxStartedTime": iso(until), "queryOrder": "descending",
+                           "$top": 100}))
+    return {
+        "definitions": None if definitions is None else [
+            {"id": d.get("id"), "name": d.get("name"), "folder": d.get("path")}
+            for d in sorted(definitions, key=lambda d: (d.get("path") or "", d.get("name") or ""))],
+        "deployments_in_window": None if deployments is None else len(deployments),
     }
 
 
@@ -547,9 +708,10 @@ def collect_project(client, collector, project, since: datetime, until: datetime
         else:
             unattributed += 1
 
+    heads: Dict[Any, Any] = {}
     pipelines = [pipeline_record(client, collector, project, d,
                                  run_summary(runs_by_definition.get(d.get("id"), [])),
-                                 test_summary(tests_by_definition.get(d.get("id"), [])))
+                                 test_summary(tests_by_definition.get(d.get("id"), [])), heads)
                  for d in sorted(definitions, key=lambda d: (d.get("path") or "", d.get("name") or ""))]
     by_id = {p["id"]: p for p in pipelines}
 
@@ -563,8 +725,8 @@ def collect_project(client, collector, project, since: datetime, until: datetime
     policies = call(collector, f"policy.configurations.list({pname})", SCOPE_CODE,
                     lambda: client.list(f"{pid}/_apis/policy/configurations", params={"$top": 1000}), default=[])
     live = [p for p in policies if p.get("isEnabled") and not p.get("isDeleted") and isinstance(p.get("settings"), dict)]
-    names = {p["id"]: p["name"] for p in pipelines}
-    repositories = [repository_record(r, live, names)
+    pipeline_names = {p["id"]: p["name"] for p in pipelines}
+    repositories = [repository_record(r, live, pipeline_names)
                     for r in sorted(repos, key=lambda r: r.get("name") or "") if not r.get("isDisabled")]
 
     return {
@@ -574,6 +736,7 @@ def collect_project(client, collector, project, since: datetime, until: datetime
         "pipelines": pipelines,
         "environments": environments,
         "repositories": repositories,
+        "classic_releases": classic_releases(client, collector, project, since, until),
         "test_runs_in_window": len(test_runs),
         "test_runs_unattributed": unattributed,
     }
@@ -613,14 +776,15 @@ def summarize(projects: List[Dict[str, Any]], days: int) -> Dict[str, Any]:
         "pipelines_generating_sbom": with_steps("sbom"),
         "deploying_pipelines": len(deploying),
         "deploying_pipelines_with_tests": sum(1 for _, x in deploying if x["analysis"]["tests"]),
-        "deploying_pipelines_testing_before_deploy": sum(1 for _, x in deploying
-                                                         if x["analysis"]["tests_before_first_deploy"]),
+        "deploying_pipelines_with_tests_gating_deploys": sum(1 for _, x in deploying if x["analysis"]["tests_gate_deploys"]),
         "deploying_pipelines_without_tests": [label(p, x) for p, x in deploying if not x["analysis"]["tests"]],
+        "deploying_pipelines_with_ungated_deploys": [label(p, x) for p, x in deploying
+                                                     if not x["analysis"]["tests_gate_deploys"]],
         "pipeline_runs_in_window": sum(x["runs"]["in_window"] for _, x in pipelines),
         "test_runs_in_window": sum(p["test_runs_in_window"] for p in projects),
         "tests_total": sum(x["test_runs"]["total_tests"] for _, x in pipelines),
         "tests_passed": sum(x["test_runs"]["passed_tests"] for _, x in pipelines),
-        "tests_failed": sum(x["test_runs"]["failed_tests"] for _, x in pipelines),
+        "tests_not_passed": sum(x["test_runs"]["not_passed_tests"] for _, x in pipelines),
         "pipelines_with_test_runs_in_window": sum(1 for _, x in pipelines if x["test_runs"]["in_window"]),
         "environments_total": len(envs),
         "environments_with_approval": sum(1 for _, e in envs if e["approval_required"]),
@@ -635,11 +799,17 @@ def summarize(projects: List[Dict[str, Any]], days: int) -> Dict[str, Any]:
         "deployments_with_test_runs": sum(1 for d in deployments if d["run_test_runs"]),
         "repositories_total": len(repos),
         "repositories_requiring_review": sum(1 for _, r in repos if r["requires_review"]),
+        "repositories_where_self_approval_satisfies_review": sum(
+            1 for _, r in repos if r["self_approval_satisfies_review"]),
         "repositories_requiring_build_validation": sum(1 for _, r in repos if r["requires_build_validation"]),
         "repositories_without_review_or_build_validation": [
             label(p, r) for p, r in repos if not (r["requires_review"] or r["requires_build_validation"])],
         "projects_with_classic_pipeline_creation_disabled": sum(
             1 for p in projects if (p["general_settings"] or {}).get("disableClassicPipelineCreation")),
+        "classic_release_definitions": sum(len(p["classic_releases"]["definitions"] or []) for p in projects),
+        "classic_release_deployments_in_window": sum(
+            p["classic_releases"]["deployments_in_window"] or 0 for p in projects),
+        "not_collected": list(NOT_COLLECTED),
     }
 
 

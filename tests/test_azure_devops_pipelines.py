@@ -3,8 +3,9 @@
 FakeADO stands in for requests.Session and serves one organization with a web
 project: a YAML pipeline whose preview run returns its final YAML, an infra
 pipeline whose preview is refused so its file is read from the repo, a classic
-pipeline, runs, test runs, two environments with checks and deployments, and
-branch policies. Bodies follow the Azure DevOps REST 7.1 reference samples.
+pipeline, runs, test runs, two environments with checks and deployments, branch
+policies and a classic release pipeline. Bodies follow the Azure DevOps REST 7.1
+reference samples.
 """
 
 from __future__ import annotations
@@ -118,6 +119,8 @@ def definition(id_, name, process, repo):
 
 
 WEB_REPO = {"id": "r-web", "name": "web", "type": "TfsGit", "defaultBranch": "refs/heads/main"}
+WEB_HEAD = "3c1f0a9e7d2b4c6a8e0f1d3b5a7c9e1f2a4b6c8d"
+INFRA_HEAD = "9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b"
 INFRA_REPO = {"id": "r-infra", "name": "infra", "type": "TfsGit", "defaultBranch": "refs/heads/main"}
 
 
@@ -127,10 +130,10 @@ def build(id_, definition_id, result, branch="refs/heads/main", hours=1):
             "requestedFor": {"displayName": "Pipeline Bot"}, "finishTime": ago(hours=hours)}
 
 
-def ado_test_run(id_, build_id, total, passed, failed, definition_id=None):
+def ado_test_run(id_, build_id, total, passed, unanalyzed, definition_id=None, not_applicable=0):
     run = {"id": id_, "name": f"run {id_}", "state": "Completed", "isAutomated": True,
            "build": {"id": str(build_id)}, "totalTests": total, "passedTests": passed,
-           "unanalyzedTests": failed, "completedDate": ago(hours=2)}
+           "notApplicableTests": not_applicable, "unanalyzedTests": unanalyzed, "completedDate": ago(hours=2)}
     if definition_id:
         run["buildConfiguration"] = {"buildDefinitionId": definition_id}
     return run
@@ -142,7 +145,11 @@ class FakeADO:
     def __init__(self):
         b = f"/contoso/{P}"
         self.calls = []
+        self.hosts = []
         self.routes = {
+            "/contoso/_apis/connectionData": Resp(body={"authenticatedUser": {
+                "id": "u1", "providerDisplayName": "Evidence Reader",
+                "properties": {"Account": {"$type": "System.String", "$value": "reader@example.com"}}}}),
             "/contoso/_apis/projects": Resp(body={"value": [{"id": P, "name": "Web", "state": "wellFormed"}]}),
             f"{b}/_apis/build/generalsettings": Resp(body={
                 "disableClassicPipelineCreation": True, "enforceJobAuthScope": True,
@@ -158,8 +165,13 @@ class FakeADO:
             f"{b}/_apis/pipelines/10/preview": Resp(body={"finalYaml": FINAL_YAML}),
             f"{b}/_apis/pipelines/11/preview": err(400, "A value for the 'region' parameter must be provided.",
                                                    "PipelineValidationException"),
-            f"{b}/_apis/git/repositories/r-infra/items": Resp(body={"path": "/infra/pipeline.yml",
-                                                                    "content": INFRA_RAW_YAML}),
+            f"{b}/_apis/git/repositories/r-web/refs": Resp(body={"value": [
+                {"name": "refs/heads/main", "objectId": WEB_HEAD},
+                {"name": "refs/heads/main-old", "objectId": "0" * 40}]}),
+            f"{b}/_apis/git/repositories/r-infra/refs": Resp(body={"value": [
+                {"name": "refs/heads/main", "objectId": INFRA_HEAD}]}),
+            f"{b}/_apis/git/repositories/r-infra/items": Resp(body={
+                "path": "/infra/pipeline.yml", "objectId": "5d2e8f", "commitId": INFRA_HEAD, "content": INFRA_RAW_YAML}),
             f"{b}/_apis/build/builds": Resp(body={"value": [
                 build(100, 10, "succeeded", hours=3), build(101, 10, "failed", hours=5),
                 build(102, 11, "succeeded", "refs/heads/feature/x", hours=6)]}),
@@ -185,6 +197,7 @@ class FakeADO:
             f"{b}/_apis/git/repositories": Resp(body={"value": [
                 {"id": "r-web", "name": "web", "defaultBranch": "refs/heads/main"},
                 {"id": "r-infra", "name": "infra", "defaultBranch": "refs/heads/main"},
+                {"id": "r-api", "name": "api", "defaultBranch": "refs/heads/main"},
                 {"id": "r-old", "name": "old", "defaultBranch": "refs/heads/master", "isDisabled": True}]}),
             f"{b}/_apis/policy/configurations": Resp(body={"value": [
                 {"id": 1, "isEnabled": True, "isBlocking": True, "isDeleted": False,
@@ -203,7 +216,19 @@ class FakeADO:
                  "type": {"id": mod.MIN_REVIEWERS_POLICY},
                  "settings": {"minimumApproverCount": 1,
                               "scope": [{"repositoryId": "r-infra", "refName": "refs/heads/main", "matchKind": "Exact"}]}},
+                {"id": 5, "isEnabled": True, "isBlocking": True, "isDeleted": False,
+                 "type": {"id": mod.MIN_REVIEWERS_POLICY},
+                 "settings": {"minimumApproverCount": 1, "creatorVoteCounts": True,
+                              "scope": [{"repositoryId": "r-api", "refName": "refs/heads/main", "matchKind": "Exact"}]}},
             ]}),
+            f"{b}/_apis/release/definitions": {
+                None: Resp(body={"value": [{"id": 3, "name": "legacy-release", "path": "\\"}]},
+                           headers={"x-ms-continuationtoken": "4"}),
+                "4": Resp(body={"value": [{"id": 4, "name": "hotfix", "path": "\\ops"}]}),
+            },
+            f"{b}/_apis/release/deployments": Resp(body={"value": [
+                {"id": 70, "releaseDefinition": {"id": 3}, "deploymentStatus": "succeeded", "startedOn": ago(days=2)},
+                {"id": 71, "releaseDefinition": {"id": 3}, "deploymentStatus": "failed", "startedOn": ago(days=3)}]}),
         }
 
     @staticmethod
@@ -211,7 +236,7 @@ class FakeADO:
         # Every slice answers the same runs; the fetcher must not double count them.
         return Resp(body={"value": [
             ado_test_run(500, 100, 120, 118, 2, definition_id=10),
-            ado_test_run(501, 101, 120, 100, 20),
+            ado_test_run(501, 101, 120, 100, 0, not_applicable=5),  # failures already triaged
             ado_test_run(502, 9999, 5, 5, 0)]})
 
     @staticmethod
@@ -238,6 +263,7 @@ class FakeADO:
         params = dict(params or {})
         path = urlsplit(url).path
         self.calls.append((method, path, params, json))
+        self.hosts.append((urlsplit(url).netloc, path))
         route = self.routes.get(path)
         if route is None:
             raise AssertionError(f"unexpected request {method} {path} {params}")
@@ -284,13 +310,15 @@ def test_collects_the_organization_and_exits_zero(tmp_path):
     code, evidence, status, _ = run(tmp_path)
     assert code == 0 and status is None
     assert evidence["metadata"]["partial_failure"] is False
+    assert evidence["metadata"]["collecting_identity"]["account"] == "reader@example.com"
     s = evidence["summary"]
     assert (s["pipelines_total"], s["yaml_pipelines"], s["classic_pipelines"]) == (3, 2, 1)
     assert s["yaml_pipelines_analyzed"] == 2 and s["yaml_pipelines_with_templates_expanded"] == 1
     assert s["deploying_pipelines"] == 2
     assert s["deploying_pipelines_with_tests"] == 1
-    assert s["deploying_pipelines_testing_before_deploy"] == 1
+    assert s["deploying_pipelines_with_tests_gating_deploys"] == 1
     assert s["deploying_pipelines_without_tests"] == ["Web/infra"]
+    assert s["deploying_pipelines_with_ungated_deploys"] == ["Web/infra"]
     assert s["pipelines_with_security_scan"] == 1
     assert s["pipelines_with_iac_validation"] == 1 and s["pipelines_deploying_infrastructure"] == 1
     assert (s["pipelines_signing_artifacts"], s["pipelines_verifying_signatures"], s["pipelines_generating_sbom"]) == (1, 1, 1)
@@ -302,10 +330,17 @@ def test_final_yaml_comes_from_the_preview_run_without_queueing(tmp_path):
     web = pipeline(evidence, "web-ci-cd")
     assert web["yaml_source"] == "preview" and web["templates_expanded"] is True
     assert len(web["yaml_sha256"]) == 64
+    # pinned to the default branch's head commit, so the exact source can be fetched again
+    assert web["yaml_commit"] == WEB_HEAD and web["yaml_object_id"] is None
     previews = [c for c in fake.calls if c[1].endswith("/_apis/pipelines/10/preview")]
-    assert previews == [("POST", f"/contoso/{P}/_apis/pipelines/10/preview", {"api-version": "7.1"}, {"previewRun": True})]
+    assert previews == [("POST", f"/contoso/{P}/_apis/pipelines/10/preview", {"api-version": "7.1"}, {
+        "previewRun": True,
+        "resources": {"repositories": {"self": {"refName": "refs/heads/main", "version": WEB_HEAD}}}})]
     assert web["analysis"]["environments"] == ["prod"]
-    assert [s["step"] for s in web["analysis"]["steps"]["test"]] == ["Unit tests", "PublishTestResults@2"]
+    tests = web["analysis"]["steps"]["test"]
+    assert [(t["step"], t["gating"]) for t in tests] == [("Unit tests", True), ("PublishTestResults@2", False)]
+    assert tests[1]["not_gating_reason"] == "publishes results without failing on failed tests"
+    assert web["analysis"]["tests_gate_deploys"] is True and web["analysis"]["ungated_deploys"] == []
     assert web["analysis"]["steps"]["signature_verification"][0]["job"] == "DeployWeb"
 
 
@@ -316,8 +351,23 @@ def test_a_refused_preview_falls_back_to_the_file_on_the_default_branch(tmp_path
     assert infra["yaml_source"] == "repository" and infra["templates_expanded"] is False
     assert "(400) PipelineValidationException" in infra["yaml_error"]
     assert infra["analysis"]["environments"] == ["prod"]
+    assert (infra["yaml_commit"], infra["yaml_object_id"]) == (INFRA_HEAD, "5d2e8f")
     item = next(c for c in fake.calls if c[1].endswith("/items"))
-    assert item[2]["path"] == "/infra/pipeline.yml" and item[2]["versionDescriptor.version"] == "main"
+    assert item[2]["path"] == "/infra/pipeline.yml"
+    assert (item[2]["versionDescriptor.version"], item[2]["versionDescriptor.versionType"]) == (INFRA_HEAD, "commit")
+    assert infra["analysis"]["tests_gate_deploys"] is False
+    assert {d["reason"] for d in infra["analysis"]["ungated_deploys"]} == {"no gating test step"}
+
+
+def test_each_repository_head_is_read_once(tmp_path):
+    fake = FakeADO()
+    fake.routes[f"/contoso/{P}/_apis/build/definitions"]["page2"] = Resp(body={"value": [
+        definition(11, "infra", {"type": 2, "yamlFilename": "/infra/pipeline.yml"}, INFRA_REPO),
+        definition(12, "web-nightly", {"type": 2, "yamlFilename": "/nightly.yml"}, WEB_REPO)]})
+    fake.routes[f"/contoso/{P}/_apis/pipelines/12/preview"] = Resp(body={"finalYaml": "steps:\n- script: go test\n"})
+    _, evidence, _, _ = run(tmp_path, fake)
+    assert pipeline(evidence, "web-nightly")["yaml_commit"] == WEB_HEAD
+    assert len([c for c in fake.calls if c[1].endswith("/r-web/refs")]) == 1
 
 
 def test_classic_pipelines_are_listed_not_analysed(tmp_path):
@@ -333,8 +383,10 @@ def test_runs_and_test_results_attach_to_their_pipeline_once(tmp_path):
     assert web["runs"]["in_window"] == 2 and web["runs"]["failed"] == 1
     assert web["runs"]["last"]["source_version"] == "sha100"
     # run 500 by buildConfiguration, run 501 by its build id; each counted once across the 7-day slices
+    # not passed comes from the totals: run 501's failures were triaged (unanalyzedTests 0) and still count
     assert web["test_runs"] == {**web["test_runs"], "in_window": 2, "total_tests": 240, "passed_tests": 218,
-                                "failed_tests": 22}
+                                "not_passed_tests": 17}
+    assert "failed_tests" not in web["test_runs"]
     project = evidence["results"]["projects"][0]
     assert project["test_runs_in_window"] == 3 and project["test_runs_unattributed"] == 1
 
@@ -361,7 +413,7 @@ def test_environment_checks_and_deployments_carry_provenance_and_test_results(tm
     assert prod["deployments_in_window"] == 2
     web_deploy = prod["deployments"][0]
     assert (web_deploy["run_id"], web_deploy["source_version"], web_deploy["from_default_branch"]) == (100, "sha100", True)
-    assert (web_deploy["run_test_runs"], web_deploy["run_tests_passed"], web_deploy["run_tests_failed"]) == (1, 118, 2)
+    assert (web_deploy["run_test_runs"], web_deploy["run_tests_passed"], web_deploy["run_tests_not_passed"]) == (1, 118, 2)
     infra_deploy = prod["deployments"][1]
     assert infra_deploy["from_default_branch"] is False and infra_deploy["run_test_runs"] == 0
     # newest first: the 90-day-old record ends the read, so the next page is never requested
@@ -375,14 +427,59 @@ def test_environment_checks_and_deployments_carry_provenance_and_test_results(tm
 def test_default_branch_policies_per_repository(tmp_path):
     _, evidence, _, _ = run(tmp_path)
     repos = {r["name"]: r for r in evidence["results"]["projects"][0]["repositories"]}
-    assert set(repos) == {"web", "infra"}  # the disabled repository is left out
-    web, infra = repos["web"], repos["infra"]
-    assert web["min_reviewers"]["count"] == 2 and web["requires_review"] is True
+    assert set(repos) == {"web", "infra", "api"}  # the disabled repository is left out
+    web, infra, api = repos["web"], repos["infra"], repos["api"]
+    assert web["min_reviewers"]["count"] == 2 and web["min_reviewers"]["independent_approvers"] == 2
+    assert web["requires_review"] is True and web["self_approval_satisfies_review"] is False
+    # one approver whose vote may be the author's own: blocking, but not review by someone else
+    assert api["min_reviewers"]["creator_vote_counts"] is True and api["min_reviewers"]["independent_approvers"] == 0
+    assert api["requires_review"] is False and api["self_approval_satisfies_review"] is True
     assert web["build_validation"] == [{"pipeline_id": 10, "pipeline": "web-ci-cd", "blocking": True,
                                         "valid_duration_minutes": 720, "manual_queue_only": False}]
     assert infra["min_reviewers"] is None and infra["requires_review"] is False  # deleted and disabled policies ignored
     assert infra["requires_build_validation"] is True  # project-wide prefix policy
-    assert evidence["summary"]["repositories_without_review_or_build_validation"] == []
+    s = evidence["summary"]
+    assert s["repositories_without_review_or_build_validation"] == []
+    assert (s["repositories_requiring_review"], s["repositories_where_self_approval_satisfies_review"]) == (1, 1)
+
+
+@pytest.mark.parametrize("count,creator_votes,independent,requires,self_approves", [
+    (1, True, 0, False, True),
+    (2, True, 1, True, False),
+    (1, False, 1, True, False),
+    (0, True, 0, False, False),
+])
+def test_self_approval_does_not_count_as_review(count, creator_votes, independent, requires, self_approves):
+    policy = {"isEnabled": True, "isBlocking": True, "type": {"id": mod.MIN_REVIEWERS_POLICY},
+              "settings": {"minimumApproverCount": count, "creatorVoteCounts": creator_votes, "scope": [{}]}}
+    record = mod.repository_record({"id": "r1", "name": "r", "defaultBranch": "refs/heads/main"}, [policy], {})
+    assert record["min_reviewers"]["independent_approvers"] == independent
+    assert (record["requires_review"], record["self_approval_satisfies_review"]) == (requires, self_approves)
+
+
+def test_classic_release_pipelines_are_counted_on_the_release_host(tmp_path):
+    _, evidence, _, fake = run(tmp_path)
+    releases = evidence["results"]["projects"][0]["classic_releases"]
+    assert [d["name"] for d in releases["definitions"]] == ["legacy-release", "hotfix"]
+    assert releases["deployments_in_window"] == 2
+    s = evidence["summary"]
+    assert (s["classic_release_definitions"], s["classic_release_deployments_in_window"]) == (2, 2)
+    assert any(n.startswith("Classic release pipelines") for n in s["not_collected"])
+    assert any(n.startswith("Approval decisions") for n in s["not_collected"])
+    release_hosts = {h for h, path in fake.hosts if "/_apis/release/" in path}
+    assert release_hosts == {"vsrm.dev.azure.com"}
+    deployments = next(c for c in fake.calls if c[1].endswith("/release/deployments"))
+    assert deployments[2]["minStartedTime"] == evidence["results"]["window"]["start"]
+
+
+def test_missing_release_scope_names_it(tmp_path):
+    fake = FakeADO()
+    fake.routes[f"/contoso/{P}/_apis/release/definitions"] = err(
+        401, "TF400813: The user 'x' is not authorized to access this resource.", "UnauthorizedRequestException")
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 1 and status["code"] == "auth_failed"
+    assert "PAT scope needed: Release (Read)" in evidence["metadata"]["api_failures"][0]["message"]
+    assert evidence["results"]["projects"][0]["classic_releases"]["definitions"] is None
 
 
 def test_project_filter_reports_a_missing_project_as_bad_config(tmp_path, monkeypatch):
@@ -460,10 +557,12 @@ def test_classify_step(step, expected):
 def test_bare_steps_pipeline_is_one_job():
     analysis = mod.analyze_yaml("steps:\n- script: go test ./...\n")
     assert analysis["tests"] is True and analysis["deploys"] is False
-    assert analysis["steps"]["test"] == [{"stage": None, "job": None, "step": "script"}]
+    assert analysis["steps"]["test"] == [
+        {"stage": None, "job": None, "step": "script", "gating": True, "not_gating_reason": None}]
+    assert analysis["tests_gate_deploys"] is None  # nothing to gate
 
 
-def test_tests_after_deploy_are_not_before_it():
+def test_tests_in_a_parallel_job_do_not_gate():
     analysis = mod.analyze_yaml("""
 jobs:
 - deployment: Ship
@@ -473,7 +572,90 @@ jobs:
   steps: [{script: npx playwright test}]
 """)
     assert analysis["tests"] and analysis["deploys"]
-    assert analysis["tests_before_first_deploy"] is False
+    assert analysis["tests_gate_deploys"] is False
+    assert analysis["ungated_deploys"][0] == {
+        "stage": None, "job": "Ship", "step": None,
+        "reason": "not downstream of a gating test (runs before or in parallel with the tests)"}
+
+
+TWO_STAGES = """
+stages:
+- stage: Test
+  jobs:
+  - job: Unit
+    {job_extra}
+    steps:
+    - script: pytest -q
+      {test_extra}
+- stage: Deploy
+  {stage_extra}
+  jobs:
+  - deployment: Ship
+    environment: prod
+    strategy: {{runOnce: {{deploy: {{steps: [{{task: AzureWebApp@1}}]}}}}}}
+"""
+
+
+@pytest.mark.parametrize("test_extra,job_extra,stage_extra,gated,reason", [
+    ("", "", "", True, None),
+    ("", "", "dependsOn: Test", True, None),
+    ("", "", "condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))", True, None),
+    ("condition: always()", "", "", True, None),  # a failing step fails its job whatever its own condition
+    ("continueOnError: true", "", "", False, "no gating test step"),
+    ("", "continueOnError: true", "", False, "no gating test step"),
+    ("condition: eq(variables['runTests'], 'true')", "", "", False, "no gating test step"),
+    ("enabled: false", "", "", False, "no gating test step"),
+    ("", "", "dependsOn: []", False, "not downstream of a gating test (runs before or in parallel with the tests)"),
+    ("", "", "condition: always()", False, "stage condition runs it after a failure: always()"),
+    ("", "", "condition: succeededOrFailed()", False, "stage condition runs it after a failure: succeededOrFailed()"),
+    ("", "", "condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')", False,
+     "stage condition runs it after a failure: eq(variables['Build.SourceBranch'], 'refs/heads/main')"),
+])
+def test_whether_a_failing_test_stops_the_deploy(test_extra, job_extra, stage_extra, gated, reason):
+    analysis = mod.analyze_yaml(TWO_STAGES.format(test_extra=test_extra, job_extra=job_extra, stage_extra=stage_extra))
+    assert analysis["tests_gate_deploys"] is gated
+    assert {d["reason"] for d in analysis["ungated_deploys"]} == ({reason} if reason else set())
+
+
+def test_a_test_step_gates_later_steps_in_its_job_unless_they_run_after_failure():
+    analysis = mod.analyze_yaml("""
+steps:
+- script: dotnet test
+- task: AzureWebApp@1
+- task: AzureCLI@2
+  condition: succeededOrFailed()
+  inputs: {inlineScript: az deployment group create -f main.bicep}
+""")
+    assert analysis["ungated_deploys"] == [{"stage": None, "job": None, "step": "AzureCLI@2",
+                                            "reason": "step condition runs it after a failure: succeededOrFailed()"}]
+
+
+def test_jobs_gate_through_depends_on_but_not_through_a_job_that_always_runs():
+    template = """
+jobs:
+- job: Unit
+  steps: [{{script: go test ./...}}]
+- job: Report
+  dependsOn: Unit
+  {report}
+  steps: [{{script: echo done}}]
+- deployment: Ship
+  dependsOn: Report
+  environment: prod
+  strategy: {{runOnce: {{deploy: {{steps: [{{script: echo ship}}]}}}}}}
+"""
+    assert mod.analyze_yaml(template.format(report=""))["tests_gate_deploys"] is True
+    assert mod.analyze_yaml(template.format(report="condition: always()"))["tests_gate_deploys"] is False
+
+
+def test_a_test_publisher_gates_only_when_it_fails_on_failed_tests():
+    gating = mod.analyze_yaml("""
+steps:
+- task: PublishTestResults@2
+  inputs: {testResultsFiles: '**/*.xml', failTaskOnFailedTests: true}
+- task: AzureWebApp@1
+""")
+    assert gating["steps"]["test"][0]["gating"] is True and gating["tests_gate_deploys"] is True
 
 
 def test_unexpanded_extends_is_reported():

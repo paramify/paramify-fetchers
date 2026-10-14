@@ -26,6 +26,7 @@ ORG_URL_ENV = "AZURE_DEVOPS_ORG_URL"
 PAT_ENV = "AZURE_DEVOPS_PAT"
 PROJECTS_ENV = "AZURE_DEVOPS_PROJECTS"
 API_VERSION = "7.1"
+CONNECTION_DATA_API = "7.1-preview.1"
 HTTP_TIMEOUT = 60
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 MAX_RETRIES = 4
@@ -297,6 +298,16 @@ def list_projects(client: DevOpsClient, collector: DevOpsCollector) -> List[Dict
     return sorted(selected, key=lambda p: (p.get("name") or "").lower())
 
 
+def collecting_identity(client: DevOpsClient, collector: DevOpsCollector) -> Optional[Dict[str, Any]]:
+    """Who the organization authenticated; every list the fetcher reads is what this identity may see."""
+    body = collector.guard("location.connectionData", lambda: client.get("_apis/connectionData", CONNECTION_DATA_API))
+    user = (body or {}).get("authenticatedUser") if isinstance(body, dict) else None
+    if not isinstance(user, dict):
+        return None
+    account = ((user.get("properties") or {}).get("Account") or {}).get("$value")
+    return {"id": user.get("id"), "display_name": user.get("providerDisplayName"), "account": account}
+
+
 def _start() -> Path:
     from dotenv import load_dotenv  # lazy
 
@@ -327,7 +338,9 @@ def run_org(*, fetcher: str, logger: logging.Logger, collect: Collect, session: 
 
     results: Dict[str, Any] = {}
     summary: Dict[str, Any] = {}
+    identity = None
     if client is not None:
+        identity = collecting_identity(client, collector)
         try:
             results, summary = collect(client, collector)
         except Exception as exc:  # noqa: BLE001 - an unexpected answer must still leave evidence and a reason
@@ -338,6 +351,7 @@ def run_org(*, fetcher: str, logger: logging.Logger, collect: Collect, session: 
         "metadata": {
             "organization": client.org if client else None,
             "organization_url": client.base if client else None,
+            "collecting_identity": identity,
             "projects_filter": requested_projects() or None,
             "datetime": current_timestamp(),
             "partial_failure": not collector.ok,

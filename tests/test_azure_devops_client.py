@@ -223,6 +223,11 @@ def test_list_projects_narrows_and_reports_a_missing_name(monkeypatch):
     assert collector.failures[0]["operation"] == "AZURE_DEVOPS_PROJECTS lookup"
 
 
+CONNECTION = "dev.azure.com/contoso/_apis/connectionData"
+IDENTITY = {"authenticatedUser": {"id": "u1", "providerDisplayName": "Evidence Reader",
+                                  "properties": {"Account": {"$type": "System.String", "$value": "reader@example.com"}}}}
+
+
 def run(monkeypatch, tmp_path, collect, routes=None, env=None):
     for key in ("AZURE_DEVOPS_ORG_URL", "AZURE_DEVOPS_PAT", "AZURE_DEVOPS_PROJECTS"):
         monkeypatch.delenv(key, raising=False)
@@ -230,7 +235,8 @@ def run(monkeypatch, tmp_path, collect, routes=None, env=None):
     monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
     for key, value in (env or {"AZURE_DEVOPS_ORG_URL": ORG, "AZURE_DEVOPS_PAT": "pat"}).items():
         monkeypatch.setenv(key, value)
-    code = dr.run_org(fetcher="azure_devops_test", logger=dr._LOGGER, collect=collect, session=FakeSession(routes or {}))
+    session = FakeSession({CONNECTION: Resp(body=IDENTITY), **(routes or {})})
+    code = dr.run_org(fetcher="azure_devops_test", logger=dr._LOGGER, collect=collect, session=session)
     files = sorted(tmp_path.glob("azure_devops_test_*.json"))
     status = tmp_path / "status.json"
     return code, json.loads(files[0].read_text()), json.loads(status.read_text()) if status.exists() else None
@@ -240,7 +246,24 @@ def test_run_org_writes_evidence_and_exits_zero(monkeypatch, tmp_path):
     code, evidence, status = run(monkeypatch, tmp_path, lambda c, col: ({"x": 1}, {"n": 1}))
     assert code == 0 and status is None
     assert evidence["metadata"]["organization"] == "contoso"
+    assert evidence["metadata"]["collecting_identity"] == {
+        "id": "u1", "display_name": "Evidence Reader", "account": "reader@example.com"}
     assert evidence["results"] == {"x": 1} and evidence["summary"] == {"n": 1}
+
+
+def test_run_org_asks_who_it_is_collecting_as(monkeypatch, tmp_path):
+    session = FakeSession({CONNECTION: Resp(body=IDENTITY)})
+    client = dr.DevOpsClient(ORG, "pat", session)
+    assert dr.collecting_identity(client, dr.DevOpsCollector(dr._LOGGER))["id"] == "u1"
+    assert session.calls[0]["params"] == {"api-version": "7.1-preview.1"}
+
+
+def test_an_unreadable_identity_is_a_failure_not_a_guess(monkeypatch, tmp_path):
+    routes = {CONNECTION: Resp(401, {"message": "TF400813: The user is not authorized to access this resource."})}
+    code, evidence, status = run(monkeypatch, tmp_path, lambda c, col: ({}, {}), routes)
+    assert code == 1 and status["code"] == "auth_failed"
+    assert evidence["metadata"]["collecting_identity"] is None
+    assert evidence["metadata"]["api_failures"][0]["operation"] == "location.connectionData"
 
 
 def test_run_org_without_a_pat_still_writes_evidence_and_reports_bad_config(monkeypatch, tmp_path):

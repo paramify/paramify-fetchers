@@ -29,26 +29,38 @@ schemas and the `paramify` CLI — not the internal code.
   delivered events newer than itself. Stream tokens and keys are never written.
 - **`azure_devops_pipelines`** (`EVD-AZURE-DEVOPS-PIPELINES`): the first Azure DevOps
   fetcher, one target per organization with a PAT (`AZURE_DEVOPS_PAT`). Each YAML
-  pipeline's final YAML comes from a preview run, so templates are expanded and
-  nothing is queued. If the preview is refused, the file is read from the default
-  branch instead. Steps are sorted into test, security scan, IaC validation,
-  infrastructure and application deploy, signing, signature verification and SBOM,
-  and `tests_before_first_deploy` reports whether tests come before the first
-  deploy. The fetcher also collects:
+  pipeline's final YAML comes from a preview run pinned to the default branch's
+  head commit, so templates are expanded and nothing is queued. If the preview is
+  refused, the file is read at that commit instead. `yaml_commit` and
+  `yaml_sha256` let an assessor fetch the same YAML and re-check it. Steps are
+  sorted into test, security scan, IaC validation, infrastructure and application
+  deploy, signing, signature verification and SBOM. `tests_gate_deploys` reports
+  whether a failing test would stop every deploy, following `continueOnError`,
+  conditions such as `always()` and `succeededOrFailed()`, and stage and job
+  `dependsOn`; `ungated_deploys` names the rest and why. The fetcher also collects:
   - completed runs and published test runs over the lookback; test runs are queried
-    in 7-day slices, the most the API allows;
+    in 7-day slices, the most the API allows, and `not_passed_tests` comes from the
+    totals, so triaging failures doesn't change it;
   - each environment's approvals, branch control, required-template and
-    artifact-evaluation checks;
+    artifact-evaluation checks, as configured at collection time;
   - every deployment in the window, joined to its run's branch, commit and test
     results;
-  - each repository's default-branch policies (minimum reviewers, build validation);
-  - the project's pipeline settings.
+  - each repository's default-branch policies. `requires_review` doesn't count the
+    author's own vote, and `self_approval_satisfies_review` flags policies the
+    author can satisfy alone;
+  - the project's pipeline settings;
+  - a count of classic release pipelines and their deployments in the window.
 
-  A failed call names the PAT scope it needs. Environments need Environment (Read &
-  manage), because Azure DevOps has no read-only scope for them. The shared client
+  `summary.not_collected` lists what is out of scope: approval decisions, policy
+  bypass permissions, and the content of classic pipelines. Signing steps are
+  framed as supporting evidence for KSI-SVC-VRI. A failed call names the PAT scope
+  it needs. Environments need Environment (Read & manage), because Azure DevOps has
+  no read-only scope for them. The shared client
   (`fetchers/azure/_shared/devops_rest.py`) handles PAT auth and continuation
-  paging. It sends the PAT only to the host it paged from and never follows a
-  redirect, and it keeps the TF/VS error code on every failure.
+  paging, and records the identity it collected as (`metadata.collecting_identity`,
+  from `_apis/connectionData`) for every Azure DevOps fetcher. It sends the PAT only
+  to the host it paged from and never follows a redirect, and it keeps the TF/VS
+  error code on every failure.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
