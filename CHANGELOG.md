@@ -761,6 +761,20 @@ schemas and the `paramify` CLI — not the internal code.
   ranges joined with `", "`) after `CIDRs`. Existing keys and their order are
   unchanged.
 
+- **`aws_iam_mfa_status` reports FIDO security keys as `fido`** (0.1.0 →
+  0.2.0). Every device whose serial is an ARN was typed `virtual`, so a FIDO/U2F
+  security key (`arn:aws:iam::<account>:u2f/...`), the phishing-resistant
+  factor, read as an authenticator app. `Type` is now `fido` for a `:u2f/`
+  serial, `virtual` for a `:mfa/` serial, `hardware` for a bare serial (a
+  hardware TOTP token) and `unknown` for any other shape.
+
+- **`aws_iam_policies` lists permissions-boundary use apart from attachments**
+  (0.2.0 → 0.3.0). `AttachedUsers` and `AttachedRoles` also named the users and
+  roles that use the policy only as their permissions boundary, which grants
+  nothing. They now hold attachments only, and two new keys after
+  `AttachedRoles`, `BoundaryUsers` and `BoundaryRoles`, name the users and roles
+  that use it as their boundary. Existing keys and their order are unchanged.
+
 - **`aws_auto_scaling_high_availability` lists each group's instances.** A
   query error left `Instances` empty for every Auto Scaling group.
 
