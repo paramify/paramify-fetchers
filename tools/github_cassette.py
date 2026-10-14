@@ -171,6 +171,8 @@ def record(fetcher: str, out: Path) -> int:
     out.write_text(json.dumps({"fetcher": fetcher, "org": redact(os.environ.get("GITHUB_ORG", "")),
                                "env": {k: v for k, v in os.environ.items()
                                        if k.startswith(("GITHUB_", "PARAMIFY_", "FEDRAMP_")) and k != "GITHUB_TOKEN"},
+                               # Some endpoints answer GitHub Apps only; replay must present the same kind of token.
+                               "token_kind": "app" if os.environ.get("GITHUB_TOKEN", "").startswith("ghs_") else "personal",
                                "exit_code": code, "entries": entries}, indent=1, sort_keys=True))
     print(f"{fetcher}: {len(entries)} responses -> {out} (exit {code})")
     return code

@@ -298,3 +298,25 @@ def test_deployment_limits_at_their_lowest(env, code_name):
     cassette["env"].update(env)
     sweep.run_once("deployment_controls", cassette)
     assert sweep.LAST_STATUS.get("code") == code_name
+
+
+# Recorded with a GitHub App installation token (read-only), not a personal one.
+
+def replay_app(fetcher):
+    cassette = json.loads((CASSETTES / "app" / f"{fetcher}.json").read_text())
+    code, evidence, _ = sweep.run_once(fetcher, cassette, None)
+    return code, evidence
+
+
+def test_fine_grained_tokens_are_listed_to_an_app():
+    code, ev = replay_app("non_user_credentials")
+    assert code == 0 and ev["metadata"]["fine_grained_tokens_readable"] is True
+    assert ev["summary"]["fine_grained_tokens"] == 2 and ev["summary"]["fine_grained_tokens_without_expiry"] == 0
+    assert all(t["token_expires_at"] and t["token_last_used_at"] for t in ev["fine_grained_tokens"])
+
+
+def test_an_app_cannot_read_ruleset_bypass_lists_and_says_so():
+    # GitHub omits bypass_actors from a ruleset read with an App token holding Administration: read.
+    code, ev = replay_app("branch_protection")
+    assert code == 0 and ev["summary"]["with_always_bypass"] == []
+    assert "fetcher-test-scn" in ev["summary"]["bypass_actors_unreadable"]

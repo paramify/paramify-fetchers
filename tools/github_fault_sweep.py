@@ -61,7 +61,7 @@ def run_once(fetcher: str, cassette: dict, fault=None) -> Tuple[int, dict, list]
     gc.requests.Session = lambda: replay
     gc.time.sleep = lambda s: None
     with tempfile.TemporaryDirectory() as tmp:
-        os.environ.update({**cassette["env"], "GITHUB_TOKEN": "github_pat_replay", "EVIDENCE_DIR": f"{tmp}/evidence",
+        os.environ.update({**cassette["env"], "GITHUB_TOKEN": "ghs_replay" if cassette.get("token_kind") == "app" else "github_pat_replay", "EVIDENCE_DIR": f"{tmp}/evidence",
                            "FETCHER_STATUS_FILE": f"{tmp}/status.json", "LOG_LEVEL": "CRITICAL"})
         try:
             code = gc.run(module.NAME, module.collect, getattr(module, "CONFIG", None),

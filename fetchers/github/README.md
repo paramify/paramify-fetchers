@@ -85,6 +85,12 @@ Two settings are visible only to an **organization owner**: the two-factor
 requirement and the list of members without two-factor. Collected by a
 non-owner they are `null`, never `false`.
 
+A **GitHub App installation token** holding the same read-only permissions
+produced the same evidence as a personal token for all fifteen, with two
+differences, both measured: it can list the organization's fine-grained
+tokens, and GitHub does not show it who may bypass a ruleset, so those
+rulesets appear in `bypass_actors_unreadable` rather than as bypass-free.
+
 ## Wiring into a manifest
 
 See [`examples/github_run.yaml`](../../examples/github_run.yaml): one target
