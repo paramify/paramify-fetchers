@@ -1,6 +1,6 @@
 name: aws_network_firewall_rules
-version: 0.1.0
-description: Lists AWS Network Firewall firewalls with their policy, VPC, default actions, and the stateless/stateful rule groups (and rule counts) each policy references.
+version: 0.2.0
+description: Lists AWS Network Firewall firewalls with their policy, VPC, default actions, and the stateless/stateful rule groups each policy references, with rule counts for stateful groups defined as rules, Suricata rule strings or domain lists.
 category: aws
 
 supports_targets: true
