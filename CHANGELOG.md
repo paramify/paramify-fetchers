@@ -739,6 +739,29 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`gcp_cloud_sql_encryption_status` reads point-in-time recovery per engine**
+  (0.1.0 → 0.1.1). The fetcher took the first non-null of
+  `pointInTimeRecoveryEnabled` and `binaryLogEnabled`, so a MySQL instance with
+  the binary log on (MySQL's PITR switch) and the generic toggle at `false`
+  read as having no PITR. MySQL now reads `binaryLogEnabled` and PostgreSQL /
+  SQL Server read `pointInTimeRecoveryEnabled`, the same rule
+  `gcp_cloud_sql_backup_configuration` uses. Each record adds the two raw flags
+  (`pitr_toggle_enabled`, `binary_log_enabled`) and the summary adds
+  `point_in_time_recovery_instances`.
+- **`gcp_compute_instance_configuration` counts OS Login 2FA only where OS
+  Login is on** (0.1.0 → 0.1.1). `enable-oslogin-2fa` does nothing without
+  `enable-oslogin`, but `os_login_2fa_enabled` (per instance and per project)
+  and the `os_login_2fa_instances` / `project_os_login_2fa_enabled` summary
+  fields reported the flag alone. They now report effective 2FA (OS Login on
+  and the 2FA flag on, each resolved instance-first). The raw flag is kept as
+  `os_login_2fa_configured`.
+- **`gcp_gke_cluster_configuration` recognises Binary Authorization set by
+  evaluation mode** (0.1.0 → 0.1.1). `binary_authorization_enabled` read only
+  the deprecated `enabled` flag, so a cluster enforcing with
+  `PROJECT_SINGLETON_POLICY_ENFORCE` read as off and was left out of
+  `binary_authorization_clusters`. Any mode other than `DISABLED` now counts as
+  enabled. The legacy flag decides only when no mode is set, since the API
+  ignores it otherwise. It is kept as `binary_authorization_legacy_enabled`.
 - **Every uploader reads "already exists" / "already connected" the same way.**
   The API refuses a repeat evidence-set create or a repeat CONNECT instead of
   ignoring it, and each uploader held its own test for that refusal: the scripts
