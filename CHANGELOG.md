@@ -739,6 +739,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Checkov evidence no longer overstates pass rates** (`checkov_terraform` and
+  `checkov_kubernetes` 0.1.0 → 0.2.0). `skip_resources` deleted failed checks on
+  matching resources, so they left `total_checks` and raised
+  `aggregate_percentage`; they are now moved to `skipped_checks` (marked
+  `SKIPPED`, with the matching pattern in `suppress_comment`) and counted in
+  `summary.skipped_by_resource_filter`. An empty pattern from a trailing comma
+  no longer matches every resource. The 17 checks in
+  `skip-checks-k8s.default.txt`, among them `CKV_K8S_20` and `CKV_K8S_31`, were
+  always skipped and left no trace in the evidence. The effective skip list is
+  now recorded in `metadata.skip_checks`, and the new `use_default_skip_checks`
+  knob (default `true`, so results are unchanged) set to `false` lets
+  `skip_checks` replace the defaults. When the requested branch could not be
+  cloned, the scan fell back to the default branch but `metadata.branch` still
+  named the requested one. `metadata.branch` now names the branch actually
+  scanned, with `requested_branch` and `branch_fallback` beside it.
 - **Every uploader reads "already exists" / "already connected" the same way.**
   The API refuses a repeat evidence-set create or a repeat CONNECT instead of
   ignoring it, and each uploader held its own test for that refusal: the scripts
