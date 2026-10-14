@@ -74,6 +74,9 @@ evidence_set:
     only. A category is captured when an exporting setting enables it by name, enables
     a group it belongs to, or enables allLogs; uncaptured_log_categories and
     captures_all_audit_categories follow from that. Metrics-only resources keep
-    has_enabled_log_setting null and are outside the coverage denominator. Run time:
+    has_enabled_log_setting null and are outside the coverage denominator. A SQL
+    server's master database is listed and counted like any database: its setting is
+    where server-level auditing (SQLSecurityAuditEvents, DevOpsOperationsAudit) is
+    exported, while the server resource itself has metrics only. Run time:
     about 14 resources per second with 4 workers (measured on ~1,000 resources), so
     roughly 25 minutes per 20,000; the timeout is 3600 seconds.
