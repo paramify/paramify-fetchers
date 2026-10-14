@@ -65,11 +65,63 @@ def test_open_issue_with_nothing_has_no_disposition(vc):
     assert vc._final_disposition(_issue("OPEN")) is None
 
 
+def test_open_issue_with_milestone_is_partially_mitigated(vc):
+    issue = _issue("OPEN", milestones=[{"description": "patch"}])
+    assert vc._final_disposition(issue) == "Partially Mitigated"
+
+
+@pytest.mark.parametrize("issue", [_issue("UNKNOWN"), _issue("IN_PROGRESS"), {}])
+def test_only_closed_status_is_remediated(vc, issue):
+    # Remediated is for CLOSED only, not for every status that is not OPEN.
+    assert vc._final_disposition(issue) is None
+
+
+@pytest.mark.parametrize(
+    "deviation",
+    [
+        _deviation("FALSE_POSITIVE", status="PENDING"),
+        _deviation("FALSE_POSITIVE", status="REJECTED"),
+        _deviation("RISK_ADJUSTMENT", status="PENDING"),
+        _deviation("RISK_ADJUSTMENT", status="REJECTED"),
+    ],
+)
+def test_unaccepted_deviation_on_open_issue_has_no_disposition(vc, deviation):
+    assert vc._final_disposition(_issue("OPEN", deviations=[deviation])) is None
+
+
+def test_unaccepted_false_positive_on_closed_issue_is_remediated(vc):
+    issue = _issue("CLOSED", deviations=[_deviation("FALSE_POSITIVE", status="PENDING")])
+    assert vc._final_disposition(issue) == "Remediated"
+
+
 def test_detail_counts_files_closed_issue_under_remediated(vc):
     details = [{"finalDisposition": vc._final_disposition(_issue("CLOSED"))}]
     dispositions = vc._detail_counts(details)["dispositions"]
     assert dispositions["remediated"] == 1
     assert dispositions["fullyMitigated"] == 0
+
+
+def test_detail_counts_over_mixed_dispositions(vc):
+    issues = [
+        _issue("CLOSED"),
+        _issue("CLOSED"),
+        _issue("CLOSED", deviations=[_deviation("FALSE_POSITIVE")]),
+        _issue("OPEN", deviations=[_deviation("RISK_ADJUSTMENT")]),
+        _issue("OPEN"),
+    ]
+    details = []
+    for issue in issues:
+        disposition = vc._final_disposition(issue)
+        details.append({"finalDisposition": disposition} if disposition else {})
+    dispositions = vc._detail_counts(details)["dispositions"]
+    assert dispositions == {
+        "fullyMitigated": 0,
+        "remediated": 2,
+        "partiallyMitigated": 1,
+        "falsePositive": 1,
+        "inProgress": 1,
+    }
+    assert sum(dispositions.values()) == len(details)
 
 
 @pytest.mark.parametrize(
@@ -89,3 +141,12 @@ def test_detail_counts_files_closed_issue_under_remediated(vc):
 )
 def test_disposition_is_within_schema_enum(vc, issue):
     assert vc._final_disposition(issue) in SCHEMA_DISPOSITIONS | {None}
+
+
+def test_detail_counts_keeps_fully_mitigated_separate(vc):
+    # Nothing emits Fully Mitigated today, but the counts must not merge it
+    # into remediated if a future mapping does.
+    details = [{"finalDisposition": "Fully Mitigated"}, {"finalDisposition": "Remediated"}]
+    dispositions = vc._detail_counts(details)["dispositions"]
+    assert dispositions["fullyMitigated"] == 1
+    assert dispositions["remediated"] == 1

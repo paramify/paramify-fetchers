@@ -739,6 +739,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Paramify VER fetchers report closed issues as `Remediated`.** A closed
+  issue is no longer detected, which FedRAMP defines as a remediated
+  vulnerability; "Fully Mitigated" means still detected at negligible impact.
+  Closed issues were reported as `finalDisposition: "Fully Mitigated"` and now
+  report `"Remediated"`. An accepted `FALSE_POSITIVE` deviation still takes
+  precedence. The `_summary` dispositions in the Vulnerability Detail Report
+  and Historical VER Activity gain a `remediated` count; `fullyMitigated` is
+  kept for compatibility and is 0, since nothing maps to it yet.
 - **Every uploader reads "already exists" / "already connected" the same way.**
   The API refuses a repeat evidence-set create or a repeat CONNECT instead of
   ignoring it, and each uploader held its own test for that refusal: the scripts
