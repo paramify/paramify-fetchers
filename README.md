@@ -38,6 +38,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 <a href="fetchers/betterstack/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/betterstack-dark.svg"><img src="fetchers/logos/betterstack.svg" alt="Better Stack" width="56" height="56" style="margin: 20px;"></picture></a>
 <a href="fetchers/jira/"><img src="fetchers/logos/jira.svg" alt="Jira" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/wiz/"><img src="fetchers/logos/wiz.jpeg" alt="Wiz" width="56" height="56" style="margin: 20px;"></a>
+<a href="fetchers/fedramp_marketplace/"><img src="fetchers/logos/fedramp.png" alt="FedRAMP Marketplace" width="56" height="56" style="margin: 20px;"></a>
 
 </div>
 
@@ -57,6 +58,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | **Kubernetes** | 3 | EKS pod inventory, microservice segmentation, `kubectl` security posture |
 | **Rippling** | 3 | Employee roster, current employees, managed devices |
 | **Paramify** | 3 | FedRAMP 20x vulnerability reporting — accepted vulnerability info, vulnerability detail, and historical VER activity |
+| **FedRAMP Marketplace** | 2 | Third-party vendor FedRAMP certification status — listed or delisted, certified / in process / ready / in remediation, certification class (A–D) and impact level, latest status change, and the marketplace listing link — for a configured vendor list or the FedRAMP systems recorded in your Paramify workspace |
 | **Checkov** | 2 | IaC scans over cloned Terraform / Kubernetes source |
 | **ServiceNow** | 2 | Customer service cases and ITSM change records |
 | **Better Stack** | 1 | Public status page components, their reported uptime and status history, and published incident reports |

@@ -12,6 +12,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **FedRAMP Marketplace category: third-party vendor certification status.**
+  Two credential-free-for-FedRAMP fetchers read FedRAMP's published
+  marketplace data (data.json, the status changelog and the 20x CSO-PKG
+  overviews) and report, per vendor package, whether it is certified, in
+  process, ready, in remediation, delisted or unknown, its certification class
+  (A–D, with where the class came from), impact level, latest status change and
+  marketplace link. `fedramp_marketplace_vendor_certification_status` checks a
+  configured `Vendor Name=PACKAGE_ID` list;
+  `fedramp_marketplace_workspace_vendor_certification_status` checks the
+  `COM_FEDRAMP_SYSTEM` elements in the Paramify workspace, matching them to
+  listings by name. Both map to KSI-SCR-MIT and KSI-SCR-MON and write one
+  combined file or one file per vendor (`output_mode`). Six validators ship
+  with them: certified, certified-or-in-process, not delisted, not in
+  remediation, package ID resolves, and feed fresh.
+
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default

@@ -1,0 +1,77 @@
+name: fedramp_marketplace_workspace_vendor_certification_status
+version: 0.1.0
+description: >-
+  Checks the FedRAMP Marketplace certification status of every FedRAMP system
+  recorded in the Paramify workspace (elements of subtype COM_FEDRAMP_SYSTEM
+  by default): listed or delisted, certified / in process / ready / in
+  remediation, certification class and impact level, the latest status
+  change, and the marketplace listing link.
+
+category: fedramp_marketplace
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: fedramp_marketplace_workspace_vendor_certification_status.json
+
+secrets:
+  - name: api_token
+    env: PARAMIFY_API_TOKEN
+    description: Paramify REST API token with read access to the workspace's elements (GET /elements).
+
+config_schema:
+  api_base_url:
+    type: string
+    default: https://app.paramify.com/api/v0
+    env: PARAMIFY_API_BASE_URL
+    description: Paramify REST API base URL.
+  element_subtypes:
+    type: string
+    default: COM_FEDRAMP_SYSTEM
+    env: FEDRAMP_ELEMENT_SUBTYPES
+    description: >-
+      Comma-separated element subtypes to check. Defaults to COM_FEDRAMP_SYSTEM;
+      add COM_SAAS or COM_IAAS to also check those elements against the
+      marketplace (any that FedRAMP does not list are reported not_listed).
+  package_id_overrides:
+    type: string
+    required: false
+    env: FEDRAMP_PACKAGE_ID_OVERRIDES
+    description: >-
+      Comma-separated `Element Name=PACKAGE_ID` pairs that pin an element to a
+      package when its name does not match a listing on its own.
+
+ksis:
+  - KSI-SCR-MIT
+  - KSI-SCR-MON
+
+evidence_set:
+  reference_id: EVD-FEDRAMP-WORKSPACE-VENDOR-CERTIFICATION
+  name: FedRAMP Workspace Vendor Certification Status
+  instructions: >-
+    Script: fetcher.py. GET /elements from the Paramify REST API, keeping the
+    configured subtypes (COM_FEDRAMP_SYSTEM by default); elements sharing a
+    name are one vendor. Then three unauthenticated GETs of FedRAMP's
+    published marketplace data (github.com/FedRAMP/marketplace-fedramp-gov-data):
+    data.json, fedramp-status-changelog.json and fedramp-frc-cso-pkg.json.
+
+    Each element is matched to a package ID, recorded in match_method: a
+    configured override (config_override), else a package ID written in the
+    element name (id_in_name), else its name against the listings (name). A
+    name with a trailing " - <qualifier>" is retried without it. When several
+    listings match, a certified one is preferred over in process, then ready
+    (name_preferred_state), then one whose impact level the element name
+    mentions (name_impact_level). Anything still ambiguous or unmatched is
+    reported with package_id null, certification_state not_listed and the
+    candidates in suggested_package_ids; it fails the certification and
+    package-ID checks until it is renamed or given an override.
+
+    certification_state, certification_class and class_source,
+    package_id_resolves, summary and feed are as in
+    EVD-FEDRAMP-VENDOR-CERTIFICATION: the changelog wins when it disagrees
+    with data.json, class comes from the CSO-PKG, else the changelog, else is
+    derived from impact level (LI-SaaS A, Low B, Moderate C, High D), and
+    FedRAMP publishes no CAP status.

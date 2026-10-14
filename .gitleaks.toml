@@ -106,3 +106,22 @@ condition = "AND"
 paths = ['''fetchers/azure/entra_authentication_policy/fetcher\.py$''']
 regexes = ['''(?m)^PASSWORD_RULE_TEMPLATE_ID = "5cf42378-d67d-4f36-ba46-e8b86229381d"\s*$''']
 regexTarget = "line"
+
+# --- False positive: synthetic Azure keys in the DevOps audit-stream tests --- #
+# GRID_KEY and LAW_KEY in tests/test_azure_devops_audit_streams.py are fixture
+# values for an Event Grid key and a Log Analytics shared key. They are base64
+# of the plain strings "secret-key-do-not-write" and
+# "law-shared-key-do-not-write", chosen so the test can assert the fetcher never
+# writes a key into evidence. generic-api-key fires on the `_KEY` names plus
+# base64 entropy (4.56 / 4.44), not on a real credential.
+#
+# Scoped to that test path and the exact two literals, so any other value
+# assigned to these names is still reported. `(?m)` is required for the reason
+# documented on the Service Management API entry.
+[[allowlists]]
+description = "Base64 'do-not-write' fixture keys in the Azure DevOps audit-stream tests"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''tests/test_azure_devops_audit_streams\.py$''']
+regexes = ['''(?m)^(?:GRID_KEY = "c2VjcmV0LWtleS1kby1ub3Qtd3JpdGU="|LAW_KEY = "bGF3LXNoYXJlZC1rZXktZG8tbm90LXdyaXRl")\s*$''']
+regexTarget = "line"
