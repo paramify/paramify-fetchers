@@ -15,8 +15,9 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_devops_audit_streams`** (`EVD-AZURE-DEVOPS-AUDIT-STREAMS`): whether an
   Azure DevOps organization exports its audit log, which it otherwise keeps for
   90 days. Records:
-  - whether auditing is on, from the Log Audit Events policy, or from the audit
-    log when the policy can't be read;
+  - whether auditing is on, from the Log Audit Events policy when the token can
+    read it, otherwise from the audit log (a scoped PAT gets 401 on the policy,
+    and the run notes it);
   - every audit stream's target, status, reason and last update;
   - the newest audit event, not counting the fetcher's own reads of the log.
 
