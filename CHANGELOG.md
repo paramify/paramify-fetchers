@@ -12,6 +12,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_devops_audit_streams`** (`EVD-AZURE-DEVOPS-AUDIT-STREAMS`): whether an
+  Azure DevOps organization exports its audit log, which it otherwise keeps for
+  90 days. Records:
+  - whether auditing is on, from the Log Audit Events policy, or from the audit
+    log when the policy can't be read;
+  - every audit stream's target, status, reason and last update;
+  - the newest audit event, not counting the fetcher's own reads of the log.
+
+  For an Azure Monitor Logs stream it counts this organization's
+  `AzureDevOpsAuditing` rows in the workspace over the window, and `missing_rows`
+  flags an enabled stream that delivered nothing while the organization was
+  active. The organization is matched on organization-level events and rows
+  only: project-level rows carry the project's id, so they are counted apart
+  rather than as other organizations, and a stream is only expected to have
+  delivered events newer than itself. Stream tokens and keys are never written.
 - **`azure_devops_pipelines`** (`EVD-AZURE-DEVOPS-PIPELINES`): the first Azure DevOps
   fetcher, one target per organization with a PAT (`AZURE_DEVOPS_PAT`). Each YAML
   pipeline's final YAML comes from a preview run, so templates are expanded and
