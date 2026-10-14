@@ -40,7 +40,7 @@
     "name": "Fetcher Tester",
     "owned_private_repos": 0,
     "plan": {
-     "filled_seats": 2,
+     "filled_seats": 1,
      "name": "free",
      "private_repos": 10000,
      "seats": 0,
@@ -58,7 +58,7 @@
     "total_private_repos": 0,
     "two_factor_requirement_enabled": false,
     "type": "Organization",
-    "updated_at": "2026-10-04T02:54:38Z",
+    "updated_at": "2026-10-14T04:32:44Z",
     "web_commit_signoff_required": false
    },
    "headers": {
@@ -607,6 +607,16 @@
            "type": "organization"
           },
           "type": "Team"
+         },
+         {
+          "reviewer": {
+           "id": 342642459,
+           "login": "second-reviewer",
+           "site_admin": false,
+           "type": "User",
+           "user_view_type": "public"
+          },
+          "type": "User"
          }
         ],
         "type": "required_reviewers"
@@ -1142,7 +1152,7 @@
     },
     "private": false,
     "pull_request_creation_policy": "all",
-    "pushed_at": "2026-10-04T03:50:58Z",
+    "pushed_at": "2026-10-14T18:20:58Z",
     "security_and_analysis": {
      "dependabot_security_updates": {
       "status": "disabled"
@@ -1166,7 +1176,7 @@
     "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-protected.git",
     "stargazers_count": 0,
     "subscribers_count": 0,
-    "updated_at": "2026-10-04T05:56:51Z",
+    "updated_at": "2026-10-14T18:21:04Z",
     "use_squash_pr_title_as_default": false,
     "visibility": "public",
     "watchers": 0,
@@ -1767,14 +1777,8 @@
  },
  "env": {
   "GITHUB_CHECK_KEV": "false",
-  "GITHUB_DEPLOYMENT_DAYS_BACK": "366",
   "GITHUB_ORG": "Fetcher-Tester",
-  "GITHUB_REPOSITORIES": "fetcher-test-actions,fetcher-test-deploy,fetcher-test-disabled-rules,fetcher-test-evaluate-rules,fetcher-test-globs,fetcher-test-leaked-secret,fetcher-test-protected,fetcher-test-releases,fetcher-test-scanning-off,fetcher-test-scn,fetcher-test-unprotected,fetcher-test-vulnerable",
-  "GITHUB_SCN_DAYS_BACK": "366",
-  "GITHUB_SCN_REQUIRE_COMPLETE": "false",
-  "GITHUB_SCN_STATE": "all",
-  "GITHUB_SCN_STRICT": "false",
-  "PARAMIFY_CERT_PACKAGE_URI": "https://example.com/cert-package"
+  "GITHUB_REPOSITORIES": "fetcher-test-actions,fetcher-test-deploy,fetcher-test-disabled-rules,fetcher-test-evaluate-rules,fetcher-test-globs,fetcher-test-leaked-secret,fetcher-test-protected,fetcher-test-releases,fetcher-test-scanning-off,fetcher-test-scn,fetcher-test-unprotected,fetcher-test-vulnerable"
  },
  "exit_code": 0,
  "fetcher": "deployment_controls",

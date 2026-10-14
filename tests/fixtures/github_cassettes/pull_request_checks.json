@@ -13,7 +13,7 @@
     "dependabot_security_updates_enabled_for_new_repositories": false,
     "dependency_graph_enabled_for_new_repositories": false,
     "deploy_keys_enabled_for_repositories": true,
-    "disk_usage": 15725,
+    "disk_usage": 15736,
     "display_commenter_full_name_setting_enabled": false,
     "followers": 0,
     "following": 0,
@@ -40,7 +40,7 @@
     "name": "Fetcher Tester",
     "owned_private_repos": 0,
     "plan": {
-     "filled_seats": 2,
+     "filled_seats": 1,
      "name": "free",
      "private_repos": 10000,
      "seats": 0,
@@ -48,7 +48,7 @@
     },
     "private_gists": 0,
     "public_gists": 0,
-    "public_repos": 9,
+    "public_repos": 13,
     "readers_can_create_discussions": true,
     "secret_scanning_enabled_for_new_repositories": false,
     "secret_scanning_push_protection_custom_link": null,
@@ -58,12 +58,252 @@
     "total_private_repos": 0,
     "two_factor_requirement_enabled": false,
     "type": "Organization",
-    "updated_at": "2026-10-04T02:54:38Z",
+    "updated_at": "2026-10-14T04:32:44Z",
     "web_commit_signoff_required": false
    },
    "headers": {
     "Content-Type": "application/json; charset=utf-8",
     "X-Accepted-GitHub-Permissions": "allows_permissionless_access=true"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-actions": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-09T18:18:48Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-actions",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-actions.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1412278731,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-actions",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-09T18:18:56Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 3,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-actions.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-09T18:18:58Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-actions/branches/main/protection": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest/branches/branch-protection#get-branch-protection",
+    "message": "Branch not protected",
+    "status": "404"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "Not Found",
+   "status": 404
+  },
+  "/repos/Fetcher-Tester/fetcher-test-actions/rules/branches/main?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-deploy": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-09T18:36:19Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-deploy",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-deploy.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1412299268,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-deploy",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-09T18:36:26Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 1,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-deploy.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-09T18:36:53Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-deploy/branches/main/protection": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest/branches/branch-protection#get-branch-protection",
+    "message": "Branch not protected",
+    "status": "404"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "Not Found",
+   "status": 404
+  },
+  "/repos/Fetcher-Tester/fetcher-test-deploy/rules/branches/main?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
    },
    "reason": "OK",
    "status": 200
@@ -627,7 +867,7 @@
     },
     "private": false,
     "pull_request_creation_policy": "all",
-    "pushed_at": "2026-10-04T03:50:58Z",
+    "pushed_at": "2026-10-14T18:20:58Z",
     "security_and_analysis": {
      "dependabot_security_updates": {
       "status": "disabled"
@@ -651,7 +891,7 @@
     "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-protected.git",
     "stargazers_count": 0,
     "subscribers_count": 0,
-    "updated_at": "2026-10-04T05:56:51Z",
+    "updated_at": "2026-10-14T18:21:04Z",
     "use_squash_pr_title_as_default": false,
     "visibility": "public",
     "watchers": 0,
@@ -726,6 +966,126 @@
      "type": "non_fast_forward"
     }
    ],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-releases": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-09T18:30:22Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-releases",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-releases.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1412292511,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-releases",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-09T18:31:52Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 1,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-releases.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-09T18:32:42Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-releases/branches/main/protection": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest/branches/branch-protection#get-branch-protection",
+    "message": "Branch not protected",
+    "status": "404"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "Not Found",
+   "status": 404
+  },
+  "/repos/Fetcher-Tester/fetcher-test-releases/rules/branches/main?per_page=100": {
+   "body": [],
    "headers": {
     "Content-Type": "application/json; charset=utf-8",
     "X-Accepted-GitHub-Permissions": "metadata=read"
@@ -846,6 +1206,151 @@
   },
   "/repos/Fetcher-Tester/fetcher-test-scanning-off/rules/branches/main?per_page=100": {
    "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scn": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-09T18:24:28Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-scn",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-scn.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1412285363,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-scn",
+    "network_count": 0,
+    "open_issues": 1,
+    "open_issues_count": 1,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-09T18:45:31Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 6,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-scn.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-09T18:45:33Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scn/branches/main/protection": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest/branches/branch-protection#get-branch-protection",
+    "message": "Branch not protected",
+    "status": "404"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "Not Found",
+   "status": 404
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scn/rules/branches/main?per_page=100": {
+   "body": [
+    {
+     "parameters": {
+      "allowed_merge_methods": [
+       "merge",
+       "squash",
+       "rebase"
+      ],
+      "dismiss_stale_reviews_on_push": false,
+      "dismissal_restriction": {
+       "allowed_actors": [],
+       "enabled": false
+      },
+      "require_code_owner_review": true,
+      "require_extra_approval_for_unattributed_changes": true,
+      "require_last_push_approval": false,
+      "required_approving_review_count": 0,
+      "required_review_thread_resolution": false,
+      "required_reviewers": []
+     },
+     "ruleset_id": 24808676,
+     "ruleset_source": "Fetcher-Tester/fetcher-test-scn",
+     "ruleset_source_type": "Repository",
+     "type": "pull_request"
+    }
+   ],
    "headers": {
     "Content-Type": "application/json; charset=utf-8",
     "X-Accepted-GitHub-Permissions": "metadata=read"
@@ -1093,6 +1598,48 @@
    "reason": "OK",
    "status": 200
   },
+  "POST /graphql 015ad170297d {\"after\": null, \"branch\": \"main\", \"first\": 50, \"name\": \"fetcher-test-actions\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [],
+       "pageInfo": {
+        "endCursor": null,
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql 015ad170297d {\"after\": null, \"branch\": \"main\", \"first\": 50, \"name\": \"fetcher-test-deploy\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [],
+       "pageInfo": {
+        "endCursor": null,
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
   "POST /graphql 015ad170297d {\"after\": null, \"branch\": \"main\", \"first\": 50, \"name\": \"fetcher-test-disabled-rules\", \"owner\": \"Fetcher-Tester\"}": {
    "body": {
     "data": {
@@ -1261,6 +1808,184 @@
         {
          "author": {
           "__typename": "User",
+          "login": "second-reviewer"
+         },
+         "commits": {
+          "nodes": [
+           {
+            "commit": {
+             "oid": "3702038be843fd274aa22cdf99b8e1db02709bb9",
+             "statusCheckRollup": {
+              "contexts": {
+               "nodes": [
+                {
+                 "__typename": "CheckRun",
+                 "completedAt": "2026-10-14T18:20:45Z",
+                 "conclusion": "SUCCESS",
+                 "name": "approve",
+                 "startedAt": "2026-10-14T18:20:42Z",
+                 "status": "COMPLETED"
+                },
+                {
+                 "__typename": "CheckRun",
+                 "completedAt": "2026-10-14T18:20:45Z",
+                 "conclusion": "SUCCESS",
+                 "name": "ci",
+                 "startedAt": "2026-10-14T18:20:42Z",
+                 "status": "COMPLETED"
+                },
+                {
+                 "__typename": "CheckRun",
+                 "completedAt": "2026-10-14T18:20:44Z",
+                 "conclusion": "SUCCESS",
+                 "name": "ci",
+                 "startedAt": "2026-10-14T18:20:40Z",
+                 "status": "COMPLETED"
+                }
+               ],
+               "totalCount": 3
+              }
+             }
+            }
+           }
+          ]
+         },
+         "headRefOid": "3702038be843fd274aa22cdf99b8e1db02709bb9",
+         "labels": {
+          "nodes": [],
+          "totalCount": 0
+         },
+         "mergeCommit": {
+          "oid": "f54d5238f3e24a88bc4aa9bb5ccc8f6e143172ab"
+         },
+         "mergedAt": "2026-10-14T18:20:59Z",
+         "mergedBy": {
+          "__typename": "User",
+          "login": "sandbox-owner"
+         },
+         "number": 3,
+         "reviews": {
+          "nodes": [
+           {
+            "author": {
+             "__typename": "User",
+             "login": "sandbox-owner"
+            },
+            "commit": {
+             "oid": "3702038be843fd274aa22cdf99b8e1db02709bb9"
+            },
+            "state": "APPROVED",
+            "submittedAt": "2026-10-14T18:20:37Z"
+           },
+           {
+            "author": {
+             "__typename": "Bot",
+             "login": "github-actions"
+            },
+            "commit": {
+             "oid": "3702038be843fd274aa22cdf99b8e1db02709bb9"
+            },
+            "state": "APPROVED",
+            "submittedAt": "2026-10-14T18:20:44Z"
+           }
+          ],
+          "totalCount": 2
+         },
+         "title": "Fixture: fetcher-test/outside-author",
+         "updatedAt": "2026-10-14T18:20:59Z"
+        },
+        {
+         "author": {
+          "__typename": "User",
+          "login": "sandbox-owner"
+         },
+         "commits": {
+          "nodes": [
+           {
+            "commit": {
+             "oid": "c7836c4ec3259f5c466aae7e36d4647ad2232ffa",
+             "statusCheckRollup": {
+              "contexts": {
+               "nodes": [
+                {
+                 "__typename": "CheckRun",
+                 "completedAt": "2026-10-14T18:20:19Z",
+                 "conclusion": "SUCCESS",
+                 "name": "approve",
+                 "startedAt": "2026-10-14T18:20:14Z",
+                 "status": "COMPLETED"
+                },
+                {
+                 "__typename": "CheckRun",
+                 "completedAt": "2026-10-14T18:20:16Z",
+                 "conclusion": "SUCCESS",
+                 "name": "ci",
+                 "startedAt": "2026-10-14T18:20:13Z",
+                 "status": "COMPLETED"
+                },
+                {
+                 "__typename": "CheckRun",
+                 "completedAt": "2026-10-14T18:20:14Z",
+                 "conclusion": "SUCCESS",
+                 "name": "ci",
+                 "startedAt": "2026-10-14T18:20:11Z",
+                 "status": "COMPLETED"
+                }
+               ],
+               "totalCount": 3
+              }
+             }
+            }
+           }
+          ]
+         },
+         "headRefOid": "c7836c4ec3259f5c466aae7e36d4647ad2232ffa",
+         "labels": {
+          "nodes": [],
+          "totalCount": 0
+         },
+         "mergeCommit": {
+          "oid": "e782931d6f77b6683efe8204dde8ed05d75b503d"
+         },
+         "mergedAt": "2026-10-14T18:20:30Z",
+         "mergedBy": {
+          "__typename": "User",
+          "login": "sandbox-owner"
+         },
+         "number": 2,
+         "reviews": {
+          "nodes": [
+           {
+            "author": {
+             "__typename": "User",
+             "login": "second-reviewer"
+            },
+            "commit": {
+             "oid": "c7836c4ec3259f5c466aae7e36d4647ad2232ffa"
+            },
+            "state": "APPROVED",
+            "submittedAt": "2026-10-14T18:20:09Z"
+           },
+           {
+            "author": {
+             "__typename": "Bot",
+             "login": "github-actions"
+            },
+            "commit": {
+             "oid": "c7836c4ec3259f5c466aae7e36d4647ad2232ffa"
+            },
+            "state": "APPROVED",
+            "submittedAt": "2026-10-14T18:20:17Z"
+           }
+          ],
+          "totalCount": 2
+         },
+         "title": "Fixture: fetcher-test/human-approved",
+         "updatedAt": "2026-10-14T18:20:30Z"
+        },
+        {
+         "author": {
+          "__typename": "User",
           "login": "sandbox-owner"
          },
          "commits": {
@@ -1352,6 +2077,27 @@
    "reason": "OK",
    "status": 200
   },
+  "POST /graphql 015ad170297d {\"after\": null, \"branch\": \"main\", \"first\": 50, \"name\": \"fetcher-test-releases\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [],
+       "pageInfo": {
+        "endCursor": null,
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
   "POST /graphql 015ad170297d {\"after\": null, \"branch\": \"main\", \"first\": 50, \"name\": \"fetcher-test-scanning-off\", \"owner\": \"Fetcher-Tester\"}": {
    "body": {
     "data": {
@@ -1360,6 +2106,136 @@
        "nodes": [],
        "pageInfo": {
         "endCursor": null,
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql 015ad170297d {\"after\": null, \"branch\": \"main\", \"first\": 50, \"name\": \"fetcher-test-scn\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [
+        {
+         "author": {
+          "__typename": "User",
+          "login": "sandbox-owner"
+         },
+         "commits": {
+          "nodes": [
+           {
+            "commit": {
+             "oid": "d20463446c0b059aeeca3683ac75da02f609e7b0",
+             "statusCheckRollup": null
+            }
+           }
+          ]
+         },
+         "headRefOid": "d20463446c0b059aeeca3683ac75da02f609e7b0",
+         "labels": {
+          "nodes": [],
+          "totalCount": 0
+         },
+         "mergeCommit": {
+          "oid": "b68b2877869b016a80b1eb1e299142a3bd37cd83"
+         },
+         "mergedAt": "2026-10-09T18:27:36Z",
+         "mergedBy": {
+          "__typename": "User",
+          "login": "sandbox-owner"
+         },
+         "number": 3,
+         "reviews": {
+          "nodes": [],
+          "totalCount": 0
+         },
+         "title": "Fixture: fetcher-test/scn/broken",
+         "updatedAt": "2026-10-09T18:27:36Z"
+        },
+        {
+         "author": {
+          "__typename": "User",
+          "login": "sandbox-owner"
+         },
+         "commits": {
+          "nodes": [
+           {
+            "commit": {
+             "oid": "2d671db61ffbd903f364438f05b6e700425d5cab",
+             "statusCheckRollup": null
+            }
+           }
+          ]
+         },
+         "headRefOid": "2d671db61ffbd903f364438f05b6e700425d5cab",
+         "labels": {
+          "nodes": [],
+          "totalCount": 0
+         },
+         "mergeCommit": {
+          "oid": "8e74ff710573e9b0f2cdc1578ace493f7fdc96d9"
+         },
+         "mergedAt": "2026-10-09T18:26:41Z",
+         "mergedBy": {
+          "__typename": "User",
+          "login": "sandbox-owner"
+         },
+         "number": 2,
+         "reviews": {
+          "nodes": [],
+          "totalCount": 0
+         },
+         "title": "Fixture: fetcher-test/scn/routine",
+         "updatedAt": "2026-10-09T18:26:41Z"
+        },
+        {
+         "author": {
+          "__typename": "User",
+          "login": "sandbox-owner"
+         },
+         "commits": {
+          "nodes": [
+           {
+            "commit": {
+             "oid": "5406183b52f9dbb93eeedd51d5325724002aeac1",
+             "statusCheckRollup": null
+            }
+           }
+          ]
+         },
+         "headRefOid": "5406183b52f9dbb93eeedd51d5325724002aeac1",
+         "labels": {
+          "nodes": [],
+          "totalCount": 0
+         },
+         "mergeCommit": {
+          "oid": "d7e2e9a4e8071dda0babe7768f6fd481b8f620e6"
+         },
+         "mergedAt": "2026-10-09T18:25:45Z",
+         "mergedBy": {
+          "__typename": "User",
+          "login": "sandbox-owner"
+         },
+         "number": 1,
+         "reviews": {
+          "nodes": [],
+          "totalCount": 0
+         },
+         "title": "Fixture: fetcher-test/scn/complete",
+         "updatedAt": "2026-10-09T18:25:45Z"
+        }
+       ],
+       "pageInfo": {
+        "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0wOVQxODoyNTo0NVrPAAAAAR5b8VA=",
         "hasNextPage": false
        }
       }
@@ -1440,6 +2316,176 @@
        "pageInfo": {
         "endCursor": null,
         "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql eeb1b0ab7085 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-actions\", \"owner\": \"Fetcher-Tester\", \"ref\": \"refs/heads/main\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "isEmpty": false,
+      "ref": {
+       "target": {
+        "history": {
+         "nodes": [
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:18:56Z",
+           "message": "Add .github/workflows/no-permissions.yml",
+           "oid": "b6bc81484da30498da568f5245a60b633efc0e2a",
+           "signature": null
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:18:55Z",
+           "message": "Add .github/workflows/oidc.yml",
+           "oid": "cf99c553760b0951333410537cdfb75f909522b6",
+           "signature": null
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:18:54Z",
+           "message": "Add .github/workflows/pwn-request.yml",
+           "oid": "97fdd7e8cf55fc7ee1f9f5b059879acb8ad1f117",
+           "signature": null
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:18:52Z",
+           "message": "Add .github/workflows/pinned.yml",
+           "oid": "5960c614a94463ab023329a9f69455ce88ef365b",
+           "signature": null
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:18:50Z",
+           "message": "Initial commit",
+           "oid": "a5c8c47ca9f3dce6a54dd5170aa41b255c1db184",
+           "signature": {
+            "isValid": true
+           }
+          }
+         ],
+         "pageInfo": {
+          "endCursor": "b6bc81484da30498da568f5245a60b633efc0e2a 4",
+          "hasNextPage": false
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql eeb1b0ab7085 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-deploy\", \"owner\": \"Fetcher-Tester\", \"ref\": \"refs/heads/main\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "isEmpty": false,
+      "ref": {
+       "target": {
+        "history": {
+         "nodes": [
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:36:23Z",
+           "message": "Add .github/workflows/deploy.yml",
+           "oid": "30ef49bf4f319962ca4240870af1ac65d35e6800",
+           "signature": null
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:36:20Z",
+           "message": "Initial commit",
+           "oid": "6246073f2f3fcfc7b79ec496ced2de5461042636",
+           "signature": {
+            "isValid": true
+           }
+          }
+         ],
+         "pageInfo": {
+          "endCursor": "30ef49bf4f319962ca4240870af1ac65d35e6800 1",
+          "hasNextPage": false
+         }
+        }
        }
       }
      }
@@ -1699,6 +2745,50 @@
            "associatedPullRequests": {
             "nodes": [
              {
+              "mergedAt": "2026-10-14T18:20:59Z"
+             }
+            ],
+            "totalCount": 1
+           },
+           "author": {
+            "name": "second-reviewer",
+            "user": {
+             "login": "second-reviewer"
+            }
+           },
+           "committedDate": "2026-10-14T18:20:58Z",
+           "message": "Add outside-author.txt (#3)",
+           "oid": "f54d5238f3e24a88bc4aa9bb5ccc8f6e143172ab",
+           "signature": {
+            "isValid": true
+           }
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [
+             {
+              "mergedAt": "2026-10-14T18:20:30Z"
+             }
+            ],
+            "totalCount": 1
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-14T18:20:29Z",
+           "message": "Add human-approved.txt (#2)",
+           "oid": "e782931d6f77b6683efe8204dde8ed05d75b503d",
+           "signature": {
+            "isValid": true
+           }
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [
+             {
               "mergedAt": "2026-10-04T03:50:58Z"
              }
             ],
@@ -1753,7 +2843,68 @@
           }
          ],
          "pageInfo": {
-          "endCursor": "ad790414336e1bca0b801752fda9843424727b4d 2",
+          "endCursor": "f54d5238f3e24a88bc4aa9bb5ccc8f6e143172ab 4",
+          "hasNextPage": false
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql eeb1b0ab7085 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-releases\", \"owner\": \"Fetcher-Tester\", \"ref\": \"refs/heads/main\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "isEmpty": false,
+      "ref": {
+       "target": {
+        "history": {
+         "nodes": [
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:30:26Z",
+           "message": "Add .github/workflows/release.yml",
+           "oid": "20cc12cd2bbf6f35b2b52e3dba15aea956099c0a",
+           "signature": null
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:30:24Z",
+           "message": "Initial commit",
+           "oid": "3f1d765476c645f8fd4e26f31e9610b368180e5b",
+           "signature": {
+            "isValid": true
+           }
+          }
+         ],
+         "pageInfo": {
+          "endCursor": "20cc12cd2bbf6f35b2b52e3dba15aea956099c0a 1",
           "hasNextPage": false
          }
         }
@@ -1815,6 +2966,165 @@
          ],
          "pageInfo": {
           "endCursor": "f02d18e86e2f8531b8e979aa3ed01dd09a82712c 1",
+          "hasNextPage": false
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql eeb1b0ab7085 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-scn\", \"owner\": \"Fetcher-Tester\", \"ref\": \"refs/heads/main\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "isEmpty": false,
+      "ref": {
+       "target": {
+        "history": {
+         "nodes": [
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:45:31Z",
+           "message": "Add bypass.txt",
+           "oid": "0678d60ad05f6a50991d93c29a7c65996df12511",
+           "signature": null
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:45:28Z",
+           "message": "Add .github/CODEOWNERS",
+           "oid": "a01b6dd6d6c6dd72eb584e4d481a1c6e15c9ba09",
+           "signature": null
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:42:06Z",
+           "message": "Add SECURITY.md",
+           "oid": "ffdf56405a4be216f86d56b9d455425845e99d03",
+           "signature": null
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [
+             {
+              "mergedAt": "2026-10-09T18:27:36Z"
+             }
+            ],
+            "totalCount": 1
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:27:35Z",
+           "message": "Fixture: fetcher-test/scn/broken (#3)\n\n* Add scn-broken.txt\n\n* Add scn-broken.txt",
+           "oid": "b68b2877869b016a80b1eb1e299142a3bd37cd83",
+           "signature": {
+            "isValid": true
+           }
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [
+             {
+              "mergedAt": "2026-10-09T18:26:41Z"
+             }
+            ],
+            "totalCount": 1
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:26:40Z",
+           "message": "Fixture: fetcher-test/scn/routine (#2)\n\n* Add scn-routine.txt\n\n* Add scn-routine.txt",
+           "oid": "8e74ff710573e9b0f2cdc1578ace493f7fdc96d9",
+           "signature": {
+            "isValid": true
+           }
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [
+             {
+              "mergedAt": "2026-10-09T18:25:45Z"
+             }
+            ],
+            "totalCount": 1
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:25:44Z",
+           "message": "Fixture: fetcher-test/scn/complete (#1)\n\n* Add scn-complete.txt\n\n* Add scn-complete.txt",
+           "oid": "d7e2e9a4e8071dda0babe7768f6fd481b8f620e6",
+           "signature": {
+            "isValid": true
+           }
+          },
+          {
+           "associatedPullRequests": {
+            "nodes": [],
+            "totalCount": 0
+           },
+           "author": {
+            "name": "Swyln",
+            "user": {
+             "login": "sandbox-owner"
+            }
+           },
+           "committedDate": "2026-10-09T18:24:29Z",
+           "message": "Initial commit",
+           "oid": "6398abe9795e444d49a0babe665ca7043c52a448",
+           "signature": {
+            "isValid": true
+           }
+          }
+         ],
+         "pageInfo": {
+          "endCursor": "0678d60ad05f6a50991d93c29a7c65996df12511 6",
           "hasNextPage": false
          }
         }
@@ -2010,7 +3320,7 @@
  "env": {
   "GITHUB_CHECK_KEV": "false",
   "GITHUB_ORG": "Fetcher-Tester",
-  "GITHUB_REPOSITORIES": "fetcher-test-disabled-rules,fetcher-test-evaluate-rules,fetcher-test-globs,fetcher-test-leaked-secret,fetcher-test-protected,fetcher-test-scanning-off,fetcher-test-unprotected,fetcher-test-vulnerable"
+  "GITHUB_REPOSITORIES": "fetcher-test-actions,fetcher-test-deploy,fetcher-test-disabled-rules,fetcher-test-evaluate-rules,fetcher-test-globs,fetcher-test-leaked-secret,fetcher-test-protected,fetcher-test-releases,fetcher-test-scanning-off,fetcher-test-scn,fetcher-test-unprotected,fetcher-test-vulnerable"
  },
  "exit_code": 0,
  "fetcher": "pull_request_checks",

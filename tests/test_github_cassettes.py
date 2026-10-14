@@ -68,9 +68,15 @@ def test_branch_protection_on_the_recorded_sandbox():
 
 def test_pull_requests_on_the_recorded_sandbox():
     s = _summary("pull_request_checks")
-    assert s["merged_pull_requests"] == 3 and s["merged_without_human_approval"] == 3  # one bot-approved
-    assert s["merged_without_approval"] == 2 and s["merged_with_failed_checks"] == 1
+    assert s["merged_pull_requests"] == 8 and s["merged_without_human_approval"] == 6  # one bot-approved
+    assert s["merged_without_approval"] == 5 and s["merged_with_failed_checks"] == 1
     assert s["merged_with_failed_required_checks"] == 0  # the failing check is optional where it ran
+    _, _, ev, _ = replay("pull_request_checks")
+    protected = next(r for r in ev["repositories"] if r["repository"] == "fetcher-test-protected")
+    by = {pr["author"]: pr for pr in protected["pull_requests"] if pr["approved_by_human"]}
+    # A second person: approves the owner's change, and authors one the owner approves.
+    assert [a["reviewer"] for a in by["sandbox-owner"]["approvals"] if not a["bot"]] == ["second-reviewer"]
+    assert [a["reviewer"] for a in by["second-reviewer"]["approvals"] if not a["bot"]] == ["sandbox-owner"]
 
 
 def test_dependabot_on_the_recorded_sandbox():
@@ -101,7 +107,7 @@ def test_org_settings_on_the_recorded_sandbox():
 def test_access_on_the_recorded_sandbox():
     s = _summary("access_review")
     assert s["owners"] == ["sandbox-owner"] and s["teams_with_admin"] == ["fetcher-test-admins"]
-    assert s["pending_invitations"] == 1
+    assert s["outside_collaborators_with_write"] == ["second-reviewer"]
 
 
 def test_credentials_on_the_recorded_sandbox():
@@ -133,6 +139,10 @@ def test_deployments_on_the_recorded_sandbox():
     assert s["production_deployable_from_any_branch"] == ["fetcher-test-deploy:prod-eu"]
     assert s["production_deployments"] == 3 and len(s["production_deployments_not_by_actions"]) == 2  # made by the API
     assert s["production_deployments_by_state"] == {"failure": 1, "success": 2}
+    _, _, ev, _ = replay("deployment_controls")
+    envs = {e["name"]: e for r in ev["repositories"] for e in r.get("environments") or []}
+    assert envs["production"]["required_reviewers"] == [{"type": "Team", "reviewer": "fetcher-test-admins"},
+                                                        {"type": "User", "reviewer": "second-reviewer"}]
 
 
 def test_releases_on_the_recorded_sandbox():

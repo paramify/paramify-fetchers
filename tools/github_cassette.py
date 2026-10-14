@@ -29,7 +29,7 @@ from requests.structures import CaseInsensitiveDict
 ROOT = Path(__file__).resolve().parent.parent
 GITHUB = ROOT / "fetchers" / "github"
 KEPT_HEADERS = ("Link", "X-Accepted-GitHub-Permissions", "Content-Type")
-REDACT = {"StewartClaw": "sandbox-owner", "stewartclaw": "sandbox-owner"}
+REDACT = {"StewartClaw": "sandbox-owner", "stewartclaw": "sandbox-owner", "stewclawson": "second-reviewer"}
 
 
 def key(url: str, params: Optional[dict] = None) -> str:
