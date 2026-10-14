@@ -43,6 +43,7 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 ksis:
   - KSI-MLA-LET
+  - KSI-MLA-OSM
   - KSI-CMT-LMC
 
 evidence_set:

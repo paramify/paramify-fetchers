@@ -26,6 +26,38 @@ schemas and the `paramify` CLI — not the internal code.
   combined file or one file per vendor (`output_mode`). Six validators ship
   with them: certified, certified-or-in-process, not delisted, not in
   remediation, package ID resolves, and feed fresh.
+
+- **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
+  and network interface's Internet-bound traffic goes, as `egress_path`: an
+  appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
+  outbound access (`default_outbound_access_effective` reads an unset subnet flag
+  as on). A default route split into halves (`0.0.0.0/1` + `128.0.0.0/1`) counts as
+  the default, and on a subnet whose default goes to an appliance or gateway every
+  route straight to the Internet is listed in `internet_bypass_routes`. An
+  appliance next hop is resolved to what holds it (`appliance_owner`): an Azure
+  Firewall, an IP-forwarding NIC, or something outside the subscription.
+  Subnets connected to a Virtual WAN hub with routing intent resolve to the hub's
+  firewall when the connection propagates the default route. Each subnet also lists
+  its own and its peers' address ranges that are not forced through the appliance.
+  Every route table says whether a subnet uses it, and every Azure Firewall carries
+  its tier, policy, effective threat-intelligence mode (the strictest along the
+  policy's parent chain) and the subnets routed through it. A spoke VNet is
+  recognised from its own peerings even when its hub is in a separate connectivity
+  subscription. The hub is then looked for in up to 50 other subscriptions the
+  credential can read (`VIRTUAL_HUB_SEARCH_MAX_SUBSCRIPTIONS`), keeping only that
+  hub's connections to this subscription's spokes; a spoke still not found reads
+  `virtual_hub_unresolved`, not `default_outbound`. Load balancer outbound rules are
+  not evaluated. Configured routes only:
+  effective routes need an action Reader does not have. Tested read-only against a
+  production subscription, where every count matched Resource Graph.
+- **`azure_ddos_protection`** (`EVD-AZURE-DDOS`) — every public IP, what holds it,
+  its virtual network and its `effective_protection`: `network_protection` (a DDoS
+  plan on the VNet), `ip_protection`, `none`, `disabled`, `not_supported` (NAT
+  gateway IPs, which DDoS Protection cannot cover), or `unknown` where the VNet
+  cannot be resolved. A public load balancer frontend takes its backend pools' VNet.
+  Also every DDoS
+  protection plan and the VNets that use it. Virtual WAN hub firewall addresses are
+  not public IP resources and are not listed.
 - **Default custom tags on everything the uploaders create.** Every evidence
   set, script and validator that `paramify upload`, `paramify scripts sync`
   and `paramify validators sync` create or maintain now carries two custom
@@ -452,8 +484,70 @@ schemas and the `paramify` CLI — not the internal code.
   failed call leaves every flag and total derived from it null rather than
   false or 0, so an unanswered call never reads as "off".
 
+- **`azure_resource_diagnostic_settings`** (`EVD-AZURE-RESOURCE-DIAG-SETTINGS`)
+  — resource-level logging across the whole subscription. `azure_diagnostic_settings`
+  reads only the subscription's activity log export, and the per-service fetchers
+  only their own types, so nothing showed which resources' logs go nowhere. Every
+  resource Resource Graph lists, plus the blob, file, queue and table services
+  each storage account's kind has, is checked for the log categories its type emits and the
+  diagnostic settings that export them: `has_enabled_log_setting`,
+  `destination_types`, `sends_to_log_analytics`, `uncaptured_log_categories` and
+  `captures_all_audit_categories`. The summary gives log-setting and Log
+  Analytics coverage of the log-emitting resources, with the uncovered ones
+  counted by type; metrics-only and unsupported types are outside the
+  denominator. A row count that disagrees with Resource Graph's total, or any
+  read error other than an unsupported type or a since-deleted resource, fails
+  the run. One `ResourceTypeNotSupported` answer covers the rest of that type.
+  Reader-only; about 14 resources a second, timeout 3600s.
+- **`azure_alert_rules`** (`EVD-AZURE-ALERT-RULES`) — every metric alert, log
+  search alert and smart detector rule, resolved through its action groups to
+  the receivers it notifies and checked against alert processing rules that
+  suppress or add notifications. A processing rule scoped narrower than the
+  alert is a partial match. Per rule: `routes_to_enabled_receiver`,
+  `routes_to_person` (email, SMS, voice, app push, ARM role or ITSM; webhooks,
+  Logic Apps, Functions, runbooks and Event Hubs may or may not reach anyone),
+  `suppressed` and `reaches_human`, each true, false or null when unknown. The
+  summary counts unknown verdicts apart rather than as "no". Read through raw ARM REST, since `azure-mgmt-monitor` 6.x drops
+  `nextLink` on metric alerts and action groups and reads log alerts in the 2018
+  schema. Reader-only.
+- **`azure_change_provenance`** (`EVD-AZURE-CHANGE-PROVENANCE`) — every
+  control-plane change in the subscription over Resource Graph's 14 days of change
+  history, attributed by correlationId to the ARM deployment that made it, to a
+  configured pipeline identity, or to a direct edit. A deployment a person ran,
+  from the CLI or through the Portal's create wizards, is `manual_deployment` and
+  does not count as a redeployment. Changes Azure records with no caller take the
+  origin of the nearest named change to the same resource, then of a deployment
+  whose run and outputs cover them, and are otherwise `platform` or
+  `unattributed`. The summary gives `percent_redeployed`, a
+  `percent_redeployed_conservative` that counts unattributed changes against it,
+  direct edits by client, caller and resource type, and the direct changes in
+  resource groups deleted since, whose deployment history went with them.
+  Reader-only. Maps to `KSI-CMT-RMV`.
+- **`azure_residual_resources`** (`EVD-AZURE-RESIDUAL-RESOURCES`) — leftovers in
+  the subscription: unattached disks, NICs, NSGs, public IPs and NAT gateways,
+  disconnected private endpoints, private DNS zones linked to no network, App
+  Service plans hosting nothing, empty resource groups, user-assigned identities
+  with no attachment, role or federated credential, stopped or long-untouched
+  deployment slots, and role assignments whose principal Entra ID no longer has.
+  Cross-tenant `ForeignGroup` principals are never reported deleted, and the run
+  fails rather than guess when Microsoft Graph is signed in to a tenant other than
+  the subscription's. Needs Reader, plus Microsoft Graph `Directory.Read.All`
+  (admin-consented) when it runs as a service principal. Maps to `KSI-SVC-PRR`.
+
 ### Changed
 
+- **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
+  subnet now says which other subnets in its VNet can reach it on every port
+  (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`
+  or `no_peer_subnets`, with the subnets named on each side). Both subnets' NSGs
+  are walked in priority order, default rules included, so a VNet relying on the
+  platform's AllowVnetInBound reads `unsegmented`. An allow scoped to an
+  application security group, or an NSG in another subscription, gives
+  `undetermined` rather than a guess. A rule's port ranges are merged, so a deny
+  split across `0-1023` and `1024-65535` covers every port. Platform subnets are left out. Subnets gain
+  `address_prefixes` and `platform_subnet`, and rules gain their application
+  security group ids. NIC-level NSGs, traffic within a subnet and peered VNets are
+  not considered.
 - **The TUI keeps evidence and scan reports apart.** The catalog and the
   add-fetcher picker group by kind first (**Evidence**, **Scan reports**) and
   platform second, so a platform that ships both, like Wiz, no longer lists
@@ -575,6 +669,26 @@ schemas and the `paramify` CLI — not the internal code.
   and `audit_logging_percentage`. Existing fields are unchanged. The fetcher now
   also maps to `KSI-MLA-LET`, and to `KSI-CNA-MAT`, `KSI-CNA-RNT` and
   `KSI-SVC-SIN`, which its network and SKU fields already evidenced.
+- **`azure_activity_log_alerts` 0.2.0 says whether an alert reaches a person.**
+  A rule with an action group counted as monitoring even when the group was
+  disabled, had no enabled receiver, or an alert processing rule removed its
+  notifications. Each rule now carries `resolved_action_groups` (enabled state
+  and enabled receivers; webhook host only, phone numbers masked),
+  `routes_to_enabled_receiver`, `routes_to_person`, `suppressed` and
+  `reaches_human`, decided as in `azure_alert_rules` (true, false, or null when
+  unknown), from raw ARM reads of action groups and processing rules. A second
+  map, `change_operation_coverage`, covers App Service create / update,
+  configuration, deployment and slot swap, at site and slot level, counting
+  only alerts that reach a person (null where only one that might covers it);
+  `monitored_operation_coverage_reaching_human` does the same for the existing
+  map. `action_groups` and `monitored_operation_coverage` are
+  unchanged.
+- **`azure_diagnostic_settings` also maps to `KSI-MLA-OSM`**, which its
+  subscription activity-log export already evidenced.
+- **`KSI-SVC-PRR` counts as config-evidenceable.** Its residual elements are a
+  state of the environment a fetcher can show, so `framework/reference/ksis.yaml`
+  marks it evidenceable and `docs/ksi_mapping.md` lists it as covered by
+  `azure_residual_resources`: 35 of 37 evidenceable indicators.
 - **The TUI saves manifest edits as they are made.** Adding a fetcher, editing an
   entry, adding / editing / removing a target, picking an assessment, removing an
   entry, and changing the output dir all write the file immediately. Edits used
