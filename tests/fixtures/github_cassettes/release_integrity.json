@@ -1,0 +1,2110 @@
+{
+ "entries": {
+  "/orgs/Fetcher-Tester": {
+   "body": {
+    "advanced_security_enabled_for_new_repositories": false,
+    "archived_at": null,
+    "billing_email": "redacted@example.com",
+    "collaborators": 0,
+    "created_at": "2026-10-04T02:54:38Z",
+    "default_repository_branch": "main",
+    "default_repository_permission": "read",
+    "dependabot_alerts_enabled_for_new_repositories": false,
+    "dependabot_security_updates_enabled_for_new_repositories": false,
+    "dependency_graph_enabled_for_new_repositories": false,
+    "deploy_keys_enabled_for_repositories": true,
+    "disk_usage": 15736,
+    "display_commenter_full_name_setting_enabled": false,
+    "followers": 0,
+    "following": 0,
+    "has_organization_projects": true,
+    "has_repository_projects": true,
+    "id": 337551672,
+    "is_verified": false,
+    "login": "Fetcher-Tester",
+    "members_allowed_repository_creation_type": "all",
+    "members_can_change_repo_visibility": true,
+    "members_can_create_internal_repositories": false,
+    "members_can_create_pages": true,
+    "members_can_create_private_pages": true,
+    "members_can_create_private_repositories": true,
+    "members_can_create_public_pages": true,
+    "members_can_create_public_repositories": true,
+    "members_can_create_repositories": true,
+    "members_can_create_teams": true,
+    "members_can_delete_issues": false,
+    "members_can_delete_repositories": true,
+    "members_can_fork_private_repositories": false,
+    "members_can_invite_outside_collaborators": true,
+    "members_can_view_dependency_insights": true,
+    "name": "Fetcher Tester",
+    "owned_private_repos": 0,
+    "plan": {
+     "filled_seats": 2,
+     "name": "free",
+     "private_repos": 10000,
+     "seats": 0,
+     "space": 976562499
+    },
+    "private_gists": 0,
+    "public_gists": 0,
+    "public_repos": 13,
+    "readers_can_create_discussions": true,
+    "secret_scanning_enabled_for_new_repositories": false,
+    "secret_scanning_push_protection_custom_link": null,
+    "secret_scanning_push_protection_custom_link_enabled": false,
+    "secret_scanning_push_protection_enabled_for_new_repositories": false,
+    "secret_scanning_validity_checks_enabled": false,
+    "total_private_repos": 0,
+    "two_factor_requirement_enabled": false,
+    "type": "Organization",
+    "updated_at": "2026-10-04T02:54:38Z",
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "allows_permissionless_access=true"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/orgs/Fetcher-Tester/settings/immutable-releases": {
+   "body": {
+    "enforced_repositories": "none"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "organization_administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-actions": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-09T18:18:48Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-actions",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-actions.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1412278731,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-actions",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-09T18:18:56Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 3,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-actions.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-09T18:18:58Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-actions/immutable-releases": {
+   "body": {
+    "enabled": false,
+    "enforced_by_owner": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-actions/releases?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-actions/rulesets?includes_parents=true&per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-deploy": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-09T18:36:19Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-deploy",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-deploy.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1412299268,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-deploy",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-09T18:36:26Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 1,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-deploy.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-09T18:36:53Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-deploy/immutable-releases": {
+   "body": {
+    "enabled": false,
+    "enforced_by_owner": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-deploy/releases?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-deploy/rulesets?includes_parents=true&per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-disabled-rules": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:17:48Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-disabled-rules",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-disabled-rules.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837102,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-disabled-rules",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:50:02Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 3,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-disabled-rules.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:56:53Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-disabled-rules/immutable-releases": {
+   "body": {
+    "enabled": false,
+    "enforced_by_owner": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-disabled-rules/releases?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-disabled-rules/rulesets?includes_parents=true&per_page=100": {
+   "body": [
+    {
+     "created_at": "2026-10-03T21:17:53.798-06:00",
+     "enforcement": "disabled",
+     "id": 24440987,
+     "name": "fetcher-test-main",
+     "source": "Fetcher-Tester/fetcher-test-disabled-rules",
+     "source_type": "Repository",
+     "target": "branch",
+     "updated_at": "2026-10-03T21:17:53.852-06:00"
+    }
+   ],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-evaluate-rules": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:17:54Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-evaluate-rules",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-evaluate-rules.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837177,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-evaluate-rules",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:17:56Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 0,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-evaluate-rules.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:56:55Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-evaluate-rules/immutable-releases": {
+   "body": {
+    "enabled": false,
+    "enforced_by_owner": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-evaluate-rules/releases?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-evaluate-rules/rulesets?includes_parents=true&per_page=100": {
+   "body": [
+    {
+     "created_at": "2026-10-03T21:17:58.270-06:00",
+     "enforcement": "evaluate",
+     "id": 24440991,
+     "name": "fetcher-test-main",
+     "source": "Fetcher-Tester/fetcher-test-evaluate-rules",
+     "source_type": "Repository",
+     "target": "branch",
+     "updated_at": "2026-10-03T21:17:58.306-06:00"
+    }
+   ],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-globs": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T05:38:51Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-globs",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-globs.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403956974,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-globs",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T05:38:59Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 0,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-globs.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:57:18Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-globs/immutable-releases": {
+   "body": {
+    "enabled": false,
+    "enforced_by_owner": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-globs/releases?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-globs/rulesets?includes_parents=true&per_page=100": {
+   "body": [
+    {
+     "created_at": "2026-10-03T23:38:59.862-06:00",
+     "enforcement": "active",
+     "id": 24444304,
+     "name": "fetcher-test-glob-0",
+     "source": "Fetcher-Tester/fetcher-test-globs",
+     "source_type": "Repository",
+     "target": "branch",
+     "updated_at": "2026-10-03T23:38:59.875-06:00"
+    },
+    {
+     "created_at": "2026-10-03T23:39:00.420-06:00",
+     "enforcement": "active",
+     "id": 24444306,
+     "name": "fetcher-test-glob-1",
+     "source": "Fetcher-Tester/fetcher-test-globs",
+     "source_type": "Repository",
+     "target": "branch",
+     "updated_at": "2026-10-03T23:39:00.432-06:00"
+    },
+    {
+     "created_at": "2026-10-03T23:39:00.872-06:00",
+     "enforcement": "active",
+     "id": 24444307,
+     "name": "fetcher-test-glob-2",
+     "source": "Fetcher-Tester/fetcher-test-globs",
+     "source_type": "Repository",
+     "target": "branch",
+     "updated_at": "2026-10-03T23:39:00.884-06:00"
+    },
+    {
+     "created_at": "2026-10-03T23:39:01.385-06:00",
+     "enforcement": "active",
+     "id": 24444308,
+     "name": "fetcher-test-glob-3",
+     "source": "Fetcher-Tester/fetcher-test-globs",
+     "source_type": "Repository",
+     "target": "branch",
+     "updated_at": "2026-10-03T23:39:01.400-06:00"
+    },
+    {
+     "created_at": "2026-10-03T23:39:01.830-06:00",
+     "enforcement": "active",
+     "id": 24444309,
+     "name": "fetcher-test-glob-4",
+     "source": "Fetcher-Tester/fetcher-test-globs",
+     "source_type": "Repository",
+     "target": "branch",
+     "updated_at": "2026-10-03T23:39:01.841-06:00"
+    },
+    {
+     "created_at": "2026-10-03T23:39:02.424-06:00",
+     "enforcement": "active",
+     "id": 24444310,
+     "name": "fetcher-test-glob-5",
+     "source": "Fetcher-Tester/fetcher-test-globs",
+     "source_type": "Repository",
+     "target": "branch",
+     "updated_at": "2026-10-03T23:39:02.453-06:00"
+    },
+    {
+     "created_at": "2026-10-03T23:39:03.036-06:00",
+     "enforcement": "active",
+     "id": 24444311,
+     "name": "fetcher-test-glob-6",
+     "source": "Fetcher-Tester/fetcher-test-globs",
+     "source_type": "Repository",
+     "target": "branch",
+     "updated_at": "2026-10-03T23:39:03.047-06:00"
+    },
+    {
+     "created_at": "2026-10-03T23:39:03.481-06:00",
+     "enforcement": "active",
+     "id": 24444312,
+     "name": "fetcher-test-glob-7",
+     "source": "Fetcher-Tester/fetcher-test-globs",
+     "source_type": "Repository",
+     "target": "branch",
+     "updated_at": "2026-10-03T23:39:03.495-06:00"
+    }
+   ],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-leaked-secret": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T04:19:53Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-leaked-secret",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-leaked-secret.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403881216,
+    "is_template": false,
+    "language": "Python",
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-leaked-secret",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T04:20:37Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 1,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-leaked-secret.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:57:04Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-leaked-secret/immutable-releases": {
+   "body": {
+    "enabled": false,
+    "enforced_by_owner": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-leaked-secret/releases?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-leaked-secret/rulesets?includes_parents=true&per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-protected": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:17:42Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-protected",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-protected.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837041,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-protected",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:50:58Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 3,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-protected.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:56:51Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-protected/immutable-releases": {
+   "body": {
+    "enabled": false,
+    "enforced_by_owner": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-protected/releases?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-protected/rulesets?includes_parents=true&per_page=100": {
+   "body": [
+    {
+     "created_at": "2026-10-03T21:17:47.759-06:00",
+     "enforcement": "active",
+     "id": 24440977,
+     "name": "fetcher-test-main",
+     "source": "Fetcher-Tester/fetcher-test-protected",
+     "source_type": "Repository",
+     "target": "branch",
+     "updated_at": "2026-10-03T21:17:47.796-06:00"
+    }
+   ],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-releases": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-09T18:30:22Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-releases",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-releases.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1412292511,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-releases",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-09T18:31:52Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 1,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-releases.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-09T18:32:42Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-releases/attestations/sha256:0204ee7c327b7bd1eec9c7adb9efd05776de83b5c8b945bfc015317f2170b77f?predicate_type=provenance": {
+   "body": {
+    "attestations": [
+     {
+      "bundle": {
+       "dsseEnvelope": {
+        "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCJzdWJqZWN0IjpbeyJuYW1lIjoiYXJ0aWZhY3QudHh0IiwiZGlnZXN0Ijp7InNoYTI1NiI6IjAyMDRlZTdjMzI3YjdiZDFlZWM5YzdhZGI5ZWZkMDU3NzZkZTgzYjVjOGI5NDViZmMwMTUzMTdmMjE3MGI3N2YifX1dLCJwcmVkaWNhdGVUeXBlIjoiaHR0cHM6Ly9zbHNhLmRldi9wcm92ZW5hbmNlL3YxIiwicHJlZGljYXRlIjp7ImJ1aWxkRGVmaW5pdGlvbiI6eyJidWlsZFR5cGUiOiJodHRwczovL2FjdGlvbnMuZ2l0aHViLmlvL2J1aWxkdHlwZXMvd29ya2Zsb3cvdjEiLCJleHRlcm5hbFBhcmFtZXRlcnMiOnsid29ya2Zsb3ciOnsicmVmIjoicmVmcy9oZWFkcy9tYWluIiwicmVwb3NpdG9yeSI6Imh0dHBzOi8vZ2l0aHViLmNvbS9GZXRjaGVyLVRlc3Rlci9mZXRjaGVyLXRlc3QtcmVsZWFzZXMiLCJwYXRoIjoiLmdpdGh1Yi93b3JrZmxvd3MvcmVsZWFzZS55bWwifX0sImludGVybmFsUGFyYW1ldGVycyI6eyJnaXRodWIiOnsiZXZlbnRfbmFtZSI6IndvcmtmbG93X2Rpc3BhdGNoIiwicmVwb3NpdG9yeV9pZCI6IjE0MTIyOTI1MTEiLCJyZXBvc2l0b3J5X293bmVyX2lkIjoiMzM3NTUxNjcyIiwicnVubmVyX2Vudmlyb25tZW50IjoiZ2l0aHViLWhvc3RlZCJ9fSwicmVzb2x2ZWREZXBlbmRlbmNpZXMiOlt7InVyaSI6ImdpdCtodHRwczovL2dpdGh1Yi5jb20vRmV0Y2hlci1UZXN0ZXIvZmV0Y2hlci10ZXN0LXJlbGVhc2VzQHJlZnMvaGVhZHMvbWFpbiIsImRpZ2VzdCI6eyJnaXRDb21taXQiOiIyMGNjMTJjZDJiYmY2ZjM1YjJiNTJlM2RiYTE1YWVhOTU2MDk5YzBhIn19XX0sInJ1bkRldGFpbHMiOnsiYnVpbGRlciI6eyJpZCI6Imh0dHBzOi8vZ2l0aHViLmNvbS9GZXRjaGVyLVRlc3Rlci9mZXRjaGVyLXRlc3QtcmVsZWFzZXMvLmdpdGh1Yi93b3JrZmxvd3MvcmVsZWFzZS55bWxAcmVmcy9oZWFkcy9tYWluIn0sIm1ldGFkYXRhIjp7Imludm9jYXRpb25JZCI6Imh0dHBzOi8vZ2l0aHViLmNvbS9GZXRjaGVyLVRlc3Rlci9mZXRjaGVyLXRlc3QtcmVsZWFzZXMvYWN0aW9ucy9ydW5zLzM3OTczODI4OTY2L2F0dGVtcHRzLzEifX19fQ==",
+        "payloadType": "application/vnd.in-toto+json",
+        "signatures": [
+         {
+          "sig": "MEQCIGiEuShiZ53TPlQ281o6apwdY6rqDJ2m2+S5J+7sSf/5AiBJtAC6MuS4O3Y+MdSGIOkxr4fUNIXaDcc6J/qbM2s+6w=="
+         }
+        ]
+       },
+       "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+       "verificationMaterial": {
+        "certificate": {
+         "rawBytes": "MIIHfTCCBwOgAwIBAgIUAm7t0iCQmwwOLH5hjt35Yf5NzbswCgYIKoZIzj0EAwMwNzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRlcm1lZGlhdGUwHhcNMjYxMDA5MTgzMTEzWhcNMjYxMDA5MTg0MTEzWjAAMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEGoLf8L07X023reGy7XR5dhwigjXkdLHEs/n89S2ezc3ZJWJX1oYE0wZWpx00mst6dpAr9+iYeL6/8WB+EHmyCaOCBiIwggYeMA4GA1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAfBgNVHSMEGDAWgBTf0+nPViQRlvmo2OkoVaLGLhhkPzBzBgNVHREBAf8EaTBnhmVodHRwczovL2dpdGh1Yi5jb20vRmV0Y2hlci1UZXN0ZXIvZmV0Y2hlci10ZXN0LXJlbGVhc2VzLy5naXRodWIvd29ya2Zsb3dzL3JlbGVhc2UueW1sQHJlZnMvaGVhZHMvbWFpbjA5BgorBgEEAYO/MAEBBCtodHRwczovL3Rva2VuLmFjdGlvbnMuZ2l0aHVidXNlcmNvbnRlbnQuY29tMB8GCisGAQQBg78wAQIEEXdvcmtmbG93X2Rpc3BhdGNoMDYGCisGAQQBg78wAQMEKDIwY2MxMmNkMmJiZjZmMzViMmI1MmUzZGJhMTVhZWE5NTYwOTljMGEwFQYKKwYBBAGDvzABBAQHcmVsZWFzZTAyBgorBgEEAYO/MAEFBCRGZXRjaGVyLVRlc3Rlci9mZXRjaGVyLXRlc3QtcmVsZWFzZXMwHQYKKwYBBAGDvzABBgQPcmVmcy9oZWFkcy9tYWluMDsGCisGAQQBg78wAQgELQwraHR0cHM6Ly90b2tlbi5hY3Rpb25zLmdpdGh1YnVzZXJjb250ZW50LmNvbTB1BgorBgEEAYO/MAEJBGcMZWh0dHBzOi8vZ2l0aHViLmNvbS9GZXRjaGVyLVRlc3Rlci9mZXRjaGVyLXRlc3QtcmVsZWFzZXMvLmdpdGh1Yi93b3JrZmxvd3MvcmVsZWFzZS55bWxAcmVmcy9oZWFkcy9tYWluMDgGCisGAQQBg78wAQoEKgwoMjBjYzEyY2QyYmJmNmYzNWIyYjUyZTNkYmExNWFlYTk1NjA5OWMwYTAdBgorBgEEAYO/MAELBA8MDWdpdGh1Yi1ob3N0ZWQwRwYKKwYBBAGDvzABDAQ5DDdodHRwczovL2dpdGh1Yi5jb20vRmV0Y2hlci1UZXN0ZXIvZmV0Y2hlci10ZXN0LXJlbGVhc2VzMDgGCisGAQQBg78wAQ0EKgwoMjBjYzEyY2QyYmJmNmYzNWIyYjUyZTNkYmExNWFlYTk1NjA5OWMwYTAfBgorBgEEAYO/MAEOBBEMD3JlZnMvaGVhZHMvbWFpbjAaBgorBgEEAYO/MAEPBAwMCjE0MTIyOTI1MTEwMQYKKwYBBAGDvzABEAQjDCFodHRwczovL2dpdGh1Yi5jb20vRmV0Y2hlci1UZXN0ZXIwGQYKKwYBBAGDvzABEQQLDAkzMzc1NTE2NzIwdQYKKwYBBAGDvzABEgRnDGVodHRwczovL2dpdGh1Yi5jb20vRmV0Y2hlci1UZXN0ZXIvZmV0Y2hlci10ZXN0LXJlbGVhc2VzLy5naXRodWIvd29ya2Zsb3dzL3JlbGVhc2UueW1sQHJlZnMvaGVhZHMvbWFpbjA4BgorBgEEAYO/MAETBCoMKDIwY2MxMmNkMmJiZjZmMzViMmI1MmUzZGJhMTVhZWE5NTYwOTljMGEwIQYKKwYBBAGDvzABFAQTDBF3b3JrZmxvd19kaXNwYXRjaDBrBgorBgEEAYO/MAEVBF0MW2h0dHBzOi8vZ2l0aHViLmNvbS9GZXRjaGVyLVRlc3Rlci9mZXRjaGVyLXRlc3QtcmVsZWFzZXMvYWN0aW9ucy9ydW5zLzM3OTczODI4OTY2L2F0dGVtcHRzLzEwFgYKKwYBBAGDvzABFgQIDAZwdWJsaWMwYgYKKwYBBAGDvzABGARUDFJyZXBvOkZldGNoZXItVGVzdGVyQDMzNzU1MTY3Mi9mZXRjaGVyLXRlc3QtcmVsZWFzZXNAMTQxMjI5MjUxMTpyZWY6cmVmcy9oZWFkcy9tYWluMIGKBgorBgEEAdZ5AgQCBHwEegB4AHYA3T0wasbHETJjGR4cmWc3AqJKXrjePK3/h4pygC8p7o4AAAGhIe8AkAAABAMARzBFAiBe8BKXj4gZ+CGzaqNpf6PwRWqGLddipXoUagzuRoEGNwIhALMnhIAuwmIEmp5WgdKqAQbla6sfCUZAVyQZdE2SMOhWMAoGCCqGSM49BAMDA2gAMGUCMBGJqm0WlELJdKH0cj+6s352OFoTekPpZlsJ5Mkrx/nxbZy9pHlDJqa0E29W6QPjrwIxANEYAl9HIa9Ea5RV0LcfgHz6Wi/16Dli36Vpoal6uJxXSyp+N0KH4kPVOU1JTaXtjQ=="
+        },
+        "timestampVerificationData": {},
+        "tlogEntries": [
+         {
+          "canonicalizedBody": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoiZHNzZSIsInNwZWMiOnsiZW52ZWxvcGVIYXNoIjp7ImFsZ29yaXRobSI6InNoYTI1NiIsInZhbHVlIjoiNTBjY2ZhNzcwYjliMDU0MTYzMjgzZWFiODliMzk5YjBjYjU2ZWM0MzNiNTg2OTE4YzY4NjgwM2NiYWQ4NjczZiJ9LCJwYXlsb2FkSGFzaCI6eyJhbGdvcml0aG0iOiJzaGEyNTYiLCJ2YWx1ZSI6Ijc3Y2QzMjRiNDNjN2FjZjFlMDJjYWJmNTdhNzc2ODQ2OGFjZGQwNWQ3YmI0NGQ2NDljZTk0YjkwMmZhMDQxOWYifSwic2lnbmF0dXJlcyI6W3sic2lnbmF0dXJlIjoiTUVRQ0lHaUV1U2hpWjUzVFBsUTI4MW82YXB3ZFk2cnFESjJtMitTNUorN3NTZi81QWlCSnRBQzZNdVM0TzNZK01kU0dJT2t4cjRmVU5JWGFEY2M2Si9xYk0ycys2dz09IiwidmVyaWZpZXIiOiJMUzB0TFMxQ1JVZEpUaUJEUlZKVVNVWkpRMEZVUlMwdExTMHRDazFKU1VobVZFTkRRbmRQWjBGM1NVSkJaMGxWUVcwM2REQnBRMUZ0ZDNkUFRFZzFhR3AwTXpWWlpqVk9lbUp6ZDBObldVbExiMXBKZW1vd1JVRjNUWGNLVG5wRlZrMUNUVWRCTVZWRlEyaE5UV015Ykc1ak0xSjJZMjFWZFZwSFZqSk5ValIzU0VGWlJGWlJVVVJGZUZaNllWZGtlbVJIT1hsYVV6RndZbTVTYkFwamJURnNXa2RzYUdSSFZYZElhR05PVFdwWmVFMUVRVFZOVkdkNlRWUkZlbGRvWTA1TmFsbDRUVVJCTlUxVVp6Qk5WRVY2VjJwQlFVMUdhM2RGZDFsSUNrdHZXa2w2YWpCRFFWRlpTVXR2V2tsNmFqQkVRVkZqUkZGblFVVkhiMHhtT0V3d04xZ3dNak55WlVkNU4xaFNOV1JvZDJsbmFsaHJaRXhJUlhNdmJqZ0tPVk15Wlhwak0xcEtWMHBZTVc5WlJUQjNXbGR3ZURBd2JYTjBObVJ3UVhJNUsybFpaVXcyTHpoWFFpdEZTRzE1UTJGUFEwSnBTWGRuWjFsbFRVRTBSd3BCTVZWa1JIZEZRaTkzVVVWQmQwbElaMFJCVkVKblRsWklVMVZGUkVSQlMwSm5aM0pDWjBWR1FsRmpSRUY2UVdaQ1owNVdTRk5OUlVkRVFWZG5RbFJtQ2pBcmJsQldhVkZTYkhadGJ6SlBhMjlXWVV4SFRHaG9hMUI2UW5wQ1owNVdTRkpGUWtGbU9FVmhWRUp1YUcxV2IyUklVbmRqZW05MlRESmtjR1JIYURFS1dXazFhbUl5TUhaU2JWWXdXVEpvYkdOcE1WVmFXRTR3V2xoSmRscHRWakJaTW1oc1kya3hNRnBZVGpCTVdFcHNZa2RXYUdNeVZucE1lVFZ1WVZoU2J3cGtWMGwyWkRJNWVXRXlXbk5pTTJSNlRETktiR0pIVm1oak1sVjFaVmN4YzFGSVNteGFiazEyWVVkV2FGcElUWFppVjBad1ltcEJOVUpuYjNKQ1owVkZDa0ZaVHk5TlFVVkNRa04wYjJSSVVuZGplbTkyVEROU2RtRXlWblZNYlVacVpFZHNkbUp1VFhWYU1td3dZVWhXYVdSWVRteGpiVTUyWW01U2JHSnVVWFVLV1RJNWRFMUNPRWREYVhOSFFWRlJRbWMzT0hkQlVVbEZSVmhrZG1OdGRHMWlSemt6V0RKU2NHTXpRbWhrUjA1dlRVUlpSME5wYzBkQlVWRkNaemM0ZHdwQlVVMUZTMFJKZDFreVRYaE5iVTVyVFcxS2FWcHFXbTFOZWxacFRXMUpNVTF0VlhwYVIwcG9UVlJXYUZwWFJUVk9WRmwzVDFSc2FrMUhSWGRHVVZsTENrdDNXVUpDUVVkRWRucEJRa0pCVVVoamJWWnpXbGRHZWxwVVFYbENaMjl5UW1kRlJVRlpUeTlOUVVWR1FrTlNSMXBZVW1waFIxWjVURlpTYkdNelVtd0tZMms1YlZwWVVtcGhSMVo1VEZoU2JHTXpVWFJqYlZaeldsZEdlbHBZVFhkSVVWbExTM2RaUWtKQlIwUjJla0ZDUW1kUlVHTnRWbTFqZVRsdldsZEdhd3BqZVRsMFdWZHNkVTFFYzBkRGFYTkhRVkZSUW1jM09IZEJVV2RGVEZGM2NtRklVakJqU0UwMlRIazVNR0l5ZEd4aWFUVm9XVE5TY0dJeU5YcE1iV1J3Q21SSGFERlpibFo2V2xoS2FtSXlOVEJhVnpVd1RHMU9kbUpVUWpGQ1oyOXlRbWRGUlVGWlR5OU5RVVZLUWtkalRWcFhhREJrU0VKNlQyazRkbG95YkRBS1lVaFdhVXh0VG5aaVV6bEhXbGhTYW1GSFZubE1WbEpzWXpOU2JHTnBPVzFhV0ZKcVlVZFdlVXhZVW14ak0xRjBZMjFXYzFwWFJucGFXRTEyVEcxa2NBcGtSMmd4V1drNU0ySXpTbkphYlhoMlpETk5kbU50Vm5OYVYwWjZXbE0xTldKWGVFRmpiVlp0WTNrNWIxcFhSbXRqZVRsMFdWZHNkVTFFWjBkRGFYTkhDa0ZSVVVKbk56aDNRVkZ2UlV0bmQyOU5ha0pxV1hwRmVWa3lVWGxaYlVwdFRtMVplazVYU1hsWmFsVjVXbFJPYTFsdFJYaE9WMFpzV1ZSck1VNXFRVFVLVDFkTmQxbFVRV1JDWjI5eVFtZEZSVUZaVHk5TlFVVk1Ra0U0VFVSWFpIQmtSMmd4V1dreGIySXpUakJhVjFGM1VuZFpTMHQzV1VKQ1FVZEVkbnBCUWdwRVFWRTFSRVJrYjJSSVVuZGplbTkyVERKa2NHUkhhREZaYVRWcVlqSXdkbEp0VmpCWk1taHNZMmt4VlZwWVRqQmFXRWwyV20xV01Ga3lhR3hqYVRFd0NscFlUakJNV0Vwc1lrZFdhR015Vm5wTlJHZEhRMmx6UjBGUlVVSm5OemgzUVZFd1JVdG5kMjlOYWtKcVdYcEZlVmt5VVhsWmJVcHRUbTFaZWs1WFNYa0tXV3BWZVZwVVRtdFpiVVY0VGxkR2JGbFVhekZPYWtFMVQxZE5kMWxVUVdaQ1oyOXlRbWRGUlVGWlR5OU5RVVZQUWtKRlRVUXpTbXhhYmsxMllVZFdhQXBhU0UxMllsZEdjR0pxUVdGQ1oyOXlRbWRGUlVGWlR5OU5RVVZRUWtGM1RVTnFSVEJOVkVsNVQxUkpNVTFVUlhkTlVWbExTM2RaUWtKQlIwUjJla0ZDQ2tWQlVXcEVRMFp2WkVoU2QyTjZiM1pNTW1Sd1pFZG9NVmxwTldwaU1qQjJVbTFXTUZreWFHeGphVEZWV2xoT01GcFlTWGRIVVZsTFMzZFpRa0pCUjBRS2RucEJRa1ZSVVV4RVFXdDZUWHBqTVU1VVJUSk9la2wzWkZGWlMwdDNXVUpDUVVkRWRucEJRa1ZuVW01RVIxWnZaRWhTZDJONmIzWk1NbVJ3WkVkb01RcFphVFZxWWpJd2RsSnRWakJaTW1oc1kya3hWVnBZVGpCYVdFbDJXbTFXTUZreWFHeGphVEV3V2xoT01FeFlTbXhpUjFab1l6Sldla3g1Tlc1aFdGSnZDbVJYU1haa01qbDVZVEphYzJJelpIcE1NMHBzWWtkV2FHTXlWWFZsVnpGelVVaEtiRnB1VFhaaFIxWm9Xa2hOZG1KWFJuQmlha0UwUW1kdmNrSm5SVVVLUVZsUEwwMUJSVlJDUTI5TlMwUkpkMWt5VFhoTmJVNXJUVzFLYVZwcVdtMU5lbFpwVFcxSk1VMXRWWHBhUjBwb1RWUldhRnBYUlRWT1ZGbDNUMVJzYWdwTlIwVjNTVkZaUzB0M1dVSkNRVWRFZG5wQlFrWkJVVlJFUWtZellqTktjbHB0ZUhaa01UbHJZVmhPZDFsWVVtcGhSRUp5UW1kdmNrSm5SVVZCV1U4dkNrMUJSVlpDUmpCTlZ6Sm9NR1JJUW5wUGFUaDJXakpzTUdGSVZtbE1iVTUyWWxNNVIxcFlVbXBoUjFaNVRGWlNiR016VW14amFUbHRXbGhTYW1GSFZua0tURmhTYkdNelVYUmpiVlp6V2xkR2VscFlUWFpaVjA0d1lWYzVkV041T1hsa1Z6VjZUSHBOTTA5VVkzcFBSRWswVDFSWk1rd3lSakJrUjFaMFkwaFNlZ3BNZWtWM1JtZFpTMHQzV1VKQ1FVZEVkbnBCUWtablVVbEVRVnAzWkZkS2MyRlhUWGRaWjFsTFMzZFpRa0pCUjBSMmVrRkNSMEZTVlVSR1NubGFXRUoyQ2s5cldteGtSMDV2V2xoSmRGWkhWbnBrUjFaNVVVUk5lazU2VlRGTlZGa3pUV2s1YlZwWVVtcGhSMVo1VEZoU2JHTXpVWFJqYlZaeldsZEdlbHBZVGtFS1RWUlJlRTFxU1RWTmFsVjRUVlJ3ZVZwWFdUWmpiVlp0WTNrNWIxcFhSbXRqZVRsMFdWZHNkVTFKUjB0Q1oyOXlRbWRGUlVGa1dqVkJaMUZEUWtoM1JRcGxaMEkwUVVoWlFUTlVNSGRoYzJKSVJWUktha2RTTkdOdFYyTXpRWEZLUzFoeWFtVlFTek12YURSd2VXZERPSEEzYnpSQlFVRkhhRWxsT0VGclFVRkJDa0pCVFVGU2VrSkdRV2xDWlRoQ1MxaHFOR2RhSzBOSGVtRnhUbkJtTmxCM1VsZHhSMHhrWkdsd1dHOVZZV2Q2ZFZKdlJVZE9kMGxvUVV4TmJtaEpRWFVLZDIxSlJXMXdOVmRuWkV0eFFWRmliR0UyYzJaRFZWcEJWbmxSV21SRk1sTk5UMmhYVFVGdlIwTkRjVWRUVFRRNVFrRk5SRUV5WjBGTlIxVkRUVUpIU2dweGJUQlhiRVZNU21STFNEQmphaXMyY3pNMU1rOUdiMVJsYTFCd1dteHpTalZOYTNKNEwyNTRZbHA1T1hCSWJFUktjV0V3UlRJNVZ6WlJVR3B5ZDBsNENrRk9SVmxCYkRsSVNXRTVSV0UxVWxZd1RHTm1aMGg2TmxkcEx6RTJSR3hwTXpaV2NHOWhiRFoxU25oWVUzbHdLMDR3UzBnMGExQldUMVV4U2xSaFdIUUthbEU5UFFvdExTMHRMVVZPUkNCRFJWSlVTVVpKUTBGVVJTMHRMUzB0Q2c9PSJ9XX19",
+          "inclusionPromise": {
+           "signedEntryTimestamp": "MEUCIQDAs8DKW3Om+fgWG8/LbQztZRtTeZ3BC/N8SpH4t06lLgIgcv1sUldH92AjTzPaD4pz21/vCBp4+bpuIl2XIXm0Kpw="
+          },
+          "inclusionProof": {
+           "checkpoint": {
+            "envelope": "rekor.sigstore.dev - 1193050959916656506\n3047606497\n4YXxVae5Eel6KqdPCtijcVq1IG1S84ne5+lFHxVSFnU=\n\n\u2014 rekor.sigstore.dev wNI9ajBFAiA2SDCR3Ujg1MSLtMntqcL7Vz+noL/W4b9kDy8zcWgyVgIhAOf6Sq8P4gnPYAzKnB4HgtWfRykHiPaGkZccIpGQcR/v\n"
+           },
+           "hashes": [
+            "Bd66ERMxqi6v0iK4IquEYZia8RDyTWCOlshUdJVfpko=",
+            "nvv80mApfHlJFPAA/PW1zetB0OIufZJqHpt3xS9b1C0=",
+            "HZJCuS7aWAKrhom39OMf3KxvlrH8BG8PYvwIThbcNVA=",
+            "6UwRNgDnHvYO3z8d3nrtIJ+3Nah+fFxsKSKShtr357c=",
+            "J8U3/Ls0HIDgaYj+so8zqH3Jq8F4gtrJSyr/g1GaexQ=",
+            "NktyXbcBwsPPMSSNybJkkJbvBeJinF9OU/jWqfJTA3M=",
+            "9o+fntZW57OJFc0lbcNK7lEgtuCUpLsp9WXgyRkTZak=",
+            "XjsEADTkrmJGCFbUrpEJ9lKyPsugTQxRNm/9eMv/VgU=",
+            "vSr2E/NutFMzEHeJAsoB8bePxj8ARBoGIVG0pjDnvZA=",
+            "+HBALtnm0vheplBii7v271wa8T+w3qCEO36t3gxnq4A=",
+            "ZkHJlXVA1u11bB23yUjRwFmKgYxIYMxvMCmkQDjZhxk=",
+            "qqEkcpWTbg7zuyypqFgKNALjHX+gseEx/okc6c7TeoI=",
+            "Iz7U9DJT5JZMmwTZeYomODieyxt6LMA1MF5sY5rLqOU=",
+            "nFIZ2brO1ANHPk5prvv9TLEBDqqNgaYEBmsyP40B0O0=",
+            "4Qh+oTbYMNZG8o6b5TjkLowu8zTMD/YGtu9os93Mfiw=",
+            "wSaHrpTQFjMB4RSxQVUhglqJvAGe2z1ilppo9GSYLkY=",
+            "hafZfJdzUX/yyCr3Anv7Qq1DWVaWxotaclNRcl/O9SQ=",
+            "NlOclldmKPA1tMKIskqHAwuQDYHp31YwpK+OOMrMccc=",
+            "qxzHanAzz57SDdmJe0B7bJK72NTIBbwEMGBBKvDOROw=",
+            "xH/DCseLHr9eKoYT8qsORZK7zVdEGYWHuVtsVrD95wY="
+           ],
+           "logIndex": "3047606460",
+           "rootHash": "4YXxVae5Eel6KqdPCtijcVq1IG1S84ne5+lFHxVSFnU=",
+           "treeSize": "3047606497"
+          },
+          "integratedTime": "1791570674",
+          "kindVersion": {
+           "kind": "dsse",
+           "version": "0.0.1"
+          },
+          "logId": {
+           "keyId": "wNI9atQGlz+VWfO6LRygH4QUfY/8W4RFwiT5i5WRgB0="
+          },
+          "logIndex": "3169510722"
+         }
+        ]
+       }
+      },
+      "bundle_url": "https://tmaproduction.blob.core.windows.net/attestations/1412292511/2026/10/09/54424681.json.sn?se=2026-10-09T21%3A52%3A31Z&sig=X9tr18btzIkwylGK2BaV%2FgAmn5pMNe0Dg7lp418v43s%3D&ske=2026-10-09T23%3A00%3A57Z&skoid=322a4be5-8e0b-4548-9b48-4e436a2c7c75&sks=b&skt=2026-10-09T21%3A00%3A57Z&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skv=2026-12-06&sp=r&spr=https&sr=b&st=2026-10-09T20%3A52%3A31Z&sv=2026-12-06",
+      "initiator": "user",
+      "repository_id": 1412292511
+     }
+    ]
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "Link": "<https://docs.github.com/en/rest/about-the-rest-api/api-versions>; rel=\"deprecation\"; type=\"text/html\"",
+    "X-Accepted-GitHub-Permissions": "attestations=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-releases/attestations/sha256:83525cea69c1f197148f0dc51e57c558ef424c755e544a37e7b20836fb6c9b35?predicate_type=provenance": {
+   "body": {
+    "attestations": [
+     {
+      "bundle": {
+       "dsseEnvelope": {
+        "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCJzdWJqZWN0IjpbeyJuYW1lIjoiYXJ0aWZhY3QudHh0IiwiZGlnZXN0Ijp7InNoYTI1NiI6IjgzNTI1Y2VhNjljMWYxOTcxNDhmMGRjNTFlNTdjNTU4ZWY0MjRjNzU1ZTU0NGEzN2U3YjIwODM2ZmI2YzliMzUifX1dLCJwcmVkaWNhdGVUeXBlIjoiaHR0cHM6Ly9zbHNhLmRldi9wcm92ZW5hbmNlL3YxIiwicHJlZGljYXRlIjp7ImJ1aWxkRGVmaW5pdGlvbiI6eyJidWlsZFR5cGUiOiJodHRwczovL2FjdGlvbnMuZ2l0aHViLmlvL2J1aWxkdHlwZXMvd29ya2Zsb3cvdjEiLCJleHRlcm5hbFBhcmFtZXRlcnMiOnsid29ya2Zsb3ciOnsicmVmIjoicmVmcy9oZWFkcy9tYWluIiwicmVwb3NpdG9yeSI6Imh0dHBzOi8vZ2l0aHViLmNvbS9GZXRjaGVyLVRlc3Rlci9mZXRjaGVyLXRlc3QtcmVsZWFzZXMiLCJwYXRoIjoiLmdpdGh1Yi93b3JrZmxvd3MvcmVsZWFzZS55bWwifX0sImludGVybmFsUGFyYW1ldGVycyI6eyJnaXRodWIiOnsiZXZlbnRfbmFtZSI6IndvcmtmbG93X2Rpc3BhdGNoIiwicmVwb3NpdG9yeV9pZCI6IjE0MTIyOTI1MTEiLCJyZXBvc2l0b3J5X293bmVyX2lkIjoiMzM3NTUxNjcyIiwicnVubmVyX2Vudmlyb25tZW50IjoiZ2l0aHViLWhvc3RlZCJ9fSwicmVzb2x2ZWREZXBlbmRlbmNpZXMiOlt7InVyaSI6ImdpdCtodHRwczovL2dpdGh1Yi5jb20vRmV0Y2hlci1UZXN0ZXIvZmV0Y2hlci10ZXN0LXJlbGVhc2VzQHJlZnMvaGVhZHMvbWFpbiIsImRpZ2VzdCI6eyJnaXRDb21taXQiOiIyMGNjMTJjZDJiYmY2ZjM1YjJiNTJlM2RiYTE1YWVhOTU2MDk5YzBhIn19XX0sInJ1bkRldGFpbHMiOnsiYnVpbGRlciI6eyJpZCI6Imh0dHBzOi8vZ2l0aHViLmNvbS9GZXRjaGVyLVRlc3Rlci9mZXRjaGVyLXRlc3QtcmVsZWFzZXMvLmdpdGh1Yi93b3JrZmxvd3MvcmVsZWFzZS55bWxAcmVmcy9oZWFkcy9tYWluIn0sIm1ldGFkYXRhIjp7Imludm9jYXRpb25JZCI6Imh0dHBzOi8vZ2l0aHViLmNvbS9GZXRjaGVyLVRlc3Rlci9mZXRjaGVyLXRlc3QtcmVsZWFzZXMvYWN0aW9ucy9ydW5zLzM3OTczODk4MzAyL2F0dGVtcHRzLzEifX19fQ==",
+        "payloadType": "application/vnd.in-toto+json",
+        "signatures": [
+         {
+          "sig": "MEQCICDbemTnKqspNXPuQe0sSoGoEZkvOBpRZs63PxfibfB6AiAhzS5dPu9875Kg6GTKrpfdWXtq4VITcFU1eIrT7nT/dA=="
+         }
+        ]
+       },
+       "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+       "verificationMaterial": {
+        "certificate": {
+         "rawBytes": "MIIHfjCCBwOgAwIBAgIUcFbgEKffYlLzF5DEet6V0EvzeSswCgYIKoZIzj0EAwMwNzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRlcm1lZGlhdGUwHhcNMjYxMDA5MTgzMTQ4WhcNMjYxMDA5MTg0MTQ4WjAAMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFkR6A0F0RA2i1AjZdjKAIxNAVYSHSxiWMIHVl2/3v2Vccs99+OVAHvf7s3jTbJyKunHzJ0orjkgIad9D9Oiv7KOCBiIwggYeMA4GA1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAfBgNVHSMEGDAWgBTf0+nPViQRlvmo2OkoVaLGLhhkPzBzBgNVHREBAf8EaTBnhmVodHRwczovL2dpdGh1Yi5jb20vRmV0Y2hlci1UZXN0ZXIvZmV0Y2hlci10ZXN0LXJlbGVhc2VzLy5naXRodWIvd29ya2Zsb3dzL3JlbGVhc2UueW1sQHJlZnMvaGVhZHMvbWFpbjA5BgorBgEEAYO/MAEBBCtodHRwczovL3Rva2VuLmFjdGlvbnMuZ2l0aHVidXNlcmNvbnRlbnQuY29tMB8GCisGAQQBg78wAQIEEXdvcmtmbG93X2Rpc3BhdGNoMDYGCisGAQQBg78wAQMEKDIwY2MxMmNkMmJiZjZmMzViMmI1MmUzZGJhMTVhZWE5NTYwOTljMGEwFQYKKwYBBAGDvzABBAQHcmVsZWFzZTAyBgorBgEEAYO/MAEFBCRGZXRjaGVyLVRlc3Rlci9mZXRjaGVyLXRlc3QtcmVsZWFzZXMwHQYKKwYBBAGDvzABBgQPcmVmcy9oZWFkcy9tYWluMDsGCisGAQQBg78wAQgELQwraHR0cHM6Ly90b2tlbi5hY3Rpb25zLmdpdGh1YnVzZXJjb250ZW50LmNvbTB1BgorBgEEAYO/MAEJBGcMZWh0dHBzOi8vZ2l0aHViLmNvbS9GZXRjaGVyLVRlc3Rlci9mZXRjaGVyLXRlc3QtcmVsZWFzZXMvLmdpdGh1Yi93b3JrZmxvd3MvcmVsZWFzZS55bWxAcmVmcy9oZWFkcy9tYWluMDgGCisGAQQBg78wAQoEKgwoMjBjYzEyY2QyYmJmNmYzNWIyYjUyZTNkYmExNWFlYTk1NjA5OWMwYTAdBgorBgEEAYO/MAELBA8MDWdpdGh1Yi1ob3N0ZWQwRwYKKwYBBAGDvzABDAQ5DDdodHRwczovL2dpdGh1Yi5jb20vRmV0Y2hlci1UZXN0ZXIvZmV0Y2hlci10ZXN0LXJlbGVhc2VzMDgGCisGAQQBg78wAQ0EKgwoMjBjYzEyY2QyYmJmNmYzNWIyYjUyZTNkYmExNWFlYTk1NjA5OWMwYTAfBgorBgEEAYO/MAEOBBEMD3JlZnMvaGVhZHMvbWFpbjAaBgorBgEEAYO/MAEPBAwMCjE0MTIyOTI1MTEwMQYKKwYBBAGDvzABEAQjDCFodHRwczovL2dpdGh1Yi5jb20vRmV0Y2hlci1UZXN0ZXIwGQYKKwYBBAGDvzABEQQLDAkzMzc1NTE2NzIwdQYKKwYBBAGDvzABEgRnDGVodHRwczovL2dpdGh1Yi5jb20vRmV0Y2hlci1UZXN0ZXIvZmV0Y2hlci10ZXN0LXJlbGVhc2VzLy5naXRodWIvd29ya2Zsb3dzL3JlbGVhc2UueW1sQHJlZnMvaGVhZHMvbWFpbjA4BgorBgEEAYO/MAETBCoMKDIwY2MxMmNkMmJiZjZmMzViMmI1MmUzZGJhMTVhZWE5NTYwOTljMGEwIQYKKwYBBAGDvzABFAQTDBF3b3JrZmxvd19kaXNwYXRjaDBrBgorBgEEAYO/MAEVBF0MW2h0dHBzOi8vZ2l0aHViLmNvbS9GZXRjaGVyLVRlc3Rlci9mZXRjaGVyLXRlc3QtcmVsZWFzZXMvYWN0aW9ucy9ydW5zLzM3OTczODk4MzAyL2F0dGVtcHRzLzEwFgYKKwYBBAGDvzABFgQIDAZwdWJsaWMwYgYKKwYBBAGDvzABGARUDFJyZXBvOkZldGNoZXItVGVzdGVyQDMzNzU1MTY3Mi9mZXRjaGVyLXRlc3QtcmVsZWFzZXNAMTQxMjI5MjUxMTpyZWY6cmVmcy9oZWFkcy9tYWluMIGKBgorBgEEAdZ5AgQCBHwEegB4AHYA3T0wasbHETJjGR4cmWc3AqJKXrjePK3/h4pygC8p7o4AAAGhIe+HuwAABAMARzBFAiEAmzckiEoqqwE6hL68oTX8LG/G1DadIMA8YnLQNT2kJU8CIBfjY/g4nn7BjF0NTi7O17Lnxc4BH6YEB0xlBHBp4OleMAoGCCqGSM49BAMDA2kAMGYCMQCZomJ6tU9Ocha2Df9sZ/qklX3UIpgoxMVoHPF837EBOLzTFwCSpXtjHx61+GediocCMQDbRTtY/1kUhUfRU/9gSXGil17dr1h2xh1QligJAHxsH4eHPUwXQc2LTfacJMGN/jc="
+        },
+        "timestampVerificationData": {},
+        "tlogEntries": [
+         {
+          "canonicalizedBody": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoiZHNzZSIsInNwZWMiOnsiZW52ZWxvcGVIYXNoIjp7ImFsZ29yaXRobSI6InNoYTI1NiIsInZhbHVlIjoiZDBhODA1ZWE5YzFlOGEzMjQ5Yjg5NmM2ZmZlOGQyODc0ZDFkZjIyOTU0Njg5NWUxZWIwZDMzYzllYjY2OWE5MCJ9LCJwYXlsb2FkSGFzaCI6eyJhbGdvcml0aG0iOiJzaGEyNTYiLCJ2YWx1ZSI6Ijg3YmY0ODc5NzhhMThlNTQyMjk1NzRiNDU0MWI2MzdmMTY4ODk3ODM3ZmI2YjcxZTUyOTg3NmU5NjQ1ZDI4ODkifSwic2lnbmF0dXJlcyI6W3sic2lnbmF0dXJlIjoiTUVRQ0lDRGJlbVRuS3FzcE5YUHVRZTBzU29Hb0Vaa3ZPQnBSWnM2M1B4ZmliZkI2QWlBaHpTNWRQdTk4NzVLZzZHVEtycGZkV1h0cTRWSVRjRlUxZUlyVDduVC9kQT09IiwidmVyaWZpZXIiOiJMUzB0TFMxQ1JVZEpUaUJEUlZKVVNVWkpRMEZVUlMwdExTMHRDazFKU1VobWFrTkRRbmRQWjBGM1NVSkJaMGxWWTBaaVowVkxabVpaYkV4NlJqVkVSV1YwTmxZd1JYWjZaVk56ZDBObldVbExiMXBKZW1vd1JVRjNUWGNLVG5wRlZrMUNUVWRCTVZWRlEyaE5UV015Ykc1ak0xSjJZMjFWZFZwSFZqSk5ValIzU0VGWlJGWlJVVVJGZUZaNllWZGtlbVJIT1hsYVV6RndZbTVTYkFwamJURnNXa2RzYUdSSFZYZElhR05PVFdwWmVFMUVRVFZOVkdkNlRWUlJORmRvWTA1TmFsbDRUVVJCTlUxVVp6Qk5WRkUwVjJwQlFVMUdhM2RGZDFsSUNrdHZXa2w2YWpCRFFWRlpTVXR2V2tsNmFqQkVRVkZqUkZGblFVVkdhMUkyUVRCR01GSkJNbWt4UVdwYVpHcExRVWw0VGtGV1dWTklVM2hwVjAxSlNGWUtiREl2TTNZeVZtTmpjems1SzA5V1FVaDJaamR6TTJwVVlrcDVTM1Z1U0hwS01HOXlhbXRuU1dGa09VUTVUMmwyTjB0UFEwSnBTWGRuWjFsbFRVRTBSd3BCTVZWa1JIZEZRaTkzVVVWQmQwbElaMFJCVkVKblRsWklVMVZGUkVSQlMwSm5aM0pDWjBWR1FsRmpSRUY2UVdaQ1owNVdTRk5OUlVkRVFWZG5RbFJtQ2pBcmJsQldhVkZTYkhadGJ6SlBhMjlXWVV4SFRHaG9hMUI2UW5wQ1owNVdTRkpGUWtGbU9FVmhWRUp1YUcxV2IyUklVbmRqZW05MlRESmtjR1JIYURFS1dXazFhbUl5TUhaU2JWWXdXVEpvYkdOcE1WVmFXRTR3V2xoSmRscHRWakJaTW1oc1kya3hNRnBZVGpCTVdFcHNZa2RXYUdNeVZucE1lVFZ1WVZoU2J3cGtWMGwyWkRJNWVXRXlXbk5pTTJSNlRETktiR0pIVm1oak1sVjFaVmN4YzFGSVNteGFiazEyWVVkV2FGcElUWFppVjBad1ltcEJOVUpuYjNKQ1owVkZDa0ZaVHk5TlFVVkNRa04wYjJSSVVuZGplbTkyVEROU2RtRXlWblZNYlVacVpFZHNkbUp1VFhWYU1td3dZVWhXYVdSWVRteGpiVTUyWW01U2JHSnVVWFVLV1RJNWRFMUNPRWREYVhOSFFWRlJRbWMzT0hkQlVVbEZSVmhrZG1OdGRHMWlSemt6V0RKU2NHTXpRbWhrUjA1dlRVUlpSME5wYzBkQlVWRkNaemM0ZHdwQlVVMUZTMFJKZDFreVRYaE5iVTVyVFcxS2FWcHFXbTFOZWxacFRXMUpNVTF0VlhwYVIwcG9UVlJXYUZwWFJUVk9WRmwzVDFSc2FrMUhSWGRHVVZsTENrdDNXVUpDUVVkRWRucEJRa0pCVVVoamJWWnpXbGRHZWxwVVFYbENaMjl5UW1kRlJVRlpUeTlOUVVWR1FrTlNSMXBZVW1waFIxWjVURlpTYkdNelVtd0tZMms1YlZwWVVtcGhSMVo1VEZoU2JHTXpVWFJqYlZaeldsZEdlbHBZVFhkSVVWbExTM2RaUWtKQlIwUjJla0ZDUW1kUlVHTnRWbTFqZVRsdldsZEdhd3BqZVRsMFdWZHNkVTFFYzBkRGFYTkhRVkZSUW1jM09IZEJVV2RGVEZGM2NtRklVakJqU0UwMlRIazVNR0l5ZEd4aWFUVm9XVE5TY0dJeU5YcE1iV1J3Q21SSGFERlpibFo2V2xoS2FtSXlOVEJhVnpVd1RHMU9kbUpVUWpGQ1oyOXlRbWRGUlVGWlR5OU5RVVZLUWtkalRWcFhhREJrU0VKNlQyazRkbG95YkRBS1lVaFdhVXh0VG5aaVV6bEhXbGhTYW1GSFZubE1WbEpzWXpOU2JHTnBPVzFhV0ZKcVlVZFdlVXhZVW14ak0xRjBZMjFXYzFwWFJucGFXRTEyVEcxa2NBcGtSMmd4V1drNU0ySXpTbkphYlhoMlpETk5kbU50Vm5OYVYwWjZXbE0xTldKWGVFRmpiVlp0WTNrNWIxcFhSbXRqZVRsMFdWZHNkVTFFWjBkRGFYTkhDa0ZSVVVKbk56aDNRVkZ2UlV0bmQyOU5ha0pxV1hwRmVWa3lVWGxaYlVwdFRtMVplazVYU1hsWmFsVjVXbFJPYTFsdFJYaE9WMFpzV1ZSck1VNXFRVFVLVDFkTmQxbFVRV1JDWjI5eVFtZEZSVUZaVHk5TlFVVk1Ra0U0VFVSWFpIQmtSMmd4V1dreGIySXpUakJhVjFGM1VuZFpTMHQzV1VKQ1FVZEVkbnBCUWdwRVFWRTFSRVJrYjJSSVVuZGplbTkyVERKa2NHUkhhREZaYVRWcVlqSXdkbEp0VmpCWk1taHNZMmt4VlZwWVRqQmFXRWwyV20xV01Ga3lhR3hqYVRFd0NscFlUakJNV0Vwc1lrZFdhR015Vm5wTlJHZEhRMmx6UjBGUlVVSm5OemgzUVZFd1JVdG5kMjlOYWtKcVdYcEZlVmt5VVhsWmJVcHRUbTFaZWs1WFNYa0tXV3BWZVZwVVRtdFpiVVY0VGxkR2JGbFVhekZPYWtFMVQxZE5kMWxVUVdaQ1oyOXlRbWRGUlVGWlR5OU5RVVZQUWtKRlRVUXpTbXhhYmsxMllVZFdhQXBhU0UxMllsZEdjR0pxUVdGQ1oyOXlRbWRGUlVGWlR5OU5RVVZRUWtGM1RVTnFSVEJOVkVsNVQxUkpNVTFVUlhkTlVWbExTM2RaUWtKQlIwUjJla0ZDQ2tWQlVXcEVRMFp2WkVoU2QyTjZiM1pNTW1Sd1pFZG9NVmxwTldwaU1qQjJVbTFXTUZreWFHeGphVEZWV2xoT01GcFlTWGRIVVZsTFMzZFpRa0pCUjBRS2RucEJRa1ZSVVV4RVFXdDZUWHBqTVU1VVJUSk9la2wzWkZGWlMwdDNXVUpDUVVkRWRucEJRa1ZuVW01RVIxWnZaRWhTZDJONmIzWk1NbVJ3WkVkb01RcFphVFZxWWpJd2RsSnRWakJaTW1oc1kya3hWVnBZVGpCYVdFbDJXbTFXTUZreWFHeGphVEV3V2xoT01FeFlTbXhpUjFab1l6Sldla3g1Tlc1aFdGSnZDbVJYU1haa01qbDVZVEphYzJJelpIcE1NMHBzWWtkV2FHTXlWWFZsVnpGelVVaEtiRnB1VFhaaFIxWm9Xa2hOZG1KWFJuQmlha0UwUW1kdmNrSm5SVVVLUVZsUEwwMUJSVlJDUTI5TlMwUkpkMWt5VFhoTmJVNXJUVzFLYVZwcVdtMU5lbFpwVFcxSk1VMXRWWHBhUjBwb1RWUldhRnBYUlRWT1ZGbDNUMVJzYWdwTlIwVjNTVkZaUzB0M1dVSkNRVWRFZG5wQlFrWkJVVlJFUWtZellqTktjbHB0ZUhaa01UbHJZVmhPZDFsWVVtcGhSRUp5UW1kdmNrSm5SVVZCV1U4dkNrMUJSVlpDUmpCTlZ6Sm9NR1JJUW5wUGFUaDJXakpzTUdGSVZtbE1iVTUyWWxNNVIxcFlVbXBoUjFaNVRGWlNiR016VW14amFUbHRXbGhTYW1GSFZua0tURmhTYkdNelVYUmpiVlp6V2xkR2VscFlUWFpaVjA0d1lWYzVkV041T1hsa1Z6VjZUSHBOTTA5VVkzcFBSR3MwVFhwQmVVd3lSakJrUjFaMFkwaFNlZ3BNZWtWM1JtZFpTMHQzV1VKQ1FVZEVkbnBCUWtablVVbEVRVnAzWkZkS2MyRlhUWGRaWjFsTFMzZFpRa0pCUjBSMmVrRkNSMEZTVlVSR1NubGFXRUoyQ2s5cldteGtSMDV2V2xoSmRGWkhWbnBrUjFaNVVVUk5lazU2VlRGTlZGa3pUV2s1YlZwWVVtcGhSMVo1VEZoU2JHTXpVWFJqYlZaeldsZEdlbHBZVGtFS1RWUlJlRTFxU1RWTmFsVjRUVlJ3ZVZwWFdUWmpiVlp0WTNrNWIxcFhSbXRqZVRsMFdWZHNkVTFKUjB0Q1oyOXlRbWRGUlVGa1dqVkJaMUZEUWtoM1JRcGxaMEkwUVVoWlFUTlVNSGRoYzJKSVJWUktha2RTTkdOdFYyTXpRWEZLUzFoeWFtVlFTek12YURSd2VXZERPSEEzYnpSQlFVRkhhRWxsSzBoMWQwRkJDa0pCVFVGU2VrSkdRV2xGUVcxNlkydHBSVzl4Y1hkRk5taE1Oamh2VkZnNFRFY3ZSekZFWVdSSlRVRTRXVzVNVVU1VU1tdEtWVGhEU1VKbWFsa3ZaelFLYm00M1FtcEdNRTVVYVRkUE1UZE1ibmhqTkVKSU5sbEZRakI0YkVKSVFuQTBUMnhsVFVGdlIwTkRjVWRUVFRRNVFrRk5SRUV5YTBGTlIxbERUVkZEV2dwdmJVbzJkRlU1VDJOb1lUSkVaamx6V2k5eGEyeFlNMVZKY0dkdmVFMVdiMGhRUmpnek4wVkNUMHg2VkVaM1ExTndXSFJxU0hnMk1TdEhaV1JwYjJORENrMVJSR0pTVkhSWkx6RnJWV2hWWmxKVkx6bG5VMWhIYVd3eE4yUnlNV2d5ZUdneFVXeHBaMHBCU0hoelNEUmxTRkJWZDFoUll6Sk1WR1poWTBwTlIwNEtMMnBqUFFvdExTMHRMVVZPUkNCRFJWSlVTVVpKUTBGVVJTMHRMUzB0Q2c9PSJ9XX19",
+          "inclusionPromise": {
+           "signedEntryTimestamp": "MEUCIQDhBmzCsAaAu1jiTXThpArkzzNnZ44Hvf09KCf081TNqAIgf9SDInfUVSz4t8r6hzxoaKnFK7uqGmLdSZGQqT5Mujc="
+          },
+          "inclusionProof": {
+           "checkpoint": {
+            "envelope": "rekor.sigstore.dev - 1193050959916656506\n3047614694\nStz2irqFB+Pdz/9dopVUdcm9zdAGtOWsWju6f47P7Lg=\n\n\u2014 rekor.sigstore.dev wNI9ajBEAiBKm4dj0SI1vFoW+LR5wNgTfADDxq2uCuMPX3WvU6x2TwIgAM9YuSJXn4V9BUxusKLvFQt1+EED75NHoRlsAZtUp30=\n"
+           },
+           "hashes": [
+            "0YhhtbYmW5BfTBJeRNzPJ8WbkDA0ItiBDyFdWnkoIl0=",
+            "ZNaCmHpXE4zM+9FmdNBfL7hNeUWVCdHzh6lFJDBjisI=",
+            "5Oe4r6iwbyp6K2wYddMHN/VQn1wRMCh3Uv3oCTQm7/8=",
+            "ZIy9PSC0oOPTxRAJeL2ewPhuyrLQREwQxlP+reLPibU=",
+            "TOdAdsoTCF8DHfundiQY2uSUWY+wHU0gDNuxNsa1kIs=",
+            "fKOpGF1dvq5wjH38TG4gqPyY1sZzupelFJpX6kTGSp4=",
+            "fgzVnOfRe48bG4gJjxYHgVBABNcj+RPYLjQa41tS7YY=",
+            "XbPhaG8akjMEs+uQVT8EC0hnTedLjXD3tSQzhd9cGHI=",
+            "QYb8fij1nNuGzlTeo0ZaNU/3Bu9oI7q4RD68X9niDlw=",
+            "0avTV/ok3n0krOKztdgvfmIyHPWbNz63XmhgibB9aeg=",
+            "+HBALtnm0vheplBii7v271wa8T+w3qCEO36t3gxnq4A=",
+            "ZkHJlXVA1u11bB23yUjRwFmKgYxIYMxvMCmkQDjZhxk=",
+            "qqEkcpWTbg7zuyypqFgKNALjHX+gseEx/okc6c7TeoI=",
+            "Iz7U9DJT5JZMmwTZeYomODieyxt6LMA1MF5sY5rLqOU=",
+            "nFIZ2brO1ANHPk5prvv9TLEBDqqNgaYEBmsyP40B0O0=",
+            "4Qh+oTbYMNZG8o6b5TjkLowu8zTMD/YGtu9os93Mfiw=",
+            "wSaHrpTQFjMB4RSxQVUhglqJvAGe2z1ilppo9GSYLkY=",
+            "hafZfJdzUX/yyCr3Anv7Qq1DWVaWxotaclNRcl/O9SQ=",
+            "NlOclldmKPA1tMKIskqHAwuQDYHp31YwpK+OOMrMccc=",
+            "qxzHanAzz57SDdmJe0B7bJK72NTIBbwEMGBBKvDOROw=",
+            "xH/DCseLHr9eKoYT8qsORZK7zVdEGYWHuVtsVrD95wY="
+           ],
+           "logIndex": "3047614664",
+           "rootHash": "Stz2irqFB+Pdz/9dopVUdcm9zdAGtOWsWju6f47P7Lg=",
+           "treeSize": "3047614694"
+          },
+          "integratedTime": "1791570708",
+          "kindVersion": {
+           "kind": "dsse",
+           "version": "0.0.1"
+          },
+          "logId": {
+           "keyId": "wNI9atQGlz+VWfO6LRygH4QUfY/8W4RFwiT5i5WRgB0="
+          },
+          "logIndex": "3169518926"
+         }
+        ]
+       }
+      },
+      "bundle_url": "https://tmaproduction.blob.core.windows.net/attestations/1412292511/2026/10/09/54424831.json.sn?se=2026-10-09T21%3A52%3A31Z&sig=OmHky4sQOL%2FzopVSQxEeSbLfqv2b5QkksblMOCHTtXY%3D&ske=2026-10-09T23%3A01%3A33Z&skoid=322a4be5-8e0b-4548-9b48-4e436a2c7c75&sks=b&skt=2026-10-09T21%3A01%3A33Z&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skv=2026-12-06&sp=r&spr=https&sr=b&st=2026-10-09T20%3A52%3A31Z&sv=2026-12-06",
+      "initiator": "user",
+      "repository_id": 1412292511
+     }
+    ]
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "Link": "<https://docs.github.com/en/rest/about-the-rest-api/api-versions>; rel=\"deprecation\"; type=\"text/html\"",
+    "X-Accepted-GitHub-Permissions": "attestations=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-releases/attestations/sha256:f18be2512de0f9c937e9ede0502e154193cf8d990f63546df898a8a91cb4f4a7?predicate_type=provenance": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest/repos/attestations#list-attestations",
+    "message": "Not Found",
+    "status": "404"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "Link": "<https://docs.github.com/en/rest/about-the-rest-api/api-versions>; rel=\"deprecation\"; type=\"text/html\"",
+    "X-Accepted-GitHub-Permissions": "attestations=read"
+   },
+   "reason": "Not Found",
+   "status": 404
+  },
+  "/repos/Fetcher-Tester/fetcher-test-releases/immutable-releases": {
+   "body": {
+    "enabled": true,
+    "enforced_by_owner": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-releases/releases?per_page=100": {
+   "body": [
+    {
+     "assets": [
+      {
+       "content_type": "text/plain; charset=utf-8",
+       "created_at": "2026-10-09T18:31:51Z",
+       "digest": "sha256:83525cea69c1f197148f0dc51e57c558ef424c755e544a37e7b20836fb6c9b35",
+       "download_count": 0,
+       "id": 625817605,
+       "label": "",
+       "name": "artifact.txt",
+       "size": 34,
+       "state": "uploaded",
+       "updated_at": "2026-10-09T18:31:51Z",
+       "uploader": {
+        "id": 41898282,
+        "login": "github-actions[bot]",
+        "site_admin": false,
+        "type": "Bot",
+        "user_view_type": "public"
+       }
+      }
+     ],
+     "author": {
+      "id": 41898282,
+      "login": "github-actions[bot]",
+      "site_admin": false,
+      "type": "Bot",
+      "user_view_type": "public"
+     },
+     "created_at": "2026-10-09T18:30:26Z",
+     "draft": false,
+     "id": 408220076,
+     "immutable": true,
+     "name": "v0.1.3",
+     "prerelease": false,
+     "published_at": "2026-10-09T18:31:52Z",
+     "tag_name": "v0.1.3",
+     "target_commitish": "20cc12cd2bbf6f35b2b52e3dba15aea956099c0a",
+     "updated_at": "2026-10-09T18:31:52Z",
+     "upload_url": "https://uploads.github.com/repos/Fetcher-Tester/fetcher-test-releases/releases/408220076/assets{?name,label}"
+    },
+    {
+     "assets": [
+      {
+       "content_type": "text/plain; charset=utf-8",
+       "created_at": "2026-10-09T18:31:16Z",
+       "digest": "sha256:0204ee7c327b7bd1eec9c7adb9efd05776de83b5c8b945bfc015317f2170b77f",
+       "download_count": 0,
+       "id": 625816265,
+       "label": "",
+       "name": "artifact.txt",
+       "size": 34,
+       "state": "uploaded",
+       "updated_at": "2026-10-09T18:31:16Z",
+       "uploader": {
+        "id": 41898282,
+        "login": "github-actions[bot]",
+        "site_admin": false,
+        "type": "Bot",
+        "user_view_type": "public"
+       }
+      }
+     ],
+     "author": {
+      "id": 41898282,
+      "login": "github-actions[bot]",
+      "site_admin": false,
+      "type": "Bot",
+      "user_view_type": "public"
+     },
+     "created_at": "2026-10-09T18:30:26Z",
+     "draft": false,
+     "id": 408219623,
+     "immutable": false,
+     "name": "v0.1.2",
+     "prerelease": false,
+     "published_at": "2026-10-09T18:31:17Z",
+     "tag_name": "v0.1.2",
+     "target_commitish": "20cc12cd2bbf6f35b2b52e3dba15aea956099c0a",
+     "updated_at": "2026-10-09T18:31:17Z",
+     "upload_url": "https://uploads.github.com/repos/Fetcher-Tester/fetcher-test-releases/releases/408219623/assets{?name,label}"
+    },
+    {
+     "assets": [
+      {
+       "content_type": "text/plain; charset=utf-8",
+       "created_at": "2026-10-09T18:30:42Z",
+       "digest": "sha256:f18be2512de0f9c937e9ede0502e154193cf8d990f63546df898a8a91cb4f4a7",
+       "download_count": 0,
+       "id": 625814839,
+       "label": "",
+       "name": "artifact.txt",
+       "size": 34,
+       "state": "uploaded",
+       "updated_at": "2026-10-09T18:30:42Z",
+       "uploader": {
+        "id": 41898282,
+        "login": "github-actions[bot]",
+        "site_admin": false,
+        "type": "Bot",
+        "user_view_type": "public"
+       }
+      }
+     ],
+     "author": {
+      "id": 41898282,
+      "login": "github-actions[bot]",
+      "site_admin": false,
+      "type": "Bot",
+      "user_view_type": "public"
+     },
+     "created_at": "2026-10-09T18:30:26Z",
+     "draft": false,
+     "id": 408219176,
+     "immutable": false,
+     "name": "v0.1.1",
+     "prerelease": false,
+     "published_at": "2026-10-09T18:30:43Z",
+     "tag_name": "v0.1.1",
+     "target_commitish": "20cc12cd2bbf6f35b2b52e3dba15aea956099c0a",
+     "updated_at": "2026-10-09T18:30:43Z",
+     "upload_url": "https://uploads.github.com/repos/Fetcher-Tester/fetcher-test-releases/releases/408219176/assets{?name,label}"
+    }
+   ],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-releases/rulesets/24807944": {
+   "body": {
+    "bypass_actors": [],
+    "conditions": {
+     "ref_name": {
+      "exclude": [],
+      "include": [
+       "refs/tags/v0.1.1"
+      ]
+     }
+    },
+    "created_at": "2026-10-09T12:32:11.216-06:00",
+    "current_user_can_bypass": "never",
+    "enforcement": "active",
+    "id": 24807944,
+    "name": "fetcher-test-release-tags",
+    "rules": [
+     {
+      "type": "deletion"
+     },
+     {
+      "type": "update"
+     }
+    ],
+    "source": "Fetcher-Tester/fetcher-test-releases",
+    "source_type": "Repository",
+    "target": "tag",
+    "updated_at": "2026-10-09T12:32:45.943-06:00"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-releases/rulesets?includes_parents=true&per_page=100": {
+   "body": [
+    {
+     "created_at": "2026-10-09T12:32:11.216-06:00",
+     "enforcement": "active",
+     "id": 24807944,
+     "name": "fetcher-test-release-tags",
+     "source": "Fetcher-Tester/fetcher-test-releases",
+     "source_type": "Repository",
+     "target": "tag",
+     "updated_at": "2026-10-09T12:32:45.943-06:00"
+    }
+   ],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scanning-off": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:18:12Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-scanning-off",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-scanning-off.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837347,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-scanning-off",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:18:16Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 1,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-scanning-off.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:57:05Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scanning-off/immutable-releases": {
+   "body": {
+    "enabled": false,
+    "enforced_by_owner": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scanning-off/releases?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scanning-off/rulesets?includes_parents=true&per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scn": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-09T18:24:28Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-scn",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-scn.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1412285363,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-scn",
+    "network_count": 0,
+    "open_issues": 1,
+    "open_issues_count": 1,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-09T18:45:31Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 6,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-scn.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-09T18:45:33Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scn/immutable-releases": {
+   "body": {
+    "enabled": false,
+    "enforced_by_owner": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scn/releases?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scn/rulesets?includes_parents=true&per_page=100": {
+   "body": [
+    {
+     "created_at": "2026-10-09T12:45:30.150-06:00",
+     "enforcement": "active",
+     "id": 24808676,
+     "name": "fetcher-test-code-owners",
+     "source": "Fetcher-Tester/fetcher-test-scn",
+     "source_type": "Repository",
+     "target": "branch",
+     "updated_at": "2026-10-09T12:45:30.195-06:00"
+    }
+   ],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-unprotected": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:17:59Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-unprotected",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-unprotected.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837236,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-unprotected",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:49:38Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 2,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-unprotected.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:56:57Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-unprotected/immutable-releases": {
+   "body": {
+    "enabled": false,
+    "enforced_by_owner": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-unprotected/releases?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-unprotected/rulesets?includes_parents=true&per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-vulnerable": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:18:02Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-vulnerable",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-vulnerable.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837264,
+    "is_template": false,
+    "language": "Python",
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-vulnerable",
+    "network_count": 0,
+    "open_issues": 2,
+    "open_issues_count": 2,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T05:00:10Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "enabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 5,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-vulnerable.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:56:59Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-vulnerable/immutable-releases": {
+   "body": {
+    "enabled": false,
+    "enforced_by_owner": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-vulnerable/releases?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-vulnerable/rulesets?includes_parents=true&per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  }
+ },
+ "env": {
+  "GITHUB_CHECK_KEV": "false",
+  "GITHUB_DEPLOYMENT_DAYS_BACK": "366",
+  "GITHUB_ORG": "Fetcher-Tester",
+  "GITHUB_REPOSITORIES": "fetcher-test-actions,fetcher-test-deploy,fetcher-test-disabled-rules,fetcher-test-evaluate-rules,fetcher-test-globs,fetcher-test-leaked-secret,fetcher-test-protected,fetcher-test-releases,fetcher-test-scanning-off,fetcher-test-scn,fetcher-test-unprotected,fetcher-test-vulnerable",
+  "GITHUB_SCN_DAYS_BACK": "366",
+  "GITHUB_SCN_REQUIRE_COMPLETE": "false",
+  "GITHUB_SCN_STATE": "all",
+  "GITHUB_SCN_STRICT": "false",
+  "PARAMIFY_CERT_PACKAGE_URI": "https://example.com/cert-package"
+ },
+ "exit_code": 0,
+ "fetcher": "release_integrity",
+ "org": "Fetcher-Tester"
+}

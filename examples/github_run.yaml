@@ -1,0 +1,72 @@
+# GitHub evidence from one organization's REST API.
+#
+# Set before running:
+#   export GITHUB_TOKEN=<fine-grained token whose resource owner is the org; see fetchers/github/README.md>
+#
+# Every GitHub fetcher fans out per organization. The one target below is shared
+# by all of them through a YAML anchor; add a second list item under `targets`
+# to collect another organization (or a GitHub Enterprise Server host via
+# api_url), each with its own token.
+
+run:
+  output_dir: ./evidence
+
+  fetchers:
+    - use: github_branch_protection
+      targets:
+        - &github_target
+          org: your-org
+          # api_url: https://github.example.com/api/v3   # GitHub Enterprise Server
+          # repositories: api,web,infra                   # collect only these
+          secrets:
+            token: ${env:GITHUB_TOKEN}
+
+    - use: github_pull_request_checks
+      targets: [*github_target]
+
+    - use: github_dependabot_alerts
+      targets: [*github_target]
+
+    - use: github_code_scanning_alerts
+      targets: [*github_target]
+
+    - use: github_secret_scanning
+      targets: [*github_target]
+
+    - use: github_org_security_settings
+      targets: [*github_target]
+
+    - use: github_access_review
+      targets: [*github_target]
+
+    - use: github_non_user_credentials
+      targets: [*github_target]
+
+    - use: github_actions_security
+      targets: [*github_target]
+
+    - use: github_release_integrity
+      targets: [*github_target]
+
+    - use: github_deployment_controls
+      targets: [*github_target]
+
+    - use: github_vulnerability_disclosure
+      targets: [*github_target]
+
+    # Notifications cite the Certification Package Overview; set
+    # PARAMIFY_CERT_PACKAGE_URI (shared with the paramify fetchers) or
+    # fedramp_cert_package_uri under config.
+    - use: github_significant_change_notifications
+      targets: [*github_target]
+
+    # GitHub Enterprise Cloud only.
+    # - use: github_audit_log
+    #   targets: [*github_target]
+
+    # An inventory: sent to Paramify only when every repository was collected.
+    # Archived repositories are still assets, so this target includes them.
+    - use: github_repository_inventory
+      targets:
+        - <<: *github_target
+          include_archived: true

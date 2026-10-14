@@ -1,0 +1,66 @@
+name: github_org_security_settings
+version: 0.1.0
+description: >-
+  An organization's security settings: whether two-factor authentication is
+  required and which members lack it, default member permissions, what the
+  Actions token may do, and which repositories a security configuration is
+  actually applied to.
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: github_org_security_settings.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-IAM-APM
+  - KSI-IAM-ELP
+  - KSI-CNA-EIS
+
+evidence_set:
+  reference_id: EVD-GITHUB-ORG-SECURITY
+  name: GitHub Organization Security Settings
+  instructions: >-
+    The organization's two-factor requirement and the members without two-factor
+    (owners only; null otherwise), default repository permission and member
+    creation rights, Actions token default permissions and whether workflows may
+    approve pull requests, and every code security configuration with the
+    repositories it is attached to. A configuration attached to no repository
+    applies to none; repositories_without_security_configuration lists them.

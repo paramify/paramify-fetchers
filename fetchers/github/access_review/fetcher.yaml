@@ -1,0 +1,76 @@
+name: github_access_review
+version: 0.1.0
+description: >-
+  Who can reach an organization's code and with what rights: owners, members,
+  outside collaborators, pending invitations, teams and the repositories they
+  administer or write to, organization roles and who holds them, and each
+  repository's direct admins.
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: github_access_review.json
+  aggregation: per_target
+
+config_schema:
+  include_organization_roles:
+    type: boolean
+    required: false
+    default: true
+    env: GITHUB_INCLUDE_ORGANIZATION_ROLES
+    description: >-
+      Read organization roles (security manager, all-repository roles and
+      custom roles) and who holds them. Needs the Custom organization roles
+      (organization) read permission; set false to run without it, and the
+      role fields are null.
+
+secrets: []
+
+ksis:
+  - KSI-IAM-ELP
+  - KSI-IAM-AAM
+
+evidence_set:
+  reference_id: EVD-GITHUB-ACCESS-REVIEW
+  name: GitHub Organization Access Review
+  instructions: >-
+    Owners, members, outside collaborators (with the repositories and roles
+    they hold), pending invitations (email domain only), every team with its
+    members and the repositories it administers or writes to, organization
+    roles with their holders, and per repository the direct admins (owners
+    excluded), writers and team grants.

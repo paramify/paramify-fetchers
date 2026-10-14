@@ -12,6 +12,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **GitHub fetchers (15).** Branch protection, pull request reviews and
+  checks, Actions security, release integrity, deployment controls,
+  Dependabot, code scanning and secret scanning alerts, vulnerability
+  disclosure, organization security settings, access review, non-user
+  credentials, the audit log (Enterprise Cloud), significant change
+  notifications, and `github_repository_inventory`. One target per
+  organization, on github.com, GHE.com or GitHub Enterprise Server. See
+  `fetchers/github/README.md`.
 - **`azure_entra_groups`** (`EVD-AZURE-ENTRA-GROUPS`) — every Entra ID group with
   its members and owners, its kind, whether it can hold directory roles, and
   whether membership is set by a rule (dynamic, with paused rules flagged), by hand

@@ -55,6 +55,7 @@ If you have a question about this repo, ask DeepWiki. It answers in plain Englis
     <td align="center" width="128"><a href="fetchers/web/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/web-dark.svg"><img src="fetchers/logos/web.svg" alt="Web" width="48" height="48"></picture></a><br><sub>Web</sub></td>
     <td align="center" width="128"><a href="fetchers/zendesk/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/zendesk-dark.svg"><img src="fetchers/logos/zendesk.svg" alt="Zendesk" width="48" height="48"></picture></a><br><sub>Zendesk</sub></td>
     <td align="center" width="128"><a href="fetchers/oci/"><img src="fetchers/logos/oracle.svg" alt="Oracle Cloud" width="48" height="48"></a><br><sub>Oracle Cloud</sub></td>
+    <td align="center" width="128"><a href="fetchers/github/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/github-dark.svg"><img src="fetchers/logos/github.svg" alt="GitHub" width="48" height="48"></picture></a><br><sub>GitHub</sub></td>
   </tr>
 </table>
 
@@ -79,7 +80,6 @@ More integrations are in progress. To ask for a new platform or fetcher, post in
 <table>
   <tr>
     <td align="center" width="128"><img src="fetchers/logos/qualys.svg" alt="SSL Labs" width="48" height="48"><br><sub>SSL Labs</sub></td>
-    <td align="center" width="128"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/github-dark.svg"><img src="fetchers/logos/github.svg" alt="GitHub" width="48" height="48"></picture><br><sub>GitHub</sub></td>
     <td align="center" width="128"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/tenable-dark.svg"><img src="fetchers/logos/tenable.svg" alt="Tenable" width="48" height="48"></picture><br><sub>Tenable</sub></td>
   </tr>
 </table>

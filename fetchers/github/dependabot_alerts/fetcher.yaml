@@ -1,0 +1,76 @@
+name: github_dependabot_alerts
+version: 0.1.0
+description: >-
+  Dependabot alerts for every repository, open and closed, with severity, age,
+  time to fix and dismissal reasons, plus whether each repository is actually
+  being scanned (alerts on, dependency graph populated, security updates on).
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: github_dependabot_alerts.json
+  aggregation: per_target
+
+config_schema:
+  check_kev:
+    type: boolean
+    required: false
+    default: true
+    env: GITHUB_CHECK_KEV
+    description: >-
+      Mark alerts whose CVE is in CISA's Known Exploited Vulnerabilities
+      catalog (one download from cisa.gov per run). Set false where cisa.gov
+      is unreachable; known_exploited is then null.
+
+secrets: []
+
+ksis:
+  - KSI-SCR-MON
+  - KSI-SVC-EIS
+
+evidence_set:
+  reference_id: EVD-GITHUB-DEPENDABOT-ALERTS
+  name: GitHub Dependabot Alerts
+  instructions: >-
+    Per repository, every Dependabot alert (open, fixed, dismissed) with
+    severity, CVE, package, age in days while open and days to close, and
+    whether its CVE is in the CISA KEV catalog. Scanning coverage is reported
+    beside it: alerts_enabled, dependency_graph_packages (0 means alerts are on
+    but no manifest has been parsed) and security_updates_enabled. Read
+    per repository because the organization alert list omits repositories
+    with alerts off.
