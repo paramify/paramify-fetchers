@@ -465,12 +465,18 @@ def test_classic_release_pipelines_are_counted_on_the_release_host(tmp_path):
     assert releases["deployments_in_window"] == 2
     s = evidence["summary"]
     assert (s["classic_release_definitions"], s["classic_release_deployments_in_window"]) == (2, 2)
-    assert any(n.startswith("Classic release pipelines") for n in s["not_collected"])
-    assert any(n.startswith("Approval decisions") for n in s["not_collected"])
+    assert set(s["not_collected"]) == {"projects_not_visible", "classic_release_content", "classic_build_steps",
+                                       "approval_decisions", "branch_policy_bypass"}
     release_hosts = {h for h, path in fake.hosts if "/_apis/release/" in path}
     assert release_hosts == {"vsrm.dev.azure.com"}
     deployments = next(c for c in fake.calls if c[1].endswith("/release/deployments"))
     assert deployments[2]["minStartedTime"] == evidence["results"]["window"]["start"]
+
+
+def test_an_evidence_sample_keeps_every_not_collected_entry():
+    from framework import samples
+
+    assert samples.trim({"not_collected": dict(mod.NOT_COLLECTED)})["not_collected"] == mod.NOT_COLLECTED
 
 
 def test_missing_release_scope_names_it(tmp_path):

@@ -45,16 +45,18 @@ SCOPE_ENV = "Environment (Read & manage)"
 SCOPE_PROJECT = "Project and Team (Read)"
 SCOPE_RELEASE = "Release (Read)"
 
-NOT_COLLECTED = (
-    "Projects, pipelines and repositories the collecting identity (metadata.collecting_identity) cannot see.",
-    "Classic release pipelines: definitions and deployments in the window are counted, but their stages, "
-    "approvals, gates and tasks are not read.",
-    "Classic build pipelines: listed, their steps not analysed.",
-    "Approval decisions: environment checks are configuration at collection time; who approved each deployment, "
-    "and when, is not collected.",
-    "Branch policy bypass: identities allowed to bypass policies when completing a pull request, or to push "
-    "without one, are not collected.",
-)
+# Keyed by area, not a list, so an evidence sample keeps every entry.
+NOT_COLLECTED = {
+    "projects_not_visible": "Projects, pipelines and repositories the collecting identity "
+                            "(metadata.collecting_identity) cannot see.",
+    "classic_release_content": "Classic release pipelines: definitions and deployments in the window are counted, "
+                               "but their stages, approvals, gates and tasks are not read.",
+    "classic_build_steps": "Classic build pipelines: listed, their steps not analysed.",
+    "approval_decisions": "Environment checks are configuration at collection time; who approved each deployment, "
+                          "and when, is not collected.",
+    "branch_policy_bypass": "Identities allowed to bypass policies when completing a pull request, or to push "
+                            "without one, are not collected.",
+}
 
 TEST_TASKS = {"publishtestresults", "vstest", "publishcodecoverageresults"}
 SCAN_TASKS = re.compile(r"^(advancedsecurity-|microsoftsecuritydevops|credscan|sonarqube|sonarcloud|whitesource|mend|"
@@ -812,7 +814,7 @@ def summarize(projects: List[Dict[str, Any]], days: int) -> Dict[str, Any]:
         "classic_release_definitions": sum(len(p["classic_releases"]["definitions"] or []) for p in projects),
         "classic_release_deployments_in_window": sum(
             p["classic_releases"]["deployments_in_window"] or 0 for p in projects),
-        "not_collected": list(NOT_COLLECTED),
+        "not_collected": dict(NOT_COLLECTED),
     }
 
 
