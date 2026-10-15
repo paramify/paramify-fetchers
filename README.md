@@ -98,7 +98,7 @@ More integrations are in progress. To ask for a new platform or fetcher, post in
 
 ## Install
 
-**Prerequisites:** Python 3.10+. The CLIs your fetchers need (`aws`, `jq`, `curl`, `kubectl`, etc.) must be on your `PATH` — install only what applies to the categories you'll run. Most services have a credential setup guide at `fetchers/<category>/README.md`; [Where to read next](#where-to-read-next) lists them.
+**Prerequisites:** Python 3.10+. The CLIs your fetchers need (`aws`, `jq`, `curl`, `kubectl`, etc.) must be on your `PATH` — install only what applies to the categories you'll run. Most services have a credential setup guide at `fetchers/<category>/README.md`. The [documentation index](docs/README.md#run-fetchers) lists them.
 
 ```bash
 git clone https://github.com/paramify/paramify-fetchers.git
@@ -347,45 +347,20 @@ Before you open a pull request, read [`CONTRIBUTING.md`](CONTRIBUTING.md). It gi
 
 ## Where to read next
 
-| Doc | What it covers |
-|---|---|
-| [`fetchers/aws/README.md`](fetchers/aws/README.md) | AWS credential setup (ambient + multi-account fanout) |
-| [`fetchers/okta/README.md`](fetchers/okta/README.md) | Okta API token + required admin role |
-| [`fetchers/gitlab/README.md`](fetchers/gitlab/README.md) | GitLab project access token setup |
-| [`fetchers/sentinelone/README.md`](fetchers/sentinelone/README.md) | SentinelOne service user + API token |
-| [`fetchers/crowdstrike/README.md`](fetchers/crowdstrike/README.md) | CrowdStrike Falcon API client, scopes, and cloud/GovCloud selection |
-| [`fetchers/knowbe4/README.md`](fetchers/knowbe4/README.md) | KnowBe4 Reporting API key |
-| [`fetchers/splunk/README.md`](fetchers/splunk/README.md) | Splunk token, the collection role, port 8089, and how to add a Splunk fetcher |
-| [`fetchers/rippling/README.md`](fetchers/rippling/README.md) | Rippling Developer Hub token + scopes |
-| [`fetchers/k8s/README.md`](fetchers/k8s/README.md) | Kubernetes / EKS credential setup |
-| [`fetchers/checkov/README.md`](fetchers/checkov/README.md) | Checkov setup + git token for IaC scanning |
-| [`fetchers/jira/README.md`](fetchers/jira/README.md) | Jira Cloud API token + the permissions it needs |
-| [`fetchers/wiz/README.md`](fetchers/wiz/README.md) | Wiz service account, API scopes, and commercial / Wiz for Government endpoints |
-| [`fetchers/gcp/README.md`](fetchers/gcp/README.md) | GCP Application Default Credentials (no key files) + the least-privilege custom role |
-| [`fetchers/datadog/README.md`](fetchers/datadog/README.md) | Datadog service account, API + application keys, and Gov/commercial base URL |
-| [`fetchers/paramify/README.md`](fetchers/paramify/README.md) | Paramify API token for the FedRAMP VER report fetchers + running across several programs |
-| [`fetchers/servicenow/README.md`](fetchers/servicenow/README.md) | ServiceNow service-account basic auth + the per-instance endpoint URLs |
-| [`docs/cli_guide.md`](docs/cli_guide.md) | Every `paramify` command: manifests, `doctor` preflight, upload, scan reports, inventory, discovery, script sync, program fanout |
-| [`uploaders/paramify_evidence/README.md`](uploaders/paramify_evidence/README.md) | Paramify API key setup + upload options |
-| [`uploaders/paramify_issues/README.md`](uploaders/paramify_issues/README.md) | Intaking raw scan reports into an assessment + why the file is never touched |
-| [`docs/pipelines_guide.md`](docs/pipelines_guide.md) | End-to-end: scan manifest → assessment + close policy → run → `paramify issues upload` → jobs and cycles → verify in Paramify |
-| [`uploaders/paramify_scripts/README.md`](uploaders/paramify_scripts/README.md) | Syncing fetcher entry scripts to Paramify + the association model |
-| [`docs/suggest_validator_guide.md`](docs/suggest_validator_guide.md) | End-to-end: API key → `/suggest-validator` → sync → verify validators in Paramify |
-| [`docs/validators_guide.md`](docs/validators_guide.md) | By hand: write a validator and its cases → `paramify validators check` → sync → verify in Paramify |
-| [`docs/uploader_design.md`](docs/uploader_design.md) | How the three uploaders work + the shared evidence-set identity model |
-| [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md) | Writing a new fetcher from scratch |
-| [`docs/platform_onboarding_guide.md`](docs/platform_onboarding_guide.md) | End-to-end: `/onboard-platform` through its four gates → commit the fetchers → publish to Paramify |
-| [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md) | The second kind of fetcher: raw scan reports → assessment issues |
-| [`docs/inventory_fetchers_guide.md`](docs/inventory_fetchers_guide.md) | End-to-end: run an inventory fetcher → check its records → upload → set up the inventory pipeline in Paramify |
-| [`docs/fetcher_contract.md`](docs/fetcher_contract.md) | The binding runner↔fetcher contract |
-| [`docs/ksi_mapping.md`](docs/ksi_mapping.md) | Which fetchers map to which FedRAMP KSIs, per indicator and per fetcher, plus open gaps |
-| [`docs/ksi_mapping_guide.md`](docs/ksi_mapping_guide.md) | Finding the fetchers that cover a KSI with `paramify ksi`, reading covered / gap / organizational, and declaring a fetcher's `ksis` |
-| [`docs/run_manifest_reference.md`](docs/run_manifest_reference.md) | Manifest format reference |
-| [`docs/config_injection_guide.md`](docs/config_injection_guide.md) | Walkthrough: look up a fetcher's keys → set platform config, fetcher config, and secrets in a manifest → validate → see them reach the fetcher |
-| [`docs/design.md`](docs/design.md) | Why the framework is shaped this way + current state of the work |
-| [`docs/versioning.md`](docs/versioning.md) | How we version, the contract, and what 1.0 means |
-| [`docs/releasing_guide.md`](docs/releasing_guide.md) | Step by step: changelog and version → release PR → tag → GitHub Release |
-| [`docs/private_mirror_workflow.md`](docs/private_mirror_workflow.md) | Keeping a private copy of this repo that still receives upstream releases |
+- **Set up a platform:** most platforms have a guide for their credentials and
+  permissions. Select a logo under [Supported services](#supported-services) to
+  open its folder.
+- **Run fetchers:** [`docs/cli_guide.md`](docs/cli_guide.md) is the full CLI
+  reference. [`docs/run_manifest_guide.md`](docs/run_manifest_guide.md) builds a
+  manifest step by step.
+- **Send results to Paramify:** [`docs/uploader_guide.md`](docs/uploader_guide.md)
+  for evidence, and [`docs/pipelines_guide.md`](docs/pipelines_guide.md) for scan
+  reports.
+- **Write a fetcher:** [`docs/authoring_fetcher_guide.md`](docs/authoring_fetcher_guide.md).
+- **FedRAMP KSI coverage:** [`docs/ksi_mapping.md`](docs/ksi_mapping.md).
+
+The [documentation index](docs/README.md) lists every other guide and design
+document.
 
 ## License
 
