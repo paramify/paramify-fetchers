@@ -6,13 +6,13 @@
 [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fparamify%2Fparamify-fetchers%2Fmain%2Fpyproject.toml&style=flat-square&color=2270ff)](pyproject.toml)
 [![License](https://img.shields.io/github/license/paramify/paramify-fetchers?style=flat-square&color=2270ff)](LICENSE)
 
-Automate the evidence behind your compliance program. Paramify Fetchers read the configuration and activity of the tools you already run, such as AWS, Azure, GCP, Okta and Wiz. They turn that data into evidence for [FedRAMP 20x Key Security Indicators](docs/ksi_mapping.md) and NIST 800-53 controls, ready to upload to Paramify.
+Paramify Fetchers collect evidence for your compliance program. They read the configuration and activity of the tools that you already run, such as AWS, Azure, GCP, Okta and Wiz. They turn that data into evidence for [FedRAMP 20x Key Security Indicators](docs/ksi_mapping.md) and NIST 800-53 controls. You can then upload the evidence to Paramify.
 
-Each fetcher is a small, read-only script that writes JSON to disk. A separate uploader sends that evidence to Paramify, so nothing leaves your environment until you choose to upload. This repo contains the fetchers, the runner that executes them, and the uploader.
+Each fetcher is a small script that reads data with read-only access and writes JSON to disk. A separate uploader sends the evidence to Paramify. No data leaves your environment until you upload it. This repo contains the fetchers, the runner that executes them, and the uploader.
 
 <a href="https://deepwiki.com/paramify/paramify-fetchers"><img src="docs/img/readme/ask-deepwiki.svg" alt="Ask DeepWiki about this repo" height="48"></a>
 
-**Have a question about this repo?** DeepWiki answers in plain English and links to the code that it read.
+If you have a question about this repo, ask DeepWiki. It answers in plain English and links to the code that it read.
 
 <div align="center">
 
@@ -126,13 +126,13 @@ You can use the fetchers in three ways. All three go through one facade (`framew
 
 ### The TUI
 
-`paramify tui` browses the catalog, builds and validates a manifest, runs it, and shows the evidence. You never leave the keyboard.
+`paramify tui` browses the catalog, builds and validates a manifest, runs it, and shows the evidence. You do all of this from the keyboard.
 
 ![The paramify TUI: search the catalog, read a fetcher's contract, run a manifest, and open the evidence](docs/demo/tui.gif)
 
 ### Drive it with an AI agent
 
-Every command takes `--json`, and each `paramify manifest` edit returns a stable `{ok, path, errors}` object. Thus an agent can build a runnable manifest without scraping the screen. The repo also ships Claude Code skills in [`.claude/skills/`](.claude/skills/). They scaffold a fetcher, onboard a new platform, wire a fetcher into a manifest, and propose validators.
+Every command takes `--json`, and each `paramify manifest` edit returns a stable `{ok, path, errors}` object. As a result, an agent can build a runnable manifest and does not have to read the screen output. The repo also ships Claude Code skills in [`.claude/skills/`](.claude/skills/). They scaffold a fetcher, onboard a new platform, wire a fetcher into a manifest, and propose validators.
 
 ### Using the CLI
 
@@ -164,12 +164,12 @@ To ask for a new platform or fetcher, post in [Fetcher requests](https://github.
 - **Run fetchers:** [`docs/cli_guide.md`](docs/cli_guide.md) is the full CLI
   reference. [`docs/run_manifest_guide.md`](docs/run_manifest_guide.md) builds a
   manifest step by step.
-- **Send results to Paramify:** [`docs/uploader_guide.md`](docs/uploader_guide.md)
-  for evidence, and [`docs/pipelines_guide.md`](docs/pipelines_guide.md) for scan
+- **Send results to Paramify:** use [`docs/uploader_guide.md`](docs/uploader_guide.md)
+  for evidence and [`docs/pipelines_guide.md`](docs/pipelines_guide.md) for scan
   reports.
-- **Write a fetcher:** [`docs/authoring_fetcher_guide.md`](docs/authoring_fetcher_guide.md).
+- **Write a fetcher:** read [`docs/authoring_fetcher_guide.md`](docs/authoring_fetcher_guide.md).
 - **How it works:** [`docs/architecture.md`](docs/architecture.md) explains the four parts, the evidence envelope and the repo layout.
-- **FedRAMP KSI coverage:** [`docs/ksi_mapping.md`](docs/ksi_mapping.md).
+- **FedRAMP KSI coverage:** read [`docs/ksi_mapping.md`](docs/ksi_mapping.md).
 
 The [documentation index](docs/README.md) lists every other guide and design
 document.
