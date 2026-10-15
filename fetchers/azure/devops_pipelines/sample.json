@@ -1,0 +1,413 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_devops_pipelines",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-10-15",
+  "reviewed": true,
+  "collections": [
+    {
+      "path": "results.projects[]",
+      "records": 1,
+      "fields": {
+        "classic_releases": 1,
+        "environments": 1,
+        "general_settings": 1,
+        "id": 1,
+        "name": 1,
+        "pipelines": 1,
+        "repositories": 1,
+        "test_runs_in_window": 1,
+        "test_runs_unattributed": 1
+      }
+    },
+    {
+      "path": "results.projects[].environments[]",
+      "records": 1,
+      "fields": {
+        "approval_required": 1,
+        "branch_control": 1,
+        "checks": 1,
+        "deployments": 0,
+        "deployments_collected": 1,
+        "deployments_failed": 1,
+        "deployments_in_window": 1,
+        "deployments_succeeded": 1,
+        "evaluate_artifact": 1,
+        "id": 1,
+        "name": 1,
+        "required_template": 1,
+        "resources": 0
+      }
+    },
+    {
+      "path": "results.projects[].environments[].checks[]",
+      "records": 1,
+      "fields": {
+        "approvers": 1,
+        "definition_ref": 0,
+        "disabled": 1,
+        "display_name": 0,
+        "id": 1,
+        "kind": 1,
+        "min_required_approvers": 1,
+        "modified_on": 1,
+        "requester_cannot_be_approver": 1,
+        "timeout_minutes": 1,
+        "type": 1
+      }
+    },
+    {
+      "path": "results.projects[].environments[].checks[].approvers[]",
+      "records": 1,
+      "fields": {
+        "display_name": 0,
+        "id": 1
+      }
+    },
+    {
+      "path": "results.projects[].pipelines[]",
+      "records": 1,
+      "fields": {
+        "analysis": 1,
+        "folder": 1,
+        "id": 1,
+        "name": 1,
+        "queue_status": 1,
+        "repository": 1,
+        "runs": 1,
+        "templates_expanded": 1,
+        "test_runs": 1,
+        "type": 1,
+        "yaml_commit": 1,
+        "yaml_error": 0,
+        "yaml_object_id": 0,
+        "yaml_path": 1,
+        "yaml_sha256": 1,
+        "yaml_source": 1
+      }
+    },
+    {
+      "path": "results.projects[].pipelines[].analysis.deployment_jobs[]",
+      "records": 1,
+      "fields": {
+        "environment": 1,
+        "job": 1,
+        "stage": 1
+      }
+    },
+    {
+      "path": "results.projects[].pipelines[].analysis.steps.signature_verification[]",
+      "records": 1,
+      "fields": {
+        "job": 1,
+        "stage": 1,
+        "step": 1
+      }
+    },
+    {
+      "path": "results.projects[].pipelines[].analysis.steps.signing[]",
+      "records": 1,
+      "fields": {
+        "job": 1,
+        "stage": 1,
+        "step": 1
+      }
+    },
+    {
+      "path": "results.projects[].pipelines[].analysis.steps.test[]",
+      "records": 2,
+      "fields": {
+        "gating": 2,
+        "job": 2,
+        "not_gating_reason": 0,
+        "stage": 2,
+        "step": 2
+      }
+    },
+    {
+      "path": "results.projects[].repositories[]",
+      "records": 1,
+      "fields": {
+        "build_validation": 1,
+        "comment_resolution_required": 1,
+        "default_branch": 1,
+        "id": 1,
+        "min_reviewers": 1,
+        "name": 1,
+        "required_reviewer_policies": 1,
+        "requires_build_validation": 1,
+        "requires_review": 1,
+        "self_approval_satisfies_review": 1,
+        "work_item_linking_required": 1
+      }
+    },
+    {
+      "path": "results.projects[].repositories[].build_validation[]",
+      "records": 1,
+      "fields": {
+        "blocking": 1,
+        "manual_queue_only": 1,
+        "pipeline": 1,
+        "pipeline_id": 1,
+        "valid_duration_minutes": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "collecting_identity": {
+        "display_name": "Person1",
+        "id": "00000000-0000-4000-8000-111111111111",
+        "login": "user1@example.com"
+      },
+      "datetime": "2026-10-15T16:49:42Z",
+      "organization": "example-organization",
+      "organization_url": "https://dev.azure.com/example-organization",
+      "partial_failure": false,
+      "projects_filter": null
+    },
+    "results": {
+      "projects": [
+        {
+          "classic_releases": {
+            "definitions": [],
+            "deployments_in_window": 0
+          },
+          "environments": [
+            {
+              "approval_required": true,
+              "branch_control": false,
+              "checks": [
+                {
+                  "approvers": [
+                    {
+                      "display_name": null,
+                      "id": "00000000-0000-4000-8000-111111111111"
+                    }
+                  ],
+                  "definition_ref": null,
+                  "disabled": false,
+                  "display_name": null,
+                  "id": 1,
+                  "kind": "approval",
+                  "min_required_approvers": 0,
+                  "modified_on": "2026-10-14T18:30:58Z",
+                  "requester_cannot_be_approver": false,
+                  "timeout_minutes": 43200,
+                  "type": "Approval"
+                }
+              ],
+              "deployments": [],
+              "deployments_collected": true,
+              "deployments_failed": 0,
+              "deployments_in_window": 0,
+              "deployments_succeeded": 0,
+              "evaluate_artifact": false,
+              "id": 1,
+              "name": "sandbox",
+              "required_template": false,
+              "resources": []
+            }
+          ],
+          "general_settings": {
+            "disableClassicBuildPipelineCreation": true,
+            "disableClassicPipelineCreation": false,
+            "disableClassicReleasePipelineCreation": true,
+            "enforceJobAuthScope": true,
+            "enforceJobAuthScopeForReleases": true,
+            "enforceNoAccessToSecretsFromForks": false,
+            "enforceReferencedRepoScopedToken": true,
+            "enforceSettableVar": true,
+            "forkProtectionEnabled": true,
+            "publishPipelineMetadata": false,
+            "statusBadgesArePrivate": true
+          },
+          "id": "00000000-0000-4000-8000-222222222222",
+          "name": "test-project",
+          "pipelines": [
+            {
+              "analysis": {
+                "deployment_jobs": [
+                  {
+                    "environment": "sandbox",
+                    "job": "DeploySandbox",
+                    "stage": "Deploy"
+                  }
+                ],
+                "deploys": true,
+                "environments": [
+                  "sandbox"
+                ],
+                "extends_template": null,
+                "stages": [
+                  "Build",
+                  "Deploy"
+                ],
+                "steps": {
+                  "application_deploy": [],
+                  "iac_validation": [],
+                  "infrastructure_deploy": [],
+                  "sbom": [],
+                  "security_scan": [],
+                  "signature_verification": [
+                    {
+                      "job": "DeploySandbox",
+                      "stage": "Deploy",
+                      "step": "Verify checksum and deploy"
+                    }
+                  ],
+                  "signing": [
+                    {
+                      "job": "Test",
+                      "stage": "Build",
+                      "step": "Sign artifact (ephemeral key)"
+                    }
+                  ],
+                  "test": [
+                    {
+                      "gating": true,
+                      "job": "Test",
+                      "not_gating_reason": null,
+                      "stage": "Build",
+                      "step": "Run unit tests"
+                    }
+                  ]
+                },
+                "tests": true,
+                "tests_gate_deploys": true,
+                "ungated_deploys": []
+              },
+              "folder": "\\",
+              "id": 1,
+              "name": "test-project",
+              "queue_status": "enabled",
+              "repository": {
+                "default_branch": "refs/heads/main",
+                "id": "00000000-0000-4000-8000-333333333333",
+                "name": "test-project",
+                "type": "TfsGit"
+              },
+              "runs": {
+                "canceled": 0,
+                "failed": 0,
+                "in_window": 0,
+                "last": null,
+                "partially_succeeded": 0,
+                "succeeded": 0
+              },
+              "templates_expanded": true,
+              "test_runs": {
+                "automated": 0,
+                "in_window": 0,
+                "last_completed": null,
+                "not_passed_tests": 0,
+                "passed_tests": 0,
+                "total_tests": 0
+              },
+              "type": "yaml",
+              "yaml_commit": "0000000000000000000000000000000000000001",
+              "yaml_error": null,
+              "yaml_object_id": null,
+              "yaml_path": "/azure-pipelines.yml",
+              "yaml_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+              "yaml_source": "preview"
+            }
+          ],
+          "repositories": [
+            {
+              "build_validation": [
+                {
+                  "blocking": true,
+                  "manual_queue_only": false,
+                  "pipeline": "test-project",
+                  "pipeline_id": 1,
+                  "valid_duration_minutes": 720.0
+                }
+              ],
+              "comment_resolution_required": false,
+              "default_branch": "refs/heads/main",
+              "id": "00000000-0000-4000-8000-333333333333",
+              "min_reviewers": {
+                "block_last_pusher_vote": false,
+                "blocking": true,
+                "count": 1,
+                "creator_vote_counts": false,
+                "independent_approvers": 1,
+                "reset_on_source_push": true
+              },
+              "name": "test-project",
+              "required_reviewer_policies": 0,
+              "requires_build_validation": true,
+              "requires_review": true,
+              "self_approval_satisfies_review": false,
+              "work_item_linking_required": false
+            }
+          ],
+          "test_runs_in_window": 0,
+          "test_runs_unattributed": 0
+        }
+      ],
+      "window": {
+        "end": "2026-10-15T16:49:38Z",
+        "lookback_days": 30,
+        "start": "2026-09-15T16:49:38Z"
+      }
+    },
+    "summary": {
+      "classic_pipelines": 0,
+      "classic_release_definitions": 0,
+      "classic_release_deployments_in_window": 0,
+      "deploying_pipelines": 1,
+      "deploying_pipelines_with_tests": 1,
+      "deploying_pipelines_with_tests_gating_deploys": 1,
+      "deploying_pipelines_with_ungated_deploys": [],
+      "deploying_pipelines_without_tests": [],
+      "deployments_from_default_branch": 0,
+      "deployments_in_window": 0,
+      "deployments_succeeded": 0,
+      "deployments_with_test_runs": 0,
+      "disabled_pipelines": 0,
+      "environments_total": 1,
+      "environments_with_approval": 1,
+      "environments_with_artifact_evaluation": 0,
+      "environments_with_branch_control": 0,
+      "environments_with_required_template": 0,
+      "environments_without_checks": [],
+      "lookback_days": 30,
+      "not_collected": {
+        "approval_decisions": "Environment checks are configuration at collection time; who approved each deployment, and when, is not collected.",
+        "branch_policy_bypass": "Identities allowed to bypass policies when completing a pull request, or to push without one, are not collected.",
+        "classic_build_steps": "Classic build pipelines: listed, their steps not analysed.",
+        "classic_release_content": "Classic release pipelines: definitions and deployments in the window are counted, but their stages, approvals, gates and tasks are not read.",
+        "projects_not_visible": "Projects, pipelines and repositories the collecting identity (metadata.collecting_identity) cannot see."
+      },
+      "pipeline_runs_in_window": 0,
+      "pipelines_deploying_infrastructure": 0,
+      "pipelines_generating_sbom": 0,
+      "pipelines_signing_artifacts": 1,
+      "pipelines_total": 1,
+      "pipelines_verifying_signatures": 1,
+      "pipelines_with_iac_validation": 0,
+      "pipelines_with_security_scan": 0,
+      "pipelines_with_test_runs_in_window": 0,
+      "pipelines_with_tests": 1,
+      "projects_collected": 1,
+      "projects_with_classic_pipeline_creation_disabled": 0,
+      "repositories_requiring_build_validation": 1,
+      "repositories_requiring_review": 1,
+      "repositories_total": 1,
+      "repositories_where_self_approval_satisfies_review": 0,
+      "repositories_without_review_or_build_validation": [],
+      "test_runs_in_window": 0,
+      "tests_not_passed": 0,
+      "tests_passed": 0,
+      "tests_total": 0,
+      "yaml_pipelines": 1,
+      "yaml_pipelines_analyzed": 1,
+      "yaml_pipelines_not_analyzed": [],
+      "yaml_pipelines_with_templates_expanded": 1
+    }
+  }
+}
