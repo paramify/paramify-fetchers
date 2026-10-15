@@ -117,7 +117,7 @@ def main() -> int:
         for k in members:
             m = meta[k["id"]]
             # Covered indicators carry no mark; only gaps and organizational ones do.
-            mark = {"covered": "", "gap": "❌ ", "organizational": "⬜ "}[k["status"]]
+            mark = {"covered": "", "gap": "⏳ ", "organizational": "⬜ "}[k["status"]]
             opt = " *(optional at Low)*" if m.get("optional_for_class_b") else ""
             w(f"#### {mark}`{k['id']}` — {m['name']}{opt}")
             w("")

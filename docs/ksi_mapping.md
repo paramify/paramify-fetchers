@@ -314,7 +314,7 @@ python tools/gen_ksi_mapping.py
 
 *Organizational — evidenced by HR, training or process, not cloud config.*
 
-#### ❌ `KSI-RPL-TRC` — Testing Recovery Capabilities
+#### ⏳ `KSI-RPL-TRC` — Testing Recovery Capabilities
 
 > The capability to recover from incidents and contingencies aligned with defined recovery objectives is persistently tested.
 
@@ -364,7 +364,7 @@ python tools/gen_ksi_mapping.py
 
 ### SCR — Supply Chain Risk  (1/2)
 
-#### ❌ `KSI-SCR-MIT` — Mitigating Supply Chain Risk
+#### ⏳ `KSI-SCR-MIT` — Mitigating Supply Chain Risk
 
 > Persistently identify, review, and mitigate potential supply chain risks.
 
