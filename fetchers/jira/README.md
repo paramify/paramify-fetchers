@@ -1,7 +1,19 @@
 # Jira Fetchers
 
-One fetcher inventories a Jira Cloud site and its recent issue activity, using
-an Atlassian account email + API token over basic auth.
+Four fetchers read a Jira Cloud site over the REST API v3 with an Atlassian
+account email + API token (basic auth):
+
+| Fetcher | Evidence | Collector needs |
+|---|---|---|
+| `jira_site_inventory` | Site, projects, schemes, service desks, recent issue activity | Browse Projects |
+| `jira_remediation_items` | JQL-selected findings tickets with owner, due date, full status history | Browse Projects |
+| `jira_audit_records` | Site audit log: who changed what configuration, when, from where | Administer Jira |
+| `jira_access_roles` | Admin groups and members, product access, per-project privileged grants and role members | Administer Jira |
+
+The two admin fetchers make only read calls, but Jira offers no lower permission
+for the audit log, application roles or other projects' role members. Run them
+under a separate collector account so the everyday fetchers keep a Browse-only
+token.
 
 ---
 
@@ -28,9 +40,49 @@ service desks to be listed. No Jira administrator permission is required.
 | `jql` | `JIRA_ISSUE_JQL` | — | Explicit JQL; overrides `lookback_days` |
 | `max_issues` | `JIRA_MAX_ISSUES` | `2000` | Issue cap; `metadata.issues_truncated` records whether it was hit |
 
+### `jira_remediation_items`
+
+| Config key | Env | Default | Description |
+|---|---|---|---|
+| `jql` | `JIRA_REMEDIATION_JQL` | (required) | JQL selecting the findings tickets, closed ones included |
+| `max_items` | `JIRA_REMEDIATION_MAX_ITEMS` | `2000` | Ticket cap; `metadata.items_truncated` records whether it was hit |
+
+Calls `POST /rest/api/3/search/jql` and `POST /rest/api/3/changelog/bulkfetch`
+(status field, full history, de-duplicated by history id). Summary: open,
+closed, open overdue, open unassigned, open without due date, closed after due
+date, days to close.
+
+### `jira_audit_records`
+
+| Config key | Env | Default | Description |
+|---|---|---|---|
+| `lookback_days` | `JIRA_AUDIT_LOOKBACK_DAYS` | `90` | Window of audit records to collect |
+| `filter` | `JIRA_AUDIT_FILTER` | (none) | Optional API text filter |
+| `max_records` | `JIRA_AUDIT_MAX_RECORDS` | `20000` | Record cap; `metadata.records_truncated` records whether it was hit |
+
+Calls `GET /rest/api/3/auditing/record` (offset/limit 1000, from/to). Issue edits
+are not in this log, and organization-level (admin.atlassian.com) audit is not
+collected.
+
+### `jira_access_roles`
+
+| Config key | Env | Default | Description |
+|---|---|---|---|
+| `project_keys` | `JIRA_PROJECT_KEYS` | all visible | Comma-separated project keys to scan |
+| `admin_groups` | `JIRA_ADMIN_GROUPS` | (none) | Extra group names to treat as administrative |
+| `max_projects` | `JIRA_ACCESS_MAX_PROJECTS` | `200` | Project cap |
+
+Calls `GET /rest/api/3/group/bulk` (accessType site-admin and admin),
+`/group/member`, `/applicationrole`, `/project/search`, and per project
+`/project/{key}/permissionscheme?expand=all`, `/project/{key}/role` and
+`/project/{key}/role/{id}`. Privileged permissions are administer project,
+delete issues/comments/attachments/worklogs, edit all comments, set issue
+security and modify reporter; grants of those to `anyone` or an application
+role are flagged as `broad_privileged_grants`.
+
 ---
 
-## What it collects
+## What `jira_site_inventory` collects
 
 | Section | Source |
 |---|---|
