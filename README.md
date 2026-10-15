@@ -11,7 +11,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 
 <div align="center">
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/how-it-works-dark.svg"><img src="docs/img/readme/how-it-works.svg" alt="How a fetcher works: a fetcher reads your tools read-only and writes JSON evidence files to your disk; a separate uploader sends those files to Paramify. Fetchers never contact Paramify." width="880"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/how-it-works-dark.svg"><img src="docs/img/readme/how-it-works.svg" alt="How it runs: a container in your environment runs on a schedule. Inside it, the fetchers read your tools read-only and write JSON evidence files to disk, then the uploader sends those files to Paramify. Fetchers never contact Paramify; only the uploader sends data out." width="880"></picture>
 
 </div>
 
