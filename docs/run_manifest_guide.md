@@ -126,7 +126,7 @@ run:
 
 `validate` checks the wiring against each fetcher's contract. `doctor` also
 checks the CLIs each category needs and whether every variable the manifest
-names holds a value ([doctor's checks](../README.md#using-the-cli)). None is
+names holds a value ([doctor's checks](cli_guide.md#preflight-with-paramify-doctor)). None is
 set yet:
 
 ![paramify validate says OK; paramify doctor finds curl and jq but lists all six variables as missing, and ends with Issues found](img/run_manifest/05-doctor-missing.png)
@@ -158,7 +158,7 @@ paramify doctor daily
 ```
 </details>
 
-The manifest is runnable. Next: [run it, then upload](../README.md#collect-then-upload).
+The manifest is runnable. Next: [run it, then upload](cli_guide.md#collect-then-upload).
 
 ---
 
