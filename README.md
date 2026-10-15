@@ -62,7 +62,7 @@ If you have a question about this repo, ask DeepWiki. It answers in plain Englis
 
 </div>
 
-`python tools/generate_chart.py` draws this chart from the git history of this repo. CI draws it again each time a fetcher merges.
+`python tools/generate_chart.py` draws this chart from the git history by CI each time a new fetcher merges.
 <!-- END:fetcher-chart -->
 
 ### Coming soon
