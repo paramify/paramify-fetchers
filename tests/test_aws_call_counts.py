@@ -241,3 +241,64 @@ def test_iam_roles_makes_the_same_calls_at_any_role_count(tmp_path):
         "Tags": [],
     }
     assert payload["results"][-1] == {"Type": "PasswordPolicy", "Policy": {"MinimumPasswordLength": 14}}
+
+
+def test_iam_mfa_status_tells_security_keys_from_virtual_devices(tmp_path):
+    # Before 0.2.0 every ARN serial was "virtual", so a FIDO security key
+    # (arn:...:u2f/...), the phishing-resistant factor, read as an app.
+    acct = "arn:aws:iam::111122223333"
+    devices = [
+        [f"{acct}:u2f/user/alice/yubikey-ABCDEFGHIJKLMNOPQRSTUVWXYZ", "2026-01-01T00:00:00Z"],
+        [f"{acct}:mfa/alice-phone", "2026-01-02T00:00:00Z"],
+        ["GAHT12345678", "2026-01-03T00:00:00Z"],
+        ["arn:aws-us-gov:iam::111122223333:u2f/user/alice/key2", "2026-01-04T00:00:00Z"],
+        [f"{acct}:sms-mfa/alice", "2026-01-05T00:00:00Z"],
+    ]
+    _, payload = _run(tmp_path, "iam_mfa_status", {
+        "iam get-account-summary": {"AccountMFAEnabled": 1},
+        "iam list-virtual-mfa-devices": [],
+        "iam list-users": ["alice"],
+        "iam list-mfa-devices": devices,
+    })
+    (user,) = payload["results"]["users"]
+    assert user["MFAEnabled"] is True
+    assert [d["Type"] for d in user["MFADevices"]] == ["fido", "virtual", "hardware", "fido", "unknown"]
+    assert all(list(d) == ["SerialNumber", "EnableDate", "Type"] for d in user["MFADevices"])
+    assert payload["results"]["root_account"] == {"RootMFAEnabled": True, "RootHardwareMFA": True}
+
+
+def test_iam_policies_lists_boundary_use_apart_from_attachments(tmp_path):
+    # Before 0.3.0 an entity that only used the policy as its permissions
+    # boundary was listed under AttachedUsers / AttachedRoles.
+    arn = "arn:aws:iam::111122223333:policy/guardrail"
+    other = "arn:aws:iam::111122223333:policy/other"
+    policy = {
+        "PolicyName": "guardrail", "PolicyId": "ANPA0", "Arn": arn,
+        "CreateDate": "2024-01-01T00:00:00Z", "UpdateDate": "2024-01-01T00:00:00Z",
+        "PolicyVersionList": [{"IsDefaultVersion": True, "Document": {"Version": "2012-10-17", "Statement": []}}],
+    }
+    _, payload = _run(tmp_path, "iam_policies", {
+        "iam list-policies": [arn],
+        "iam get-account-authorization-details": {
+            "Policies": [policy],
+            "Users": [
+                {"Name": "attaches", "Attached": [arn], "Boundary": None},
+                {"Name": "bounded", "Attached": [other], "Boundary": arn},
+                {"Name": "both", "Attached": [arn], "Boundary": arn},
+                {"Name": "neither", "Attached": None, "Boundary": other},
+            ],
+            "Groups": [{"Name": "ops", "Attached": [arn]}],
+            "Roles": [
+                {"Name": "app", "Attached": [], "Boundary": arn},
+                {"Name": "admin", "Attached": [arn], "Boundary": None},
+            ],
+        },
+    })
+    (result,) = payload["results"]
+    assert result["AttachedGroups"] == ["ops"]
+    assert result["AttachedUsers"] == ["attaches", "both"]
+    assert result["AttachedRoles"] == ["admin"]
+    assert result["BoundaryUsers"] == ["bounded", "both"]
+    assert result["BoundaryRoles"] == ["app"]
+    # The new keys are appended, so patterns that read the existing order still match.
+    assert list(result)[-5:] == ["AttachedGroups", "AttachedUsers", "AttachedRoles", "BoundaryUsers", "BoundaryRoles"]
