@@ -90,7 +90,9 @@ jobs:
       - name: test the mapping
         run: pytest -q tests/test_import_solcap_mapping.py
 
+      # Only main proposes changes; a run anywhere else stops at the report.
       - name: open or update the PR
+        if: github.ref == 'refs/heads/main'
         uses: peter-evans/create-pull-request@v8
         with:
           # SOLCAP_PR_TOKEN (a GitHub App or fine-grained token with contents +
