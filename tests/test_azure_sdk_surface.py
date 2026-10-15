@@ -489,6 +489,20 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list"],
         "azure/virtual_wan_configuration — P2S protocols and auth types",
     ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "application_gateways",
+        ["list_all"],
+        "azure/app_gateway_tls_listeners, azure/app_gateway_backend_tls, azure/app_gateway_waf",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "web_application_firewall_policies",
+        ["list_all", "get"],
+        "azure/app_gateway_waf",
+    ),
     # --- backup: PR #58 widens this to <12 ----------------------------------
     (
         "azure.mgmt.recoveryservices",
@@ -1615,6 +1629,151 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "SubnetPropertiesFormat",
         ["ip_configurations", "application_gateway_ip_configurations"],
         "azure/ddos_protection — the back-references that place a public IP in a VNet",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayPropertiesFormat",
+        [
+            "http_listeners", "listeners", "ssl_policy", "default_predefined_ssl_policy",
+            "ssl_profiles", "enable_fips", "frontend_ports", "frontend_ip_configurations",
+            "request_routing_rules", "routing_rules", "url_path_maps", "redirect_configurations",
+            "operational_state", "sku",
+        ],
+        "azure/app_gateway_tls_listeners — a missing listener list reads as "
+        "'no plaintext listeners'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayHttpListenerPropertiesFormat",
+        ["protocol", "frontend_port", "frontend_ip_configuration", "ssl_profile", "ssl_certificate", "host_names"],
+        "azure/app_gateway_tls_listeners",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayListenerPropertiesFormat",
+        ["protocol", "frontend_port", "frontend_ip_configuration", "ssl_profile"],
+        "azure/app_gateway_tls_listeners — L4 listeners",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewaySslPolicy",
+        ["policy_type", "policy_name", "min_protocol_version", "cipher_suites", "disabled_ssl_protocols"],
+        "azure/app_gateway_tls_listeners — a renamed field reads as "
+        "'default_not_reported' instead of the real minimum TLS version",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewaySslProfilePropertiesFormat",
+        ["ssl_policy"],
+        "azure/app_gateway_tls_listeners — per-listener policy override",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayRequestRoutingRulePropertiesFormat",
+        ["rule_type", "http_listener", "redirect_configuration", "url_path_map"],
+        "azure/app_gateway_tls_listeners — redirect-only detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayUrlPathMapPropertiesFormat",
+        ["default_redirect_configuration", "path_rules"],
+        "azure/app_gateway_tls_listeners — redirect-only detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayPathRulePropertiesFormat",
+        ["redirect_configuration"],
+        "azure/app_gateway_tls_listeners — redirect-only detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayRedirectConfigurationPropertiesFormat",
+        ["target_listener", "target_url"],
+        "azure/app_gateway_tls_listeners — redirect target is HTTPS",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayFrontendIPConfigurationPropertiesFormat",
+        ["public_ip_address"],
+        "azure/app_gateway_tls_listeners — public vs private frontend",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayPropertiesFormat",
+        ["backend_http_settings_collection", "backend_settings_collection", "probes", "trusted_root_certificates", "firewall_policy", "web_application_firewall_configuration"],
+        "azure/app_gateway_backend_tls, azure/app_gateway_waf",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayBackendHttpSettingsPropertiesFormat",
+        ["protocol", "port", "validate_cert_chain_and_expiry", "validate_sni", "sni_name", "trusted_root_certificates", "probe"],
+        "azure/app_gateway_backend_tls — a renamed toggle reads as 'default_enabled' on a backend whose validation is off",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayBackendSettingsPropertiesFormat",
+        ["protocol", "port", "trusted_root_certificates"],
+        "azure/app_gateway_backend_tls — L4 backend settings",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayProbePropertiesFormat",
+        ["protocol"],
+        "azure/app_gateway_backend_tls — probe protocol",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayUrlPathMapPropertiesFormat",
+        ["default_backend_http_settings"],
+        "azure/app_gateway_backend_tls — which settings are in use",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayPathRulePropertiesFormat",
+        ["backend_http_settings", "firewall_policy"],
+        "azure/app_gateway_backend_tls, azure/app_gateway_waf — per-path settings and WAF",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayHttpListenerPropertiesFormat",
+        ["firewall_policy"],
+        "azure/app_gateway_waf — per-listener WAF policy",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "WebApplicationFirewallPolicyPropertiesFormat",
+        ["policy_settings", "managed_rules", "custom_rules", "application_gateways", "http_listeners", "path_based_rules"],
+        "azure/app_gateway_waf",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "PolicySettings",
+        ["state", "mode"],
+        "azure/app_gateway_waf — a renamed mode reads every WAF as not enforcing",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ManagedRuleSet",
+        ["rule_set_type", "rule_set_version", "rule_group_overrides", "computed_disabled_rules"],
+        "azure/app_gateway_waf",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ManagedRuleOverride",
+        ["rule_id", "state", "action"],
+        "azure/app_gateway_waf — disabled managed rules",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "WebApplicationFirewallCustomRule",
+        ["name", "priority", "rule_type", "action", "state", "rate_limit_threshold", "rate_limit_duration"],
+        "azure/app_gateway_waf — rate-limit rules",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayWebApplicationFirewallConfiguration",
+        ["enabled", "firewall_mode", "rule_set_type", "rule_set_version", "disabled_rule_groups", "exclusions"],
+        "azure/app_gateway_waf — legacy in-gateway WAF",
     ),
     # --- policy effects: a missing field reads as an unresolved effect ------
     # The model_base generation declares these on the *Properties models and
