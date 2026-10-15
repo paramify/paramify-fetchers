@@ -1,0 +1,39 @@
+validator: organizations_scp_policy_read_ok
+cases:
+  - name: full_read
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":[{"Id":"r-root","PolicyTypes":[{"Type":"SERVICE_CONTROL_POLICY","Status":"ENABLED"}]}],"ServiceControlPolicies":[{"Id":"p-FullAWSAccess","Name":"FullAWSAccess","AwsManaged":true,"Targets":[{"TargetId":"r-root"}]},{"Id":"p-deny","Name":"DenyLeaveOrg","AwsManaged":false,"Targets":[{"TargetId":"ou-a"}]}],"OrganizationsInUse":true,"ScpsEnabled":true,"PolicyRead":{"Status":"ok","Reason":null}}]}}'
+
+  - name: read_ok_zero_scps
+    expect: PASS
+    note: >
+      an organization that really has no SCPs is a complete read, not a denied one
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":[{"Id":"r-root","PolicyTypes":[]}],"ServiceControlPolicies":[],"OrganizationsInUse":true,"ScpsEnabled":false,"PolicyRead":{"Status":"ok","Reason":null}}]}}'
+
+  - name: standalone_account
+    expect: PASS
+    note: >
+      not in an AWS Organization: no SCPs apply, which is an answer
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{},"Roots":[],"ServiceControlPolicies":[],"OrganizationsInUse":false,"Note":"account not a member of an AWS Organization (no SCPs apply)","ScpsEnabled":false,"PolicyRead":{"Status":"not_enabled","Reason":"account not a member of an AWS Organization"}}]}}'
+
+  - name: member_account_denied
+    expect: FAIL
+    note: >
+      the bug this validator exists for: describe-organization works from any member, the SCP reads are AccessDenied
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error_code":"not_authorized"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":null,"ServiceControlPolicies":null,"OrganizationsInUse":true,"ScpsEnabled":null,"PolicyRead":{"Status":"denied","Reason":"list-roots: An error occurred (AccessDeniedException) when calling the ListRoots operation: You don''t have permissions to access this resource."}}]}}'
+
+  - name: read_error
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error_code":"not_authorized"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":null,"ServiceControlPolicies":null,"OrganizationsInUse":true,"ScpsEnabled":null,"PolicyRead":{"Status":"error","Reason":"list-roots: An error occurred (ExpiredTokenException)"}}]}}'
+
+  - name: v0_2_0_empty_lists_no_marker
+    expect: FAIL
+    note: >
+      0.2.0 wrote empty lists and no marker for a denied read; without PolicyRead it cannot be told from no SCPs, so it must not pass
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":[],"ServiceControlPolicies":[]}]}}'
+
+  - name: policy_read_renamed
+    expect: FAIL
+    note: >
+      the key renamed upstream, envelope intact
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"metadata":{"account_id":"222222222222"},"results":[{"Organization":{"Id":"o-abc","MasterAccountId":"111111111111"},"Roots":[{"Id":"r-root","PolicyTypes":[{"Type":"SERVICE_CONTROL_POLICY","Status":"ENABLED"}]}],"ServiceControlPolicies":[{"Id":"p-FullAWSAccess","Name":"FullAWSAccess","AwsManaged":true,"Targets":[{"TargetId":"r-root"}]},{"Id":"p-deny","Name":"DenyLeaveOrg","AwsManaged":false,"Targets":[{"TargetId":"ou-a"}]}],"OrganizationsInUse":true,"ScpsEnabled":true,"ReadStatus":{"Status":"ok","Reason":null}}]}}'
