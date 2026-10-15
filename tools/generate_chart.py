@@ -51,25 +51,28 @@ OUT_DARK = REPO_ROOT / "docs" / "coverage-over-time-dark.svg"
 
 # Two selected themes rather than one flipped automatically: the dark steps are
 # chosen for the dark surface, and every colour below is written into the file.
+# Each surface is GitHub's own page background for that theme, so the chart sits
+# in the README rather than floating in a box. One accent: fetchers wear the
+# Paramify brand blue, services plain ink.
 LIGHT = {
-    "surface": "#fcfcfb",
-    "ink": "#0b0b0b",
-    "secondary": "#52514e",
-    "muted": "#898781",
-    "grid": "#e1e0d9",
-    "axis": "#c3c2b7",
-    "fetchers": "#2a78d6",
-    "services": "#eb6834",
+    "surface": "#ffffff",
+    "ink": "#1f2328",
+    "secondary": "#59636e",
+    "muted": "#8c959f",
+    "grid": "#eef0f2",
+    "axis": "#d1d9e0",
+    "fetchers": "#2270ff",
+    "services": "#1f2328",
 }
 DARK = {
-    "surface": "#1a1a19",
-    "ink": "#ffffff",
-    "secondary": "#c3c2b7",
-    "muted": "#898781",
-    "grid": "#2c2c2a",
-    "axis": "#383835",
-    "fetchers": "#3987e5",
-    "services": "#d95926",
+    "surface": "#0d1117",
+    "ink": "#f0f6fc",
+    "secondary": "#9198a1",
+    "muted": "#6e7681",
+    "grid": "#1b2129",
+    "axis": "#30363d",
+    "fetchers": "#4d8bff",
+    "services": "#c9d1d9",
 }
 
 FONT = "system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif"
@@ -160,28 +163,40 @@ def num(value: float) -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
-def text_el(x: float, y: float, s: str, *, fill: str, size: float = 11, weight: int = 400) -> str:
+def text_el(
+    x: float,
+    y: float,
+    s: str,
+    *,
+    fill: str,
+    size: float = 11,
+    weight: int = 400,
+    anchor: str = "start",
+    spacing: str | None = None,
+) -> str:
+    tracking = f' letter-spacing="{spacing}"' if spacing else ""
     return (
         f'<text x="{num(x)}" y="{num(y)}" font-family="{FONT}" font-size="{size}" '
-        f'font-weight="{weight}" fill="{fill}" text-anchor="start">{s}</text>'
+        f'font-weight="{weight}" fill="{fill}" text-anchor="{anchor}"{tracking}>{s}</text>'
     )
 
 
-def tick_el(x: float, y: float, s: str, *, fill: str, anchor: str) -> str:
-    return (
-        f'<text x="{num(x)}" y="{num(y)}" font-family="{FONT}" font-size="11" '
-        f'font-weight="400" fill="{fill}" text-anchor="{anchor}">{s}</text>'
-    )
+def headline_el(x: float, y: float, theme: dict[str, str], totals: list[tuple[int, str, str]]) -> str:
+    """The current totals as big numerals, each keyed by a dot in its line's colour.
 
-
-def key_el(x: float, y: float, color: str, surface: str) -> str:
-    """A short line + dot: identity for a panel, so no text wears the data colour."""
-    return (
-        f'<line x1="{num(x)}" y1="{num(y)}" x2="{num(x + 16)}" y2="{num(y)}" stroke="{color}" '
-        f'stroke-width="2" stroke-linecap="round"/>'
-        f'<circle cx="{num(x + 8)}" cy="{num(y)}" r="3.5" fill="{color}" '
-        f'stroke="{surface}" stroke-width="1.5"/>'
-    )
+    One <text> with tspans, so each group flows after the last at whatever width
+    the viewer's system font gives the numerals — nothing here guesses glyph widths.
+    """
+    parts = []
+    for i, (value, unit, color) in enumerate(totals):
+        gap = ' dx="36"' if i else ""
+        parts.append(
+            f'<tspan{gap} font-size="44" font-weight="600" fill="{theme["ink"]}" '
+            f'letter-spacing="-0.02em">{value}</tspan>'
+            f'<tspan dx="10" font-size="11" fill="{color}">●</tspan>'
+            f'<tspan dx="5" font-size="13" fill="{theme["secondary"]}">{unit}</tspan>'
+        )
+    return f'<text x="{num(x)}" y="{num(y)}" font-family="{FONT}">{"".join(parts)}</text>'
 
 
 def nice_axis(peak: int) -> tuple[int, int]:
@@ -226,92 +241,110 @@ def panel(
     theme: dict[str, str],
     *,
     box: tuple[float, float, float, float],
-    first: dt.date,
+    x: Callable[[dt.date], float],
     last: dt.date,
     points: Series,
     color: str,
-    unit: str,
+    shade: bool,
 ) -> None:
-    """One plot area: gridlines, y ticks, the step line, dated x ticks, end label."""
+    """One plot area: dashed gridlines, y ticks in the gutter, the step line, an end dot."""
     left, top, right, bottom = box
-    span = max(1, (last - first).days)
     axis_max, step = nice_axis(max(count for _, count in points))
-
-    def x(day: dt.date) -> float:
-        return left + (day - first).days / span * (right - left)
 
     def y(count: float) -> float:
         return bottom - count / axis_max * (bottom - top)
 
     for value in range(0, axis_max + 1, step):
         gy = y(value)
+        dash = "" if value == 0 else ' stroke-dasharray="2 3"'
         stroke = theme["axis"] if value == 0 else theme["grid"]
         out.append(
             f'<line x1="{num(left)}" y1="{num(gy)}" x2="{num(right)}" y2="{num(gy)}" '
-            f'stroke="{stroke}" stroke-width="1"/>'
+            f'stroke="{stroke}" stroke-width="1"{dash}/>'
         )
-        out.append(tick_el(left - 10, gy + 4, str(value), fill=theme["muted"], anchor="end"))
-
-    ticks = month_ticks(first, last)
-    for tick in ticks:
-        label = f"{tick:%b %Y}" if tick.month == 1 or tick == ticks[0] else f"{tick:%b}"
-        out.append(tick_el(x(tick), bottom + 20, label, fill=theme["muted"], anchor="middle"))
+        out.append(text_el(left - 8, gy + 4, str(value), fill=theme["muted"], size=10, anchor="end"))
 
     line = step_path(points, x, y, x(last))
-    out.append(
-        f'<path d="{line} L{num(x(last))},{num(y(0))} L{num(x(points[0][0]))},{num(y(0))} Z" '
-        f'fill="{color}" fill-opacity="0.10" stroke="none"/>'
-    )
+    if shade:
+        out.append(
+            f'<path d="{line} L{num(x(last))},{num(y(0))} L{num(x(points[0][0]))},{num(y(0))} Z" '
+            f'fill="{color}" fill-opacity="0.07" stroke="none"/>'
+        )
     out.append(
         f'<path d="{line}" fill="none" stroke="{color}" stroke-width="2" '
         f'stroke-linejoin="round" stroke-linecap="round"/>'
     )
-
-    end_x, end_y = x(last), y(points[-1][1])
-    out.append(
-        f'<circle cx="{num(end_x)}" cy="{num(end_y)}" r="4.5" fill="{color}" '
-        f'stroke="{theme["surface"]}" stroke-width="2"/>'
-    )
-    out.append(text_el(end_x + 11, end_y + 2, str(points[-1][1]), fill=theme["ink"], size=17, weight=600))
-    out.append(text_el(end_x + 11, end_y + 18, unit, fill=theme["muted"]))
+    out.append(f'<circle cx="{num(x(last))}" cy="{num(y(points[-1][1]))}" r="3.5" fill="{color}"/>')
 
 
 def render(theme: dict[str, str], fetchers: Series, services: Series, last: dt.date) -> str:
-    """Two stacked panels sharing one time axis.
+    """The current totals as a headline, then two stacked panels sharing one time axis.
 
     Small multiples rather than one plot with two y scales: 181 against 14 on a
     single pair of axes would invent a relationship between them that the data
-    does not have.
+    does not have. Month hairlines run through both panels, and the month labels
+    sit once, under the lower one.
     """
-    width, height = 880, 448
-    left, right = 54, width - 118
+    width, height = 880, 432
+    left, right = 48, width - 24
+    first = fetchers[0][0]
+    span = max(1, (last - first).days)
     alt = (
         f"Fetcher and service counts over time. Fetchers rise from {fetchers[0][1]} to "
         f"{fetchers[-1][1]}, and services from {services[0][1]} to {services[-1][1]}, "
-        f"between {fetchers[0][0]:%B %Y} and {last:%B %Y}."
+        f"between {first:%B %Y} and {last:%B %Y}."
+    )
+
+    def x(day: dt.date) -> float:
+        return left + (day - first).days / span * (right - left)
+
+    gained = (
+        f"since {first:%B %Y} · +{fetchers[-1][1] - fetchers[0][1]} fetchers, "
+        f"+{services[-1][1] - services[0][1]} services"
     )
     out = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}" role="img" aria-label="{alt}">',
         f'<rect x="0" y="0" width="{width}" height="{height}" fill="{theme["surface"]}"/>',
-        text_el(24, 32, "Coverage over time", fill=theme["ink"], size=16, weight=600),
+        text_el(24, 22, "COVERAGE OVER TIME", fill=theme["muted"], weight=600, spacing="0.08em"),
+        headline_el(
+            24,
+            72,
+            theme,
+            [
+                (fetchers[-1][1], "fetchers", theme["fetchers"]),
+                (services[-1][1], "services", theme["services"]),
+            ],
+        ),
+        text_el(right, 72, gained, fill=theme["muted"], size=12, anchor="end"),
     ]
+
     panels = (
-        (theme["fetchers"], "Fetchers · fetcher.yaml directories", fetchers, "fetchers", 76, 206),
-        (theme["services"], "Services · top-level categories", services, "services", 278, 408),
+        (fetchers, theme["fetchers"], 108, 236, True),
+        (services, theme["services"], 268, 384, False),
     )
-    for color, caption, points, unit, top, bottom in panels:
-        out.append(key_el(24, top - 20, color, theme["surface"]))
-        out.append(text_el(48, top - 16, caption, fill=theme["secondary"], size=12))
+    top, bottom = panels[0][2], panels[-1][3]
+    ticks = month_ticks(first, last)
+    for tick in ticks:
+        tx = x(tick)
+        out.append(
+            f'<line x1="{num(tx)}" y1="{top}" x2="{num(tx)}" y2="{bottom}" '
+            f'stroke="{theme["grid"]}" stroke-width="1"/>'
+        )
+        if tx + 40 <= right:
+            label = f"{tick:%b %Y}" if tick.month == 1 or tick == ticks[0] else f"{tick:%b}"
+            out.append(text_el(tx + 4, bottom + 20, label, fill=theme["muted"]))
+
+    for points, color, panel_top, panel_bottom, shade in panels:
         panel(
             out,
             theme,
-            box=(left, top, right, bottom),
-            first=fetchers[0][0],
+            box=(left, panel_top, right, panel_bottom),
+            x=x,
             last=last,
             points=points,
             color=color,
-            unit=unit,
+            shade=shade,
         )
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + "\n".join(out) + "\n</svg>\n"
 
