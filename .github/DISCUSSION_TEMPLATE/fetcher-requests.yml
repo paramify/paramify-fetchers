@@ -1,0 +1,44 @@
+title: "[Request] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask for a new platform or a new fetcher. Before posting, search the existing
+        requests and upvote one that matches. Upvotes are how we decide what to build next.
+  - type: input
+    id: platform
+    attributes:
+      label: Platform or tool
+      description: The product you want evidence from, e.g. Snowflake, Cloudflare, Jamf.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: What should it collect?
+      description: The configuration, settings or records you need, and what they prove.
+      placeholder: e.g. "SSO enforcement and MFA status for every user, to show phishing-resistant MFA."
+    validations:
+      required: true
+  - type: input
+    id: requirement
+    attributes:
+      label: Requirement it supports (optional)
+      description: A FedRAMP 20x KSI, NIST 800-53 control or other framework requirement.
+  - type: input
+    id: api
+    attributes:
+      label: API documentation (optional)
+      description: A link to the platform's API docs, if you know it.
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Deployment
+      options:
+        - Commercial
+        - Government cloud
+        - Both
+        - Not sure
+    validations:
+      required: true

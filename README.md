@@ -62,7 +62,7 @@ Generated from this repo's git history by `python tools/generate_chart.py`, and 
 
 ### Coming soon
 
-More integrations are in progress. To request a fetcher or upvote what should be prioritized next, visit [Paramify Community Feature Requests](https://support.paramify.com/hc/en-us/community/topics/31851789568275-Feature-Requests).
+More integrations are in progress. To ask for a new platform or fetcher, or upvote what should come next, use [Fetcher requests](https://github.com/paramify/paramify-fetchers/discussions/categories/fetcher-requests) in Discussions.
 
 <div align="center">
 
