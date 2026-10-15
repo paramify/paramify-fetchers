@@ -9,10 +9,11 @@
 
 Fetchers are small scripts that collect compliance evidence from your infrastructure and write it to disk as JSON. A separate uploader stage pushes that evidence to Paramify. This repo contains the fetchers, the runner that executes them, and the uploader — the fetchers themselves never talk to Paramify directly.
 
-```
-  customer tool  ──fetcher──▶  JSON evidence file  ──uploader──▶  Paramify
-                               (on disk, per run)     (separate stage)
-```
+<div align="center">
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/how-it-works-dark.svg"><img src="docs/img/readme/how-it-works.svg" alt="How a fetcher works: a fetcher reads your tools read-only and writes JSON evidence files to your disk; a separate uploader sends those files to Paramify. Fetchers never contact Paramify." width="880"></picture>
+
+</div>
 
 ---
 
