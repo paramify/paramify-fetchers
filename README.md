@@ -62,7 +62,7 @@ Each fetcher is a small, read-only script that writes JSON to disk. A separate u
 
 </div>
 
-Generated from this repo's git history by `python tools/generate_chart.py`, and refreshed by CI whenever a fetcher lands.
+`python tools/generate_chart.py` draws this chart from the git history of this repo. CI draws it again each time a fetcher merges.
 <!-- END:fetcher-chart -->
 
 ### Coming soon
@@ -103,7 +103,7 @@ For real services, [Install](#install) lists the extras and CLIs that each one n
 
 ## Install
 
-**Prerequisites:** Python 3.10+. The CLIs your fetchers need (`aws`, `jq`, `curl`, `kubectl`, etc.) must be on your `PATH` — install only what applies to the categories you'll run. Most services have a credential setup guide at `fetchers/<category>/README.md`. The [documentation index](docs/README.md#run-fetchers) lists them.
+**Prerequisites:** Python 3.10 or later. The CLIs that your fetchers use (`aws`, `jq`, `curl`, `kubectl` and others) must be on your `PATH`. Install only the CLIs for the categories that you run. Most services have a credential setup guide at `fetchers/<category>/README.md`. The [documentation index](docs/README.md#run-fetchers) lists them.
 
 ```bash
 git clone https://github.com/paramify/paramify-fetchers.git
@@ -112,40 +112,28 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e '.[all]'      # '[all]' bundles the TUI; use `pip install -e .` for the headless CLI only
 ```
 
-Azure and GCP are the exceptions to the CLI rule above: both talk to their cloud
-through the official SDKs rather than a CLI, so each has its own extra and
-neither needs a cloud CLI at runtime.
+Azure and GCP do not use a CLI. They talk to their cloud through the official SDKs, so each one has its own extra. Neither one needs a cloud CLI at runtime.
 
 ```bash
 pip install -e '.[azure]'    # 32 packages; no `az` CLI at runtime
 pip install -e '.[gcp]'      # 12 packages; no `gcloud` at runtime
 ```
 
-Both are deliberately kept out of `[all]` — they are the heaviest extras here
-and only matter if you actually run those categories. Azure authenticates
-through `DefaultAzureCredential`, GCP through Application Default Credentials;
-neither takes a static key file.
+These two extras are not in `[all]` on purpose. They are the heaviest extras, and you need them only if you run those categories. Azure signs in through `DefaultAzureCredential`, and GCP through Application Default Credentials. Neither one uses a static key file.
 
-There are three ways to drive it — an interactive **TUI**, an **AI agent**, or the **CLI** directly. All three go through one facade (`framework.api`), so they behave identically; pick whichever fits how you work.
+You can use the fetchers in three ways: an interactive **TUI**, an **AI agent**, or the **CLI**. All three go through one facade (`framework.api`), so they behave the same. Pick the one that fits how you work.
 
 ---
 
 ## The TUI
 
-The fastest way in. `paramify tui` browses the catalog, builds and validates a
-manifest, runs it, and reviews evidence — all without leaving the keyboard:
+The TUI is the fastest way to start. `paramify tui` browses the catalog, builds and validates a manifest, runs it, and shows the evidence. You never leave the keyboard.
 
 ![The paramify terminal UI](docs/demo/tui.gif)
 
-**Sending scan reports** (Nessus, Wiz, STIG results and the like) into Paramify
-pipelines is its own short setup — a manifest for the scanners, an assessment and
-close policy for each, then send from the Paramify tab. The walkthrough, with
-recordings, is [`docs/pipelines_guide.md`](docs/pipelines_guide.md).
+**Scan reports** (Nessus, Wiz, STIG results and similar files) go into Paramify pipelines, which need a short setup. You write a manifest for the scanners and give each one an assessment and a close policy. Then you send the reports from the Paramify tab. [`docs/pipelines_guide.md`](docs/pipelines_guide.md) walks through it, with recordings.
 
-The recordings on this page were made against a larger set of synthetic fetchers
-than the repo ships, so a run of your own will be shorter than the one on film —
-`examples/demo.yaml` collects once and exits clean. What the frames show of the
-runner, the envelope and each command's output is exactly what you get.
+The recordings on this page used a larger set of synthetic fetchers than the repo ships. Thus your own run is shorter than the one in the recording: `examples/demo.yaml` collects once and exits clean. The runner, the envelope and the command output in the recordings are the same as what you get.
 
 ![A run, and the evidence it wrote](docs/demo/firstrun.gif)
 
@@ -153,9 +141,7 @@ runner, the envelope and each command's output is exactly what you get.
 
 ## Drive it with an AI agent
 
-Every command takes `--json`, and each `paramify manifest` edit returns a stable
-`{ok, path, errors}` object — so an agent can assemble a runnable manifest by
-reading `errors` and closing each gap, no screen-scraping:
+Every command takes `--json`. Each `paramify manifest` edit returns a stable `{ok, path, errors}` object. An agent reads `errors` and fixes each gap until the manifest can run. It does not need to scrape the screen.
 
 ```bash
 paramify catalog --json                                  # discover what's available
@@ -165,17 +151,18 @@ paramify manifest set-secret okta_phishing_resistant_mfa api_token OKTA_API_TOKE
 paramify validate manifest.yaml --json                   # → {"ok": true, "errors": []}
 ```
 
-The repo also ships Claude Code skills under [`.claude/skills/`](.claude/skills/) —
-`create-fetcher`, `onboard-platform`, `wire-manifest`, and `suggest-validator` — so
-an agent can scaffold a new fetcher, onboard a platform nobody has integrated yet,
-wire a fetcher into a manifest, or propose a validator directly.
+The repo also ships four Claude Code skills in [`.claude/skills/`](.claude/skills/):
+
+- `create-fetcher` scaffolds a new fetcher.
+- `onboard-platform` onboards a platform that has no fetchers yet.
+- `wire-manifest` adds a fetcher to a manifest and fills in what it needs.
+- `suggest-validator` proposes a validator.
 
 ---
 
 ## Using the CLI
 
-The same operations, run by hand. `paramify catalog` lists the catalog and
-`paramify describe <fetcher>` shows exactly what any one fetcher needs:
+The CLI does the same operations by hand. `paramify catalog` lists the catalog, and `paramify describe <fetcher>` shows what one fetcher needs:
 
 ![Browsing the catalog and reading a fetcher's contract](docs/demo/catalog.gif)
 
@@ -190,8 +177,8 @@ paramify manifest init
 paramify manifest add okta_phishing_resistant_mfa
 paramify manifest set-secret okta_phishing_resistant_mfa api_token OKTA_API_TOKEN
 paramify manifest set-secret okta_phishing_resistant_mfa org_url OKTA_ORG_URL
-# The manifest builder reports missing secrets after each step —
-# keep going until it says the manifest is runnable.
+# The manifest builder reports missing secrets after each step.
+# Keep going until it says the manifest is runnable.
 
 # 3. Set your credentials and run
 export OKTA_API_TOKEN=<your token>
@@ -204,7 +191,7 @@ export PARAMIFY_UPLOAD_API_TOKEN=<your token>   # see uploaders/paramify_evidenc
 paramify upload                                  # push the latest run
 ```
 
-Most services have a credential setup guide in their fetcher directory — for example, [`fetchers/okta/README.md`](fetchers/okta/README.md) covers creating an Okta API token and the required admin role. See [`examples/`](examples/) for complete worked manifests (multi-region AWS, GitLab fanout, etc.) and [`deploy/README.md`](deploy/README.md) for running on a schedule in Docker.
+Most services have a credential setup guide in their fetcher directory. For example, [`fetchers/okta/README.md`](fetchers/okta/README.md) shows how to create an Okta API token and which admin role it needs. [`examples/`](examples/) has full sample manifests, such as multi-region AWS and GitLab fanout. [`deploy/README.md`](deploy/README.md) shows how to run on a schedule in Docker.
 
 [`docs/cli_guide.md`](docs/cli_guide.md) is the full CLI reference. It covers every
 command, manifest building, the `paramify doctor` preflight, uploads, scan reports,
@@ -214,18 +201,12 @@ inventory, discovery and script sync.
 
 ## How it runs
 
-Four pieces, kept deliberately separate:
+The framework has four parts, and each one has its own job:
 
-- **Fetcher** — a small script (`fetcher.py` or `fetcher.sh`) that collects from
-  *one* source and writes a JSON file. It reads everything it needs from
-  environment variables and writes only to `EVIDENCE_DIR`.
-- **`fetcher.yaml`** — the fetcher's self-description: its name, what secrets and
-  config it needs, what it outputs, and its `evidence_set` identity. Ships with
-  the code, validated against a schema. Customers never edit this.
-- **Run manifest** — the customer's intent: which fetchers to run, with what
-  config, against what targets. Lives in the customer's environment, not here.
-- **Runner** — reads `fetcher.yaml` files and a manifest, resolves secrets and
-  config into environment variables, and executes each fetcher.
+- **Fetcher:** a small script (`fetcher.py` or `fetcher.sh`) that collects from *one* source and writes a JSON file. It reads all its inputs from environment variables and writes only to `EVIDENCE_DIR`.
+- **`fetcher.yaml`:** the description of the fetcher. It gives the name, the secrets and config that the fetcher needs, the output, and the `evidence_set` identity. It ships with the code, and a schema validates it. Customers never edit this file.
+- **Run manifest:** what the customer wants to run. It lists the fetchers, their config, and their targets. It lives in the customer's environment, not in this repo.
+- **Runner:** reads the `fetcher.yaml` files and a manifest, turns secrets and config into environment variables, and runs each fetcher.
 
 ```mermaid
 flowchart LR
@@ -241,21 +222,19 @@ flowchart LR
     U -->|"Paramify REST v0 · HTTPS only"| P[("Paramify")]
 ```
 
-Everything goes through one facade, `framework.api` — discovery, manifest
-editing, validation, and running. The TUI, the CLI, and the `--json` surface an
-agent drives all sit on that single code path, which is why they behave
-identically.
+Discovery, manifest edits, validation and runs all go through one facade, `framework.api`. The TUI, the CLI and the `--json` output for agents use that one code path. As a result, they behave the same.
 
-Output lands in `<output_dir>/run-<UTC-timestamp>/`, one JSON file per fetcher
-(or per target for fan-out), alongside a `_run_metadata.json` run index. The
-runner wraps each evidence file in an envelope —
-`{schema_version, metadata, payload}` — where `metadata` carries the fetcher
-name/version/category, run id, target, `collected_at`, status, exit code, and
-the `evidence_set` identity; failed invocations also get a `stderr_tail`. The
-`_run_metadata.json` index itself is not enveloped.
+Output goes to `<output_dir>/run-<UTC-timestamp>/`. Each fetcher writes one JSON file, or one per target for fan-out. A `_run_metadata.json` file indexes the run, and the runner does not envelope this index. The runner wraps each evidence file in an envelope: `{schema_version, metadata, payload}`.
 
-A finished evidence file looks like this — an AWS VPC-segmentation run,
-abbreviated:
+The `metadata` block holds:
+
+- the fetcher name, version and category
+- the run id, the target and `collected_at`
+- the status and the exit code
+- the `evidence_set` identity
+- a `stderr_tail`, but only for a failed run
+
+Here is a finished evidence file from an AWS VPC segmentation run, shortened:
 
 ```json
 {
@@ -290,19 +269,17 @@ abbreviated:
 }
 ```
 
-The runner owns the `metadata` envelope; the fetcher owns `payload`. The
-`evidence_set` block (from `fetcher.yaml`) is what an uploaded file maps to in
-Paramify. Note there is no pass/fail verdict — that judgment is Paramify-side, by
-design (peering connections and endpoints are omitted above for brevity).
+The runner owns the `metadata` envelope, and the fetcher owns `payload`. The `evidence_set` block comes from `fetcher.yaml`. It tells Paramify which evidence set the uploaded file belongs to. The file has no pass or fail verdict. Paramify makes that judgment, by design. (The example leaves out the peering connections and endpoints to save space.)
 
-> **Status:** pre-1.0 (v0.x). The runner now wraps every output in the
-> `metadata`+`payload` envelope, but fetchers still write raw evidence dicts and
-> read env directly rather than receiving a typed secrets object — both are
-> tracked interim shortcuts, not the target. Comparators (`depends_on`) and
-> structured exit-code categories (still binary `0`/`1`, plus `124` for a runner
-> timeout-kill) are not built yet. Issue-report collection is built end to end —
-> contract, runner, uploader, template — and Wiz ships the first three vendor
-> fetchers in that category.
+> **Status:** pre-1.0 (v0.x). The runner wraps every output in the
+> `metadata`+`payload` envelope. But fetchers still write raw evidence dicts and
+> read the environment directly. They do not get a typed secrets object yet.
+> These are known interim shortcuts, not the target design. Comparators
+> (`depends_on`) are not built yet. Structured exit-code categories are not built
+> either: exit codes are still binary `0`/`1`, plus `124` when the runner kills a
+> fetcher on timeout. Issue-report collection is complete: the contract, the
+> runner, the uploader and the template. Wiz ships the first three vendor fetchers
+> of that kind.
 
 ---
 
@@ -310,9 +287,9 @@ design (peering connections and endpoints are omitted above for brevity).
 
 ```
 framework/                      # shared code (facade, runner, contract, schemas)
-  api.py                        # the facade — discovery, manifest edit, validate, run
+  api.py                        # the facade: discovery, manifest edit, validate, run
   schemas/                      # fetcher / manifest / category JSON Schemas
-  cli.py                        # the `paramify` CLI — one command, steers every front-end
+  cli.py                        # the `paramify` CLI: one command, steers every front-end
   runner/                       # executor + manifest loader (+ `python -m framework.runner` shim)
   tui/                          # terminal UI front-end (Textual)
 fetchers/
@@ -338,13 +315,15 @@ run_and_upload.sh               # example collect→upload glue
 docs/                           # contract, design, and reference guides
 ```
 
-Directories starting with `_` are not fetchers — the runner skips them.
+Directories that start with `_` are not fetchers, and the runner skips them.
 
 ---
 
 ## Adding a fetcher
 
-To add evidence collection for a new control or a new tool, see [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md). If nothing covers that platform yet and you want a whole slate rather than one fetcher, start from [`docs/platform_onboarding_guide.md`](docs/platform_onboarding_guide.md). If the tool already produces the findings — a vulnerability scan or a CSPM export — you want an issue-report fetcher instead: [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
+- To collect evidence for a new control or a new tool, read [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md).
+- If a platform has no fetchers yet and you want a full set, start from [`docs/platform_onboarding_guide.md`](docs/platform_onboarding_guide.md).
+- Some tools already produce findings, for example a vulnerability scan or a CSPM export. For these tools, write an issue-report fetcher: [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
 
 Before you open a pull request, read [`CONTRIBUTING.md`](CONTRIBUTING.md). It gives the dev setup, the checks that CI runs, and the ground rules.
 
@@ -369,4 +348,4 @@ document.
 
 ## License
 
-Licensed under the GNU General Public License v3.0 — see [`LICENSE`](LICENSE).
+This project uses the GNU General Public License v3.0. See [`LICENSE`](LICENSE).
