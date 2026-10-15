@@ -526,6 +526,36 @@ schemas and the `paramify` CLI — not the internal code.
   fails rather than guess when Microsoft Graph is signed in to a tenant other than
   the subscription's. Needs Reader, plus Microsoft Graph `Directory.Read.All`
   (admin-consented) when it runs as a service principal. Maps to `KSI-SVC-PRR`.
+- **Three Azure Application Gateway fetchers.** All three are Reader-only and
+  fan out per subscription. They share `_shared/app_gateway.py`, which fails
+  the run when `list_all` returns a different number of gateways than Resource
+  Graph counts. Resource Graph can lag behind `list_all`, so a mismatch is
+  counted once more after 30 seconds before the run fails.
+  - `azure_app_gateway_tls_listeners` (`EVD-AZURE-APPGW-TLS-LISTENERS`): every
+    L7 and L4 listener, with its protocol, a public or private frontend,
+    whether a plain-HTTP listener only redirects to HTTPS, and the effective
+    minimum TLS version along with where it comes from. The source is the SSL
+    profile, then the gateway's `sslPolicy`, then the default predefined policy.
+    An L4 Tcp listener always counts as plaintext, even when TLS passes through
+    it to the backend.
+  - `azure_app_gateway_backend_tls` (`EVD-AZURE-APPGW-BACKEND-TLS`): every
+    backend setting, with its protocol, whether the certificate chain and SNI
+    are validated, its trusted roots and its probe protocol, plus which rules
+    use it. Only settings that are in use count towards the totals.
+  - `azure_app_gateway_waf` (`EVD-AZURE-APPGW-WAF`): the WAF that applies to
+    each HTTP(S) listener. A path rule's policy overrides the listener's, which
+    overrides the gateway's, which overrides the legacy configuration. The
+    fetcher reports whether that WAF is enabled in Prevention mode, and each
+    policy's disabled managed rules, exclusions and rate-limit rules. A policy
+    in another subscription is read with a direct GET. If the identity is
+    refused (401 or 403) or the policy no longer exists (404), the policy is
+    recorded as unreadable, the listener's result is null rather than
+    "enforcing", and the run does not fail. Any other error does fail it.
+
+  These fetchers were run against a live subscription with one gateway. SSL
+  profiles, attached WAF policies and L4 listeners have not yet been
+  exercised against live data. `tests/test_azure_app_gateway_verdicts.py`
+  covers those paths against modelled gateways.
 
 ### Changed
 
@@ -762,7 +792,29 @@ schemas and the `paramify` CLI — not the internal code.
   unchanged. `fetchers/aws/README.md` now documents the two ways to run it
   from a non-management account: a read-only delegation policy, or a profile
   that assumes a role in the management account.
-
+- **`gcp_cloud_sql_encryption_status` reads point-in-time recovery per engine**
+  (0.1.0 → 0.1.1). The fetcher took the first non-null of
+  `pointInTimeRecoveryEnabled` and `binaryLogEnabled`, so a MySQL instance with
+  the binary log on (MySQL's PITR switch) and the generic toggle at `false`
+  read as having no PITR. MySQL now reads `binaryLogEnabled` and PostgreSQL /
+  SQL Server read `pointInTimeRecoveryEnabled`, the same rule
+  `gcp_cloud_sql_backup_configuration` uses. Each record adds the two raw flags
+  (`pitr_toggle_enabled`, `binary_log_enabled`) and the summary adds
+  `point_in_time_recovery_instances`.
+- **`gcp_compute_instance_configuration` counts OS Login 2FA only where OS
+  Login is on** (0.1.0 → 0.1.1). `enable-oslogin-2fa` does nothing without
+  `enable-oslogin`, but `os_login_2fa_enabled` (per instance and per project)
+  and the `os_login_2fa_instances` / `project_os_login_2fa_enabled` summary
+  fields reported the flag alone. They now report effective 2FA (OS Login on
+  and the 2FA flag on, each resolved instance-first). The raw flag is kept as
+  `os_login_2fa_configured`.
+- **`gcp_gke_cluster_configuration` recognises Binary Authorization set by
+  evaluation mode** (0.1.0 → 0.1.1). `binary_authorization_enabled` read only
+  the deprecated `enabled` flag, so a cluster enforcing with
+  `PROJECT_SINGLETON_POLICY_ENFORCE` read as off and was left out of
+  `binary_authorization_clusters`. Any mode other than `DISABLED` now counts as
+  enabled. The legacy flag decides only when no mode is set, since the API
+  ignores it otherwise. It is kept as `binary_authorization_legacy_enabled`.
 - **Every uploader reads "already exists" / "already connected" the same way.**
   The API refuses a repeat evidence-set create or a repeat CONNECT instead of
   ignoring it, and each uploader held its own test for that refusal: the scripts
@@ -785,6 +837,37 @@ schemas and the `paramify` CLI — not the internal code.
   open only to `::/0` looked closed; each rule now carries `IPv6CIDRs` (IPv6
   ranges joined with `", "`) after `CIDRs`. Existing keys and their order are
   unchanged.
+
+- **`aws_iam_mfa_status` reports FIDO security keys as `fido`** (0.1.0 →
+  0.2.0). Every device whose serial is an ARN was typed `virtual`, so a FIDO/U2F
+  security key (`arn:aws:iam::<account>:u2f/...`), the phishing-resistant
+  factor, read as an authenticator app. `Type` is now `fido` for a `:u2f/`
+  serial, `virtual` for a `:mfa/` serial, `hardware` for a bare serial (a
+  hardware TOTP token) and `unknown` for any other shape.
+
+- **`aws_iam_policies` lists permissions-boundary use apart from attachments**
+  (0.2.0 → 0.3.0). `AttachedUsers` and `AttachedRoles` also named the users and
+  roles that use the policy only as their permissions boundary, which grants
+  nothing. They now hold attachments only, and two new keys after
+  `AttachedRoles`, `BoundaryUsers` and `BoundaryRoles`, name the users and roles
+  that use it as their boundary. Existing keys and their order are unchanged.
+
+- **`aws_security_groups` shows rules that reference security groups and
+  prefix lists** (0.3.0 → 0.4.0). Only IP ranges were read, so a rule whose
+  source (outbound: destination) is another security group or a managed prefix
+  list came out with empty CIDRs and no source, as if it allowed nothing. Each
+  rule now ends with `SecurityGroupIds` and `PrefixListIds`, joined with `", "`
+  like `CIDRs`; a group owned by another account is written
+  `<account-id>/<group-id>`. Each group record also gains `GroupName` and
+  `VpcId` after `Rules`. Keys are only appended.
+
+- **`aws_network_firewall_rules` counts Suricata and domain-list rules**
+  (0.1.0 → 0.2.0). `StatefulRuleCount` read only `StatefulRules`, so a stateful
+  rule group written as a Suricata rules string or a domain list reported 0.
+  A rules string now counts its lines that are not blank or `#` comments
+  (backslash-continued lines count once); a domain list counts its domains
+  (`Targets`), not the rules AWS generates per target type. A new
+  `StatefulRuleSource` key names which of the three was counted.
 
 - **`aws_auto_scaling_high_availability` lists each group's instances.** A
   query error left `Instances` empty for every Auto Scaling group.
