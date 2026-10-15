@@ -115,13 +115,15 @@ def lookback_days() -> int:
 
 
 def call(collector: DevOpsCollector, operation: str, scope: str, fn: Callable[[], Any], default: Any = None) -> Any:
-    """collector.guard, naming the PAT scope on an auth refusal."""
+    """collector.guard, naming the PAT scope (or, for an Entra identity, the read access) on an auth refusal."""
     def scoped():
         try:
             return fn()
         except DevOpsError as exc:
             if exc.status in (401, 403):
-                exc.args = (f"{exc} [PAT scope needed: {scope}]",)
+                hint = (f"PAT scope needed: {scope}" if collector.auth_mode == "pat"
+                        else f"the Entra identity lacks permission for this read; PAT equivalent: {scope}")
+                exc.args = (f"{exc} [{hint}]",)
             raise
     return collector.guard(operation, scoped, default)
 

@@ -15,6 +15,7 @@ import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import pytest
@@ -506,6 +507,18 @@ def test_missing_environment_scope_fails_the_run_and_names_the_scope(tmp_path):
     assert failure["operation"] == "distributedtask.environments.list(Web)"
     assert "TF400813" in failure["message"] and "PAT scope needed: Environment (Read & manage)" in failure["message"]
     assert evidence["summary"]["pipelines_total"] == 3  # the rest is still collected
+
+
+def test_as_an_entra_identity_a_refusal_names_the_missing_permission(tmp_path, monkeypatch):
+    monkeypatch.delenv("AZURE_DEVOPS_PAT")
+    monkeypatch.setattr(dr, "entra_credential", lambda: SimpleNamespace(
+        get_token=lambda scope: SimpleNamespace(token="t", expires_on=NOW.timestamp() + 3600)))
+    fake = FakeADO()
+    fake.routes[f"/contoso/{P}/_apis/distributedtask/environments"] = err(401, "TF400813: not authorized.")
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 1 and evidence["metadata"]["auth_mode"] == "entra"
+    assert "Entra identity lacks permission" in evidence["metadata"]["api_failures"][0]["message"]
+    assert evidence["summary"]["pipelines_total"] == 3
 
 
 def test_a_preview_server_error_is_a_collection_failure(tmp_path):

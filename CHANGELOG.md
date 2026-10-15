@@ -17,7 +17,8 @@ schemas and the `paramify` CLI — not the internal code.
   90 days. Records:
   - whether auditing is on, from the Log Audit Events policy when the token can
     read it, otherwise from the audit log: its newest change to that policy, else
-    its newest event (a scoped PAT gets 401 on the policy, and the run notes it);
+    its newest event (a scoped PAT gets 401 on the policy, and the run notes it;
+    signed in with Entra instead, the fetcher reads the policy itself);
   - every audit stream's target, status, reason and last update;
   - the newest audit event, not counting the fetcher's own reads of the log.
 
@@ -29,7 +30,9 @@ schemas and the `paramify` CLI — not the internal code.
   rather than as other organizations, and a stream is only expected to have
   delivered events newer than itself. Stream tokens and keys are never written.
 - **`azure_devops_pipelines`** (`EVD-AZURE-DEVOPS-PIPELINES`): the first Azure DevOps
-  fetcher, one target per organization with a PAT (`AZURE_DEVOPS_PAT`). Each YAML
+  fetcher, one target per organization, signed in with a PAT (`AZURE_DEVOPS_PAT`)
+  or, when none is set, the ambient Entra identity (az login, managed or workload
+  identity, or a service principal added to the organization). Each YAML
   pipeline's final YAML comes from a preview run pinned to the default branch's
   head commit, so templates are expanded and nothing is queued. If the preview is
   refused, the file is read at that commit instead. `yaml_commit` and
@@ -55,13 +58,15 @@ schemas and the `paramify` CLI — not the internal code.
   `summary.not_collected` lists what is out of scope: approval decisions, policy
   bypass permissions, and the content of classic pipelines. Signing steps are
   framed as supporting evidence for KSI-SVC-VRI. A failed call names the PAT scope
-  it needs. Environments need Environment (Read & manage), because Azure DevOps has
-  no read-only scope for them. The shared client
-  (`fetchers/azure/_shared/devops_rest.py`) handles PAT auth and continuation
-  paging, and records the identity it collected as (`metadata.collecting_identity`,
-  from `_apis/connectionData`) for every Azure DevOps fetcher. It sends the PAT only
-  to the host it paged from and never follows a redirect, and it keeps the TF/VS
-  error code on every failure.
+  it needs. With a PAT, environments need Environment (Read & manage), because
+  Azure DevOps has no read-only scope for them; an Entra identity needs only read
+  access, such as project Readers. The shared client
+  (`fetchers/azure/_shared/devops_rest.py`) handles PAT or Entra sign-in
+  (`metadata.auth_mode`) and continuation paging, and records the identity it
+  collected as (`metadata.collecting_identity`, from `_apis/connectionData`) for
+  every Azure DevOps fetcher. It sends credentials only to the host it paged from
+  and never follows a redirect, and it keeps the TF/VS error code on every
+  failure.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default

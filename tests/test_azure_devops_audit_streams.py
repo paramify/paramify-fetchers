@@ -191,6 +191,7 @@ def test_fetcher_yaml_follows_the_shape():
     assert spec["config_schema"]["audit_window_days"]["default"] == mod.DEFAULT_WINDOW_DAYS
     assert spec["output"]["aggregation"] == "per_target"
     assert [s["env"] for s in spec["secrets"]] == ["AZURE_DEVOPS_PAT"] and spec["secrets"][0]["per_target"]
+    assert spec["secrets"][0]["required"] is False  # without a PAT the ambient Entra identity signs in
 
 
 # --- transforms -----------------------------------------------------------------
@@ -580,10 +581,11 @@ class FakeAdoSession:
         }
         self.routes[f"dev.azure.com/{ORG}/_apis/connectionData"] = {
             "authenticatedUser": {"id": "u1", "providerDisplayName": "Audit Reader"}}
-        self.calls = []
+        self.calls, self.auth = [], []
 
     def request(self, method, url, headers=None, params=None, timeout=None, allow_redirects=True, json=None):
         self.calls.append((method, url, dict(params or {})))
+        self.auth.append(headers["Authorization"])
         parts = urlsplit(url)
         answer = self.routes[parts.netloc + parts.path]
         if isinstance(answer, list):
@@ -651,3 +653,22 @@ def test_main_treats_a_sign_in_page_as_a_failure(ado, tmp_path):
     code, _ = run_main(tmp_path)
     assert code == 1
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "auth_failed"
+
+
+def test_main_signed_in_with_entra_reads_the_policy_itself(ado, monkeypatch, tmp_path):
+    scopes = []
+
+    class EntraCred:
+        def get_token(self, scope):
+            scopes.append(scope)
+            return namedtuple("T", "token expires_on")("entra-tok", 9_999_999_999)
+
+    monkeypatch.delenv("AZURE_DEVOPS_PAT")
+    monkeypatch.setattr(devops_rest, "entra_credential", EntraCred)
+    code, text = run_main(tmp_path)
+    evidence = json.loads(text)
+    assert code == 0 and evidence["metadata"]["auth_mode"] == "entra"
+    assert evidence["results"]["auditing"] == {
+        "enabled": True, "source": "Policy.LogAuditEvents", "log_audit_events_policy": True}
+    assert evidence["results"]["notes"] == []
+    assert set(ado.auth) == {"Bearer entra-tok"} and scopes == [f"{devops_rest.ADO_RESOURCE}/.default"]

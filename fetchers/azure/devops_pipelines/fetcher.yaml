@@ -40,7 +40,7 @@ target_schema:
     env: AZURE_DEVOPS_PROJECTS
     description: >
       Comma-separated project names or ids to limit collection to. Optional:
-      omit to collect every project the PAT can read. A named project that is
+      omit to collect every project the identity can read. A named project that is
       missing fails the run.
 
 config_schema:
@@ -57,12 +57,16 @@ secrets:
   - name: pat
     env: AZURE_DEVOPS_PAT
     per_target: true
+    required: false
     description: >
       Personal access token for the organization with Build (Read), Code (Read),
       Test Management (Read), Project and Team (Read), Release (Read) and
       Environment (Read & manage). Azure DevOps has no read-only environment
-      scope; the fetcher only reads. Collection covers what the token's owner can
-      see, recorded as metadata.collecting_identity.
+      scope; the fetcher only reads. Optional: without it the fetcher signs in as
+      the ambient Entra identity (az login, managed or workload identity, or the
+      category's service principal added to the organization), which needs only
+      read access, such as project Readers. Collection covers what the signed-in
+      identity can see, recorded as metadata.collecting_identity.
 
 ksis:
   - KSI-CMT-RMV      # changes ship by pipeline redeployment from version control
@@ -118,5 +122,6 @@ evidence_set:
     Signing, signature-verification and SBOM steps are found by pattern in the
     YAML: they show the pipeline is set up to sign or verify, not that integrity
     is verified before each deploy, so they support KSI-SVC-VRI rather than
-    prove it. Pipeline general settings: build/generalsettings. A failed call
+    prove it. Pipeline general settings: build/generalsettings. Signs in with
+    the PAT, else the ambient Entra identity (metadata.auth_mode). A refused call
     names the PAT scope it needs.

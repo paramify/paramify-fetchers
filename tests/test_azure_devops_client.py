@@ -5,7 +5,9 @@ from __future__ import annotations
 import base64
 import json
 import sys
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import pytest
@@ -280,11 +282,78 @@ def test_an_unreadable_identity_is_a_failure_not_a_guess(monkeypatch, tmp_path):
     assert evidence["metadata"]["api_failures"][0]["operation"] == "location.connectionData"
 
 
-def test_run_org_without_a_pat_still_writes_evidence_and_reports_bad_config(monkeypatch, tmp_path):
-    code, evidence, status = run(monkeypatch, tmp_path, lambda c, col: ({}, {}), env={"AZURE_DEVOPS_ORG_URL": ORG})
-    assert code == 1
+class FakeCredential:
+    def __init__(self, error=None):
+        self.scopes, self.error, self.minted = [], error, 0
+
+    def get_token(self, scope):
+        if self.error:
+            raise self.error
+        self.scopes.append(scope)
+        self.minted += 1
+        return SimpleNamespace(token=f"entra-{self.minted}", expires_on=time.time() + 3600)
+
+
+def test_without_a_pat_the_ambient_entra_identity_is_used(monkeypatch, tmp_path):
+    cred = FakeCredential()
+    monkeypatch.setattr(dr, "entra_credential", lambda: cred)
+    seen = []
+
+    def collect(c, col):
+        seen.append(c.list("_apis/projects"))
+        return {}, {}
+
+    routes = {"dev.azure.com/contoso/_apis/projects": Resp(body={"value": [1]})}
+    code, evidence, _ = run(monkeypatch, tmp_path, collect, routes, env={"AZURE_DEVOPS_ORG_URL": ORG})
+    assert code == 0 and seen == [[1]]
+    assert evidence["metadata"]["auth_mode"] == "entra"
+    assert cred.scopes == ["499b84ac-1321-427f-aa17-267ca6975798/.default"]
+
+
+def test_bearer_token_is_reused_until_it_nears_expiry():
+    cred = FakeCredential()
+    session = FakeSession({"dev.azure.com/contoso/_apis/projects": Resp(body={"value": []})})
+    c = dr.DevOpsClient(ORG, None, session, credential=cred)
+    c.list("_apis/projects")
+    c.list("_apis/projects")
+    assert [call["headers"]["Authorization"] for call in session.calls] == ["Bearer entra-1", "Bearer entra-1"]
+    c._token = SimpleNamespace(token="old", expires_on=time.time() + 60)
+    c.list("_apis/projects")
+    assert session.calls[-1]["headers"]["Authorization"] == "Bearer entra-2"
+
+
+def test_a_pat_wins_over_the_entra_identity(monkeypatch, tmp_path):
+    monkeypatch.setattr(dr, "entra_credential", lambda: pytest.fail("credential built although a PAT is set"))
+    code, evidence, _ = run(monkeypatch, tmp_path, lambda c, col: ({}, {}))
+    assert code == 0 and evidence["metadata"]["auth_mode"] == "pat"
+
+
+def test_no_usable_entra_identity_is_an_auth_failure(monkeypatch, tmp_path):
+    cred = FakeCredential(RuntimeError("CredentialUnavailableError: DefaultAzureCredential failed to retrieve a token"))
+    monkeypatch.setattr(dr, "entra_credential", lambda: cred)
+
+    def collect(c, col):
+        col.guard("core.projects.list", lambda: c.list("_apis/projects"))
+        return {}, {}
+
+    code, evidence, status = run(monkeypatch, tmp_path, collect, env={"AZURE_DEVOPS_ORG_URL": ORG})
+    assert code == 1 and status["code"] == "auth_failed"
     assert evidence["metadata"]["partial_failure"] is True
-    assert status["code"] == "bad_config" and "AZURE_DEVOPS_PAT" in status["error"]
+
+
+def test_missing_azure_identity_still_writes_evidence(monkeypatch, tmp_path):
+    def missing():
+        raise ModuleNotFoundError("No module named 'azure'")
+
+    monkeypatch.setattr(dr, "entra_credential", missing)
+    code, evidence, status = run(monkeypatch, tmp_path, lambda c, col: ({}, {}), env={"AZURE_DEVOPS_ORG_URL": ORG})
+    assert code == 1 and status["code"] == "internal_error"
+    assert evidence["metadata"]["api_failures"][0]["operation"] == "configuration"
+
+
+def test_client_needs_a_pat_or_a_credential():
+    with pytest.raises(ValueError, match="AZURE_DEVOPS_PAT"):
+        dr.DevOpsClient(ORG, None)
 
 
 def test_run_org_reports_the_ado_failure_code(monkeypatch, tmp_path):

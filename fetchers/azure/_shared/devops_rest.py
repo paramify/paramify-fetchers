@@ -24,6 +24,8 @@ from azure_common import (
 
 ORG_URL_ENV = "AZURE_DEVOPS_ORG_URL"
 PAT_ENV = "AZURE_DEVOPS_PAT"
+# Azure DevOps' first-party application, the audience of an Entra token for it.
+ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798"
 PROJECTS_ENV = "AZURE_DEVOPS_PROJECTS"
 API_VERSION = "7.1"
 CONNECTION_DATA_API = "7.1-preview.1"
@@ -78,6 +80,7 @@ class DevOpsCollector(Collector):
     def __init__(self, logger: logging.Logger):
         super().__init__(logger)
         self.codes: List[str] = []
+        self.auth_mode = "pat"
 
     def record(self, operation: str, exc: BaseException) -> None:
         super().record(operation, exc)
@@ -135,14 +138,26 @@ def _error(response: Any) -> DevOpsError:
 
 
 class DevOpsClient:
-    """PAT-authenticated reads against one Azure DevOps Services organization."""
+    """Reads against one Azure DevOps Services organization, as a PAT or as an Entra identity."""
 
-    def __init__(self, org_url: str, pat: str, session: Any = None):
+    def __init__(self, org_url: str, pat: Optional[str], session: Any = None, credential: Any = None):
         import requests  # lazy
 
         self.org, self.base = parse_org_url(org_url)
         self.session = session or requests.Session()
-        self._auth = "Basic " + base64.b64encode(f":{pat}".encode()).decode()
+        if not pat and credential is None:
+            raise ValueError(f"{PAT_ENV} is not set and no Entra credential was given")
+        self.auth_mode = "pat" if pat else "entra"
+        self._auth = "Basic " + base64.b64encode(f":{pat}".encode()).decode() if pat else ""
+        self._credential = None if pat else credential
+        self._token: Any = None
+
+    def _authorization(self) -> str:
+        if self._credential is None:
+            return self._auth
+        if self._token is None or self._token.expires_on - 120 < time.time():
+            self._token = self._credential.get_token(f"{ADO_RESOURCE}/.default")
+        return f"Bearer {self._token.token}"
 
     def service_url(self, service: Optional[str] = None) -> str:
         """The org's root on another ADO service host, e.g. "auditservice" or "vsrm"."""
@@ -159,8 +174,8 @@ class DevOpsClient:
         """One request, retried on throttling, transient 5xx and dropped connections. Redirects are never followed."""
         import requests  # lazy
 
-        headers = {"Authorization": self._auth, "Accept": "application/json"}
         for attempt in range(MAX_RETRIES + 1):
+            headers = {"Authorization": self._authorization(), "Accept": "application/json"}
             try:
                 response = self.session.request(
                     method, url, headers=headers, timeout=HTTP_TIMEOUT, allow_redirects=False, **kwargs
@@ -177,7 +192,7 @@ class DevOpsClient:
             time.sleep(wait)
         if 300 <= response.status_code < 400:
             location = (response.headers or {}).get("Location") or ""
-            # A read API redirects only to sign-in, i.e. the PAT was not accepted.
+            # A read API redirects only to sign-in, i.e. the PAT or token was not accepted.
             raise DevOpsError(response.status_code, "Redirect", f"redirected to {urlsplit(location).hostname}")
         if response.status_code >= 400:
             raise _error(response)
@@ -213,7 +228,7 @@ class DevOpsClient:
     def iter(self, path: str, api_version: str = API_VERSION, params: Optional[Dict[str, Any]] = None,
              service: Optional[str] = None, item_key: str = "value") -> Iterator[Dict[str, Any]]:
         """Every item across pages: x-ms-continuationtoken or a body continuationToken, else a same-host nextLink."""
-        url = self.url(path, service)
+        url: Optional[str] = self.url(path, service)
         base_params = {**(params or {}), "api-version": api_version}
         query: Optional[Dict[str, Any]] = base_params
         seen = set()
@@ -322,6 +337,13 @@ def _start() -> Path:
     return Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
 
 
+def entra_credential() -> Any:
+    """The ambient Entra identity (az login, managed or workload identity, service principal), used when there is no PAT."""
+    from azure.identity import DefaultAzureCredential  # lazy
+
+    return DefaultAzureCredential()
+
+
 Collect = Callable[[DevOpsClient, DevOpsCollector], Tuple[Dict[str, Any], Dict[str, Any]]]
 
 
@@ -331,10 +353,11 @@ def run_org(*, fetcher: str, logger: logging.Logger, collect: Collect, session: 
     collector = DevOpsCollector(logger)
     client: Optional[DevOpsClient] = None
     try:
-        if not os.environ.get(PAT_ENV):
-            raise ValueError(f"{PAT_ENV} is not set")
-        client = DevOpsClient(os.environ.get(ORG_URL_ENV, ""), os.environ[PAT_ENV], session)
-    except ValueError as exc:
+        pat = os.environ.get(PAT_ENV)
+        client = DevOpsClient(os.environ.get(ORG_URL_ENV, ""), pat, session,
+                              credential=None if pat else entra_credential())
+        collector.auth_mode = client.auth_mode
+    except Exception as exc:  # noqa: BLE001 - bad config or a missing azure-identity still leaves evidence
         collector.record("configuration", exc)
 
     results: Dict[str, Any] = {}
@@ -352,6 +375,7 @@ def run_org(*, fetcher: str, logger: logging.Logger, collect: Collect, session: 
         "metadata": {
             "organization": client.org if client else None,
             "organization_url": client.base if client else None,
+            "auth_mode": client.auth_mode if client else None,
             "collecting_identity": identity,
             "projects_filter": requested_projects() or None,
             "datetime": current_timestamp(),
