@@ -1,15 +1,18 @@
 
 # Paramify Fetchers
 
-[![CI](https://github.com/paramify/paramify-fetchers/actions/workflows/ci.yml/badge.svg)](https://github.com/paramify/paramify-fetchers/actions/workflows/ci.yml)
-[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-1467ff.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-1467ff.svg)](pyproject.toml)
-[![Version](https://img.shields.io/badge/version-0.5.1--beta-1467ff.svg)](CHANGELOG.md)
-[![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1467ff.svg)](https://deepwiki.com/paramify/paramify-fetchers)
+[![CI](https://img.shields.io/github/actions/workflow/status/paramify/paramify-fetchers/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/paramify/paramify-fetchers/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/paramify/paramify-fetchers?include_prereleases&style=flat-square&label=release&color=2270ff)](https://github.com/paramify/paramify-fetchers/releases)
+[![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fparamify%2Fparamify-fetchers%2Fmain%2Fpyproject.toml&style=flat-square&color=2270ff)](pyproject.toml)
+[![License](https://img.shields.io/github/license/paramify/paramify-fetchers?style=flat-square&color=2270ff)](LICENSE)
 
 Automate the evidence behind your compliance program. Paramify Fetchers read the configuration and activity of the tools you already run, such as AWS, Azure, GCP, Okta and Wiz. They turn that data into evidence for [FedRAMP 20x Key Security Indicators](docs/ksi_mapping.md) and NIST 800-53 controls, ready to upload to Paramify.
 
 Each fetcher is a small, read-only script that writes JSON to disk. A separate uploader sends that evidence to Paramify, so nothing leaves your environment until you choose to upload. This repo contains the fetchers, the runner that executes them, and the uploader.
+
+<a href="https://deepwiki.com/paramify/paramify-fetchers"><img src="docs/img/readme/ask-deepwiki.svg" alt="Ask DeepWiki about this repo" height="48"></a>
+
+**Have a question about this repo?** DeepWiki answers in plain English and links to the code that it read.
 
 <div align="center">
 
