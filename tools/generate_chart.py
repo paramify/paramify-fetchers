@@ -18,7 +18,7 @@ checked out — and, at each commit, counts:
 
 `demo` is sample data rather than a supported service, so it is excluded from
 both counts — that keeps the chart in step with the README's supported-services
-table, which omits it too. `--include-demo` counts it in both.
+logos, which omit it too. `--include-demo` counts it in both.
 
     python tools/generate_chart.py
 

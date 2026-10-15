@@ -49,27 +49,6 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 
 </div>
 
-| Category | Fetchers | What it collects |
-|---|---:|---|
-| **AWS** | 80 | Encryption at rest and in transit, IAM and Organizations guardrails, threat detection and vulnerability scanning, logging and config drift, network segmentation, WAF and DDoS protection, backup and high availability, patch compliance, key and secret rotation, and CI/CD pipeline config |
-| **Azure** | 54 | Storage/disk/SQL encryption and CMK use, Entra identity + Conditional Access, RBAC assignments and custom roles, Azure Policy assignments, network security groups, Key Vault config and key rotation, Defender plans and per-resource assessments, VM hardening, the container and PaaS surface (AKS, Container Registry, App Service, Functions, Databricks), diagnostic settings and activity-log alerts, backup, the managed databases, Azure Cache for Redis and Managed Redis TLS and access, DNS zones and DNSSEC, and VPN Gateway / Virtual WAN IPsec and hub security |
-| **GCP** | 19 | Disk/bucket/Cloud SQL/BigQuery/Secret Manager encryption and CMEK use, IAM policy bindings, custom roles and service-account keys, KMS key rotation, GKE cluster and Compute Engine hardening, Cloud Logging sinks, Cloud SQL backups and network exposure, VPC/firewall/DNS segmentation, load-balancer TLS, and API keys |
-| **Wiz** | 14 | Connected cloud accounts and scan coverage, open cloud-configuration and toxic-combination issues, host and container vulnerabilities with KEV exposure and fix availability, cloud configuration (NIST SP 800-53) and OS benchmark (DISA STIG) posture, Wiz Defend detections, Runtime Sensor file-integrity monitoring, attack-surface and code (SAST) findings, tenant security settings, and issue, vulnerability and STIG reports for Paramify assessments |
-| **Datadog** | 13 | Cloud SIEM detection rules, signals and operational config, monitors, log pipelines/indexes/archives, host & container inventory, agent checks, APM services, and incidents with timelines |
-| **Okta** | 8 | Phishing-resistant MFA and passwordless authentication, authenticators, least privilege, just-in-time access, non-user account authentication, suspicious activity management, and account management |
-| **CrowdStrike** | 7 | Managed host inventory, Spotlight vulnerabilities, detections, prevention policies, Zero Trust Assessment, FileVantage file integrity, and host firewall policies and rules |
-| **Splunk** | 7 | Index retention and data integrity control, index and log-source freshness, configured inputs against the data actually received, alert rules with their run and fire history, alert delivery outcomes, and who can search or delete which indexes |
-| **SentinelOne** | 5 | Agents, activities, cloud detection rules, XDR assets, user config |
-| **KnowBe4** | 4 | Security-awareness, high-risk, developer, and module-based training summaries |
-| **GitLab** | 4 | CI/CD pipeline config, merge-request and project summaries, significant change notifications |
-| **Kubernetes** | 3 | EKS pod inventory, microservice segmentation, `kubectl` security posture |
-| **Rippling** | 3 | Employee roster, current employees, managed devices |
-| **Paramify** | 3 | FedRAMP 20x vulnerability reporting — accepted vulnerability info, vulnerability detail, and historical VER activity |
-| **Checkov** | 2 | IaC scans over cloned Terraform / Kubernetes source |
-| **ServiceNow** | 2 | Customer service cases and ITSM change records |
-| **Better Stack** | 1 | Public status page components, their reported uptime and status history, and published incident reports |
-| **Jira** | 1 | Site and project inventory, issue schemes, Jira Service Management service desks, and recent issue activity with change and incident rollups |
-
 <!-- BEGIN:fetcher-chart -->
 <div align="center">
 
