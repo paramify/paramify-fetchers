@@ -12,6 +12,7 @@ rules and the reasons for them. Start with the guide.
 - [Give a fetcher its config and secrets](config_injection_guide.md)
 - [Read an evidence envelope](envelope_guide.md)
 - [Follow one run through the framework](architecture_guide.md)
+- [How it runs](architecture.md): the four parts, the evidence envelope and the repo layout
 - [Evidence samples](evidence_samples.md): what each fetcher collects, without a run
 - [Discovery fetchers](discovery.md): what a set of credentials can see in a platform
 

@@ -1,11 +1,43 @@
 # The `paramify` CLI
 
 The TUI and the AI-agent skills do all their work through the `paramify`
-command. Thus you can script anything that you can do in them. The
-[quickstart in the README](../README.md#using-the-cli) shows a typical run from
-start to finish. This guide is the full reference.
+command. Thus you can script anything that you can do in them. This guide starts
+with a typical run from start to finish, then gives the full reference.
 
 **You need:** [the repo installed](../README.md#install).
+
+---
+
+## A typical run
+
+This run wires one Okta fetcher into a new manifest, runs it, and uploads the evidence:
+
+```bash
+# 1. Browse available fetchers by category
+paramify catalog
+
+# 2. Start a manifest and wire in your fetchers
+paramify manifest init
+paramify manifest add okta_phishing_resistant_mfa
+paramify manifest set-secret okta_phishing_resistant_mfa api_token OKTA_API_TOKEN
+paramify manifest set-secret okta_phishing_resistant_mfa org_url OKTA_ORG_URL
+# The manifest builder reports missing secrets after each step.
+# Keep going until it says the manifest is runnable.
+
+# 3. Set your credentials and run
+export OKTA_API_TOKEN=<your token>
+export OKTA_ORG_URL=https://your-org.okta.com
+paramify validate manifest.yaml
+paramify run     manifest.yaml         # evidence → ./evidence/run-<timestamp>/
+
+# 4. Upload to Paramify
+export PARAMIFY_UPLOAD_API_TOKEN=<your token>   # see uploaders/paramify_evidence/README.md for setup
+paramify upload                                  # push the latest run
+```
+
+Most services have a credential setup guide in their fetcher directory. For
+example, [`fetchers/okta/README.md`](../fetchers/okta/README.md) shows how to
+create an Okta API token and which admin role it needs.
 
 ---
 
