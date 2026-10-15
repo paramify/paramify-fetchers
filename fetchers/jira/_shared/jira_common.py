@@ -35,6 +35,7 @@ class JiraClient:
         self.session.headers.update({"Accept": "application/json"})
         self.api_failures: list[dict] = []
         self.failure_codes: list[str] = []
+        self.authenticated = False
 
     def fail(self, operation: str, type_: str, message: str, code: str) -> None:
         self.api_failures.append(
@@ -53,6 +54,7 @@ class JiraClient:
             raise Abort from e
 
         if resp.status_code == 200:
+            self.authenticated = True
             try:
                 return resp.json()
             except ValueError:
@@ -65,6 +67,11 @@ class JiraClient:
 
         message = error_message(resp)
         if resp.status_code == 401:
+            # Jira also answers 401 for a missing project permission (measured on
+            # /project/{key}/role), so only a 401 before any success is a bad credential.
+            if self.authenticated:
+                self.fail(operation, "HTTP401", message, "not_authorized")
+                return None
             self.fail(operation, "HTTP401", message, "auth_failed")
             raise Abort
         code = {403: "not_authorized", 429: "rate_limited", 400: "bad_config"}.get(
@@ -149,7 +156,8 @@ class JiraClient:
                         if hid in seen:
                             continue
                         seen.add(hid)
-                        out.setdefault(issue_id, []).append(h)
+                        # bulkfetch returns `created` as epoch milliseconds, not ISO text.
+                        out.setdefault(issue_id, []).append({**h, "created": iso_ts(h.get("created"))})
                 token = page.get("nextPageToken")
                 if not token:
                     break
@@ -174,6 +182,13 @@ def error_message(resp: requests.Response) -> str:
 
 def name_of(obj, key="name"):
     return obj.get(key) if isinstance(obj, dict) else None
+
+
+def iso_ts(value):
+    """ISO 8601 UTC text for an epoch-millisecond number; other values pass through."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat(timespec="milliseconds")
+    return value
 
 
 def parse_ts(value):

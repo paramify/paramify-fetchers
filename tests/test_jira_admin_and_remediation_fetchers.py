@@ -109,7 +109,8 @@ def test_remediation_items_paging_history_and_rollups(run):
             return 200, {"issues": page2, "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
             assert body["fieldIds"] == ["status"]
-            hist = {"id": "h1", "created": "2026-01-05T00:00:00.000+0000", "author": {"displayName": "Ann"},
+            # bulkfetch returns epoch milliseconds here (measured against a live site)
+            hist = {"id": "h1", "created": 1767571200000, "author": {"displayName": "Ann"},
                     "items": [{"field": "status", "fieldId": "status", "fromString": "To Do", "toString": "Done"}]}
             if not body.get("nextPageToken"):
                 return 200, {"issueChangeLogs": [{"issueId": "101", "changeHistories": [hist]}], "nextPageToken": "c2"}
@@ -125,6 +126,7 @@ def test_remediation_items_paging_history_and_rollups(run):
     assert s["days_to_close"]["median"] == 10.0
     first = out["items"][0]
     assert first["status_change_count"] == 1 and first["status_transitions"][0]["to"] == "Done"
+    assert first["status_transitions"][0]["at"] == "2026-01-05T00:00:00.000+00:00"
     assert first["linked_issues"] == [{"relation": "relates to", "key": "OPS-99"}]
     assert out["metadata"]["status_history_complete"] is True
 
@@ -254,3 +256,29 @@ def test_access_roles_falls_back_to_application_key(run):
     assert code == 0
     assert [g["name"] for g in out["admin_groups"]] == ["jira-admins"]
     assert any(p.get("applicationKey") == "jira-core" for p in seen)
+
+
+def test_access_roles_non_admin_401_on_roles_does_not_abort(run):
+    """A non-admin gets 401 (not 403) from /project/{key}/role; that is a permission gap, not a bad token."""
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/group/bulk":
+            return 200, {"isLast": True, "values": [{"groupId": "g1", "name": "jira-admins"}]}
+        if path == "/rest/api/3/group/member":
+            return 200, {"isLast": True, "values": [{"accountId": "a1", "displayName": "A", "accountType": "app", "active": True}]}
+        if path == "/rest/api/3/applicationrole":
+            return 403, {"errorMessages": ["admin only"]}
+        if path == "/rest/api/3/project/search":
+            return 200, {"isLast": True, "values": [{"key": "SEC", "name": "Security"}, {"key": "HR", "name": "HR"}]}
+        if path.endswith("/permissionscheme"):
+            return 403, {"errorMessages": ["admin only"]}
+        if path.endswith("/role"):
+            return 401, {"errorMessages": ["Client must be authenticated"]}
+        raise AssertionError(path)
+
+    code, out, calls, status = run("access_roles", router)
+    assert code == 1 and status["code"] == "not_authorized"
+    assert [p["key"] for p in out["projects"]] == ["SEC", "HR"]
+    assert out["summary"]["distinct_admin_users"] == 1
+    assert out["summary"]["admin_users_by_account_type"] == {"app": 1}
