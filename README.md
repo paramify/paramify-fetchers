@@ -4,7 +4,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/paramify/paramify-fetchers/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/paramify/paramify-fetchers/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/paramify/paramify-fetchers?include_prereleases&style=flat-square&label=release&color=2270ff)](https://github.com/paramify/paramify-fetchers/releases)
 [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fparamify%2Fparamify-fetchers%2Fmain%2Fpyproject.toml&style=flat-square&color=2270ff)](pyproject.toml)
-[![License](https://img.shields.io/github/license/paramify/paramify-fetchers?style=flat-square&color=2270ff)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0-2270ff?style=flat-square)](LICENSE)
 
 Automate the evidence behind your compliance program. Paramify Fetchers read the configuration and activity of the tools you already run, such as AWS, Azure, GCP, Okta and Wiz. They turn that data into evidence for [FedRAMP 20x Key Security Indicators](docs/ksi_mapping.md) and NIST 800-53 controls, ready to upload to Paramify.
 
