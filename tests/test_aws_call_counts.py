@@ -109,7 +109,8 @@ def _security_groups(n_groups: int) -> dict:
     everything = {"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}
     return {
         "ec2 describe-security-groups": [
-            {"GroupId": f"sg-{i}", "IpPermissions": [tcp], "IpPermissionsEgress": [everything]}
+            {"GroupId": f"sg-{i}", "GroupName": f"group-{i}", "VpcId": "vpc-1",
+             "IpPermissions": [tcp], "IpPermissionsEgress": [everything]}
             for i in range(n_groups)
         ]
     }
@@ -125,11 +126,15 @@ def test_security_groups_makes_the_same_calls_at_any_group_count(tmp_path):
         "GroupId": "sg-0",
         "Rules": [
             {"Direction": "INBOUND RULES", "Protocol": "tcp", "FromPort": 443, "ToPort": 443,
-             "CIDRs": "0.0.0.0/0", "IPv6CIDRs": ""},
+             "CIDRs": "0.0.0.0/0", "IPv6CIDRs": "", "SecurityGroupIds": "", "PrefixListIds": ""},
             {"Direction": "OUTBOUND RULES", "Protocol": "-1", "FromPort": None, "ToPort": None,
-             "CIDRs": "0.0.0.0/0", "IPv6CIDRs": ""},
+             "CIDRs": "0.0.0.0/0", "IPv6CIDRs": "", "SecurityGroupIds": "", "PrefixListIds": ""},
         ],
+        "GroupName": "group-0",
+        "VpcId": "vpc-1",
     }
+    # Keys are only ever appended: validators match on this order.
+    assert list(payload["results"][0]) == ["GroupId", "Rules", "GroupName", "VpcId"]
 
 
 def test_security_groups_keeps_all_traffic_and_ipv6_rules(tmp_path):
@@ -151,13 +156,50 @@ def test_security_groups_keeps_all_traffic_and_ipv6_rules(tmp_path):
     })
     rules = payload["results"][0]["Rules"]
     # Keys are only ever appended: validators match on this order.
-    assert all(list(r) == ["Direction", "Protocol", "FromPort", "ToPort", "CIDRs", "IPv6CIDRs"] for r in rules)
+    assert all(list(r) == ["Direction", "Protocol", "FromPort", "ToPort", "CIDRs", "IPv6CIDRs",
+                           "SecurityGroupIds", "PrefixListIds"] for r in rules)
     assert [(r["Protocol"], r["FromPort"], r["ToPort"], r["CIDRs"], r["IPv6CIDRs"]) for r in rules] == [
         ("-1", None, None, "0.0.0.0/0", ""),
         ("tcp", 22, 22, "", "::/0"),
         ("tcp", 443, 443, "10.0.0.0/8, 0.0.0.0/0", "2001:db8::/32, ::/0"),
         ("icmp", -1, -1, "0.0.0.0/0", ""),
         ("tcp", 5432, 5432, "", ""),
+    ]
+
+
+def test_security_groups_keeps_group_and_prefix_list_sources(tmp_path):
+    # Before 0.4.0 a rule sourced from another security group or a prefix list
+    # came out with empty CIDRs and nothing else, so it read as a rule that
+    # allowed nothing; the group's name and VPC were not recorded either.
+    inbound = [
+        {"IpProtocol": "tcp", "FromPort": 5432, "ToPort": 5432,
+         "UserIdGroupPairs": [{"GroupId": "sg-app", "UserId": "111122223333"},
+                              {"GroupId": "sg-peer", "UserId": "444455556666",
+                               "VpcPeeringConnectionId": "pcx-1"}]},
+        {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
+         "IpRanges": [{"CidrIp": "10.0.0.0/8"}],
+         "PrefixListIds": [{"PrefixListId": "pl-cloudfront"}, {"PrefixListId": "pl-office"}]},
+    ]
+    outbound = [
+        {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
+         "PrefixListIds": [{"PrefixListId": "pl-s3"}]},
+        {"IpProtocol": "-1", "UserIdGroupPairs": [{"GroupId": "sg-self"}]},
+    ]
+    _, payload = _run(tmp_path, "security_groups", {
+        "ec2 describe-security-groups": [{
+            "GroupId": "sg-1", "GroupName": "db", "VpcId": "vpc-9",
+            "IpPermissions": inbound, "IpPermissionsEgress": outbound,
+        }],
+    })
+    (group,) = payload["results"]
+    assert (group["GroupId"], group["GroupName"], group["VpcId"]) == ("sg-1", "db", "vpc-9")
+    assert [(r["Direction"], r["CIDRs"], r["SecurityGroupIds"], r["PrefixListIds"]) for r in group["Rules"]] == [
+        # Same-account references are the bare group id; another account's are
+        # <account-id>/<group-id>, as the console writes them.
+        ("INBOUND RULES", "", "sg-app, 444455556666/sg-peer", ""),
+        ("INBOUND RULES", "10.0.0.0/8", "", "pl-cloudfront, pl-office"),
+        ("OUTBOUND RULES", "", "", "pl-s3"),
+        ("OUTBOUND RULES", "", "sg-self", ""),
     ]
 
 

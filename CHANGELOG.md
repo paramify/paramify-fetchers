@@ -805,6 +805,23 @@ schemas and the `paramify` CLI — not the internal code.
   `AttachedRoles`, `BoundaryUsers` and `BoundaryRoles`, name the users and roles
   that use it as their boundary. Existing keys and their order are unchanged.
 
+- **`aws_security_groups` shows rules that reference security groups and
+  prefix lists** (0.3.0 → 0.4.0). Only IP ranges were read, so a rule whose
+  source (outbound: destination) is another security group or a managed prefix
+  list came out with empty CIDRs and no source, as if it allowed nothing. Each
+  rule now ends with `SecurityGroupIds` and `PrefixListIds`, joined with `", "`
+  like `CIDRs`; a group owned by another account is written
+  `<account-id>/<group-id>`. Each group record also gains `GroupName` and
+  `VpcId` after `Rules`. Keys are only appended.
+
+- **`aws_network_firewall_rules` counts Suricata and domain-list rules**
+  (0.1.0 → 0.2.0). `StatefulRuleCount` read only `StatefulRules`, so a stateful
+  rule group written as a Suricata rules string or a domain list reported 0.
+  A rules string now counts its lines that are not blank or `#` comments
+  (backslash-continued lines count once); a domain list counts its domains
+  (`Targets`), not the rules AWS generates per target type. A new
+  `StatefulRuleSource` key names which of the three was counted.
+
 - **`aws_auto_scaling_high_availability` lists each group's instances.** A
   query error left `Instances` empty for every Auto Scaling group.
 
