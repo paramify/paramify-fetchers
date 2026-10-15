@@ -1,0 +1,109 @@
+name: Solcap mapping refresh
+
+# mappings/solution_capabilities.yaml is generated from the "20x Mapping" tab of
+# the fetcher-to-solution-capability mapping sheet, which people keep editing.
+# Re-import it weekly and propose the result as ONE rolling PR (never a push to
+# main): a person reads the change and the sheet problems the importer found,
+# then merges. No diff, no PR.
+#
+# Google access is keyless: GitHub's OIDC token is exchanged through Workload
+# Identity Federation for a short-lived token of a service account that can
+# only READ the sheet. Setup, and the secrets below: docs/solcap_mapping_refresh.md.
+#   SOLCAP_WIF_PROVIDER    projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+#   SOLCAP_SHEET_READER    the service account's email
+#   SOLCAP_SHEET_ID        the spreadsheet id
+#   SOLCAP_SHEET_GID       the 20x Mapping tab's gid (from its URL), so a tab rename doesn't break the job
+#   SOLCAP_PR_TOKEN        optional; see the last step
+# All are secrets, not variables: this repo's workflow logs are public.
+
+on:
+  schedule:
+    - cron: "17 14 * * 1" # Mondays, 14:17 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: solcap-mapping-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: refresh (sheet -> mapping PR)
+    # Forks have neither the sheet nor the identity pool.
+    if: github.repository == 'paramify/paramify-fetchers'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write # the OIDC token Workload Identity Federation exchanges
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: google
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.SOLCAP_WIF_PROVIDER }}
+          service_account: ${{ secrets.SOLCAP_SHEET_READER }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/spreadsheets.readonly
+          access_token_lifetime: 300s
+
+      - name: export the 20x Mapping tab
+        env:
+          TOKEN: ${{ steps.google.outputs.access_token }}
+          SHEET_ID: ${{ secrets.SOLCAP_SHEET_ID }}
+          SHEET_GID: ${{ secrets.SOLCAP_SHEET_GID }}
+        run: |
+          set -euo pipefail
+          api="https://sheets.googleapis.com/v4/spreadsheets/$SHEET_ID"
+          auth="Authorization: Bearer $TOKEN"
+          # gid -> current tab title, then read the tab by title.
+          title=$(curl -fsS -H "$auth" "$api?fields=sheets.properties(sheetId,title)" \
+            | jq -er --argjson gid "$SHEET_GID" '.sheets[].properties | select(.sheetId == $gid) | .title')
+          # A1 notation: the title in single quotes, any quote in it doubled.
+          range=$(jq -rn --arg t "$title" --arg q "'" '$q + ($t | gsub($q; $q + $q)) + $q | @uri')
+          # The values API drops trailing empty cells and returns a blank row as
+          # []; write it as one empty cell so csv.DictReader keeps it and the
+          # importer's sheet row numbers stay true.
+          curl -fsS -H "$auth" "$api/values/$range" \
+            | jq -r '.values[] | if length == 0 then [""] else . end | @csv' \
+            > "$RUNNER_TEMP/20x-mapping.csv"
+          echo "exported tab: $title"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install -e ".[dev]"
+
+      - name: regenerate the mapping
+        run: |
+          set -euo pipefail
+          python tools/import_solcap_mapping.py "$RUNNER_TEMP/20x-mapping.csv" --report "$RUNNER_TEMP/report.md"
+          cat "$RUNNER_TEMP/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      # A PR opened with the default GITHUB_TOKEN does not trigger the CI
+      # workflow, so the checks that read this file run here.
+      - name: test the mapping
+        run: pytest -q tests/test_import_solcap_mapping.py
+
+      - name: open or update the PR
+        uses: peter-evans/create-pull-request@v8
+        with:
+          # SOLCAP_PR_TOKEN (a GitHub App or fine-grained token with contents +
+          # pull-requests write) lets CI run on the PR; without it the default
+          # token opens it, which needs "Allow GitHub Actions to create and
+          # approve pull requests" on in the repo's Actions settings.
+          token: ${{ secrets.SOLCAP_PR_TOKEN || github.token }}
+          branch: bot/solcap-mapping-refresh
+          base: main
+          add-paths: mappings/solution_capabilities.yaml
+          commit-message: "chore(mappings): refresh the solution capability mapping from the sheet"
+          title: "chore(mappings): refresh the solution capability mapping"
+          body-path: ${{ runner.temp }}/report.md
+          author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          committer: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          delete-branch: true
