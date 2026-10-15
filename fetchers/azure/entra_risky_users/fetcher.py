@@ -64,7 +64,13 @@ def project_user(user: Dict[str, Any], roles: Dict[str, List[Dict[str, Any]]], n
 
 
 def account_enabled(client, user_id: str) -> Optional[bool]:
-    return client.graph_get(f"/users/{user_id}", {"$select": "id,accountEnabled"}).get("accountEnabled")
+    """None when Graph refuses the read: User.Read.All is optional, so that is unknown, not a failed run."""
+    try:
+        return client.graph_get(f"/users/{user_id}", {"$select": "id,accountEnabled"}).get("accountEnabled")
+    except ArmError as exc:
+        if exc.status == 403:
+            return None
+        raise
 
 
 def collect(client, collector) -> tuple:

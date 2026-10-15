@@ -662,6 +662,21 @@ def test_entra_risky_users(azure, tmp_path):
     assert s["privileged_principals"] == 21
 
 
+def test_entra_risky_users_refused_account_read_is_unknown(azure, tmp_path):
+    azure.arm[("/v1.0/users/u-admin", None)] = Resp(
+        403, {"error": {"code": "Authorization_RequestDenied", "message": "Insufficient privileges to complete the operation."}})
+    code, ev = run("entra_risky_users", tmp_path)
+    admin = next(u for u in ev["results"]["risky_users"] if u["user_principal_name"] == "admin@contoso.com")
+    assert code == 0 and ev["metadata"]["partial_failure"] is False and admin["account_enabled"] is None
+    assert ev["summary"]["privileged_open_risk_users_enabled"] == 1
+
+
+def test_entra_risky_users_other_account_read_errors_fail(azure, tmp_path):
+    azure.arm[("/v1.0/users/u-admin", None)] = Resp(400, {"error": {"code": "BadRequest", "message": "bad"}})
+    code, ev = run("entra_risky_users", tmp_path)
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+
+
 def test_entra_risky_users_without_p2_is_a_state(azure, tmp_path):
     azure.arm[("/v1.0/identityProtection/riskyUsers", None)] = Resp(
         403, {"error": {"code": "Forbidden", "message": "Your tenant is not licensed for this feature."}})
