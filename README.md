@@ -23,28 +23,28 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 
 <table>
   <tr>
-    <td align="center" width="128"><a href="fetchers/aws/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/aws-dark.svg"><img src="fetchers/logos/aws.svg" alt="AWS" width="48" height="48"></picture><br><sub>AWS</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/azure/"><img src="fetchers/logos/azure.svg" alt="Azure" width="48" height="48"><br><sub>Azure</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/gcp/"><img src="fetchers/logos/gcp.svg" alt="Google Cloud" width="48" height="48"><br><sub>Google Cloud</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/wiz/"><img src="fetchers/logos/wiz.jpeg" alt="Wiz" width="48" height="48"><br><sub>Wiz</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/datadog/"><img src="fetchers/logos/datadog.svg" alt="Datadog" width="48" height="48"><br><sub>Datadog</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/okta/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/okta-dark.svg"><img src="fetchers/logos/okta.svg" alt="Okta" width="48" height="48"></picture><br><sub>Okta</sub></a></td>
+    <td align="center" width="128"><a href="fetchers/aws/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/aws-dark.svg"><img src="fetchers/logos/aws.svg" alt="AWS" width="48" height="48"></picture></a><br><sub>AWS</sub></td>
+    <td align="center" width="128"><a href="fetchers/azure/"><img src="fetchers/logos/azure.svg" alt="Azure" width="48" height="48"></a><br><sub>Azure</sub></td>
+    <td align="center" width="128"><a href="fetchers/gcp/"><img src="fetchers/logos/gcp.svg" alt="Google Cloud" width="48" height="48"></a><br><sub>Google Cloud</sub></td>
+    <td align="center" width="128"><a href="fetchers/wiz/"><img src="fetchers/logos/wiz.jpeg" alt="Wiz" width="48" height="48"></a><br><sub>Wiz</sub></td>
+    <td align="center" width="128"><a href="fetchers/datadog/"><img src="fetchers/logos/datadog.svg" alt="Datadog" width="48" height="48"></a><br><sub>Datadog</sub></td>
+    <td align="center" width="128"><a href="fetchers/okta/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/okta-dark.svg"><img src="fetchers/logos/okta.svg" alt="Okta" width="48" height="48"></picture></a><br><sub>Okta</sub></td>
   </tr>
   <tr>
-    <td align="center" width="128"><a href="fetchers/crowdstrike/"><img src="fetchers/logos/crowdstrike.svg" alt="CrowdStrike" width="48" height="48"><br><sub>CrowdStrike</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/splunk/"><img src="fetchers/logos/splunk.svg" alt="Splunk" width="48" height="48"><br><sub>Splunk</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/sentinelone/"><img src="fetchers/logos/sentinelone.svg" alt="SentinelOne" width="48" height="48"><br><sub>SentinelOne</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/knowbe4/"><img src="fetchers/logos/knowbe4.svg" alt="KnowBe4" width="48" height="48"><br><sub>KnowBe4</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/gitlab/"><img src="fetchers/logos/gitlab.svg" alt="GitLab" width="48" height="48"><br><sub>GitLab</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/k8s/"><img src="fetchers/logos/kubernetes.svg" alt="Kubernetes" width="48" height="48"><br><sub>Kubernetes</sub></a></td>
+    <td align="center" width="128"><a href="fetchers/crowdstrike/"><img src="fetchers/logos/crowdstrike.svg" alt="CrowdStrike" width="48" height="48"></a><br><sub>CrowdStrike</sub></td>
+    <td align="center" width="128"><a href="fetchers/splunk/"><img src="fetchers/logos/splunk.svg" alt="Splunk" width="48" height="48"></a><br><sub>Splunk</sub></td>
+    <td align="center" width="128"><a href="fetchers/sentinelone/"><img src="fetchers/logos/sentinelone.svg" alt="SentinelOne" width="48" height="48"></a><br><sub>SentinelOne</sub></td>
+    <td align="center" width="128"><a href="fetchers/knowbe4/"><img src="fetchers/logos/knowbe4.svg" alt="KnowBe4" width="48" height="48"></a><br><sub>KnowBe4</sub></td>
+    <td align="center" width="128"><a href="fetchers/gitlab/"><img src="fetchers/logos/gitlab.svg" alt="GitLab" width="48" height="48"></a><br><sub>GitLab</sub></td>
+    <td align="center" width="128"><a href="fetchers/k8s/"><img src="fetchers/logos/kubernetes.svg" alt="Kubernetes" width="48" height="48"></a><br><sub>Kubernetes</sub></td>
   </tr>
   <tr>
-    <td align="center" width="128"><a href="fetchers/rippling/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/rippling-dark.svg"><img src="fetchers/logos/rippling.svg" alt="Rippling" width="48" height="48"></picture><br><sub>Rippling</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/paramify/"><img src="fetchers/logos/paramify.svg" alt="Paramify" width="48" height="48"><br><sub>Paramify</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/checkov/"><img src="fetchers/logos/checkov.png" alt="Checkov" width="48" height="48"><br><sub>Checkov</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/servicenow/"><img src="fetchers/logos/servicenow.png" alt="ServiceNow" width="48" height="48"><br><sub>ServiceNow</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/betterstack/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/betterstack-dark.svg"><img src="fetchers/logos/betterstack.svg" alt="Better Stack" width="48" height="48"></picture><br><sub>Better Stack</sub></a></td>
-    <td align="center" width="128"><a href="fetchers/jira/"><img src="fetchers/logos/jira.svg" alt="Jira" width="48" height="48"><br><sub>Jira</sub></a></td>
+    <td align="center" width="128"><a href="fetchers/rippling/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/rippling-dark.svg"><img src="fetchers/logos/rippling.svg" alt="Rippling" width="48" height="48"></picture></a><br><sub>Rippling</sub></td>
+    <td align="center" width="128"><a href="fetchers/paramify/"><img src="fetchers/logos/paramify.svg" alt="Paramify" width="48" height="48"></a><br><sub>Paramify</sub></td>
+    <td align="center" width="128"><a href="fetchers/checkov/"><img src="fetchers/logos/checkov.png" alt="Checkov" width="48" height="48"></a><br><sub>Checkov</sub></td>
+    <td align="center" width="128"><a href="fetchers/servicenow/"><img src="fetchers/logos/servicenow.png" alt="ServiceNow" width="48" height="48"></a><br><sub>ServiceNow</sub></td>
+    <td align="center" width="128"><a href="fetchers/betterstack/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/betterstack-dark.svg"><img src="fetchers/logos/betterstack.svg" alt="Better Stack" width="48" height="48"></picture></a><br><sub>Better Stack</sub></td>
+    <td align="center" width="128"><a href="fetchers/jira/"><img src="fetchers/logos/jira.svg" alt="Jira" width="48" height="48"></a><br><sub>Jira</sub></td>
   </tr>
 </table>
 
