@@ -1,0 +1,1764 @@
+{
+ "entries": {
+  "/orgs/Fetcher-Tester": {
+   "body": {
+    "advanced_security_enabled_for_new_repositories": false,
+    "archived_at": null,
+    "billing_email": "redacted@example.com",
+    "collaborators": 0,
+    "created_at": "2026-10-04T02:54:38Z",
+    "default_repository_branch": "main",
+    "default_repository_permission": "read",
+    "dependabot_alerts_enabled_for_new_repositories": false,
+    "dependabot_security_updates_enabled_for_new_repositories": false,
+    "dependency_graph_enabled_for_new_repositories": false,
+    "deploy_keys_enabled_for_repositories": true,
+    "disk_usage": 15736,
+    "display_commenter_full_name_setting_enabled": false,
+    "followers": 0,
+    "following": 0,
+    "has_organization_projects": true,
+    "has_repository_projects": true,
+    "id": 337551672,
+    "is_verified": false,
+    "login": "Fetcher-Tester",
+    "members_allowed_repository_creation_type": "all",
+    "members_can_change_repo_visibility": true,
+    "members_can_create_internal_repositories": false,
+    "members_can_create_pages": true,
+    "members_can_create_private_pages": true,
+    "members_can_create_private_repositories": true,
+    "members_can_create_public_pages": true,
+    "members_can_create_public_repositories": true,
+    "members_can_create_repositories": true,
+    "members_can_create_teams": true,
+    "members_can_delete_issues": false,
+    "members_can_delete_repositories": true,
+    "members_can_fork_private_repositories": false,
+    "members_can_invite_outside_collaborators": true,
+    "members_can_view_dependency_insights": true,
+    "name": "Fetcher Tester",
+    "owned_private_repos": 0,
+    "plan": {
+     "filled_seats": 2,
+     "name": "free",
+     "private_repos": 10000,
+     "seats": 0,
+     "space": 976562499
+    },
+    "private_gists": 0,
+    "public_gists": 0,
+    "public_repos": 13,
+    "readers_can_create_discussions": true,
+    "secret_scanning_enabled_for_new_repositories": false,
+    "secret_scanning_push_protection_custom_link": null,
+    "secret_scanning_push_protection_custom_link_enabled": false,
+    "secret_scanning_push_protection_enabled_for_new_repositories": false,
+    "secret_scanning_validity_checks_enabled": false,
+    "total_private_repos": 0,
+    "two_factor_requirement_enabled": false,
+    "type": "Organization",
+    "updated_at": "2026-10-04T02:54:38Z",
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "allows_permissionless_access=true"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-actions": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-09T18:18:48Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-actions",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-actions.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1412278731,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-actions",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-09T18:18:56Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 3,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-actions.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-09T18:18:58Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-deploy": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-09T18:36:19Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-deploy",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-deploy.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1412299268,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-deploy",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-09T18:36:26Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 1,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-deploy.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-09T18:36:53Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-disabled-rules": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:17:48Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-disabled-rules",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-disabled-rules.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837102,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-disabled-rules",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:50:02Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 3,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-disabled-rules.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:56:53Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-evaluate-rules": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:17:54Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-evaluate-rules",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-evaluate-rules.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837177,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-evaluate-rules",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:17:56Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 0,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-evaluate-rules.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:56:55Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-globs": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T05:38:51Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-globs",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-globs.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403956974,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-globs",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T05:38:59Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 0,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-globs.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:57:18Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-leaked-secret": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T04:19:53Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-leaked-secret",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-leaked-secret.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403881216,
+    "is_template": false,
+    "language": "Python",
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-leaked-secret",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T04:20:37Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 1,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-leaked-secret.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:57:04Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-protected": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:17:42Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-protected",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-protected.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837041,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-protected",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:50:58Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 3,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-protected.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:56:51Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-releases": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-09T18:30:22Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-releases",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-releases.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1412292511,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-releases",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-09T18:31:52Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 1,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-releases.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-09T18:32:42Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scanning-off": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:18:12Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-scanning-off",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-scanning-off.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837347,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-scanning-off",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:18:16Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 1,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-scanning-off.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:57:05Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scn": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-09T18:24:28Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-scn",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-scn.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1412285363,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-scn",
+    "network_count": 0,
+    "open_issues": 1,
+    "open_issues_count": 1,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-09T18:45:31Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 6,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-scn.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-09T18:45:33Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scn/pulls/1/reviews?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "pull_requests=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scn/pulls/3/reviews?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "pull_requests=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scn/pulls/4/reviews?per_page=100": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "pull_requests=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-unprotected": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:17:59Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-unprotected",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-unprotected.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837236,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-unprotected",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:49:38Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 2,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-unprotected.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:56:57Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-vulnerable": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:18:02Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-vulnerable",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-vulnerable.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837264,
+    "is_template": false,
+    "language": "Python",
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-vulnerable",
+    "network_count": 0,
+    "open_issues": 2,
+    "open_issues_count": 2,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T05:00:10Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "enabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 5,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-vulnerable.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:56:59Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql f503bc88ba71 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-actions\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [],
+       "pageInfo": {
+        "endCursor": null,
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql f503bc88ba71 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-deploy\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [],
+       "pageInfo": {
+        "endCursor": null,
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql f503bc88ba71 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-disabled-rules\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [
+        {
+         "author": {
+          "login": "sandbox-owner"
+         },
+         "baseRefName": "main",
+         "body": "Paramify fetcher test fixture.",
+         "createdAt": "2026-10-04T03:49:43Z",
+         "headRefName": "fetcher-test/failing-check",
+         "labels": {
+          "nodes": []
+         },
+         "mergeCommit": {
+          "oid": "30a115d5f113d36511784e99b81d3725ce04e210"
+         },
+         "mergedAt": "2026-10-04T03:50:02Z",
+         "mergedBy": {
+          "login": "sandbox-owner"
+         },
+         "number": 1,
+         "state": "MERGED",
+         "title": "Fixture: fetcher-test/failing-check",
+         "updatedAt": "2026-10-04T03:50:02Z",
+         "url": "https://github.com/Fetcher-Tester/fetcher-test-disabled-rules/pull/1"
+        }
+       ],
+       "pageInfo": {
+        "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0wNFQwMzo1MDowMlrPAAAAARoIE4U=",
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql f503bc88ba71 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-evaluate-rules\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [],
+       "pageInfo": {
+        "endCursor": null,
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql f503bc88ba71 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-globs\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [],
+       "pageInfo": {
+        "endCursor": null,
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql f503bc88ba71 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-leaked-secret\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [],
+       "pageInfo": {
+        "endCursor": null,
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql f503bc88ba71 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-protected\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [
+        {
+         "author": {
+          "login": "sandbox-owner"
+         },
+         "baseRefName": "main",
+         "body": "Paramify fetcher test fixture.",
+         "createdAt": "2026-10-04T03:50:07Z",
+         "headRefName": "fetcher-test/bot-approved",
+         "labels": {
+          "nodes": []
+         },
+         "mergeCommit": {
+          "oid": "ad790414336e1bca0b801752fda9843424727b4d"
+         },
+         "mergedAt": "2026-10-04T03:50:58Z",
+         "mergedBy": {
+          "login": "sandbox-owner"
+         },
+         "number": 1,
+         "state": "MERGED",
+         "title": "Fixture: fetcher-test/bot-approved",
+         "updatedAt": "2026-10-04T03:50:58Z",
+         "url": "https://github.com/Fetcher-Tester/fetcher-test-protected/pull/1"
+        }
+       ],
+       "pageInfo": {
+        "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0wNFQwMzo1MDo1OFrPAAAAARoIHH0=",
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql f503bc88ba71 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-releases\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [],
+       "pageInfo": {
+        "endCursor": null,
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql f503bc88ba71 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-scanning-off\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [],
+       "pageInfo": {
+        "endCursor": null,
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql f503bc88ba71 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-scn\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [
+        {
+         "author": {
+          "login": "sandbox-owner"
+         },
+         "baseRefName": "main",
+         "body": "# Change Request\n- [ ] Emergency Change (add Justification to Summary below)\n\n### Scope\n- [ ] Application Release (Helm), ticket: [ABC-??](https://example.atlassian.net/browse/ABC-??)\n- [ ] Deployed Software (Helm)\n- [X] Infrastructure (Terraform)\n- [ ] Other (manual changes)\n\n### Impact\n- [ ] C1: High Impact/Risk, may cause Production downtime\n- [ ] C2: Med Impact/Risk, may cause Production slowness, or Staging downtime\n- [X] C3: Low Impact/Risk, may require complex manual changes\n- [ ] C4: No Impact/Risk, common changes or fully automated\n\n## Requested Changes\nReplacing the incumbent third-party vulnerability scanner with a cloud security posture management platform across the authorization boundary. The replacement covers container runtime, cloud posture and source-code scanning in one tool.\n\n### Impact and Security Analysis\nBroader vulnerability coverage and more automated triage. Introduces a new third-party vendor with read access to cloud configuration metadata. Data-scanning features that would reach customer data are deliberately left disabled, so the vendor sees configuration state only.\n\n## FedRAMP Significant Change Notification (SCN)\n- [ ] [Routine Recurring](https://www.fedramp.gov/2026/providers/20x/rules/significant-change-notification/#routine-recurring-changes)  \u2014 SCN not required\n- [X] Significant Change \u2014 SCN required (expand section below)\n\n** SCN Details** \u2014 expand if Significant Change is checked above\nFields marked **\\[REQUIRED\\]** map to required FedRAMP schema properties.\n\n**Change Type** *(`changeType`)* **\\[REQUIRED\\]**\n- [X] Adaptive\n- [ ] Transformative\n\n[Adaptive](https://www.fedramp.gov/2026/providers/20x/rules/significant-change-notification/#adaptive-changes) changes typically require careful planning that focuses on engineering execution instead of customer adoption, can be verified with minor changes to existing automated validation procedures, and do not require large changes to operational procedures, deployment plans, or documentation.\n\nTransformative changes typically introduce major features or capabilities that may change how a customer uses the service (in whole or in part) and require extensive updates to security assessments, operational procedures, deployment plans, and documentation.\n\n**Approver:** A. Approver\n**Approver Title:** Director of Security Engineering\n\n**Categorization Explanation** *(`changeTypeExplanation`)*\nThis is a like-for-like component replacement. FedRAMP gives exactly this as an example of an adaptive change: replacing a component where some security plan or procedure adjustments are required, such as a scanning tool or managed database swap.\n\n**Reason for Change** *(`reason`)*\nBroader coverage across container runtime, cloud posture and source code, plus the automation needed to support risk-based vulnerability triage.\n\n**Related Vulnerability** *(`relatedVulnerability`)*\nN/A\n\n**Assessor Name** *(`assessorName`)*\nN/A\n\n**Impact Analysis**\n**Customer Impact** *(`customerImpact`)*\nNo customer impact anticipated. The scanner is a backend security tool and is not exposed to customers. No change to customer configuration responsibilities.\n\n**Impacted Controls** **Impacted KSIs or Rev5 Controls** *(`impactedControls[]`)* (List KSI or control identifiers that will be verified, assessed, or validated as part of this change. One per line.)\n\n- KSI-CMT-VTD\n- KSI-MLA-OSM\n- RA-5\n- SI-2\n\n**Plan and Timeline** **Summary** *(`planAndTimeline.summary`)* **\\[REQUIRED within planAndTimeline\\]**\n\nThe replacement scanner runs in parallel with the incumbent until coverage is confirmed equivalent, after which the incumbent is retired. KSI-MLA-OSM and RA-5 are re-verified against the new output before decommissioning.\n\n**Planned Start** *(`planAndTimeline.plannedStart`)*\nDate: `2026-09-01`\n\n**Planned Completion** *(`planAndTimeline.plannedCompletion`)*\nDate: `2026-11-14`\n\n**Milestones** *(`planAndTimeline.milestones[]`)*\n- `2026-09-08` | Proof of Concept\n- `2026-09-29` | Decision and Procurement\n- `2026-10-20` | Setup and Onboarding\n- `2026-11-14` | Fully functional\n\n**Certification Package** **Certification Package Overview URI** *(`certificationPackageOverviewUri`)* **\\[REQUIRED\\]** `https://trust.example.com/artifacts/11111111-2222-3333-4444-555555555555/66666666-7777-8888-9999-000000000000/Certification%20Package%20Overview%20-%2020x%20Class%20C.json`\n\n---\n\n### Schedule\n\nDate/Time of Change: MM/DD/YYYY @ HH:MM\n\n### Deployment Steps, Rollback Plan (if applicable)\n\n(Provide code snippets or screenshots as needed)\n\n## Results (after completion)\n\n- [X] Change was completed successfully\n- [ ] Change was NOT completed successfully but will be rescheduled\n- [ ] Change was NOT completed successfully and will be canceled\n\n/assign me\n",
+         "createdAt": "2026-10-09T18:27:40Z",
+         "headRefName": "fetcher-test/scn/upcoming",
+         "labels": {
+          "nodes": []
+         },
+         "mergeCommit": null,
+         "mergedAt": null,
+         "mergedBy": null,
+         "number": 4,
+         "state": "OPEN",
+         "title": "Fixture: fetcher-test/scn/upcoming",
+         "updatedAt": "2026-10-09T18:27:40Z",
+         "url": "https://github.com/Fetcher-Tester/fetcher-test-scn/pull/4"
+        },
+        {
+         "author": {
+          "login": "sandbox-owner"
+         },
+         "baseRefName": "main",
+         "body": "## FedRAMP Significant Change Notification (SCN)\n- [X] Significant Change \u2014 SCN required\n\n**Reason for Change** *(`reason`)*\nWe needed to.\n",
+         "createdAt": "2026-10-09T18:26:45Z",
+         "headRefName": "fetcher-test/scn/broken",
+         "labels": {
+          "nodes": []
+         },
+         "mergeCommit": {
+          "oid": "b68b2877869b016a80b1eb1e299142a3bd37cd83"
+         },
+         "mergedAt": "2026-10-09T18:27:36Z",
+         "mergedBy": {
+          "login": "sandbox-owner"
+         },
+         "number": 3,
+         "state": "MERGED",
+         "title": "Fixture: fetcher-test/scn/broken",
+         "updatedAt": "2026-10-09T18:27:36Z",
+         "url": "https://github.com/Fetcher-Tester/fetcher-test-scn/pull/3"
+        },
+        {
+         "author": {
+          "login": "sandbox-owner"
+         },
+         "baseRefName": "main",
+         "body": "# Change Request\n- [ ] Emergency Change\n\n## Requested Changes\nMonthly patching of the bastion AMI.\n\n## FedRAMP Significant Change Notification (SCN)\n- [X] [Routine Recurring](https://www.fedramp.gov/2026/providers/20x/rules/significant-change-notification/#routine-recurring-changes)  \u2014 SCN not required\n- [ ] Significant Change \u2014 SCN required (expand section below)\n",
+         "createdAt": "2026-10-09T18:25:49Z",
+         "headRefName": "fetcher-test/scn/routine",
+         "labels": {
+          "nodes": []
+         },
+         "mergeCommit": {
+          "oid": "8e74ff710573e9b0f2cdc1578ace493f7fdc96d9"
+         },
+         "mergedAt": "2026-10-09T18:26:41Z",
+         "mergedBy": {
+          "login": "sandbox-owner"
+         },
+         "number": 2,
+         "state": "MERGED",
+         "title": "Fixture: fetcher-test/scn/routine",
+         "updatedAt": "2026-10-09T18:26:41Z",
+         "url": "https://github.com/Fetcher-Tester/fetcher-test-scn/pull/2"
+        },
+        {
+         "author": {
+          "login": "sandbox-owner"
+         },
+         "baseRefName": "main",
+         "body": "# Change Request\n- [ ] Emergency Change (add Justification to Summary below)\n\n### Scope\n- [ ] Application Release (Helm), ticket: [ABC-??](https://example.atlassian.net/browse/ABC-??)\n- [ ] Deployed Software (Helm)\n- [X] Infrastructure (Terraform)\n- [ ] Other (manual changes)\n\n### Impact\n- [ ] C1: High Impact/Risk, may cause Production downtime\n- [ ] C2: Med Impact/Risk, may cause Production slowness, or Staging downtime\n- [X] C3: Low Impact/Risk, may require complex manual changes\n- [ ] C4: No Impact/Risk, common changes or fully automated\n\n## Requested Changes\nReplacing the incumbent third-party vulnerability scanner with a cloud security posture management platform across the authorization boundary. The replacement covers container runtime, cloud posture and source-code scanning in one tool.\n\n### Impact and Security Analysis\nBroader vulnerability coverage and more automated triage. Introduces a new third-party vendor with read access to cloud configuration metadata. Data-scanning features that would reach customer data are deliberately left disabled, so the vendor sees configuration state only.\n\n## FedRAMP Significant Change Notification (SCN)\n- [ ] [Routine Recurring](https://www.fedramp.gov/2026/providers/20x/rules/significant-change-notification/#routine-recurring-changes)  \u2014 SCN not required\n- [X] Significant Change \u2014 SCN required (expand section below)\n\n** SCN Details** \u2014 expand if Significant Change is checked above\nFields marked **\\[REQUIRED\\]** map to required FedRAMP schema properties.\n\n**Change Type** *(`changeType`)* **\\[REQUIRED\\]**\n- [X] Adaptive\n- [ ] Transformative\n\n[Adaptive](https://www.fedramp.gov/2026/providers/20x/rules/significant-change-notification/#adaptive-changes) changes typically require careful planning that focuses on engineering execution instead of customer adoption, can be verified with minor changes to existing automated validation procedures, and do not require large changes to operational procedures, deployment plans, or documentation.\n\nTransformative changes typically introduce major features or capabilities that may change how a customer uses the service (in whole or in part) and require extensive updates to security assessments, operational procedures, deployment plans, and documentation.\n\n**Approver:** A. Approver\n**Approver Title:** Director of Security Engineering\n\n**Categorization Explanation** *(`changeTypeExplanation`)*\nThis is a like-for-like component replacement. FedRAMP gives exactly this as an example of an adaptive change: replacing a component where some security plan or procedure adjustments are required, such as a scanning tool or managed database swap.\n\n**Reason for Change** *(`reason`)*\nBroader coverage across container runtime, cloud posture and source code, plus the automation needed to support risk-based vulnerability triage.\n\n**Related Vulnerability** *(`relatedVulnerability`)*\nN/A\n\n**Assessor Name** *(`assessorName`)*\nN/A\n\n**Impact Analysis**\n**Customer Impact** *(`customerImpact`)*\nNo customer impact anticipated. The scanner is a backend security tool and is not exposed to customers. No change to customer configuration responsibilities.\n\n**Impacted Controls** **Impacted KSIs or Rev5 Controls** *(`impactedControls[]`)* (List KSI or control identifiers that will be verified, assessed, or validated as part of this change. One per line.)\n\n- KSI-CMT-VTD\n- KSI-MLA-OSM\n- RA-5\n- SI-2\n\n**Plan and Timeline** **Summary** *(`planAndTimeline.summary`)* **\\[REQUIRED within planAndTimeline\\]**\n\nThe replacement scanner runs in parallel with the incumbent until coverage is confirmed equivalent, after which the incumbent is retired. KSI-MLA-OSM and RA-5 are re-verified against the new output before decommissioning.\n\n**Planned Start** *(`planAndTimeline.plannedStart`)*\nDate: `2026-09-01`\n\n**Planned Completion** *(`planAndTimeline.plannedCompletion`)*\nDate: `2026-11-14`\n\n**Milestones** *(`planAndTimeline.milestones[]`)*\n- `2026-09-08` | Proof of Concept\n- `2026-09-29` | Decision and Procurement\n- `2026-10-20` | Setup and Onboarding\n- `2026-11-14` | Fully functional\n\n**Certification Package** **Certification Package Overview URI** *(`certificationPackageOverviewUri`)* **\\[REQUIRED\\]** `https://trust.example.com/artifacts/11111111-2222-3333-4444-555555555555/66666666-7777-8888-9999-000000000000/Certification%20Package%20Overview%20-%2020x%20Class%20C.json`\n\n---\n\n### Schedule\n\nDate/Time of Change: MM/DD/YYYY @ HH:MM\n\n### Deployment Steps, Rollback Plan (if applicable)\n\n(Provide code snippets or screenshots as needed)\n\n## Results (after completion)\n\n- [X] Change was completed successfully\n- [ ] Change was NOT completed successfully but will be rescheduled\n- [ ] Change was NOT completed successfully and will be canceled\n\n/assign me\n",
+         "createdAt": "2026-10-09T18:24:54Z",
+         "headRefName": "fetcher-test/scn/complete",
+         "labels": {
+          "nodes": []
+         },
+         "mergeCommit": {
+          "oid": "d7e2e9a4e8071dda0babe7768f6fd481b8f620e6"
+         },
+         "mergedAt": "2026-10-09T18:25:45Z",
+         "mergedBy": {
+          "login": "sandbox-owner"
+         },
+         "number": 1,
+         "state": "MERGED",
+         "title": "Fixture: fetcher-test/scn/complete",
+         "updatedAt": "2026-10-09T18:25:45Z",
+         "url": "https://github.com/Fetcher-Tester/fetcher-test-scn/pull/1"
+        }
+       ],
+       "pageInfo": {
+        "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0wOVQxODoyNTo0NVrPAAAAAR5b8VA=",
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql f503bc88ba71 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-unprotected\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [
+        {
+         "author": {
+          "login": "sandbox-owner"
+         },
+         "baseRefName": "main",
+         "body": "Paramify fetcher test fixture.",
+         "createdAt": "2026-10-04T03:48:48Z",
+         "headRefName": "fetcher-test/no-review",
+         "labels": {
+          "nodes": []
+         },
+         "mergeCommit": {
+          "oid": "51f2971a5f4e0540fb1abad342206128e7e28879"
+         },
+         "mergedAt": "2026-10-04T03:49:38Z",
+         "mergedBy": {
+          "login": "sandbox-owner"
+         },
+         "number": 1,
+         "state": "MERGED",
+         "title": "Fixture: fetcher-test/no-review",
+         "updatedAt": "2026-10-04T03:49:39Z",
+         "url": "https://github.com/Fetcher-Tester/fetcher-test-unprotected/pull/1"
+        }
+       ],
+       "pageInfo": {
+        "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0wNFQwMzo0OTozOVrPAAAAARoH_8I=",
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "POST /graphql f503bc88ba71 {\"after\": null, \"first\": 50, \"name\": \"fetcher-test-vulnerable\", \"owner\": \"Fetcher-Tester\"}": {
+   "body": {
+    "data": {
+     "repository": {
+      "pullRequests": {
+       "nodes": [
+        {
+         "author": {
+          "login": "dependabot"
+         },
+         "baseRefName": "main",
+         "body": "Bumps [django](https://github.com/django/django) from 2.2 to 5.2.17.\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/django/django/commit/e802ada38b3ecf345915163bb6d7f008be411664\"><code>e802ada</code></a> [5.2.x] Bumped version for 5.2.17 release.</li>\n<li><a href=\"https://github.com/django/django/commit/b9adb81339cc418f8f56b1050cca6dfec3ab6349\"><code>b9adb81</code></a> [5.2.x] Fixed CVE-2026-15920 -- Made display_for_field() validate URLs before...</li>\n<li><a href=\"https://github.com/django/django/commit/ba80833fa656dd09660b97c4429331067db1b080\"><code>ba80833</code></a> [5.2.x] Fixed CVE-2026-15830 -- Mitigated potential DoS via nested geometry c...</li>\n<li><a href=\"https://github.com/django/django/commit/c72a5dbb64d0777f3f471f1be94e8b2ca91e0959\"><code>c72a5db</code></a> [5.2.x] Fixed CVE-2026-15337 -- Mitigated potential DoS in check_for_language().</li>\n<li><a href=\"https://github.com/django/django/commit/115ffd0463a765ab1cc93de18e94b5459b8a300e\"><code>115ffd0</code></a> [5.2.x] Fixed CVE-2026-15307 -- Blocked raster strings and dicts in spatial l...</li>\n<li><a href=\"https://github.com/django/django/commit/ec5ced4b4b4a97e0aae0ebda4794c377185ba147\"><code>ec5ced4</code></a> [5.2.x] Fixed <a href=\"https://redirect.github.com/django/django/issues/36770\">#36770</a> -- Fixed incomplete mocking in SQLiteInMemoryTestDbs.</li>\n<li><a href=\"https://github.com/django/django/commit/02369b526a35122fdee953ef15939472a6365709\"><code>02369b5</code></a> [5.2.x] Allowed the full Python test matrix to run on GitHub Actions.</li>\n<li><a href=\"https://github.com/django/django/commit/686072fa057c8c1aac3341cb0a250827846727db\"><code>686072f</code></a> [5.2.x] Added stub release notes and release date for 5.2.17.</li>\n<li><a href=\"https://github.com/django/django/commit/cd5ad8c81bf221868e3c33d90d6e021d067829b4\"><code>cd5ad8c</code></a> [5.2.x] Bumped minimum setuptools version to 83.</li>\n<li><a href=\"https://github.com/django/django/commit/3e389b7ddaf08109900da5415ddaac5a355a170f\"><code>3e389b7</code></a> [5.2.x] Closed temporary files in GDALRasterTests.</li>\n<li>Additional commits viewable in <a href=\"https://github.com/django/django/compare/2.2...5.2.17\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\n[![Dependabot compatibility score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=django&package-manager=pip&previous-version=2.2&new-version=5.2.17)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\nYou can disable automated security fix PRs for this repo from the [Security Alerts page](https://github.com/Fetcher-Tester/fetcher-test-vulnerable/network/alerts).\n\n</details>",
+         "createdAt": "2026-10-04T05:00:11Z",
+         "headRefName": "dependabot/pip/django-5.2.17",
+         "labels": {
+          "nodes": [
+           {
+            "name": "dependencies"
+           },
+           {
+            "name": "python"
+           }
+          ]
+         },
+         "mergeCommit": null,
+         "mergedAt": null,
+         "mergedBy": null,
+         "number": 2,
+         "state": "OPEN",
+         "title": "Bump django from 2.2 to 5.2.17",
+         "updatedAt": "2026-10-04T05:00:14Z",
+         "url": "https://github.com/Fetcher-Tester/fetcher-test-vulnerable/pull/2"
+        },
+        {
+         "author": {
+          "login": "dependabot"
+         },
+         "baseRefName": "main",
+         "body": "Bumps [requests](https://github.com/psf/requests) from 2.19.0 to 2.33.0.\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/psf/requests/releases\">requests's releases</a>.</em></p>\n<blockquote>\n<h2>v2.33.0</h2>\n<h2>2.33.0 (2026-03-25)</h2>\n<p><strong>Announcements</strong></p>\n<ul>\n<li>\ud83d\udce3 Requests is adding inline types. If you have a typed code base that uses Requests, please take a look at <a href=\"https://redirect.github.com/psf/requests/issues/7271\">#7271</a>. Give it a try, and report any gaps or feedback you may have in the issue. \ud83d\udce3</li>\n</ul>\n<p><strong>Security</strong></p>\n<ul>\n<li>CVE-2026-25645 <code>requests.utils.extract_zipped_paths</code> now extracts contents to a non-deterministic location to prevent malicious file replacement. This does not affect default usage of Requests, only applications calling the utility function directly.</li>\n</ul>\n<p><strong>Improvements</strong></p>\n<ul>\n<li>Migrated to a PEP 517 build system using setuptools. (<a href=\"https://redirect.github.com/psf/requests/issues/7012\">#7012</a>)</li>\n</ul>\n<p><strong>Bugfixes</strong></p>\n<ul>\n<li>Fixed an issue where an empty netrc entry could cause malformed authentication to be applied to Requests on Python 3.11+. (<a href=\"https://redirect.github.com/psf/requests/issues/7205\">#7205</a>)</li>\n</ul>\n<p><strong>Deprecations</strong></p>\n<ul>\n<li>Dropped support for Python 3.9 following its end of support. (<a href=\"https://redirect.github.com/psf/requests/issues/7196\">#7196</a>)</li>\n</ul>\n<p><strong>Documentation</strong></p>\n<ul>\n<li>Various typo fixes and doc improvements.</li>\n</ul>\n<h2>New Contributors</h2>\n<ul>\n<li><a href=\"https://github.com/M0d3v1\"><code>@\u200bM0d3v1</code></a> made their first contribution in <a href=\"https://redirect.github.com/psf/requests/pull/6865\">psf/requests#6865</a></li>\n<li><a href=\"https://github.com/aminvakil\"><code>@\u200baminvakil</code></a> made their first contribution in <a href=\"https://redirect.github.com/psf/requests/pull/7220\">psf/requests#7220</a></li>\n<li><a href=\"https://github.com/E8Price\"><code>@\u200bE8Price</code></a> made their first contribution in <a href=\"https://redirect.github.com/psf/requests/pull/6960\">psf/requests#6960</a></li>\n<li><a href=\"https://github.com/mitre88\"><code>@\u200bmitre88</code></a> made their first contribution in <a href=\"https://redirect.github.com/psf/requests/pull/7244\">psf/requests#7244</a></li>\n<li><a href=\"https://github.com/magsen\"><code>@\u200bmagsen</code></a> made their first contribution in <a href=\"https://redirect.github.com/psf/requests/pull/6553\">psf/requests#6553</a></li>\n<li><a href=\"https://github.com/Rohan5commit\"><code>@\u200bRohan5commit</code></a> made their first contribution in <a href=\"https://redirect.github.com/psf/requests/pull/7227\">psf/requests#7227</a></li>\n</ul>\n<p><strong>Full Changelog</strong>: <a href=\"https://github.com/psf/requests/blob/main/HISTORY.md#2330-2026-03-25\">https://github.com/psf/requests/blob/main/HISTORY.md#2330-2026-03-25</a></p>\n<h2>v2.32.5</h2>\n<h2>2.32.5 (2025-08-18)</h2>\n<p><strong>Bugfixes</strong></p>\n<ul>\n<li>The SSLContext caching feature originally introduced in 2.32.0 has created\na new class of issues in Requests that have had negative impact across a number\nof use cases. The Requests team has decided to revert this feature as long term\nmaintenance of it is proving to be unsustainable in its current iteration.</li>\n</ul>\n<p><strong>Deprecations</strong></p>\n<ul>\n<li>Added support for Python 3.14.</li>\n<li>Dropped support for Python 3.8 following its end of support.</li>\n</ul>\n<h2>v2.32.4</h2>\n<h2>2.32.4 (2025-06-10)</h2>\n<!-- raw HTML omitted -->\n</blockquote>\n<p>... (truncated)</p>\n</details>\n<details>\n<summary>Changelog</summary>\n<p><em>Sourced from <a href=\"https://github.com/psf/requests/blob/main/HISTORY.md\">requests's changelog</a>.</em></p>\n<blockquote>\n<h2>2.33.0 (2026-03-25)</h2>\n<p><strong>Announcements</strong></p>\n<ul>\n<li>\ud83d\udce3 Requests is adding inline types. If you have a typed code base that\nuses Requests, please take a look at <a href=\"https://redirect.github.com/psf/requests/issues/7271\">#7271</a>. Give it a try, and report\nany gaps or feedback you may have in the issue. \ud83d\udce3</li>\n</ul>\n<p><strong>Security</strong></p>\n<ul>\n<li>CVE-2026-25645 <code>requests.utils.extract_zipped_paths</code> now extracts\ncontents to a non-deterministic location to prevent malicious file\nreplacement. This does not affect default usage of Requests, only\napplications calling the utility function directly.</li>\n</ul>\n<p><strong>Improvements</strong></p>\n<ul>\n<li>Migrated to a PEP 517 build system using setuptools. (<a href=\"https://redirect.github.com/psf/requests/issues/7012\">#7012</a>)</li>\n</ul>\n<p><strong>Bugfixes</strong></p>\n<ul>\n<li>Fixed an issue where an empty netrc entry could cause\nmalformed authentication to be applied to Requests on\nPython 3.11+. (<a href=\"https://redirect.github.com/psf/requests/issues/7205\">#7205</a>)</li>\n</ul>\n<p><strong>Deprecations</strong></p>\n<ul>\n<li>Dropped support for Python 3.9 following its end of support. (<a href=\"https://redirect.github.com/psf/requests/issues/7196\">#7196</a>)</li>\n</ul>\n<p><strong>Documentation</strong></p>\n<ul>\n<li>Various typo fixes and doc improvements.</li>\n</ul>\n<h2>2.32.5 (2025-08-18)</h2>\n<p><strong>Bugfixes</strong></p>\n<ul>\n<li>The SSLContext caching feature originally introduced in 2.32.0 has created\na new class of issues in Requests that have had negative impact across a number\nof use cases. The Requests team has decided to revert this feature as long term\nmaintenance of it is proving to be unsustainable in its current iteration.</li>\n</ul>\n<p><strong>Deprecations</strong></p>\n<ul>\n<li>Added support for Python 3.14.</li>\n<li>Dropped support for Python 3.8 following its end of support.</li>\n</ul>\n<h2>2.32.4 (2025-06-10)</h2>\n<p><strong>Security</strong></p>\n<ul>\n<li>CVE-2024-47081 Fixed an issue where a maliciously crafted URL and trusted\nenvironment will retrieve credentials for the wrong hostname/machine from a\nnetrc file.</li>\n</ul>\n<!-- raw HTML omitted -->\n</blockquote>\n<p>... (truncated)</p>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/psf/requests/commit/bc04dfd6dad4cb02cd92f5daa81eb562d280a761\"><code>bc04dfd</code></a> v2.33.0</li>\n<li><a href=\"https://github.com/psf/requests/commit/66d21cb07bd6255b1280291c4fafb71803cdb3b7\"><code>66d21cb</code></a> Merge commit from fork</li>\n<li><a href=\"https://github.com/psf/requests/commit/8b9bc8fc0f63be84602387913c4b689f19efd028\"><code>8b9bc8f</code></a> Move badges to top of README (<a href=\"https://redirect.github.com/psf/requests/issues/7293\">#7293</a>)</li>\n<li><a href=\"https://github.com/psf/requests/commit/e331a288f369973f5de0ec8901c94cae4fa87286\"><code>e331a28</code></a> Remove unused extraction call (<a href=\"https://redirect.github.com/psf/requests/issues/7292\">#7292</a>)</li>\n<li><a href=\"https://github.com/psf/requests/commit/753fd08c5eacce0aa0df73fe47e49525c67e0a29\"><code>753fd08</code></a> docs: fix FAQ grammar in httplib2 example</li>\n<li><a href=\"https://github.com/psf/requests/commit/774a0b837a194ee885d4fdd9ca947900cc3daf71\"><code>774a0b8</code></a> docs(socks): same block as other sections</li>\n<li><a href=\"https://github.com/psf/requests/commit/9c72a41bec8597f948c9d8caa5dc3f12273b3303\"><code>9c72a41</code></a> Bump github/codeql-action from 4.33.0 to 4.34.1</li>\n<li><a href=\"https://github.com/psf/requests/commit/ebf71906798ec82f34e07d3168f8b8aecaf8a3be\"><code>ebf7190</code></a> Bump github/codeql-action from 4.32.0 to 4.33.0</li>\n<li><a href=\"https://github.com/psf/requests/commit/0e4ae38f0c93d4f92a96c774bd52c069d12a4798\"><code>0e4ae38</code></a> docs: exclude Response.is_permanent_redirect from API docs (<a href=\"https://redirect.github.com/psf/requests/issues/7244\">#7244</a>)</li>\n<li><a href=\"https://github.com/psf/requests/commit/d568f47278492e630cc990a259047c67991d007a\"><code>d568f47</code></a> docs: clarify Quickstart POST example (<a href=\"https://redirect.github.com/psf/requests/issues/6960\">#6960</a>)</li>\n<li>Additional commits viewable in <a href=\"https://github.com/psf/requests/compare/v2.19.0...v2.33.0\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\n[![Dependabot compatibility score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=requests&package-manager=pip&previous-version=2.19.0&new-version=2.33.0)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\nYou can disable automated security fix PRs for this repo from the [Security Alerts page](https://github.com/Fetcher-Tester/fetcher-test-vulnerable/network/alerts).\n\n</details>",
+         "createdAt": "2026-10-04T04:59:56Z",
+         "headRefName": "dependabot/pip/requests-2.33.0",
+         "labels": {
+          "nodes": [
+           {
+            "name": "dependencies"
+           },
+           {
+            "name": "python"
+           }
+          ]
+         },
+         "mergeCommit": null,
+         "mergedAt": null,
+         "mergedBy": null,
+         "number": 1,
+         "state": "OPEN",
+         "title": "Bump requests from 2.19.0 to 2.33.0",
+         "updatedAt": "2026-10-04T04:59:57Z",
+         "url": "https://github.com/Fetcher-Tester/fetcher-test-vulnerable/pull/1"
+        }
+       ],
+       "pageInfo": {
+        "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0wNFQwNDo1OTo1N1rPAAAAARoM1N0=",
+        "hasNextPage": false
+       }
+      }
+     }
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-RateLimit-Resource": "graphql"
+   },
+   "reason": "OK",
+   "status": 200
+  }
+ },
+ "env": {
+  "GITHUB_CHECK_KEV": "false",
+  "GITHUB_DEPLOYMENT_DAYS_BACK": "366",
+  "GITHUB_ORG": "Fetcher-Tester",
+  "GITHUB_REPOSITORIES": "fetcher-test-actions,fetcher-test-deploy,fetcher-test-disabled-rules,fetcher-test-evaluate-rules,fetcher-test-globs,fetcher-test-leaked-secret,fetcher-test-protected,fetcher-test-releases,fetcher-test-scanning-off,fetcher-test-scn,fetcher-test-unprotected,fetcher-test-vulnerable",
+  "GITHUB_SCN_DAYS_BACK": "366",
+  "GITHUB_SCN_REQUIRE_COMPLETE": "false",
+  "GITHUB_SCN_STATE": "all",
+  "GITHUB_SCN_STRICT": "false",
+  "PARAMIFY_CERT_PACKAGE_URI": "https://example.com/cert-package"
+ },
+ "exit_code": 0,
+ "fetcher": "significant_change_notifications",
+ "org": "Fetcher-Tester"
+}

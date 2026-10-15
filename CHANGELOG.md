@@ -208,6 +208,32 @@ schemas and the `paramify` CLI — not the internal code.
   Run tab shows why a fetcher failed next to its status, and focus returns to
   the Paramify tab when a send finishes, so its keys work without pressing 5
   again.
+- **GitHub fetchers (15).** `github_branch_protection`, `github_pull_request_checks`,
+  `github_dependabot_alerts`, `github_code_scanning_alerts`,
+  `github_secret_scanning`, `github_org_security_settings`,
+  `github_access_review`, `github_non_user_credentials`,
+  `github_actions_security`, `github_release_integrity`,
+  `github_deployment_controls`, `github_vulnerability_disclosure`,
+  `github_significant_change_notifications`, `github_audit_log` (Enterprise
+  Cloud) and the inventory
+  `github_repository_inventory` (one record per repository, with custom
+  property values; all or nothing), on one shared
+  read-only client, one target per organization (github.com, GHE.com or
+  GitHub Enterprise Server). Protection is read from the rules GitHub enforces
+  rather than the rulesets defined; a feature that is off is evidence while a
+  token that cannot read it is a failure naming the permission; anything
+  unreadable that could disprove a verdict leaves it `null`.
+  `github_pull_request_checks` reads pull requests and commits over GraphQL
+  (queries only; every other call is a GET), about 2 points per 50 pull
+  requests where REST costs three calls each, and reports who merged each one
+  and its labels. `github_actions_security` parses every workflow file for
+  unpinned actions, missing permissions blocks and privileged triggers that run
+  pull request code; `github_release_integrity` looks up build provenance by
+  each asset's digest; `github_deployment_controls` checks each production
+  deployment's commit against the default branch's history;
+  `github_significant_change_notifications` uses the GitLab SCN fetcher's parser
+  and validator, so one template makes the same notification on both. See
+  `fetchers/github/README.md`.
 - **Evidence sets carry a collection frequency.** `evidence_set.frequency` in
   `fetcher.yaml` takes Paramify's evidence frequency values (`DAILY`,
   `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `QUARTERLY`, `BIANNUAL`,

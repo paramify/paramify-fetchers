@@ -29,6 +29,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 <a href="fetchers/crowdstrike/"><img src="fetchers/logos/crowdstrike.svg" alt="CrowdStrike" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/splunk/"><img src="fetchers/logos/splunk.svg" alt="Splunk" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/knowbe4/"><img src="fetchers/logos/knowbe4.svg" alt="KnowBe4" width="56" height="56" style="margin: 20px;"></a>
+<a href="fetchers/github/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/github-dark.svg"><img src="fetchers/logos/github.svg" alt="GitHub" width="56" height="56" style="margin: 20px;"></picture></a>
 <a href="fetchers/gitlab/"><img src="fetchers/logos/gitlab.svg" alt="GitLab" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/k8s/"><img src="fetchers/logos/kubernetes.svg" alt="Kubernetes" width="56" height="56" style="margin: 20px;"></a>
 <a href="fetchers/rippling/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/rippling-dark.svg"><img src="fetchers/logos/rippling.svg" alt="Rippling" width="56" height="56" style="margin: 20px;"></picture></a>
@@ -46,6 +47,7 @@ Fetchers are small scripts that collect compliance evidence from your infrastruc
 | **AWS** | 80 | Encryption at rest and in transit, IAM and Organizations guardrails, threat detection and vulnerability scanning, logging and config drift, network segmentation, WAF and DDoS protection, backup and high availability, patch compliance, key and secret rotation, and CI/CD pipeline config |
 | **Azure** | 54 | Storage/disk/SQL encryption and CMK use, Entra identity + Conditional Access, RBAC assignments and custom roles, Azure Policy assignments, network security groups, Key Vault config and key rotation, Defender plans and per-resource assessments, VM hardening, the container and PaaS surface (AKS, Container Registry, App Service, Functions, Databricks), diagnostic settings and activity-log alerts, backup, the managed databases, Azure Cache for Redis and Managed Redis TLS and access, DNS zones and DNSSEC, and VPN Gateway / Virtual WAN IPsec and hub security |
 | **GCP** | 19 | Disk/bucket/Cloud SQL/BigQuery/Secret Manager encryption and CMEK use, IAM policy bindings, custom roles and service-account keys, KMS key rotation, GKE cluster and Compute Engine hardening, Cloud Logging sinks, Cloud SQL backups and network exposure, VPC/firewall/DNS segmentation, load-balancer TLS, and API keys |
+| **GitHub** | 15 | Repository inventory, enforced default-branch protection with CODEOWNERS and bypass actors, merged pull requests with their approvals and checks, Dependabot, code scanning and secret scanning alerts with scanning coverage, organization security settings, access review with organization roles, non-user credentials, Actions workflow security, significant change notifications, release integrity and provenance, deployment controls, vulnerability disclosure, and the Enterprise Cloud audit log |
 | **Wiz** | 14 | Connected cloud accounts and scan coverage, open cloud-configuration and toxic-combination issues, host and container vulnerabilities with KEV exposure and fix availability, cloud configuration (NIST SP 800-53) and OS benchmark (DISA STIG) posture, Wiz Defend detections, Runtime Sensor file-integrity monitoring, attack-surface and code (SAST) findings, tenant security settings, and issue, vulnerability and STIG reports for Paramify assessments |
 | **Datadog** | 13 | Cloud SIEM detection rules, signals and operational config, monitors, log pipelines/indexes/archives, host & container inventory, agent checks, APM services, and incidents with timelines |
 | **Okta** | 8 | Phishing-resistant MFA and passwordless authentication, authenticators, least privilege, just-in-time access, non-user account authentication, suspicious activity management, and account management |
@@ -79,7 +81,6 @@ More integrations are in progress. To request a fetcher or upvote what should be
 <div align="center">
 
 <img src="fetchers/logos/qualys.svg" alt="SSL Labs" width="56" height="56" style="margin: 20px;">
-<picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/github-dark.svg"><img src="fetchers/logos/github.svg" alt="GitHub" width="56" height="56" style="margin: 20px;"></picture>
 <picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/tenable-dark.svg"><img src="fetchers/logos/tenable.svg" alt="Tenable" width="56" height="56" style="margin: 20px;"></picture>
 
 and more
@@ -600,6 +601,7 @@ To add evidence collection for a new control or a new tool, see [`docs/authoring
 |---|---|
 | [`fetchers/aws/README.md`](fetchers/aws/README.md) | AWS credential setup (ambient + multi-account fanout) |
 | [`fetchers/okta/README.md`](fetchers/okta/README.md) | Okta API token + required admin role |
+| [`fetchers/github/README.md`](fetchers/github/README.md) | GitHub fine-grained token, the read permissions per fetcher, and what the client guards against |
 | [`fetchers/gitlab/README.md`](fetchers/gitlab/README.md) | GitLab project access token setup |
 | [`fetchers/sentinelone/README.md`](fetchers/sentinelone/README.md) | SentinelOne service user + API token |
 | [`fetchers/crowdstrike/README.md`](fetchers/crowdstrike/README.md) | CrowdStrike Falcon API client, scopes, and cloud/GovCloud selection |

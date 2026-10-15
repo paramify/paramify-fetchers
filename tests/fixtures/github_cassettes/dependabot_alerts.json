@@ -1,0 +1,3898 @@
+{
+ "entries": {
+  "/orgs/Fetcher-Tester": {
+   "body": {
+    "advanced_security_enabled_for_new_repositories": false,
+    "archived_at": null,
+    "billing_email": "redacted@example.com",
+    "collaborators": 0,
+    "created_at": "2026-10-04T02:54:38Z",
+    "default_repository_branch": "main",
+    "default_repository_permission": "read",
+    "dependabot_alerts_enabled_for_new_repositories": false,
+    "dependabot_security_updates_enabled_for_new_repositories": false,
+    "dependency_graph_enabled_for_new_repositories": false,
+    "deploy_keys_enabled_for_repositories": true,
+    "disk_usage": 12,
+    "display_commenter_full_name_setting_enabled": false,
+    "followers": 0,
+    "following": 0,
+    "has_organization_projects": true,
+    "has_repository_projects": true,
+    "id": 337551672,
+    "is_verified": false,
+    "login": "Fetcher-Tester",
+    "members_allowed_repository_creation_type": "all",
+    "members_can_change_repo_visibility": true,
+    "members_can_create_internal_repositories": false,
+    "members_can_create_pages": true,
+    "members_can_create_private_pages": true,
+    "members_can_create_private_repositories": true,
+    "members_can_create_public_pages": true,
+    "members_can_create_public_repositories": true,
+    "members_can_create_repositories": true,
+    "members_can_create_teams": true,
+    "members_can_delete_issues": false,
+    "members_can_delete_repositories": true,
+    "members_can_fork_private_repositories": false,
+    "members_can_invite_outside_collaborators": true,
+    "members_can_view_dependency_insights": true,
+    "name": "Fetcher Tester",
+    "owned_private_repos": 0,
+    "plan": {
+     "filled_seats": 2,
+     "name": "free",
+     "private_repos": 10000,
+     "seats": 0,
+     "space": 976562499
+    },
+    "private_gists": 0,
+    "public_gists": 0,
+    "public_repos": 9,
+    "readers_can_create_discussions": true,
+    "secret_scanning_enabled_for_new_repositories": false,
+    "secret_scanning_push_protection_custom_link": null,
+    "secret_scanning_push_protection_custom_link_enabled": false,
+    "secret_scanning_push_protection_enabled_for_new_repositories": false,
+    "secret_scanning_validity_checks_enabled": false,
+    "total_private_repos": 0,
+    "two_factor_requirement_enabled": false,
+    "type": "Organization",
+    "updated_at": "2026-10-04T02:54:38Z",
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "allows_permissionless_access=true"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-disabled-rules": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:17:48Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-disabled-rules",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-disabled-rules.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837102,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-disabled-rules",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:50:02Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 3,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-disabled-rules.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:38:20Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-disabled-rules/automated-security-fixes": {
+   "body": {
+    "enabled": false,
+    "paused": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-disabled-rules/dependabot/alerts?per_page=100&state=open%2Cfixed%2Cdismissed%2Cauto_dismissed": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "vulnerability_alerts=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-disabled-rules/dependency-graph/sbom": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest",
+    "message": "Not Found",
+    "status": "404"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8"
+   },
+   "reason": "Not Found",
+   "status": 404
+  },
+  "/repos/Fetcher-Tester/fetcher-test-evaluate-rules": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:17:54Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-evaluate-rules",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-evaluate-rules.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837177,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-evaluate-rules",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:17:56Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 0,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-evaluate-rules.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:38:23Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-evaluate-rules/automated-security-fixes": {
+   "body": {
+    "enabled": false,
+    "paused": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-evaluate-rules/dependabot/alerts?per_page=100&state=open%2Cfixed%2Cdismissed%2Cauto_dismissed": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "vulnerability_alerts=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-evaluate-rules/dependency-graph/sbom": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest",
+    "message": "Not Found",
+    "status": "404"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8"
+   },
+   "reason": "Not Found",
+   "status": 404
+  },
+  "/repos/Fetcher-Tester/fetcher-test-globs": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T05:38:51Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-globs",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-globs.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403956974,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-globs",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T05:38:59Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 0,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-globs.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:38:56Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-globs/automated-security-fixes": {
+   "body": {
+    "enabled": false,
+    "paused": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-globs/dependabot/alerts?per_page=100&state=open%2Cfixed%2Cdismissed%2Cauto_dismissed": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "vulnerability_alerts=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-globs/dependency-graph/sbom": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest",
+    "message": "Not Found",
+    "status": "404"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8"
+   },
+   "reason": "Not Found",
+   "status": 404
+  },
+  "/repos/Fetcher-Tester/fetcher-test-leaked-secret": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T04:19:53Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-leaked-secret",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-leaked-secret.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403881216,
+    "is_template": false,
+    "language": "Python",
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-leaked-secret",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T04:20:37Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 1,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-leaked-secret.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:38:31Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-leaked-secret/automated-security-fixes": {
+   "body": {
+    "enabled": false,
+    "paused": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-leaked-secret/dependabot/alerts?per_page=100&state=open%2Cfixed%2Cdismissed%2Cauto_dismissed": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "vulnerability_alerts=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-leaked-secret/dependency-graph/sbom": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest",
+    "message": "Not Found",
+    "status": "404"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8"
+   },
+   "reason": "Not Found",
+   "status": 404
+  },
+  "/repos/Fetcher-Tester/fetcher-test-protected": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:17:42Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-protected",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-protected.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837041,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-protected",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:50:58Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 3,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-protected.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:38:18Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-protected/automated-security-fixes": {
+   "body": {
+    "enabled": false,
+    "paused": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-protected/dependabot/alerts?per_page=100&state=open%2Cfixed%2Cdismissed%2Cauto_dismissed": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "vulnerability_alerts=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-protected/dependency-graph/sbom": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest",
+    "message": "Not Found",
+    "status": "404"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8"
+   },
+   "reason": "Not Found",
+   "status": 404
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scanning-off": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:18:12Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-scanning-off",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-scanning-off.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837347,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-scanning-off",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:18:16Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "disabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "disabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 1,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-scanning-off.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:38:33Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scanning-off/automated-security-fixes": {
+   "body": {
+    "enabled": false,
+    "paused": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scanning-off/dependabot/alerts?per_page=100&state=open%2Cfixed%2Cdismissed%2Cauto_dismissed": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest/dependabot/alerts#list-dependabot-alerts-for-a-repository",
+    "message": "Dependabot alerts are disabled for this repository.",
+    "status": "403"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "vulnerability_alerts=read"
+   },
+   "reason": "Forbidden",
+   "status": 403
+  },
+  "/repos/Fetcher-Tester/fetcher-test-scanning-off/dependency-graph/sbom": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest",
+    "message": "Not Found",
+    "status": "404"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8"
+   },
+   "reason": "Not Found",
+   "status": 404
+  },
+  "/repos/Fetcher-Tester/fetcher-test-unprotected": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:17:59Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-unprotected",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-unprotected.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837236,
+    "is_template": false,
+    "language": null,
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-unprotected",
+    "network_count": 0,
+    "open_issues": 0,
+    "open_issues_count": 0,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T03:49:38Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "disabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 2,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-unprotected.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:38:25Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-unprotected/automated-security-fixes": {
+   "body": {
+    "enabled": false,
+    "paused": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-unprotected/dependabot/alerts?per_page=100&state=open%2Cfixed%2Cdismissed%2Cauto_dismissed": {
+   "body": [],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "vulnerability_alerts=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-unprotected/dependency-graph/sbom": {
+   "body": {
+    "documentation_url": "https://docs.github.com/rest",
+    "message": "Not Found",
+    "status": "404"
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8"
+   },
+   "reason": "Not Found",
+   "status": 404
+  },
+  "/repos/Fetcher-Tester/fetcher-test-vulnerable": {
+   "body": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": false,
+    "archived": false,
+    "created_at": "2026-10-04T03:18:02Z",
+    "custom_properties": {},
+    "default_branch": "main",
+    "delete_branch_on_merge": false,
+    "disabled": false,
+    "fork": false,
+    "forks": 0,
+    "forks_count": 0,
+    "full_name": "Fetcher-Tester/fetcher-test-vulnerable",
+    "git_url": "git://github.com/Fetcher-Tester/fetcher-test-vulnerable.git",
+    "has_discussions": false,
+    "has_downloads": false,
+    "has_issues": true,
+    "has_pages": false,
+    "has_projects": true,
+    "has_pull_requests": true,
+    "has_wiki": true,
+    "homepage": null,
+    "id": 1403837264,
+    "is_template": false,
+    "language": "Python",
+    "merge_commit_message": "PR_TITLE",
+    "merge_commit_title": "MERGE_MESSAGE",
+    "mirror_url": null,
+    "name": "fetcher-test-vulnerable",
+    "network_count": 0,
+    "open_issues": 2,
+    "open_issues_count": 2,
+    "organization": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "owner": {
+     "id": 337551672,
+     "login": "Fetcher-Tester",
+     "site_admin": false,
+     "type": "Organization",
+     "user_view_type": "public"
+    },
+    "permissions": {
+     "admin": true,
+     "maintain": true,
+     "pull": true,
+     "push": true,
+     "triage": true
+    },
+    "private": false,
+    "pull_request_creation_policy": "all",
+    "pushed_at": "2026-10-04T05:00:10Z",
+    "security_and_analysis": {
+     "dependabot_security_updates": {
+      "status": "enabled"
+     },
+     "secret_scanning": {
+      "status": "enabled"
+     },
+     "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+     },
+     "secret_scanning_push_protection": {
+      "status": "enabled"
+     },
+     "secret_scanning_validity_checks": {
+      "status": "disabled"
+     }
+    },
+    "size": 2,
+    "squash_merge_commit_message": "COMMIT_MESSAGES",
+    "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+    "ssh_url": "redacted@example.com:Fetcher-Tester/fetcher-test-vulnerable.git",
+    "stargazers_count": 0,
+    "subscribers_count": 0,
+    "updated_at": "2026-10-04T05:38:27Z",
+    "use_squash_pr_title_as_default": false,
+    "visibility": "public",
+    "watchers": 0,
+    "watchers_count": 0,
+    "web_commit_signoff_required": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "metadata=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-vulnerable/automated-security-fixes": {
+   "body": {
+    "enabled": true,
+    "paused": false
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "administration=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-vulnerable/dependabot/alerts?per_page=100&state=open%2Cfixed%2Cdismissed%2Cauto_dismissed": {
+   "body": [
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:59Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 56,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2026-15307",
+      "epss": {
+       "percentage": 0.01094,
+       "percentile": 0.64028
+      },
+      "ghsa_id": "GHSA-wvqv-fj8w-qmhm",
+      "published_at": "2026-08-04T18:31:27Z",
+      "severity": "high",
+      "summary": "Django GeoDjango spatial lookups allow file writes and outbound requests through GDAL raster parsing",
+      "updated_at": "2026-09-30T23:25:48Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "5.2.17"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": "< 5.2.17"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:59Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:59Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 55,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2026-15830",
+      "epss": {
+       "percentage": 0.00763,
+       "percentile": 0.53554
+      },
+      "ghsa_id": "GHSA-q238-5cxm-5c9h",
+      "published_at": "2026-08-04T18:31:27Z",
+      "severity": "medium",
+      "summary": "Django GeoDjango vulnerable to denial of service through deeply nested geometry collections",
+      "updated_at": "2026-09-30T20:19:01Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "5.2.17"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": "< 5.2.17"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:59Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:58Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 54,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2026-6873",
+      "epss": {
+       "percentage": 0.00281,
+       "percentile": 0.1857
+      },
+      "ghsa_id": "GHSA-h7pc-vwp9-298g",
+      "published_at": "2026-06-03T15:30:43Z",
+      "severity": "low",
+      "summary": "Django: signed cookies are vulnerable to salt namespace collisions",
+      "updated_at": "2026-08-07T20:04:30Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "5.2.15"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "low",
+      "vulnerable_version_range": "< 5.2.15"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:58Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:58Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 53,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2026-8404",
+      "epss": {
+       "percentage": 0.00429,
+       "percentile": 0.34584
+      },
+      "ghsa_id": "GHSA-8cjm-8mp7-r2xf",
+      "published_at": "2026-06-03T15:30:43Z",
+      "severity": "low",
+      "summary": "Django: UpdateCacheMiddleware may disclose cached responses due to case-sensitive Cache-Control handling",
+      "updated_at": "2026-08-07T20:04:00Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "5.2.15"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "low",
+      "vulnerable_version_range": "< 5.2.15"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:58Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:58Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 52,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2026-53877",
+      "epss": {
+       "percentage": 0.00437,
+       "percentile": 0.355
+      },
+      "ghsa_id": "GHSA-crhf-3pfg-w68w",
+      "published_at": "2026-07-07T15:32:57Z",
+      "severity": "medium",
+      "summary": " Django: GDALRaster may over-read heap memory when constructed from bytes",
+      "updated_at": "2026-08-07T20:01:07Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "5.2.16"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": "< 5.2.16"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:58Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:57Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 51,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2026-48588",
+      "epss": {
+       "percentage": 0.00429,
+       "percentile": 0.34584
+      },
+      "ghsa_id": "GHSA-3h9f-r86x-qvjx",
+      "published_at": "2026-07-07T15:32:57Z",
+      "severity": "low",
+      "summary": "Django: cache middleware may expose private responses when unrelated request cookies are present",
+      "updated_at": "2026-08-07T20:00:59Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "5.2.16"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "low",
+      "vulnerable_version_range": "< 5.2.16"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:57Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:57Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 50,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2026-53878",
+      "epss": {
+       "percentage": 0.00327,
+       "percentile": 0.23526
+      },
+      "ghsa_id": "GHSA-8qcx-xf44-272x",
+      "published_at": "2026-07-07T15:32:57Z",
+      "severity": "medium",
+      "summary": "Django: DomainNameValidator permits newline characters that may enable HTTP header injection",
+      "updated_at": "2026-08-07T20:00:50Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "5.2.16"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": "< 5.2.16"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:57Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:57Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 49,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2026-48587",
+      "epss": {
+       "percentage": 0.00429,
+       "percentile": 0.34584
+      },
+      "ghsa_id": "GHSA-923m-gv2p-w5qp",
+      "published_at": "2026-06-03T15:30:43Z",
+      "severity": "low",
+      "summary": "Django: has_vary_header may expose cached responses when Vary values contain whitespace",
+      "updated_at": "2026-08-07T19:56:59Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "5.2.15"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "low",
+      "vulnerable_version_range": "< 5.2.15"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:57Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:56Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "requests"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 48,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2026-25645",
+      "epss": {
+       "percentage": 0.00185,
+       "percentile": 0.0716
+      },
+      "ghsa_id": "GHSA-gc5v-m9x4-r6x2",
+      "published_at": "2026-03-25T16:56:28Z",
+      "severity": "medium",
+      "summary": "Requests has Insecure Temp File Reuse in its extract_zipped_paths() utility function",
+      "updated_at": "2026-03-27T22:07:43Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.33.0"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "requests"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": "< 2.33.0"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:56Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:56Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 47,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2025-64459",
+      "epss": {
+       "percentage": 0.19396,
+       "percentile": 0.97021
+      },
+      "ghsa_id": "GHSA-frmv-pr5f-9mcr",
+      "published_at": "2025-11-05T15:31:07Z",
+      "severity": "critical",
+      "summary": "Django vulnerable to SQL injection via _connector keyword argument in QuerySet and Q objects.",
+      "updated_at": "2026-06-05T14:34:00Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "4.2.26"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "critical",
+      "vulnerable_version_range": "< 4.2.26"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:56Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:56Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 46,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2025-64458",
+      "epss": {
+       "percentage": 0.01902,
+       "percentile": 0.7853
+      },
+      "ghsa_id": "GHSA-qw25-v68c-qjf3",
+      "published_at": "2025-11-05T15:31:07Z",
+      "severity": "high",
+      "summary": "Django has a denial-of-service vulnerability in HttpResponseRedirect and HttpResponsePermanentRedirect on Windows",
+      "updated_at": "2026-06-05T14:33:45Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "4.2.26"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": "< 4.2.26"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:56Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:55Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 45,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2025-57833",
+      "epss": {
+       "percentage": 0.16759,
+       "percentile": 0.96899
+      },
+      "ghsa_id": "GHSA-6w2r-r2m5-xq5w",
+      "published_at": "2025-09-08T18:31:31Z",
+      "severity": "high",
+      "summary": "Django is subject to SQL injection through its column aliases",
+      "updated_at": "2026-06-05T14:33:30Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "4.2.24"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": "< 4.2.24"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:55Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:55Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "requests"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 44,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2024-47081",
+      "epss": {
+       "percentage": 0.0098,
+       "percentile": 0.60713
+      },
+      "ghsa_id": "GHSA-9hjg-9r4m-mvj7",
+      "published_at": "2025-06-09T19:06:08Z",
+      "severity": "medium",
+      "summary": "Requests vulnerable to .netrc credentials leak via malicious URLs",
+      "updated_at": "2025-06-09T19:06:12Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.32.4"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "requests"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": "< 2.32.4"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:55Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:55Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 43,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2025-48432",
+      "epss": {
+       "percentage": 0.00751,
+       "percentile": 0.52984
+      },
+      "ghsa_id": "GHSA-7xr5-9hcq-chf9",
+      "published_at": "2025-06-05T03:30:58Z",
+      "severity": "medium",
+      "summary": "Django Improper Output Neutralization for Logs vulnerability",
+      "updated_at": "2025-06-10T20:03:55Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "4.2.22"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": "< 4.2.22"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:55Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:54Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 42,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2024-45231",
+      "epss": {
+       "percentage": 0.00788,
+       "percentile": 0.54501
+      },
+      "ghsa_id": "GHSA-rrqc-c2jx-6jgv",
+      "published_at": "2024-10-08T18:33:13Z",
+      "severity": "medium",
+      "summary": "Django allows enumeration of user e-mail addresses",
+      "updated_at": "2024-10-30T19:02:44Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "4.2.16"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": "< 4.2.16"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:54Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:54Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 41,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2019-14233",
+      "epss": {
+       "percentage": 0.03172,
+       "percentile": 0.87516
+      },
+      "ghsa_id": "GHSA-h5jv-4p7w-64jg",
+      "published_at": "2019-08-06T01:43:33Z",
+      "severity": "high",
+      "summary": "Django Denial-of-service in strip_tags()",
+      "updated_at": "2024-09-20T16:25:07Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.4"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 2.2a1, < 2.2.4"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:54Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:54Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 40,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2019-14232",
+      "epss": {
+       "percentage": 0.03531,
+       "percentile": 0.88734
+      },
+      "ghsa_id": "GHSA-c4qh-4vgv-qc6g",
+      "published_at": "2019-08-06T01:43:29Z",
+      "severity": "high",
+      "summary": "Django Denial-of-service in django.utils.text.Truncator",
+      "updated_at": "2024-09-20T16:15:23Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.4"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 2.2a1, < 2.2.4"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:54Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:53Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 39,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2019-14235",
+      "epss": {
+       "percentage": 0.03073,
+       "percentile": 0.87072
+      },
+      "ghsa_id": "GHSA-v9qg-3j8p-r63v",
+      "published_at": "2019-08-06T01:43:31Z",
+      "severity": "high",
+      "summary": "Uncontrolled Recursion in Django",
+      "updated_at": "2024-09-20T16:09:22Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.4"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 2.2a1, < 2.2.4"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:53Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:53Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 38,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2019-14234",
+      "epss": {
+       "percentage": 0.47694,
+       "percentile": 0.98793
+      },
+      "ghsa_id": "GHSA-6r97-cj55-9hrq",
+      "published_at": "2019-08-16T14:00:34Z",
+      "severity": "critical",
+      "summary": "SQL Injection in Django",
+      "updated_at": "2024-09-20T16:08:24Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.4"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "critical",
+      "vulnerable_version_range": ">= 2.2a1, < 2.2.4"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:53Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:53Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 37,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2021-45115",
+      "epss": {
+       "percentage": 0.02417,
+       "percentile": 0.83505
+      },
+      "ghsa_id": "GHSA-53qw-q765-4fww",
+      "published_at": "2022-01-12T19:20:53Z",
+      "severity": "high",
+      "summary": "Denial-of-service in Django",
+      "updated_at": "2024-09-20T16:04:23Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.26"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 2.2a1, < 2.2.26"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:53Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:52Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 36,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2019-12308",
+      "epss": {
+       "percentage": 0.02402,
+       "percentile": 0.83305
+      },
+      "ghsa_id": "GHSA-7rp2-fm2h-wchj",
+      "published_at": "2019-06-10T18:43:25Z",
+      "severity": "medium",
+      "summary": "Django Cross-site Scripting in AdminURLFieldWidget",
+      "updated_at": "2024-09-20T16:03:28Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.2"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 2.2a1, < 2.2.2"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:52Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:52Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 35,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2021-28658",
+      "epss": {
+       "percentage": 0.03865,
+       "percentile": 0.89547
+      },
+      "ghsa_id": "GHSA-xgxc-v2qg-chmh",
+      "published_at": "2021-04-08T18:11:48Z",
+      "severity": "medium",
+      "summary": "Directory Traversal in Django",
+      "updated_at": "2024-09-20T15:47:27Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.20"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 2.2a1, < 2.2.20"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:52Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:52Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 34,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2021-33571",
+      "epss": {
+       "percentage": 0.0526,
+       "percentile": 0.92051
+      },
+      "ghsa_id": "GHSA-p99v-5w3c-jqq9",
+      "published_at": "2021-06-10T17:21:12Z",
+      "severity": "high",
+      "summary": "Django Access Control Bypass possibly leading to SSRF, RFI, and LFI attacks ",
+      "updated_at": "2024-09-20T15:46:26Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.24"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 2.2a1, < 2.2.24"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:52Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:51Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 33,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2021-44420",
+      "epss": {
+       "percentage": 0.02488,
+       "percentile": 0.84036
+      },
+      "ghsa_id": "GHSA-v6rh-hp5x-86rv",
+      "published_at": "2021-12-09T19:09:37Z",
+      "severity": "medium",
+      "summary": "Potential bypass of an upstream access control based on URL paths in Django",
+      "updated_at": "2024-11-18T16:26:19Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.25"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 2.2a1, < 2.2.25"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:51Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:51Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 32,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2020-13596",
+      "epss": {
+       "percentage": 0.02897,
+       "percentile": 0.85965
+      },
+      "ghsa_id": "GHSA-2m34-jcjv-45xf",
+      "published_at": "2020-06-05T16:24:28Z",
+      "severity": "medium",
+      "summary": "XSS in Django",
+      "updated_at": "2024-09-20T15:43:13Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.13"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 2.2a1, < 2.2.13"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:51Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:51Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 31,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2021-31542",
+      "epss": {
+       "percentage": 0.05334,
+       "percentile": 0.9214
+      },
+      "ghsa_id": "GHSA-rxjp-mfm9-w4wr",
+      "published_at": "2021-06-04T21:15:56Z",
+      "severity": "high",
+      "summary": "Path Traversal in Django",
+      "updated_at": "2024-09-20T15:30:30Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.21"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 2.2, < 2.2.21"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:51Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:50Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 30,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2021-32052",
+      "epss": {
+       "percentage": 0.03172,
+       "percentile": 0.87513
+      },
+      "ghsa_id": "GHSA-qm57-vhq3-3fwf",
+      "published_at": "2021-06-09T17:14:51Z",
+      "severity": "medium",
+      "summary": "Header injection possible in Django",
+      "updated_at": "2024-09-20T15:28:26Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.22"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 2.2, < 2.2.22"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:50Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:50Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 29,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2020-13254",
+      "epss": {
+       "percentage": 0.0609,
+       "percentile": 0.92548
+      },
+      "ghsa_id": "GHSA-wpjr-j57x-wxfw",
+      "published_at": "2020-06-05T16:20:44Z",
+      "severity": "high",
+      "summary": "Data leakage via cache key collision in Django",
+      "updated_at": "2024-11-18T16:26:06Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.13"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 2.2, < 2.2.13"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:50Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:50Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 28,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2020-9402",
+      "epss": {
+       "percentage": 0.22513,
+       "percentile": 0.975
+      },
+      "ghsa_id": "GHSA-3gh2-xw74-jmcw",
+      "published_at": "2020-06-05T14:52:07Z",
+      "severity": "high",
+      "summary": "SQL injection in Django",
+      "updated_at": "2026-05-19T16:12:01Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.11"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 2.2, < 2.2.11"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:50Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:49Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 27,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2020-7471",
+      "epss": {
+       "percentage": 0.65575,
+       "percentile": 0.99236
+      },
+      "ghsa_id": "GHSA-hmr4-m2h5-33qx",
+      "published_at": "2020-02-11T21:03:20Z",
+      "severity": "critical",
+      "summary": "SQL injection in Django",
+      "updated_at": "2024-09-20T15:03:13Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.10"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "critical",
+      "vulnerable_version_range": ">= 2.0, < 2.2.10"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:49Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:49Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 26,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2019-19844",
+      "epss": {
+       "percentage": 0.53561,
+       "percentile": 0.98918
+      },
+      "ghsa_id": "GHSA-vfq6-hq5r-27r6",
+      "published_at": "2020-01-16T22:35:12Z",
+      "severity": "critical",
+      "summary": "Django Potential account hijack via password reset form",
+      "updated_at": "2024-09-20T15:01:09Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.9"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "critical",
+      "vulnerable_version_range": ">= 2.0, < 2.2.9"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:49Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:49Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 25,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2019-19118",
+      "epss": {
+       "percentage": 0.0167,
+       "percentile": 0.75767
+      },
+      "ghsa_id": "GHSA-hvmf-r92r-27hr",
+      "published_at": "2019-12-04T21:26:28Z",
+      "severity": "high",
+      "summary": "Django allows unintended model editing",
+      "updated_at": "2024-11-18T16:26:05Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.8"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 2.2, < 2.2.8"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:49Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:48Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 24,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2021-45116",
+      "epss": {
+       "percentage": 0.01855,
+       "percentile": 0.77769
+      },
+      "ghsa_id": "GHSA-8c5j-9r9f-c6w8",
+      "published_at": "2022-01-12T19:21:10Z",
+      "severity": "high",
+      "summary": "Information disclosure in Django",
+      "updated_at": "2024-09-20T12:22:53Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.26"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 2.2, < 2.2.26"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:48Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:48Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 23,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2020-24583",
+      "epss": {
+       "percentage": 0.03969,
+       "percentile": 0.89805
+      },
+      "ghsa_id": "GHSA-m6gj-h9gm-gw44",
+      "published_at": "2021-03-18T20:30:13Z",
+      "severity": "high",
+      "summary": "Django Incorrect Default Permissions",
+      "updated_at": "2024-09-18T20:05:05Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.16"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 2.2a1, < 2.2.16"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:48Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:48Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 22,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2019-12781",
+      "epss": {
+       "percentage": 0.01711,
+       "percentile": 0.76525
+      },
+      "ghsa_id": "GHSA-6c7v-2f49-8h26",
+      "published_at": "2019-07-03T20:37:25Z",
+      "severity": "medium",
+      "summary": "Django Incorrect HTTP detection with reverse-proxy connecting via HTTPS",
+      "updated_at": "2024-09-18T16:15:30Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.3"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 2.2, < 2.2.3"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:48Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:47Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 21,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2022-36359",
+      "epss": {
+       "percentage": 0.00883,
+       "percentile": 0.57582
+      },
+      "ghsa_id": "GHSA-8x94-hmjh-97hq",
+      "published_at": "2022-08-11T14:49:12Z",
+      "severity": "high",
+      "summary": "Django vulnerable to Reflected File Download attack",
+      "updated_at": "2024-12-18T22:08:24Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "3.2.15"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": "< 3.2.15"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:47Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:47Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "requests"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 20,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2024-35195",
+      "epss": {
+       "percentage": 0.0034,
+       "percentile": 0.24687
+      },
+      "ghsa_id": "GHSA-9wx4-h78v-vm56",
+      "published_at": "2024-05-20T20:15:00Z",
+      "severity": "medium",
+      "summary": "Requests `Session` object does not verify requests after making first request with verify=False",
+      "updated_at": "2026-01-16T00:02:51Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.32.0"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "requests"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": "< 2.32.0"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:47Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:47Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 19,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2021-45452",
+      "epss": {
+       "percentage": 0.02408,
+       "percentile": 0.83508
+      },
+      "ghsa_id": "GHSA-jrh2-hc4r-7jwx",
+      "published_at": "2022-01-12T19:21:04Z",
+      "severity": "medium",
+      "summary": "Directory-traversal in Django",
+      "updated_at": "2024-09-20T12:19:35Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.26"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 2.2, < 2.2.26"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:47Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:47Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 18,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2022-23833",
+      "epss": {
+       "percentage": 0.49527,
+       "percentile": 0.98847
+      },
+      "ghsa_id": "GHSA-6cw3-g6wv-c2xv",
+      "published_at": "2022-02-04T00:00:26Z",
+      "severity": "high",
+      "summary": "Infinite Loop in Django",
+      "updated_at": "2024-09-20T15:34:08Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.27"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 2.2, < 2.2.27"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:47Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:46Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 17,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2022-22818",
+      "epss": {
+       "percentage": 0.03356,
+       "percentile": 0.8792
+      },
+      "ghsa_id": "GHSA-95rw-fx8r-36v6",
+      "published_at": "2022-02-04T00:00:33Z",
+      "severity": "medium",
+      "summary": "Cross-site Scripting in Django",
+      "updated_at": "2024-09-20T15:35:37Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.27"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 2.2, < 2.2.27"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:46Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:46Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 16,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2019-11358",
+      "epss": {
+       "percentage": 0.8682,
+       "percentile": 0.9974
+      },
+      "ghsa_id": "GHSA-6c3j-c64m-qhgq",
+      "published_at": "2019-04-26T16:29:11Z",
+      "severity": "medium",
+      "summary": "XSS in jQuery as used in Drupal, Backdrop CMS, and other products",
+      "updated_at": "2024-11-05T20:16:56Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.2"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 2.2a1, < 2.2.2"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:46Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:46Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "requests"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 15,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2023-32681",
+      "epss": {
+       "percentage": 0.02974,
+       "percentile": 0.8652
+      },
+      "ghsa_id": "GHSA-j8r2-6x86-q33q",
+      "published_at": "2023-05-22T20:36:32Z",
+      "severity": "medium",
+      "summary": "Unintended leak of Proxy-Authorization header in requests",
+      "updated_at": "2024-03-27T20:09:55Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.31.0"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "requests"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 2.3.0, < 2.31.0"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:46Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:45Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 14,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2022-28346",
+      "epss": {
+       "percentage": 0.18661,
+       "percentile": 0.96964
+      },
+      "ghsa_id": "GHSA-2gwj-7jmv-h26r",
+      "published_at": "2022-04-13T00:00:33Z",
+      "severity": "critical",
+      "summary": "SQL Injection in Django",
+      "updated_at": "2024-09-20T15:09:55Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.28"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "critical",
+      "vulnerable_version_range": ">= 2.2, < 2.2.28"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:45Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:45Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 13,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2022-28347",
+      "epss": {
+       "percentage": 0.02943,
+       "percentile": 0.86538
+      },
+      "ghsa_id": "GHSA-w24h-v9qh-8gxj",
+      "published_at": "2022-04-13T00:00:33Z",
+      "severity": "critical",
+      "summary": "SQL Injection in Django",
+      "updated_at": "2024-09-20T15:09:14Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.28"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "Django"
+      },
+      "severity": "critical",
+      "vulnerable_version_range": ">= 2.2, < 2.2.28"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:45Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:44Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 12,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2021-33203",
+      "epss": {
+       "percentage": 0.02737,
+       "percentile": 0.85502
+      },
+      "ghsa_id": "GHSA-68w8-qjq3-2gfm",
+      "published_at": "2021-06-10T17:21:00Z",
+      "severity": "medium",
+      "summary": "Path Traversal in Django",
+      "updated_at": "2024-09-20T15:32:27Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.24"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": "< 2.2.24"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:44Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:44Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 11,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2020-24584",
+      "epss": {
+       "percentage": 0.03297,
+       "percentile": 0.8771
+      },
+      "ghsa_id": "GHSA-fr28-569j-53c4",
+      "published_at": "2021-03-18T20:30:01Z",
+      "severity": "medium",
+      "summary": "Django Incorrect Default Permissions",
+      "updated_at": "2024-11-18T16:26:11Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.16"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 2.2, < 2.2.16"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:44Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:44Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 10,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2021-3281",
+      "epss": {
+       "percentage": 0.07605,
+       "percentile": 0.93774
+      },
+      "ghsa_id": "GHSA-fvgf-6h6h-3322",
+      "published_at": "2021-03-18T20:29:49Z",
+      "severity": "medium",
+      "summary": "Django Directory Traversal via archive.extract",
+      "updated_at": "2024-09-20T15:36:34Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.2.18"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "django"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 2.2, < 2.2.18"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:44Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:43Z",
+     "dependency": {
+      "manifest_path": "requirements.txt",
+      "package": {
+       "ecosystem": "pip",
+       "name": "requests"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 9,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2018-18074",
+      "epss": {
+       "percentage": 0.07443,
+       "percentile": 0.93669
+      },
+      "ghsa_id": "GHSA-x84v-xcm2-53pg",
+      "published_at": "2018-10-29T19:06:46Z",
+      "severity": "high",
+      "summary": "Insufficiently Protected Credentials in Requests",
+      "updated_at": "2024-10-21T21:26:18Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "2.20.0"
+      },
+      "package": {
+       "ecosystem": "pip",
+       "name": "requests"
+      },
+      "severity": "high",
+      "vulnerable_version_range": "<= 2.19.1"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:43Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:43Z",
+     "dependency": {
+      "manifest_path": "package.json",
+      "package": {
+       "ecosystem": "npm",
+       "name": "lodash"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 8,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2026-4800",
+      "epss": {
+       "percentage": 0.02618,
+       "percentile": 0.84794
+      },
+      "ghsa_id": "GHSA-r5fr-rjxr-66jc",
+      "published_at": "2026-04-01T23:51:12Z",
+      "severity": "high",
+      "summary": "lodash vulnerable to Code Injection via `_.template` imports key names",
+      "updated_at": "2026-04-01T23:51:13Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "4.18.0"
+      },
+      "package": {
+       "ecosystem": "npm",
+       "name": "lodash"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 4.0.0, <= 4.17.23"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:43Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:43Z",
+     "dependency": {
+      "manifest_path": "package.json",
+      "package": {
+       "ecosystem": "npm",
+       "name": "lodash"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 7,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2026-2950",
+      "epss": {
+       "percentage": 0.00377,
+       "percentile": 0.28871
+      },
+      "ghsa_id": "GHSA-f23m-r3pf-42rh",
+      "published_at": "2026-04-01T23:50:27Z",
+      "severity": "medium",
+      "summary": "lodash vulnerable to Prototype Pollution via array path bypass in `_.unset` and `_.omit`",
+      "updated_at": "2026-04-01T23:50:28Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "4.18.0"
+      },
+      "package": {
+       "ecosystem": "npm",
+       "name": "lodash"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": "<= 4.17.23"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:43Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:42Z",
+     "dependency": {
+      "manifest_path": "package.json",
+      "package": {
+       "ecosystem": "npm",
+       "name": "lodash"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 6,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2025-13465",
+      "epss": {
+       "percentage": 0.0185,
+       "percentile": 0.78172
+      },
+      "ghsa_id": "GHSA-xxjr-mmjv-4gpg",
+      "published_at": "2026-01-21T23:01:22Z",
+      "severity": "medium",
+      "summary": "Lodash has Prototype Pollution Vulnerability in `_.unset` and `_.omit` functions",
+      "updated_at": "2026-06-09T10:56:35Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "4.17.23"
+      },
+      "package": {
+       "ecosystem": "npm",
+       "name": "lodash"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 4.0.0, <= 4.17.22"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:42Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:42Z",
+     "dependency": {
+      "manifest_path": "package.json",
+      "package": {
+       "ecosystem": "npm",
+       "name": "lodash"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 5,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2020-28500",
+      "epss": {
+       "percentage": 0.07336,
+       "percentile": 0.93601
+      },
+      "ghsa_id": "GHSA-29mw-wpgm-hmr9",
+      "published_at": "2022-01-06T20:30:46Z",
+      "severity": "medium",
+      "summary": "Regular Expression Denial of Service (ReDoS) in lodash",
+      "updated_at": "2025-09-29T20:19:46Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "4.17.21"
+      },
+      "package": {
+       "ecosystem": "npm",
+       "name": "lodash"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 4.0.0, < 4.17.21"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:42Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:42Z",
+     "dependency": {
+      "manifest_path": "package.json",
+      "package": {
+       "ecosystem": "npm",
+       "name": "lodash"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 4,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2020-8203",
+      "epss": {
+       "percentage": 0.05213,
+       "percentile": 0.91503
+      },
+      "ghsa_id": "GHSA-p6mc-m468-83gw",
+      "published_at": "2020-07-15T19:15:48Z",
+      "severity": "high",
+      "summary": "Prototype Pollution in lodash",
+      "updated_at": "2025-08-12T21:43:40Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "4.17.19"
+      },
+      "package": {
+       "ecosystem": "npm",
+       "name": "lodash"
+      },
+      "severity": "high",
+      "vulnerable_version_range": ">= 3.7.0, < 4.17.19"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:42Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:41Z",
+     "dependency": {
+      "manifest_path": "package.json",
+      "package": {
+       "ecosystem": "npm",
+       "name": "minimist"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 3,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2021-44906",
+      "epss": {
+       "percentage": 0.04581,
+       "percentile": 0.905
+      },
+      "ghsa_id": "GHSA-xvch-5gv4-984h",
+      "published_at": "2022-03-18T00:01:09Z",
+      "severity": "critical",
+      "summary": "Prototype Pollution in minimist",
+      "updated_at": "2024-06-21T21:33:52Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "1.2.6"
+      },
+      "package": {
+       "ecosystem": "npm",
+       "name": "minimist"
+      },
+      "severity": "critical",
+      "vulnerable_version_range": ">= 1.0.0, < 1.2.6"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:41Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:41Z",
+     "dependency": {
+      "manifest_path": "package.json",
+      "package": {
+       "ecosystem": "npm",
+       "name": "lodash"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 2,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2021-23337",
+      "epss": {
+       "percentage": 0.21333,
+       "percentile": 0.97519
+      },
+      "ghsa_id": "GHSA-35jh-r3h4-6jhm",
+      "published_at": "2021-05-06T16:05:51Z",
+      "severity": "high",
+      "summary": "Command Injection in lodash",
+      "updated_at": "2025-08-12T21:44:25Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "4.17.21"
+      },
+      "package": {
+       "ecosystem": "npm",
+       "name": "lodash"
+      },
+      "severity": "high",
+      "vulnerable_version_range": "< 4.17.21"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:41Z"
+    },
+    {
+     "assignees": [],
+     "auto_dismissed_at": null,
+     "created_at": "2026-10-04T04:58:40Z",
+     "dependency": {
+      "manifest_path": "package.json",
+      "package": {
+       "ecosystem": "npm",
+       "name": "minimist"
+      },
+      "relationship": "direct",
+      "scope": "runtime"
+     },
+     "dismissal_request": null,
+     "dismissed_at": null,
+     "dismissed_by": null,
+     "dismissed_comment": null,
+     "dismissed_reason": null,
+     "fixed_at": null,
+     "number": 1,
+     "security_advisory": {
+      "classification": "general",
+      "cve_id": "CVE-2020-7598",
+      "epss": {
+       "percentage": 0.01931,
+       "percentile": 0.78677
+      },
+      "ghsa_id": "GHSA-vh95-rmgr-6w4m",
+      "published_at": "2020-04-03T21:48:32Z",
+      "severity": "medium",
+      "summary": "Prototype Pollution in minimist",
+      "updated_at": "2024-02-13T20:00:55Z",
+      "withdrawn_at": null
+     },
+     "security_vulnerability": {
+      "first_patched_version": {
+       "identifier": "1.2.3"
+      },
+      "package": {
+       "ecosystem": "npm",
+       "name": "minimist"
+      },
+      "severity": "medium",
+      "vulnerable_version_range": ">= 1.0.0, < 1.2.3"
+     },
+     "state": "open",
+     "updated_at": "2026-10-04T04:58:40Z"
+    }
+   ],
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Accepted-GitHub-Permissions": "vulnerability_alerts=read"
+   },
+   "reason": "OK",
+   "status": 200
+  },
+  "/repos/Fetcher-Tester/fetcher-test-vulnerable/dependency-graph/sbom": {
+   "body": {
+    "sbom": {
+     "SPDXID": "SPDXRef-DOCUMENT",
+     "creationInfo": {
+      "created": "2026-10-04T05:49:15Z",
+      "creators": [
+       "Tool: protobom-v0.0.0-20261002212751-c7f93c253304+dirty",
+       "Tool: GitHub.com-Dependency-Graph",
+       "Tool: dependabot"
+      ]
+     },
+     "dataLicense": "CC0-1.0",
+     "documentNamespace": "https://spdx.org/spdxdocs/protobom/a60b96f3-002e-43ee-87a2-2400d4a0bb72",
+     "name": "com.github.Fetcher-Tester/fetcher-test-vulnerable",
+     "packages": [
+      {
+       "SPDXID": "SPDXRef-pypi-django-2.2-bb20f9",
+       "downloadLocation": "NOASSERTION",
+       "externalRefs": [
+        {
+         "referenceCategory": "PACKAGE-MANAGER",
+         "referenceLocator": "pkg:pypi/django@2.2",
+         "referenceType": "purl"
+        }
+       ],
+       "filesAnalyzed": false,
+       "licenseConcluded": "BSD-2-Clause AND BSD-3-Clause AND LicenseRef-github-NOASSERTION AND Python-2.0",
+       "name": "django",
+       "versionInfo": "2.2"
+      },
+      {
+       "SPDXID": "SPDXRef-pypi-requests-2.19.0-98184d",
+       "downloadLocation": "NOASSERTION",
+       "externalRefs": [
+        {
+         "referenceCategory": "PACKAGE-MANAGER",
+         "referenceLocator": "pkg:pypi/requests@2.19.0",
+         "referenceType": "purl"
+        }
+       ],
+       "filesAnalyzed": false,
+       "licenseConcluded": "Apache-2.0",
+       "name": "requests",
+       "versionInfo": "2.19.0"
+      },
+      {
+       "SPDXID": "SPDXRef-github-Fetcher-Tester-fetcher-test-vulnerable-main-2eefb6",
+       "downloadLocation": "git+https://github.com/Fetcher-Tester/fetcher-test-vulnerable",
+       "externalRefs": [
+        {
+         "referenceCategory": "PACKAGE-MANAGER",
+         "referenceLocator": "pkg:github/Fetcher-Tester/fetcher-test-vulnerable@main",
+         "referenceType": "purl"
+        }
+       ],
+       "filesAnalyzed": false,
+       "name": "com.github.Fetcher-Tester/fetcher-test-vulnerable",
+       "versionInfo": "main"
+      }
+     ],
+     "relationships": [
+      {
+       "relatedSpdxElement": "SPDXRef-pypi-django-2.2-bb20f9",
+       "relationshipType": "DEPENDS_ON",
+       "spdxElementId": "SPDXRef-github-Fetcher-Tester-fetcher-test-vulnerable-main-2eefb6"
+      },
+      {
+       "relatedSpdxElement": "SPDXRef-pypi-requests-2.19.0-98184d",
+       "relationshipType": "DEPENDS_ON",
+       "spdxElementId": "SPDXRef-github-Fetcher-Tester-fetcher-test-vulnerable-main-2eefb6"
+      },
+      {
+       "relatedSpdxElement": "SPDXRef-github-Fetcher-Tester-fetcher-test-vulnerable-main-2eefb6",
+       "relationshipType": "DESCRIBES",
+       "spdxElementId": "SPDXRef-DOCUMENT"
+      }
+     ],
+     "spdxVersion": "SPDX-2.3"
+    }
+   },
+   "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "Link": "<https://github.blog/changelog/2026-05-12-synchronous-sbom-api-deprecated>; rel=\"deprecation\"; type=\"text/html\", </repos/Fetcher-Tester/fetcher-test-vulnerable/dependency-graph/sbom/generate-report>; rel=\"alternate\"",
+    "X-Accepted-GitHub-Permissions": "contents=read"
+   },
+   "reason": "OK",
+   "status": 200
+  }
+ },
+ "env": {
+  "GITHUB_CHECK_KEV": "false",
+  "GITHUB_ORG": "Fetcher-Tester",
+  "GITHUB_REPOSITORIES": "fetcher-test-disabled-rules,fetcher-test-evaluate-rules,fetcher-test-globs,fetcher-test-leaked-secret,fetcher-test-protected,fetcher-test-scanning-off,fetcher-test-unprotected,fetcher-test-vulnerable"
+ },
+ "exit_code": 0,
+ "fetcher": "dependabot_alerts",
+ "org": "Fetcher-Tester"
+}

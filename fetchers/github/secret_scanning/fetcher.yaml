@@ -1,0 +1,62 @@
+name: github_secret_scanning
+version: 0.1.0
+description: >-
+  Secret scanning for every repository: whether scanning and push protection
+  are on, every alert with its validity and resolution, and every push that
+  bypassed push protection. The secrets themselves are never collected.
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: github_secret_scanning.json
+  aggregation: per_target
+
+secrets: []
+
+ksis:
+  - KSI-SVC-ASM
+
+evidence_set:
+  reference_id: EVD-GITHUB-SECRET-SCANNING
+  name: GitHub Secret Scanning
+  instructions: >-
+    Per repository, the secret scanning and push protection settings, every
+    alert (requested with hide_secret; the secret value is never collected)
+    with type, validity (active, inactive, unknown), resolution and age, and
+    every alert whose push bypassed push protection. Settings are null when
+    the token cannot read them, never reported as disabled.
