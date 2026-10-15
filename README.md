@@ -20,20 +20,6 @@ Each fetcher is a small, read-only script that writes JSON to disk. A separate u
 
 </div>
 
-### Try it in a minute
-
-You do not need credentials. The bundled `demo_hello` fetcher writes synthetic evidence, so you can watch a full run before you connect a real service.
-
-```bash
-git clone https://github.com/paramify/paramify-fetchers.git && cd paramify-fetchers
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
-paramify run examples/demo.yaml                    # synthetic evidence, no credentials
-paramify evidence evidence/run-*/demo_hello.json   # read what it wrote
-```
-
-For real services, [Install](#install) lists the extras and CLIs that each one needs. Then pick how you want to use it: the [TUI](#the-tui), an [AI agent](#drive-it-with-an-ai-agent), or the [CLI](#using-the-cli).
-
 ---
 
 ## Supported services
@@ -96,6 +82,22 @@ More integrations are in progress. To ask for a new platform or fetcher, post in
 <sub>and more</sub>
 
 </div>
+
+---
+
+## Try it in a minute
+
+You do not need credentials. The bundled `demo_hello` fetcher writes synthetic evidence, so you can watch a full run before you connect a real service.
+
+```bash
+git clone https://github.com/paramify/paramify-fetchers.git && cd paramify-fetchers
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+paramify run examples/demo.yaml                    # synthetic evidence, no credentials
+paramify evidence evidence/run-*/demo_hello.json   # read what it wrote
+```
+
+For real services, [Install](#install) lists the extras and CLIs that each one needs. Then pick how you want to use it: the [TUI](#the-tui), an [AI agent](#drive-it-with-an-ai-agent), or the [CLI](#using-the-cli).
 
 ---
 
