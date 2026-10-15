@@ -17,6 +17,12 @@ source:
   tab: 20x Mapping
   imported_at: '2026-10-15'
 mappings:
+- fetcher: aws_access_analyzer_findings
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-MAT
 - fetcher: aws_acm_certificate_status
   solution_capability:
     id: RS-03-02-02
@@ -30,6 +36,12 @@ mappings:
     name: Application Session
   ksis:
   - KSI-IAM-JIT
+- fetcher: aws_athena_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
 - fetcher: aws_auto_scaling_high_availability
   solution_capability:
     id: RS-02-03-01
@@ -208,6 +220,12 @@ mappings:
     name: Security Event Notifications
   ksis:
   - KSI-MLA-RVL
+- fetcher: aws_codeartifact_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
 - fetcher: aws_codebuild_pipeline_config
   solution_capability:
     id: RS-13-02-07
@@ -386,6 +404,26 @@ mappings:
     name: Recovery Objectives
   ksis:
   - KSI-RPL-ABO
+- fetcher: aws_dms_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+  - KSI-SVC-VCM
+- fetcher: aws_documentdb_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+  - KSI-SVC-VCM
+- fetcher: aws_dynamodb_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
 - fetcher: aws_dynamodb_pitr_status
   solution_capability:
     id: RS-02-01-01
@@ -465,6 +503,12 @@ mappings:
     name: Validated Cryptographic Modules
   ksis:
   - KSI-SVC-VRI
+- fetcher: aws_efs_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
 - fetcher: aws_efs_high_availability
   solution_capability:
     id: RS-02-03-01
@@ -495,6 +539,54 @@ mappings:
     name: Contingency Plan
   ksis:
   - KSI-CNA-OFA
+- fetcher: aws_eks_least_privilege
+  solution_capability:
+    id: RS-12-01-05
+    name: Logged Event Type Inventory
+  ksis:
+  - KSI-MLA-LET
+- fetcher: aws_elasticache_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: aws_emr_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: aws_firehose_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: aws_fsx_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: aws_global_accelerator_ha
+  solution_capability:
+    id: RS-02-03-01
+    name: Alternate Processing Sites
+  ksis:
+  - KSI-CNA-OFA
+- fetcher: aws_global_accelerator_ha
+  solution_capability:
+    id: RS-02-01-01
+    name: Contingency Plan
+  ksis:
+  - KSI-CNA-OFA
+- fetcher: aws_glue_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
 - fetcher: aws_guard_duty
   solution_capability:
     id: RS-12-01-02
@@ -583,6 +675,31 @@ mappings:
     name: Multifactor Authentication
   ksis:
   - KSI-IAM-APM
+- fetcher: aws_iam_password_policy
+  solution_capability:
+    id: RS-07-03-03
+    name: Multifactor Authentication
+  ksis:
+  - KSI-IAM-APM
+- fetcher: aws_iam_password_policy
+  solution_capability:
+    id: RS-07-04-02
+    name: Personal Identity Verification (PIV)
+  ksis:
+  - KSI-IAM-APM
+- fetcher: aws_iam_policies
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-MLA-ALA
+- fetcher: aws_iam_policies
+  solution_capability:
+    id: RS-07-02-03
+    name: Logical Access Review
+  ksis:
+  - KSI-IAM-ELP
+  - KSI-MLA-ALA
 - fetcher: aws_iam_roles
   solution_capability:
     id: RS-13-01-02
@@ -638,6 +755,18 @@ mappings:
     name: Third-Party Assurance Review
   ksis:
   - KSI-SCR-MON
+- fetcher: aws_kafka_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: aws_kinesis_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
 - fetcher: aws_kms_key_rotation
   solution_capability:
     id: RS-03-02-02
@@ -687,6 +816,18 @@ mappings:
     name: Data Inventory Reconciliation
   ksis:
   - KSI-PIY-GIV
+- fetcher: aws_memorydb_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: aws_neptune_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
 - fetcher: aws_network_acls
   solution_capability:
     id: RS-13-03-03
@@ -737,6 +878,12 @@ mappings:
     name: Contingency Plan
   ksis:
   - KSI-CNA-OFA
+- fetcher: aws_opensearch_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
 - fetcher: aws_organizations_scp
   solution_capability:
     id: RS-13-03-04
@@ -749,12 +896,24 @@ mappings:
     name: Baseline Configuration Standard
   ksis:
   - KSI-CNA-DFP
+- fetcher: aws_rds_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
 - fetcher: aws_rds_tls_configuration
   solution_capability:
     id: RS-03-02-02
     name: Authorized Cryptographic Modules
   ksis:
   - KSI-SVC-VCM
+- fetcher: aws_redshift_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
 - fetcher: aws_resource_inventory
   solution_capability:
     id: RS-03-04-01
@@ -785,6 +944,24 @@ mappings:
     name: Authorized Cryptographic Modules
   ksis:
   - KSI-SVC-SIN
+- fetcher: aws_sagemaker_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: aws_secrets_manager_rotation
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-ASM
+- fetcher: aws_secrets_manager_rotation
+  solution_capability:
+    id: RS-13-03-10
+    name: Automated Configuration Management
+  ksis:
+  - KSI-SVC-ASM
 - fetcher: aws_security_groups
   solution_capability:
     id: RS-13-03-03
@@ -848,6 +1025,24 @@ mappings:
     name: Continuous Monitoring Strategy
   ksis:
   - KSI-MLA-OSM
+- fetcher: aws_shield_dos_protection
+  solution_capability:
+    id: RS-13-03-04
+    name: Baseline Configuration Exceptions
+  ksis:
+  - KSI-CNA-RVP
+- fetcher: aws_sns_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: aws_sqs_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
 - fetcher: aws_ssm_patch_compliance
   solution_capability:
     id: RS-05-02-01
@@ -860,6 +1055,25 @@ mappings:
     name: Patch Management
   ksis:
   - KSI-SVC-PRR
+- fetcher: aws_transfer_tls_enforcement
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+  - KSI-SVC-VCM
+- fetcher: aws_transfer_tls_enforcement
+  solution_capability:
+    id: RS-03-01-02
+    name: Cryptographic Module Authentication
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: aws_transfer_tls_enforcement
+  solution_capability:
+    id: RP-09-01-03
+    name: Validated Cryptographic Modules
+  ksis:
+  - KSI-SVC-VRI
 - fetcher: aws_vpc_flow_logs
   solution_capability:
     id: RS-12-02-05
@@ -890,6 +1104,24 @@ mappings:
     name: Trusted Connection Review
   ksis:
   - KSI-CNA-ULN
+- fetcher: aws_waf_all_rules
+  solution_capability:
+    id: RS-13-03-04
+    name: Baseline Configuration Exceptions
+  ksis:
+  - KSI-CNA-RVP
+- fetcher: aws_waf_all_rules
+  solution_capability:
+    id: RS-09-02-02
+    name: Policy Enforcement Point Exceptions
+  ksis:
+  - KSI-CNA-RNT
+- fetcher: aws_waf_dos_rules
+  solution_capability:
+    id: RS-13-03-04
+    name: Baseline Configuration Exceptions
+  ksis:
+  - KSI-CNA-RVP
 - fetcher: azure_activity_log_alerts
   solution_capability:
     id: RS-12-01-02
@@ -939,6 +1171,75 @@ mappings:
   ksis:
   - KSI-CNA-RNT
   - KSI-CNA-ULN
+- fetcher: azure_alert_rules
+  solution_capability:
+    id: RS-12-01-02
+    name: Audit Log Collection and Alerts
+  ksis:
+  - KSI-MLA-OSM
+  - KSI-MLA-RVL
+- fetcher: azure_alert_rules
+  solution_capability:
+    id: RS-04-03-04
+    name: Continuous Monitoring
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_alert_rules
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_alert_rules
+  solution_capability:
+    id: RS-12-03-02
+    name: Security Event Notifications
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_app_gateway_backend_tls
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+  - KSI-SVC-VCM
+- fetcher: azure_app_gateway_tls_listeners
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: azure_app_gateway_tls_listeners
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-MAT
+- fetcher: azure_app_gateway_waf
+  solution_capability:
+    id: RS-13-03-04
+    name: Baseline Configuration Exceptions
+  ksis:
+  - KSI-CNA-RVP
+- fetcher: azure_app_gateway_waf
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-MAT
+- fetcher: azure_app_gateway_waf
+  solution_capability:
+    id: RS-09-02-02
+    name: Policy Enforcement Point Exceptions
+  ksis:
+  - KSI-CNA-MAT
+  - KSI-CNA-RNT
+- fetcher: azure_app_gateway_waf
+  solution_capability:
+    id: RS-09-03-03
+    name: Trusted Connection Review
+  ksis:
+  - KSI-CNA-RNT
 - fetcher: azure_app_service_configuration
   solution_capability:
     id: RS-07-05-02
@@ -1025,6 +1326,30 @@ mappings:
     name: Recovery Objectives
   ksis:
   - KSI-RPL-ABO
+- fetcher: azure_change_provenance
+  solution_capability:
+    id: RS-13-03-10
+    name: Automated Configuration Management
+  ksis:
+  - KSI-CMT-RMV
+- fetcher: azure_change_provenance
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CMT-RMV
+- fetcher: azure_change_provenance
+  solution_capability:
+    id: RS-13-01-01
+    name: Change Control Board
+  ksis:
+  - KSI-CMT-RMV
+- fetcher: azure_change_provenance
+  solution_capability:
+    id: RS-13-01-02
+    name: Change Request
+  ksis:
+  - KSI-CMT-LMC
 - fetcher: azure_container_registry_configuration
   solution_capability:
     id: RS-13-03-03
@@ -1110,6 +1435,12 @@ mappings:
     name: Trusted Connection Review
   ksis:
   - KSI-CNA-ULN
+- fetcher: azure_ddos_protection
+  solution_capability:
+    id: RS-13-03-04
+    name: Baseline Configuration Exceptions
+  ksis:
+  - KSI-CNA-RVP
 - fetcher: azure_defender_assessments
   solution_capability:
     id: RS-13-03-04
@@ -1264,6 +1595,12 @@ mappings:
     name: Authorized Cryptographic Modules
   ksis:
   - KSI-SVC-SIN
+- fetcher: azure_dns_configuration
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-VCM
 - fetcher: azure_entra_app_registrations
   solution_capability:
     id: RS-03-02-02
@@ -1331,6 +1668,98 @@ mappings:
     name: Logical Access Review
   ksis:
   - KSI-IAM-ELP
+- fetcher: azure_front_door_origins
+  solution_capability:
+    id: RS-02-03-01
+    name: Alternate Processing Sites
+  ksis:
+  - KSI-CNA-OFA
+- fetcher: azure_front_door_origins
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-VCM
+- fetcher: azure_front_door_origins
+  solution_capability:
+    id: RS-02-01-01
+    name: Contingency Plan
+  ksis:
+  - KSI-CNA-OFA
+- fetcher: azure_front_door_tls
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: azure_front_door_tls
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-MAT
+- fetcher: azure_front_door_waf_coverage
+  solution_capability:
+    id: RS-12-01-01
+    name: Audit Logging Criteria
+  ksis:
+  - KSI-MLA-LET
+- fetcher: azure_front_door_waf_coverage
+  solution_capability:
+    id: RS-13-03-04
+    name: Baseline Configuration Exceptions
+  ksis:
+  - KSI-CNA-RVP
+- fetcher: azure_front_door_waf_coverage
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-MAT
+- fetcher: azure_front_door_waf_coverage
+  solution_capability:
+    id: RS-12-01-05
+    name: Logged Event Type Inventory
+  ksis:
+  - KSI-MLA-LET
+- fetcher: azure_front_door_waf_coverage
+  solution_capability:
+    id: RS-09-02-02
+    name: Policy Enforcement Point Exceptions
+  ksis:
+  - KSI-CNA-MAT
+  - KSI-CNA-RNT
+- fetcher: azure_front_door_waf_coverage
+  solution_capability:
+    id: RS-09-03-03
+    name: Trusted Connection Review
+  ksis:
+  - KSI-CNA-RNT
+- fetcher: azure_front_door_waf_policies
+  solution_capability:
+    id: RS-13-03-04
+    name: Baseline Configuration Exceptions
+  ksis:
+  - KSI-CNA-RVP
+- fetcher: azure_front_door_waf_policies
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-MAT
+- fetcher: azure_front_door_waf_policies
+  solution_capability:
+    id: RS-09-02-02
+    name: Policy Enforcement Point Exceptions
+  ksis:
+  - KSI-CNA-MAT
+  - KSI-CNA-RNT
+- fetcher: azure_front_door_waf_policies
+  solution_capability:
+    id: RS-09-03-03
+    name: Trusted Connection Review
+  ksis:
+  - KSI-CNA-RNT
 - fetcher: azure_function_app_configuration
   solution_capability:
     id: RS-03-02-02
@@ -1380,6 +1809,36 @@ mappings:
     name: Authorized Cryptographic Modules
   ksis:
   - KSI-SVC-ASM
+- fetcher: azure_log_analytics_deletion_rights
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-MLA-OSM
+- fetcher: azure_log_analytics_deletion_rights
+  solution_capability:
+    id: RS-07-02-03
+    name: Logical Access Review
+  ksis:
+  - KSI-MLA-ALA
+- fetcher: azure_log_analytics_query_audit
+  solution_capability:
+    id: RS-12-01-02
+    name: Audit Log Collection and Alerts
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_log_analytics_query_audit
+  solution_capability:
+    id: RS-04-03-04
+    name: Continuous Monitoring
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_log_analytics_query_audit
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-MLA-RVL
 - fetcher: azure_log_analytics_workspaces
   solution_capability:
     id: RS-02-04-03
@@ -1416,6 +1875,42 @@ mappings:
     name: Logical Access Review
   ksis:
   - KSI-MLA-ALA
+- fetcher: azure_log_storage_immutability
+  solution_capability:
+    id: RS-02-04-03
+    name: Audit Log Backup
+  ksis:
+  - KSI-MLA-OSM
+- fetcher: azure_log_storage_immutability
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-MLA-OSM
+- fetcher: azure_managed_redis_configuration
+  solution_capability:
+    id: RS-02-03-01
+    name: Alternate Processing Sites
+  ksis:
+  - KSI-CNA-OFA
+- fetcher: azure_managed_redis_configuration
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: azure_managed_redis_configuration
+  solution_capability:
+    id: RS-02-01-01
+    name: Contingency Plan
+  ksis:
+  - KSI-CNA-OFA
+- fetcher: azure_managed_redis_configuration
+  solution_capability:
+    id: RS-09-03-03
+    name: Trusted Connection Review
+  ksis:
+  - KSI-CNA-RNT
 - fetcher: azure_mysql_configuration
   solution_capability:
     id: RS-02-03-01
@@ -1642,13 +2137,295 @@ mappings:
   ksis:
   - KSI-IAM-ELP
   - KSI-MLA-ALA
+- fetcher: azure_redis_cache_configuration
+  solution_capability:
+    id: RS-02-03-01
+    name: Alternate Processing Sites
+  ksis:
+  - KSI-CNA-OFA
+- fetcher: azure_redis_cache_configuration
+  solution_capability:
+    id: RS-12-01-01
+    name: Audit Logging Criteria
+  ksis:
+  - KSI-MLA-LET
+- fetcher: azure_redis_cache_configuration
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: azure_redis_cache_configuration
+  solution_capability:
+    id: RS-02-01-01
+    name: Contingency Plan
+  ksis:
+  - KSI-CNA-OFA
+- fetcher: azure_redis_cache_configuration
+  solution_capability:
+    id: RS-12-01-05
+    name: Logged Event Type Inventory
+  ksis:
+  - KSI-MLA-LET
+- fetcher: azure_redis_cache_configuration
+  solution_capability:
+    id: RS-16-01-01
+    name: Patch Management
+  ksis:
+  - KSI-SVC-PRR
+- fetcher: azure_redis_cache_configuration
+  solution_capability:
+    id: RS-09-03-03
+    name: Trusted Connection Review
+  ksis:
+  - KSI-CNA-RNT
+- fetcher: azure_resource_diagnostic_settings
+  solution_capability:
+    id: RS-02-04-03
+    name: Audit Log Backup
+  ksis:
+  - KSI-MLA-OSM
+- fetcher: azure_resource_diagnostic_settings
+  solution_capability:
+    id: RS-12-01-02
+    name: Audit Log Collection and Alerts
+  ksis:
+  - KSI-MLA-OSM
+- fetcher: azure_resource_diagnostic_settings
+  solution_capability:
+    id: RS-12-01-01
+    name: Audit Logging Criteria
+  ksis:
+  - KSI-MLA-LET
+- fetcher: azure_resource_diagnostic_settings
+  solution_capability:
+    id: RS-12-02-05
+    name: Authoritative Advisories
+  ksis:
+  - KSI-MLA-LET
+- fetcher: azure_resource_diagnostic_settings
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-MLA-OSM
+- fetcher: azure_resource_diagnostic_settings
+  solution_capability:
+    id: RS-12-01-05
+    name: Logged Event Type Inventory
+  ksis:
+  - KSI-MLA-LET
 - fetcher: azure_resource_inventory
   solution_capability:
     id: RS-03-04-01
     name: Data Inventory Reconciliation
   ksis:
   - KSI-PIY-GIV
+- fetcher: azure_sentinel_analytics_rules
+  solution_capability:
+    id: RS-12-01-02
+    name: Audit Log Collection and Alerts
+  ksis:
+  - KSI-MLA-OSM
+  - KSI-MLA-RVL
+- fetcher: azure_sentinel_analytics_rules
+  solution_capability:
+    id: RS-12-02-05
+    name: Authoritative Advisories
+  ksis:
+  - KSI-MLA-OSM
+- fetcher: azure_sentinel_analytics_rules
+  solution_capability:
+    id: RS-04-03-04
+    name: Continuous Monitoring
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_sentinel_analytics_rules
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-MLA-OSM
+  - KSI-MLA-RVL
+- fetcher: azure_sentinel_analytics_rules
+  solution_capability:
+    id: RS-12-03-02
+    name: Security Event Notifications
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_sentinel_automation_rules
+  solution_capability:
+    id: RS-12-01-02
+    name: Audit Log Collection and Alerts
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_sentinel_automation_rules
+  solution_capability:
+    id: RS-04-03-04
+    name: Continuous Monitoring
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_sentinel_automation_rules
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_sentinel_automation_rules
+  solution_capability:
+    id: RS-12-03-02
+    name: Security Event Notifications
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_sentinel_data_sources
+  solution_capability:
+    id: RS-02-04-03
+    name: Audit Log Backup
+  ksis:
+  - KSI-MLA-OSM
+- fetcher: azure_sentinel_data_sources
+  solution_capability:
+    id: RS-12-01-02
+    name: Audit Log Collection and Alerts
+  ksis:
+  - KSI-MLA-OSM
+- fetcher: azure_sentinel_data_sources
+  solution_capability:
+    id: RS-12-01-01
+    name: Audit Logging Criteria
+  ksis:
+  - KSI-MLA-LET
+- fetcher: azure_sentinel_data_sources
+  solution_capability:
+    id: RS-12-02-05
+    name: Authoritative Advisories
+  ksis:
+  - KSI-MLA-LET
+  - KSI-MLA-OSM
+- fetcher: azure_sentinel_data_sources
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-MLA-OSM
+- fetcher: azure_sentinel_data_sources
+  solution_capability:
+    id: RS-12-01-05
+    name: Logged Event Type Inventory
+  ksis:
+  - KSI-MLA-LET
+- fetcher: azure_sentinel_incidents
+  solution_capability:
+    id: RS-12-01-02
+    name: Audit Log Collection and Alerts
+  ksis:
+  - KSI-MLA-OSM
+  - KSI-MLA-RVL
+- fetcher: azure_sentinel_incidents
+  solution_capability:
+    id: RS-04-03-04
+    name: Continuous Monitoring
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_sentinel_incidents
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-MLA-RVL
+- fetcher: azure_sentinel_incidents
+  solution_capability:
+    id: RS-06-01-04
+    name: Incident Response Plan Improvement
+  ksis:
+  - KSI-INR-AAR
+  - KSI-INR-RIR
+- fetcher: azure_sentinel_incidents
+  solution_capability:
+    id: RS-06-01-01
+    name: Incident Response Plan Objectives
+  ksis:
+  - KSI-INR-RIR
+- fetcher: azure_sentinel_incidents
+  solution_capability:
+    id: RS-06-05-01
+    name: Incident Response Post-mortem
+  ksis:
+  - KSI-INR-RPI
+- fetcher: azure_sentinel_incidents
+  solution_capability:
+    id: RS-06-01-03
+    name: Incident Response Process
+  ksis:
+  - KSI-INR-RPI
+- fetcher: azure_sentinel_incidents
+  solution_capability:
+    id: RS-06-03-03
+    name: Incident Response Reporting Guidelines
+  ksis:
+  - KSI-INR-AAR
+- fetcher: azure_sentinel_incidents
+  solution_capability:
+    id: RS-12-03-02
+    name: Security Event Notifications
+  ksis:
+  - KSI-MLA-RVL
 - fetcher: azure_sql_encryption_status
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: azure_sql_managed_instance_backups
+  solution_capability:
+    id: RS-02-03-01
+    name: Alternate Processing Sites
+  ksis:
+  - KSI-CNA-OFA
+- fetcher: azure_sql_managed_instance_backups
+  solution_capability:
+    id: RS-02-01-01
+    name: Contingency Plan
+  ksis:
+  - KSI-CNA-OFA
+  - KSI-RPL-ABO
+- fetcher: azure_sql_managed_instance_backups
+  solution_capability:
+    id: RS-02-02-01
+    name: Critical Business Functions
+  ksis:
+  - KSI-RPL-ABO
+- fetcher: azure_sql_managed_instance_backups
+  solution_capability:
+    id: RS-02-02-02
+    name: Recovery Objectives
+  ksis:
+  - KSI-RPL-ABO
+- fetcher: azure_sql_managed_instance_configuration
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: azure_sql_managed_instance_configuration
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-MAT
+- fetcher: azure_sql_managed_instance_configuration
+  solution_capability:
+    id: RS-12-01-05
+    name: Logged Event Type Inventory
+  ksis:
+  - KSI-MLA-LET
+- fetcher: azure_sql_managed_instance_configuration
+  solution_capability:
+    id: RS-09-03-03
+    name: Trusted Connection Review
+  ksis:
+  - KSI-CNA-RNT
+- fetcher: azure_sql_managed_instance_encryption
   solution_capability:
     id: RS-03-02-02
     name: Authorized Cryptographic Modules
@@ -1703,6 +2480,26 @@ mappings:
     name: Trusted Connection Review
   ksis:
   - KSI-CNA-RNT
+- fetcher: azure_virtual_wan_configuration
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: azure_virtual_wan_configuration
+  solution_capability:
+    id: RS-09-03-06
+    name: Internal Connections
+  ksis:
+  - KSI-CNA-RNT
+  - KSI-CNA-ULN
+- fetcher: azure_virtual_wan_configuration
+  solution_capability:
+    id: RS-09-03-03
+    name: Trusted Connection Review
+  ksis:
+  - KSI-CNA-RNT
+  - KSI-CNA-ULN
 - fetcher: azure_vm_hardening_status
   solution_capability:
     id: RS-13-03-03
@@ -1715,6 +2512,62 @@ mappings:
     name: Validated Cryptographic Modules
   ksis:
   - KSI-SVC-VRI
+- fetcher: azure_vnet_egress_routing
+  solution_capability:
+    id: RS-13-03-04
+    name: Baseline Configuration Exceptions
+  ksis:
+  - KSI-CNA-DFP
+- fetcher: azure_vnet_egress_routing
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-DFP
+- fetcher: azure_vnet_egress_routing
+  solution_capability:
+    id: RS-09-03-06
+    name: Internal Connections
+  ksis:
+  - KSI-CNA-RNT
+  - KSI-CNA-ULN
+- fetcher: azure_vnet_egress_routing
+  solution_capability:
+    id: RS-09-02-02
+    name: Policy Enforcement Point Exceptions
+  ksis:
+  - KSI-CNA-RNT
+- fetcher: azure_vnet_egress_routing
+  solution_capability:
+    id: RS-09-03-03
+    name: Trusted Connection Review
+  ksis:
+  - KSI-CNA-RNT
+  - KSI-CNA-ULN
+- fetcher: azure_vpn_gateway_configuration
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-SIN
+- fetcher: azure_vpn_gateway_configuration
+  solution_capability:
+    id: RS-02-01-01
+    name: Contingency Plan
+  ksis:
+  - KSI-CNA-OFA
+- fetcher: azure_vpn_gateway_configuration
+  solution_capability:
+    id: RS-09-03-06
+    name: Internal Connections
+  ksis:
+  - KSI-CNA-RNT
+- fetcher: azure_vpn_gateway_configuration
+  solution_capability:
+    id: RS-09-03-03
+    name: Trusted Connection Review
+  ksis:
+  - KSI-CNA-RNT
 - fetcher: betterstack_public_status_page
   solution_capability:
     id: RS-02-03-01
@@ -1828,6 +2681,30 @@ mappings:
     name: Security Event Notifications
   ksis:
   - KSI-MLA-RVL
+- fetcher: crowdstrike_filevantage
+  solution_capability:
+    id: RS-13-03-10
+    name: Automated Configuration Management
+  ksis:
+  - KSI-SVC-ACM
+- fetcher: crowdstrike_filevantage
+  solution_capability:
+    id: RS-13-01-03
+    name: Change Notification
+  ksis:
+  - KSI-CMT-LMC
+- fetcher: crowdstrike_filevantage
+  solution_capability:
+    id: RS-13-01-02
+    name: Change Request
+  ksis:
+  - KSI-CMT-LMC
+- fetcher: crowdstrike_filevantage
+  solution_capability:
+    id: RS-13-03-02
+    name: Configuration Management Plan Scope & Review
+  ksis:
+  - KSI-SVC-ACM
 - fetcher: crowdstrike_firewall_policies
   solution_capability:
     id: RS-13-03-03
@@ -1939,7 +2816,19 @@ mappings:
     name: Enterprise Risk Assessment
   ksis:
   - KSI-PIY-RIS
+- fetcher: datadog_agent_hosts
+  solution_capability:
+    id: RS-03-04-01
+    name: Data Inventory Reconciliation
+  ksis:
+  - KSI-PIY-GIV
 - fetcher: datadog_apm_services
+  solution_capability:
+    id: RS-03-04-01
+    name: Data Inventory Reconciliation
+  ksis:
+  - KSI-PIY-GIV
+- fetcher: datadog_containers
   solution_capability:
     id: RS-03-04-01
     name: Data Inventory Reconciliation
@@ -2468,6 +3357,12 @@ mappings:
     name: Logical Access Review
   ksis:
   - KSI-IAM-ELP
+- fetcher: gcp_iam_service_accounts
+  solution_capability:
+    id: RS-07-02-03
+    name: Logical Access Review
+  ksis:
+  - KSI-IAM-ELP
 - fetcher: gcp_kms_key_configuration
   solution_capability:
     id: RS-03-02-02
@@ -2495,6 +3390,12 @@ mappings:
     name: Authorized Cryptographic Modules
   ksis:
   - KSI-SVC-SIN
+- fetcher: gcp_secret_manager_configuration
+  solution_capability:
+    id: RS-03-02-02
+    name: Authorized Cryptographic Modules
+  ksis:
+  - KSI-SVC-ASM
 - fetcher: gcp_vpc_network_configuration
   solution_capability:
     id: RS-09-03-06
@@ -2699,6 +3600,36 @@ mappings:
     name: Configuration Management Plan Scope & Review
   ksis:
   - KSI-SVC-ACM
+- fetcher: jira_site_inventory
+  solution_capability:
+    id: RS-13-01-03
+    name: Change Notification
+  ksis:
+  - KSI-CMT-LMC
+- fetcher: jira_site_inventory
+  solution_capability:
+    id: RS-13-01-02
+    name: Change Request
+  ksis:
+  - KSI-CMT-LMC
+- fetcher: jira_site_inventory
+  solution_capability:
+    id: RS-06-05-01
+    name: Incident Response Post-mortem
+  ksis:
+  - KSI-INR-RPI
+- fetcher: jira_site_inventory
+  solution_capability:
+    id: RS-06-01-03
+    name: Incident Response Process
+  ksis:
+  - KSI-INR-RPI
+- fetcher: jira_site_inventory
+  solution_capability:
+    id: RS-06-03-03
+    name: Incident Response Reporting Guidelines
+  ksis:
+  - KSI-INR-AAR
 - fetcher: k8s_eks_microservice_segmentation
   solution_capability:
     id: RS-13-03-03
@@ -2717,6 +3648,12 @@ mappings:
     name: Trusted Connection Review
   ksis:
   - KSI-CNA-ULN
+- fetcher: k8s_eks_pod_inventory
+  solution_capability:
+    id: RS-03-04-01
+    name: Data Inventory Reconciliation
+  ksis:
+  - KSI-PIY-GIV
 - fetcher: k8s_kubectl_security
   solution_capability:
     id: RS-13-03-04
@@ -2980,6 +3917,12 @@ mappings:
     name: Vulnerability Remediation
   ksis:
   - KSI-PIY-RVD
+- fetcher: rippling_all_employees
+  solution_capability:
+    id: RS-07-02-03
+    name: Logical Access Review
+  ksis:
+  - KSI-IAM-AAM
 - fetcher: rippling_current_employees
   solution_capability:
     id: RS-15-02-01
@@ -3060,6 +4003,12 @@ mappings:
     name: Multifactor Authentication
   ksis:
   - KSI-IAM-APM
+- fetcher: sentinelone_xdr_assets
+  solution_capability:
+    id: RS-03-04-01
+    name: Data Inventory Reconciliation
+  ksis:
+  - KSI-PIY-GIV
 - fetcher: servicenow_cases
   solution_capability:
     id: RS-06-01-04
@@ -3281,3 +4230,258 @@ mappings:
     name: Logical Access Review
   ksis:
   - KSI-MLA-ALA
+- fetcher: wiz_attack_surface_findings
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-MAT
+- fetcher: wiz_attack_surface_findings
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-SVC-EIS
+- fetcher: wiz_attack_surface_findings
+  solution_capability:
+    id: RS-04-03-01
+    name: Enterprise Risk Assessment
+  ksis:
+  - KSI-SVC-EIS
+- fetcher: wiz_cloud_configuration_posture
+  solution_capability:
+    id: RS-13-03-10
+    name: Automated Configuration Management
+  ksis:
+  - KSI-MLA-EVC
+- fetcher: wiz_cloud_configuration_posture
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-EIS
+  - KSI-CNA-IBP
+  - KSI-MLA-EVC
+- fetcher: wiz_cloud_configuration_posture
+  solution_capability:
+    id: RS-04-03-04
+    name: Continuous Monitoring
+  ksis:
+  - KSI-MLA-EVC
+- fetcher: wiz_code_findings
+  solution_capability:
+    id: RS-13-03-10
+    name: Automated Configuration Management
+  ksis:
+  - KSI-CMT-VTD
+- fetcher: wiz_code_findings
+  solution_capability:
+    id: RS-13-02-05
+    name: Code Review
+  ksis:
+  - KSI-PIY-RSD
+- fetcher: wiz_code_findings
+  solution_capability:
+    id: RS-13-02-02
+    name: Development Lifecycle Process Review
+  ksis:
+  - KSI-PIY-RSD
+- fetcher: wiz_code_findings
+  solution_capability:
+    id: RS-13-02-07
+    name: Quality Assurance Review
+  ksis:
+  - KSI-CMT-VTD
+- fetcher: wiz_code_findings
+  solution_capability:
+    id: RS-13-02-01
+    name: Software Development Lifecycle Process
+  ksis:
+  - KSI-PIY-RSD
+- fetcher: wiz_container_vulnerabilities
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-SVC-EIS
+- fetcher: wiz_container_vulnerabilities
+  solution_capability:
+    id: RS-04-03-01
+    name: Enterprise Risk Assessment
+  ksis:
+  - KSI-SCR-MIT
+  - KSI-SVC-EIS
+- fetcher: wiz_container_vulnerabilities
+  solution_capability:
+    id: RS-14-03-01
+    name: Supply Chain Risk Management
+  ksis:
+  - KSI-SCR-MON
+- fetcher: wiz_container_vulnerabilities
+  solution_capability:
+    id: RS-16-01-02
+    name: Vulnerability Remediation
+  ksis:
+  - KSI-PIY-RVD
+- fetcher: wiz_file_integrity_monitoring
+  solution_capability:
+    id: RS-12-01-02
+    name: Audit Log Collection and Alerts
+  ksis:
+  - KSI-MLA-OSM
+- fetcher: wiz_file_integrity_monitoring
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-MLA-OSM
+- fetcher: wiz_host_configuration_posture
+  solution_capability:
+    id: RS-13-03-10
+    name: Automated Configuration Management
+  ksis:
+  - KSI-MLA-EVC
+  - KSI-SVC-ACM
+- fetcher: wiz_host_configuration_posture
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-EIS
+  - KSI-CNA-IBP
+  - KSI-MLA-EVC
+- fetcher: wiz_host_configuration_posture
+  solution_capability:
+    id: RS-13-03-02
+    name: Configuration Management Plan Scope & Review
+  ksis:
+  - KSI-SVC-ACM
+- fetcher: wiz_host_configuration_posture
+  solution_capability:
+    id: RS-04-03-04
+    name: Continuous Monitoring
+  ksis:
+  - KSI-MLA-EVC
+- fetcher: wiz_infrastructure_vulnerabilities
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-SVC-EIS
+- fetcher: wiz_infrastructure_vulnerabilities
+  solution_capability:
+    id: RS-04-03-01
+    name: Enterprise Risk Assessment
+  ksis:
+  - KSI-SVC-EIS
+- fetcher: wiz_infrastructure_vulnerabilities
+  solution_capability:
+    id: RS-16-01-01
+    name: Patch Management
+  ksis:
+  - KSI-SVC-PRR
+- fetcher: wiz_infrastructure_vulnerabilities
+  solution_capability:
+    id: RS-14-03-01
+    name: Supply Chain Risk Management
+  ksis:
+  - KSI-SCR-MON
+- fetcher: wiz_infrastructure_vulnerabilities
+  solution_capability:
+    id: RS-16-01-02
+    name: Vulnerability Remediation
+  ksis:
+  - KSI-PIY-RVD
+- fetcher: wiz_issues_report
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-SVC-EIS
+- fetcher: wiz_posture_issues
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-EIS
+- fetcher: wiz_posture_issues
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-SVC-EIS
+- fetcher: wiz_posture_issues
+  solution_capability:
+    id: RS-04-03-01
+    name: Enterprise Risk Assessment
+  ksis:
+  - KSI-SVC-EIS
+- fetcher: wiz_scan_coverage
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-EIS
+- fetcher: wiz_scan_coverage
+  solution_capability:
+    id: RS-03-04-01
+    name: Data Inventory Reconciliation
+  ksis:
+  - KSI-PIY-GIV
+- fetcher: wiz_stig_compliance_report
+  solution_capability:
+    id: RS-13-03-03
+    name: Baseline Configuration Standard
+  ksis:
+  - KSI-CNA-IBP
+  - KSI-MLA-EVC
+- fetcher: wiz_stig_compliance_report
+  solution_capability:
+    id: RS-04-03-04
+    name: Continuous Monitoring
+  ksis:
+  - KSI-MLA-EVC
+- fetcher: wiz_threat_detections
+  solution_capability:
+    id: RS-12-01-02
+    name: Audit Log Collection and Alerts
+  ksis:
+  - KSI-MLA-OSM
+  - KSI-MLA-RVL
+- fetcher: wiz_threat_detections
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-MLA-OSM
+  - KSI-MLA-RVL
+- fetcher: wiz_threat_detections
+  solution_capability:
+    id: RS-06-01-03
+    name: Incident Response Process
+  ksis:
+  - KSI-INR-RPI
+- fetcher: wiz_threat_detections
+  solution_capability:
+    id: RS-06-03-04
+    name: Insider Threat Escalation
+  ksis:
+  - KSI-IAM-SUS
+- fetcher: wiz_vulnerability_findings
+  solution_capability:
+    id: RS-05-02-01
+    name: Continuous Monitoring Strategy
+  ksis:
+  - KSI-SVC-EIS
+- fetcher: wiz_vulnerability_findings
+  solution_capability:
+    id: RS-14-03-01
+    name: Supply Chain Risk Management
+  ksis:
+  - KSI-SCR-MON
+- fetcher: wiz_vulnerability_findings
+  solution_capability:
+    id: RS-16-01-02
+    name: Vulnerability Remediation
+  ksis:
+  - KSI-PIY-RVD
