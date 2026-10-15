@@ -39,6 +39,8 @@ TABLE = "AzureDevOpsAuditing"
 AZURE_MONITOR = "Azure Monitor Logs"
 # Reading the audit log or its streams is itself audited; this collector's own reads are not activity.
 READ_ACTIONS = frozenset({"auditlog.accesslog", "auditlog.downloadlog", "auditlog.streamread"})
+# Logged when anyone switches Log Audit Events; a scoped PAT can read this but not the policy itself.
+POLICY_CHANGE = "organizationpolicy.policyvalueupdated"
 # Integer wire values follow the AuditStreamStatus enum order.
 STATUSES = ("unknown", "enabled", "disabledByUser", "disabledBySystem", "deleted", "backfilling")
 DELIVERING = frozenset({"enabled", "backfilling"})
@@ -171,12 +173,20 @@ def _event(found: Optional[tuple]) -> Optional[Dict[str, Any]]:
             "category": entry.get("category")}
 
 
+def _change(found: Optional[tuple]) -> Optional[Dict[str, Any]]:
+    if not found:
+        return None
+    when, entry = found
+    value = str((entry.get("data") or {}).get("PolicyValue") or "").strip().lower()
+    return {"timestamp": iso(when), "value": {"on": True, "true": True, "off": False, "false": False}.get(value)}
+
+
 def newest_events(client, now: datetime) -> Dict[str, Any]:
     """Newest audit event that is not a read of the log, the newest old enough to have been streamed, and the
     newest organization-level one old enough: project events carry the project's scopeId, not the organization's."""
     params = {"startTime": iso(now - timedelta(days=RETENTION_DAYS)), "endTime": iso(now),
               "batchSize": str(AUDIT_PAGE_SIZE)}
-    newest = settled = settled_org = None
+    newest = settled = settled_org = change = None
     scope_id = None
     read = pages = 0
     complete = True
@@ -198,6 +208,11 @@ def newest_events(client, now: datetime) -> Dict[str, Any]:
             if when is None:
                 continue
             stamps.append(when)
+            data = entry.get("data")
+            if ((entry.get("actionId") or "").lower() == POLICY_CHANGE and isinstance(data, dict)
+                    and str(data.get("PolicyName") or "").lower() == LOG_AUDIT_EVENTS.lower()
+                    and (change is None or when > change[0])):
+                change = (when, entry)
             if (entry.get("actionId") or "").lower() in READ_ACTIONS:
                 continue
             if newest is None or when > newest[0]:
@@ -221,13 +236,18 @@ def newest_events(client, now: datetime) -> Dict[str, Any]:
         "newest_event": _event(newest),
         "newest_event_older_than_1h": _event(settled),
         "newest_organization_event_older_than_1h": _event(settled_org),
+        "log_audit_events_change": _change(change),
         "organization_scope_id": scope_id,
     }
 
 
-def auditing_state(policy: Optional[bool], newest: Optional[datetime], now: datetime, days: int) -> tuple:
+def auditing_state(policy: Optional[bool], changed_to: Optional[bool], newest: Optional[datetime], now: datetime,
+                   days: int) -> tuple:
     if policy is not None:
         return policy, LOG_AUDIT_EVENTS
+    # A recent event can predate a switch-off; the newest Log Audit Events change says which way it went.
+    if changed_to is not None:
+        return changed_to, "audit_log_policy_change"
     if newest and newest >= now - timedelta(days=days):
         return True, "audit_log"
     return None, None
@@ -333,7 +353,8 @@ def collect(client, collector) -> tuple:
         key=lambda s: (s["target_type"] or "", s["display_name"] or "", str(s["id"])),
     )
     audit_log = audit_call("audit.auditlog.query", lambda: newest_events(client, now))
-    enabled, source = auditing_state(policy, when_of(dig(audit_log, "newest_event", "timestamp")), now, days)
+    enabled, source = auditing_state(policy, dig(audit_log, "log_audit_events_change", "value"),
+                                     when_of(dig(audit_log, "newest_event", "timestamp")), now, days)
 
     # Compared with the organization's own rows, so the event must be organization-level too.
     settled = when_of(dig(audit_log, "newest_organization_event_older_than_1h", "timestamp"))

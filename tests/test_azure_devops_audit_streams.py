@@ -491,6 +491,39 @@ def test_an_unreadable_policy_falls_back_to_the_audit_log(fakes):
     assert "could not be read" in results["notes"][0] and summary["auditing_enabled"] is True
 
 
+def policy_change(value, when, name="Policy.LogAuditEvents"):
+    return {**entry("OrganizationPolicy.PolicyValueUpdated", when, area="OrganizationPolicy"),
+            "data": {"PolicyName": name, "PolicyValue": value}}
+
+
+@pytest.mark.parametrize("value, enabled", [("OFF", False), ("ON", True)])
+def test_the_newest_policy_change_decides_when_the_policy_is_unreadable(fakes, value, enabled):
+    devops, _, _ = fakes
+    devops.routes["_apis/OrganizationPolicy/Policies/Policy.LogAuditEvents"] = ado_error(401, "unauthorized")
+    devops.routes["_apis/audit/auditlog"] = [page([
+        entry("AuditLog.StreamRead", NOW - timedelta(minutes=1), area="Auditing"),
+        policy_change(value, NOW - timedelta(minutes=5)),
+        policy_change("ON" if value == "OFF" else "OFF", NOW - timedelta(days=1)),
+        entry("Git.RepositoryCreated", NOW - timedelta(days=2)),
+    ])]
+    results, summary, _ = run(devops)
+    assert results["auditing"] == {"enabled": enabled, "source": "audit_log_policy_change",
+                                   "log_audit_events_policy": None}
+    assert results["audit_log"]["log_audit_events_change"]["value"] is enabled
+    assert summary["auditing_enabled"] is enabled
+
+
+def test_another_policys_change_and_a_readable_policy_leave_the_answer_alone(fakes):
+    devops, _, _ = fakes
+    devops.routes["_apis/audit/auditlog"] = [page([
+        policy_change("OFF", NOW - timedelta(minutes=5), name="Policy.AllowAnonymousAccess"),
+        policy_change("OFF", NOW - timedelta(days=1)),
+    ])]
+    results, _, _ = run(devops)
+    assert results["audit_log"]["log_audit_events_change"]["value"] is False
+    assert results["auditing"]["enabled"] is True and results["auditing"]["source"] == "Policy.LogAuditEvents"
+
+
 def test_no_policy_and_no_recent_event_leaves_auditing_unknown(fakes):
     devops, _, _ = fakes
     devops.routes["_apis/OrganizationPolicy/Policies/Policy.LogAuditEvents"] = {"unexpected": 1}

@@ -1,13 +1,13 @@
 name: azure_devops_audit_streams
 version: 0.1.0
 description: >
-  For one Azure DevOps organization: whether auditing is on (from the
-  newest audit event, or the Log Audit Events policy when the token can read
-  it), every audit stream with its target type, status and reason,
-  and last update, and the newest event in the 90-day audit log. For an Azure
-  Monitor Logs stream, whether the workspace's AzureDevOpsAuditing table
-  received this organization's rows in the window. Stream tokens and keys are
-  never written.
+  For one Azure DevOps organization: whether auditing is on (from the Log
+  Audit Events policy when the token can read it, else from the audit log's
+  newest change to that policy or its newest event), every audit stream with
+  its target type, status and reason, and last update, and the newest event in
+  the 90-day audit log. For an Azure Monitor Logs stream, whether the
+  workspace's AzureDevOpsAuditing table received this organization's rows in
+  the window. Stream tokens and keys are never written.
 category: azure
 
 supports_targets: true
@@ -39,7 +39,8 @@ config_schema:
     description: >
       How many days back an Azure Monitor Logs stream's AzureDevOpsAuditing
       rows are counted, and how recent the newest audit event must be to show
-      auditing is on (with a scoped PAT the policy cannot be read).
+      auditing is on when neither the policy nor a logged change to it can be
+      read (a scoped PAT cannot read the policy).
 
 secrets:
   - name: pat
@@ -49,10 +50,11 @@ secrets:
       Read-only personal access token with the Read Audit Log scope
       (vso.auditlog), from a user with the View audit log permission. A scoped
       PAT cannot read the Log Audit Events policy (401 with vso.auditlog and
-      every other scope tried), so auditing is judged from the audit log and
-      the run notes the 401. The Azure Monitor ingestion check uses the
-      ambient Azure credential instead (see _categories/azure.yaml) and needs
-      Log Analytics Reader on the stream's workspace.
+      every other scope tried), so auditing is judged from the audit log (its
+      newest change to that policy, else its newest event) and the run notes
+      the 401. The Azure Monitor ingestion check uses the ambient Azure
+      credential instead (see _categories/azure.yaml) and needs Log Analytics
+      Reader on the stream's workspace.
 
 ksis:
   - KSI-MLA-LET      # Logging event types — ADO audit events are logged and exported past ADO's 90 days
@@ -62,8 +64,8 @@ evidence_set:
   name: Azure DevOps Audit Streams
   instructions: >
     Script: fetcher.py. Azure DevOps REST: OrganizationPolicy
-    Policy.LogAuditEvents (a scoped PAT gets 401; auditing then reads on when
-    the audit log holds an event in the window; see auditing.source),
+    Policy.LogAuditEvents (scoped PATs get 401; then its newest logged change,
+    else on if an event falls in the window; see auditing.source),
     auditservice _apis/audit/streams and _apis/audit/auditlog, ignoring
     audit-log reads. consumerInputs keep only URL, host, workspace and tenant
     identifiers. Azure Monitor Logs streams: this organization's
