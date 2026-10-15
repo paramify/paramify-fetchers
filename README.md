@@ -7,13 +7,29 @@
 [![Version](https://img.shields.io/badge/version-0.5.1--beta-1467ff.svg)](CHANGELOG.md)
 [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1467ff.svg)](https://deepwiki.com/paramify/paramify-fetchers)
 
-Fetchers are small scripts that collect compliance evidence from your infrastructure and write it to disk as JSON. A separate uploader stage pushes that evidence to Paramify. This repo contains the fetchers, the runner that executes them, and the uploader — the fetchers themselves never talk to Paramify directly.
+Automate the evidence behind your compliance program. Paramify Fetchers read the configuration and activity of the tools you already run (AWS, Azure, GCP, Okta, Wiz and more) and turn it into evidence for [FedRAMP 20x Key Security Indicators](docs/ksi_mapping.md) and NIST 800-53 controls, ready to upload to Paramify.
+
+Each fetcher is a small, read-only script that writes JSON to disk. A separate uploader sends that evidence to Paramify, so nothing leaves your environment until you choose to upload. This repo contains the fetchers, the runner that executes them, and the uploader.
 
 <div align="center">
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/how-it-works-dark.svg"><img src="docs/img/readme/how-it-works.svg" alt="How it runs: a container in your environment runs on a schedule. Inside it, the fetchers read your tools read-only and write JSON evidence files to disk, then the uploader sends those files to Paramify. Fetchers never contact Paramify; only the uploader sends data out." width="880"></picture>
 
 </div>
+
+### Try it in a minute
+
+No credentials needed: the bundled `demo_hello` fetcher emits synthetic evidence, so you can watch a whole run before wiring up a real service.
+
+```bash
+git clone https://github.com/paramify/paramify-fetchers.git && cd paramify-fetchers
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+paramify run examples/demo.yaml                    # synthetic evidence, no credentials
+paramify evidence evidence/run-*/demo_hello.json   # read what it wrote
+```
+
+For real services, [Install](#install) covers the extras and CLIs each one needs. Then pick how you want to drive it: the [TUI](#the-tui), an [AI agent](#drive-it-with-an-ai-agent), or the [CLI](#using-the-cli).
 
 ---
 
@@ -120,15 +136,6 @@ manifest, runs it, and reviews evidence — all without leaving the keyboard:
 pipelines is its own short setup — a manifest for the scanners, an assessment and
 close policy for each, then send from the Paramify tab. The walkthrough, with
 recordings, is [`docs/pipelines_guide.md`](docs/pipelines_guide.md).
-
-> **Zero-credential first run:** the bundled `demo_hello` fetcher emits synthetic
-> evidence, so you can watch the whole collect → envelope pipeline before wiring
-> up a real service:
->
-> ```bash
-> paramify run examples/demo.yaml                    # synthetic evidence — no credentials
-> paramify evidence evidence/run-*/demo_hello.json   # inspect the enveloped result
-> ```
 
 The recordings on this page were made against a larger set of synthetic fetchers
 than the repo ships, so a run of your own will be shorter than the one on film —
@@ -333,6 +340,8 @@ Directories starting with `_` are not fetchers — the runner skips them.
 ## Adding a fetcher
 
 To add evidence collection for a new control or a new tool, see [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md). If nothing covers that platform yet and you want a whole slate rather than one fetcher, start from [`docs/platform_onboarding_guide.md`](docs/platform_onboarding_guide.md). If the tool already produces the findings — a vulnerability scan or a CSPM export — you want an issue-report fetcher instead: [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
+
+Before you open a pull request, [`CONTRIBUTING.md`](CONTRIBUTING.md) covers the dev setup, the checks CI runs, and the ground rules.
 
 ---
 
