@@ -1,6 +1,6 @@
 name: aws_iam_policies
-version: 0.2.0
-description: Lists local (customer-managed) IAM policies and per-policy detail (default version document, attached users/groups/roles).
+version: 0.3.0
+description: Lists local (customer-managed) IAM policies and per-policy detail (default version document, attached users/groups/roles, and the users/roles that use it as their permissions boundary).
 category: aws
 
 supports_targets: true
