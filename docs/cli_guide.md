@@ -1,9 +1,9 @@
 # The `paramify` CLI
 
-Everything the TUI and the AI-agent skills do goes through the `paramify`
-command, so anything you can do there you can script here. The README's
-[quickstart](../README.md#using-the-cli) shows a typical run end to end; this
-guide is the full reference.
+The TUI and the AI-agent skills do all their work through the `paramify`
+command. Thus you can script anything that you can do in them. The README's
+[quickstart](../README.md#using-the-cli) shows a typical run from start to
+finish. This guide is the full reference.
 
 **You need:** [the repo installed](../README.md#install).
 

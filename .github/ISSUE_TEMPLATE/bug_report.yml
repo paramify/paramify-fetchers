@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting. **Remove credentials, account IDs, tenant names and real
+        Thank you for the report. **Remove credentials, account IDs, tenant names and real
         evidence** from anything you paste. For a security problem, use
         [private reporting](https://github.com/paramify/paramify-fetchers/security/advisories/new) instead.
   - type: input
@@ -32,17 +32,17 @@ body:
     id: output
     attributes:
       label: Output or logs
-      description: Error messages, the fetcher's exit code, or `paramify doctor` output.
+      description: Error messages, the exit code of the fetcher, or the output of `paramify doctor`.
       render: text
   - type: input
     id: version
     attributes:
       label: Version
-      description: The release tag or commit you're on (`git rev-parse --short HEAD`).
+      description: The release tag or commit that you use (`git rev-parse --short HEAD`).
     validations:
       required: true
   - type: input
     id: environment
     attributes:
       label: Environment
-      description: OS and Python version, and whether you run locally, in Docker, ECS or Kubernetes.
+      description: "Your OS and Python version, and where you run it: locally, in Docker, on ECS or on Kubernetes."

@@ -7,19 +7,19 @@
 [![Version](https://img.shields.io/badge/version-0.5.1--beta-1467ff.svg)](CHANGELOG.md)
 [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-1467ff.svg)](https://deepwiki.com/paramify/paramify-fetchers)
 
-Automate the evidence behind your compliance program. Paramify Fetchers read the configuration and activity of the tools you already run (AWS, Azure, GCP, Okta, Wiz and more) and turn it into evidence for [FedRAMP 20x Key Security Indicators](docs/ksi_mapping.md) and NIST 800-53 controls, ready to upload to Paramify.
+Automate the evidence behind your compliance program. Paramify Fetchers read the configuration and activity of the tools you already run, such as AWS, Azure, GCP, Okta and Wiz. They turn that data into evidence for [FedRAMP 20x Key Security Indicators](docs/ksi_mapping.md) and NIST 800-53 controls, ready to upload to Paramify.
 
 Each fetcher is a small, read-only script that writes JSON to disk. A separate uploader sends that evidence to Paramify, so nothing leaves your environment until you choose to upload. This repo contains the fetchers, the runner that executes them, and the uploader.
 
 <div align="center">
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/how-it-works-dark.svg"><img src="docs/img/readme/how-it-works.svg" alt="How it runs: a container in your environment runs on a schedule. Inside it, the fetchers read your tools read-only and write JSON evidence files to disk, then the uploader sends those files to Paramify. Fetchers never contact Paramify; only the uploader sends data out." width="880"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/how-it-works-dark.svg"><img src="docs/img/readme/how-it-works.svg" alt="How it runs: a container in your environment runs on a schedule. Inside it, the fetchers read your tools read-only and write JSON evidence files to disk, then the uploader sends those files to Paramify. Fetchers never contact Paramify. Only the uploader sends data out." width="880"></picture>
 
 </div>
 
 ### Try it in a minute
 
-No credentials needed: the bundled `demo_hello` fetcher emits synthetic evidence, so you can watch a whole run before wiring up a real service.
+You do not need credentials. The bundled `demo_hello` fetcher writes synthetic evidence, so you can watch a full run before you connect a real service.
 
 ```bash
 git clone https://github.com/paramify/paramify-fetchers.git && cd paramify-fetchers
@@ -29,7 +29,7 @@ paramify run examples/demo.yaml                    # synthetic evidence, no cred
 paramify evidence evidence/run-*/demo_hello.json   # read what it wrote
 ```
 
-For real services, [Install](#install) covers the extras and CLIs each one needs. Then pick how you want to drive it: the [TUI](#the-tui), an [AI agent](#drive-it-with-an-ai-agent), or the [CLI](#using-the-cli).
+For real services, [Install](#install) lists the extras and CLIs that each one needs. Then pick how you want to use it: the [TUI](#the-tui), an [AI agent](#drive-it-with-an-ai-agent), or the [CLI](#using-the-cli).
 
 ---
 
@@ -78,7 +78,7 @@ Generated from this repo's git history by `python tools/generate_chart.py`, and 
 
 ### Coming soon
 
-More integrations are in progress. To ask for a new platform or fetcher, or upvote what should come next, use [Fetcher requests](https://github.com/paramify/paramify-fetchers/discussions/categories/fetcher-requests) in Discussions.
+More integrations are in progress. To ask for a new platform or fetcher, post in [Fetcher requests](https://github.com/paramify/paramify-fetchers/discussions/categories/fetcher-requests) in Discussions. Upvote the requests that you want built next.
 
 <div align="center">
 
@@ -201,9 +201,9 @@ paramify upload                                  # push the latest run
 
 Most services have a credential setup guide in their fetcher directory — for example, [`fetchers/okta/README.md`](fetchers/okta/README.md) covers creating an Okta API token and the required admin role. See [`examples/`](examples/) for complete worked manifests (multi-region AWS, GitLab fanout, etc.) and [`deploy/README.md`](deploy/README.md) for running on a schedule in Docker.
 
-The full command surface, building manifests, preflighting with `paramify doctor`,
-uploads, scan reports, inventory, discovery and script sync are covered in
-[`docs/cli_guide.md`](docs/cli_guide.md).
+[`docs/cli_guide.md`](docs/cli_guide.md) is the full CLI reference. It covers every
+command, manifest building, the `paramify doctor` preflight, uploads, scan reports,
+inventory, discovery and script sync.
 
 ---
 
@@ -341,7 +341,7 @@ Directories starting with `_` are not fetchers — the runner skips them.
 
 To add evidence collection for a new control or a new tool, see [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md). If nothing covers that platform yet and you want a whole slate rather than one fetcher, start from [`docs/platform_onboarding_guide.md`](docs/platform_onboarding_guide.md). If the tool already produces the findings — a vulnerability scan or a CSPM export — you want an issue-report fetcher instead: [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
 
-Before you open a pull request, [`CONTRIBUTING.md`](CONTRIBUTING.md) covers the dev setup, the checks CI runs, and the ground rules.
+Before you open a pull request, read [`CONTRIBUTING.md`](CONTRIBUTING.md). It gives the dev setup, the checks that CI runs, and the ground rules.
 
 ---
 

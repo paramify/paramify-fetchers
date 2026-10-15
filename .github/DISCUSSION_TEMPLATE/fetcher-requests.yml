@@ -4,8 +4,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Ask for a new platform or a new fetcher. Before posting, search the existing
-        requests and upvote one that matches. Upvotes are how we decide what to build next.
+        Ask for a new platform or a new fetcher. Before you post, search the existing
+        requests. If one matches, upvote it. Upvotes decide what we build next.
   - type: input
     id: platform
     attributes:
@@ -30,7 +30,7 @@ body:
     id: api
     attributes:
       label: API documentation (optional)
-      description: A link to the platform's API docs, if you know it.
+      description: A link to the API documentation of the platform, if you know it.
   - type: dropdown
     id: environment
     attributes:

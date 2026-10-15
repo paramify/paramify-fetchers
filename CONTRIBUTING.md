@@ -1,13 +1,14 @@
 # Contributing
 
-Thanks for helping. There are three common ways in:
+Thank you for your help. Most contributions start in one of three places:
 
 - **Ask for a platform or fetcher.** Post in
   [Fetcher requests](https://github.com/paramify/paramify-fetchers/discussions/categories/fetcher-requests),
-  or upvote a request that's already there. Upvotes decide what gets built next.
+  or upvote a request that is already there. Upvotes decide what we build next.
 - **Report a bug.** [Open an issue](https://github.com/paramify/paramify-fetchers/issues/new/choose).
-  For anything security-related, follow [`SECURITY.md`](SECURITY.md) instead.
-- **Send a fix or a new fetcher** as a pull request. The rest of this page covers that.
+  For a security problem, use the process in [`SECURITY.md`](SECURITY.md) instead.
+- **Send a fix or a new fetcher** as a pull request. The rest of this page is
+  about pull requests.
 
 ## Set up
 
@@ -18,11 +19,11 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev,tui]'
 ```
 
-Add `azure` or `gcp` to the extras if you're working on those fetchers.
+To work on Azure or GCP fetchers, add `azure` or `gcp` to the extras.
 
 ## Before you open a pull request
 
-Run what CI runs:
+Run the same checks that CI runs:
 
 ```bash
 ruff check framework/
@@ -30,40 +31,42 @@ mypy framework/
 pytest -q
 ```
 
-`pytest` includes the contract tests, which check every `fetcher.yaml` and
-category file against the schema. CI also runs
-[gitleaks](https://github.com/gitleaks/gitleaks) over the history, so a
-committed secret fails the build.
+The `pytest` run includes the contract tests. These tests compare every
+`fetcher.yaml` and category file with the schema. CI also runs
+[gitleaks](https://github.com/gitleaks/gitleaks) on the history, so a committed
+secret makes the build fail.
 
 ## Adding a fetcher
 
-- [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md) covers writing one
-  from scratch, and [`docs/fetcher_contract.md`](docs/fetcher_contract.md) is the
-  contract every fetcher must meet.
-- For a platform nobody has integrated yet, start from
+- To write a fetcher from scratch, read
+  [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md).
+  [`docs/fetcher_contract.md`](docs/fetcher_contract.md) gives the contract that
+  every fetcher must meet.
+- For a platform that has no fetchers yet, start from
   [`docs/platform_onboarding_guide.md`](docs/platform_onboarding_guide.md).
-- If the tool already produces findings (a vulnerability scan or a CSPM export),
-  you want an issue-report fetcher instead:
+- Some tools already produce findings, for example a vulnerability scan or a
+  CSPM export. For these tools, write an issue-report fetcher:
   [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
-- Using Claude Code? The `create-fetcher` and `onboard-platform` skills in
-  [`.claude/skills/`](.claude/skills/) walk through the same steps.
+- If you use Claude Code, the `create-fetcher` and `onboard-platform` skills in
+  [`.claude/skills/`](.claude/skills/) do the same steps with you.
 
 ## Ground rules
 
 - **Fetchers are read-only.** A fetcher reads from the platform and writes
-  evidence to disk. It never changes the system it reads from, and it never calls
-  Paramify; uploading is the uploader's job.
-- **No real data in the repo.** Tests, fixtures, examples and PR descriptions use
-  synthetic data. Never commit credentials, real evidence, account IDs or tenant
-  names.
-- **Keep changes focused.** One fetcher or one fix per pull request is easiest to
-  review.
-- **Update the changelog.** Add a line under `## [Unreleased]` in
-  [`CHANGELOG.md`](CHANGELOG.md) for anything a user would notice. Changes to the
-  public contract (the `fetcher.yaml`, manifest and envelope schemas, and the
-  `paramify` CLI) follow [`docs/versioning_guide.md`](docs/versioning_guide.md).
+  evidence to disk. It never changes the system that it reads from. It never
+  calls Paramify, because uploads are the job of the uploader.
+- **No real data in the repo.** Tests, fixtures, examples and pull request
+  descriptions use synthetic data. Never commit credentials, real evidence,
+  account IDs or tenant names.
+- **Keep each change small.** A pull request with one fetcher or one fix is the
+  easiest to review.
+- **Update the changelog.** If a user can see the change, add a line under
+  `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md). Changes to the public
+  contract obey [`docs/versioning_guide.md`](docs/versioning_guide.md). The
+  public contract is the `fetcher.yaml`, manifest and envelope schemas, and the
+  `paramify` CLI.
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the
-[GNU General Public License v3.0](LICENSE), the same license as the project.
+The project uses the [GNU General Public License v3.0](LICENSE). When you
+contribute, you agree to license your contribution under the same license.
