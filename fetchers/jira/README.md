@@ -122,9 +122,16 @@ role are flagged as `broad_privileged_grants`.
 | `max_items` | `JIRA_CHANGE_MAX_ITEMS` | `2000` | Ticket cap; hitting it fails the run as partial |
 
 Custom field names differ per site, so the fetcher looks them up by name with
-`GET /rest/api/3/field`; names that match nothing are listed in
-`metadata.fields_unresolved` instead of failing the run. Comment bodies are not
-collected, only the count.
+`GET /rest/api/3/field` (case-insensitive). A name that matches no field, or
+several fields, is listed in `metadata.field_problems` and fails the run as
+`partial_failure`, because the findings that depend on that field would be wrong.
+For an ambiguous name, `metadata.field_candidates` lists every matching field id;
+pin one by setting that role to its `customfield_` id in `JIRA_CHANGE_FIELDS`, or
+set the role to an empty value to turn its checks off. Sites with Jira Service
+Management often have their own "Change type" and "Change risk" fields, so pin
+those two by id. Comment bodies are not collected, only the count.
+
+The same field rules apply to `JIRA_INCIDENT_FIELDS` below.
 
 ### `jira_incident_postmortems`
 

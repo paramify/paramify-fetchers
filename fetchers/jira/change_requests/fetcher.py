@@ -17,6 +17,7 @@ from jira_common import (  # noqa: E402
     collector_info,
     connection_settings,
     counts,
+    field_problem_reason,
     field_value,
     int_env,
     json_env,
@@ -326,13 +327,14 @@ def main() -> int:
     collector = None
     ids: dict = {}
     problems: dict = {}
+    candidates: dict = {}
     records: list = []
     truncated = False
     history_complete = True
 
     try:
         collector = collector_info(client)
-        ids, problems = resolve_fields(client, cfg["fields"])
+        ids, problems, candidates = resolve_fields(client, cfg["fields"])
         raw, truncated, _ = client.search_issues(
             jql, BASE_FIELDS + sorted(set(ids.values())), cfg["max_items"]
         )
@@ -356,6 +358,7 @@ def main() -> int:
             "field_names": cfg["fields"],
             "fields_resolved": ids,
             "field_problems": problems,
+            "field_candidates": candidates,
             "not_deployed_resolutions": sorted(cfg["not_deployed"]),
             "approved_statuses": sorted(cfg["approved_statuses"]),
             "preapproved_change_types": sorted(cfg["preapproved_types"]),
@@ -376,6 +379,10 @@ def main() -> int:
         incomplete = f"tickets truncated at JIRA_CHANGE_MAX_ITEMS={cfg['max_items']}"
     elif not history_complete:
         incomplete = "status history incomplete for some tickets"
+    field_reason = field_problem_reason(problems, "JIRA_CHANGE_FIELDS")
+    if field_reason:
+        logger.warning("%s", field_reason)
+        incomplete = f"{incomplete}; {field_reason}" if incomplete else field_reason
     return write_and_finish(logger, client, evidence, OUTPUT_FILE, incomplete)
 
 

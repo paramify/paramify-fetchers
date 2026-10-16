@@ -253,11 +253,12 @@ ISSUE_KEY = re.compile(r"^[A-Z][A-Z0-9_]{0,254}-[0-9]{1,12}$")
 def resolve_fields(client: JiraClient, wanted: dict):
     """Map {role: field name or customfield_ id} to {role: field id} via GET /rest/api/3/field.
 
-    Names are case-insensitive. Returns (ids, problems) where problems maps role to
-    "unresolved" (no such field), "ambiguous" (several fields share the name) or
-    "disabled" (empty name in the config).
+    Names are case-insensitive. Returns (ids, problems, candidates) where problems maps
+    role to "unresolved" (no such field), "ambiguous" (several fields share the name) or
+    "disabled" (empty name in the config), and candidates maps each ambiguous role to the
+    matching fields so the operator can pin one by its customfield_ id.
     """
-    ids, problems = {}, {}
+    ids, problems, candidates = {}, {}, {}
     names = {}
     for role, name in wanted.items():
         if not isinstance(name, str) or not name.strip():
@@ -267,22 +268,44 @@ def resolve_fields(client: JiraClient, wanted: dict):
         else:
             names[role] = name.strip().lower()
     if not names:
-        return ids, problems
+        return ids, problems, candidates
     fields = client.request("GET", "/rest/api/3/field", "GET /rest/api/3/field")
     if not isinstance(fields, list):
         problems.update({role: "unresolved" for role in names})
-        return ids, problems
+        return ids, problems, candidates
     by_name: dict = {}
     for f in fields:
         if isinstance(f, dict) and isinstance(f.get("name"), str) and isinstance(f.get("id"), str):
-            by_name.setdefault(f["name"].strip().lower(), []).append(f["id"])
+            schema = f.get("schema") if isinstance(f.get("schema"), dict) else {}
+            by_name.setdefault(f["name"].strip().lower(), []).append(
+                {
+                    "id": f["id"],
+                    "name": f["name"],
+                    "type": schema.get("custom") or schema.get("type"),
+                }
+            )
     for role, name in names.items():
         found = by_name.get(name, [])
         if len(found) == 1:
-            ids[role] = found[0]
+            ids[role] = found[0]["id"]
+        elif found:
+            problems[role] = "ambiguous"
+            candidates[role] = found[:10]
         else:
-            problems[role] = "ambiguous" if found else "unresolved"
-    return ids, problems
+            problems[role] = "unresolved"
+    return ids, problems, candidates
+
+
+def field_problem_reason(problems: dict, env_name: str) -> str:
+    """Explain unresolved or ambiguous field roles, or return "" when every enabled role resolved."""
+    bad = sorted(f"{role} ({p})" for role, p in problems.items() if p in ("unresolved", "ambiguous"))
+    if not bad:
+        return ""
+    return (
+        f"fields not resolved: {', '.join(bad)}; findings that depend on them are not reliable. "
+        f"Set {env_name} to a customfield_ id from metadata.field_candidates, "
+        f"or an empty value to turn that check off"
+    )
 
 
 def _adf_text(node) -> str:

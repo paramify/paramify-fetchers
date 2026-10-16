@@ -510,9 +510,46 @@ def test_change_requests_unresolved_fields_are_reported(run):
         raise AssertionError(path)
 
     code, out, _, _ = run("change_requests", router, {"JIRA_CHANGE_JQL": "project = CCB"})
-    assert code == 0
+    assert code == 1
     assert out["metadata"]["fields_resolved"] == {"approver": "cf3"}
     assert out["metadata"]["field_problems"]["risk"] == "unresolved"
+    assert out["metadata"]["complete"] is False
+    assert "risk (unresolved)" in out["metadata"]["incomplete_reason"]
+
+
+def test_change_requests_ambiguous_field_fails_loudly_and_lists_candidates(run):
+    fields = [
+        {"id": "customfield_10043", "name": "Change Type", "schema": {"custom": "com.atlassian.jira.plugin.system.customfieldtypes:select"}},
+        {"id": "customfield_10005", "name": "Change type", "schema": {"custom": "com.atlassian.servicedesk:sd-change-type"}},
+        {"id": "cf3", "name": "CCB Approver"},
+    ]
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, fields
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [], "isLast": True}
+        raise AssertionError(path)
+
+    env = {"JIRA_CHANGE_JQL": "project = CCB",
+           "JIRA_CHANGE_FIELDS": '{"risk": "", "approved_at": "", "security_review": "", "test_results": "", '
+                                 '"deployed_at": "", "exception_expiry": "", "last_reviewed": ""}'}
+    code, out, _, _ = run("change_requests", router, env)
+    meta = out["metadata"]
+    assert code == 1 and meta["complete"] is False
+    assert meta["field_problems"]["change_type"] == "ambiguous"
+    assert meta["field_problems"]["risk"] == "disabled"
+    assert [c["id"] for c in meta["field_candidates"]["change_type"]] == ["customfield_10043", "customfield_10005"]
+    assert "change_type (ambiguous)" in meta["incomplete_reason"]
+    assert "risk" not in meta["incomplete_reason"]
+
+    env["JIRA_CHANGE_FIELDS"] = env["JIRA_CHANGE_FIELDS"][:-1] + ', "change_type": "customfield_10043"}'
+    code, out, _, _ = run("change_requests", router, env)
+    assert code == 0 and out["metadata"]["complete"] is True
+    assert out["metadata"]["fields_resolved"]["change_type"] == "customfield_10043"
+    assert out["metadata"]["field_candidates"] == {}
 
 
 def test_change_requests_rejects_unknown_field_role(monkeypatch, tmp_path):

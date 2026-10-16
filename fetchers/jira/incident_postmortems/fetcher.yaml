@@ -40,6 +40,9 @@ config_schema:
       category, detected_at, reported_at, phase. Defaults: "Severity", "Incident
       Category", "Detected At", "Reported At", "Incident Phase". A value may be a
       field id such as customfield_10054; an empty value disables that role.
+      Names that match no field, or several fields, are listed in
+      metadata.field_problems and fail the run as partial; for several,
+      metadata.field_candidates lists the ids to choose from.
       Without a reported-at field the ticket's created time is used and counted
       in summary.reported_time_from_ticket_created.
   report_minutes:

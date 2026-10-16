@@ -20,6 +20,7 @@ from jira_common import (  # noqa: E402
     connection_settings,
     counts,
     fetch_issues,
+    field_problem_reason,
     field_value,
     int_env,
     json_env,
@@ -331,6 +332,7 @@ def main() -> int:
     collector = None
     ids: dict = {}
     problems: dict = {}
+    candidates: dict = {}
     incidents: list = []
     truncated = False
     history_complete = True
@@ -339,7 +341,7 @@ def main() -> int:
 
     try:
         collector = collector_info(client)
-        ids, problems = resolve_fields(client, cfg["fields"])
+        ids, problems, candidates = resolve_fields(client, cfg["fields"])
         raw, truncated, _ = client.search_issues(
             jql, INCIDENT_FIELDS + sorted(set(ids.values())), cfg["max_items"]
         )
@@ -395,6 +397,7 @@ def main() -> int:
             "field_names": cfg["fields"],
             "fields_resolved": ids,
             "field_problems": problems,
+            "field_candidates": candidates,
             "required_phases": cfg["required_phases"],
             "no_postmortem_resolutions": sorted(cfg["no_review"]),
             "report_window_minutes": cfg["report_minutes"],
@@ -421,6 +424,10 @@ def main() -> int:
         incomplete = "status or phase history incomplete for some incidents"
     elif not related_complete or missing_related:
         incomplete = "some post-mortems or action items could not be read"
+    field_reason = field_problem_reason(problems, "JIRA_INCIDENT_FIELDS")
+    if field_reason:
+        logger.warning("%s", field_reason)
+        incomplete = f"{incomplete}; {field_reason}" if incomplete else field_reason
     return write_and_finish(logger, client, evidence, OUTPUT_FILE, incomplete)
 
 

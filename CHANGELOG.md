@@ -25,6 +25,10 @@ schemas and the `paramify` CLI — not the internal code.
   carries `metadata.complete` and `metadata.incomplete_reason`.
   `jira_audit_records` no longer reports `records_truncated: false` when records
   past the cap were dropped.
+- **`jira_change_requests`, `jira_incident_postmortems`**: a configured field name
+  that matches no Jira field, or several, now fails the run as `partial_failure`
+  instead of silently skipping the checks that need it. Ambiguous names list their
+  matching ids in `metadata.field_candidates`.
 
 ### Added
 
