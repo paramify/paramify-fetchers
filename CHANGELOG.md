@@ -28,6 +28,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`jira_change_requests`** (`EVD-JIRA-CHANGE-REQUESTS`): change, internal
+  connection and exception tickets with CCB approver and time, deployment time,
+  test and security review results, watcher and comment counts, status and field
+  history, and per-ticket findings (deployed without approval, approved after
+  deployment, failed tests, missing security review, exceptions open past expiry
+  or overdue for review). Field names are configurable and resolved by name.
+- **`jira_incident_postmortems`** (`EVD-JIRA-INCIDENT-POSTMORTEMS`): incidents with
+  severity, category, minutes from detection to report against a reporting window
+  and per-category targets, phase history, linked post-mortems and their action
+  items, with findings for late reports, missing post-mortems and unassigned or
+  overdue action items.
 - **`jira_remediation_items`** (`EVD-JIRA-REMEDIATION-ITEMS`): the Jira tickets a
   required JQL (`JIRA_REMEDIATION_JQL`) selects as findings, each with owner, due
   date, overdue flag and full status history from `POST /rest/api/3/changelog/bulkfetch`,
