@@ -53,7 +53,8 @@ schemas and the `paramify` CLI — not the internal code.
   dependency; the HTML-to-text and date capture live in `fetchers/_lib/html_text.py`
   for any category to import. Tested with synthetic fixtures. Run live only against GitHub
   pages, because www.paramify.com was not reachable from the test environment.
-  No KSI mapping.
+  No KSI mapping. The README's supported services grid lists Web, with a globe
+  icon drawn for this repo (`fetchers/logos/web.svg` and `web-dark.svg`).
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
