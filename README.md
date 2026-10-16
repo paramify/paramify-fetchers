@@ -51,6 +51,9 @@ Each fetcher is a small, read-only script that writes JSON to disk. A separate u
     <td align="center" width="128"><a href="fetchers/betterstack/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/betterstack-dark.svg"><img src="fetchers/logos/betterstack.svg" alt="Better Stack" width="48" height="48"></picture></a><br><sub>Better Stack</sub></td>
     <td align="center" width="128"><a href="fetchers/jira/"><img src="fetchers/logos/jira.svg" alt="Jira" width="48" height="48"></a><br><sub>Jira</sub></td>
   </tr>
+  <tr>
+    <td align="center" width="128"><a href="fetchers/web/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/web-dark.svg"><img src="fetchers/logos/web.svg" alt="Web" width="48" height="48"></picture></a><br><sub>Web</sub></td>
+  </tr>
 </table>
 
 </div>
