@@ -1,5 +1,5 @@
 {
-  "_fixture_note": "SYNTHETIC fixture, UNVERIFIED shape: modelled on Zendesk's documented Help Center API and zendesk_api_client_rb (offset pagination: count / next_page). Not captured from a live help center. {BASE} is replaced by the test server's origin.",
+  "_fixture_note": "SYNTHETIC fixture. Values are invented; the key set was checked against the live support.paramify.com Help Center API on 2026-10-16 (offset pagination: count / next_page, same-host next_page). {BASE} is replaced by the test server's origin.",
   "articles": [
     {
       "id": 360003,

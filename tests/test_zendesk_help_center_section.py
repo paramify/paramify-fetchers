@@ -1,9 +1,9 @@
 """zendesk_help_center_section against a local stand-in for a public Help Center.
 
-The fixtures under tests/fixtures/zendesk/ are SYNTHETIC and their shape is UNVERIFIED
-against a live help center: they follow Zendesk's documented Help Center API and the
-offset pagination in zendesk_api_client_rb (`count`, `next_page`). "collected_at" is
-frozen at 2026-10-16T15:00:00Z.
+The fixtures under tests/fixtures/zendesk/ are SYNTHETIC: invented values, with the key
+set checked against the live support.paramify.com Help Center API on 2026-10-16 (offset
+pagination via `count` and a same-host `next_page`). "collected_at" is frozen at
+2026-10-16T15:00:00Z.
 """
 
 from __future__ import annotations
@@ -35,7 +35,8 @@ HTML = {"Content-Type": "text/html; charset=utf-8"}
 FIXED_FIELDS = [
     "collected_at", "target_name", "section_url", "help_center", "locale", "anonymous", "section",
     "article_count", "reported_count", "articles_updated_max", "articles_updated_min", "days_since_last_update",
-    "all_articles_public", "mentions_top_level_admin", "scg_terms", "articles",
+    "all_articles_public", "public_page_challenges", "all_user_segments_everyone", "mentions_top_level_admin",
+    "scg_terms", "articles",
 ]
 
 
@@ -158,6 +159,38 @@ def test_an_article_page_error_is_recorded_not_fatal(site):
     code, ev, _ = run(**{"/hc/en-us/articles/360002-Single-sign-on-SSO-with-SAML": (404, HTML, b"gone")})
     assert code == 0 and ev["articles"][1]["public_page_status"]["http_status"] == 404
     assert ev["all_articles_public"] is False
+
+
+CHALLENGE = (403, {"Content-Type": "text/html", "cf-mitigated": "challenge", "Server": "cloudflare"},
+             b"<title>Just a moment...</title>")
+
+
+def test_a_cloudflare_challenge_leaves_public_access_unverified(site):
+    # Measured 2026-10-16: support.paramify.com answers every non-browser GET of an article page this way.
+    run, _, _ = site
+    code, ev, _ = run(**{
+        "/hc/en-us/articles/360001-Configuring-top-level-administrator-accounts": CHALLENGE,
+        "/hc/en-us/articles/360002-Single-sign-on-SSO-with-SAML": CHALLENGE,
+        "/hc/en-us/articles/360003-Audit-log-retention-settings": CHALLENGE,
+    })
+    assert code == 0
+    assert all(a["public_page_status"]["bot_challenge"] is True for a in ev["articles"])
+    assert ev["all_articles_public"] is None and ev["public_page_challenges"] == 3
+
+
+def test_a_sign_in_redirect_beats_a_challenge(site):
+    run, _, _ = site
+    _, ev, _ = run(**{"/hc/en-us/articles/360001-Configuring-top-level-administrator-accounts": CHALLENGE})
+    assert ev["all_articles_public"] is False and ev["public_page_challenges"] == 1
+
+
+def test_user_segments(site):
+    run, docs, _ = site
+    _, ev, _ = run()
+    assert ev["all_user_segments_everyone"] is True
+    docs["page2"]["articles"][0]["user_segment_id"] = 360000123
+    _, ev, _ = run()
+    assert ev["all_user_segments_everyone"] is False and ev["articles"][2]["user_segment_id"] == 360000123
 
 
 def test_scg_heuristics(site):

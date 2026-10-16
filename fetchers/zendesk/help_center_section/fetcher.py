@@ -35,7 +35,7 @@ SECTION_PATH = re.compile(r"^/hc/(?P<locale>[A-Za-z]{2,3}(?:-[A-Za-z0-9]+)*)/sec
 SIGN_IN = re.compile(r"/signin|/access/", re.IGNORECASE)
 
 ARTICLE_FIELDS = ["id", "title", "html_url", "created_at", "updated_at", "edited_at", "draft", "promoted",
-                  "position", "label_names", "locale", "outdated", "author_id", "section_id"]
+                  "position", "label_names", "locale", "outdated", "author_id", "section_id", "user_segment_id"]
 SECTION_FIELDS = ["id", "name", "html_url", "updated_at"]
 
 # Paramify-specific keyword heuristics for a Secure Configuration Guide; see evidence_set.instructions.
@@ -51,6 +51,7 @@ SCG_TERMS = {
 FAILURE_FIELDS: Dict[str, Any] = {
     "section": None, "article_count": None, "reported_count": None, "articles_updated_max": None,
     "articles_updated_min": None, "days_since_last_update": None, "all_articles_public": None,
+    "public_page_challenges": None, "all_user_segments_everyone": None,
     "mentions_top_level_admin": None, "scg_terms": None, "articles": [],
 }
 
@@ -140,7 +141,8 @@ def list_articles(session: requests.Session, url: str, origin: str, verify_ssl: 
 
 
 def public_page_status(session: requests.Session, url: Any, verify_ssl: bool) -> Dict[str, Any]:
-    status: Dict[str, Any] = {"http_status": 0, "final_url": None, "redirected_to_signin": None, "error": None}
+    status: Dict[str, Any] = {"http_status": 0, "final_url": None, "redirected_to_signin": None,
+                              "bot_challenge": None, "error": None}
     if not isinstance(url, str) or urlparse(url).scheme not in {"http", "https"}:
         status["error"] = {"type": "bad_url", "message": f"html_url is not an http(s) URL: {url!r}"}
         return status
@@ -149,6 +151,8 @@ def public_page_status(session: requests.Session, url: Any, verify_ssl: bool) ->
                          stream=True) as response:
             status.update(http_status=response.status_code, final_url=response.url)
             status["redirected_to_signin"] = bool(SIGN_IN.search(urlparse(response.url).path))
+            # Measured on support.paramify.com: Cloudflare answers every non-browser client 403 with this header.
+            status["bot_challenge"] = response.headers.get("cf-mitigated", "").lower() == "challenge"
     except requests.exceptions.RequestException as exc:
         status["error"] = {"type": "network_error", "message": f"GET {url} failed: {type(exc).__name__}: {exc}"}
     return status
@@ -166,6 +170,15 @@ def article_record(session: requests.Session, article: Dict[str, Any], verify_ss
         "body": article.get("body"),
         "text": text,
     }
+
+
+def _all_public(statuses: List[Dict[str, Any]]) -> Optional[bool]:
+    """False if any page is plainly not public; None if a bot challenge left any unverified."""
+    if not statuses:
+        return None
+    if any(s["redirected_to_signin"] or (s["http_status"] != 200 and not s["bot_challenge"]) for s in statuses):
+        return False
+    return None if any(s["bot_challenge"] for s in statuses) else True
 
 
 def _parse_time(value: Any) -> Optional[datetime]:
@@ -200,10 +213,9 @@ def collect(record: Dict[str, Any], origin: str, locale: str, section_id: str, v
         "articles_updated_max": dated[-1] if dated else None,
         "articles_updated_min": dated[0] if dated else None,
         "days_since_last_update": int((collected - newest).total_seconds() // 86400) if newest else None,
-        "all_articles_public": all(
-            a["public_page_status"]["http_status"] == 200 and not a["public_page_status"]["redirected_to_signin"]
-            for a in articles
-        ) if articles else None,
+        "all_articles_public": _all_public([a["public_page_status"] for a in articles]),
+        "public_page_challenges": sum(bool(a["public_page_status"]["bot_challenge"]) for a in articles),
+        "all_user_segments_everyone": all(a["user_segment_id"] is None for a in articles) if articles else None,
         "mentions_top_level_admin": any(TOP_LEVEL_ADMIN.search(t) for t in texts),
         "scg_terms": {term: any(pattern.search(t) for t in with_admin) for term, pattern in SCG_TERMS.items()},
         "articles": articles,

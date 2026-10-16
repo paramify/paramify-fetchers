@@ -75,13 +75,17 @@ evidence_set:
     locale, outdated, author_id, section_id) and its `body` HTML, plus `text`
     (the body as plain text), text_length, text_sha256, a `last_updated` date
     copied from the text if it states one, and `public_page_status`: an
-    anonymous GET of html_url with its status, final URL, and whether it was
-    sent to a sign-in page. A failing page GET is recorded, not fatal.
+    anonymous GET of html_url with its status, final URL, whether it was sent
+    to a sign-in page, and whether Cloudflare answered with a bot challenge
+    (`cf-mitigated: challenge`). A failing page GET is recorded, not fatal.
 
     Fixed fields first: the section, article_count (an empty section is
     recorded as 0, not a failure), the newest and oldest updated_at,
-    days_since_last_update, and all_articles_public (null when there are no
-    articles).
+    days_since_last_update, all_articles_public (false if any page redirects
+    to sign-in or fails; null when there are no articles or a bot challenge
+    left a page unverified), public_page_challenges (pages that met a
+    challenge), and all_user_segments_everyone (every article's
+    user_segment_id is null, Zendesk's "visible to everyone").
 
     `mentions_top_level_admin` and `scg_terms` are Paramify-specific keyword
     heuristics for a Secure Configuration Guide. `scg_terms.<term>` is true
