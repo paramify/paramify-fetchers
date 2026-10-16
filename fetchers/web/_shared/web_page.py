@@ -55,10 +55,10 @@ def env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def check_url(url: str) -> str:
+def check_url(url: str, env: str = "WEB_PAGE_URL") -> str:
     parsed = urlparse(url)
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
-        raise CollectionError(f"WEB_PAGE_URL is not an http(s) URL: {url!r}", "bad_url", "bad_config")
+        raise CollectionError(f"{env} is not an http(s) URL: {url!r}", "bad_url", "bad_config")
     return url
 
 
@@ -66,7 +66,7 @@ def sanitize_for_filename(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "_", value)
 
 
-def _media_type(content_type: str) -> Tuple[str, Optional[str]]:
+def media_type(content_type: str) -> Tuple[str, Optional[str]]:
     media, _, params = content_type.partition(";")
     charset = None
     for param in params.split(";"):
@@ -95,14 +95,16 @@ def decode_body(body: bytes, charset: Optional[str], is_html: bool) -> str:
     return body.decode("utf-8", errors="replace")
 
 
-def fetch(url: str, verify_ssl: bool, record: Dict[str, Any], user_agent: str) -> Tuple[bytes, str]:
+def fetch(
+    url: str, verify_ssl: bool, record: Dict[str, Any], user_agent: str, accept: str = ACCEPT
+) -> Tuple[bytes, str]:
     """GET the page; fills `record` with what the response said, even when it fails."""
     session = requests.Session()
     session.max_redirects = MAX_REDIRECTS
     try:
         response = session.get(
             url,
-            headers={"User-Agent": user_agent, "Accept": ACCEPT},
+            headers={"User-Agent": user_agent, "Accept": accept},
             timeout=REQUEST_TIMEOUT,
             verify=verify_ssl,
             stream=True,
@@ -157,6 +159,22 @@ def fetch(url: str, verify_ssl: bool, record: Dict[str, Any], user_agent: str) -
     return b"".join(chunks), content_type
 
 
+def fetch_recorded(
+    url: str, verify_ssl: bool, user_agent: str, accept: str = ACCEPT
+) -> Tuple[Dict[str, Any], Optional[bytes], str]:
+    """fetch() for a linked URL: a failure is recorded in `error`, not raised."""
+    record: Dict[str, Any] = {
+        "url": url, "final_url": None, "redirects": [], "http_status": 0, "content_type": None, "error": None,
+    }
+    try:
+        check_url(url, "linked URL")
+        body, content_type = fetch(url, verify_ssl, record, user_agent, accept)
+    except CollectionError as exc:
+        record["error"] = {"type": exc.kind, "message": str(exc)}
+        return record, None, record["content_type"] or ""
+    return record, body, content_type
+
+
 class PageContent(NamedTuple):
     text: str
     title: Optional[str]
@@ -166,7 +184,7 @@ class PageContent(NamedTuple):
 
 def read_content(body: bytes, content_type: str, url: str) -> PageContent:
     """Decode the body by media type. Unsupported types, bad JSON and empty text all fail."""
-    media, charset = _media_type(content_type)
+    media, charset = media_type(content_type)
     is_json = media == "application/json" or media.endswith("+json")
     title, document = None, None
     if media in HTML_TYPES:
@@ -206,10 +224,13 @@ def run(
     name: str,
     collect: Callable[[str, bool, Dict[str, Any]], Dict[str, Any]],
     failure_fields: Dict[str, Any],
+    url_env: str = "WEB_PAGE_URL",
+    resolve_url: Callable[[str], str] = lambda url: url,
 ) -> int:
     """Run one web fetcher for the target in the environment. Returns the exit code.
 
-    `collect(url, verify_ssl, record)` returns the evidence dict; `record` holds the
+    The URL comes from `url_env`, is checked to be http(s), then passed through
+    `resolve_url`. `collect(url, verify_ssl, record)` returns the evidence dict; `record` holds the
     request fields and is filled in by fetch() as the response arrives. On failure the
     file gets `record`, then `failure_fields`, then the contract's failure ledger.
     """
@@ -227,7 +248,7 @@ def run(
     record: Dict[str, Any] = {
         "collected_at": current_timestamp(),
         "target_name": target_name,
-        "url": os.environ.get("WEB_PAGE_URL", "").strip(),
+        "url": os.environ.get(url_env, "").strip(),
         "final_url": None,
         "redirects": [],
         "http_status": 0,
@@ -236,7 +257,7 @@ def run(
 
     try:
         target_name = record["target_name"] = get_env("WEB_TARGET_NAME")
-        url = check_url(get_env("WEB_PAGE_URL"))
+        url = record["url"] = resolve_url(check_url(get_env(url_env), url_env))
         evidence = collect(url, env_bool("WEB_VERIFY_SSL", True), record)
         path = write_evidence(output_dir, name, target_name, evidence)
     except CollectionError as exc:
