@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Zendesk ticket forms and their fields, read with an API token, plus an anonymous check of the request page."""
+"""Zendesk ticket forms and their fields, read with an API token, plus the forms and request page seen anonymously."""
 
 import re
 import sys
@@ -32,7 +32,9 @@ MAX_PAGES = 100
 USER_AGENT = f"paramify-fetchers {NAME}/{VERSION}"
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
-# Field names are from Zendesk's Support API documentation, UNVERIFIED against a live response.
+# Field names are from Zendesk's Support API documentation. The anonymous ticket_forms shape was checked live on
+# support.paramify.com on 2026-10-16: every name below except agent_conditions was present (agent_conditions is
+# absent anonymously, so it records null there). The authenticated shapes are still UNVERIFIED live.
 FORM_FIELDS = ["id", "name", "display_name", "active", "default", "end_user_visible", "in_all_brands",
                "restricted_brand_ids", "ticket_field_ids", "agent_conditions", "end_user_conditions"]
 FIELD_FIELDS = ["id", "type", "title", "title_in_portal", "description", "active", "required", "required_in_portal",
@@ -42,8 +44,10 @@ OPTION_FIELDS = ["name", "value", "default"]
 # Paramify-specific keyword heuristic; see evidence_set.instructions.
 SECURITY = re.compile(r"secur|vulnerab|disclos", re.IGNORECASE)
 
+# Reset on failure. credentials_supplied, authenticated, forms_end_user_visible(_source) and the anonymous_* fields
+# are not here: the run sets them in the record before the authenticated calls, so a failure keeps them.
 FAILURE_FIELDS: Dict[str, Any] = {
-    "forms_end_user_visible": None, "security_report_option": None, "has_security_report_option": None,
+    "security_report_option": None, "has_security_report_option": None,
     "required_portal_fields": None, "requests_new_public": None, "requests_new_status": None,
     "form_count": None, "field_count": None, "pagination": None, "forms": [],
 }
@@ -70,7 +74,7 @@ def api_origin(base_url: str) -> str:
 
 
 def list_all(http: requests.Session, url: str, key: str, origin: str, verify: bool,
-             auth: Tuple[str, str]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+             auth: Optional[Tuple[str, str]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Every page, offset (`next_page` + `count`) or cursor (`meta.has_more` + `links.next`).
 
     Offset fails unless the collected number equals `count`. Cursor has no total, so it ends on has_more false.
@@ -117,6 +121,10 @@ def field_record(field: Dict[str, Any]) -> Dict[str, Any]:
         record["custom_field_options"] = [{name: o.get(name) for name in OPTION_FIELDS}
                                           for o in options if isinstance(o, dict)]
     return record
+
+
+def visible(forms: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [f for f in forms if f["active"] is True and f["end_user_visible"] is True]
 
 
 def form_record(form: Dict[str, Any], fields_by_id: Dict[Any, Dict[str, Any]]) -> Dict[str, Any]:
@@ -168,13 +176,42 @@ def requests_new_public(status: Dict[str, Any]) -> Optional[bool]:
     return status["http_status"] == 200 and not status["redirected_to_signin"]
 
 
+def anonymous_forms(record: Dict[str, Any], origin: str, form_ids: Optional[List[int]], verify: bool) -> None:
+    """The ticket forms an anonymous visitor gets, written into `record` so a later failure keeps them. Never fatal.
+
+    anonymous_forms_ok is true when the list was read, false on an HTTP error or a bad shape, null on a network error.
+    """
+    try:
+        raw, _ = list_all(http_session(USER_AGENT), f"{origin}/api/v2/ticket_forms.json", "ticket_forms", origin,
+                          verify, None)
+    except CollectionError as exc:
+        record.update(anonymous_forms_ok=None if exc.kind == "network_error" else False,
+                      anonymous_forms_error=str(exc))
+        return
+    if form_ids is not None:
+        raw = [f for f in raw if f.get("id") in form_ids]
+    forms = [{name: f.get(name) for name in FORM_FIELDS} for f in raw]
+    record.update(anonymous_forms_ok=True, anonymous_forms=forms, forms_end_user_visible=len(visible(forms)),
+                  forms_end_user_visible_source="anonymous")
+
+
 def collect(record: Dict[str, Any], origin: str, locale: str, form_ids: Optional[List[int]], verify: bool,
             auth: Tuple[str, str]) -> Dict[str, Any]:
+    anonymous_forms(record, origin, form_ids, verify)
     http = http_session(USER_AGENT)
-    raw_forms, form_pages = list_all(http, f"{origin}/api/v2/ticket_forms.json", "ticket_forms", origin, verify,
-                                     auth)
-    raw_fields, field_pages = list_all(http, f"{origin}/api/v2/ticket_fields.json", "ticket_fields", origin, verify,
-                                       auth)
+    try:
+        # Bad credentials do not fail ticket_forms: Zendesk falls back to the anonymous user and answers 200 with the
+        # end-user-visible forms (seen live on 2026-10-16: bad Basic auth got 200 there, and 401 "Couldn't
+        # authenticate you" on ticket_fields). ticket_fields has no anonymous answer, so it is the credential check.
+        raw_forms, form_pages = list_all(http, f"{origin}/api/v2/ticket_forms.json", "ticket_forms", origin, verify,
+                                         auth)
+        raw_fields, field_pages = list_all(http, f"{origin}/api/v2/ticket_fields.json", "ticket_fields", origin,
+                                           verify, auth)
+    except CollectionError as exc:
+        if exc.code == "auth_failed":
+            record["authenticated"] = False
+        raise
+    record["authenticated"] = True
     if form_ids is not None:
         missing = sorted(set(form_ids) - {f.get("id") for f in raw_forms})
         if missing:
@@ -183,7 +220,7 @@ def collect(record: Dict[str, Any], origin: str, locale: str, form_ids: Optional
         raw_forms = [f for f in raw_forms if f.get("id") in form_ids]
     fields_by_id = {f.get("id"): field_record(f) for f in raw_fields}
     forms = [form_record(f, fields_by_id) for f in raw_forms]
-    shown = [f for f in forms if f["active"] is True and f["end_user_visible"] is True]
+    shown = visible(forms)
     security = security_matches(shown)
 
     # A fresh session with no auth, so no credential or API session cookie reaches the public page.
@@ -191,6 +228,7 @@ def collect(record: Dict[str, Any], origin: str, locale: str, form_ids: Optional
     return {
         **record,
         "forms_end_user_visible": len(shown),
+        "forms_end_user_visible_source": "authenticated",
         "security_report_option": security,
         "has_security_report_option": bool(security),
         "required_portal_fields": required_portal_fields(shown),
@@ -213,7 +251,14 @@ def main() -> int:
         "help_center": None,
         "locale": None,
         "ticket_form_ids": None,
-        "authenticated": True,
+        "credentials_supplied": bool(env("ZENDESK_EMAIL") and env("ZENDESK_API_TOKEN")),
+        "authenticated": None,
+        "anonymous_forms_ok": None,
+        "forms_end_user_visible": None,
+        "forms_end_user_visible_source": None,
+        **FAILURE_FIELDS,
+        "anonymous_forms_error": None,
+        "anonymous_forms": [],
     }
 
     def work() -> Dict[str, Any]:

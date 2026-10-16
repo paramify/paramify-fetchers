@@ -1,7 +1,10 @@
 """zendesk_request_form against a local stand-in for the Zendesk Support API and Help Center.
 
 The fixtures under tests/fixtures/zendesk/synthetic_ticket_*.json are SYNTHETIC: invented ids
-and tags, with field names from Zendesk's API documentation, UNVERIFIED against a live response.
+and tags, with field names from Zendesk's API documentation. synthetic_ticket_forms_anonymous.json
+follows the shape of a live anonymous ticket_forms response (2026-10-16); the authenticated shapes
+are UNVERIFIED against a live response. The stand-in serves `anon` routes to requests that carry
+no Authorization header, so the anonymous and the authenticated ticket_forms reads can differ.
 The forms, labels and Reason options mirror Paramify's public "Submit a request" page as Isaac
 Teuscher described it on 2026-10-16. "collected_at" is frozen at 2026-10-16T15:00:00Z.
 """
@@ -43,20 +46,25 @@ SIGNIN = "/hc/en-us/signin?return_to=%2Fhc%2Fen-us%2Frequests%2Fnew"
 CHALLENGE = (403, {**HTML, "cf-mitigated": "challenge", "Server": "cloudflare"}, b"<title>Just a moment...</title>")
 
 FIXED_FIELDS = [
-    "collected_at", "target_name", "base_url", "help_center", "locale", "ticket_form_ids", "authenticated",
-    "forms_end_user_visible", "security_report_option", "has_security_report_option", "required_portal_fields",
-    "requests_new_public", "requests_new_status", "form_count", "field_count", "pagination", "forms",
+    "collected_at", "target_name", "base_url", "help_center", "locale", "ticket_form_ids", "credentials_supplied",
+    "authenticated", "anonymous_forms_ok", "forms_end_user_visible", "forms_end_user_visible_source",
+    "security_report_option", "has_security_report_option", "required_portal_fields", "requests_new_public",
+    "requests_new_status", "form_count", "field_count", "pagination", "forms", "anonymous_forms_error",
+    "anonymous_forms",
 ]
+UNAUTHENTICATED = (401, JSON, b'{"error":"Couldn\'t authenticate you"}')
 REQUIRED = ["Subject", "Description", "Reason/How can we help?", "Product"]
 
 
 class _Handler(BaseHTTPRequestHandler):
     routes: Dict[str, Tuple[int, Dict[str, str], bytes]] = {}
+    anon: Dict[str, Tuple[int, Dict[str, str], bytes]] = {}
     seen: list = []
 
     def do_GET(self) -> None:  # noqa: N802
         _Handler.seen.append((self.path, dict(self.headers)))
-        status, headers, body = self.routes.get(self.path, (404, JSON, b'{"error": "RecordNotFound"}'))
+        table = self.anon if "Authorization" not in self.headers and self.path in self.anon else self.routes
+        status, headers, body = table.get(self.path, (404, JSON, b'{"error": "RecordNotFound"}'))
         self.send_response(status)
         for key, value in headers.items():
             self.send_header(key, value)
@@ -93,6 +101,7 @@ def as_cursor(page1: dict, page2: dict, base: str) -> Dict[str, dict]:
 @pytest.fixture
 def site(server, monkeypatch, tmp_path):
     docs = {"forms": fixture("synthetic_ticket_forms.json", server),
+            "anon_forms": fixture("synthetic_ticket_forms_anonymous.json", server),
             "fields1": fixture("synthetic_ticket_fields_page1.json", server),
             "fields2": fixture("synthetic_ticket_fields_page2.json", server)}
 
@@ -103,6 +112,8 @@ def site(server, monkeypatch, tmp_path):
             FIELDS_2: (200, JSON, json.dumps(docs["fields2"]).encode()),
             REQUESTS_NEW: (200, {**HTML, "Set-Cookie": "_help_center_session=x; path=/"}, b"<form>ok</form>"),
         }
+        # Live: ticket_forms answers anonymously with the end-user-visible forms; ticket_fields does not.
+        _Handler.anon = {FORMS: (200, JSON, json.dumps(docs["anon_forms"]).encode()), FIELDS: UNAUTHENTICATED}
         _Handler.seen = []
 
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
@@ -116,10 +127,14 @@ def site(server, monkeypatch, tmp_path):
     monkeypatch.setattr(zd, "load_dotenv", lambda: None)
     monkeypatch.setattr(zd, "current_timestamp", lambda: NOW)
 
-    def run(**routes):
+    def encode(routes):
+        return {path: (200, JSON, json.dumps(doc).encode()) if isinstance(doc, dict) else doc
+                for path, doc in routes.items()}
+
+    def run(anon=None, **routes):
         publish()
-        _Handler.routes.update({path: (200, JSON, json.dumps(doc).encode()) if isinstance(doc, dict) else doc
-                                for path, doc in routes.items()})
+        _Handler.routes.update(encode(routes))
+        _Handler.anon.update(encode(anon or {}))
         code = zd.main()
         evidence = json.loads((tmp_path / "zendesk_request_form_support.json").read_text())
         status_file = tmp_path / "status.json"
@@ -142,8 +157,10 @@ def test_forms_and_fields_are_collected(site):
     code, ev, status = run()
     assert (code, status) == (0, None)
     assert list(ev) == FIXED_FIELDS
-    assert ev["help_center"] == base and ev["locale"] == "en-us" and ev["authenticated"] is True
+    assert ev["help_center"] == base and ev["locale"] == "en-us"
+    assert ev["credentials_supplied"] is True and ev["authenticated"] is True
     assert ev["form_count"] == 2 and ev["field_count"] == 7 and ev["forms_end_user_visible"] == 1
+    assert ev["forms_end_user_visible_source"] == "authenticated"
     assert ev["pagination"] == {
         "ticket_forms": {"style": "offset", "pages": 1, "collected": 2, "reported_count": 2},
         "ticket_fields": {"style": "offset", "pages": 2, "collected": 7, "reported_count": 7},
@@ -237,6 +254,8 @@ def test_ticket_form_ids_filter(site, monkeypatch):
     _, ev, _ = run()
     assert ev["ticket_form_ids"] == [360010002] and [f["id"] for f in ev["forms"]] == [360010002]
     assert ev["forms_end_user_visible"] == 0
+    # The anonymous list never has the hidden form; filtering it out is not a failure.
+    assert ev["anonymous_forms_ok"] is True and ev["anonymous_forms"] == []
 
 
 def test_a_field_id_with_no_field_is_listed(site):
@@ -324,25 +343,93 @@ def test_a_request_page_error_is_false_and_not_fatal(site):
     assert code == 0 and ev["requests_new_public"] is False and ev["requests_new_status"]["http_status"] == 404
 
 
-def test_api_calls_carry_the_token_and_the_page_get_does_not(site):
+def test_api_calls_carry_the_token_and_the_anonymous_reads_do_not(site):
     run, _, _ = site
     run()
-    by_path = {path: headers for path, headers in _Handler.seen}
-    for path in (FORMS, FIELDS, FIELDS_2):
-        assert by_path[path]["Authorization"] == BASIC
-    page = by_path[REQUESTS_NEW]
-    assert "Authorization" not in page and "Cookie" not in page
+    assert [path for path, _ in _Handler.seen] == [FORMS, FORMS, FIELDS, FIELDS_2, REQUESTS_NEW]
+    (anonymous, forms, fields, fields_2, page) = [headers for _, headers in _Handler.seen]
+    for headers in (forms, fields, fields_2):
+        assert headers["Authorization"] == BASIC
+    for headers in (anonymous, page):
+        assert "Authorization" not in headers and "Cookie" not in headers
     assert all(h["User-Agent"] == f"paramify-fetchers zendesk_request_form/{zd.VERSION}" for _, h in _Handler.seen)
+
+
+# --- the anonymous forms list -------------------------------------------------------------
+
+def test_anonymous_forms_are_recorded_verbatim(site):
+    run, docs, _ = site
+    code, ev, _ = run()
+    assert code == 0 and ev["anonymous_forms_ok"] is True and ev["anonymous_forms_error"] is None
+    (form,) = ev["anonymous_forms"]
+    vendor = docs["anon_forms"]["ticket_forms"][0]
+    assert list(form) == zd.FORM_FIELDS
+    for name in zd.FORM_FIELDS:
+        assert form[name] == vendor.get(name)
+    assert form["agent_conditions"] is None  # absent from the live anonymous shape
+    assert form["end_user_visible"] is True and len(form["ticket_field_ids"]) == 6
+
+
+def test_bad_credentials_fall_back_to_anonymous_on_forms_and_fail_on_fields(site):
+    """The live answer to bad Basic auth (2026-10-16): 200 on ticket_forms, 401 on ticket_fields."""
+    run, docs, _ = site
+    code, ev, status = run(**{FORMS: docs["anon_forms"], FIELDS: UNAUTHENTICATED})
+    _assert_failed(code, ev, status, "http_error", "auth_failed")
+    assert "HTTP 401" in status["error"] and "authenticate you" in status["error"] and FIELDS in status["error"]
+    assert ev["credentials_supplied"] is True and ev["authenticated"] is False
+    assert ev["forms_end_user_visible"] == 1 and ev["forms_end_user_visible_source"] == "anonymous"
+    assert [f["id"] for f in ev["anonymous_forms"]] == [360010001]
+    assert list(ev)[:len(FIXED_FIELDS)] == FIXED_FIELDS
+
+
+def test_an_anonymous_forms_error_is_recorded_and_not_fatal(site):
+    run, _, _ = site
+    code, ev, status = run(anon={FORMS: (403, JSON, b'{"error": "Forbidden"}')})
+    assert (code, status) == (0, None)
+    assert ev["anonymous_forms_ok"] is False and ev["anonymous_forms"] == []
+    assert "HTTP 403" in ev["anonymous_forms_error"]
+    assert ev["authenticated"] is True and ev["forms_end_user_visible_source"] == "authenticated"
+
+
+def test_an_anonymous_network_error_is_null_not_false(site, monkeypatch):
+    run, _, _ = site
+    real = zd.list_all
+
+    def flaky(http, url, key, origin, verify, auth):
+        if auth is None:
+            raise zd.CollectionError("GET failed: ConnectionError", "network_error")
+        return real(http, url, key, origin, verify, auth)
+
+    monkeypatch.setattr(zd, "list_all", flaky)
+    code, ev, _ = run()
+    assert code == 0 and ev["anonymous_forms_ok"] is None and ev["anonymous_forms_error"]
+
+
+def test_both_lists_failing_leaves_forms_end_user_visible_null(site):
+    run, _, _ = site
+    code, ev, status = run(anon={FORMS: UNAUTHENTICATED}, **{FIELDS: UNAUTHENTICATED})
+    _assert_failed(code, ev, status, "http_error", "auth_failed", anonymous=False)
+    assert ev["forms_end_user_visible"] is None and ev["forms_end_user_visible_source"] is None
 
 
 # --- failures -----------------------------------------------------------------------------
 
-def _assert_failed(code, ev, status, kind, contract_code):
+def _assert_failed(code, ev, status, kind, contract_code, anonymous=True, authenticated=None):
+    """`anonymous`: whether the anonymous forms read happened and succeeded before the failure.
+
+    `authenticated` is what the evidence must say when the failure is not a 401 (always false on one).
+    """
     assert code == 1 and status["code"] == contract_code
     (failure,) = ev["metadata"]["api_failures"]
     assert ev["metadata"]["partial_failure"] is True
     assert set(failure) == {"operation", "type", "message"} and failure["type"] == kind
     assert ev["forms"] == [] and ev["has_security_report_option"] is None and ev["requests_new_public"] is None
+    assert ev["authenticated"] is (False if contract_code == "auth_failed" else authenticated)
+    if anonymous:
+        assert ev["anonymous_forms_ok"] is True and [f["id"] for f in ev["anonymous_forms"]] == [360010001]
+        assert ev["forms_end_user_visible"] == 1 and ev["forms_end_user_visible_source"] == "anonymous"
+    else:
+        assert ev["anonymous_forms"] == [] and ev["anonymous_forms_ok"] is not True
 
 
 @pytest.mark.parametrize("status_code, contract_code",
@@ -361,15 +448,16 @@ def test_missing_secrets_or_base_url_is_bad_config(site, monkeypatch, missing):
     run, _, _ = site
     monkeypatch.delenv(missing)
     code, ev, status = run()
-    _assert_failed(code, ev, status, "missing_config", "bad_config")
+    _assert_failed(code, ev, status, "missing_config", "bad_config", anonymous=False)
     assert missing in status["error"] and _Handler.seen == []
+    assert ev["credentials_supplied"] is (missing == "ZENDESK_BASE_URL")
 
 
 @pytest.mark.parametrize("url", ["http://support.example.com", "ftp://support.example.com", "not a url"])
 def test_a_non_https_base_url_is_bad_config(site, monkeypatch, url):
     run, _, _ = site
     monkeypatch.setenv("ZENDESK_BASE_URL", url)
-    _assert_failed(*run(), "bad_url", "bad_config")
+    _assert_failed(*run(), "bad_url", "bad_config", anonymous=False)
     assert _Handler.seen == []
 
 
@@ -377,14 +465,14 @@ def test_a_non_https_base_url_is_bad_config(site, monkeypatch, url):
 def test_bad_ticket_form_ids_is_bad_config(site, monkeypatch, raw):
     run, _, _ = site
     monkeypatch.setenv("ZENDESK_TICKET_FORM_IDS", raw)
-    _assert_failed(*run(), "bad_config", "bad_config")
+    _assert_failed(*run(), "bad_config", "bad_config", anonymous=False)
 
 
 def test_an_unknown_ticket_form_id_fails(site, monkeypatch):
     run, _, _ = site
     monkeypatch.setenv("ZENDESK_TICKET_FORM_IDS", "360010001,123")
     code, ev, status = run()
-    _assert_failed(code, ev, status, "form_not_found", "bad_config")
+    _assert_failed(code, ev, status, "form_not_found", "bad_config", authenticated=True)
     assert "[123]" in status["error"]
 
 

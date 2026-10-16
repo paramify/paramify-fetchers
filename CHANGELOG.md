@@ -24,13 +24,23 @@ schemas and the `paramify` CLI — not the internal code.
   options). Fixed fields come first: `forms_end_user_visible`,
   `security_report_option` and `has_security_report_option` (a form name or
   portal option matching secur/vulnerab/disclos, a Paramify-specific
-  heuristic), and `required_portal_fields`. One anonymous GET of
+  heuristic), and `required_portal_fields`. It first reads
+  `/api/v2/ticket_forms.json` with no credential and keeps those forms as
+  `anonymous_forms` (with `anonymous_forms_ok`), never fatal and kept in the
+  failure evidence. Bad credentials do not fail `ticket_forms` (Zendesk falls
+  back to the anonymous user; seen live on 2026-10-16), so `ticket_fields` is
+  the credential check: `credentials_supplied` says a token was sent, and
+  `authenticated` is true only once `ticket_fields` succeeds, false on a 401,
+  null otherwise. A 401 still fails the run (`auth_failed`); its evidence then
+  counts `forms_end_user_visible` from the anonymous list, with
+  `forms_end_user_visible_source: anonymous`. One anonymous GET of
   `/hc/<locale>/requests/new`, never fatal, records whether the page loads,
   sends the visitor to sign in, or meets a Cloudflare challenge (which leaves
   `requests_new_public` null, not false). `base_url` must be https (loopback
   excepted, for tests), and the token is redacted from any failure message.
-  Field names come from Zendesk's API documentation and are unverified against
-  a live response; tested with synthetic fixtures only. No KSI mapping.
+  Field names come from Zendesk's API documentation. The anonymous
+  `ticket_forms` shape was checked live; the authenticated shapes are
+  unverified, and tests use synthetic fixtures only. No KSI mapping.
 - The zendesk fetchers' HTTP, URL-parsing and run-wrapper code moved to
   `fetchers/zendesk/_shared/zendesk_client.py`. No behavior change to
   `zendesk_help_center_section`.
