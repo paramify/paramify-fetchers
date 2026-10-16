@@ -376,10 +376,19 @@ def test_missing_env_is_bad_config(site, monkeypatch, tmp_path, missing):
         ("Last revised on September 2024", "September 2024"),
         ("We updated our cookie banner", None),
         ("Updated daily", None),
+        # www.paramify.com puts the label and the date in separate elements, so separate lines
+        ("Last Updated\nJune 5, 2026", "June 5, 2026"),
+        ("Last Updated:\nApril 22, 2025", "April 22, 2025"),
+        ("Last Updated\nby the legal team", None),
     ],
 )
 def test_last_updated_capture(line, expected):
     assert wp.find_last_updated(f"Intro\n{line}\nOutro") == expected
+
+
+def test_label_and_date_in_separate_elements():
+    text, _ = wp.html_to_text("<div><div>Last Updated</div><div>June 5, 2026</div></div><p>Body</p>")
+    assert wp.find_last_updated(text) == "June 5, 2026"
 
 
 def test_unclosed_head_is_closed_by_body():
