@@ -12,6 +12,27 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **A `web` category and its first fetcher, `web_page_text`**
+  (`EVD-WEB-PAGE-TEXT`). It fetches one public URL per target, with no
+  credential, and records the text the page served. For HTML that is the
+  visible text, one line per block element, with script, style and head
+  dropped and navigation and footer kept. For JSON it is the parsed document
+  plus the body verbatim, and plain text is kept as served. Fixed fields come
+  first so a validator's first match lands on them: the final URL and each
+  redirect, the HTTP status and content type, the `<title>`, a `last_updated`
+  date copied verbatim from the first "Last updated" or "Effective date" line,
+  the text length, the body's `sha256`, and `text_sha256` of the extracted text,
+  which is the stable change signal because markup and per-request tokens do
+  not move it. The run fails on a network or TLS
+  error, any status other than 200, more than 5 redirects, a body over 5 MB, an
+  unsupported content type, JSON that does not parse, or a page with no text,
+  which is how a page rendered by JavaScript shows up. The evidence shows what
+  the URL served when it was collected, not which version of a document is in
+  force. HTML parsing uses the standard library, so there is no new
+  dependency; the HTML-to-text and date capture live in `fetchers/_lib/html_text.py`
+  for any category to import. Tested with synthetic fixtures. Run live only against GitHub
+  pages, because www.paramify.com was not reachable from the test environment.
+  No KSI mapping.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
