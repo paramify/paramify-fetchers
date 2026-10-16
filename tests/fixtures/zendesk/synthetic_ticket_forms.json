@@ -1,0 +1,58 @@
+{
+  "_fixture_note": "SYNTHETIC fixture. Ids, timestamps and option tag values are invented. Field names follow Zendesk's Support API documentation and are UNVERIFIED against a live response (no API token was available). The forms, field labels and Reason options mirror Paramify's public Submit a request page as Isaac Teuscher described it on 2026-10-16. {BASE} is replaced by the test server's origin.",
+  "ticket_forms": [
+    {
+      "url": "{BASE}/api/v2/ticket_forms/360010001.json",
+      "id": 360010001,
+      "name": "Default Ticket Form",
+      "raw_name": "Default Ticket Form",
+      "display_name": "Submit a request",
+      "raw_display_name": "Submit a request",
+      "end_user_visible": true,
+      "position": 0,
+      "ticket_field_ids": [
+        900001,
+        900002,
+        900003,
+        900004,
+        900005,
+        900006
+      ],
+      "active": true,
+      "default": true,
+      "in_all_brands": true,
+      "restricted_brand_ids": [],
+      "end_user_conditions": [],
+      "agent_conditions": [],
+      "created_at": "2024-03-04T17:00:00Z",
+      "updated_at": "2026-06-02T15:30:00Z"
+    },
+    {
+      "url": "{BASE}/api/v2/ticket_forms/360010002.json",
+      "id": 360010002,
+      "name": "Internal escalation",
+      "raw_name": "Internal escalation",
+      "display_name": "Internal escalation",
+      "raw_display_name": "Internal escalation",
+      "end_user_visible": false,
+      "position": 1,
+      "ticket_field_ids": [
+        900001,
+        900002,
+        900003,
+        900007
+      ],
+      "active": true,
+      "default": false,
+      "in_all_brands": true,
+      "restricted_brand_ids": [],
+      "end_user_conditions": [],
+      "agent_conditions": [],
+      "created_at": "2024-03-04T17:00:00Z",
+      "updated_at": "2026-06-02T15:30:00Z"
+    }
+  ],
+  "next_page": null,
+  "previous_page": null,
+  "count": 2
+}

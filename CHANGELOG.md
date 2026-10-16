@@ -12,6 +12,28 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`zendesk_request_form`** (`EVD-ZENDESK-REQUEST-FORM`, "Zendesk
+  Submit-a-Request Form"). With a Zendesk API token (`ZENDESK_EMAIL` and
+  `ZENDESK_API_TOKEN`, declared on this fetcher, so
+  `zendesk_help_center_section` stays credential-free) it reads
+  `/api/v2/ticket_forms.json` and `/api/v2/ticket_fields.json` to the last
+  page, offset (`next_page` plus `count`, which must match) or cursor
+  (`meta.has_more` plus `links.next`). Any API error fails the run. Each form
+  keeps Zendesk's own fields with its `ticket_field_ids` resolved to field
+  records (portal title, required/visible/editable in portal, dropdown
+  options). Fixed fields come first: `forms_end_user_visible`,
+  `security_report_option` and `has_security_report_option` (a form name or
+  portal option matching secur/vulnerab/disclos, a Paramify-specific
+  heuristic), and `required_portal_fields`. One anonymous GET of
+  `/hc/<locale>/requests/new`, never fatal, records whether the page loads,
+  sends the visitor to sign in, or meets a Cloudflare challenge (which leaves
+  `requests_new_public` null, not false). `base_url` must be https (loopback
+  excepted, for tests), and the token is redacted from any failure message.
+  Field names come from Zendesk's API documentation and are unverified against
+  a live response; tested with synthetic fixtures only. No KSI mapping.
+- The zendesk fetchers' HTTP, URL-parsing and run-wrapper code moved to
+  `fetchers/zendesk/_shared/zendesk_client.py`. No behavior change to
+  `zendesk_help_center_section`.
 - **A `zendesk` category and its first fetcher, `zendesk_help_center_section`**
   (`EVD-ZENDESK-HELP-CENTER-SECTION`). Given a Help Center section URL, it lists
   the section's articles through the Help Center API as an anonymous user, so
