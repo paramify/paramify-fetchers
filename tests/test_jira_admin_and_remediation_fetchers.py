@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -42,7 +43,8 @@ def run(monkeypatch, tmp_path):
     def _run(name: str, router, env: dict | None = None):
         calls = []
 
-        def fake_request(self, method, url, params=None, json=None, timeout=None):
+        def fake_request(self, method, url, params=None, json=None, timeout=None, **kw):
+            assert kw.get("allow_redirects") is False, "redirects must never be followed"
             path = url.split(".atlassian.net", 1)[1]
             calls.append((method, path, params, json))
             status, body = router(method, path, params or {}, json or {})
@@ -282,3 +284,134 @@ def test_access_roles_non_admin_401_on_roles_does_not_abort(run):
     assert [p["key"] for p in out["projects"]] == ["SEC", "HR"]
     assert out["summary"]["distinct_admin_users"] == 1
     assert out["summary"]["admin_users_by_account_type"] == {"app": 1}
+
+
+# ---------- security hardening ----------
+
+@pytest.mark.parametrize("url", [
+    "https://example.atlassian.net@evil.example",
+    "https://evil.example#.atlassian.net",
+    "https://evil.example?x=.atlassian.net",
+    "https://svc:pw@example.atlassian.net",
+    "http://example.atlassian.net",
+    "https://example.atlassian.net.evil.example",
+    "https://evilatlassian.net",
+    "https://atlassian.net",
+    "https://example.atlassian.net:8443",
+    "https://example.atlassian.net/extra/path",
+    "https://api.atlassian.com/ex/jira/../../admin",
+    "https://api.atlassian.com/",
+    "https://evil.com\\.atlassian.net",
+    "https://a..atlassian.net",
+    "https://x%2fy.atlassian.net",
+    "https://site\u3002atlassian.net",
+    "https://site.atlassian.net.",
+])
+def test_base_url_rejects_hosts_that_could_receive_the_token(url):
+    sys.path.insert(0, str(JIRA / "_shared"))
+    from jira_common import validate_base_url
+    normalized, error = validate_base_url(url)
+    assert normalized is None and error
+    assert "pw" not in error and "svc" not in error
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://example.atlassian.net", "https://example.atlassian.net"),
+    ("https://Example.atlassian.net/", "https://example.atlassian.net"),
+    ("https://api.atlassian.com/ex/jira/eadac007-8666-4024-a026-0bfb4d34aa2e",
+     "https://api.atlassian.com/ex/jira/eadac007-8666-4024-a026-0bfb4d34aa2e"),
+    ("https://example.atlassian-us-gov-mod.net", "https://example.atlassian-us-gov-mod.net"),
+])
+def test_base_url_accepts_site_and_gateway(url, expected):
+    sys.path.insert(0, str(JIRA / "_shared"))
+    from jira_common import validate_base_url
+    assert validate_base_url(url) == (expected, None)
+
+
+@pytest.mark.parametrize("name", ["remediation_items", "audit_records", "access_roles", "site_inventory"])
+def test_bad_base_url_fails_before_any_call(monkeypatch, tmp_path, name):
+    def no_network(*a, **k):
+        raise AssertionError("no request may be made with a refused base URL")
+    monkeypatch.setattr(requests.Session, "request", no_network)
+    for k, v in {"JIRA_BASE_URL": "https://example.atlassian.net@evil.example", "JIRA_EMAIL": "e",
+                 "JIRA_API_TOKEN": "t", "JIRA_REMEDIATION_JQL": "labels = x",
+                 "EVIDENCE_DIR": str(tmp_path), "FETCHER_STATUS_FILE": str(tmp_path / "s.json")}.items():
+        monkeypatch.setenv(k, v)
+    assert load(name).main() == 1
+    status = json.loads((tmp_path / "s.json").read_text())
+    assert status["code"] == "bad_config" and "evil.example" not in status["error"]
+
+
+def test_redirect_is_not_followed_and_fails(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 302, {}
+        return 200, {"offset": 0, "total": 0, "records": []}
+
+    code, out, _, status = run("audit_records", router)
+    assert code == 1 and status["code"] == "bad_config"
+    assert out["metadata"]["api_failures"][0]["type"] == "HTTP302"
+    assert out["metadata"]["complete"] is False
+
+
+def test_audit_records_truncation_is_reported(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        start = params["offset"]
+        batch = [{"id": i, "created": "2026-10-01T00:00:00.000+0000", "category": "permissions"}
+                 for i in range(start, min(start + 1000, 2000))]
+        return 200, {"offset": start, "limit": 1000, "total": 2000, "records": batch}
+
+    code, out, _, status = run("audit_records", router, {"JIRA_AUDIT_MAX_RECORDS": "1500"})
+    assert out["metadata"]["records_collected"] == 1500
+    assert out["metadata"]["records_truncated"] is True
+    assert out["metadata"]["complete"] is False
+    assert code == 1 and status["code"] == "partial_failure"
+    assert "JIRA_AUDIT_MAX_RECORDS=1500" in status["error"]
+
+
+def test_audit_records_exactly_at_cap_is_complete(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        start = params["offset"]
+        batch = [{"id": i, "created": "2026-10-01T00:00:00.000+0000"} for i in range(start, min(start + 1000, 1000))]
+        return 200, {"offset": start, "total": 1000, "records": batch}
+
+    code, out, _, status = run("audit_records", router, {"JIRA_AUDIT_MAX_RECORDS": "1000"})
+    assert code == 0 and status is None
+    assert out["metadata"]["records_truncated"] is False and out["metadata"]["complete"] is True
+
+
+def test_remediation_items_cap_is_reported(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [_issue(i, "To Do", "new") for i in range(body["maxResults"])],
+                         "nextPageToken": "more"}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        raise AssertionError(path)
+
+    code, out, _, status = run("remediation_items", router,
+                               {"JIRA_REMEDIATION_JQL": "labels = x", "JIRA_REMEDIATION_MAX_ITEMS": "3"})
+    assert out["metadata"]["items_truncated"] is True and out["metadata"]["complete"] is False
+    assert code == 1 and status["code"] == "partial_failure"
+
+
+def test_remediation_items_cap_holds_when_server_ignores_max_results(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [_issue(i, "To Do", "new") for i in range(50)], "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        raise AssertionError(path)
+
+    code, out, _, status = run("remediation_items", router,
+                               {"JIRA_REMEDIATION_JQL": "labels = x", "JIRA_REMEDIATION_MAX_ITEMS": "10"})
+    assert out["metadata"]["items_collected"] == 10
+    assert out["metadata"]["items_truncated"] is True and code == 1

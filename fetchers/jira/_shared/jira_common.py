@@ -3,11 +3,13 @@
 import json
 import logging
 import os
+import re
 import statistics
 import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -46,8 +48,15 @@ class JiraClient:
     def request(self, method, path, operation, *, params=None, body=None, allow_404=False, quiet_400=False):
         """Return the decoded JSON body, NOT_FOUND (when allowed), or None on failure."""
         try:
+            # Redirects are not followed: a redirected request could carry the
+            # credential or a POST body to a path or host it was never meant for.
             resp = self.session.request(
-                method, f"{self.base_url}{path}", params=params, json=body, timeout=TIMEOUT
+                method,
+                f"{self.base_url}{path}",
+                params=params,
+                json=body,
+                timeout=TIMEOUT,
+                allow_redirects=False,
             )
         except requests.RequestException as e:
             self.fail(operation, type(e).__name__, str(e), "target_unreachable")
@@ -64,6 +73,15 @@ class JiraClient:
             return NOT_FOUND
         if resp.status_code == 400 and quiet_400:
             return NOT_FOUND
+
+        if 300 <= resp.status_code < 400:
+            self.fail(
+                operation,
+                f"HTTP{resp.status_code}",
+                "redirect not followed; JIRA_BASE_URL must be the site or API gateway URL itself",
+                "bad_config",
+            )
+            return None
 
         message = error_message(resp)
         if resp.status_code == 401:
@@ -119,6 +137,9 @@ class JiraClient:
             issues.extend(page.get("issues") or [])
             token = page.get("nextPageToken")
             more = bool(token) and not page.get("isLast", False)
+            if len(issues) > max_issues:
+                # The server returned more than maxResults asked for.
+                return issues[:max_issues], True, True
             if not more:
                 return issues, False, True
             if len(issues) >= max_issues:
@@ -232,20 +253,63 @@ def list_env(name: str) -> list:
     return [v.strip() for v in os.environ.get(name, "").split(",") if v.strip()]
 
 
+# Jira Cloud hosts the API token may be sent to: a site, or the API gateway
+# (required for scoped tokens). Government Cloud has its own domains.
+# One DNS label under the Atlassian domain, ASCII only: a looser check let
+# "evil.com\.atlassian.net" through, which requests sends to evil.com.
+_SITE_HOST = re.compile(
+    r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:atlassian\.net|atlassian-us-gov-mod\.net)$"
+)
+_GATEWAY_HOSTS = ("api.atlassian.com", "api.atlassian-us-gov-mod.com")
+_URL_CHARS = re.compile(r"^[A-Za-z0-9:/._-]+$")
+_GATEWAY_PATH = re.compile(r"^/ex/jira/[0-9A-Za-z-]{8,64}$")
+
+
+def validate_base_url(raw: str):
+    """Return (normalized_url, None) or (None, error). The error never echoes the raw value."""
+    if not _URL_CHARS.fullmatch(raw):
+        return None, "JIRA_BASE_URL contains characters a Jira Cloud URL never has"
+    try:
+        parts = urlsplit(raw)
+        host = (parts.hostname or "").lower()
+        port = parts.port
+    except ValueError:
+        return None, "JIRA_BASE_URL is not a valid URL"
+    if parts.scheme != "https":
+        return None, "JIRA_BASE_URL must use https://"
+    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
+        return None, "JIRA_BASE_URL must not contain a username or password"
+    if parts.query or parts.fragment:
+        return None, "JIRA_BASE_URL must not contain a query string or fragment"
+    if port not in (None, 443):
+        return None, "JIRA_BASE_URL must not set a port"
+    path = parts.path.rstrip("/")
+    if _SITE_HOST.fullmatch(host) and not path:
+        return f"https://{host}", None
+    if host in _GATEWAY_HOSTS and _GATEWAY_PATH.fullmatch(path):
+        return f"https://{host}{path}", None
+    return None, (
+        "JIRA_BASE_URL must be a Jira Cloud site (https://<site>.atlassian.net) or the "
+        "API gateway for a scoped token (https://api.atlassian.com/ex/jira/<cloudId>); "
+        f"got host {host or '(none)'!r}"
+    )
+
+
 def connection_settings():
     """Read the category settings. Returns (base_url, email, token), or an error string."""
-    base_url = os.environ.get("JIRA_BASE_URL", "").strip().rstrip("/")
+    raw_url = os.environ.get("JIRA_BASE_URL", "").strip()
     email = os.environ.get("JIRA_EMAIL", "").strip()
     api_token = os.environ.get("JIRA_API_TOKEN", "").strip()
     for var, value in (
-        ("JIRA_BASE_URL", base_url),
+        ("JIRA_BASE_URL", raw_url),
         ("JIRA_EMAIL", email),
         ("JIRA_API_TOKEN", api_token),
     ):
         if not value:
             return f"{var} is not set"
-    if not base_url.startswith("https://"):
-        return f"JIRA_BASE_URL must be an https:// URL, got {base_url!r}"
+    base_url, error = validate_base_url(raw_url)
+    if error:
+        return error
     return base_url, email, api_token
 
 
@@ -267,6 +331,9 @@ def utc_now() -> datetime:
 
 def write_and_finish(logger: logging.Logger, client: JiraClient, evidence: dict, filename: str, extra_failure: str = "") -> int:
     """Write the evidence file, then report the run's outcome. Returns the exit code."""
+    meta = evidence.setdefault("metadata", {})
+    meta["complete"] = not (extra_failure or client.api_failures)
+    meta["incomplete_reason"] = extra_failure or None
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / filename

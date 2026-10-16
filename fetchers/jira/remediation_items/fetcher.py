@@ -199,7 +199,12 @@ def main() -> int:
         "summary": _summarize(items),
         "items": items,
     }
-    return write_and_finish(logger, client, evidence, OUTPUT_FILE)
+    incomplete = ""
+    if truncated:
+        incomplete = f"tickets truncated at JIRA_REMEDIATION_MAX_ITEMS={max_items}"
+    elif not history_complete:
+        incomplete = "status history incomplete for some tickets"
+    return write_and_finish(logger, client, evidence, OUTPUT_FILE, incomplete)
 
 
 if __name__ == "__main__":
