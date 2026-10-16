@@ -12,6 +12,22 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`web_vulnerability_disclosure`** (`EVD-WEB-VULNERABILITY-DISCLOSURE`), the
+  second `web` fetcher. Given a site or a security.txt URL, it fetches
+  `/.well-known/security.txt` and records it verbatim, with its fields parsed per
+  RFC 9116 and whether it carries an OpenPGP cleartext signature (not verified).
+  It then follows each `Policy:` link and extracts its text as `web_page_text`
+  does, and each https `Encryption:` link, where an ASCII-armored public key is
+  read with the standard library (fingerprint, creation, expiry, user IDs,
+  subkeys). Fixed fields come first for validators: `expires_in_days`,
+  `canonical_matches_url`, `contact_emails_in_key`,
+  `key_expires_after_security_txt`, `policies_all_ok` and `policy_placeholders`
+  (`[X]`-style blanks left in the policy). Missing REQUIRED fields, a wrong
+  content type and broken linked pages are recorded as findings. The run fails
+  only when security.txt itself cannot be collected or parsed. Tested with the
+  security.txt and key Paramify publishes, served locally; the key's facts match
+  `gpg --show-keys`. Not run live against paramify.com (blocked from the test
+  environment). No KSI mapping.
 - **A `web` category and its first fetcher, `web_page_text`**
   (`EVD-WEB-PAGE-TEXT`). It fetches one public URL per target, with no
   credential, and records the text the page served. For HTML that is the
