@@ -1,0 +1,81 @@
+name: jira_access_roles
+version: 0.1.0
+description: >-
+  Collects who holds privileged access to a Jira site: site-admin and admin
+  groups with their members (active flag, account type), product access roles,
+  and for each project the permission scheme's privileged grants (administer
+  project, delete issues and comments, issue security, modify reporter), project
+  role members, the resolved list of privileged users, and grants made to
+  everyone. Requires an account with the Administer Jira global permission;
+  use a read-only scoped token (see fetchers/jira/README.md).
+category: jira
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1200
+
+output:
+  type: json
+  path: jira_access_roles.json
+
+# JIRA_EMAIL / JIRA_API_TOKEN / JIRA_BASE_URL are declared on the category.
+secrets: []
+
+config_schema:
+  project_keys:
+    type: string
+    required: false
+    env: JIRA_PROJECT_KEYS
+    description: >-
+      Comma-separated project keys to scan, e.g. `CCB,IR`. Empty scans every
+      project the account can see (up to max_projects).
+  admin_groups:
+    type: string
+    required: false
+    env: JIRA_ADMIN_GROUPS
+    description: >-
+      Comma-separated extra group names to report as administrative alongside
+      the groups Jira itself classifies as site-admin or admin access.
+  max_projects:
+    type: integer
+    required: false
+    env: JIRA_ACCESS_MAX_PROJECTS
+    default: 200
+    description: >-
+      Stop after this many projects. metadata.projects_truncated records whether
+      the cap was hit.
+
+evidence_set:
+  reference_id: EVD-JIRA-ACCESS-ROLES
+  name: Jira Privileged Access and Project Roles
+  instructions: >-
+    Script: fetcher.py. Basic auth (account email + API token) to the Jira Cloud
+    REST API as an account holding the Administer Jira global permission (the
+    calls are read-only; application roles and other projects' role members
+    have no lower permission). Reads GET /rest/api/3/myself; GET
+    /rest/api/3/group/bulk?accessType=site-admin and accessType=admin (falling
+    back to one call per applicationKey if the API requires one) plus any
+    JIRA_ADMIN_GROUPS by groupName; GET /rest/api/3/group/member
+    (includeInactiveUsers=true) for every admin group and every group named in a
+    privileged grant or project role; GET /rest/api/3/applicationrole; GET
+    /rest/api/3/project/search?expand=lead; and per project GET
+    /rest/api/3/project/{key}/permissionscheme?expand=all, GET
+    /rest/api/3/project/{key}/role and GET /rest/api/3/project/{key}/role/{id}.
+    Privileged permissions: ADMINISTER_PROJECTS, DELETE_ISSUES,
+    DELETE_ALL_COMMENTS, DELETE_ALL_ATTACHMENTS, DELETE_ALL_WORKLOGS,
+    EDIT_ALL_COMMENTS, SET_ISSUE_SECURITY, MODIFY_REPORTER. Grants to `anyone`
+    or `applicationRole` are listed as broad_privileged_grants. Summary:
+    admin_groups, distinct_admin_users, inactive_admin_users,
+    admin_users_by_account_type, projects_scanned,
+    projects_with_broad_privileged_grants, distinct_project_admin_users and
+    privileged_users_per_project. Output: jira_access_roles.json
+  description: >-
+    The people and groups holding administrative and other privileged rights in
+    the Jira site and in each project, evidencing that privileged access to the
+    change and incident tracking system is limited and reviewable.
+
+ksis:
+  - KSI-IAM-ELP

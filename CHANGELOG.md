@@ -10,7 +10,51 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Security
+
+- **Jira fetchers** (`jira_site_inventory`, `jira_remediation_items`,
+  `jira_audit_records`, `jira_access_roles`): `JIRA_BASE_URL` must now be a Jira
+  Cloud site (`https://<site>.atlassian.net`, or the Government Cloud domain) or
+  the API gateway for a scoped token (`https://api.atlassian.com/ex/jira/<cloudId>`).
+  Any other host, a userinfo part, a query, a fragment or a port is refused before
+  the token is sent, and the error no longer echoes the value. HTTP redirects are
+  no longer followed; a 3xx answer is a `bad_config` failure. The README documents
+  a read-only scoped token for the admin collector.
+- **`jira_remediation_items`, `jira_audit_records`, `jira_access_roles`**: hitting a
+  collection cap now fails the run with `partial_failure`, and every evidence file
+  carries `metadata.complete` and `metadata.incomplete_reason`.
+  `jira_audit_records` no longer reports `records_truncated: false` when records
+  past the cap were dropped.
+- **`jira_change_requests`, `jira_incident_postmortems`**: a configured field name
+  that matches no Jira field, or several, now fails the run as `partial_failure`
+  instead of silently skipping the checks that need it. Ambiguous names list their
+  matching ids in `metadata.field_candidates`.
+
 ### Added
+
+- **`jira_change_requests`** (`EVD-JIRA-CHANGE-REQUESTS`): change, internal
+  connection and exception tickets with CCB approver and time, deployment time,
+  test and security review results, watcher and comment counts, status and field
+  history, and per-ticket findings (deployed without approval, approved after
+  deployment, failed tests, missing security review, exceptions open past expiry
+  or overdue for review). Field names are configurable and resolved by name.
+- **`jira_incident_postmortems`** (`EVD-JIRA-INCIDENT-POSTMORTEMS`): incidents with
+  severity, category, minutes from detection to report against a reporting window
+  and per-category targets, phase history, linked post-mortems and their action
+  items, with findings for late reports, missing post-mortems and unassigned or
+  overdue action items.
+- **`jira_remediation_items`** (`EVD-JIRA-REMEDIATION-ITEMS`): the Jira tickets a
+  required JQL (`JIRA_REMEDIATION_JQL`) selects as findings, each with owner, due
+  date, overdue flag and full status history from `POST /rest/api/3/changelog/bulkfetch`,
+  plus open, closed, overdue, unassigned and days-to-close rollups. Browse Projects only.
+- **`jira_audit_records`** (`EVD-JIRA-AUDIT-RECORDS`): the Jira site audit log over a
+  lookback window (`GET /rest/api/3/auditing/record`) with actor, time, source address
+  and changed values, and a rollup of permission, user, group, workflow and scheme
+  changes. Needs the Administer Jira global permission.
+- **`jira_access_roles`** (`EVD-JIRA-ACCESS-ROLES`): Jira site-admin and admin groups
+  and their members, product access roles, and per project the privileged permission
+  grants, project role members and the resolved privileged users, flagging privileged
+  grants made to everyone. Needs the Administer Jira global permission.
 
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an

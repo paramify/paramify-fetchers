@@ -1,0 +1,130 @@
+name: jira_incident_postmortems
+version: 0.1.0
+description: >-
+  Collects Jira incident tickets with severity, category, detected and reported
+  times (minutes to report against a reporting window and per-category
+  notification targets), response phase history, linked post-mortems and their
+  action items (owner, due date, status), with per-incident findings such as
+  reported late, resolved without a post-mortem, post-mortem without action
+  items, and unassigned or overdue action items.
+category: jira
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: jira_incident_postmortems.json
+
+# JIRA_EMAIL / JIRA_API_TOKEN / JIRA_BASE_URL are declared on the category.
+secrets: []
+
+config_schema:
+  jql:
+    type: string
+    required: true
+    env: JIRA_INCIDENT_JQL
+    description: >-
+      JQL that selects the incident tickets, e.g. `project = IR AND issuetype =
+      Incident`. Include resolved incidents.
+  field_names:
+    type: string
+    required: false
+    env: JIRA_INCIDENT_FIELDS
+    description: >-
+      JSON object overriding the Jira field names for each role. Keys: severity,
+      category, detected_at, reported_at, phase. Defaults: "Severity", "Incident
+      Category", "Detected At", "Reported At", "Incident Phase". A value may be a
+      field id such as customfield_10054; an empty value disables that role.
+      Names that match no field, or several fields, are listed in
+      metadata.field_problems and fail the run as partial; for several,
+      metadata.field_candidates lists the ids to choose from.
+      Without a reported-at field the ticket's created time is used and counted
+      in summary.reported_time_from_ticket_created.
+  report_minutes:
+    type: integer
+    required: false
+    env: JIRA_INCIDENT_REPORT_MINUTES
+    default: 60
+    description: Maximum minutes from detection to report before an incident is flagged as reported late.
+  category_targets:
+    type: string
+    required: false
+    env: JIRA_INCIDENT_CATEGORY_TARGETS
+    description: >-
+      JSON object of notification targets in minutes per category, matched by
+      exact name or longest whole-word prefix, case-insensitive, e.g. {"CAT 4":
+      15, "CAT 1": 120}. With targets set, a category without one is flagged.
+  postmortem_issue_types:
+    type: string
+    required: false
+    env: JIRA_POSTMORTEM_ISSUE_TYPES
+    default: Post-mortem
+    description: Comma-separated issue types that count as post-mortems when linked to an incident.
+  postmortem_required_severities:
+    type: string
+    required: false
+    env: JIRA_POSTMORTEM_REQUIRED_SEVERITIES
+    description: >-
+      Comma-separated severities whose resolved incidents must have a post-mortem.
+      Empty means every resolved incident.
+  required_phases:
+    type: string
+    required: false
+    env: JIRA_INCIDENT_REQUIRED_PHASES
+    description: >-
+      Comma-separated phases every resolved incident must have passed through
+      (from the phase field's history), e.g.
+      Identification,Containment,Eradication,Recovery,Lessons Learned.
+  no_postmortem_resolutions:
+    type: string
+    required: false
+    env: JIRA_NO_POSTMORTEM_RESOLUTIONS
+    default: Won't Do,Cancelled,Canceled,Duplicate,False Positive,Not an Incident
+    description: Comma-separated resolutions of incidents that need no post-mortem.
+  max_items:
+    type: integer
+    required: false
+    env: JIRA_INCIDENT_MAX_ITEMS
+    default: 1000
+    description: >-
+      Stop after this many incidents; hitting the cap fails the run as partial and
+      sets metadata.incidents_truncated.
+
+evidence_set:
+  reference_id: EVD-JIRA-INCIDENT-POSTMORTEMS
+  name: Jira Incidents, Post-mortems and Action Items
+  instructions: >-
+    Script: fetcher.py. Basic auth (account email + API token) to the Jira Cloud
+    REST API v3; Browse Projects on the incident project is enough. Reads GET
+    /rest/api/3/myself, resolves the configured field names with GET
+    /rest/api/3/field, pages POST /rest/api/3/search/jql for the incidents
+    (summary, type, status, priority, assignee, created, resolutiondate,
+    issuelinks and the resolved custom fields), reads status and phase history
+    with POST /rest/api/3/changelog/bulkfetch, then reads linked issues of the
+    configured post-mortem types and their sub-tasks (the action items) with
+    POST /rest/api/3/issue/bulkfetch. Per incident: minutes_to_report (detected
+    to reported), category target, phases_seen, post-mortems and action items.
+    Only links to the configured post-mortem types are followed; a linked
+    post-mortem the collector cannot read is reported as postmortem_not_visible
+    and fails the run as partial. Findings: missing_detected_time,
+    detected_or_reported_time_unparseable, reported_before_detected,
+    reported_late, category_notification_target_missed, missing_severity,
+    missing_category, category_without_target, phases_missing,
+    resolved_without_postmortem, postmortem_not_visible,
+    postmortem_without_action_items,
+    unassigned_action_items, overdue_action_items. Descriptions and comments are
+    not collected. Output: jira_incident_postmortems.json
+  description: >-
+    Incident tickets with their reporting times, response phases and linked
+    post-mortems with assigned action items, evidencing that incidents are
+    reported on time, worked through defined phases, and reviewed afterward with
+    lessons learned turned into tracked actions.
+
+ksis:
+  - KSI-INR-AAR
+  - KSI-INR-RPI
