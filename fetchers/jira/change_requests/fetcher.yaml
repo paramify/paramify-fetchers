@@ -44,7 +44,8 @@ config_schema:
       Analysis", "Test Results", "Deployed At", "Exception Expiry", "Last
       Reviewed". A value may also be a field id such as customfield_10045. An
       empty value disables that check. Names that match no field, or several
-      fields, are listed in metadata.field_problems.
+      fields, are listed in metadata.field_problems and fail the run as partial;
+      for several, metadata.field_candidates lists the ids to choose from.
   approved_statuses:
     type: string
     required: false
