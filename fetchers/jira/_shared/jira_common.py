@@ -67,7 +67,10 @@ class JiraClient:
             try:
                 return resp.json()
             except ValueError:
-                self.fail(operation, "InvalidJSON", resp.text[:300], "partial_failure")
+                self.fail(
+                    operation, "InvalidJSON", f"response was not JSON ({len(resp.content)} bytes)",
+                    "partial_failure",
+                )
                 return None
         if resp.status_code == 404 and allow_404:
             return NOT_FOUND
@@ -213,8 +216,14 @@ def iso_ts(value):
 
 
 def parse_ts(value):
-    if not value:
+    """Timezone-aware datetime from a Jira timestamp or YYYY-MM-DD date (as UTC midnight)."""
+    if not isinstance(value, str) or not value:
         return None
+    if len(value) == 10:
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
     for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z"):
         try:
             return datetime.strptime(value, fmt)
@@ -236,6 +245,113 @@ def number_stats(values: list) -> dict:
         "mean": round(statistics.fmean(values), 2),
         "max": round(max(values), 2),
     }
+
+
+ISSUE_KEY = re.compile(r"^[A-Z][A-Z0-9_]{0,254}-[0-9]{1,12}$")
+
+
+def resolve_fields(client: JiraClient, wanted: dict):
+    """Map {role: field name or customfield_ id} to {role: field id} via GET /rest/api/3/field.
+
+    Names are case-insensitive. Returns (ids, problems) where problems maps role to
+    "unresolved" (no such field), "ambiguous" (several fields share the name) or
+    "disabled" (empty name in the config).
+    """
+    ids, problems = {}, {}
+    names = {}
+    for role, name in wanted.items():
+        if not isinstance(name, str) or not name.strip():
+            problems[role] = "disabled"
+        elif re.fullmatch(r"customfield_[0-9]{1,10}", name.strip()):
+            ids[role] = name.strip()
+        else:
+            names[role] = name.strip().lower()
+    if not names:
+        return ids, problems
+    fields = client.request("GET", "/rest/api/3/field", "GET /rest/api/3/field")
+    if not isinstance(fields, list):
+        problems.update({role: "unresolved" for role in names})
+        return ids, problems
+    by_name: dict = {}
+    for f in fields:
+        if isinstance(f, dict) and isinstance(f.get("name"), str) and isinstance(f.get("id"), str):
+            by_name.setdefault(f["name"].strip().lower(), []).append(f["id"])
+    for role, name in names.items():
+        found = by_name.get(name, [])
+        if len(found) == 1:
+            ids[role] = found[0]
+        else:
+            problems[role] = "ambiguous" if found else "unresolved"
+    return ids, problems
+
+
+def _adf_text(node) -> str:
+    if isinstance(node, dict):
+        if node.get("type") == "text" and isinstance(node.get("text"), str):
+            return node["text"]
+        return " ".join(t for t in (_adf_text(c) for c in node.get("content") or []) if t)
+    if isinstance(node, list):
+        return " ".join(t for t in (_adf_text(c) for c in node) if t)
+    return ""
+
+
+def field_value(raw):
+    """Plain value of a Jira field: option value, user display name, or the scalar itself."""
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, dict):
+        if raw.get("type") == "doc":
+            return _adf_text(raw).strip() or None
+        for key in ("value", "displayName", "name", "key"):
+            if raw.get(key) is not None and not isinstance(raw.get(key), (dict, list)):
+                return str(raw[key])
+        return None
+    if isinstance(raw, list):
+        vals = [field_value(v) for v in raw]
+        return ", ".join(v for v in vals if v) or None
+    return str(raw)
+
+
+def fetch_issues(client: JiraClient, keys, fields: list):
+    """Fetch issues by key via POST /rest/api/3/issue/bulkfetch, 100 per call.
+
+    Unknown or hidden keys come back as issueErrors rather than failing the call.
+    Returns (issues, missing_keys, complete). Keys that do not look like issue keys are skipped.
+    """
+    safe = sorted({k for k in keys if isinstance(k, str) and ISSUE_KEY.fullmatch(k)})
+    found: list = []
+    missing: list = []
+    complete = True
+    for i in range(0, len(safe), 100):
+        chunk = safe[i : i + 100]
+        page = client.request(
+            "POST",
+            "/rest/api/3/issue/bulkfetch",
+            "POST /rest/api/3/issue/bulkfetch",
+            body={"issueIdsOrKeys": chunk, "fields": fields},
+        )
+        if not isinstance(page, dict):
+            complete = False
+            continue
+        got = [i for i in page.get("issues") or [] if isinstance(i, dict)]
+        found.extend(got)
+        seen = {i.get("key") for i in got}
+        missing.extend(k for k in chunk if k not in seen)
+    return found, sorted(missing), complete
+
+
+def json_env(name: str, default):
+    """Parse a JSON object from an env var. Returns (value, error)."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default, None
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return None, f"{name} must be a JSON object"
+    if not isinstance(value, dict):
+        return None, f"{name} must be a JSON object"
+    return value, None
 
 
 def int_env(name: str, default: int):

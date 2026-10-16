@@ -1,6 +1,6 @@
 # Jira Fetchers
 
-Four fetchers read a Jira Cloud site over the REST API v3 with an Atlassian
+Six fetchers read a Jira Cloud site over the REST API v3 with an Atlassian
 account email + API token (basic auth):
 
 | Fetcher | Evidence | Collector needs |
@@ -9,6 +9,8 @@ account email + API token (basic auth):
 | `jira_remediation_items` | JQL-selected findings tickets with owner, due date, full status history | Browse Projects |
 | `jira_audit_records` | Site audit log: who changed what configuration, when, from where | Administer Jira |
 | `jira_access_roles` | Admin groups and members, product access, per-project privileged grants and role members | Administer Jira |
+| `jira_change_requests` | Change, internal connection and exception tickets: CCB approval, deployment, tests, security review, exception expiry and review | Browse Projects |
+| `jira_incident_postmortems` | Incidents: severity, category, minutes to report, phase history, linked post-mortems and action items | Browse Projects |
 
 The two admin fetchers make only read calls, but Jira offers no lower permission
 for the audit log, application roles or other projects' role members. Run them
@@ -49,6 +51,8 @@ classic `manage:jira-configuration` scope: it can write.
 | `jira_remediation_items` | `read:issue-details:jira`, `read:field:jira`, `read:field.default-value:jira`, `read:field.option:jira`, `read:issue-meta:jira`, `read:issue.changelog:jira` |
 | `jira_audit_records` | `read:audit-log:jira` |
 | `jira_access_roles` | `read:field:jira`, `read:project:jira`, `read:project-role:jira`, `read:permission-scheme:jira`, `read:permission:jira`, `read:project-category:jira`, `read:issue-type:jira`, `read:issue-type-hierarchy:jira`, `read:project.property:jira`, `read:project-version:jira`, `read:project.component:jira` |
+| `jira_change_requests` | the `jira_remediation_items` scopes, plus `read:field-configuration:jira`, `read:project:jira`, `read:project-category:jira` |
+| `jira_incident_postmortems` | the `jira_change_requests` scopes, plus `read:issue:jira`, `read:status:jira`, `read:issue-security-level:jira`, `read:issue.vote:jira` (for `POST /rest/api/3/issue/bulkfetch`) |
 
 A scoped token only works through the API gateway. Find the site's `cloudId` at
 `https://<site>.atlassian.net/_edge/tenant_info` and set
@@ -103,6 +107,36 @@ Calls `GET /rest/api/3/group/bulk` (accessType site-admin and admin),
 delete issues/comments/attachments/worklogs, edit all comments, set issue
 security and modify reporter; grants of those to `anyone` or an application
 role are flagged as `broad_privileged_grants`.
+
+### `jira_change_requests`
+
+| Config key | Env | Default | Description |
+|---|---|---|---|
+| `jql` | `JIRA_CHANGE_JQL` | (required) | JQL selecting the change, internal connection and exception tickets |
+| `field_names` | `JIRA_CHANGE_FIELDS` | see yaml | JSON mapping roles (`approver`, `approved_at`, `change_type`, `risk`, `security_review`, `test_results`, `deployed_at`, `exception_expiry`, `last_reviewed`) to the site's field names |
+| `approved_statuses` | `JIRA_CHANGE_APPROVED_STATUSES` | (none) | Statuses that mean CCB-approved, when approval is a workflow step |
+| `preapproved_change_types` | `JIRA_CHANGE_PREAPPROVED_TYPES` | `Standard` | Change types that need no CCB approval |
+| `exception_issue_types` | `JIRA_EXCEPTION_ISSUE_TYPES` | `Configuration Exception` | Issue types treated as exceptions |
+| `connection_issue_types` | `JIRA_CONNECTION_ISSUE_TYPES` | `Internal Connection` | Issue types treated as internal connection requests |
+| `exception_review_days` | `JIRA_EXCEPTION_REVIEW_DAYS` | `365` | Open exceptions not reviewed within this window are flagged |
+| `max_items` | `JIRA_CHANGE_MAX_ITEMS` | `2000` | Ticket cap; hitting it fails the run as partial |
+
+Custom field names differ per site, so the fetcher looks them up by name with
+`GET /rest/api/3/field`; names that match nothing are listed in
+`metadata.fields_unresolved` instead of failing the run. Comment bodies are not
+collected, only the count.
+
+### `jira_incident_postmortems`
+
+| Config key | Env | Default | Description |
+|---|---|---|---|
+| `jql` | `JIRA_INCIDENT_JQL` | (required) | JQL selecting the incident tickets |
+| `field_names` | `JIRA_INCIDENT_FIELDS` | see yaml | JSON mapping roles (`severity`, `category`, `detected_at`, `reported_at`, `phase`) to field names |
+| `report_minutes` | `JIRA_INCIDENT_REPORT_MINUTES` | `60` | Detection-to-report window |
+| `category_targets` | `JIRA_INCIDENT_CATEGORY_TARGETS` | (none) | JSON of per-category notification targets in minutes, matched by name or prefix |
+| `postmortem_issue_types` | `JIRA_POSTMORTEM_ISSUE_TYPES` | `Post-mortem` | Linked issue types that count as post-mortems; their sub-tasks are the action items |
+| `postmortem_required_severities` | `JIRA_POSTMORTEM_REQUIRED_SEVERITIES` | (all) | Severities whose resolved incidents need a post-mortem |
+| `max_items` | `JIRA_INCIDENT_MAX_ITEMS` | `1000` | Incident cap; hitting it fails the run as partial |
 
 ---
 

@@ -415,3 +415,313 @@ def test_remediation_items_cap_holds_when_server_ignores_max_results(run):
                                {"JIRA_REMEDIATION_JQL": "labels = x", "JIRA_REMEDIATION_MAX_ITEMS": "10"})
     assert out["metadata"]["items_collected"] == 10
     assert out["metadata"]["items_truncated"] is True and code == 1
+
+
+# ---------- change_requests ----------
+
+CF = {"Change Type": "cf1", "Change Risk": "cf2", "CCB Approver": "cf3", "CCB Approval Date": "cf4",
+      "Security Impact Analysis": "cf5", "Test Results": "cf6", "Deployed At": "cf7",
+      "Exception Expiry": "cf8", "Last Reviewed": "cf9", "Severity": "cf10", "Incident Category": "cf11",
+      "Detected At": "cf12", "Reported At": "cf13", "Incident Phase": "cf14"}
+FIELD_LIST = [{"id": v, "name": k, "custom": True} for k, v in CF.items()]
+APPROVER = {"accountId": "a1", "displayName": "CCB Chair", "emailAddress": "chair@example.com"}
+
+
+def _ticket(n, itype, status, cat, f, watch=1, comments=1):
+    return {"id": str(500 + n), "key": f"CCB-{n}", "fields": {
+        "summary": f"ticket {n}", "project": {"key": "CCB"}, "issuetype": {"name": itype},
+        "status": {"name": status, "statusCategory": {"key": cat}},
+        "created": "2026-10-01T00:00:00.000+0000",
+        "resolutiondate": "2026-10-06T18:00:00.000+0000" if cat == "done" else None,
+        "watches": {"watchCount": watch}, "comment": {"total": comments, "comments": [{"body": "secret"}]},
+        "issuelinks": [], **f}}
+
+
+def test_change_requests_findings(run):
+    sel = lambda v: {"value": v}  # noqa: E731
+    tickets = [
+        _ticket(1, "Change Request", "Done", "done", {"cf1": sel("Normal"), "cf3": APPROVER,
+                "cf4": "2026-10-05T08:00:00.000-0600", "cf6": sel("Passed"), "cf7": "2026-10-06T12:00:00.000-0600"}),
+        _ticket(2, "Change Request", "Done", "done", {"cf1": sel("Emergency"), "cf3": APPROVER,
+                "cf4": "2026-10-09T20:00:00.000+0000", "cf6": sel("Passed"), "cf7": "2026-10-09T16:00:00.000+0000"}),
+        _ticket(3, "Change Request", "Done", "done", {"cf1": sel("Normal"), "cf6": sel("Passed")}, comments=0),
+        _ticket(4, "Change Request", "Done", "done", {"cf1": sel("Standard"), "cf6": sel("Passed")}),
+        _ticket(5, "Change Request", "Done", "done", {"cf1": sel("Normal"), "cf3": APPROVER,
+                "cf4": "2026-10-01T00:00:00.000+0000", "cf6": sel("Failed")}),
+        _ticket(6, "Change Request", "Done", "done", {"cf1": sel("Normal"), "cf6": sel("Passed")}),
+        _ticket(7, "Internal Connection", "Done", "done", {"cf3": APPROVER, "cf4": "2026-10-01T00:00:00.000+0000",
+                "cf5": sel("Not completed"), "cf6": sel("Passed")}),
+        _ticket(8, "Configuration Exception", "Backlog", "new", {"cf3": APPROVER, "cf4": "2026-06-01T00:00:00.000+0000",
+                "cf8": "2026-09-01", "cf9": "2026-06-01"}),
+        _ticket(9, "Configuration Exception", "Backlog", "new", {"cf3": APPROVER, "cf4": "2025-05-01T00:00:00.000+0000",
+                "cf8": "2099-01-01", "cf9": "2020-01-01"}),
+        _ticket(10, "Configuration Exception", "Backlog", "new", {}),
+        _ticket(11, "Configuration Exception", "Done", "done", {"cf3": APPROVER, "cf4": "2025-01-10T00:00:00.000+0000"}),
+    ]
+    hist6 = [{"id": "h1", "created": "2026-10-03T00:00:00.000+00:00", "author": {"displayName": "Chair"},
+              "items": [{"fieldId": "status", "fromString": "Backlog", "toString": "Approved"}]},
+             {"id": "h2", "created": "2026-10-04T00:00:00.000+00:00", "author": {"displayName": "Dev"},
+              "items": [{"fieldId": "status", "fromString": "Approved", "toString": "Done"}]}]
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, FIELD_LIST
+        if path == "/rest/api/3/search/jql":
+            assert "cf3" in body["fields"] and "watches" in body["fields"]
+            return 200, {"issues": tickets, "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            assert len(body["fieldIds"]) <= 10
+            return 200, {"issueChangeLogs": [{"issueId": "506", "changeHistories": hist6}]}
+        raise AssertionError(path)
+
+    code, out, _, status = run("change_requests", router,
+                               {"JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_APPROVED_STATUSES": "Approved"})
+    assert code == 0 and status is None
+    by_key = {t["key"]: t for t in out["tickets"]}
+    assert by_key["CCB-1"]["findings"] == [] and by_key["CCB-1"]["approved_before_deploy"] is True
+    assert by_key["CCB-1"]["approver"] == "CCB Chair"
+    assert "chair@example.com" not in json.dumps(out) and "secret" not in json.dumps(out)
+    assert "approved_after_deploy" in by_key["CCB-2"]["findings"]
+    # one watcher (the reporter) and no comments is not a notification trail
+    assert by_key["CCB-3"]["findings"] == ["deployed_without_approval", "deployed_without_notification_trail"]
+    assert by_key["CCB-4"]["findings"] == [] and by_key["CCB-4"]["preapproved"] is True
+    assert "deployed_with_failed_tests" in by_key["CCB-5"]["findings"]
+    assert by_key["CCB-6"]["approval_source"] == "status" and by_key["CCB-6"]["findings"] == []
+    assert by_key["CCB-7"]["findings"] == ["connection_without_security_review", "connection_without_risk"]
+    assert by_key["CCB-8"]["findings"] == ["exception_open_past_expiry"]
+    assert by_key["CCB-9"]["findings"] == ["exception_review_overdue"]
+    assert set(by_key["CCB-10"]["findings"]) == {"exception_without_approval", "exception_review_overdue"}
+    assert by_key["CCB-11"]["findings"] == []
+    s = out["summary"]
+    assert s["exceptions_total"] == 4 and s["exceptions_open"] == 3
+    assert s["changes_deployed"] == 7 and s["changes_deployed_preapproved"] == 1
+
+
+def test_change_requests_unresolved_fields_are_reported(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, [{"id": "cf3", "name": "CCB Approver", "custom": True}]
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [], "isLast": True}
+        raise AssertionError(path)
+
+    code, out, _, _ = run("change_requests", router, {"JIRA_CHANGE_JQL": "project = CCB"})
+    assert code == 0
+    assert out["metadata"]["fields_resolved"] == {"approver": "cf3"}
+    assert out["metadata"]["field_problems"]["risk"] == "unresolved"
+
+
+def test_change_requests_rejects_unknown_field_role(monkeypatch, tmp_path):
+    for k, v in {"JIRA_BASE_URL": "https://x.atlassian.net", "JIRA_EMAIL": "e", "JIRA_API_TOKEN": "t",
+                 "JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_FIELDS": '{"aprover": "X"}',
+                 "EVIDENCE_DIR": str(tmp_path), "FETCHER_STATUS_FILE": str(tmp_path / "s.json")}.items():
+        monkeypatch.setenv(k, v)
+    assert load("change_requests").main() == 1
+    assert json.loads((tmp_path / "s.json").read_text())["code"] == "bad_config"
+
+
+# ---------- incident_postmortems ----------
+
+def _incident(n, f, cat="done", links=()):
+    return {"id": str(700 + n), "key": f"IR-{n}", "fields": {
+        "summary": f"incident {n}", "project": {"key": "IR"}, "issuetype": {"name": "Incident"},
+        "status": {"name": "Done" if cat == "done" else "In Progress", "statusCategory": {"key": cat}},
+        "created": "2026-10-01T00:00:00.000+0000", "resolutiondate": None,
+        "issuelinks": [{"type": {"name": "Relates", "outward": "relates to"},
+                        "outwardIssue": {"key": k, "fields": {"issuetype": {"name": "Post-mortem"}}}} for k in links],
+        **f}}
+
+
+def test_incident_postmortems_findings(run):
+    sel = lambda v: {"value": v}  # noqa: E731
+    incidents = [
+        _incident(1, {"cf10": sel("SEV 2"), "cf11": sel("CAT 2 User Level Intrusion"),
+                      "cf12": "2026-10-01T10:00:00.000-0600", "cf13": "2026-10-01T10:40:00.000-0600",
+                      "cf14": sel("Lessons Learned")}, links=["IR-7"]),
+        _incident(2, {"cf10": sel("SEV 1"), "cf11": sel("CAT 4 Denial of Service"),
+                      "cf12": "2026-10-02T09:00:00.000+0000", "cf13": "2026-10-02T09:50:00.000+0000"}, links=["IR-8"]),
+        _incident(3, {"cf10": sel("SEV 3"), "cf11": sel("CAT 3 Unsuccessful Activity Attempt"),
+                      "cf12": "2026-10-03T08:00:00.000+0000", "cf13": "2026-10-03T10:30:00.000+0000"}, links=["IR-9"]),
+        _incident(4, {"cf10": sel("SEV 2"), "cf11": sel("CAT 7 Malicious Logic"),
+                      "cf12": "2026-10-05T12:00:00.000+0000", "cf13": "2026-10-05T12:30:00.000+0000"}),
+        _incident(5, {"cf10": sel("SEV 4"), "cf11": sel("CAT 6 Reconnaissance"), "cf12": "2026-10-14T07:00:00.000+0000",
+                      "cf13": "2026-10-14T07:20:00.000+0000"}, cat="indeterminate"),
+        _incident(6, {"cf10": sel("SEV 3"), "cf11": sel("CAT 5 Non-Compliance Activity"),
+                      "cf13": "2026-10-13T09:00:00.000+0000"}),
+    ]
+    pms = {k: {"key": k, "fields": {"issuetype": {"name": "Post-mortem"}, "status": {"name": "Done"},
+                                    "summary": "pm", "subtasks": [{"key": s} for s in subs]}}
+           for k, subs in {"IR-7": ["IR-10", "IR-11", "IR-12"], "IR-8": [], "IR-9": ["IR-13"]}.items()}
+
+    def action(key, parent, done, assignee, due):
+        return {"key": key, "fields": {"parent": {"key": parent}, "summary": "ai", "duedate": due,
+                "status": {"name": "Done" if done else "To Do", "statusCategory": {"key": "done" if done else "new"}},
+                "assignee": {"displayName": "Owner"} if assignee else None}}
+    actions = {"IR-10": action("IR-10", "IR-7", True, True, "2026-10-08"),
+               "IR-11": action("IR-11", "IR-7", True, True, "2026-10-09"),
+               "IR-12": action("IR-12", "IR-7", False, True, "2026-10-10"),
+               "IR-13": action("IR-13", "IR-9", False, False, "2099-12-01")}
+    phase_hist = [{"id": f"p{i}", "created": f"2026-10-01T1{i}:00:00.000+00:00", "author": {"displayName": "IR"},
+                   "items": [{"fieldId": "cf14", "fromString": a, "toString": b}]}
+                  for i, (a, b) in enumerate([("Identification", "Containment"), ("Containment", "Eradication"),
+                                              ("Eradication", "Recovery"), ("Recovery", "Lessons Learned")])]
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, FIELD_LIST
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": incidents, "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            assert body["fieldIds"] == ["status", "cf14"]
+            return 200, {"issueChangeLogs": [{"issueId": "701", "changeHistories": phase_hist}]}
+        if path == "/rest/api/3/issue/bulkfetch":
+            keys = body["issueIdsOrKeys"]
+            pool = {**pms, **actions}
+            return 200, {"issues": [pool[k] for k in keys if k in pool], "issueErrors": []}
+        raise AssertionError(path)
+
+    env = {"JIRA_INCIDENT_JQL": "project = IR AND issuetype = Incident",
+           "JIRA_INCIDENT_CATEGORY_TARGETS": '{"CAT 1": 120, "CAT 2": 120, "CAT 3": 240, "CAT 4": 15, "CAT 5": 240, "CAT 6": 240, "CAT 7": 120}',
+           "JIRA_POSTMORTEM_REQUIRED_SEVERITIES": "SEV 1,SEV 2"}
+    code, out, _, status = run("incident_postmortems", router, env)
+    assert code == 0 and status is None
+    by_key = {i["key"]: i for i in out["incidents"]}
+    assert by_key["IR-1"]["minutes_to_report"] == 40.0
+    assert by_key["IR-1"]["phases_seen"] == ["Identification", "Containment", "Eradication", "Recovery", "Lessons Learned"]
+    assert by_key["IR-1"]["phases_missing"] == []
+    assert by_key["IR-1"]["findings"] == ["overdue_action_items"]
+    assert set(by_key["IR-2"]["findings"]) == {"category_notification_target_missed", "postmortem_without_action_items"}
+    assert set(by_key["IR-3"]["findings"]) == {"reported_late", "unassigned_action_items"}
+    assert by_key["IR-4"]["findings"] == ["resolved_without_postmortem"]
+    assert by_key["IR-5"]["findings"] == []
+    assert by_key["IR-6"]["findings"] == ["missing_detected_time"]
+    s = out["summary"]
+    assert (s["incidents"], s["open"], s["resolved"]) == (6, 1, 5)
+    assert s["reported_within_window"] == 4 and s["reported_late"] == 1
+    assert s["postmortem_required"] == 3 and s["resolved_without_postmortem"] == 1
+    assert s["action_items"] == {"total": 4, "open": 2, "done": 2, "open_unassigned": 1, "overdue": 1}
+
+
+def test_change_requests_date_only_approval_after_deploy_is_caught(run):
+    t = _ticket(1, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}, "cf3": APPROVER,
+                "cf4": "2026-10-10", "cf6": {"value": "Passed"}, "cf7": "2026-10-01T12:00:00.000+0000"})
+    cancelled = _ticket(2, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}})
+    cancelled["fields"]["resolution"] = {"name": "Won't Do"}
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, FIELD_LIST
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [t, cancelled], "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        raise AssertionError(path)
+
+    code, out, _, _ = run("change_requests", router, {"JIRA_CHANGE_JQL": "project = CCB"})
+    by_key = {r["key"]: r for r in out["tickets"]}
+    assert "approved_after_deploy" in by_key["CCB-1"]["findings"]
+    assert by_key["CCB-2"]["cancelled"] is True and by_key["CCB-2"]["findings"] == []
+    assert out["summary"]["changes_cancelled"] == 1 and out["summary"]["changes_deployed"] == 1
+
+
+def test_change_requests_unexpected_shape_still_writes_and_reports(run):
+    bad = _ticket(1, "Change Request", "Done", "done", {})
+    bad["fields"]["status"] = "Done"  # a string where an object belongs
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, FIELD_LIST
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [bad], "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        raise AssertionError(path)
+
+    code, out, _, status = run("change_requests", router, {"JIRA_CHANGE_JQL": "project = CCB"})
+    assert code == 1 and status["code"] == "internal_error"
+    assert out["metadata"]["complete"] is False
+
+
+def test_incident_category_prefix_needs_word_boundary():
+    sys.path.insert(0, str(JIRA / "incident_postmortems"))
+    mod = load("incident_postmortems")
+    targets = {"CAT 1": 10, "CAT 4": 15}
+    assert mod._category_target("CAT 10 Something", targets) is None
+    assert mod._category_target("cat 4 Denial of Service", targets) == 15
+    assert mod._category_target("CAT 1 Root Level Intrusion", targets) == 10
+
+
+def test_incident_hidden_postmortem_is_not_reported_as_missing(run):
+    inc = _incident(4, {"cf10": {"value": "SEV 2"}, "cf11": {"value": "CAT 7"},
+                        "cf12": "2026-10-05T12:00:00.000+0000", "cf13": "2026-10-05T12:30:00.000+0000"},
+                    links=["IR-99"])
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, FIELD_LIST
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [inc], "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        if path == "/rest/api/3/issue/bulkfetch":
+            return 200, {"issues": [], "issueErrors": [{"errorMessages": ["not visible"]}]}
+        raise AssertionError(path)
+
+    code, out, _, status = run("incident_postmortems", router, {"JIRA_INCIDENT_JQL": "project = IR"})
+    assert out["incidents"][0]["findings"] == ["postmortem_not_visible"]
+    assert out["metadata"]["related_issues_not_visible"] == ["IR-99"]
+    assert code == 1 and status["code"] == "partial_failure"
+
+
+def test_incident_negative_report_time_is_flagged(run):
+    inc = _incident(1, {"cf10": {"value": "SEV 4"}, "cf11": {"value": "CAT 6"},
+                        "cf12": "2026-10-05T12:00:00.000+0000", "cf13": "2026-10-05T11:00:00.000+0000"}, cat="new")
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, FIELD_LIST
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [inc], "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        raise AssertionError(path)
+
+    code, out, _, _ = run("incident_postmortems", router, {"JIRA_INCIDENT_JQL": "project = IR"})
+    assert out["incidents"][0]["findings"] == ["reported_before_detected"]
+    assert out["summary"]["reported_within_window"] == 0
+
+
+def test_incident_required_phases(run):
+    inc = _incident(2, {"cf10": {"value": "SEV 3"}, "cf11": {"value": "CAT 3"}, "cf14": {"value": "Lessons Learned"},
+                        "cf12": "2026-10-05T12:00:00.000+0000", "cf13": "2026-10-05T12:10:00.000+0000"})
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, FIELD_LIST
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [inc], "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        raise AssertionError(path)
+
+    code, out, _, _ = run("incident_postmortems", router, {
+        "JIRA_INCIDENT_JQL": "project = IR", "JIRA_POSTMORTEM_REQUIRED_SEVERITIES": "SEV 1",
+        "JIRA_INCIDENT_REQUIRED_PHASES": "Identification,Containment,Lessons Learned"})
+    i = out["incidents"][0]
+    assert i["phases_missing"] == ["Identification", "Containment"] and i["findings"] == ["phases_missing"]
