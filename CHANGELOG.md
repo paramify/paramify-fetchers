@@ -31,7 +31,9 @@ schemas and the `paramify` CLI — not the internal code.
   Run live against support.paramify.com's Recommended Secure Configuration
   section (4 articles, matching the API's `count`). There, Cloudflare
   challenged every anonymous article-page GET, so `all_articles_public`
-  read null. No KSI mapping.
+  read null. No KSI mapping. The README's supported services grid lists
+  Zendesk, using the Simple Icons `zendesk` mark (CC0) in light and dark
+  variants (`fetchers/logos/zendesk.svg` and `zendesk-dark.svg`).
 - **A `web` category and its first fetcher, `web_page_text`**
   (`EVD-WEB-PAGE-TEXT`). It fetches one public URL per target, with no
   credential, and records the text the page served. For HTML that is the
