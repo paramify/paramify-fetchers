@@ -105,7 +105,10 @@ def _public_key(body: bytes) -> Dict[str, Any]:
     if not body or body[0] != 4:
         raise KeyParseError(f"public key packet version {body[0] if body else '?'} (only v4 is read)")
     created = int.from_bytes(body[1:5], "big")
-    fingerprint = hashlib.sha1(b"\x99" + len(body).to_bytes(2, "big") + body).hexdigest().upper()
+    # RFC 4880 §12.2 defines v4 fingerprints as SHA-1; an identifier, not a verification.
+    fingerprint = hashlib.sha1(
+        b"\x99" + len(body).to_bytes(2, "big") + body, usedforsecurity=False
+    ).hexdigest().upper()
     algorithm = body[5]
     bits = None
     if algorithm in (1, 2, 3):
