@@ -33,11 +33,13 @@ _DATE = (
     r"|\d{1,2}/\d{1,2}/\d{2,4}"
     rf"|{_MONTH}\s+\d{{4}}"
 )
-LAST_UPDATED = re.compile(
-    r"\b(?:Last\s+(?:updated|modified|revised)|Effective\s+(?:date|as\s+of)|Updated)\b"
-    rf"(?:\s+on)?\s*[:\-–—]?\s*(?P<date>{_DATE})\b",
-    re.IGNORECASE,
-)
+_LABEL = r"\b(?:Last\s+(?:updated|modified|revised)|Effective\s+(?:date|as\s+of)|Updated)\b(?:\s+on)?\s*[:\-–—]?\s*"
+LAST_UPDATED = re.compile(rf"{_LABEL}(?P<date>{_DATE})\b", re.IGNORECASE)
+# The label alone on its line, with the date as the next line (two block elements).
+LABEL_ONLY = re.compile(rf"^\s*{_LABEL}$", re.IGNORECASE)
+DATE_FIRST = re.compile(rf"^\s*(?P<date>{_DATE})\b", re.IGNORECASE)
+
+
 class _TextExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -93,8 +95,11 @@ def html_to_text(markup: str) -> Tuple[str, Optional[str]]:
 
 
 def find_last_updated(text: str) -> Optional[str]:
-    for line in text.splitlines():
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
         match = LAST_UPDATED.search(line)
+        if match is None and LABEL_ONLY.match(line) and i + 1 < len(lines):
+            match = DATE_FIRST.match(lines[i + 1])
         if match:
             return match.group("date")
     return None

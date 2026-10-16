@@ -67,7 +67,8 @@ evidence_set:
 
     `last_updated` is the date from the first line reading "Last updated",
     "Last modified", "Last revised", "Effective date", "Effective as of" or
-    "Updated" plus a date, copied as written. Null if there is none.
+    "Updated" plus a date, or the line right after such a label standing
+    alone, copied as written. Null if there is none.
 
     This is what the URL served at `collected_at`, not proof that it is the
     agreement in force or the version a customer signed. Pages that render

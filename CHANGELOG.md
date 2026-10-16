@@ -36,7 +36,8 @@ schemas and the `paramify` CLI — not the internal code.
   plus the body verbatim, and plain text is kept as served. Fixed fields come
   first so a validator's first match lands on them: the final URL and each
   redirect, the HTTP status and content type, the `<title>`, a `last_updated`
-  date copied verbatim from the first "Last updated" or "Effective date" line,
+  date copied verbatim from the first "Last updated" or "Effective date" line
+  (or the line after a bare label, as www.paramify.com lays it out),
   the text length, the body's `sha256`, and `text_sha256` of the extracted text,
   which is the stable change signal because markup and per-request tokens do
   not move it. The run fails on a network or TLS
