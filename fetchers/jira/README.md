@@ -23,14 +23,38 @@ Declared once on the category ([`_categories/jira.yaml`](../_categories/jira.yam
 
 | Variable | Kind | Required | Description |
 |---|---|---|---|
-| `JIRA_BASE_URL` | config `base_url` | Yes | Site URL, e.g. `https://<site>.atlassian.net` |
+| `JIRA_BASE_URL` | config `base_url` | Yes | `https://<site>.atlassian.net` (classic token) or `https://api.atlassian.com/ex/jira/<cloudId>` (scoped token). Other hosts are refused and redirects are not followed |
 | `JIRA_EMAIL` | secret `email` | Yes | Email of the Atlassian account the token belongs to |
 | `JIRA_API_TOKEN` | secret `api_token` | Yes | API token from [id.atlassian.com → Security → API tokens](https://id.atlassian.com/manage-profile/security/api-tokens) |
 
 Use a dedicated service account. It needs **Browse Projects** on every project
 you want in the evidence — projects it cannot see are simply absent, not
 reported as errors — and, for Jira Service Management sites, agent access to the
-service desks to be listed. No Jira administrator permission is required.
+service desks to be listed. `jira_site_inventory` and `jira_remediation_items`
+need no Jira administrator permission; `jira_audit_records` and
+`jira_access_roles` need **Administer Jira**, so run them under a separate admin
+collector account (override `secrets:` for those two in the manifest).
+
+### Read-only scoped token (recommended)
+
+A classic API token can do anything its account can, which for the admin
+collector includes changing Jira's configuration. Create a **scoped** token
+instead (id.atlassian.com → Security → API tokens → *Create API token with
+scopes* → app **Jira**) with only these granular read scopes. Do not add the
+classic `manage:jira-configuration` scope: it can write.
+
+| Needed by | Scopes |
+|---|---|
+| every fetcher (`/myself`) | `read:user:jira`, `read:group:jira`, `read:application-role:jira`, `read:avatar:jira` |
+| `jira_remediation_items` | `read:issue-details:jira`, `read:field:jira`, `read:field.default-value:jira`, `read:field.option:jira`, `read:issue-meta:jira`, `read:issue.changelog:jira` |
+| `jira_audit_records` | `read:audit-log:jira` |
+| `jira_access_roles` | `read:field:jira`, `read:project:jira`, `read:project-role:jira`, `read:permission-scheme:jira`, `read:permission:jira`, `read:project-category:jira`, `read:issue-type:jira`, `read:issue-type-hierarchy:jira`, `read:project.property:jira`, `read:project-version:jira`, `read:project.component:jira` |
+
+A scoped token only works through the API gateway. Find the site's `cloudId` at
+`https://<site>.atlassian.net/_edge/tenant_info` and set
+`JIRA_BASE_URL=https://api.atlassian.com/ex/jira/<cloudId>`. The email is still
+required. Scopes limit what the token can do; they do not grant permissions, so
+the admin collector account still needs Administer Jira.
 
 ### `jira_site_inventory`
 

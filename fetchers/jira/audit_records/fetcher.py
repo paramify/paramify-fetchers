@@ -137,8 +137,11 @@ def main() -> int:
             records.extend(_record(r) for r in batch)
             offset += len(batch)
             if len(records) >= max_records:
-                truncated = reported_total is None or reported_total > len(records)
+                fetched = len(records)
                 records = records[:max_records]
+                truncated = fetched > max_records or (
+                    reported_total is None or reported_total > max_records
+                )
                 break
             if not batch or (reported_total is not None and offset >= reported_total):
                 break
@@ -163,7 +166,13 @@ def main() -> int:
         "summary": _summarize(records),
         "records": records,
     }
-    return write_and_finish(logger, client, evidence, OUTPUT_FILE)
+    incomplete = (
+        f"audit records truncated at JIRA_AUDIT_MAX_RECORDS={max_records}"
+        f" ({reported_total if reported_total is not None else 'unknown'} available)"
+        if truncated
+        else ""
+    )
+    return write_and_finish(logger, client, evidence, OUTPUT_FILE, incomplete)
 
 
 if __name__ == "__main__":

@@ -396,7 +396,12 @@ def main() -> int:
             group_names.get(gid) or gid: members for gid, members in sorted(group_members.items())
         },
     }
-    return write_and_finish(logger, client, evidence, OUTPUT_FILE)
+    incomplete = ""
+    if projects_truncated:
+        incomplete = f"projects truncated at JIRA_ACCESS_MAX_PROJECTS={max_projects}"
+    elif incomplete_groups:
+        incomplete = f"membership incomplete for {len(incomplete_groups)} group(s)"
+    return write_and_finish(logger, client, evidence, OUTPUT_FILE, incomplete)
 
 
 if __name__ == "__main__":

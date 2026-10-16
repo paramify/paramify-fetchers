@@ -31,8 +31,10 @@ from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 
 from fetcher_status import report_failure  # noqa: E402
+from jira_common import validate_base_url  # noqa: E402
 
 logger = logging.getLogger("jira_site_inventory")
 
@@ -105,6 +107,7 @@ class JiraClient:
                 params=params,
                 json=body,
                 timeout=TIMEOUT,
+                allow_redirects=False,
             )
         except requests.RequestException as e:
             self._fail(operation, type(e).__name__, str(e), "target_unreachable")
@@ -118,6 +121,14 @@ class JiraClient:
                 return None
         if resp.status_code == 404 and allow_404:
             return NOT_FOUND
+        if 300 <= resp.status_code < 400:
+            self._fail(
+                operation,
+                f"HTTP{resp.status_code}",
+                "redirect not followed; JIRA_BASE_URL must be the site or API gateway URL itself",
+                "bad_config",
+            )
+            return None
 
         message = _error_message(resp)
         if resp.status_code == 401:
@@ -355,21 +366,20 @@ def main() -> int:
     # Interim v0.x: fetcher loads .env itself and reads env directly.
     load_dotenv()
 
-    base_url = os.environ.get("JIRA_BASE_URL", "").strip().rstrip("/")
+    raw_url = os.environ.get("JIRA_BASE_URL", "").strip()
     email = os.environ.get("JIRA_EMAIL", "").strip()
     api_token = os.environ.get("JIRA_API_TOKEN", "").strip()
     for var, value in (
-        ("JIRA_BASE_URL", base_url),
+        ("JIRA_BASE_URL", raw_url),
         ("JIRA_EMAIL", email),
         ("JIRA_API_TOKEN", api_token),
     ):
         if not value:
             report_failure(f"{var} is not set", "bad_config")
             return 1
-    if not base_url.startswith("https://"):
-        report_failure(
-            f"JIRA_BASE_URL must be an https:// URL, got {base_url!r}", "bad_config"
-        )
+    base_url, url_error = validate_base_url(raw_url)
+    if url_error:
+        report_failure(url_error, "bad_config")
         return 1
 
     lookback_days = _int_env("JIRA_LOOKBACK_DAYS", 90)

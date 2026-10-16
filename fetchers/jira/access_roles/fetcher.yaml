@@ -6,7 +6,8 @@ description: >-
   and for each project the permission scheme's privileged grants (administer
   project, delete issues and comments, issue security, modify reporter), project
   role members, the resolved list of privileged users, and grants made to
-  everyone. Requires an account with the Administer Jira global permission.
+  everyone. Requires an account with the Administer Jira global permission;
+  use a read-only scoped token (see fetchers/jira/README.md).
 category: jira
 
 supports_targets: false

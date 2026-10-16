@@ -10,6 +10,22 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Security
+
+- **Jira fetchers** (`jira_site_inventory`, `jira_remediation_items`,
+  `jira_audit_records`, `jira_access_roles`): `JIRA_BASE_URL` must now be a Jira
+  Cloud site (`https://<site>.atlassian.net`, or the Government Cloud domain) or
+  the API gateway for a scoped token (`https://api.atlassian.com/ex/jira/<cloudId>`).
+  Any other host, a userinfo part, a query, a fragment or a port is refused before
+  the token is sent, and the error no longer echoes the value. HTTP redirects are
+  no longer followed; a 3xx answer is a `bad_config` failure. The README documents
+  a read-only scoped token for the admin collector.
+- **`jira_remediation_items`, `jira_audit_records`, `jira_access_roles`**: hitting a
+  collection cap now fails the run with `partial_failure`, and every evidence file
+  carries `metadata.complete` and `metadata.incomplete_reason`.
+  `jira_audit_records` no longer reports `records_truncated: false` when records
+  past the cap were dropped.
+
 ### Added
 
 - **`jira_remediation_items`** (`EVD-JIRA-REMEDIATION-ITEMS`): the Jira tickets a

@@ -20,8 +20,10 @@ secrets:
   - name: api_token
     env: JIRA_API_TOKEN
     description: >-
-      Atlassian API token (id.atlassian.com → Security → API tokens). Most
-      fetchers need only Browse Projects on the projects to be collected;
+      Atlassian API token (id.atlassian.com → Security → API tokens). Prefer a
+      scoped token limited to the read-only Jira scopes listed in
+      fetchers/jira/README.md; it must be used with the API gateway base URL.
+      Most fetchers need only Browse Projects on the projects to be collected;
       jira_audit_records and jira_access_roles need the Administer Jira global
       permission, so give those a separate admin collector account.
 
@@ -30,4 +32,7 @@ config_schema:
     type: string
     required: true
     env: JIRA_BASE_URL
-    description: Jira Cloud site URL, e.g. https://<site>.atlassian.net
+    description: >-
+      Jira Cloud site URL (https://<site>.atlassian.net) for a classic token, or
+      the API gateway URL (https://api.atlassian.com/ex/jira/<cloudId>) for a
+      scoped token. Any other host is refused, and redirects are not followed.

@@ -4,7 +4,8 @@ description: >-
   Collects the Jira site audit log over a lookback window (permission, user,
   group, workflow, scheme, project and system changes) with who made each change,
   when, from where and what changed, plus rollups by category, object type and
-  author. Requires an account with the Administer Jira global permission.
+  author. Requires an account with the Administer Jira global permission; use
+  a read-only scoped token (see fetchers/jira/README.md).
 category: jira
 
 supports_targets: false
