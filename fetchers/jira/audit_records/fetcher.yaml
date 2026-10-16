@@ -65,8 +65,10 @@ evidence_set:
   description: >-
     The Jira site's own record of administrative and configuration changes,
     evidencing that privileged activity on the change and incident tracking
-    system is logged with actor, time and change detail.
+    system is logged with actor, time and change detail. Supporting evidence
+    only: it logs changes to Jira itself, not to the cloud service offering.
 
+# Not KSI-MLA-ALA: that KSI is about who may read log data, not whether
+# changes are logged.
 ksis:
-  - KSI-MLA-ALA
   - KSI-CMT-LMC
