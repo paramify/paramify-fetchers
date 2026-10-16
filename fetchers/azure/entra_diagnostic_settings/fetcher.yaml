@@ -1,0 +1,63 @@
+name: azure_entra_diagnostic_settings
+version: 0.1.0
+description: >
+  The Entra ID tenant's diagnostic settings: which directory log categories
+  (AuditLogs, SignInLogs, non-interactive, service-principal and managed-identity
+  sign-ins, provisioning, risk events, Graph activity) each setting exports, and
+  where to: Log Analytics workspace, storage account or Event Hub. Each
+  destination workspace is checked for Microsoft Sentinel. Per category: whether
+  any setting exports it, and whether it reaches a Sentinel workspace. Also
+  whether both AuditLogs and SignInLogs reach the SIEM.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_entra_diagnostic_settings.json
+  aggregation: per_target
+
+target_schema:
+  # Entra diagnostic settings are tenant-scoped: one target per tenant.
+  tenant_id:
+    type: string
+    required: false
+    env: AZURE_TENANT_ID
+    description: >
+      Entra tenant id to collect from, and the output filename's discriminator.
+      Optional — omit to use the tenant the credential authenticates into. When
+      set, a credential that lands in a different tenant fails the run.
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Optional and not used to scope collection. With an Azure CLI login it picks
+      the account that holds this subscription, and it is recorded for correlation.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-MLA-OSM      # Operating SIEM capability — directory logs reach the SIEM
+  - KSI-MLA-LET      # Logging event types — which Entra event categories are collected
+
+evidence_set:
+  reference_id: EVD-AZURE-ENTRA-DIAGNOSTIC-SETTINGS
+  name: Azure Entra ID Diagnostic Settings
+  instructions: >
+    Script: fetcher.py. ARM REST at tenant scope, api-version 2017-04-01:
+    microsoft.aadiam/diagnosticSettings and diagnosticSettingsCategories. A
+    category counts as exported when a setting lists it enabled. Each destination
+    workspace's SecurityInsights onboardingStates decides to_sentinel_workspace
+    (null when that workspace isn't readable). Needs an Entra role that reads
+    tenant diagnostic settings (Security Reader or Global Reader), plus Microsoft
+    Sentinel Reader on the destination workspaces.

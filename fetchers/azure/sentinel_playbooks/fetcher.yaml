@@ -1,0 +1,65 @@
+name: azure_sentinel_playbooks
+version: 0.1.0
+description: >
+  Microsoft Sentinel playbooks in the subscription: Logic Apps triggered by the
+  Sentinel connector (incident, alert or entity), plus any Logic App a Sentinel
+  automation rule runs. Each playbook reports its state, triggers and connectors.
+  It reports whether it contains an account (disable the user, revoke sign-in
+  sessions, confirm compromised), isolates a device, updates the incident, or
+  sends email or Teams messages, with the static email recipients. It also lists
+  which automation rules run it and whether any is active. Per subscription:
+  playbooks actually live (enabled and run by an active rule), and how many of
+  those contain accounts or notify someone.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_sentinel_playbooks.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+  workspaces:
+    type: string
+    required: false
+    env: SENTINEL_WORKSPACES
+    description: >
+      Comma-separated workspace names or resource ids whose automation rules are
+      read. Optional — omit to read every Sentinel workspace in the subscription.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-IAM-SUS      # Responding to suspicious activity — automated account containment
+  - KSI-MLA-RVL      # Reviewing logs — who Sentinel notifies
+
+evidence_set:
+  reference_id: EVD-AZURE-SENTINEL-PLAYBOOKS
+  name: Azure Sentinel Playbooks
+  instructions: >
+    Script: fetcher.py. ARM REST: Microsoft.Logic/workflows (api-version
+    2019-05-01) and each Sentinel workspace's automationRules (2025-09-01).
+    Capabilities come from each action's connector and inputs, nested branches
+    included. Account containment means an action sets accountEnabled false,
+    revokes sign-in sessions or confirms a user compromised. Recipients are
+    static addresses only. Standard (single-tenant) workflows are read
+    (Microsoft.Web 2024-04-01) only when an automation rule runs them. Roles:
+    Reader (or Logic App Reader) and Microsoft Sentinel Reader.
