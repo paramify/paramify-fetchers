@@ -450,7 +450,17 @@ def fetchers():
     cat = api.catalog(api.find_repo_root(REPO_ROOT))
     allf = [f for c in cat["categories"] for f in c["fetchers"]]
     assert allf, "no fetchers discovered — cannot run parity smoke tests"
-    with_secret = next((f for f in allf if f["secrets"] and not f["supports_targets"]), None)
+    # A fetcher whose only requirements are its secrets: wiring them must make the
+    # manifest valid. One with required config that has no default (a portal URL,
+    # a course list) would still be invalid, so it is skipped.
+    with_secret = next(
+        (
+            f for f in allf
+            if f["secrets"] and not f["supports_targets"]
+            and not any(c.get("required") and c.get("default") is None for c in f["config"])
+        ),
+        None,
+    )
     fanout = next((f for f in allf if f["supports_targets"]), None)
     return {"any": allf[0], "with_secret": with_secret, "fanout": fanout}
 
