@@ -388,7 +388,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cp-3`, `ir-2`, `ps-6`, `at-2`, `at-2.2`, `at-2.3`, `at-3.5`, `at-4`, `ir-2.3`, `at-3`, `sr-11.1`
 
-*4 fetchers:* [`knowbe4_developer_specific_training`](../fetchers/knowbe4/developer_specific_training), [`knowbe4_high_risk_training`](../fetchers/knowbe4/high_risk_training), [`knowbe4_module_based_summary`](../fetchers/knowbe4/module_based_summary), [`knowbe4_security_awareness_training`](../fetchers/knowbe4/security_awareness_training)
+*8 fetchers:* [`cornerstone_incident_response_training`](../fetchers/cornerstone/incident_response_training), [`cornerstone_role_based_training`](../fetchers/cornerstone/role_based_training), [`cornerstone_secure_development_training`](../fetchers/cornerstone/secure_development_training), [`cornerstone_security_awareness_training`](../fetchers/cornerstone/security_awareness_training), [`knowbe4_developer_specific_training`](../fetchers/knowbe4/developer_specific_training), [`knowbe4_high_risk_training`](../fetchers/knowbe4/high_risk_training), [`knowbe4_module_based_summary`](../fetchers/knowbe4/module_based_summary), [`knowbe4_security_awareness_training`](../fetchers/knowbe4/security_awareness_training)
 
 ### INR — Incident Response  (2/2)
 
@@ -427,7 +427,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-234 of 242 fetchers carry a mapping.
+238 of 246 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -594,6 +594,15 @@ python tools/gen_ksi_mapping.py
 |---|---|
 | [`checkov_kubernetes`](../fetchers/checkov/kubernetes) | `KSI-MLA-EVC` |
 | [`checkov_terraform`](../fetchers/checkov/terraform) | `KSI-MLA-EVC` |
+
+### cornerstone  (4)
+
+| Fetcher | Indicators |
+|---|---|
+| [`cornerstone_incident_response_training`](../fetchers/cornerstone/incident_response_training) | `KSI-CED-RAT` |
+| [`cornerstone_role_based_training`](../fetchers/cornerstone/role_based_training) | `KSI-CED-RAT` |
+| [`cornerstone_secure_development_training`](../fetchers/cornerstone/secure_development_training) | `KSI-CED-RAT` |
+| [`cornerstone_security_awareness_training`](../fetchers/cornerstone/security_awareness_training) | `KSI-CED-RAT` |
 
 ### crowdstrike  (7)
 

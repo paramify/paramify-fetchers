@@ -12,6 +12,23 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`cornerstone` category** with four KSI-CED-RAT fetchers over Cornerstone's
+  Reporting API (read-only OData views, OAuth 2.0 client credentials):
+  `cornerstone_security_awareness_training`, `cornerstone_role_based_training`,
+  `cornerstone_secure_development_training` and
+  `cornerstone_incident_response_training`. Each resolves the configured courses
+  in `vw_rpt_training`, reads every registration from `vw_rpt_transcript`, and
+  reports per user (numeric Cornerstone id only) the latest status, last
+  completion and whether it is inside the retraining interval, plus each
+  course's version and last content change. The awareness fetcher can take a
+  `vw_rpt_user` population filter so never-assigned users count as
+  `not_assigned`. Every view read is counted first and checked for
+  completeness; an unresolved course name reports null metrics and exits 0.
+  The portal URL must be one label under `csod.com`, redirects are refused, and
+  nextLinks are followed only on the same host under the views root. Covered
+  offline by `tests/test_cornerstone_fetchers.py`; not yet run against a live
+  portal.
+
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
