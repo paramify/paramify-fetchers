@@ -1,0 +1,39 @@
+# Cornerstone fetchers are python (requests) against Cornerstone's Reporting API
+# (RAPI): read-only OData views over the Real-time Data Warehouse, reached with
+# an OAuth 2.0 client-credentials token. No ambient identity: one OAuth client id
+# and secret per portal, declared once here and shared by every fetcher in the
+# category.
+display_name: Cornerstone
+description: >-
+  Cornerstone OnDemand Learning (Cornerstone LMS). Security training completion
+  from the Reporting API transcript and training views: general security
+  awareness for all users, role-based training for high-risk roles, secure
+  development training, and incident response / contingency training. The
+  courses to measure are named in config; one OAuth 2.0 client per portal.
+
+requires:
+  python_packages:
+    - requests
+
+secrets:
+  - name: client_id
+    env: CSOD_CLIENT_ID
+    description: >-
+      Client ID of the OAuth 2.0 application registered in Cornerstone (Admin >
+      Tools > Edge > API Management > Manage OAuth 2.0 Applications).
+  - name: client_secret
+    env: CSOD_CLIENT_SECRET
+    description: >-
+      Client secret of that OAuth 2.0 application. Cornerstone shows it once;
+      regenerate it if lost. The application's user needs only the 'Reporting
+      API - Read Only' security permission.
+
+config_schema:
+  portal_url:
+    type: string
+    required: true
+    env: CSOD_PORTAL_URL
+    description: >-
+      Cornerstone portal URL, e.g. https://<corpname>.csod.com (use the pilot or
+      stage portal host to test). Only https hosts directly under csod.com are
+      accepted, so the client secret cannot be sent anywhere else.
