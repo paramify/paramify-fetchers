@@ -551,6 +551,24 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_resource_diagnostic_settings` 0.2.0 shows whether resource logs arrive.**
+  A diagnostic setting naming a workspace did not show that logs reach it. For
+  each Log Analytics workspace an exporting setting names, one query over
+  `INGESTION_LOOKBACK_DAYS` (default 7) gives every resource in the subscription
+  its newest record time and record count. AzureActivity and AzureMetrics are left
+  out, because their rows name a resource without being its logs. `union *` skips
+  Basic and Auxiliary plan tables, so each of those is queried on its own over
+  `BASIC_LOGS_LOOKBACK_HOURS` (default 24; 0 skips them, since they bill per GB
+  scanned). Each resource gains `log_analytics_ingestion` per destination,
+  `last_ingested` and `ingested_in_window` (null when a destination refused the
+  read or was not queried in full; a deleted destination reads false). With
+  `APPROVED_LOG_WORKSPACES` set, each setting carries `workspace_approved` and each
+  resource `sends_to_approved_workspace`. `results.log_analytics_destinations` and
+  new summary keys (`resources_with_recent_ingestion`,
+  `resources_without_recent_ingestion`, `resources_ingestion_unknown`,
+  `no_recent_ingestion_by_type`, `settings_exporting_to_unapproved_workspace`,
+  and others) report the totals. A 403 on a destination workspace does not fail
+  the run. Existing fields and summary keys are unchanged.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`

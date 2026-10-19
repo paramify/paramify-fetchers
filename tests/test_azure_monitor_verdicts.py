@@ -395,3 +395,229 @@ def test_listed_child_is_not_added_twice_and_other_types_get_none():
     out = rds.with_storage_children([sa, listed_blob, BASE])
     ids = [r["id"].lower() for r in out]
     assert len(ids) == len(set(ids)) == 6
+
+
+# --- resource_diagnostic_settings: log ingestion and approved destinations ---
+
+LAW_A = f"{RG}/providers/Microsoft.OperationalInsights/workspaces/law-a"
+LAW_B = "/subscriptions/s2/resourceGroups/rg2/providers/Microsoft.OperationalInsights/workspaces/law-b"
+azure_rest = sys.modules["azure_rest"]
+
+
+def exporting(*workspaces):
+    settings = [setting(workspace=w, group="allLogs") for w in workspaces]
+    return rds.resource_record(BASE, rds.STATUS_ASSESSED, LOGS, settings)
+
+
+def queried(complete=True, **resources):
+    return {"status": rds.INGESTION_QUERIED, "all_tables_queried": complete, "resources": resources}
+
+
+def seen(records=5, last="2026-10-12T11:00:00Z", tables=("AzureDiagnostics",)):
+    return {"last_ingested": last, "records": records, "tables": list(tables)}
+
+
+@pytest.mark.parametrize("workspace, ingested", [
+    (queried(**{VAULT.lower(): seen()}), True),
+    (queried(), False),
+    (queried(complete=False), None),
+    ({"status": rds.INGESTION_NOT_FOUND}, False),
+    ({"status": rds.INGESTION_NOT_AUTHORIZED}, None),
+    ({"status": rds.INGESTION_ERROR}, None),
+])
+def test_ingested_in_window_for_one_destination(workspace, ingested):
+    record = rds.with_ingestion(exporting(LAW_A), {rds.workspace_key(LAW_A): workspace}, [])
+    assert record["ingested_in_window"] is ingested
+    assert [d["status"] for d in record["log_analytics_ingestion"]] == [workspace["status"]]
+
+
+@pytest.mark.parametrize("b_status, ingested", [
+    (rds.INGESTION_NOT_AUTHORIZED, None),
+    (rds.INGESTION_NOT_FOUND, False),
+])
+def test_unread_destination_leaves_an_empty_one_unknown(b_status, ingested):
+    workspaces = {rds.workspace_key(LAW_A): queried(), rds.workspace_key(LAW_B): {"status": b_status}}
+    assert rds.with_ingestion(exporting(LAW_A, LAW_B), workspaces, [])["ingested_in_window"] is ingested
+
+
+def test_records_in_any_destination_count_even_when_another_is_refused():
+    workspaces = {
+        rds.workspace_key(LAW_A): queried(**{VAULT.lower(): seen(last="2026-10-12T09:00:00.1234567Z")}),
+        rds.workspace_key(LAW_B): {"status": rds.INGESTION_NOT_AUTHORIZED},
+    }
+    record = rds.with_ingestion(exporting(LAW_A, LAW_B), workspaces, [])
+    assert (record["ingested_in_window"], record["last_ingested"]) == (True, "2026-10-12T09:00:00.1234567Z")
+    assert [d["records"] for d in record["log_analytics_ingestion"]] == [5, None]
+
+
+def test_resource_without_a_log_analytics_destination_is_unknown():
+    record = rds.with_ingestion(exporting(None), {}, [])
+    assert (record["log_analytics_ingestion"], record["ingested_in_window"], record["last_ingested"]) == ([], None, None)
+
+
+def test_same_workspace_in_two_casings_is_one_destination():
+    record = rds.with_ingestion(exporting(LAW_A, LAW_A.upper()), {rds.workspace_key(LAW_A): queried()}, [])
+    assert len(record["log_analytics_ingestion"]) == 1
+
+
+def test_rows_fold_per_resource_across_tables_and_case():
+    rows = [
+        {"ResourceId": VAULT.lower(), "Table": "AzureDiagnostics", "Records": 3, "LastIngested": "2026-10-12T10:00:00Z"},
+        {"ResourceId": VAULT.upper(), "Table": "KeyVaultAudit", "Records": 2, "LastIngested": "2026-10-12T11:30:00.5Z"},
+        {"ResourceId": "", "Table": "X", "Records": 9, "LastIngested": "2026-10-12T11:59:00Z"},
+    ]
+    assert rds.ingestion_by_resource(rows) == {VAULT.lower(): {
+        "last_ingested": "2026-10-12T11:30:00.5Z", "records": 5, "tables": ["AzureDiagnostics", "KeyVaultAudit"]}}
+
+
+@pytest.mark.parametrize("exc, status", [
+    (azure_rest.ArmError(404, "ResourceNotFound", "gone"), rds.INGESTION_NOT_FOUND),
+    (azure_rest.ArmError(403, "AuthorizationFailed", "no"), rds.INGESTION_NOT_AUTHORIZED),
+    (azure_rest.QueryError("(403) InsufficientAccessError", "The provided credentials have insufficient access"),
+     rds.INGESTION_NOT_AUTHORIZED),
+    (azure_rest.QueryError("(404) WorkspaceNotFoundError", "Workspace could not be found"), rds.INGESTION_NOT_FOUND),
+    (azure_rest.QueryError("(400) BadArgumentError", "syntax"), rds.INGESTION_ERROR),
+    (azure_rest.ArmError(500, "InternalServerError", "boom"), rds.INGESTION_ERROR),
+])
+def test_ingestion_status(exc, status):
+    assert rds.ingestion_status(exc) == status
+
+
+def table(name, plan):
+    return {"name": name, "properties": {"plan": plan}}
+
+
+class _Workspaces:
+    def __init__(self, get_error=None, customer_id="cust-1", tables=()):
+        self.get_error, self.customer_id, self.tables, self.queries = get_error, customer_id, list(tables), []
+
+    def get(self, path, api_version):
+        if self.get_error:
+            raise self.get_error
+        return {"properties": {"customerId": self.customer_id}}
+
+    def list(self, path, api_version):
+        assert path == f"{LAW_A}/tables"
+        return self.tables
+
+    def query(self, customer_id, kql, timespan):
+        self.queries.append((customer_id, kql, timespan))
+        if kql.startswith("union"):
+            return [{"ResourceId": VAULT.lower(), "Table": "AzureDiagnostics", "Records": 1,
+                     "LastIngested": "2026-10-12T00:00:00Z"}]
+        return [{"ResourceId": VAULT.lower(), "Table": "StorageBlobLogs", "Records": 4,
+                 "LastIngested": "2026-10-12T01:00:00Z"}]
+
+
+def test_destination_query_is_scoped_to_the_subscription_and_skips_non_log_tables():
+    client, collector = _Workspaces(), _Collector()
+    out = rds.read_workspace_ingestion(client, LAW_A, "s1", 7, 24, collector)
+    customer_id, kql, timespan = client.queries[0]
+    assert (customer_id, timespan, out["status"], collector.failures) == ("cust-1", "P7D", rds.INGESTION_QUERIED, [])
+    assert "ago(7d)" in kql and "startswith '/subscriptions/s1/'" in kql
+    assert "!in ('AzureActivity', 'AzureMetrics')" in kql
+    assert (len(client.queries), out["all_tables_queried"], out["resources"][VAULT.lower()]["records"]) == (1, True, 1)
+
+
+def test_basic_and_auxiliary_tables_are_queried_one_by_one_over_the_short_window():
+    tables = [table("StorageBlobLogs", "Basic"), table("AzureDiagnostics", "Analytics"), table("Aux_CL", "Auxiliary")]
+    client = _Workspaces(tables=tables)
+    out = rds.read_workspace_ingestion(client, LAW_A, "s1", 7, 24, _Collector())
+    assert [(q[2], q[1].split(" ")[0]) for q in client.queries[1:]] == [("PT24H", "['Aux_CL']"), ("PT24H", "['StorageBlobLogs']")]
+    assert all("ago(24h)" in q[1] and "startswith '/subscriptions/s1/'" in q[1] for q in client.queries[1:])
+    assert out["non_analytics_tables"] == [{"name": "Aux_CL", "plan": "Auxiliary"}, {"name": "StorageBlobLogs", "plan": "Basic"}]
+    assert out["all_tables_queried"] is True
+    assert out["resources"][VAULT.lower()]["tables"] == ["AzureDiagnostics", "StorageBlobLogs"]
+
+
+def test_basic_tables_left_unqueried_make_an_empty_resource_unknown():
+    client = _Workspaces(tables=[table("StorageBlobLogs", "Basic")])
+    out = rds.read_workspace_ingestion(client, LAW_A, "s1", 7, 0, _Collector())
+    assert (len(client.queries), out["all_tables_queried"]) == (1, False)
+    other = {**exporting(LAW_A), "id": VAULT + "-other"}
+    assert rds.with_ingestion(other, {rds.workspace_key(LAW_A): out}, [])["ingested_in_window"] is None
+    assert rds.with_ingestion(exporting(LAW_A), {rds.workspace_key(LAW_A): out}, [])["ingested_in_window"] is True
+
+
+@pytest.mark.parametrize("raw, hours", [(None, 24), ("0", 0), ("6", 6), ("-3", 0), ("x", 24)])
+def test_basic_lookback_hours(monkeypatch, raw, hours):
+    if raw is None:
+        monkeypatch.delenv(rds.BASIC_LOOKBACK_ENV, raising=False)
+    else:
+        monkeypatch.setenv(rds.BASIC_LOOKBACK_ENV, raw)
+    assert rds.basic_lookback_hours() == hours
+
+
+@pytest.mark.parametrize("error, status, failed", [
+    (azure_rest.ArmError(403, "AuthorizationFailed", "no"), rds.INGESTION_NOT_AUTHORIZED, False),
+    (azure_rest.ArmError(404, "ResourceNotFound", "gone"), rds.INGESTION_NOT_FOUND, False),
+    (azure_rest.ArmError(500, "InternalServerError", "boom"), rds.INGESTION_ERROR, True),
+])
+def test_only_unexpected_destination_failures_fail_the_run(error, status, failed):
+    collector = _Collector()
+    out = rds.read_workspace_ingestion(_Workspaces(get_error=error), LAW_A, "s1", 7, 24, collector)
+    assert (out["status"], bool(collector.failures), out["resources"]) == (status, failed, {})
+
+
+def test_workspace_without_customer_id_is_an_error():
+    collector = _Collector()
+    out = rds.read_workspace_ingestion(_Workspaces(customer_id=None), LAW_A, "s1", 7, 24, collector)
+    assert (out["status"], len(collector.failures)) == (rds.INGESTION_ERROR, 1)
+
+
+@pytest.mark.parametrize("approved, expected", [
+    ([], None),
+    ([rds.workspace_key(LAW_A)], True),
+    (["law-a"], True),
+    ([rds.workspace_key(LAW_B)], False),
+])
+def test_workspace_approval(approved, expected):
+    record = rds.with_ingestion(exporting(LAW_A.upper()), {}, approved)
+    assert record["diagnostic_settings"][0]["workspace_approved"] is expected
+    assert record["sends_to_approved_workspace"] is expected
+
+
+def test_approved_workspaces_reads_ids_and_names(monkeypatch):
+    monkeypatch.setenv(rds.APPROVED_WORKSPACES_ENV, f" {LAW_A.upper()}/ , law-b ,,")
+    assert rds.approved_workspaces() == [rds.workspace_key(LAW_A), "law-b"]
+
+
+def test_ingestion_summary_counts():
+    a, b = rds.workspace_key(LAW_A), rds.workspace_key(LAW_B)
+    other = f"{RG}/providers/Microsoft.KeyVault/vaults/kv2"
+    workspaces = {
+        a: {"workspace_id": LAW_A, "name": "law-a", "customer_id": "c", "status": rds.INGESTION_QUERIED,
+            "error": None, "non_analytics_tables": [], "all_tables_queried": True, "resources": {VAULT.lower(): seen()}},
+        b: {"workspace_id": LAW_B, "name": "law-b", "customer_id": None, "status": rds.INGESTION_NOT_AUTHORIZED,
+            "error": "403", "non_analytics_tables": [], "all_tables_queried": False, "resources": {}},
+    }
+    approved = ["law-a"]
+    records = [
+        rds.with_ingestion(exporting(LAW_A), workspaces, approved),
+        rds.with_ingestion({**exporting(LAW_A), "id": other}, workspaces, approved),
+        rds.with_ingestion({**exporting(LAW_B), "id": other + "3"}, workspaces, approved),
+    ]
+    destinations = rds.destination_records(workspaces, records, approved)
+    assert [(d["name"], d["approved"], d["all_tables_queried"], d["resources_exporting"], d["resources_with_records"])
+            for d in destinations] == [("law-a", True, True, 2, 1), ("law-b", False, None, 1, 0)]
+    summary = rds.summarize_ingestion(records, destinations, 7, 24, approved)
+    assert {k: summary[k] for k in (
+        "log_analytics_destinations", "log_analytics_destinations_queried", "log_analytics_destinations_not_authorized",
+        "resources_with_recent_ingestion", "resources_without_recent_ingestion", "resources_ingestion_unknown",
+        "recent_ingestion_percentage", "no_recent_ingestion_by_type", "all_log_analytics_resources_ingesting",
+        "settings_exporting_to_unapproved_workspace", "resources_sending_to_approved_workspace",
+        "resources_exporting_to_unapproved_workspace",
+    )} == {
+        "log_analytics_destinations": 2, "log_analytics_destinations_queried": 1,
+        "log_analytics_destinations_not_authorized": 1, "resources_with_recent_ingestion": 1,
+        "resources_without_recent_ingestion": 1, "resources_ingestion_unknown": 1, "recent_ingestion_percentage": 33,
+        "no_recent_ingestion_by_type": {"microsoft.keyvault/vaults": 1}, "all_log_analytics_resources_ingesting": False,
+        "settings_exporting_to_unapproved_workspace": 1, "resources_sending_to_approved_workspace": 2,
+        "resources_exporting_to_unapproved_workspace": 1,
+    }
+
+
+def test_ingestion_summary_without_an_approved_list_leaves_approval_unknown():
+    summary = rds.summarize_ingestion([rds.with_ingestion(exporting(LAW_A), {}, [])], [], 7, 24, [])
+    assert (summary["approved_workspaces_configured"], summary["settings_exporting_to_unapproved_workspace"],
+            summary["resources_sending_to_approved_workspace"]) == (False, None, None)
