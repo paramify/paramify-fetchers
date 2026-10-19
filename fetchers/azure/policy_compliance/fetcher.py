@@ -86,17 +86,22 @@ HISTORY = "default"
 RECURRENCE_WINDOW_DAYS = 30
 # Grouped history rows read before stopping: one per (resource, policy, state).
 MAX_HISTORY_ROWS = 50000
+HISTORY_GROUP_KEYS = ("ResourceId, PolicyAssignmentId, PolicyDefinitionId, "
+                      "PolicyDefinitionReferenceId, ComplianceState")
 # Pairs seen both compliant and non-compliant each cost one ordered-history query.
 DEFAULT_MAX_RECURRENCE_PAIRS = 100
 MAX_RECURRENCE_PAIRS_ENV = "AZURE_POLICY_MAX_RECURRENCE_PAIRS"
 COMPLIANCE_FILTER = "(ComplianceState eq 'NonCompliant' or ComplianceState eq 'Compliant')"
 
+# Azure deletes a remediation task 60 days after its last change, so older ones are gone.
 DEFAULT_MAX_REMEDIATION_DEPLOYMENTS = 1000
 MAX_REMEDIATION_DEPLOYMENTS_ENV = "AZURE_POLICY_MAX_REMEDIATION_DEPLOYMENTS"
 REMEDIATIONS_SEGMENT = "/providers/microsoft.policyinsights/remediations/"
 
 # evaluation_details_status on each listed non-compliant state.
 DETAILS_COLLECTED = "collected"
+# Always the case for Resource Provider mode policies (Microsoft.KeyVault.Data and the
+# like), whose results Azure keeps per component ($expand=components, not read here).
 DETAILS_NOT_RETURNED = "not_returned"
 DETAILS_NOT_REQUESTED = "not_requested"
 DETAILS_UNSUPPORTED_SCOPE = "unsupported_scope"
@@ -237,6 +242,21 @@ def project_history_group(row) -> dict:
         "policy_definition_reference_id": model_attr(row, "policy_definition_reference_id"),
         "compliance_state": model_attr(row, "compliance_state"),
         "evaluations": extra.get("evaluations") or 0,
+    }
+
+
+def project_group_count(row):
+    """The `$count as n` of a groupby(...)/aggregate query: how many groups there are."""
+    n = (model_attr(row, "additional_properties") or {}).get("n")
+    return int(n) if n is not None else None
+
+
+def project_resource_state(state) -> dict:
+    """A remediated resource's latest state, and when it was evaluated."""
+    return {
+        "resource_id": model_attr(state, "resource_id"),
+        "compliance_state": model_attr(state, "compliance_state"),
+        "timestamp": _iso(model_attr(state, "timestamp")),
     }
 
 
@@ -498,28 +518,40 @@ def remediation_scope(remediation_id) -> tuple[str, str | None]:
     return "resource", text[:cut]
 
 
-def latest_states_by_resource(rows: list[dict]) -> dict[str, str]:
-    """{resource id: latest compliance state} from a grouped query; NonCompliant wins."""
-    states: dict[str, str] = {}
+def latest_states_by_resource(rows: list[dict]) -> dict[str, dict]:
+    """{resource id: its latest state row}; NonCompliant wins when a resource has two."""
+    states: dict[str, dict] = {}
     for row in rows:
         resource_id = str(row.get("resource_id") or "").lower()
-        state = row.get("compliance_state")
-        if resource_id and (resource_id not in states or str(state).lower() == NON_COMPLIANT):
-            states[resource_id] = state
+        if resource_id and (
+            resource_id not in states or str(row.get("compliance_state")).lower() == NON_COMPLIANT
+        ):
+            states[resource_id] = row
     return states
 
 
-def deployment_record(deployment: dict, task: dict, current_states: dict[str, str]) -> dict:
-    """A remediation deployment, checked against its resource's latest compliance state."""
-    state = current_states.get(str(deployment.get("remediated_resource_id") or "").lower())
+def deployment_record(deployment: dict, task: dict, current_states: dict[str, dict]) -> dict:
+    """A remediation deployment, checked against its resource's latest compliance state.
+
+    A state evaluated before the deployment last changed says nothing about it: Azure
+    re-evaluates a deployIfNotExists target only in its 24-hour cycle.
+    """
+    current = current_states.get(str(deployment.get("remediated_resource_id") or "").lower()) or {}
+    state, evaluated_at = current.get("compliance_state"), current.get("timestamp")
+    deployed_at = deployment.get("last_updated_on") or deployment.get("created_on")
+    # Both are _iso strings, so they compare as times.
+    reevaluated = evaluated_at >= deployed_at if evaluated_at and deployed_at else None
     lowered = str(state or "").lower()
+    now_compliant = True if lowered == COMPLIANT else False if lowered == NON_COMPLIANT else None
     return {
         "remediation_task_id": task.get("id"),
         "policy_assignment_id": task.get("policy_assignment_id"),
         "policy_definition_reference_id": task.get("policy_definition_reference_id"),
         **deployment,
         "current_compliance_state": state,
-        "now_compliant": True if lowered == COMPLIANT else False if lowered == NON_COMPLIANT else None,
+        "current_state_evaluated_at": evaluated_at,
+        "reevaluated_since_deployment": reevaluated,
+        "now_compliant": None if reevaluated is False else now_compliant,
     }
 
 
@@ -597,9 +629,9 @@ def summarize_recurrence(
         "recurrence_pairs_read": len(records),
         "recurrence_pairs_truncated": pairs_truncated,
         "recurring_non_compliant_pairs": sum(1 for r in records if r["recurring"]),
-        # A pair non-compliant throughout the window is one episode.
+        # Any non-compliant pair had at least one episode, read or not.
         "max_non_compliant_episodes": max(
-            [r["non_compliant_episodes"] for r in records] + [1 if persistent else 0]
+            [r["non_compliant_episodes"] for r in records] + [1 if non_compliant else 0]
         ),
     }
 
@@ -621,8 +653,13 @@ def summarize_remediation_deployments(deployments: list[dict], truncated: bool) 
             1 for d in deployments
             if d["now_compliant"] is False and str(d.get("status") or "").lower() == "succeeded"
         ),
+        # The state read predates the deployment; the next evaluation will tell.
+        "remediated_resources_not_yet_reevaluated": sum(
+            1 for d in deployments if d.get("reevaluated_since_deployment") is False
+        ),
         "remediated_resources_compliance_unknown": sum(
-            1 for d in deployments if d["now_compliant"] is None
+            1 for d in deployments
+            if d["now_compliant"] is None and d.get("reevaluated_since_deployment") is not False
         ),
     }
 
@@ -696,8 +733,7 @@ def collect_recurrence(client, subscription_id, limit: int, collector: Collector
             from_property=start,
             to=end,
             filter=COMPLIANCE_FILTER,
-            apply="groupby((ResourceId, PolicyAssignmentId, PolicyDefinitionId, "
-                  "PolicyDefinitionReferenceId, ComplianceState), aggregate($count as evaluations))",
+            apply=f"groupby(({HISTORY_GROUP_KEYS}), aggregate($count as evaluations))",
         )
         for row in client.policy_states.list_query_results_for_subscription(
             HISTORY, subscription_id, query_options=options
@@ -707,7 +743,29 @@ def collect_recurrence(client, subscription_id, limit: int, collector: Collector
                 break
             rows.append(project_history_group(row))
 
+    def _group_count():
+        # No $apply example shows a nextLink, so check every group came back.
+        options = QueryOptions(
+            from_property=start,
+            to=end,
+            filter=COMPLIANCE_FILTER,
+            apply=f"groupby(({HISTORY_GROUP_KEYS}))/aggregate($count as n)",
+        )
+        for row in client.policy_states.list_query_results_for_subscription(
+            HISTORY, subscription_id, query_options=options
+        ):
+            return project_group_count(row)
+        return None
+
     collector.guard("policyinsights.policy_states.list_query_results_for_subscription (history)", _groups)
+    if not truncated:
+        expected = collector.guard(
+            "policyinsights.policy_states.list_query_results_for_subscription (history group count)",
+            _group_count,
+        )
+        if expected is not None and len(rows) < expected:
+            logger.warning("history query returned %d of %d groups", len(rows), expected)
+            truncated = True
     pairs = history_pairs(rows)
     flipping = intermittent_pairs(pairs)
     records = []
@@ -785,14 +843,19 @@ def collect_remediation_deployments(
             continue
 
         def _current(task=task):
-            clauses = [f"PolicyAssignmentId eq '{_odata(task.get('policy_assignment_id'))}'"]
+            # Lower case, as policy states hold these ids and the service's own filters spell them.
+            clauses = [f"PolicyAssignmentId eq '{_odata(task.get('policy_assignment_id')).lower()}'"]
             if task.get("policy_definition_reference_id"):
                 clauses.append(
-                    f"PolicyDefinitionReferenceId eq '{_odata(task['policy_definition_reference_id'])}'"
+                    "PolicyDefinitionReferenceId eq "
+                    f"'{_odata(task['policy_definition_reference_id']).lower()}'"
                 )
-            options = QueryOptions(filter=" and ".join(clauses), apply="groupby((ResourceId, ComplianceState))")
+            # "latest" holds one row per resource for one assignment and reference id.
+            options = QueryOptions(
+                filter=" and ".join(clauses), select="ResourceId, ComplianceState, Timestamp"
+            )
             return latest_states_by_resource([
-                project_history_group(s)
+                project_resource_state(s)
                 for s in client.policy_states.list_query_results_for_subscription(
                     LATEST, subscription_id, query_options=options
                 )

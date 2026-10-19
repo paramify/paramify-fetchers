@@ -235,15 +235,20 @@ def test_collect_recurrence_reads_history_once_then_each_flipping_pair(monkeypat
     series = [NS(timestamp=datetime(2026, 10, d, tzinfo=timezone.utc), compliance_state=s)
               for d, s in ((1, "NonCompliant"), (2, "Compliant"), (3, "NonCompliant"))]
 
+    reported = {"n": 5}
+
     def query(resource, subscription_id, query_options):
         seen.append((resource, query_options.apply, query_options.order_by, query_options.from_property))
+        if (query_options.apply or "").endswith("/aggregate($count as n)"):
+            return [NS(additional_properties=dict(reported))]
         return groups if query_options.apply else series
 
     client = fake_client(policy_states={"list_query_results_for_subscription": query})
     out = fx.collect_recurrence(client, "s1", 1, fx.Collector(logging.getLogger("t")), now=NOW)
     assert seen[0][0] == "default" and "aggregate($count as evaluations)" in seen[0][1]
     assert seen[0][3] == datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
-    assert len(seen) == 2 and seen[1][2] == "Timestamp asc"
+    assert seen[1][1] == f"groupby(({fx.HISTORY_GROUP_KEYS}))/aggregate($count as n)"
+    assert len(seen) == 3 and seen[2][2] == "Timestamp asc"
     (record,) = out["records"]
     assert record["resource_id"] == NSG and record["non_compliant_episodes"] == 2
     assert out["pairs_truncated"] is True and out["history_truncated"] is False
@@ -251,9 +256,26 @@ def test_collect_recurrence_reads_history_once_then_each_flipping_pair(monkeypat
     summary = fx.summarize_recurrence(out["pairs"], out["records"], False, True)
     assert (summary["recurring_non_compliant_pairs"], summary["max_non_compliant_episodes"]) == (1, 2)
 
-    monkeypatch.setattr(fx, "MAX_HISTORY_ROWS", 2)
+    # The service counts more groups than came back: pages were dropped.
+    reported["n"] = 6
     assert fx.collect_recurrence(client, "s1", 0, fx.Collector(logging.getLogger("t")), now=NOW)[
         "history_truncated"] is True
+
+    monkeypatch.setattr(fx, "MAX_HISTORY_ROWS", 2)
+    seen.clear()
+    assert fx.collect_recurrence(client, "s1", 0, fx.Collector(logging.getLogger("t")), now=NOW)[
+        "history_truncated"] is True
+    assert len(seen) == 1
+
+
+def test_episode_floor_counts_unread_intermittent_pairs():
+    rows = [
+        {**state(VM), "compliance_state": "noncompliant", "evaluations": 3},
+        {**state(VM), "compliance_state": "compliant", "evaluations": 2},
+    ]
+    summary = fx.summarize_recurrence(fx.history_pairs(rows), [], False, True)
+    assert (summary["history_persistently_non_compliant_pairs"], summary["max_non_compliant_episodes"]) == (0, 1)
+    assert fx.summarize_recurrence({}, [], False, False)["max_non_compliant_episodes"] == 0
 
 
 # --- remediation deployments ---
@@ -276,6 +298,7 @@ def test_deployment_is_checked_against_the_latest_state():
         {"resource_id": NSG, "compliance_state": "Compliant"},
         {"resource_id": NSG.upper(), "compliance_state": "NonCompliant"},
     ])
+    assert current[NSG.lower()]["compliance_state"] == "NonCompliant"
     task = {"id": "t", "policy_assignment_id": ASSIGN, "policy_definition_reference_id": "r1"}
     rows = [fx.deployment_record({"remediated_resource_id": rid, "status": status}, task, current)
             for rid, status in ((VM, "Succeeded"), (NSG, "Succeeded"), (f"{RG}/x/y/gone", "Failed"))]
@@ -285,6 +308,26 @@ def test_deployment_is_checked_against_the_latest_state():
             summary["succeeded_remediations_still_non_compliant"],
             summary["remediated_resources_compliance_unknown"]) == (1, 1, 1, 1)
     assert summary["remediation_deployments_by_status"] == {"Failed": 1, "Succeeded": 2}
+
+
+def test_state_evaluated_before_the_deployment_is_not_yet_reevaluated():
+    current = fx.latest_states_by_resource([
+        {"resource_id": VM, "compliance_state": "NonCompliant", "timestamp": "2026-10-18T09:00:00Z"},
+        {"resource_id": NSG, "compliance_state": "NonCompliant", "timestamp": "2026-10-19T09:00:00Z"},
+        {"resource_id": f"{RG}/x/y/z", "compliance_state": "Compliant", "timestamp": None},
+    ])
+    task = {"id": "t", "policy_assignment_id": ASSIGN}
+    deployed = {"status": "Succeeded", "created_on": "2026-10-18T10:00:00Z", "last_updated_on": "2026-10-18T10:05:00Z"}
+    rows = [fx.deployment_record({**deployed, "remediated_resource_id": rid}, task, current)
+            for rid in (VM, NSG, f"{RG}/x/y/z", f"{RG}/x/y/gone")]
+    assert [(r["reevaluated_since_deployment"], r["now_compliant"]) for r in rows] == [
+        (False, None), (True, False), (None, True), (None, None)]
+    assert rows[0]["current_compliance_state"] == "NonCompliant"
+    assert rows[0]["current_state_evaluated_at"] == "2026-10-18T09:00:00Z"
+    summary = fx.summarize_remediation_deployments(rows, truncated=False)
+    assert (summary["remediated_resources_not_yet_reevaluated"], summary["succeeded_remediations_still_non_compliant"],
+            summary["remediated_resources_now_compliant"], summary["remediated_resources_compliance_unknown"]) == (
+        1, 1, 1, 1)
 
 
 @needs_sdk
@@ -304,10 +347,11 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit():
         return [deployment(f"{RG}/providers/x/y/z")]
 
     def latest(resource, subscription_id, query_options):
-        assert query_options.apply == "groupby((ResourceId, ComplianceState))"
-        assert "PolicyDefinitionReferenceId eq 'r1'" in query_options.filter
-        return [NS(resource_id=VM, compliance_state="Compliant", policy_assignment_id=None,
-                   policy_definition_id=None, policy_definition_reference_id=None, additional_properties={})]
+        assert query_options.apply is None
+        assert query_options.select == "ResourceId, ComplianceState, Timestamp"
+        assert query_options.filter == (
+            f"PolicyAssignmentId eq '{ASSIGN.lower()}' and PolicyDefinitionReferenceId eq 'r1'")
+        return [NS(resource_id=VM, compliance_state="Compliant", timestamp=datetime(2026, 10, 19, tzinfo=timezone.utc))]
 
     client = fake_client(
         policy_states={"list_query_results_for_subscription": latest},
@@ -316,7 +360,7 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit():
     )
     tasks = [
         {"id": f"{SUB}/providers/Microsoft.PolicyInsights/remediations/t1", "name": "t1",
-         "policy_assignment_id": ASSIGN, "policy_definition_reference_id": "r1", "total_deployments": 2},
+         "policy_assignment_id": ASSIGN, "policy_definition_reference_id": "R1", "total_deployments": 2},
         {"id": f"{RG}/providers/Microsoft.PolicyInsights/remediations/t2", "name": "t2",
          "policy_assignment_id": ASSIGN, "policy_definition_reference_id": "r1", "total_deployments": 1},
     ]
@@ -329,6 +373,41 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit():
     rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 1, fx.Collector(logging.getLogger("t")))
     assert len(rows) == 1 and truncated is True
     assert listed == [("subscription", "t1")]
+
+
+@needs_sdk
+def test_collect_remediation_deployments_at_management_group_and_resource():
+    listed = []
+
+    def deployment(rid):
+        return NS(remediated_resource_id=rid, deployment_id=None, status="Failed", resource_location=None,
+                  error=NS(code="Denied", message="no"), created_on=None, last_updated_on=None)
+
+    def at_management_group(group, name):
+        listed.append(("management_group", group, name))
+        return [deployment(VM)]
+
+    def at_resource(resource_id, name):
+        listed.append(("resource", resource_id, name))
+        return [deployment(NSG)]
+
+    client = fake_client(
+        policy_states={"list_query_results_for_subscription": lambda *a, **k: []},
+        remediations={"list_deployments_at_management_group": at_management_group,
+                      "list_deployments_at_resource": at_resource},
+    )
+    tasks = [
+        {"id": "/providers/Microsoft.Management/managementGroups/mg1/providers/Microsoft.PolicyInsights/"
+               "remediations/t3", "name": "t3", "policy_assignment_id": ASSIGN},
+        {"id": f"{NSG}/providers/Microsoft.PolicyInsights/remediations/t4", "name": "t4",
+         "policy_assignment_id": ASSIGN},
+    ]
+    collector = fx.Collector(logging.getLogger("t"))
+    rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 10, collector)
+    assert listed == [("management_group", "mg1", "t3"), ("resource", NSG.lstrip("/"), "t4")]
+    assert [(r["remediation_task_id"].rsplit("/", 1)[-1], r["error_code"], r["now_compliant"]) for r in rows] == [
+        ("t3", "Denied", None), ("t4", "Denied", None)]
+    assert truncated is False and collector.ok
 
 
 # --- wiring ---

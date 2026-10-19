@@ -561,15 +561,21 @@ schemas and the `paramify` CLI — not the internal code.
     resources with the most listed states are read first.
   - `evaluation_details_status` gives the reason a state has no details. It is
     `collected` only when Azure returned an evaluated expression or an ifNotExists
-    lookup; a state returned without either is `not_returned`.
+    lookup; a state returned without either is `not_returned`, as Resource Provider
+    mode policies (`Microsoft.KeyVault.Data` and the like) always are.
     `evaluation_details_truncated` says when not every listed resource was read.
   - Each remediation task's per-resource deployments (status, error, times) are
     listed in `remediation_deployments`, up to `max_remediation_deployments`
     (default 1000), and each is checked against its resource's latest compliance
     state. New summary keys count resources now compliant, still non-compliant, and
-    succeeded deployments still non-compliant.
+    succeeded deployments still non-compliant. A state evaluated before the
+    deployment last changed counts as `remediated_resources_not_yet_reevaluated`
+    instead. Azure deletes a task 60 days after its last change, so this covers
+    about the last 60 days at most.
   - From 30 days of history, the summary counts (resource, policy) pairs
     non-compliant throughout and pairs non-compliant only some of the time.
+    `history_truncated` is also set when fewer groups come back than the service
+    counts.
   - For up to `max_recurrence_pairs` (default 100) of the part-time ones,
     `non_compliance_recurrence` counts the separate non-compliant episodes and how
     many times the pair fell back out of compliance. `recurring_non_compliant_pairs`
