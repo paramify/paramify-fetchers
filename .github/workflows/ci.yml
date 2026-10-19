@@ -169,7 +169,7 @@ jobs:
       # --fail-on-skip (tests/conftest.py) fails the job if any of them skipped.
       - name: pytest (TUI)
         run: >-
-          pytest -q -rs --fail-on-skip --snapshot-report snapshot_report.html
+          pytest -q -rsx --fail-on-skip --snapshot-report snapshot_report.html
           ${{ matrix.pytest-args }}
           tests/test_tui_*.py tests/test_manifest_autosave.py tests/test_target_editor.py
       # Side-by-side SVG diff of every mismatched snapshot. Refresh after an

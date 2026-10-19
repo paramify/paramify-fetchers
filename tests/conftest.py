@@ -58,24 +58,26 @@ def repo_root() -> Path:
 def pytest_addoption(parser):
     parser.addoption(
         "--fail-on-skip", action="store_true",
-        help="fail the run if any test or test module is skipped",
+        help="fail the run if any test or test module is skipped or xfailed",
     )
 
 
-def _skipped(config) -> list:
+def _not_run(config) -> list:
     reporter = config.pluginmanager.get_plugin("terminalreporter")
-    return reporter.stats.get("skipped", []) if reporter else []
+    stats = reporter.stats if reporter else {}
+    return stats.get("skipped", []) + stats.get("xfailed", [])
 
 
 def pytest_sessionfinish(session, exitstatus):
-    if session.config.getoption("--fail-on-skip") and exitstatus == 0 and _skipped(session.config):
+    if session.config.getoption("--fail-on-skip") and exitstatus == 0 and _not_run(session.config):
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    if config.getoption("--fail-on-skip") and _skipped(config):
+    if config.getoption("--fail-on-skip") and _not_run(config):
         terminalreporter.write_line(
-            f"--fail-on-skip: {len(_skipped(config))} skipped, so the run fails (-rs lists why)",
+            f"--fail-on-skip: {len(_not_run(config))} skipped or xfailed, so the run fails"
+            " (-rsx lists why)",
             red=True,
         )
 
