@@ -582,6 +582,8 @@ schemas and the `paramify` CLI — not the internal code.
     counts pairs with more than one episode.
   - Every bounded list has a truncation flag. Existing fields are unchanged. Still
     Reader-only. Also mapped to `KSI-SVC-EIS`.
+  - `runtime.timeout` is 3600 seconds: the added queries run serially, and a
+    production run took about 8 minutes, near the runner's 600-second default.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`

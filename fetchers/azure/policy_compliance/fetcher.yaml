@@ -17,6 +17,8 @@ supports_targets: true
 runtime:
   type: python
   entry: fetcher.py
+  # Hundreds of serial queries at the default limits, plus 429 backoff; a production run took ~8 minutes.
+  timeout: 3600
 
 output:
   type: json
