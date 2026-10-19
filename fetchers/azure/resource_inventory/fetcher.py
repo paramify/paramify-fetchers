@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Azure resource inventory for one subscription, from Azure Resource Graph.
+"""Azure resource inventory for one subscription, from Azure Resource Graph, with each resource's Defender and Policy coverage.
 
 One query over the `Resources` table instead of one list call per service, so the
 inventory covers every resource type ARM knows about — including the ones no other
-fetcher in this category reads. Resource Graph pages at most 1000 rows; the fetcher
-follows `$skipToken` to the end and treats a truncated or short result as a
-collection failure, never as a smaller inventory.
+fetcher in this category reads. Two more queries read Defender for Cloud assessments
+(`SecurityResources`) and Azure Policy states (`PolicyResources`); they are separate
+queries joined here by resource id because Resource Graph allows one cross-table join
+per query and pages `summarize` only to its first page. Resource Graph pages at most
+1000 rows; every query follows `$skipToken` to the end and treats a truncated or short
+result as a collection failure, never as a smaller inventory or a coverage gap.
 
 Resource Graph is eventually consistent with ARM (typically seconds, occasionally
 minutes), and returns only what the caller can read, so a Reader gap reads as a
@@ -24,22 +27,20 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import (  # noqa: E402
     Collector,
-    arm_client_kwargs,
     build_payload,
     classify_failure_code,
+    coverage_percentage,
     credential,
     failure_reason,
-    model_attr,
+    report_failure,
     resolve_subscription,
     sanitize_for_filename,
+    sorted_counts,
     write_evidence,
-    report_failure,
 )
+from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_resource_inventory")
-
-# The largest page Resource Graph serves; `$top` above it is rejected.
-PAGE_SIZE = 1000
 
 # `order by id` keeps paging stable across skip tokens. The provisioning state lives
 # in each type's own `properties` bag, so it is lifted out as a string.
@@ -50,9 +51,26 @@ INVENTORY_QUERY = (
     " | order by id asc"
 )
 
-# A guard, not a cap: 1000 pages is a million resources. Reaching it means the service
-# kept handing back skip tokens, which is recorded as a failure.
-MAX_PAGES = 1000
+DEFENDER_QUERY = (
+    "SecurityResources"
+    " | where type =~ 'microsoft.security/assessments'"
+    " | project id, resourceDetails = properties.resourceDetails,"
+    " status = tostring(properties.status.code), severity = tostring(properties.metadata.severity)"
+    " | order by id asc"
+)
+
+POLICY_QUERY = (
+    "PolicyResources"
+    " | where type =~ 'microsoft.policyinsights/policystates'"
+    " | project id, resourceId = tostring(properties.resourceId),"
+    " complianceState = tostring(properties.complianceState)"
+    " | order by id asc"
+)
+
+ASSESSMENT_ID_MARKER = "/providers/microsoft.security/assessments/"
+UNHEALTHY = "unhealthy"
+HIGH_SEVERITIES = frozenset({"high", "critical"})
+NON_COMPLIANT = "noncompliant"
 
 
 # --- pure transforms (Resource Graph rows are plain dicts already) ---
@@ -78,99 +96,234 @@ def resource_record(row: dict) -> dict:
     }
 
 
-def _sorted_counts(counter: Counter) -> dict:
-    return {key: counter[key] for key in sorted(counter)}
+def assessment_target(row: dict) -> str | None:
+    """The resource an assessment is about: its `resourceDetails` id, else the ARM id in front of the assessment."""
+    details = row.get("resourceDetails")
+    if isinstance(details, dict):
+        for key in ("Id", "id", "ResourceId", "resourceId"):
+            if details.get(key):
+                return str(details[key])
+    assessment_id = row.get("id") or ""
+    cut = assessment_id.lower().rfind(ASSESSMENT_ID_MARKER)
+    return assessment_id[:cut] if cut > 0 else None
 
 
-def summarize(resources: list[dict]) -> dict:
-    """Total, by type, by location, and how many carry no tags."""
+def inventory_key(target: str | None, inventory: set[str]) -> str | None:
+    """The inventoried resource a result is about, or its nearest inventoried parent (a subnet's VNet)."""
+    key = (target or "").strip().lower().rstrip("/")
+    while key:
+        if key in inventory:
+            return key
+        key = key.rpartition("/")[0]
+    return None
+
+
+def tally_defender(rows: list[dict], inventory: set[str]) -> dict:
+    """Assessments, unhealthy and unhealthy High/Critical counts per inventoried resource."""
+    by_resource: dict[str, Counter] = {}
+    outside = 0
+    for row in rows:
+        key = inventory_key(assessment_target(row), inventory)
+        if key is None:
+            outside += 1
+            continue
+        counts = by_resource.setdefault(key, Counter())
+        counts["assessments"] += 1
+        if (row.get("status") or "").lower() == UNHEALTHY:
+            counts["unhealthy"] += 1
+            severity = (row.get("severity") or "").lower()
+            if severity in HIGH_SEVERITIES:
+                counts["unhealthy_high"] += 1
+            elif not severity:
+                counts["unhealthy_unknown_severity"] += 1
+    return {"by_resource": by_resource, "rows": len(rows), "outside_inventory": outside}
+
+
+def tally_policy(rows: list[dict], inventory: set[str]) -> dict:
+    """Policy states (one per resource, assignment and policy) and non-compliant states per inventoried resource."""
+    by_resource: dict[str, Counter] = {}
+    outside = 0
+    for row in rows:
+        key = inventory_key(row.get("resourceId"), inventory)
+        if key is None:
+            outside += 1
+            continue
+        counts = by_resource.setdefault(key, Counter())
+        counts["evaluations"] += 1
+        if (row.get("complianceState") or "").lower() == NON_COMPLIANT:
+            counts["non_compliant"] += 1
+    return {"by_resource": by_resource, "rows": len(rows), "outside_inventory": outside}
+
+
+def with_coverage(resources: list[dict], defender: dict | None, policy: dict | None) -> list[dict]:
+    """Add each resource's counts; None for a service whose query did not complete."""
+
+    def count(tally, key, field):
+        return None if tally is None else tally["by_resource"].get(key, Counter())[field]
+
+    out = []
+    for r in resources:
+        key = (r["id"] or "").lower()
+        out.append({
+            **r,
+            "defender_assessments": count(defender, key, "assessments"),
+            "defender_unhealthy": count(defender, key, "unhealthy"),
+            "defender_unhealthy_high_severity": count(defender, key, "unhealthy_high"),
+            "policy_evaluations": count(policy, key, "evaluations"),
+            "policy_non_compliant": count(policy, key, "non_compliant"),
+        })
+    return out
+
+
+def _coverage(resources: list[dict], tally: dict | None, field: str) -> dict:
+    """Gaps among the types the service covered at least one resource of; other types are listed apart."""
+    if tally is None:
+        return {"in_scope": None, "covered": None, "missing": None, "other_types": None, "complete": None}
+    covered_types = {r["type"] for r in resources if r[field]}
+    in_scope = [r for r in resources if r["type"] in covered_types]
+    missing = sorted(r["id"] for r in in_scope if not r[field])
+    other_types = Counter(r["type"] or "unknown" for r in resources if r["type"] not in covered_types)
+    # A service that covered nothing (not in use, nothing assigned) must not read as "no gaps".
+    complete = not missing and (bool(covered_types) or not resources)
+    return {"in_scope": len(in_scope), "covered": len(in_scope) - len(missing), "missing": missing,
+            "other_types": sorted_counts(other_types), "complete": complete}
+
+
+def _resources_with(resources: list[dict], field: str, tally: dict | None) -> int | None:
+    return None if tally is None else sum(1 for r in resources if r[field])
+
+
+def _sum_of(resources: list[dict], field: str, tally: dict | None) -> int | None:
+    return None if tally is None else sum(r[field] for r in resources)
+
+
+def _service_summary(resources, tally, field, cov, names) -> dict:
+    """One service's summary keys, under that service's own names; None throughout when its query failed."""
+    known = tally is not None
+    return {
+        names["complete"]: known,
+        names["total"]: tally["rows"] if known else None,
+        names["outside"]: tally["outside_inventory"] if known else None,
+        names["resources"]: _resources_with(resources, field, tally),
+        names["in_scope"]: cov["in_scope"],
+        names["percentage"]: coverage_percentage(cov["covered"], cov["in_scope"]) if known else None,
+        names["missing"]: cov["missing"],
+        names["missing_count"]: len(cov["missing"]) if known else None,
+        names["other_types"]: cov["other_types"],
+        names["all"]: cov["complete"],
+    }
+
+
+DEFENDER_NAMES = {
+    "complete": "defender_coverage_complete",
+    "total": "defender_assessments_total",
+    "outside": "defender_assessments_outside_inventory",
+    "resources": "resources_assessed_by_defender",
+    "in_scope": "defender_assessable_resources",
+    "percentage": "defender_assessed_percentage",
+    "missing": "resources_without_defender_assessment",
+    "missing_count": "resources_without_defender_assessment_count",
+    "other_types": "types_without_defender_assessment",
+    "all": "all_assessable_resources_assessed_by_defender",
+}
+
+POLICY_NAMES = {
+    "complete": "policy_coverage_complete",
+    "total": "policy_evaluations_total",
+    "outside": "policy_evaluations_outside_inventory",
+    "resources": "resources_evaluated_by_policy",
+    "in_scope": "policy_evaluable_resources",
+    "percentage": "policy_evaluated_percentage",
+    "missing": "resources_without_policy_evaluation",
+    "missing_count": "resources_without_policy_evaluation_count",
+    "other_types": "types_without_policy_evaluation",
+    "all": "all_evaluable_resources_evaluated_by_policy",
+}
+
+
+def summarize(resources: list[dict], defender: dict | None = None, policy: dict | None = None) -> dict:
+    """Total, by type, by location, how many carry no tags, and Defender and Policy coverage."""
     by_type = Counter(r["type"] or "unknown" for r in resources)
     # Global resources (DNS zones, Front Door, some identity types) report "global".
     by_location = Counter(r["location"] or "unknown" for r in resources)
     untagged = sum(1 for r in resources if not r["tags"])
+    neither = None
+    if defender is not None and policy is not None:
+        neither = sorted_counts(Counter(
+            r["type"] or "unknown" for r in resources
+            if not r["defender_assessments"] and not r["policy_evaluations"]
+        ))
     return {
         "total_resources": len(resources),
         "resource_type_count": len(by_type),
-        "resources_by_type": _sorted_counts(by_type),
+        "resources_by_type": sorted_counts(by_type),
         "location_count": len(by_location),
-        "resources_by_location": _sorted_counts(by_location),
+        "resources_by_location": sorted_counts(by_location),
         "resource_group_count": len({r["resource_group"] for r in resources if r["resource_group"]}),
         "untagged_resources": untagged,
         "tagged_resources": len(resources) - untagged,
+        **_service_summary(resources, defender, "defender_assessments",
+                           _coverage(resources, defender, "defender_assessments"), DEFENDER_NAMES),
+        "resources_with_unhealthy_high_severity": _resources_with(
+            resources, "defender_unhealthy_high_severity", defender),
+        "unhealthy_high_severity_assessments": _sum_of(resources, "defender_unhealthy_high_severity", defender),
+        "unhealthy_assessments_without_severity": None if defender is None else sum(
+            c["unhealthy_unknown_severity"] for c in defender["by_resource"].values()),
+        **_service_summary(resources, policy, "policy_evaluations",
+                           _coverage(resources, policy, "policy_evaluations"), POLICY_NAMES),
+        "resources_with_non_compliant_policy": _resources_with(resources, "policy_non_compliant", policy),
+        "non_compliant_policy_evaluations": _sum_of(resources, "policy_non_compliant", policy),
+        "types_covered_by_neither": neither,
     }
 
 
 # --- collection (lazy azure imports) ---
 
-def collect_resources(subscription_id, cred, collector: Collector) -> dict:
-    """Page the inventory query to the end.
-
-    Returns the records plus Resource Graph's own `total_records`, so the evidence
-    shows the count the service reported alongside the count collected.
-    """
-
-    def _client():
-        from azure.mgmt.resourcegraph import ResourceGraphClient  # lazy
-
-        # Tenant-scoped client: the subscription goes in each request, not the client.
-        return ResourceGraphClient(credential=cred, **arm_client_kwargs())
-
-    client = collector.guard("resourcegraph.ResourceGraphClient (init)", _client)
-    if client is None:
-        return {"resources": [], "total_records": None, "pages": 0}
-
-    def _page_all() -> dict:
-        from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions  # lazy
-
-        rows: list[dict] = []
-        total_records = None
-        skip_token = None
-        pages = 0
-        seen_tokens = set()
-        while True:
-            response = client.resources(
-                QueryRequest(
-                    subscriptions=[subscription_id],
-                    query=INVENTORY_QUERY,
-                    options=QueryRequestOptions(
-                        top=PAGE_SIZE, skip_token=skip_token, result_format="objectArray"
-                    ),
-                )
-            )
-            pages += 1
-            total_records = model_attr(response, "total_records")
-            # "true" only when the projection lacks `id`, which would make paging
-            # impossible; this query projects it, so a truncation is a real failure.
-            if str(model_attr(response, "result_truncated") or "").lower() == "true":
-                raise RuntimeError(
-                    "Resource Graph reported the inventory result as truncated"
-                )
-            rows.extend(model_attr(response, "data") or [])
-            skip_token = model_attr(response, "skip_token")
-            if not skip_token:
-                break
-            if skip_token in seen_tokens or pages >= MAX_PAGES:
-                raise RuntimeError(
-                    f"Resource Graph paging did not terminate after {pages} page(s)"
-                )
-            seen_tokens.add(skip_token)
-        if total_records is not None and len(rows) != total_records:
-            raise RuntimeError(
-                f"Resource Graph reported {total_records} resources but paging returned "
-                f"{len(rows)}"
-            )
-        return {"rows": rows, "total_records": total_records, "pages": pages}
-
-    result = collector.guard("resourcegraph.resources (Resources)", _page_all)
-    if result is None:
-        return {"resources": [], "total_records": None, "pages": 0}
-    resources = sorted(
-        (resource_record(row) for row in result["rows"]), key=lambda r: r.get("id") or ""
-    )
+def _query_status(query: str, result: dict | None) -> dict:
     return {
-        "resources": resources,
-        "total_records": result["total_records"],
-        "pages": result["pages"],
+        "query": query,
+        "complete": result is not None,
+        "pages_read": None if result is None else result["pages"],
+        "total_records_reported": None if result is None else result["total_records"],
+    }
+
+
+def collect(subscription_id, cred, collector: Collector) -> dict:
+    """Page the inventory and both coverage queries to the end, then join them by resource id.
+
+    A coverage query that fails or comes back truncated is recorded as a failure and
+    its counts stay null, rather than every resource reading as uncovered.
+    """
+    empty = {"resources": [], "total_records": None, "pages": 0, "defender": None, "policy": None,
+             "coverage_queries": {}}
+    client = collector.guard("resourcegraph.ResourceGraphClient (init)", lambda: resource_graph_client(cred))
+    if client is None:
+        return empty
+    inventory = collector.guard(
+        "resourcegraph.resources (Resources)", lambda: query_all(client, subscription_id, INVENTORY_QUERY)
+    )
+    if inventory is None:
+        return empty
+    resources = sorted((resource_record(row) for row in inventory["rows"]), key=lambda r: r.get("id") or "")
+    keys = {(r["id"] or "").lower() for r in resources if r["id"]}
+
+    def _read(label: str, query: str) -> dict | None:
+        return collector.guard(f"resourcegraph.resources ({label})", lambda: query_all(client, subscription_id, query))
+
+    assessments = _read("SecurityResources", DEFENDER_QUERY)
+    states = _read("PolicyResources", POLICY_QUERY)
+    defender = None if assessments is None else tally_defender(assessments["rows"], keys)
+    policy = None if states is None else tally_policy(states["rows"], keys)
+    return {
+        "resources": with_coverage(resources, defender, policy),
+        "total_records": inventory["total_records"],
+        "pages": inventory["pages"],
+        "defender": defender,
+        "policy": policy,
+        "coverage_queries": {
+            "defender_assessments": _query_status(DEFENDER_QUERY, assessments),
+            "policy_states": _query_status(POLICY_QUERY, states),
+        },
     }
 
 
@@ -190,9 +343,10 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    collected = {"resources": [], "total_records": None, "pages": 0}
+    collected = {"resources": [], "total_records": None, "pages": 0, "defender": None, "policy": None,
+                 "coverage_queries": {}}
     if subscription_id and cred is not None:
-        collected = collect_resources(subscription_id, cred, collector)
+        collected = collect(subscription_id, cred, collector)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -213,8 +367,9 @@ def main() -> int:
             "query": INVENTORY_QUERY,
             "pages_read": collected["pages"],
             "total_records_reported": collected["total_records"],
+            "coverage_queries": collected["coverage_queries"],
         },
-        summary=summarize(resources),
+        summary=summarize(resources, collected["defender"], collected["policy"]),
     )
 
     filename = (

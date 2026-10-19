@@ -698,6 +698,28 @@ schemas and the `paramify` CLI — not the internal code.
   `monitored_operation_coverage_reaching_human` does the same for the existing
   map. `action_groups` and `monitored_operation_coverage` are
   unchanged.
+- **`azure_resource_inventory` 0.2.0 shows each resource's Defender and Policy
+  coverage.** Two more Resource Graph queries read Defender for Cloud assessments
+  (`SecurityResources`) and Azure Policy states (`PolicyResources`). They are joined
+  to the inventory by resource id in the fetcher, because Resource Graph allows one
+  cross-table join per query and pages `summarize` only to its first page. Each
+  resource gains `defender_assessments`, `defender_unhealthy`,
+  `defender_unhealthy_high_severity` (High or Critical), `policy_evaluations` and
+  `policy_non_compliant`; a result on a child resource, such as a subnet, counts for
+  the inventoried parent. The summary lists `resources_without_defender_assessment`
+  and `resources_without_policy_evaluation`. A resource counts there only when the
+  service covers another resource of its type in the subscription. Types it covers
+  on no resource are listed apart, with counts, in `types_without_defender_assessment`
+  and `types_without_policy_evaluation`, so a type Defender has no recommendations
+  for is not a gap. `all_assessable_resources_assessed_by_defender` and
+  `all_evaluable_resources_evaluated_by_policy` are false when the service covers
+  nothing at all. Also new: coverage percentages, unhealthy High/Critical and
+  non-compliant counts, `types_covered_by_neither`, and
+  `results.coverage_queries` with each query's page count and reported total. Every
+  query is paged to the end; a coverage query that fails or comes back truncated
+  is a collection failure, and that service's counts stay null rather than reading
+  as uncovered. Also mapped to `KSI-MLA-EVC`, `KSI-CNA-EIS` and `KSI-SVC-EIS`.
+  Existing fields and summary keys are unchanged.
 - **`azure_diagnostic_settings` also maps to `KSI-MLA-OSM`**, which its
   subscription activity-log export already evidenced.
 - **`KSI-SVC-PRR` counts as config-evidenceable.** Its residual elements are a
