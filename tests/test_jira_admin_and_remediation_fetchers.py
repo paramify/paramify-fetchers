@@ -1120,3 +1120,65 @@ def test_access_roles_all_roles_setting_reads_the_index(run):
     assert "/rest/api/3/project/CCB/role" in [p for _, p, _, _ in calls]
     assert [r["name"] for r in out["projects"][0]["roles"]] == ["Developers", "Administrators"] or \
            {r["name"] for r in out["projects"][0]["roles"]} == {"Developers", "Administrators"}
+
+
+# ---------- site_inventory on the shared client (review item 10) ----------
+
+def _inventory_router(issues, project_type="software", desks=None, fail_after_success=False):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/serverInfo":
+            return 200, {"baseUrl": "https://example.atlassian.net", "deploymentType": "Cloud", "version": "1001.0.0"}
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/project/search":
+            return 200, {"isLast": True, "values": [{"id": "1", "key": "OPS", "name": "Ops", "projectTypeKey": project_type,
+                                                      "lead": {"displayName": "Lead"}, "issueTypes": [{"name": "Task"}]}]}
+        if path == "/rest/api/3/issuetype":
+            return 200, [{"id": "1", "name": "Task", "subtask": False}]
+        if path == "/rest/api/3/priority/search":
+            return 200, {"isLast": True, "values": [{"id": "3", "name": "Medium", "isDefault": True}]}
+        if path == "/rest/api/3/status":
+            return 200, [{"id": "1", "name": "To Do", "statusCategory": {"key": "new"}}]
+        if path == "/rest/servicedeskapi/servicedesk":
+            return (200, {"isLastPage": True, "values": desks}) if desks is not None else (404, {})
+        if path == "/rest/api/3/search/jql":
+            if fail_after_success:
+                return 401, {"errorMessages": ["no project permission"]}
+            return 200, {"issues": issues, "isLast": True}
+        raise AssertionError(path)
+    return router
+
+
+def test_site_inventory_uses_shared_client_and_write_and_finish(run):
+    issues = [_issue(1, "Done", "done", resolved="2026-01-02T00:00:00.000+0000"), _issue(2, "To Do", "new")]
+    for i in issues:
+        i["fields"]["issuetype"] = {"name": "Incident"}
+    code, out, calls, status = run("site_inventory", _inventory_router(issues, "service_desk",
+                                                                        desks=[{"id": "1", "projectKey": "OPS", "projectName": "Ops"}]))
+    assert code == 0 and status is None
+    assert out["metadata"]["complete"] is True and out["metadata"]["partial_failure"] is False
+    assert out["service_management"] == {"available": True, "service_desks": [{"id": "1", "project_key": "OPS", "project_name": "Ops"}]}
+    assert out["summary"]["issues"]["total"] == 2 and out["summary"]["incident_issues"]["total"] == 2
+    assert out["summary"]["issues"]["resolution_hours"]["overall"]["count"] == 1
+    assert out["issues"][0]["hours_to_resolve"] == 24.0
+    assert "/rest/servicedeskapi/servicedesk" in [p for _, p, _, _ in calls]
+
+
+def test_site_inventory_without_jsm_does_not_call_the_service_desk_api(run):
+    code, out, calls, _ = run("site_inventory", _inventory_router([]))
+    assert code == 0
+    assert out["service_management"] == {"available": False, "service_desks": []}
+    assert "/rest/servicedeskapi/servicedesk" not in [p for _, p, _, _ in calls]
+
+
+def test_site_inventory_cap_is_partial_and_401_after_success_does_not_abort(run):
+    issues = [_issue(i, "To Do", "new") for i in range(3)]
+    code, out, _, status = run("site_inventory", _inventory_router(issues), {"JIRA_MAX_ISSUES": "2"})
+    assert code == 1 and status["code"] == "partial_failure"
+    assert out["metadata"]["issues_collected"] == 2 and out["metadata"]["issues_truncated"] is True
+    assert out["metadata"]["partial_failure"] is True and "JIRA_MAX_ISSUES" in out["metadata"]["incomplete_reason"]
+
+    code, out, _, status = run("site_inventory", _inventory_router([], fail_after_success=True))
+    assert code == 1 and status["code"] == "not_authorized"
+    assert out["projects"], "everything before the failed call is still in the file"
+    assert out["metadata"]["api_failures"][0]["type"] == "HTTP401"

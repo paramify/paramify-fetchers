@@ -178,6 +178,32 @@ class JiraClient:
             if page.get("isLast", True) or not batch:
                 return values, True
 
+    def service_desks(self):
+        """Page the JSM service-desk list (`start`/`limit`/`isLastPage` paging).
+
+        Returns the list, NOT_FOUND when the site has no Jira Service Management,
+        or None after a recorded failure.
+        """
+        desks: list = []
+        start = 0
+        while True:
+            page = self.request(
+                "GET",
+                "/rest/servicedeskapi/servicedesk",
+                "GET /rest/servicedeskapi/servicedesk",
+                params={"start": start, "limit": 50},
+                allow_404=True,
+            )
+            if page is NOT_FOUND:
+                return NOT_FOUND
+            if page is None:
+                return None
+            batch = page.get("values") or []
+            desks.extend(batch)
+            start += len(batch)
+            if page.get("isLastPage", True) or not batch:
+                return desks
+
     def search_issues(self, jql: str, fields: list, max_issues: int):
         """Page POST /rest/api/3/search/jql. Returns (issues, truncated, complete)."""
         issues: list = []

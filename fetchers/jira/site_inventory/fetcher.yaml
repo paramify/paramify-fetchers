@@ -1,5 +1,5 @@
 name: jira_site_inventory
-version: 0.1.0
+version: 0.1.1
 description: >-
   Inventories a Jira Cloud site — deployment info, projects with leads and issue
   counts, issue types, priorities, statuses, Jira Service Management service
