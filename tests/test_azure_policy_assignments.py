@@ -97,6 +97,30 @@ def test_audit_action_initiative_member_through_initiative_parameter():
         "auditAction", "initiative_default")
 
 
+# Direct when `passed` is None; otherwise an initiative member the initiative passes `passed` to.
+@pytest.mark.parametrize("params, effect_expression, passed, expected", [
+    ({}, PARAM_EFFECT, {"effect": "AuditAction"}, ("auditAction", "initiative_reference", None)),
+    ({}, PARAM_EFFECT, {"effect": "[if(true,'deny','audit')]"},
+     ("unresolved", None, "initiative passes an expression, not a parameter")),
+    ({"memberEffect": "AuditAction"}, PARAM_EFFECT, {"effect": "[parameters('memberEffect')]"},
+     ("auditAction", "assignment_parameter", None)),
+    ({}, None, None, ("unresolved", None, "effect is not a literal or a parameter reference")),
+    ({"Effect": "AuditAction"}, "[Parameters('EFFECT')]", None, ("auditAction", "assignment_parameter", None)),
+], ids=["initiative_passes_literal", "initiative_passes_expression", "initiative_parameter_from_assignment",
+        "no_effect_expression", "mixed_case_parameter_names"])
+def test_resolution_paths(params, effect_expression, passed, expected):
+    if passed is None:
+        record = resolved(assignment(params=params), definition(effect_expression))
+    else:
+        initiative = definition(None, members=[
+            {"reference_id": "r1", "policy_definition_id": BUILT_IN_DEF, "parameters": passed},
+        ])
+        members = [{**initiative["members"][0], "definition": definition(effect_expression)}]
+        record = resolved(assignment(params=params, definition_id=BUILT_IN_SET), initiative, members)
+    member = only_member(record)
+    assert (member["effect"], member["effect_source"], member["reason"]) == expected
+
+
 # --- unknown values carry a reason ---
 
 def test_unknown_assignment_value_is_unresolved_with_reason():
@@ -132,7 +156,7 @@ def test_expression_effect_keeps_its_own_reason():
     assert member["reason"] == "effect is not a literal or a parameter reference"
 
 
-# --- the rest of Microsoft's effect list ---
+# --- other effects: from Microsoft's effects reference or used by built-in definitions ---
 
 @pytest.mark.parametrize("raw, canonical, klass", [
     ("Mutate", "mutate", "enforcing"),
@@ -141,7 +165,7 @@ def test_expression_effect_keeps_its_own_reason():
     ("DenyAction", "denyAction", "enforcing"),
     ("Manual", "manual", "audit_only"),
 ])
-def test_documented_effects_resolve(raw, canonical, klass):
+def test_other_effects_resolve(raw, canonical, klass):
     record = resolved(assignment(), definition(raw))
     assert only_member(record)["effect"] == canonical
     assert record["effect_class"] == klass
@@ -168,6 +192,17 @@ def test_summary_counts_unresolved_members_and_those_under_do_not_enforce():
     assert summary["unresolved_member_policies"] == 3
     assert summary["member_policy_effect_counts"]["unresolved"] == 3
     assert summary["unresolved_member_policies_not_enforced"] == 2
+    # The per-assignment fields still read as holding nothing back; only the summary key shows the gap.
+    assert held_back["enforcing_effects_not_enforced"] is False
+    assert summary["enforcing_effects_not_enforced_assignments"] == 0
+
+
+def test_unreadable_do_not_enforce_initiative_counts_no_members():
+    record = resolved(assignment(mode="DoNotEnforce", definition_id=BUILT_IN_SET), None, [])
+    assert (record["effect_class"], record["policy_effects"]["member_count"]) == ("unresolved", 0)
+    summary = fx.summarize([record])
+    assert summary["unresolved_effect_assignments"] == 1
+    assert (summary["unresolved_member_policies"], summary["unresolved_member_policies_not_enforced"]) == (0, 0)
 
 
 def test_summary_with_no_assignments_reports_zero_unresolved_members():

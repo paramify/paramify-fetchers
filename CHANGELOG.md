@@ -773,14 +773,22 @@ schemas and the `paramify` CLI — not the internal code.
   0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
   counterpart of `DenyAction`, was reported as `unresolved` with no reason and
   raised `unresolved_effect_assignments`. It now resolves to `auditAction`, an
-  audit-only effect. `mutate`, `addToNetworkGroup` and `enforceSetting`, which
-  built-in definitions also use, now resolve as enforcing effects. Any other
-  unrecognised value is still unresolved, but its `reason` now names the value
-  (`unknown effect value 'X'`). Two new summary keys count unresolved member
-  policies: `unresolved_member_policies`, and
-  `unresolved_member_policies_not_enforced` for those under DoNotEnforce. A
-  partly resolved initiative is classed by its resolved members alone, so these
-  keys show what that class leaves out.
+  audit-only effect. `mutate` and `addToNetworkGroup` (both in Microsoft's
+  effects reference) and `enforceSetting` (used by built-in definitions) now
+  resolve as enforcing effects. Every assignment's `policy_effects.effect_counts`
+  and the summary's `member_policy_effect_counts` therefore gain four keys,
+  zero unless used: `auditAction`, `mutate`, `addToNetworkGroup` and
+  `enforceSetting`. Any other unrecognised value is still unresolved, but its
+  `reason` now names the value (`unknown effect value 'X'`). Two new summary
+  keys count unresolved member policies: `unresolved_member_policies`, and
+  `unresolved_member_policies_not_enforced` for those in any assignment whose
+  enforcementMode is not Default. Members of an initiative whose definition
+  can't be read aren't counted; that assignment shows only in
+  `unresolved_effect_assignments`. The per-assignment fields are unchanged: a
+  partly resolved DoNotEnforce initiative is still classed by its resolved
+  members, so its `effect_class` can read `audit_only` and
+  `enforcing_effects_not_enforced` false. The new summary keys are where that
+  gap shows.
 - **`azure_entra_authentication_policy` counts X.509 as phishing-resistant only
   when it is multi-factor** (0.1.0 → 0.2.0). An enabled X.509 certificate method
   was always listed in `phishing_resistant_methods_enabled`, even with its default

@@ -101,14 +101,12 @@ CANONICAL_EFFECTS = {
 }
 # The effects that change or block a request, or remediate a resource. `append` and
 # `denyAction` are included: they alter or refuse the request just as deny/modify do.
-# `mutate` (AKS), `addToNetworkGroup` (Virtual Network Manager) and `enforceSetting`
-# (a resource-provider mode) change the resource's configuration.
+# mutate, addToNetworkGroup and enforceSetting change the resource's configuration.
 ENFORCING_EFFECTS = frozenset(
     {"deny", "denyAction", "modify", "deployIfNotExists", "append", "mutate",
      "addToNetworkGroup", "enforceSetting"}
 )
-# The effects that only report. `manual` is attestation, which enforces nothing;
-# `auditAction` logs the action `denyAction` would block.
+# The effects that only report. `manual` is attestation, which enforces nothing.
 AUDIT_EFFECTS = frozenset({"audit", "auditAction", "auditIfNotExists", "manual"})
 DISABLED_EFFECT = "disabled"
 UNRESOLVED_EFFECT = "unresolved"
@@ -618,8 +616,7 @@ def summarize_effects(assignments: list[dict]) -> dict:
         ),
         # Across every assignment's members; an initiative assigned twice counts twice.
         "member_policy_effect_counts": dict(sorted(member_counts.items())),
-        # A partly resolved initiative is classed by its resolved members, so these
-        # count what that class leaves out; under DoNotEnforce they may be held back.
+        # Unresolved members, which effect_class and enforcing_effects_not_enforced ignore.
         "unresolved_member_policies": member_counts.get(UNRESOLVED_EFFECT, 0),
         "unresolved_member_policies_not_enforced": unresolved_not_enforced,
     }
