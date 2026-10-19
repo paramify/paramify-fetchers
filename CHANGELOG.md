@@ -698,6 +698,47 @@ schemas and the `paramify` CLI — not the internal code.
   `monitored_operation_coverage_reaching_human` does the same for the existing
   map. `action_groups` and `monitored_operation_coverage` are
   unchanged.
+- **`azure_resource_inventory` 0.2.0 shows each resource's Defender and Policy
+  coverage.** Two more Resource Graph queries read Defender for Cloud assessments
+  (`SecurityResources`) and Azure Policy states (`PolicyResources`). They are joined
+  to the inventory by resource id in the fetcher, because Resource Graph allows one
+  cross-table join per query and pages `summarize` only to its first page. Each
+  resource gains `defender_assessments`, `defender_unhealthy`,
+  `defender_unhealthy_high_severity` (High or Critical), `policy_evaluations` and
+  `policy_non_compliant`; a result on a child resource, such as a subnet, counts for
+  the inventoried parent. Only Healthy and Unhealthy assessments count:
+  NotApplicable ones did not happen (off by policy, for instance) and are counted
+  apart, in `defender_not_applicable` and `defender_not_applicable_total`; an
+  assessment with a missing or unexpected status counts in neither, but in
+  `defender_unknown_status_total`. The
+  summary lists `resources_without_defender_assessment`
+  and `resources_without_policy_evaluation`. A resource counts there only when the
+  service covers another resource of its type in the subscription. Types it covers
+  on no resource are listed apart, with counts, in `types_without_defender_assessment`
+  and `types_without_policy_evaluation`, so a type Defender has no recommendations
+  for is not a gap. `all_assessable_resources_assessed_by_defender` and
+  `all_evaluable_resources_evaluated_by_policy` are false when the service covers
+  nothing at all, and on an empty inventory, which is what Resource Graph returns
+  to a caller without Reader. `defender_coverage_collected` and
+  `policy_coverage_collected` say whether each coverage query was read to the end. Also new: coverage percentages, unhealthy High/Critical and
+  non-compliant counts on inventoried resources, and
+  `resources_covered_by_neither_by_type` (uncovered resources of every type, gaps
+  and never-covered types alike). Assessments and policy states about anything not
+  inventoried (the subscription, resource groups, deleted resources) are counted
+  apart, with `defender_unhealthy_outside_inventory`,
+  `defender_unhealthy_high_severity_outside_inventory`,
+  `defender_unhealthy_without_severity_outside_inventory` and
+  `policy_non_compliant_outside_inventory`, so the inventoried counts plus these add
+  up to the totals; many High recommendations (owner MFA, Defender plans) are about
+  the subscription itself. Assessments of AWS, GCP or on-premises machines (a
+  `resourceDetails` source other than Azure) always count outside, by source.
+  `results.coverage_queries` gives each query's page count, reported total and
+  `outside_inventory_by_target`, the same counts for those results by the type of
+  what they target (never its name). Every
+  query is paged to the end; a coverage query that fails or comes back truncated
+  is a collection failure, and that service's counts stay null rather than reading
+  as uncovered. Also mapped to `KSI-MLA-EVC`, `KSI-CNA-EIS` and `KSI-SVC-EIS`.
+  Existing fields and summary keys are unchanged.
 - **`azure_defender_plans` 0.2.0 records each plan's sub-plan, enablement time
   and inheritance.** Each plan now carries `sub_plan` (Servers `P1` / `P2`,
   `DefenderForStorageV2`, `PerKeyVault`, …), `enablement_time` (the last time it
