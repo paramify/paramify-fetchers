@@ -1,7 +1,8 @@
 """Discover fetchers in the repo and validate their fetcher.yaml files.
 
-Walks `fetchers/<category>/<short_name>/fetcher.yaml`, skipping any directory
-that starts with `_` (e.g. _shared, _categories, _template).
+Walks `fetchers/<category>/<short_name>/fetcher.yaml` and
+`comparators/<category>/<short_name>/fetcher.yaml`, skipping any directory that
+starts with `_` (e.g. _shared, _categories, _template).
 """
 
 import json
@@ -23,6 +24,10 @@ from framework.contract import (
     TargetField,
 )
 from framework.issue_reports import reserved_config_schema
+from framework.runner import dependency_graph
+
+FETCHERS_DIR = "fetchers"
+COMPARATORS_DIR = "comparators"
 
 
 def _load_schema(repo_root: Path, name: str = "fetcher_schema.json") -> dict:
@@ -45,23 +50,32 @@ def _parse_config_schema(raw: Optional[dict]) -> dict:
     return out
 
 
-def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
-    """Walk fetchers/*/*/fetcher.yaml. Returns {fetcher_name: Fetcher}.
+def _fetcher_dirs(tree_root: Path):
+    for category_dir in sorted(tree_root.iterdir()):
+        if not category_dir.is_dir() or category_dir.name.startswith("_"):
+            continue
+        for fetcher_dir in sorted(category_dir.iterdir()):
+            if fetcher_dir.is_dir() and not fetcher_dir.name.startswith("_"):
+                yield fetcher_dir
 
-    Raises ValueError on schema-invalid yaml or duplicate fetcher names.
+
+def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
+    """Walk fetchers/*/*/fetcher.yaml and comparators/*/*/fetcher.yaml. Returns {fetcher_name: Fetcher}.
+
+    One namespace for both trees. Raises ValueError on schema-invalid yaml,
+    duplicate names, a fetcher in the wrong tree, or a comparator whose inputs
+    are unknown, write no JSON evidence, or form a cycle.
     """
     schema = _load_schema(repo_root)
     validator = Draft202012Validator(schema)
 
     fetchers: Dict[str, Fetcher] = {}
-    fetchers_root = repo_root / "fetchers"
+    trees = [repo_root / FETCHERS_DIR]
+    if (repo_root / COMPARATORS_DIR).is_dir():
+        trees.append(repo_root / COMPARATORS_DIR)
 
-    for category_dir in sorted(fetchers_root.iterdir()):
-        if not category_dir.is_dir() or category_dir.name.startswith("_"):
-            continue
-        for fetcher_dir in sorted(category_dir.iterdir()):
-            if not fetcher_dir.is_dir() or fetcher_dir.name.startswith("_"):
-                continue
+    for tree_root in trees:
+        for fetcher_dir in _fetcher_dirs(tree_root):
             yaml_path = fetcher_dir / "fetcher.yaml"
             if not yaml_path.exists():
                 continue
@@ -73,6 +87,17 @@ def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
                 raise ValueError(f"{yaml_path}: schema validation failed:\n{detail}")
 
             fetcher = _parse_fetcher(data, fetcher_dir)
+            in_comparators = tree_root.name == COMPARATORS_DIR
+            if fetcher.is_comparator and not in_comparators:
+                raise ValueError(
+                    f"{yaml_path}: declares depends_on, so it is a comparator and "
+                    f"belongs under {COMPARATORS_DIR}/<category>/<name>/"
+                )
+            if in_comparators and not fetcher.is_comparator:
+                raise ValueError(
+                    f"{yaml_path}: is under {COMPARATORS_DIR}/ but declares no depends_on; "
+                    f"a fetcher that collects from a source belongs under {FETCHERS_DIR}/"
+                )
             if fetcher.name in fetchers:
                 raise ValueError(
                     f"Duplicate fetcher name '{fetcher.name}': "
@@ -80,6 +105,9 @@ def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
                 )
             fetchers[fetcher.name] = fetcher
 
+    problems = dependency_graph.problems(fetchers)
+    if problems:
+        raise ValueError("comparator inputs are invalid:\n" + "\n".join(f"  {p}" for p in problems))
     return fetchers
 
 
@@ -163,6 +191,7 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
         ksis=list(data.get("ksis") or []),
         kind=data.get("kind", "evidence"),
         issue_report=issue_report,
+        depends_on=list(data.get("depends_on") or []),
     )
 
 

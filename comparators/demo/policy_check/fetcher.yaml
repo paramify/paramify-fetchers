@@ -1,0 +1,25 @@
+name: demo_policy_check
+version: 0.1.0
+description: >
+  A verdict per policy in demo_hello's evidence from the same run. Synthetic, not real evidence.
+category: demo
+
+depends_on:
+  - demo_hello
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: demo_policy_check.json
+
+secrets: []
+
+evidence_set:
+  reference_id: EVD-DEMO-POLICY-CHECK
+  name: Demo — Synthetic Policy Check
+  instructions: >
+    Script: fetcher.py. Reads demo_hello's evidence from the same run and gives
+    each policy a verdict. Calls no API. For trying comparators only.

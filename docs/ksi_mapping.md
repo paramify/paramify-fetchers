@@ -427,7 +427,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-234 of 242 fetchers carry a mapping.
+234 of 243 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -750,4 +750,4 @@ python tools/gen_ksi_mapping.py
 
 ### Unmapped
 
-[`aws_discovery_beta`](../fetchers/aws/discovery_beta), [`demo_hello`](../fetchers/demo/hello), [`knowbe4_discovery_beta`](../fetchers/knowbe4/discovery_beta), [`servicenow_cases`](../fetchers/servicenow/cases), [`servicenow_changes`](../fetchers/servicenow/changes), [`wiz_issues_report`](../fetchers/wiz/issues_report), [`wiz_stig_compliance_report`](../fetchers/wiz/stig_compliance_report), [`wiz_vulnerability_findings`](../fetchers/wiz/vulnerability_findings) — deliberately carry no mapping.
+[`aws_discovery_beta`](../fetchers/aws/discovery_beta), [`demo_hello`](../fetchers/demo/hello), [`demo_policy_check`](../comparators/demo/policy_check), [`knowbe4_discovery_beta`](../fetchers/knowbe4/discovery_beta), [`servicenow_cases`](../fetchers/servicenow/cases), [`servicenow_changes`](../fetchers/servicenow/changes), [`wiz_issues_report`](../fetchers/wiz/issues_report), [`wiz_stig_compliance_report`](../fetchers/wiz/stig_compliance_report), [`wiz_vulnerability_findings`](../fetchers/wiz/vulnerability_findings) — deliberately carry no mapping.

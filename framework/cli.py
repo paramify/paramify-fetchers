@@ -288,6 +288,8 @@ def _human_run_printer():
             _err(f"  {style.mark('SKIP')}  {style.name(ev['fetcher'])} {style.dim('(' + ev['reason'] + ')')}")
         elif kind == "fetcher_start":
             targets = style.dim(f"  ({ev['targets']} targets)") if ev["fanout"] else ""
+            if ev.get("depends_on"):
+                targets = style.dim(f"  (reads {', '.join(ev['depends_on'])})")
             typer.echo(f"  {style.dim('RUN')}   {style.name(ev['fetcher'])}{targets}")
         elif kind == "fetcher_note":
             _err(f"        {style.mark('NOTE')}  {style.dim(ev['note'])}")
@@ -651,9 +653,13 @@ def list_cmd(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
         # styled value formatted to a width lands short by the length of its escape.
         col = "{:50s}".format(f["name"])
         ver = "v{:8s}".format(f["version"])
+        reads = (
+            f" {style.dim('reads=')}{style.env(','.join(f['depends_on']))}"
+            if f.get("depends_on") else ""
+        )
         typer.echo(
             f"  {style.name(col)} {style.dim(ver)} [{style.dim('{:6s}'.format(tag))}]"
-            f" {style.dim('category=')}{style.env(f['category'] or '-')}"
+            f" {style.dim('category=')}{style.env(f['category'] or '-')}{reads}"
         )
 
 
@@ -698,6 +704,11 @@ def describe_cmd(
     )
     typer.echo(f"  {f['description']}")
     typer.echo(f"  {style.dim('supports_targets:')} {f['supports_targets']}")
+    if f.get("depends_on"):
+        typer.echo(
+            f"  {style.dim('depends_on:')} {', '.join(style.name(d) for d in f['depends_on'])}"
+            f"  {style.dim('(a comparator: runs after these in the same run)')}"
+        )
     for label, fields in (("config", f["config"]), ("secrets", f["secrets"]),
                           ("target_schema", f["target_schema"])):
         if fields:

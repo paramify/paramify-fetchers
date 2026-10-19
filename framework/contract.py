@@ -158,10 +158,18 @@ class Fetcher:
     ksis: List[str] = field(default_factory=list)
     kind: str = "evidence"
     issue_report: Optional["IssueReport"] = None
+    #: The fetchers whose evidence from the same run this one reads. Non-empty
+    #: makes it a comparator (comparators/<category>/<name>/).
+    depends_on: List[str] = field(default_factory=list)
 
     @property
     def entry_path(self) -> Path:
         return self.path / self.runtime_entry
+
+    @property
+    def is_comparator(self) -> bool:
+        """True when this fetcher's source is other fetchers' evidence from the same run."""
+        return bool(self.depends_on)
 
     @property
     def is_issue_report(self) -> bool:
@@ -293,3 +301,5 @@ class InvocationResult:
     # envelope then falls back to the stderr tail. See docs/fetcher_contract_guide.md, step 4.
     error: Optional[str] = None
     error_code: Optional[str] = None
+    # A comparator's inputs, as the runner records them in `metadata.inputs`.
+    inputs: Optional[List[Dict[str, Any]]] = None

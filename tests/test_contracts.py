@@ -31,25 +31,27 @@ from framework.contract import DEFAULT_EVIDENCE_FREQUENCY, EVIDENCE_FREQUENCIES
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHERS_ROOT = REPO_ROOT / "fetchers"
+COMPARATORS_ROOT = REPO_ROOT / "comparators"
 SCHEMAS_ROOT = REPO_ROOT / "framework" / "schemas"
 
 
 def _fetcher_yamls() -> list[Path]:
     """Every real fetcher.yaml, mirroring discover_fetchers' walk.
 
-    category/<name>/fetcher.yaml, skipping any ``_``-prefixed dir (_shared,
-    _categories, _template) at either level.
+    category/<name>/fetcher.yaml under fetchers/ and comparators/, skipping any
+    ``_``-prefixed dir (_shared, _categories, _template) at either level.
     """
     out: list[Path] = []
-    for category_dir in sorted(FETCHERS_ROOT.iterdir()):
-        if not category_dir.is_dir() or category_dir.name.startswith("_"):
-            continue
-        for fetcher_dir in sorted(category_dir.iterdir()):
-            if not fetcher_dir.is_dir() or fetcher_dir.name.startswith("_"):
+    for tree in (FETCHERS_ROOT, COMPARATORS_ROOT):
+        for category_dir in sorted(tree.iterdir()):
+            if not category_dir.is_dir() or category_dir.name.startswith("_"):
                 continue
-            yaml_path = fetcher_dir / "fetcher.yaml"
-            if yaml_path.exists():
-                out.append(yaml_path)
+            for fetcher_dir in sorted(category_dir.iterdir()):
+                if not fetcher_dir.is_dir() or fetcher_dir.name.startswith("_"):
+                    continue
+                yaml_path = fetcher_dir / "fetcher.yaml"
+                if yaml_path.exists():
+                    out.append(yaml_path)
     return out
 
 
@@ -115,7 +117,9 @@ def test_fetcher_names_unique_and_complete() -> None:
 # and it is copied before anyone finds out.
 # --------------------------------------------------------------------------- #
 
-TEMPLATE_YAMLS = sorted(FETCHERS_ROOT.glob("_template*/fetcher.yaml"))
+TEMPLATE_YAMLS = sorted(FETCHERS_ROOT.glob("_template*/fetcher.yaml")) + [
+    COMPARATORS_ROOT / "_template" / "fetcher.yaml"
+]
 
 
 def test_templates_discovered() -> None:
