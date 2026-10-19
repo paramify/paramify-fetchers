@@ -563,6 +563,22 @@ schemas and the `paramify` CLI — not the internal code.
   `address_prefixes` and `platform_subnet`, and rules gain their application
   security group ids. NIC-level NSGs, traffic within a subnet and peered VNets are
   not considered.
+- **`azure_sentinel_data_sources` 0.2.0: last data received per connector.**
+  Each workspace gains `connectors`: every connector definition installed from
+  Content Hub (returned by the preview `dataConnectors` listing), every codeless
+  definition (`dataConnectorDefinitions`), and every built-in connection whose
+  definition isn't installed. Each data type carries its last data received in
+  the window, measured with the definition's own `lastDataReceivedQuery` as the
+  Sentinel portal does, or a built-in query for a connection without one. A data
+  type that is a whole table takes its time from the per-table ingestion query,
+  and the filtered ones run as one union per 100. A connector is `connected` when
+  any data type received data, and lists the connections that feed it, including
+  the Defender XDR connection for alert products it carries. Where Sentinel
+  health monitoring is on, `connector_health` holds each connector's latest
+  SentinelHealth status and reason. `data_connectors` now also lists kinds only
+  the preview listing returns, such as Defender XDR (`MicrosoftThreatProtection`),
+  with `seen_in` saying which listing returned each, so `data_connectors_total`
+  can rise. Other existing fields are unchanged.
 - **The TUI keeps evidence and scan reports apart.** The catalog and the
   add-fetcher picker group by kind first (**Evidence**, **Scan reports**) and
   platform second, so a platform that ships both, like Wiz, no longer lists

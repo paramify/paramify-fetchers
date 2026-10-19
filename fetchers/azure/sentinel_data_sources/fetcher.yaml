@@ -1,5 +1,5 @@
 name: azure_sentinel_data_sources
-version: 0.1.0
+version: 0.2.0
 description: >
   For every Microsoft Sentinel workspace in the subscription: its data connectors
   and their enabled data types, and every Log Analytics table that received data
@@ -7,7 +7,11 @@ description: >
   per-workspace count of ingesting source tables is what shows which sources feed
   the SIEM. It is measured from the data itself, because the data connectors list
   omits sources wired up through diagnostic settings or data collection rules
-  (Azure Activity, Entra ID logs, AMA).
+  (Azure Activity, Entra ID logs, AMA). Each installed connector also shows, per
+  data type, its last data received in the window, measured as the Sentinel
+  portal does, and whether it is connected (received anything). Where Sentinel
+  health monitoring is on, each connector's latest SentinelHealth status is
+  included.
 category: azure
 
 supports_targets: true
@@ -65,11 +69,12 @@ evidence_set:
   reference_id: EVD-AZURE-SENTINEL-DATA-SOURCES
   name: Azure Sentinel Data Sources
   instructions: >
-    Script: fetcher.py. ARM REST, api-version 2025-09-01: list Log Analytics
-    workspaces, keep those with a SecurityInsights onboardingStates/default,
-    then list dataConnectors. Log Analytics query API: max(TimeGenerated) and
-    count() per table over the window, and per SecurityAlert ProductName.
-    sources_ingesting counts tables with data, plus each non-Sentinel alert
-    product, excluding workspace and Sentinel telemetry (Usage, Operation,
-    LAQueryLogs, SentinelHealth/Audit, SecurityIncident, Watchlist, UEBA) and
-    Heartbeat. Roles: Microsoft Sentinel Reader and Log Analytics Reader.
+    Script: fetcher.py. ARM REST per Sentinel workspace: dataConnectors at
+    2025-09-01 and 2025-10-01-preview, and dataConnectorDefinitions. Log
+    Analytics: max(TimeGenerated) and count() per table and per SecurityAlert
+    product, each connector data type's lastDataReceivedQuery (built-in
+    queries where no definition is installed), and SentinelHealth. Connected
+    means any data in the window. sources_ingesting excludes workspace and
+    Sentinel telemetry (Usage, Operation, LAQueryLogs, SentinelHealth/Audit,
+    SecurityIncident, Watchlist, UEBA, Heartbeat). Roles: Microsoft Sentinel
+    Reader and Log Analytics Reader.

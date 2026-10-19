@@ -109,6 +109,7 @@ class FakeAzure:
                  "properties": {"tenantId": "t", "dataTypes": {"exchange": {"state": "Enabled"},
                                                                "teams": {"state": "Disabled"}}}},
             ]},
+            (f"{SI_A}/dataConnectorDefinitions", "2025-09-01"): {"value": []},
             (f"{SI_A}/alertRules", "2025-09-01"): {
                 "value": [rule("fusion", "Fusion", True, "f71aba3d-28fb-450b-b192-4e76a83015c8")],
                 "nextLink": f"https://management.azure.com{SI_A}/alertRules?api-version=2025-09-01&$skipToken=p2"},
@@ -152,6 +153,7 @@ class FakeAzure:
                 ["Heartbeat", iso(NOW), 50]])),
             ("by ProductName", table(["ProductName", "LastIngested", "Records"], [
                 ["Microsoft Defender Advanced Threat Protection", iso(NOW), 1], ["Azure Sentinel", iso(NOW), 1]])),
+            ("ParamifyIndex", table(["Time", "ParamifyIndex"], [])),
             ("SecurityIncident", table(["IncidentName", "Status", "ClosedTime", "CreatedTime"], [
                 ["i-closed", "Closed", iso(NOW - timedelta(days=2)), iso(NOW - timedelta(days=3))],
                 ["i-new", "New", None, iso(NOW - timedelta(days=200))]])),
@@ -312,6 +314,100 @@ def test_data_sources(azure, tmp_path):
     assert o365["enabled_data_types"] == ["exchange"]
     assert ev["results"]["workspaces_without_sentinel"] == ["law-plain"]
     assert ev["summary"]["workspaces_with_2plus_sources"] == 1
+
+
+def ui_connector(name, data_types, criteria=None):
+    return {"id": f"{SI_A}/dataConnectors/{name}", "name": name, "kind": "StaticUI", "properties": {"connectorUiConfig": {
+        "title": name, "connectivityCriterias": criteria or [],
+        "dataTypes": [{"name": n, "lastDataReceivedQuery": f"{q}\n | summarize Time = max(TimeGenerated)\n | where isnotempty(Time)"}
+                      for n, q in data_types]}}}
+
+
+def connectors_workspace(azure):
+    """Content Hub definitions, a codeless one, and connections only the preview listing returns."""
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [
+        ui_connector("AzureActiveDirectory", [("SigninLogs", "SigninLogs"), ("AuditLogs", "AuditLogs")]),
+        ui_connector("MicrosoftDefenderAdvancedThreatProtection",
+                     [("SecurityAlert (MDATP)", 'SecurityAlert\u200b | where ProviderName == "MDATP"')],
+                     [{"type": "MtpAlerts", "value": ["MicrosoftDefenderAdvancedThreatProtection"]}]),
+        ui_connector("Office365", [("OfficeActivity (Exchange)", 'OfficeActivity | where OfficeWorkload == "Exchange"'),
+                                   ("OfficeActivity (Teams)", 'OfficeActivity | where OfficeWorkload == "MicrosoftTeams"')]),
+        {"id": f"{SI_A}/dataConnectors/o365", "name": "o365", "kind": "Office365",
+         "properties": {"dataTypes": {"exchange": {"state": "Enabled"}}}},
+        {"id": f"{SI_A}/dataConnectors/mtp", "name": "mtp", "kind": "MicrosoftThreatProtection",
+         "properties": {"dataTypes": {"alerts": {"state": "enabled"}, "incidents": {"state": "enabled"}}}},
+        {"id": f"{SI_A}/dataConnectors/ccp1", "name": "ccp1", "kind": "RestApiPoller",
+         "properties": {"connectorDefinitionName": "MyCcp"}}]}
+    azure.arm[(f"{SI_A}/dataConnectorDefinitions", "2025-09-01")] = {"value": [
+        {"name": "MyCcp", "kind": "Customizable", "properties": {"connectorUiConfig": {
+            "title": "My codeless connector", "graphQueriesTableName": "MyCcp_CL",
+            "dataTypes": [{"name": "{{graphQueriesTableName}}",
+                           "lastDataReceivedQuery": "{{graphQueriesTableName}}\n | summarize Time = max(TimeGenerated)\n | where isnotempty(Time)"}],
+            "connectivityCriteria": [{"type": "HasDataConnectors"}]}}}]}
+    azure.queries[0] = ("union withsource=ParamifySourceTable", table(["ParamifySourceTable", "LastIngested", "Records"], [
+        ["SigninLogs", iso(NOW - timedelta(hours=1)), 9], ["SecurityAlert", iso(NOW), 2], ["OfficeActivity", iso(NOW), 4],
+        ["SentinelHealth", iso(NOW), 1], ["Usage", iso(NOW), 5]]))
+    azure.queries.insert(0, ("SentinelResourceType", table(
+        ["SentinelResourceId", "TimeGenerated", "Status", "Reason", "Description", "SentinelResourceKind", "SentinelResourceName"],
+        [[f"{SI_A}/dataConnectors/CCP1", iso(NOW), "Failure", "Unauthorized", "token expired", "RestApiPoller", "ccp1"]])))
+
+
+def test_data_sources_last_data_per_connector(azure, tmp_path):
+    connectors_workspace(azure)
+    # Filtered data types on tables with data, in catalog order: ASC alerts, MDATP alerts, Exchange, Teams.
+    azure.queries.insert(0, ("ParamifyIndex", table(["Time", "ParamifyIndex"], [[iso(NOW), 1], [iso(NOW), 2]])))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    ws = ws_a(ev)
+    union = next(q for _, _, q in azure.calls if "ParamifyIndex" in q)
+    assert "\u200b" not in union and union.count("ParamifyIndex =") == 4  # bare tables come from the ingestion query
+    assert [(c["name"], c["seen_in"]) for c in ws["data_connectors"]] == [
+        ("asc", ["stable"]), ("mtp", ["preview"]), ("o365", ["stable", "preview"]), ("ccp1", ["preview"])]
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    assert list(by_id) == ["AzureActiveDirectory", "AzureSecurityCenter", "MicrosoftDefenderAdvancedThreatProtection",
+                           "MicrosoftThreatProtection", "MyCcp", "Office365"]
+    aad = by_id["AzureActiveDirectory"]
+    assert [d["last_data_received"] is not None for d in aad["data_types"]] == [True, False]
+    assert aad["connected"] is True and aad["definition"] == "content_hub" and aad["connections"] == []
+    assert (by_id["AzureSecurityCenter"]["definition"], by_id["AzureSecurityCenter"]["connected"]) == ("built_in", False)
+    assert by_id["MicrosoftDefenderAdvancedThreatProtection"]["connections"] == ["mtp"]
+    mtp = by_id["MicrosoftThreatProtection"]
+    assert [d["table"] for d in mtp["data_types"]] == ["SecurityIncident", "SecurityAlert"] and mtp["connected"] is True
+    ccp = by_id["MyCcp"]
+    assert (ccp["definition"], ccp["connections"], ccp["data_types"][0]["table"]) == ("codeless", ["ccp1"], "MyCcp_CL")
+    assert ccp["connected"] is False and ccp["health_status"] == "Failure"
+    office = by_id["Office365"]
+    assert office["connections"] == ["o365"] and office["last_data_received"] == iso(NOW)
+    assert [d["last_data_received"] is not None for d in office["data_types"]] == [True, False]
+    assert ws["connectors_connected"] == 4 and ws["connectors_not_connected"] == ["AzureSecurityCenter", "MyCcp"]
+    assert ws["health_monitoring"] is True and ws["connector_health"][0]["reason"] == "Unauthorized"
+    assert {k: ev["summary"][k] for k in ("connectors_connected", "connectors_not_connected",
+                                          "workspaces_with_health_monitoring", "connectors_unhealthy")} == {
+        "connectors_connected": 4, "connectors_not_connected": 2,
+        "workspaces_with_health_monitoring": 1, "connectors_unhealthy": 1}
+
+
+def test_data_sources_bad_connector_query_is_isolated(azure, tmp_path):
+    connectors_workspace(azure)
+    bad = Resp(400, {"error": {"code": "BadArgumentError", "innererror": {"message": "Syntax error"}}})
+    # The batch fails, then each data type runs alone: ASC answers, MDATP is malformed, Exchange and Teams are empty.
+    azure.queries.insert(0, ("ParamifyIndex", [bad, table(["Time", "ParamifyIndex"], [[iso(NOW), 0]]), bad,
+                                               table(["Time", "ParamifyIndex"], [])]))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    assert code == 0 and by_id["AzureSecurityCenter"]["connected"] is True
+    assert by_id["MicrosoftDefenderAdvancedThreatProtection"]["connected"] is None
+    assert "MicrosoftDefenderAdvancedThreatProtection: SecurityAlert (MDATP)" in ws["notes"][0]
+
+
+def test_data_sources_without_health_monitoring(azure, tmp_path):
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["health_monitoring"] is False and ws["connector_health"] is None
+    assert [c["id"] for c in ws["connectors"]] == ["AzureSecurityCenter", "Office365"]
+    assert all(c["definition"] == "built_in" for c in ws["connectors"])
+    assert not any("SentinelHealth" in q for _, _, q in azure.calls if q)
 
 
 def test_analytics_rules_merge_preview_kinds(azure, tmp_path):
