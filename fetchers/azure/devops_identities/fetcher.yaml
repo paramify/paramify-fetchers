@@ -1,0 +1,95 @@
+name: azure_devops_identities
+version: 0.1.0
+description: >
+  For one Azure DevOps organization: every user, service principal and
+  service identity with its access level, origin (Entra ID or Microsoft
+  account), member or guest type, date added and last access; every group
+  with its members, and each identity's direct and inherited groups. Who holds
+  the privileged groups (Project Collection Administrators and Service
+  Accounts, Project Collection Build Administrators, and each project's
+  Project, Build, Release and Endpoint Administrators), directly or through
+  nested Azure DevOps or Entra groups, and which users have not signed in for
+  longer than a threshold. Azure DevOps memberships never expire, so this is
+  evidence of who holds standing administrative access and whether unused
+  accounts are removed.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: azure_devops_identities.json
+  aggregation: per_target
+
+target_schema:
+  organization_url:
+    type: string
+    required: true
+    env: AZURE_DEVOPS_ORG_URL
+    description: >
+      The Azure DevOps organization, as https://dev.azure.com/<org>,
+      https://<org>.visualstudio.com or just <org>. One target per organization.
+
+config_schema:
+  inactive_days:
+    type: integer
+    required: false
+    default: 90
+    env: AZURE_DEVOPS_INACTIVE_DAYS
+    description: >
+      A user whose last access to the organization is older than this many
+      days, or who was added this long ago and never signed in, is reported as
+      inactive.
+
+secrets:
+  - name: pat
+    env: AZURE_DEVOPS_PAT
+    per_target: true
+    required: false
+    description: >
+      Read-only personal access token for the organization with Graph (Read)
+      and Member Entitlement Management (Read). Optional: without it the fetcher
+      signs in as the ambient Entra identity (az login, managed or workload
+      identity, or the category's service principal added to the organization),
+      which must be a member of the organization; the least privilege for
+      reading last-access dates is not yet measured. Collection covers what the
+      signed-in identity can see, recorded as metadata.collecting_identity.
+
+ksis:
+  - KSI-IAM-AAM      # every user's access level, last access and inactive accounts
+  - KSI-IAM-JIT      # standing privileged group membership, direct or through Entra groups
+
+evidence_set:
+  reference_id: EVD-AZURE-DEVOPS-IDENTITIES
+  name: Azure DevOps Identities
+  instructions: >
+    Script: fetcher.py. Azure DevOps REST, every continuation token followed.
+    Identities: vssps graph/users (people, plus service identities such as the
+    build service) and graph/serviceprincipals, joined by descriptor to vsaex
+    userentitlements for access level, license status, date added and last
+    access; `kind` comes from the descriptor (aad, msa: user; aadsp:
+    service_principal; svc: service_identity). Azure DevOps writes 0001-01-01
+    for a member who never signed in, reported as `never_accessed`. A user is
+    `inactive` when sign-in is not disabled and the last access, or the date
+    added if never, is older than inactivity_threshold_days. Groups:
+    graph/groups, each one's direct members from graph/Memberships
+    direction=down, except the computed Project Collection Valid Users and
+    Project Valid Users groups and enterprise-level groups. `direct_groups` and
+    `groups` (direct and inherited) are derived from those memberships.
+    Privileged groups are the Azure DevOps groups named Project Collection
+    Administrators, Project Collection Service Accounts, Project Collection
+    Build Administrators, Project Administrators, Build Administrators, Release
+    Administrators or Endpoint Administrators; `effective_members` lists every
+    non-group member reached through nested groups, with the shortest path
+    (`via`) and whether it crosses an Entra group (`through_entra_group`). An
+    Entra group's members are those Azure DevOps has recorded, not necessarily
+    its full membership in Entra ID; `entra_groups_granting_privilege` names
+    them so the Entra side (and any PIM eligibility) can be checked.
+    `members_complete` is false when a group on the way could not be read.
+    Signs in with the PAT, else the ambient Entra identity (metadata.auth_mode).
+    A refused call names the PAT scope it needs.

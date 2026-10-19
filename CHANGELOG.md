@@ -12,6 +12,23 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_devops_identities`** (`EVD-AZURE-DEVOPS-IDENTITIES`): who can sign in to
+  an Azure DevOps organization and who holds its administrative groups. It records:
+  - every user, service principal and service identity, with access level,
+    origin, member or guest type, date added and last access (from user
+    entitlements);
+  - every group with its direct members, and each identity's direct and
+    inherited groups;
+  - the effective members of Project Collection Administrators, Project
+    Collection Service Accounts, Project Collection Build Administrators and each
+    project's Project, Build, Release and Endpoint Administrators, with the path
+    of nested groups to each and whether it crosses an Entra group;
+  - users inactive past `AZURE_DEVOPS_INACTIVE_DAYS` (default 90), counting a
+    never-used account from the day it was added.
+
+  Azure DevOps memberships never expire; `entra_groups_granting_privilege` names
+  the Entra groups to check for PIM. Read-only PAT scopes: Graph and Member
+  Entitlement Management; or an Entra identity that is an organization member.
 - **`azure_devops_audit_streams`** (`EVD-AZURE-DEVOPS-AUDIT-STREAMS`): whether an
   Azure DevOps organization exports its audit log, which it otherwise keeps for
   90 days. Records:
