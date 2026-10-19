@@ -354,7 +354,10 @@ def fetch_issues(client: JiraClient, keys, fields: list):
             body={"issueIdsOrKeys": chunk, "fields": fields},
         )
         if not isinstance(page, dict):
+            # The call failed, so nothing in this chunk was read: report every key
+            # as not visible rather than letting a caller treat it as absent.
             complete = False
+            missing.extend(chunk)
             continue
         got = [i for i in page.get("issues") or [] if isinstance(i, dict)]
         found.extend(got)
@@ -472,6 +475,9 @@ def write_and_finish(logger: logging.Logger, client: JiraClient, evidence: dict,
     """Write the evidence file, then report the run's outcome. Returns the exit code."""
     meta = evidence.setdefault("metadata", {})
     meta["complete"] = not (extra_failure or client.api_failures)
+    # The contract's signal for a validator is partial_failure, so it must follow
+    # complete, not only api_failures: a hit cap or an unresolved field is partial too.
+    meta["partial_failure"] = not meta["complete"]
     meta["incomplete_reason"] = extra_failure or None
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     output_dir.mkdir(parents=True, exist_ok=True)

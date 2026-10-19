@@ -68,6 +68,22 @@ FAILED_TESTS = {"failed", "fail"}
 DONE_REVIEWS = {"completed", "complete", "done", "yes"}
 
 
+# Findings that cannot be produced when the field role they read is turned off
+# (an empty name in JIRA_CHANGE_FIELDS). Listed in metadata.checks_disabled so an
+# evidence file never looks clean about a check that did not run.
+FINDINGS_BY_FIELD = {
+    "last_reviewed": ["exception_review_overdue"],
+    "exception_expiry": ["exception_open_past_expiry"],
+    "test_results": ["deployed_with_failed_tests", "deployed_without_passing_tests"],
+    "security_review": ["connection_without_security_review"],
+    "risk": ["connection_without_risk"],
+}
+
+
+def _checks_disabled(disabled_fields) -> list:
+    return sorted({f for role in disabled_fields for f in FINDINGS_BY_FIELD.get(role, [])})
+
+
 def _lower_set(values) -> set:
     return {v.strip().lower() for v in values if v and v.strip()}
 
@@ -138,11 +154,14 @@ def _record(issue: dict, histories: list, ids: dict, cfg: dict, now) -> dict:
     closed = category == "done"
     cancelled = closed and (resolution or "").strip().lower() in cfg["not_deployed"]
     done = (closed and not cancelled) or bool(custom.get("deployed_at"))
-    # The last time the ticket entered its current done status (a reopened ticket counts once more).
-    done_move = next(
-        (m for m in reversed(moves) if closed and m["to"] and m["to"] == status.get("name")), None
-    )
-    deployed_at = custom.get("deployed_at") or (done_move["at"] if done_move else None) or (
+    # Deployment time, when there is no deployed-at field: the FIRST move into the
+    # current done status. A ticket deployed on day 1, approved on day 3 and
+    # reopened and closed again on day 10 was still approved late; using the last
+    # move would hide that. Both moves are recorded so a reviewer can see a reopen.
+    done_moves = [m for m in moves if closed and m["to"] and m["to"] == status.get("name")]
+    first_done_at = done_moves[0]["at"] if done_moves else None
+    last_done_at = done_moves[-1]["at"] if done_moves else None
+    deployed_at = custom.get("deployed_at") or first_done_at or (
         f.get("resolutiondate") if closed and not cancelled else None
     )
     approval_change = next(
@@ -194,7 +213,10 @@ def _record(issue: dict, histories: list, ids: dict, cfg: dict, now) -> dict:
             "expiry": expiry,
             "last_reviewed": reviewed,
             "days_since_review": days_since_review,
-            "review_overdue": (not closed)
+            # None when the last-reviewed field is turned off: the check cannot run.
+            "review_overdue": None
+            if "last_reviewed" not in ids
+            else (not closed)
             and (days_since_review is None or days_since_review > cfg["review_days"]),
             "open_past_expiry": (not closed) and bool(expiry) and str(expiry)[:10] < today,
             "closed_at": f.get("resolutiondate") if closed else None,
@@ -227,6 +249,8 @@ def _record(issue: dict, histories: list, ids: dict, cfg: dict, now) -> dict:
         "approval_recorded_by": approval_change["by"] if approval_change else None,
         "deployed": done and not is_exception,
         "deployed_at": deployed_at if not is_exception else None,
+        "last_done_at": last_done_at if not is_exception else None,
+        "reopened": len(done_moves) > 1,
         "approved_before_deploy": approved_before_deploy,
         "test_results": custom.get("test_results"),
         "security_review": custom.get("security_review"),
@@ -281,9 +305,19 @@ def _config():
     max_items = int_env("JIRA_CHANGE_MAX_ITEMS", 2000)
     if review_days is None or max_items is None:
         return None, "JIRA_EXCEPTION_REVIEW_DAYS and JIRA_CHANGE_MAX_ITEMS must be positive integers"
+    merged = {**DEFAULT_FIELDS, **fields}
+    disabled = {role for role, name in merged.items() if not (isinstance(name, str) and name.strip())}
+    approved_statuses = _lower_set(list_env("JIRA_CHANGE_APPROVED_STATUSES"))
+    if not approved_statuses and disabled & {"approver", "approved_at"}:
+        return None, (
+            "no way to detect an approval: JIRA_CHANGE_APPROVED_STATUSES is empty and the "
+            "approver or approved_at field is turned off in JIRA_CHANGE_FIELDS; every change "
+            "and exception would be reported as unapproved"
+        )
     return {
-        "fields": {**DEFAULT_FIELDS, **fields},
-        "approved_statuses": _lower_set(list_env("JIRA_CHANGE_APPROVED_STATUSES")),
+        "fields": merged,
+        "disabled_fields": sorted(disabled),
+        "approved_statuses": approved_statuses,
         "preapproved_types": _lower_set(list_env("JIRA_CHANGE_PREAPPROVED_TYPES") or ["Standard"]),
         "exception_types": _lower_set(
             list_env("JIRA_EXCEPTION_ISSUE_TYPES") or ["Configuration Exception"]
@@ -359,6 +393,7 @@ def main() -> int:
             "fields_resolved": ids,
             "field_problems": problems,
             "field_candidates": candidates,
+            "checks_disabled": _checks_disabled(cfg["disabled_fields"]),
             "not_deployed_resolutions": sorted(cfg["not_deployed"]),
             "approved_statuses": sorted(cfg["approved_statuses"]),
             "preapproved_change_types": sorted(cfg["preapproved_types"]),

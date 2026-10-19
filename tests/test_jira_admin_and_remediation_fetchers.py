@@ -533,12 +533,15 @@ def test_change_requests_ambiguous_field_fails_loudly_and_lists_candidates(run):
             return 200, {"issues": [], "isLast": True}
         raise AssertionError(path)
 
-    env = {"JIRA_CHANGE_JQL": "project = CCB",
+    env = {"JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_APPROVED_STATUSES": "Approved",
            "JIRA_CHANGE_FIELDS": '{"risk": "", "approved_at": "", "security_review": "", "test_results": "", '
                                  '"deployed_at": "", "exception_expiry": "", "last_reviewed": ""}'}
     code, out, _, _ = run("change_requests", router, env)
     meta = out["metadata"]
-    assert code == 1 and meta["complete"] is False
+    assert code == 1 and meta["complete"] is False and meta["partial_failure"] is True
+    assert set(meta["checks_disabled"]) == {"connection_without_risk", "connection_without_security_review",
+                                            "deployed_with_failed_tests", "deployed_without_passing_tests",
+                                            "exception_open_past_expiry", "exception_review_overdue"}
     assert meta["field_problems"]["change_type"] == "ambiguous"
     assert meta["field_problems"]["risk"] == "disabled"
     assert [c["id"] for c in meta["field_candidates"]["change_type"]] == ["customfield_10043", "customfield_10005"]
@@ -762,3 +765,193 @@ def test_incident_required_phases(run):
         "JIRA_INCIDENT_REQUIRED_PHASES": "Identification,Containment,Lessons Learned"})
     i = out["incidents"][0]
     assert i["phases_missing"] == ["Identification", "Containment"] and i["findings"] == ["phases_missing"]
+
+
+# ---------- PR #174 review: disabled fields, conflicting settings, honest metadata ----------
+
+def _cr_router(tickets, histories=None):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, FIELD_LIST
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": tickets, "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": histories or []}
+        raise AssertionError(path)
+    return router
+
+
+def _ir_router(incidents, bulk=None):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, FIELD_LIST
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": incidents, "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        if path == "/rest/api/3/issue/bulkfetch":
+            return bulk(body) if bulk else (200, {"issues": [], "issueErrors": []})
+        raise AssertionError(path)
+    return router
+
+
+def test_change_requests_disabled_last_reviewed_does_not_flag_review_overdue(run):
+    # An approved open exception with a far-future expiry and no review field at all.
+    ex = _ticket(1, "Configuration Exception", "Backlog", "new",
+                 {"cf3": APPROVER, "cf4": "2026-06-01T00:00:00.000+0000", "cf8": "2099-01-01"})
+    env = {"JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_FIELDS": '{"last_reviewed": ""}'}
+    code, out, _, status = run("change_requests", _cr_router([ex]), env)
+    assert code == 0 and status is None
+    t = out["tickets"][0]
+    assert t["findings"] == []
+    assert t["exception"]["review_overdue"] is None
+    assert "exception_review_overdue" in out["metadata"]["checks_disabled"]
+
+
+def test_incident_disabled_fields_do_not_flag_missing_values(run):
+    inc = _incident(1, {"cf13": "2026-10-05T12:30:00.000+0000"}, cat="new")
+    env = {"JIRA_INCIDENT_JQL": "project = IR",
+           "JIRA_INCIDENT_FIELDS": '{"detected_at": "", "severity": "", "category": ""}'}
+    code, out, _, status = run("incident_postmortems", _ir_router([inc]), env)
+    assert code == 0 and status is None
+    assert out["incidents"][0]["findings"] == []
+    assert set(out["metadata"]["checks_disabled"]) >= {
+        "missing_detected_time", "missing_severity", "missing_category",
+        "reported_late", "category_notification_target_missed",
+    }
+    assert out["summary"]["reported_within_window"] == 0
+    assert out["summary"]["incidents_without_report_timing"] == 1
+
+
+@pytest.mark.parametrize("env", [
+    {"JIRA_INCIDENT_FIELDS": '{"severity": ""}', "JIRA_POSTMORTEM_REQUIRED_SEVERITIES": "SEV 1"},
+    {"JIRA_INCIDENT_FIELDS": '{"phase": ""}', "JIRA_INCIDENT_REQUIRED_PHASES": "Identification"},
+    {"JIRA_INCIDENT_FIELDS": '{"category": ""}', "JIRA_INCIDENT_CATEGORY_TARGETS": '{"CAT 1": 15}'},
+    {"JIRA_INCIDENT_FIELDS": '{"detected_at": ""}', "JIRA_INCIDENT_CATEGORY_TARGETS": '{"CAT 1": 15}'},
+    {"JIRA_INCIDENT_FIELDS": '{"detected_at": ""}', "JIRA_INCIDENT_REPORT_MINUTES": "30"},
+])
+def test_incident_conflicting_settings_are_bad_config(monkeypatch, tmp_path, env):
+    for k, v in {"JIRA_BASE_URL": "https://x.atlassian.net", "JIRA_EMAIL": "e", "JIRA_API_TOKEN": "t",
+                 "JIRA_INCIDENT_JQL": "project = IR", "EVIDENCE_DIR": str(tmp_path),
+                 "FETCHER_STATUS_FILE": str(tmp_path / "s.json"), **env}.items():
+        monkeypatch.setenv(k, v)
+    assert load("incident_postmortems").main() == 1
+    assert json.loads((tmp_path / "s.json").read_text())["code"] == "bad_config"
+    assert not (tmp_path / "jira_incident_postmortems.json").exists()
+
+
+@pytest.mark.parametrize("fields", ['{"approver": ""}', '{"approved_at": ""}', '{"approver": "", "approved_at": ""}'])
+def test_change_requests_no_approval_source_is_bad_config(monkeypatch, tmp_path, fields):
+    for k, v in {"JIRA_BASE_URL": "https://x.atlassian.net", "JIRA_EMAIL": "e", "JIRA_API_TOKEN": "t",
+                 "JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_FIELDS": fields,
+                 "EVIDENCE_DIR": str(tmp_path), "FETCHER_STATUS_FILE": str(tmp_path / "s.json")}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("JIRA_CHANGE_APPROVED_STATUSES", raising=False)
+    assert load("change_requests").main() == 1
+    assert json.loads((tmp_path / "s.json").read_text())["code"] == "bad_config"
+
+
+def test_change_requests_status_approval_allows_disabled_approval_fields(run):
+    t = _ticket(1, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}, "cf6": {"value": "Passed"}})
+    hist = [{"issueId": "501", "changeHistories": [
+        {"id": "h1", "created": "2026-10-03T00:00:00.000+00:00", "author": {"displayName": "Chair"},
+         "items": [{"fieldId": "status", "fromString": "Backlog", "toString": "Approved"}]},
+        {"id": "h2", "created": "2026-10-04T00:00:00.000+00:00", "author": {"displayName": "Dev"},
+         "items": [{"fieldId": "status", "fromString": "Approved", "toString": "Done"}]}]}]
+    env = {"JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_APPROVED_STATUSES": "Approved",
+           "JIRA_CHANGE_FIELDS": '{"approver": "", "approved_at": ""}'}
+    code, out, _, _ = run("change_requests", _cr_router([t], hist), env)
+    assert code == 0 and out["tickets"][0]["findings"] == []
+    assert out["tickets"][0]["approval_source"] == "status"
+
+
+def test_partial_failure_is_true_whenever_the_run_is_incomplete(run):
+    # Truncation: no API call failed, but the evidence is incomplete.
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [_issue(i, "To Do", "new") for i in range(3)], "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        raise AssertionError(path)
+
+    code, out, _, _ = run("remediation_items", router,
+                          {"JIRA_REMEDIATION_JQL": "labels = x", "JIRA_REMEDIATION_MAX_ITEMS": "2"})
+    assert code == 1
+    assert out["metadata"]["complete"] is False
+    assert out["metadata"]["partial_failure"] is True
+    assert out["metadata"]["api_failures"] == []
+
+    # Field problem: same contract.
+    def router2(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, [{"id": "cf3", "name": "CCB Approver"}]
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [], "isLast": True}
+        raise AssertionError(path)
+
+    code, out, _, _ = run("change_requests", router2, {"JIRA_CHANGE_JQL": "project = CCB"})
+    assert code == 1 and out["metadata"]["partial_failure"] is True
+
+
+def test_incident_failed_bulkfetch_is_not_visible_not_missing(run):
+    inc = _incident(4, {"cf10": {"value": "SEV 2"}, "cf11": {"value": "CAT 7"},
+                        "cf12": "2026-10-05T12:00:00.000+0000", "cf13": "2026-10-05T12:30:00.000+0000"},
+                    links=["IR-99"])
+    code, out, _, status = run(
+        "incident_postmortems",
+        _ir_router([inc], bulk=lambda body: (403, {"errorMessages": ["no permission"]})),
+        {"JIRA_INCIDENT_JQL": "project = IR"})
+    assert out["incidents"][0]["findings"] == ["postmortem_not_visible"]
+    assert out["metadata"]["related_issues_not_visible"] == ["IR-99"]
+    assert out["metadata"]["related_issues_complete"] is False
+    assert code == 1 and out["metadata"]["partial_failure"] is True
+    assert out["summary"]["resolved_without_postmortem"] == 0
+
+
+def test_change_requests_reopened_ticket_uses_first_deployment(run):
+    # Deployed day 1, approved day 3, reopened and closed again day 10: the approval was late.
+    t = _ticket(1, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}, "cf3": APPROVER,
+                "cf4": "2026-10-03T00:00:00.000+0000", "cf6": {"value": "Passed"}})
+    t["fields"]["resolutiondate"] = "2026-10-10T00:00:00.000+0000"
+    hist = [{"issueId": "501", "changeHistories": [
+        {"id": "h1", "created": "2026-10-01T00:00:00.000+00:00", "author": {"displayName": "Dev"},
+         "items": [{"fieldId": "status", "fromString": "In Progress", "toString": "Done"}]},
+        {"id": "h2", "created": "2026-10-05T00:00:00.000+00:00", "author": {"displayName": "Dev"},
+         "items": [{"fieldId": "status", "fromString": "Done", "toString": "Reopened"}]},
+        {"id": "h3", "created": "2026-10-10T00:00:00.000+00:00", "author": {"displayName": "Dev"},
+         "items": [{"fieldId": "status", "fromString": "Reopened", "toString": "Done"}]}]}]
+    code, out, _, _ = run("change_requests", _cr_router([t], hist), {"JIRA_CHANGE_JQL": "project = CCB"})
+    r = out["tickets"][0]
+    assert r["deployed_at"] == "2026-10-01T00:00:00.000+00:00"
+    assert r["last_done_at"] == "2026-10-10T00:00:00.000+00:00"
+    assert r["reopened"] is True
+    assert "approved_after_deploy" in r["findings"]
+
+
+def test_incident_unreadable_action_items_are_not_reported_as_none(run):
+    inc = _incident(1, {"cf10": {"value": "SEV 1"}, "cf11": {"value": "CAT 1"},
+                        "cf12": "2026-10-05T12:00:00.000+0000", "cf13": "2026-10-05T12:10:00.000+0000"},
+                    links=["IR-7"])
+    pm = {"key": "IR-7", "fields": {"issuetype": {"name": "Post-mortem"}, "status": {"name": "Done"},
+                                    "summary": "pm", "subtasks": [{"key": "IR-10"}, {"key": "IR-11"}]}}
+
+    def bulk(body):
+        keys = body["issueIdsOrKeys"]
+        if "IR-7" in keys:
+            return 200, {"issues": [pm], "issueErrors": []}
+        return 200, {"issues": [], "issueErrors": [{"errorMessages": ["not visible"]}]}
+
+    code, out, _, _ = run("incident_postmortems", _ir_router([inc], bulk=bulk), {"JIRA_INCIDENT_JQL": "project = IR"})
+    i = out["incidents"][0]
+    assert i["findings"] == ["action_items_not_visible"]
+    assert i["postmortems"][0]["action_item_count"] == 2 and i["action_items"] == []
+    assert out["metadata"]["related_issues_not_visible"] == ["IR-10", "IR-11"]
+    assert code == 1 and out["metadata"]["partial_failure"] is True

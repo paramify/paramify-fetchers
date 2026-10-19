@@ -63,6 +63,26 @@ POSTMORTEM_FIELDS = ["summary", "issuetype", "status", "created", "resolutiondat
 ACTION_FIELDS = ["summary", "status", "assignee", "duedate", "created", "resolutiondate", "parent"]
 
 
+# Findings that cannot be produced when the field role they read is turned off
+# (an empty name in JIRA_INCIDENT_FIELDS). Listed in metadata.checks_disabled.
+FINDINGS_BY_FIELD = {
+    "detected_at": [
+        "missing_detected_time",
+        "detected_or_reported_time_unparseable",
+        "reported_before_detected",
+        "reported_late",
+        "category_notification_target_missed",
+    ],
+    "severity": ["missing_severity"],
+    "category": ["missing_category", "category_without_target", "category_notification_target_missed"],
+    "phase": ["phases_missing"],
+}
+
+
+def _checks_disabled(disabled_fields) -> list:
+    return sorted({f for role in disabled_fields for f in FINDINGS_BY_FIELD.get(role, [])})
+
+
 def _minutes_between(start, end):
     a, b = parse_ts(start), parse_ts(end)
     if not a or not b:
@@ -168,30 +188,39 @@ def _incident_record(issue, histories, ids, cfg, postmortems: dict, actions: dic
         not cfg["required_severities"] or (severity or "").strip().lower() in cfg["required_severities"]
     )
 
+    # Each check runs only when the field it reads is turned on; a turned-off
+    # field must not produce a finding (see metadata.checks_disabled).
     findings = []
-    if not detected:
-        findings.append("missing_detected_time")
-    elif minutes is None:
-        findings.append("detected_or_reported_time_unparseable")
-    elif minutes < 0:
-        findings.append("reported_before_detected")
-    elif minutes > cfg["report_minutes"]:
-        findings.append("reported_late")
+    if "detected_at" in ids:
+        if not detected:
+            findings.append("missing_detected_time")
+        elif minutes is None:
+            findings.append("detected_or_reported_time_unparseable")
+        elif minutes < 0:
+            findings.append("reported_before_detected")
+        elif minutes > cfg["report_minutes"]:
+            findings.append("reported_late")
     if target is not None and minutes is not None and minutes > target:
         findings.append("category_notification_target_missed")
-    if not severity:
+    if "severity" in ids and not severity:
         findings.append("missing_severity")
-    if not category:
-        findings.append("missing_category")
-    elif cfg["category_targets"] and target is None:
-        findings.append("category_without_target")
+    if "category" in ids:
+        if not category:
+            findings.append("missing_category")
+        elif cfg["category_targets"] and target is None:
+            findings.append("category_without_target")
     missing_phases = [p for p in cfg["required_phases"] if p.lower() not in {x.lower() for x in phases_seen}]
-    if resolved and not no_review and missing_phases:
+    if "phase" in ids and resolved and not no_review and missing_phases:
         findings.append("phases_missing")
     if required and not pm_keys:
         findings.append("postmortem_not_visible" if pm_hidden else "resolved_without_postmortem")
-    if pm_keys and not action_items:
+    # A post-mortem lists its sub-tasks even when they could not be read, so an
+    # unreadable action item is "not visible", never "no action items".
+    expected_actions = sum(p["action_item_count"] for p in pm_records)
+    if pm_keys and expected_actions == 0:
         findings.append("postmortem_without_action_items")
+    elif pm_keys and len(action_items) < expected_actions:
+        findings.append("action_items_not_visible")
     if any(a["is_open"] and not a["assignee"] for a in action_items):
         findings.append("unassigned_action_items")
     if any(a["overdue"] for a in action_items):
@@ -248,6 +277,9 @@ def _summarize(incidents: list) -> dict:
         "reported_time_from_ticket_created": sum(
             1 for i in incidents if i["reported_at_source"] == "created"
         ),
+        "incidents_without_report_timing": sum(
+            1 for i in incidents if i["minutes_to_report"] is None
+        ),
         "reported_late": sum(1 for i in incidents if "reported_late" in i["findings"]),
         "category_target_missed": sum(
             1 for i in incidents if "category_notification_target_missed" in i["findings"]
@@ -288,16 +320,36 @@ def _config():
     max_items = int_env("JIRA_INCIDENT_MAX_ITEMS", 1000)
     if report_minutes is None or max_items is None:
         return None, "JIRA_INCIDENT_REPORT_MINUTES and JIRA_INCIDENT_MAX_ITEMS must be positive integers"
+    merged = {**DEFAULT_FIELDS, **fields}
+    disabled = {role for role, name in merged.items() if not (isinstance(name, str) and name.strip())}
+    required_severities = {t.lower() for t in list_env("JIRA_POSTMORTEM_REQUIRED_SEVERITIES")}
+    required_phases = list_env("JIRA_INCIDENT_REQUIRED_PHASES")
+    # A setting that depends on a turned-off field would make its check silently
+    # pass (or silently fail) every incident, so refuse the combination.
+    conflicts = [
+        ("severity", required_severities, "JIRA_POSTMORTEM_REQUIRED_SEVERITIES"),
+        ("phase", required_phases, "JIRA_INCIDENT_REQUIRED_PHASES"),
+        ("category", targets, "JIRA_INCIDENT_CATEGORY_TARGETS"),
+        ("detected_at", targets, "JIRA_INCIDENT_CATEGORY_TARGETS"),
+        ("detected_at", os.environ.get("JIRA_INCIDENT_REPORT_MINUTES", "").strip(), "JIRA_INCIDENT_REPORT_MINUTES"),
+    ]
+    for role, setting, env_name in conflicts:
+        if role in disabled and setting:
+            return None, (
+                f"{env_name} is set but the {role} field is turned off in JIRA_INCIDENT_FIELDS; "
+                f"the check could never run"
+            )
     return {
-        "fields": {**DEFAULT_FIELDS, **fields},
+        "fields": merged,
+        "disabled_fields": sorted(disabled),
         "category_targets": targets,
         "report_minutes": report_minutes,
         "max_items": max_items,
         "postmortem_types": {
             t.lower() for t in (list_env("JIRA_POSTMORTEM_ISSUE_TYPES") or ["Post-mortem"])
         },
-        "required_severities": {t.lower() for t in list_env("JIRA_POSTMORTEM_REQUIRED_SEVERITIES")},
-        "required_phases": list_env("JIRA_INCIDENT_REQUIRED_PHASES"),
+        "required_severities": required_severities,
+        "required_phases": required_phases,
         "no_review": {t.lower() for t in (list_env("JIRA_NO_POSTMORTEM_RESOLUTIONS") or DEFAULT_NO_REVIEW)},
     }, None
 
@@ -398,6 +450,7 @@ def main() -> int:
             "fields_resolved": ids,
             "field_problems": problems,
             "field_candidates": candidates,
+            "checks_disabled": _checks_disabled(cfg["disabled_fields"]),
             "required_phases": cfg["required_phases"],
             "no_postmortem_resolutions": sorted(cfg["no_review"]),
             "report_window_minutes": cfg["report_minutes"],
