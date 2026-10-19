@@ -9,8 +9,9 @@ Ported from prowler/providers/azure/services/defender/defender_service.py (Apach
 
 import logging
 import os
+import re
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -45,6 +46,14 @@ PROTECTED_TIER = "standard"
 REGISTERED = "registered"
 NOT_REGISTERED = "not_registered"
 UNKNOWN = "unknown"
+
+FULLY_COVERED = "fullycovered"
+
+_SCOPE_PATTERNS = (
+    ("management_group", re.compile(r"^/providers/microsoft\.management/managementgroups/[^/]+$")),
+    ("subscription", re.compile(r"^/subscriptions/[^/]+$")),
+    ("resource_group", re.compile(r"^/subscriptions/[^/]+/resourcegroups/[^/]+$")),
+)
 
 
 # --- projection: the only code here that touches an azure-mgmt model ---
@@ -82,15 +91,31 @@ def _iso8601_duration(value) -> str | None:
     return f"P{date_part}" + (f"T{time_part}" if time_part else "")
 
 
+def _iso8601_timestamp(value) -> str | None:
+    """A `datetime` as the category's UTC "%Y-%m-%dT%H:%M:%SZ"; anything else passes through."""
+    if not isinstance(value, datetime):
+        return value
+    moment = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def project_pricing(pricing) -> dict:
     """Read a `Pricing` model's attributes into a flat snake_case dict."""
     return {
         "id": model_attr(pricing, "id"),
         "name": model_attr(pricing, "name"),
         "pricing_tier": model_attr(pricing, "pricing_tier"),
+        "sub_plan": model_attr(pricing, "sub_plan"),
         "free_trial_remaining_time": _iso8601_duration(
             model_attr(pricing, "free_trial_remaining_time")
         ),
+        "enablement_time": _iso8601_timestamp(model_attr(pricing, "enablement_time")),
+        "enforce": model_attr(pricing, "enforce"),
+        "inherited": model_attr(pricing, "inherited"),
+        "inherited_from": model_attr(pricing, "inherited_from"),
+        "resources_coverage_status": model_attr(pricing, "resources_coverage_status"),
+        "deprecated": model_attr(pricing, "deprecated"),
+        "replaced_by": list(model_attr(pricing, "replaced_by") or []),
         "extensions": [
             {
                 "name": model_attr(ext, "name"),
@@ -116,18 +141,51 @@ def _as_bool(value) -> bool:
     return str(value).strip().lower() in ("true", "1", "yes", "on", "enabled")
 
 
+def _optional_bool(value) -> bool | None:
+    """Like `_as_bool`, but a field the API left out stays None rather than False."""
+    return None if value is None else _as_bool(value)
+
+
+def _scope_id(value) -> str | None:
+    """`inheritedFrom` is documented as the string "Null" when not inherited."""
+    text = str(value or "").strip()
+    return None if text.lower() in ("", "null", "none") else text
+
+
+def scope_type(scope_id: str | None) -> str | None:
+    """Which kind of ARM scope an `inheritedFrom` id names."""
+    if not scope_id:
+        return None
+    normalized = scope_id.lower().rstrip("/")
+    for name, pattern in _SCOPE_PATTERNS:
+        if pattern.match(normalized):
+            return name
+    return "resource" if normalized.startswith("/subscriptions/") else "other"
+
+
 def pricing_record(pricing: dict) -> dict:
-    """Normalize one projected Defender plan — Prowler's five-field projection.
+    """Normalize one projected Defender plan.
 
     `extensions` collapses the SDK's list of {name, is_enabled, ...} objects into a
     flat {name: bool} map, which is how Prowler's checks read it.
     """
     extensions = pricing.get("extensions") or []
+    inherited_from = _scope_id(pricing.get("inherited_from"))
     return {
         "resource_id": pricing.get("id"),
         "resource_name": pricing.get("name"),
         "pricing_tier": pricing.get("pricing_tier"),
+        "enabled": str(pricing.get("pricing_tier") or "").lower() == PROTECTED_TIER,
+        "sub_plan": pricing.get("sub_plan") or None,
+        "enablement_time": pricing.get("enablement_time"),
         "free_trial_remaining_time": pricing.get("free_trial_remaining_time"),
+        "resources_coverage_status": pricing.get("resources_coverage_status"),
+        "enforce": _optional_bool(pricing.get("enforce")),
+        "inherited": _optional_bool(pricing.get("inherited")),
+        "inherited_from": inherited_from,
+        "inherited_from_scope": scope_type(inherited_from),
+        "deprecated": bool(pricing.get("deprecated")),
+        "replaced_by": sorted(pricing.get("replaced_by") or []),
         "extensions": {
             ext.get("name"): _as_bool(ext.get("is_enabled"))
             for ext in extensions
@@ -136,10 +194,15 @@ def pricing_record(pricing: dict) -> dict:
     }
 
 
+def _names(rows) -> list[str]:
+    return sorted(p["resource_name"] or "" for p in rows)
+
+
 def summarize(plans: list[dict], registration_status: str) -> dict:
     """Standard-tier coverage is the headline: how many plans actually protect."""
     total = len(plans)
-    standard = sum(1 for p in plans if str(p["pricing_tier"] or "").lower() == PROTECTED_TIER)
+    enabled = [p for p in plans if p["enabled"]]
+    standard = len(enabled)
     return {
         "provider_registration_status": registration_status,
         "total_plans": total,
@@ -150,7 +213,31 @@ def summarize(plans: list[dict], registration_status: str) -> dict:
             1 for p in plans if any(p["extensions"].values())
         ),
         "total_enabled_extensions": sum(
-            1 for p in plans for enabled in p["extensions"].values() if enabled
+            1 for p in plans for on in p["extensions"].values() if on
+        ),
+        "enabled_plans": _names(enabled),
+        "enabled_plan_sub_plans": {p["resource_name"]: p["sub_plan"] for p in enabled},
+        "enabled_plan_enablement_times": {
+            p["resource_name"]: p["enablement_time"] for p in enabled
+        },
+        "enabled_plans_not_fully_covered": {
+            p["resource_name"]: p["resources_coverage_status"]
+            for p in enabled
+            if p["resources_coverage_status"]
+            and str(p["resources_coverage_status"]).lower() != FULLY_COVERED
+        },
+        "plans_not_enabled": _names(
+            p for p in plans if not p["enabled"] and not p["deprecated"]
+        ),
+        "deprecated_plans": _names(p for p in plans if p["deprecated"]),
+        "deprecated_plans_enabled": {
+            p["resource_name"]: p["replaced_by"] for p in enabled if p["deprecated"]
+        },
+        "enforced_plans": _names(p for p in plans if p["enforce"]),
+        "plans_reporting_inheritance": sum(1 for p in plans if p["inherited"] is not None),
+        "inherited_plans": _names(p for p in plans if p["inherited"]),
+        "plans_inherited_from_management_group": _names(
+            p for p in plans if p["inherited"] and p["inherited_from_scope"] == "management_group"
         ),
     }
 

@@ -698,6 +698,21 @@ schemas and the `paramify` CLI — not the internal code.
   `monitored_operation_coverage_reaching_human` does the same for the existing
   map. `action_groups` and `monitored_operation_coverage` are
   unchanged.
+- **`azure_defender_plans` 0.2.0 records each plan's sub-plan, enablement time
+  and inheritance.** Each plan now carries `sub_plan` (Servers `P1` / `P2`,
+  `DefenderForStorageV2`, `PerKeyVault`, …), `enablement_time` (the last time it
+  was set to Standard), `resources_coverage_status`, `enforce`, `deprecated` and
+  `replaced_by`, and `inherited` / `inherited_from` with `inherited_from_scope`
+  (`management_group`, `subscription`, `resource_group` or `resource`), all from
+  the same `pricings.list` call. Azure documents inheritance as reported for
+  resource-level pricing only, so at subscription scope it reads `null` and
+  `plans_reporting_inheritance` says whether any plan reported it. New summary
+  keys: `enabled_plans`, `enabled_plan_sub_plans`, `enabled_plan_enablement_times`,
+  `enabled_plans_not_fully_covered`, `plans_not_enabled` (deprecated plans left
+  out), `deprecated_plans`, `deprecated_plans_enabled`, `enforced_plans`,
+  `inherited_plans` and `plans_inherited_from_management_group`. The summary does
+  not judge which plans a system needs. Existing fields and summary keys are
+  unchanged.
 - **`azure_diagnostic_settings` also maps to `KSI-MLA-OSM`**, which its
   subscription activity-log export already evidenced.
 - **`KSI-SVC-PRR` counts as config-evidenceable.** Its residual elements are a
