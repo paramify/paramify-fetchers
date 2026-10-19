@@ -100,8 +100,8 @@ config_schema:
     type: string
     env: CHECKOV_SKIP_CHECKS
     description: >-
-      CSV of check IDs to skip; added to _shared/skip-checks.default.txt
-      unless use_default_skip_checks is false. Skipped checks do not appear in
+      Check IDs to skip, comma- or newline-separated (each entry trimmed); added to
+      _shared/skip-checks.default.txt unless use_default_skip_checks is false. Skipped checks do not appear in
       checkov's results; the effective list is recorded in metadata.skip_checks.
   use_default_skip_checks:
     type: boolean
@@ -125,14 +125,16 @@ config_schema:
     type: string
     env: CHECKOV_SKIP_PATHS
     description: >-
-      CSV of paths to skip during the scan, recorded in metadata.skip_paths. Each entry is
-      trimmed and passed whole, so it may contain spaces. Also how to
+      Paths to skip during the scan, comma- or newline-separated, recorded in
+      metadata.skip_paths. Each entry is trimmed and passed whole, so it may contain spaces. Also how to
       exclude a file checkov cannot parse, which otherwise fails the run. file_counts still
       counts skipped files.
   checks:
     type: string
     env: CHECKOV_BICEP_CHECKS
-    description: CSV allowlist of check IDs to run (overrides skips for those checks).
+    description: >-
+      Allowlist of check IDs to run, comma- or newline-separated (each entry trimmed);
+      overrides skips for those checks.
   external_checks_dir:
     type: string
     env: CHECKOV_EXTERNAL_CHECKS_DIR
