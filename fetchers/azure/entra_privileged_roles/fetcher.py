@@ -39,6 +39,7 @@ from entra_graph import (  # noqa: E402
     GLOBAL_ADMINISTRATOR_TEMPLATE_ID,
     PRIVILEGED_ROLE_NAMES,
     graph_attr,
+    is_privileged_role,
     paginate,
     resolve_tenant,
     tenant_filename_key,
@@ -48,7 +49,6 @@ from entra_graph import (  # noqa: E402
 )
 
 logger = logging.getLogger("azure_entra_privileged_roles")
-
 
 # The members collection is typed as directoryObject and the concrete kind shows up
 # only in @odata.type. It matters: a role-assignable GROUP moves the real access
@@ -111,17 +111,6 @@ def member_type(odata_type: str | None) -> str:
         return mapped
     tail = str(odata_type).rsplit(".", 1)[-1]
     return (tail[:1].upper() + tail[1:]) if tail else "Unknown"
-
-
-def is_privileged_role(role: dict) -> bool:
-    """Whether this directory role grants tenant-wide administrative power.
-
-    Name first, template id second. The redundancy is deliberate: Global Administrator
-    stays recognized even if it ever came back under a different display name.
-    """
-    if (role.get("display_name") or "") in PRIVILEGED_ROLE_NAMES:
-        return True
-    return str(role.get("role_template_id") or "").lower() == GLOBAL_ADMINISTRATOR_TEMPLATE_ID
 
 
 def member_record(member: dict) -> dict:
