@@ -857,17 +857,27 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`checkov_bicep` passes its list settings to checkov intact** (0.2.0 →
   0.2.1). `checks`, `skip_checks` and `skip_paths` take entries separated by
-  commas or newlines, and each entry is trimmed and passed to checkov whole.
-  Before:
+  commas or newlines. `checks` and `skip_checks` also take spaces and tabs,
+  since check ids never contain them. Each entry is trimmed and passed to
+  checkov whole. Before:
   - a `skip_paths` entry with a space (`My Templates/legacy`) became two skip
     paths, and each piece could skip folders it was not meant to;
-  - `checks` with a space after a comma (`CKV_AZURE_3, CKV_AZURE_44`), or one
-    id per line, failed the run;
-  - `skip_checks` read only its first line, so checks listed below it still
-    ran.
+  - a `skip_paths` entry with `*` or `?` was expanded against the files in the
+    fetcher's working directory, so `*.json` could reach checkov as
+    `--skip-path report.json`;
+  - `checks` failed the run if it had a space after a comma
+    (`CKV_AZURE_3, CKV_AZURE_44`), ids separated only by spaces, or one id
+    per line;
+  - `skip_checks` failed the run if its ids were separated only by spaces,
+    and read only its first line, so checks listed below it still ran.
 
   `metadata.skip_paths` now lists exactly the paths checkov was told to skip.
-  It used to show a path with a space, or several lines, as one entry.
+  It used to disagree in three cases:
+  - a path with a space was one entry, while checkov got two;
+  - a `*` pattern was listed as written, while checkov got the files it
+    matched;
+  - entries on separate lines with no comma between them were one entry,
+    while checkov got one per line.
 - **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →
   0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
   counterpart of `DenyAction`, was reported as `unresolved` with no reason and
