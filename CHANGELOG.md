@@ -12,6 +12,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_groups`** (`EVD-AZURE-ENTRA-GROUPS`) — every Entra ID group with
+  its members and owners, its kind, whether it can hold directory roles, and
+  whether membership is set by a rule (dynamic, with paused rules flagged), by hand
+  or synced from on-premises. Summarizes role-assignable groups without an owner or
+  with guests, groups without an owner or with only disabled owners, and groups
+  holding guests, disabled users, nested groups or service principals. Members past
+  `$expand`'s 20-item limit are read from the beta `/members`, since v1.0 leaves out
+  service principals.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
