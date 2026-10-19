@@ -115,10 +115,14 @@ evidence_set:
     configured post-mortem types and their sub-tasks (the action items) with
     POST /rest/api/3/issue/bulkfetch. Per incident: minutes_to_report (detected
     to reported), category target, phases_seen, post-mortems and action items.
-    Only links to the configured post-mortem types are followed; a linked
-    post-mortem or action item the collector cannot read (hidden, or the bulk
-    call failed) is reported as postmortem_not_visible or
-    action_items_not_visible, never as absent, and fails the run as partial.
+    Only links to the configured post-mortem types are followed. Jira strips
+    links to issues the collector cannot see (measured: an issue in a project
+    without Browse disappears from issuelinks and from bulkfetch without an
+    issueErrors entry), so the collector must hold Browse Projects on the
+    post-mortem project or the incident is reported as resolved_without_postmortem.
+    A linked issue the bulk call failed to read is reported as
+    postmortem_not_visible or action_items_not_visible, never as absent, and
+    fails the run as partial.
     Findings: missing_detected_time, detected_or_reported_time_unparseable,
     reported_before_detected, reported_late,
     category_notification_target_missed, missing_severity, missing_category,
