@@ -11,12 +11,16 @@ reads, does not exist on azure-mgmt-web 11.x and reads as None, silently breakin
 every per-app GET. Function apps are a separate evidence set.
 
 Beyond Prowler: the access restrictions (main and SCM site) that `config/web` already
-returns, and each app's diagnostic settings from azure-mgmt-monitor.
+returns, and each app's diagnostic settings from azure-mgmt-monitor. Also cipher suites,
+basic-auth publishing, Key Vault references and runtime end of support (webAppStacks).
 """
 
 import logging
 import os
+import re
 import sys
+from collections.abc import Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -64,6 +68,39 @@ FTP_ENCRYPTED_STATES = ("Disabled", "FtpsOnly")
 # live); "Internet" is the service tag for the whole public Internet.
 ALL_ADDRESSES = ("any", "*", "0.0.0.0/0", "::/0", "internet")
 
+# App Service's fixed cipher suite order, strongest first (May 2024 reorder); a minimum blocks every suite after it.
+TLS_CIPHER_SUITE_ORDER = (
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
+    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_RSA_WITH_AES_256_CBC_SHA256",
+    "TLS_RSA_WITH_AES_128_CBC_SHA256",
+    "TLS_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_RSA_WITH_AES_128_CBC_SHA",
+)
+TLS13_CIPHER_SUITES = TLS_CIPHER_SUITE_ORDER[:2]
+
+# Declared runtimes on a Windows app, in config/web; a Linux app declares one in linux_fx_version.
+WINDOWS_RUNTIME_SETTINGS = (
+    "net_framework_version",
+    "php_version",
+    "python_version",
+    "node_version",
+    "java_version",
+)
+CUSTOM_CONTAINER_PREFIXES = ("docker|", "compose|", "kube|")
+JAVA_RUNTIME_KEY = re.compile(r"java\d+Runtime")
+
 
 # --- projection: the only azure-mgmt model access ---
 
@@ -109,9 +146,13 @@ def project_site_config(config) -> dict:
         "python_version": model_attr(config, "python_version"),
         "net_framework_version": model_attr(config, "net_framework_version"),
         "node_version": model_attr(config, "node_version"),
+        "java_container": model_attr(config, "java_container"),
+        "java_container_version": model_attr(config, "java_container_version"),
         "http20_enabled": model_attr(config, "http20_enabled"),
         "ftps_state": model_attr(config, "ftps_state"),
         "min_tls_version": model_attr(config, "min_tls_version"),
+        "min_tls_cipher_suite": model_attr(config, "min_tls_cipher_suite"),
+        "scm_min_tls_version": model_attr(config, "scm_min_tls_version"),
         "remote_debugging_enabled": model_attr(config, "remote_debugging_enabled"),
         "always_on": model_attr(config, "always_on"),
         "http_logging_enabled": model_attr(config, "http_logging_enabled"),
@@ -191,6 +232,58 @@ def project_auth_settings(settings) -> dict:
     }
 
 
+def project_key_vault_reference(ref) -> dict:
+    """Read an `ApiKVReference`: where a setting resolves from, never its value."""
+    return {
+        "name": model_attr(ref, "name") or basename(model_attr(ref, "id")),
+        "status": model_attr(ref, "status"),
+        "source": model_attr(ref, "source"),
+        "vault_name": model_attr(ref, "vault_name"),
+        "secret_name": model_attr(ref, "secret_name"),
+        "secret_version": model_attr(ref, "secret_version"),
+        "identity_type": model_attr(ref, "identity_type"),
+        "details": model_attr(ref, "details"),
+    }
+
+
+def _support_dates(settings) -> dict:
+    eol = model_attr(settings, "end_of_life_date")
+    return {
+        "end_of_life_date": eol.isoformat() if isinstance(eol, datetime) else eol,
+        "is_deprecated": bool(model_attr(settings, "is_deprecated") or False),
+    }
+
+
+def project_web_app_stack(stack) -> list[dict]:
+    """Flatten one `WebAppStack` into runtimes spelled the way a site's config/web declares them."""
+    name = model_attr(stack, "name") or model_attr(stack, "value")
+    entries = []
+    for major in model_attr(stack, "major_versions") or []:
+        for minor in model_attr(major, "minor_versions") or []:
+            settings = model_attr(minor, "stack_settings")
+            base = {"stack": name, "version": model_attr(minor, "value")}
+            for os_name in ("linux", "windows"):
+                runtime = model_attr(settings, f"{os_name}_runtime_settings")
+                if model_attr(runtime, "runtime_version"):
+                    entries.append({**base, "os": os_name, "runtime": model_attr(runtime, "runtime_version"),
+                                    **_support_dates(runtime)})
+            linux_container = model_attr(settings, "linux_container_settings")
+            # The SDK model names only java8/java11; java17Runtime and later are on the raw mapping.
+            for key in (linux_container.keys() if isinstance(linux_container, Mapping) else ()):
+                if JAVA_RUNTIME_KEY.fullmatch(key) and linux_container[key]:
+                    entries.append({**base, "os": "linux", "runtime": linux_container[key],
+                                    **_support_dates(linux_container)})
+            windows_container = model_attr(settings, "windows_container_settings")
+            if model_attr(windows_container, "java_container"):
+                runtime = java_container_runtime(
+                    model_attr(windows_container, "java_container"),
+                    model_attr(windows_container, "java_container_version"),
+                )
+                entries.append({**base, "os": "windows", "runtime": runtime,
+                                **_support_dates(windows_container)})
+    return entries
+
+
 # --- pure transforms (flat snake_case dicts in, evidence records out) ---
 
 def is_web_app(kind) -> bool:
@@ -262,6 +355,9 @@ def web_app_record(site: dict) -> dict:
         "authentication": None,
         # None until the diagnostic-settings enrichment; [] means collected, none set.
         "monitor_diagnostic_settings": None,
+        "basic_auth_publishing": None,
+        "key_vault_references": None,
+        "runtime_support": None,
     }
 
 
@@ -275,13 +371,152 @@ def configuration_record(config: dict) -> dict:
         "python_version": config.get("python_version"),
         "net_framework_version": config.get("net_framework_version"),
         "node_version": config.get("node_version"),
+        "java_container": config.get("java_container"),
+        "java_container_version": config.get("java_container_version"),
         "http20_enabled": bool(config.get("http20_enabled") or False),
         "ftps_state": config.get("ftps_state"),
         "min_tls_version": config.get("min_tls_version"),
+        "scm_min_tls_version": config.get("scm_min_tls_version"),
         "remote_debugging_enabled": bool(config.get("remote_debugging_enabled") or False),
         "always_on": bool(config.get("always_on") or False),
         "http_logging_enabled": bool(config.get("http_logging_enabled") or False),
         **access_restrictions_record(config),
+        **cipher_suite_record(config.get("min_tls_version"), config.get("min_tls_cipher_suite")),
+    }
+
+
+def allowed_cipher_suites(min_tls_version, min_cipher_suite):
+    """Suites a client can still negotiate; None for a minimum outside the known order."""
+    if str(min_tls_version or "") == "1.3":
+        return list(TLS13_CIPHER_SUITES)
+    if not min_cipher_suite:
+        return list(TLS_CIPHER_SUITE_ORDER)
+    if min_cipher_suite not in TLS_CIPHER_SUITE_ORDER:
+        return None
+    return list(TLS_CIPHER_SUITE_ORDER[: TLS_CIPHER_SUITE_ORDER.index(min_cipher_suite) + 1])
+
+
+def cipher_suite_record(min_tls_version, min_cipher_suite) -> dict:
+    allowed = allowed_cipher_suites(min_tls_version, min_cipher_suite)
+    return {
+        "min_tls_cipher_suite": min_cipher_suite,
+        "allowed_tls_cipher_suites": allowed,
+        "allows_cbc_cipher_suites": None if allowed is None else any("_CBC_" in s for s in allowed),
+        # TLS_RSA_* suites use static RSA key exchange: no forward secrecy.
+        "allows_non_forward_secret_cipher_suites": (
+            None if allowed is None else any(s.startswith("TLS_RSA_") for s in allowed)
+        ),
+    }
+
+
+def basic_auth_record(scm_allowed, ftp_allowed) -> dict:
+    """Basic-auth publishing: `disabled` is null when a policy read failed and neither read showed it on."""
+    if scm_allowed or ftp_allowed:
+        disabled = False
+    elif scm_allowed is None or ftp_allowed is None:
+        disabled = None
+    else:
+        disabled = True
+    return {"scm_allowed": scm_allowed, "ftp_allowed": ftp_allowed, "disabled": disabled}
+
+
+def key_vault_reference_record(ref: dict) -> dict:
+    return {
+        "name": ref.get("name"),
+        "status": ref.get("status"),
+        "resolved": str(ref.get("status") or "").lower() == "resolved",
+        "source": ref.get("source"),
+        "vault_name": ref.get("vault_name"),
+        "secret_name": ref.get("secret_name"),
+        "secret_version_pinned": bool(ref.get("secret_version")),
+        "identity_type": ref.get("identity_type"),
+        "details": ref.get("details"),
+    }
+
+
+def key_vault_reference_items(app: dict) -> list[dict]:
+    refs = app.get("key_vault_references") or {}
+    return [r for part in ("app_settings", "connection_strings") for r in (refs.get(part) or [])]
+
+
+def java_container_runtime(container, version) -> str:
+    return f"{container}|{version or ''}"
+
+
+def runtime_index(entries: list[dict]) -> dict:
+    """(os, lower-cased runtime) -> the first stack entry declaring it."""
+    index: dict = {}
+    for entry in entries:
+        index.setdefault((entry["os"], str(entry["runtime"]).lower()), entry)
+    return index
+
+
+def declared_runtimes(kind, config: dict) -> list[tuple[str, str, str]]:
+    """(setting, value, os) for each runtime the app declares; "Off" and blanks are not declared."""
+    if "linux" in str(kind or "").lower():
+        candidates = [("linux_fx_version", config.get("linux_fx_version"), "linux")]
+    elif config.get("windows_fx_version"):
+        candidates = [("windows_fx_version", config.get("windows_fx_version"), "windows")]
+    else:
+        candidates = [(field, config.get(field), "windows") for field in WINDOWS_RUNTIME_SETTINGS]
+        if config.get("java_container"):
+            candidates.append((
+                "java_container",
+                java_container_runtime(config["java_container"], config.get("java_container_version")),
+                "windows",
+            ))
+    return [
+        (setting, str(value).strip(), os_name)
+        for setting, value, os_name in candidates
+        if value and str(value).strip().lower() not in ("", "off")
+    ]
+
+
+def _parse_time(value):
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def runtime_record(setting, value, os_name, index: dict, now: datetime) -> dict:
+    custom_container = value.lower().startswith(CUSTOM_CONTAINER_PREFIXES)
+    entry = None if custom_container else index.get((os_name, value.lower()))
+    eol = _parse_time(entry["end_of_life_date"]) if entry and entry.get("end_of_life_date") else None
+    if entry is None:
+        past = None
+    else:
+        past = bool(entry["is_deprecated"] or (eol is not None and eol <= now))
+    return {
+        "setting": setting,
+        "value": value,
+        "custom_container": custom_container,
+        "stack": entry["stack"] if entry else None,
+        "version": entry["version"] if entry else None,
+        "end_of_life_date": entry.get("end_of_life_date") if entry else None,
+        "days_until_end_of_life": (eol.date() - now.date()).days if eol else None,
+        "is_deprecated": entry["is_deprecated"] if entry else None,
+        "past_end_of_support": past,
+    }
+
+
+def runtime_support_record(kind, config: dict, index: dict, now: datetime) -> dict:
+    """Any declared runtime past end of support makes the app past it; an unmatched one makes it unknown."""
+    runtimes = [runtime_record(*declared, index, now) for declared in declared_runtimes(kind, config)]
+    verdicts = [r["past_end_of_support"] for r in runtimes]
+    if any(verdicts):
+        past = True
+    elif not runtimes or None in verdicts:
+        past = None
+    else:
+        past = False
+    return {
+        "declared_runtimes": runtimes,
+        "past_end_of_support": past,
+        "runtimes_past_end_of_support": [r["value"] for r in runtimes if r["past_end_of_support"]],
     }
 
 
@@ -482,6 +717,50 @@ def summarize(apps: list[dict]) -> dict:
             1 for a in apps if a.get("monitor_diagnostic_settings")
         ),
         "apps_with_enabled_logs": sum(1 for a in apps if has_enabled_log(a)),
+        # --- TLS cipher suites ---
+        "scm_minimum_tls_1_2_apps": sum(
+            1
+            for a in apps
+            if str(dig(a, "configuration", "scm_min_tls_version") or "") in MODERN_TLS_VERSIONS
+        ),
+        "min_tls_cipher_suite_set_apps": sum(
+            1 for a in apps if dig(a, "configuration", "min_tls_cipher_suite")
+        ),
+        "cbc_cipher_suites_allowed_apps": sum(
+            1 for a in apps if dig(a, "configuration", "allows_cbc_cipher_suites")
+        ),
+        "non_forward_secret_cipher_suites_allowed_apps": sum(
+            1 for a in apps if dig(a, "configuration", "allows_non_forward_secret_cipher_suites")
+        ),
+        # --- basic-auth publishing ---
+        "scm_basic_auth_allowed_apps": sum(
+            1 for a in apps if dig(a, "basic_auth_publishing", "scm_allowed")
+        ),
+        "ftp_basic_auth_allowed_apps": sum(
+            1 for a in apps if dig(a, "basic_auth_publishing", "ftp_allowed")
+        ),
+        "basic_auth_publishing_disabled_apps": sum(
+            1 for a in apps if dig(a, "basic_auth_publishing", "disabled") is True
+        ),
+        "basic_auth_publishing_unknown_apps": sum(
+            1 for a in apps if dig(a, "basic_auth_publishing", "disabled") is None
+        ),
+        # --- Key Vault references ---
+        "apps_with_key_vault_references": sum(1 for a in apps if key_vault_reference_items(a)),
+        "key_vault_references": sum(len(key_vault_reference_items(a)) for a in apps),
+        "unresolved_key_vault_references": sum(
+            1 for a in apps for r in key_vault_reference_items(a) if not r["resolved"]
+        ),
+        "apps_with_unresolved_key_vault_references": sum(
+            1 for a in apps if any(not r["resolved"] for r in key_vault_reference_items(a))
+        ),
+        # --- runtime end of support ---
+        "apps_with_runtime_past_end_of_support": sum(
+            1 for a in apps if dig(a, "runtime_support", "past_end_of_support") is True
+        ),
+        "apps_with_runtime_support_unknown": sum(
+            1 for a in apps if dig(a, "runtime_support", "past_end_of_support") is None
+        ),
     }
 
 
@@ -536,11 +815,54 @@ def collect_web_apps(subscription_id, cred, collector: Collector) -> list[dict]:
         )
         if settings is not None:
             app["authentication"] = authentication_record(settings)
+        _attach_publishing_and_references(client, collector, app, group, name)
 
     if apps:
+        _attach_runtime_support(client, collector, apps, datetime.now(timezone.utc))
         _attach_diagnostic_settings(subscription_id, cred, collector, apps)
 
     return sorted(apps, key=lambda r: r.get("id") or "")
+
+
+def _attach_publishing_and_references(client, collector: Collector, app, group, name) -> None:
+    """basicPublishingCredentialsPolicies and configreferences: Reader GETs that return no setting values."""
+    policies = {}
+    for kind, call in (("scm", client.web_apps.get_scm_allowed), ("ftp", client.web_apps.get_ftp_allowed)):
+        policies[kind] = collector.guard(
+            f"web.web_apps.get_{kind}_allowed ({name})",
+            lambda call=call: bool(model_attr(call(resource_group_name=group, name=name), "allow") or False),
+        )
+    app["basic_auth_publishing"] = basic_auth_record(policies["scm"], policies["ftp"])
+
+    references = {}
+    for part, method in (
+        ("app_settings", "get_app_settings_key_vault_references"),
+        ("connection_strings", "get_site_connection_string_key_vault_references"),
+    ):
+        call = getattr(client.web_apps, method)
+        references[part] = collector.guard(
+            f"web.web_apps.{method} ({name})",
+            lambda call=call: sorted(
+                (key_vault_reference_record(project_key_vault_reference(ref))
+                 for ref in call(resource_group_name=group, name=name)),
+                key=lambda r: r.get("name") or "",
+            ),
+        )
+    app["key_vault_references"] = references
+
+
+def _attach_runtime_support(client, collector: Collector, apps, now: datetime) -> None:
+    """One tenant-wide GET of Microsoft.Web/webAppStacks, joined to each app's declared runtimes."""
+    entries = collector.guard(
+        "web.provider.get_web_app_stacks",
+        lambda: [entry for stack in client.provider.get_web_app_stacks() for entry in project_web_app_stack(stack)],
+    )
+    if entries is None:
+        return
+    index = runtime_index(entries)
+    for app in apps:
+        if app.get("configuration") is not None:
+            app["runtime_support"] = runtime_support_record(app.get("kind"), app["configuration"], index, now)
 
 
 def _attach_diagnostic_settings(subscription_id, cred, collector: Collector, apps) -> None:

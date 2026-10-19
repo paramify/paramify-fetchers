@@ -40,7 +40,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2`, `si-3`
 
-*5 fetchers:* [`aws_organizations_scp`](../fetchers/aws/organizations_scp), [`azure_network_security_groups`](../fetchers/azure/network_security_groups), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`azure_vnet_egress_routing`](../fetchers/azure/vnet_egress_routing), [`k8s_kubectl_security`](../fetchers/k8s/kubectl_security)
+*6 fetchers:* [`aws_organizations_scp`](../fetchers/aws/organizations_scp), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_network_security_groups`](../fetchers/azure/network_security_groups), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`azure_vnet_egress_routing`](../fetchers/azure/vnet_egress_routing), [`k8s_kubectl_security`](../fetchers/k8s/kubectl_security)
 
 #### `KSI-CNA-EIS` — Enforcing Intended State *(optional at Low)*
 
@@ -112,7 +112,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-17.2`, `ia-5.2`, `ia-5.6`, `sc-12`, `sc-17`
 
-*11 fetchers:* [`aws_acm_certificate_status`](../fetchers/aws/acm_certificate_status), [`aws_kms_key_rotation`](../fetchers/aws/kms_key_rotation), [`aws_secrets_manager_rotation`](../fetchers/aws/secrets_manager_rotation), [`azure_databricks_workspace_configuration`](../fetchers/azure/databricks_workspace_configuration), [`azure_entra_app_registrations`](../fetchers/azure/entra_app_registrations), [`azure_key_vault_key_rotation`](../fetchers/azure/key_vault_key_rotation), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`gcp_api_keys_inventory`](../fetchers/gcp/api_keys_inventory), [`gcp_iam_service_accounts`](../fetchers/gcp/iam_service_accounts), [`gcp_kms_key_configuration`](../fetchers/gcp/kms_key_configuration), [`gcp_secret_manager_configuration`](../fetchers/gcp/secret_manager_configuration)
+*12 fetchers:* [`aws_acm_certificate_status`](../fetchers/aws/acm_certificate_status), [`aws_kms_key_rotation`](../fetchers/aws/kms_key_rotation), [`aws_secrets_manager_rotation`](../fetchers/aws/secrets_manager_rotation), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_databricks_workspace_configuration`](../fetchers/azure/databricks_workspace_configuration), [`azure_entra_app_registrations`](../fetchers/azure/entra_app_registrations), [`azure_key_vault_key_rotation`](../fetchers/azure/key_vault_key_rotation), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`gcp_api_keys_inventory`](../fetchers/gcp/api_keys_inventory), [`gcp_iam_service_accounts`](../fetchers/gcp/iam_service_accounts), [`gcp_kms_key_configuration`](../fetchers/gcp/kms_key_configuration), [`gcp_secret_manager_configuration`](../fetchers/gcp/secret_manager_configuration)
 
 #### `KSI-SVC-EIS` — Evaluating and Improving Security
 
@@ -128,7 +128,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `sc-4`
 
-*1 fetcher:* [`azure_residual_resources`](../fetchers/azure/residual_resources)
+*2 fetchers:* [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_residual_resources`](../fetchers/azure/residual_resources)
 
 #### ⬜ `KSI-SVC-RUD` — Removing Unwanted Data *(optional at Low)*
 
@@ -160,7 +160,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2.2`, `cm-8.3`, `sc-13`, `sc-23`, `si-7`, `si-7.1`, `sr-10`
 
-*5 fetchers:* [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration), [`azure_vm_hardening_status`](../fetchers/azure/vm_hardening_status), [`gcp_compute_instance_configuration`](../fetchers/gcp/compute_instance_configuration), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`wiz_file_integrity_monitoring`](../fetchers/wiz/file_integrity_monitoring)
+*6 fetchers:* [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration), [`azure_vm_hardening_status`](../fetchers/azure/vm_hardening_status), [`gcp_compute_instance_configuration`](../fetchers/gcp/compute_instance_configuration), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`wiz_file_integrity_monitoring`](../fetchers/wiz/file_integrity_monitoring)
 
 ### MLA — Monitoring, Logging, and Auditing  (5/5)
 
@@ -524,7 +524,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_app_gateway_backend_tls`](../fetchers/azure/app_gateway_backend_tls) | `KSI-SVC-SIN`, `KSI-SVC-VCM` |
 | [`azure_app_gateway_tls_listeners`](../fetchers/azure/app_gateway_tls_listeners) | `KSI-CNA-MAT`, `KSI-SVC-SIN` |
 | [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-RVP` |
-| [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-ULN`, `KSI-IAM-SNU`, `KSI-MLA-LET`, `KSI-SVC-EIS`, `KSI-SVC-SIN` |
+| [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration) | `KSI-CNA-DFP`, `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-ULN`, `KSI-IAM-SNU`, `KSI-MLA-LET`, `KSI-SVC-ASM`, `KSI-SVC-EIS`, `KSI-SVC-PRR`, `KSI-SVC-SIN`, `KSI-SVC-VRI` |
 | [`azure_app_service_plans`](../fetchers/azure/app_service_plans) | `KSI-CNA-OFA` |
 | [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status) | `KSI-RPL-ABO` |
 | [`azure_change_provenance`](../fetchers/azure/change_provenance) | `KSI-CMT-RMV` |

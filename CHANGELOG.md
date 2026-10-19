@@ -551,6 +551,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_app_service_configuration` 0.3.0: cipher suites, basic-auth publishing, Key Vault
+  references and runtime end of support.** Each web app now reports its minimum TLS cipher
+  suite and the suites still allowed (whether CBC or static-RSA suites remain), the SCM site's
+  minimum TLS version, whether basic-auth publishing is allowed on the SCM and FTP endpoints,
+  which app settings and connection strings are Key Vault references and whether each
+  resolves, and whether each declared runtime is past end of support, joined to App
+  Service's own runtime stack list. All Reader GETs; no setting value is read. Existing
+  fields are unchanged.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`

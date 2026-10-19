@@ -1,5 +1,5 @@
 name: azure_app_service_configuration
-version: 0.2.0
+version: 0.3.0
 description: >
   For each App Service web app in the subscription, reports the transport and
   identity posture — HTTPS-only, minimum TLS version, HTTP/2, FTP/FTPS deployment
@@ -11,7 +11,13 @@ description: >
   evidenced from. Also the access restrictions on the main site and the SCM
   (deployment) site — every rule, the default action, whether SCM inherits the main
   site's rules, and whether each site lets every caller through — and each app's
-  diagnostic settings (which log categories are exported, and where). Function apps are excluded; they are collected by
+  diagnostic settings (which log categories are exported, and where). Also the
+  minimum TLS cipher suite and which suites stay allowed, the SCM site's minimum TLS
+  version, whether basic-auth (publishing user) access to the SCM and FTP endpoints
+  is allowed, which app settings and connection strings resolve from Key Vault and
+  whether each resolves (setting values are never read), and whether each declared
+  runtime is past end of support, from App Service's own runtime stack list.
+  Function apps are excluded; they are collected by
   azure_function_app_configuration, whose calls need more than Reader.
 category: azure
 
@@ -53,6 +59,10 @@ ksis:
   - KSI-CNA-RNT   # access restrictions on the main and SCM sites
   - KSI-CNA-ULN   # VNet-scoped access-restriction rules and VNet integration
   - KSI-MLA-LET   # per-app diagnostic settings: which log categories are exported
+  - KSI-SVC-ASM   # app settings and connection strings resolved from Key Vault
+  - KSI-CNA-DFP   # basic-auth publishing on the SCM and FTP endpoints
+  - KSI-SVC-PRR   # runtimes past end of support left enabled
+  - KSI-SVC-VRI   # TLS cipher suites still allowed: CBC and non-forward-secret
 
   # No SVC-VCM: client certificate mode is mTLS-adjacent, but this reports the
   # setting, not automated validation of communications. Left an honest gap.
@@ -61,8 +71,44 @@ evidence_set:
   reference_id: EVD-AZURE-APPSVC-CONFIG
   name: Azure App Service Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Web"), then
-    azure-mgmt-web WebSiteManagementClient web_apps.list(), get_configuration() and
-    get_auth_settings_v2_without_secrets() per web app (access restrictions come from
-    get_configuration()), and azure-mgmt-monitor MonitorManagementClient
-    diagnostic_settings.list(resource_uri) per web app. Reader is sufficient — all GETs.
+    Script: fetcher.py. Permissions: Reader. Azure SDK calls: resource.providers.get("Microsoft.Web"),
+    then azure-mgmt-web WebSiteManagementClient web_apps.list(), and per web app
+    get_configuration() (GET config/web; access restrictions, TLS and runtime fields),
+    get_auth_settings_v2_without_secrets(), get_scm_allowed() and get_ftp_allowed()
+    (GET basicPublishingCredentialsPolicies/scm and /ftp), and
+    get_app_settings_key_vault_references() and
+    get_site_connection_string_key_vault_references() (GET config/configreferences/appsettings
+    and /connectionstrings); once per run provider.get_web_app_stacks() (GET
+    Microsoft.Web/webAppStacks); and azure-mgmt-monitor MonitorManagementClient
+    diagnostic_settings.list(resource_uri) per web app. All are GETs. No call lists app
+    settings, connection strings or publishing credentials, so no setting value or
+    secret is read.
+    TLS cipher suites: `configuration.min_tls_cipher_suite` is the minimum set on the app
+    (null when none is set). App Service orders its suites in a fixed list, strongest
+    first, and a minimum blocks every suite after it. `allowed_tls_cipher_suites` is that
+    list cut at the minimum, the whole list when no minimum is set, the two TLS 1.3 suites
+    when the minimum TLS version is 1.3, and null for a minimum not in the list.
+    `allows_cbc_cipher_suites` and `allows_non_forward_secret_cipher_suites` (TLS_RSA_*,
+    static RSA key exchange) are read from it. `scm_min_tls_version` is the deployment
+    (SCM) site's own minimum, set separately from the app's.
+    Basic-auth publishing: `basic_auth_publishing.scm_allowed` / `ftp_allowed` are the two
+    policies' `allow`; `disabled` is true when both are false, false when either is true,
+    and null when a read failed and the other did not show it on.
+    Key Vault references: `key_vault_references.app_settings` / `connection_strings` list
+    only the settings that are Key Vault references, each with its status, `resolved`
+    (status Resolved), vault, secret name, whether a secret version is pinned, and the
+    identity type used to resolve it. A setting holding a literal value is not listed;
+    an empty list means no references, and null means the read failed.
+    Runtime end of support: each app's declared runtimes are read from config/web. A Linux
+    app declares `linux_fx_version`; a Windows app any of `net_framework_version`,
+    `php_version`, `python_version`, `node_version`, `java_version` and its Java container,
+    or `windows_fx_version` for a Windows container. Blank and "Off" are not declared.
+    Each is matched to the webAppStacks entry with the same spelling, giving its stack,
+    version, `end_of_life_date`, `days_until_end_of_life` (negative once past) and
+    `is_deprecated`; `past_end_of_support` is true when deprecated or the end-of-life date
+    has passed, false when matched and neither, and null when unmatched or a custom
+    container. `runtime_support.past_end_of_support` is true if any declared runtime is
+    past end of support, null if none is declared or any is unmatched, else false. Older
+    Windows apps can carry `php_version` 5.6 from a former platform default alongside
+    their .NET version; it is reported like any other declared runtime, and setting it to
+    Off removes it.
