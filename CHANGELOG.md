@@ -47,7 +47,11 @@ schemas and the `paramify` CLI — not the internal code.
   reopened change is its first move into the done status, so a late approval is
   still caught. A role may be pinned to several `customfield_` ids for
   team-managed projects; changelog reads with more than 10 field ids are made in
-  groups instead of being cut to 10.
+  groups instead of being cut to 10. Pinned ids are checked against the site's
+  field list, a value that is neither a name, an id nor a list of ids is
+  `bad_config`, the deployment time of a change is its first entry into any
+  done-category status (read from `GET /rest/api/3/status`), and turning off
+  `change_type` while change types are pre-approved is refused.
 - **All Jira fetchers**: `metadata.partial_failure` now follows
   `metadata.complete` (a hit cap or an unresolved field is partial, not only a
   failed call). HTTP 429 and 5xx are retried with `Retry-After` or backoff, and a
@@ -62,7 +66,13 @@ schemas and the `paramify` CLI — not the internal code.
 - **`jira_audit_records`**: sensitive changes are matched by key words in the
   category name with `summary.unclassified_categories` for what matched nothing
   (Atlassian does not publish the category list); changed values are kept only
-  for sensitive records, shortened and markup-escaped.
+  for sensitive records, shortened and markup-escaped; fewer records than the
+  server's `total` is reported as partial.
+- **`jira_access_roles`**: reading no admin group at all is a recorded failure,
+  never an empty result. **`jira_site_inventory`**: a bad token is `auth_failed`
+  again (the credential is checked on `/myself` before the anonymous
+  `serverInfo`), and hitting the issue cap now fails the run as partial like the
+  other Jira fetchers.
 
 ### Added
 

@@ -281,6 +281,13 @@ def main() -> int:
         collector = collector_info(client)
 
         groups = _admin_groups(client)
+        if not groups:
+            # Every Jira Cloud site has at least one admin group; none read means the
+            # calls were refused or the API changed, never that nobody is an admin.
+            client.fail(
+                "GET /rest/api/3/group/bulk", "NoAdminGroups",
+                "no site-admin or admin group could be read for any product", "partial_failure",
+            )
         groups.update(_named_groups(client, extra_admin_groups))
         for gid, g in sorted(groups.items(), key=lambda kv: kv[1]["name"] or ""):
             members_of(gid, g["name"])

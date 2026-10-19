@@ -199,6 +199,9 @@ def main() -> int:
     truncated = False
 
     try:
+        # /myself first: serverInfo answers anonymously, so a bad token must be
+        # seen on a call that needs the credential, where a 401 is auth_failed.
+        collector = collector_info(client)
         info = client.request("GET", "/rest/api/3/serverInfo", "GET /rest/api/3/serverInfo")
         if info:
             site = {
@@ -208,8 +211,6 @@ def main() -> int:
                 "version": info.get("version"),
                 "build_number": info.get("buildNumber"),
             }
-        collector = collector_info(client)
-
         raw_projects, _ = client.paged_values(
             "/rest/api/3/project/search",
             "GET /rest/api/3/project/search",

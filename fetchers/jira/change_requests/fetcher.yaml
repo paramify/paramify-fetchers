@@ -64,7 +64,10 @@ config_schema:
     required: false
     env: JIRA_CHANGE_PREAPPROVED_TYPES
     default: Standard
-    description: Comma-separated change types that are pre-approved and need no CCB approval.
+    description: >-
+      Comma-separated change types that are pre-approved and need no CCB
+      approval. Set to an empty value when no change type is pre-approved
+      (required if the change_type field is turned off).
   exception_issue_types:
     type: string
     required: false
@@ -106,8 +109,9 @@ evidence_set:
   instructions: >-
     Script: fetcher.py. Basic auth (account email + API token) to the Jira Cloud
     REST API v3; Browse Projects on the CCB project is enough. Reads GET
-    /rest/api/3/myself, resolves the configured field names with GET
-    /rest/api/3/field, pages POST /rest/api/3/search/jql (summary, type, status,
+    /rest/api/3/myself, resolves the configured field names and checks pinned
+    ids with GET /rest/api/3/field, reads the done-category statuses with GET
+    /rest/api/3/status, pages POST /rest/api/3/search/jql (summary, type, status,
     created, resolutiondate, labels, components, issuelinks, watches, comment
     count, and the resolved custom fields), and reads full status and custom
     field history with POST /rest/api/3/changelog/bulkfetch. Approval is taken
@@ -115,8 +119,9 @@ evidence_set:
     configured approved status (who last set the approval fields is kept as
     approval_recorded_by). A change is deployed when its deployed-at field is
     set or it is done with a resolution other than the not-deployed list;
-    deployment time is that field, else the first time it entered its done
-    status (last_done_at and reopened record a later move). Date-only values
+    deployment time is that field, else the first time it entered any
+    done-category status (last_done_at and reopened record a later move).
+    Date-only values
     compare at midnight UTC. Findings per ticket:
     approval_time_unparseable,
     deployed_without_approval (pre-approved change types excepted),

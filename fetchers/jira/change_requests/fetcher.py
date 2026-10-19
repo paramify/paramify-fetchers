@@ -18,8 +18,10 @@ from jira_common import (  # noqa: E402
     collector_info,
     connection_settings,
     counts,
+    disabled_roles,
     field_problem_reason,
     int_env,
+    invalid_roles,
     json_env,
     list_env,
     name_of,
@@ -103,6 +105,8 @@ def _transitions(histories: list, field_ids: dict) -> tuple:
                         "by": name_of(h.get("author"), "displayName"),
                         "from": item.get("fromString"),
                         "to": item.get("toString"),
+                        "from_id": str(item.get("from")) if item.get("from") is not None else None,
+                        "to_id": str(item.get("to")) if item.get("to") is not None else None,
                     }
                 )
             elif fid in watched:
@@ -118,6 +122,41 @@ def _transitions(histories: list, field_ids: dict) -> tuple:
     return sorted(moves, key=key), sorted(changes, key=key)
 
 
+def _status_catalog(client: JiraClient):
+    """({status_id}, {status name lowercased}) of every status in the done category.
+
+    GET /rest/api/3/status lists all statuses with their category, so a past move
+    into a done status that was later renamed, or into a different done status
+    than the current one (Deployed, then Closed), is still recognised.
+    Returns (done_ids, done_names, complete).
+    """
+    raw = client.request("GET", "/rest/api/3/status", "GET /rest/api/3/status")
+    if not isinstance(raw, list):
+        return set(), set(), False
+    done = [st for st in raw if isinstance(st, dict) and name_of(st.get("statusCategory"), "key") == "done"]
+    return (
+        {str(st.get("id")) for st in done if st.get("id") is not None},
+        {st["name"].strip().lower() for st in done if isinstance(st.get("name"), str)},
+        True,
+    )
+
+
+def _done_entries(moves: list, status: dict, catalog) -> list:
+    """Moves that enter the done category from outside it, oldest first."""
+    done_ids, done_names, complete = catalog
+
+    def is_done(status_id, name):
+        if complete:
+            return (status_id in done_ids) or ((name or "").strip().lower() in done_names)
+        # Without the catalog only the current status is known to be done.
+        return bool(name) and name == status.get("name")
+
+    return [
+        m for m in moves
+        if is_done(m.get("to_id"), m.get("to")) and not is_done(m.get("from_id"), m.get("from"))
+    ]
+
+
 def _links(f: dict) -> list:
     out = []
     for link in f.get("issuelinks") or []:
@@ -129,7 +168,7 @@ def _links(f: dict) -> list:
     return out
 
 
-def _record(issue: dict, histories: list, ids: dict, cfg: dict, now) -> dict:
+def _record(issue: dict, histories: list, ids: dict, cfg: dict, now, catalog=(set(), set(), False)) -> dict:
     f = issue.get("fields") or {}
     status = f.get("status") or {}
     category = name_of(status.get("statusCategory"), "key")
@@ -156,10 +195,10 @@ def _record(issue: dict, histories: list, ids: dict, cfg: dict, now) -> dict:
     cancelled = closed and (resolution or "").strip().lower() in cfg["not_deployed"]
     done = (closed and not cancelled) or bool(custom.get("deployed_at"))
     # Deployment time, when there is no deployed-at field: the FIRST move into the
-    # current done status. A ticket deployed on day 1, approved on day 3 and
-    # reopened and closed again on day 10 was still approved late; using the last
-    # move would hide that. Both moves are recorded so a reviewer can see a reopen.
-    done_moves = [m for m in moves if closed and m["to"] and m["to"] == status.get("name")]
+    # done category. A ticket deployed on day 1, approved on day 3 and reopened
+    # and closed again on day 10 was still approved late; using the last move
+    # would hide that. Both moves are recorded so a reviewer can see a reopen.
+    done_moves = _done_entries(moves, status, catalog) if closed else []
     first_done_at = done_moves[0]["at"] if done_moves else None
     last_done_at = done_moves[-1]["at"] if done_moves else None
     deployed_at = custom.get("deployed_at") or first_done_at or (
@@ -307,7 +346,13 @@ def _config():
     if review_days is None or max_items is None:
         return None, "JIRA_EXCEPTION_REVIEW_DAYS and JIRA_CHANGE_MAX_ITEMS must be positive integers"
     merged = {**DEFAULT_FIELDS, **fields}
-    disabled = {role for role, name in merged.items() if not (isinstance(name, str) and name.strip())}
+    invalid = invalid_roles(merged)
+    if invalid:
+        return None, (
+            f"JIRA_CHANGE_FIELDS values must be a field name, a customfield_ id or a list of "
+            f"ids; not so for: {', '.join(invalid)}"
+        )
+    disabled = disabled_roles(merged)
     approved_statuses = _lower_set(list_env("JIRA_CHANGE_APPROVED_STATUSES"))
     if not approved_statuses and disabled & {"approver", "approved_at"}:
         return None, (
@@ -315,11 +360,21 @@ def _config():
             "approver or approved_at field is turned off in JIRA_CHANGE_FIELDS; every change "
             "and exception would be reported as unapproved"
         )
+    # Unset means the Standard default; set to an empty value means nothing is pre-approved.
+    preapproved_types = _lower_set(
+        list_env("JIRA_CHANGE_PREAPPROVED_TYPES") if "JIRA_CHANGE_PREAPPROVED_TYPES" in os.environ else ["Standard"]
+    )
+    if "change_type" in disabled and preapproved_types:
+        return None, (
+            "JIRA_CHANGE_PREAPPROVED_TYPES is set but the change_type field is turned off in "
+            "JIRA_CHANGE_FIELDS; every pre-approved change would be reported as unapproved. "
+            "Set JIRA_CHANGE_PREAPPROVED_TYPES to an empty value if no change type is pre-approved"
+        )
     return {
         "fields": merged,
         "disabled_fields": sorted(disabled),
         "approved_statuses": approved_statuses,
-        "preapproved_types": _lower_set(list_env("JIRA_CHANGE_PREAPPROVED_TYPES") or ["Standard"]),
+        "preapproved_types": preapproved_types,
         "exception_types": _lower_set(
             list_env("JIRA_EXCEPTION_ISSUE_TYPES") or ["Configuration Exception"]
         ),
@@ -367,9 +422,11 @@ def main() -> int:
     truncated = False
     history_complete = True
 
+    catalog = (set(), set(), False)
     try:
         collector = collector_info(client)
         ids, problems, candidates = resolve_fields(client, cfg["fields"])
+        catalog = _status_catalog(client)
         raw, truncated, _ = client.search_issues(
             jql, BASE_FIELDS + all_field_ids(ids), cfg["max_items"]
         )
@@ -378,7 +435,7 @@ def main() -> int:
             ["status"] + all_field_ids(ids),
         )
         records = [
-            _record(i, histories.get(str(i.get("id")), []), ids, cfg, now) for i in raw
+            _record(i, histories.get(str(i.get("id")), []), ids, cfg, now, catalog) for i in raw
         ]
     except Abort:
         pass
@@ -403,6 +460,7 @@ def main() -> int:
             "items_collected": len(records),
             "items_truncated": truncated,
             "status_history_complete": history_complete,
+            "done_statuses_known": catalog[2],
             "partial_failure": bool(client.api_failures),
             "api_failures": client.api_failures,
         },

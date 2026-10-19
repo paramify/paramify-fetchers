@@ -430,6 +430,13 @@ CF = {"Change Type": "cf1", "Change Risk": "cf2", "CCB Approver": "cf3", "CCB Ap
       "Exception Expiry": "cf8", "Last Reviewed": "cf9", "Severity": "cf10", "Incident Category": "cf11",
       "Detected At": "cf12", "Reported At": "cf13", "Incident Phase": "cf14"}
 FIELD_LIST = [{"id": v, "name": k, "custom": True} for k, v in CF.items()]
+STATUS_LIST = [{"id": "1", "name": "Backlog", "statusCategory": {"key": "new"}},
+               {"id": "2", "name": "Approved", "statusCategory": {"key": "indeterminate"}},
+               {"id": "3", "name": "In Progress", "statusCategory": {"key": "indeterminate"}},
+               {"id": "4", "name": "Reopened", "statusCategory": {"key": "indeterminate"}},
+               {"id": "5", "name": "Done", "statusCategory": {"key": "done"}},
+               {"id": "6", "name": "Deployed", "statusCategory": {"key": "done"}},
+               {"id": "7", "name": "Closed", "statusCategory": {"key": "done"}}]
 APPROVER = {"accountId": "a1", "displayName": "CCB Chair", "emailAddress": "chair@example.com"}
 
 
@@ -474,6 +481,8 @@ def test_change_requests_findings(run):
             return 200, ME
         if path == "/rest/api/3/field":
             return 200, FIELD_LIST
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             assert "cf3" in body["fields"] and "watches" in body["fields"]
             return 200, {"issues": tickets, "isLast": True}
@@ -535,6 +544,8 @@ def test_change_requests_ambiguous_field_fails_loudly_and_lists_candidates(run):
             return 200, ME
         if path == "/rest/api/3/field":
             return 200, fields
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [], "isLast": True}
         raise AssertionError(path)
@@ -621,6 +632,8 @@ def test_incident_postmortems_findings(run):
             return 200, ME
         if path == "/rest/api/3/field":
             return 200, FIELD_LIST
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": incidents, "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -665,6 +678,8 @@ def test_change_requests_date_only_approval_after_deploy_is_caught(run):
             return 200, ME
         if path == "/rest/api/3/field":
             return 200, FIELD_LIST
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [t, cancelled], "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -687,6 +702,8 @@ def test_change_requests_unexpected_shape_still_writes_and_reports(run):
             return 200, ME
         if path == "/rest/api/3/field":
             return 200, FIELD_LIST
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [bad], "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -717,6 +734,8 @@ def test_incident_hidden_postmortem_is_not_reported_as_missing(run):
             return 200, ME
         if path == "/rest/api/3/field":
             return 200, FIELD_LIST
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [inc], "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -740,6 +759,8 @@ def test_incident_negative_report_time_is_flagged(run):
             return 200, ME
         if path == "/rest/api/3/field":
             return 200, FIELD_LIST
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [inc], "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -760,6 +781,8 @@ def test_incident_required_phases(run):
             return 200, ME
         if path == "/rest/api/3/field":
             return 200, FIELD_LIST
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [inc], "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -781,6 +804,8 @@ def _cr_router(tickets, histories=None):
             return 200, ME
         if path == "/rest/api/3/field":
             return 200, FIELD_LIST
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": tickets, "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -795,6 +820,8 @@ def _ir_router(incidents, bulk=None):
             return 200, ME
         if path == "/rest/api/3/field":
             return 200, FIELD_LIST
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": incidents, "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -1042,7 +1069,7 @@ def test_timeout_after_a_success_is_one_failed_call_not_an_abort(run_raw):
         raise AssertionError(path)
 
     code, out, sleeps, status = run_raw("remediation_items", router, {"JIRA_REMEDIATION_JQL": "labels = x"})
-    assert len(sleeps) == 4
+    assert sleeps == [2.0, 4.0], "a raising request is retried twice, each attempt can take the full timeout"
     assert out is not None and out["summary"]["total"] == 1, "the run kept its evidence"
     assert out["metadata"]["status_history_complete"] is False
     assert out["metadata"]["api_failures"][0]["type"] == "ReadTimeout"
@@ -1055,7 +1082,7 @@ def test_unreachable_host_before_any_success_aborts(run_raw):
         raise requests.ConnectionError("nope")
 
     code, out, sleeps, status = run_raw("remediation_items", router, {"JIRA_REMEDIATION_JQL": "labels = x"})
-    assert code == 1 and status["code"] == "target_unreachable" and len(sleeps) == 4
+    assert code == 1 and status["code"] == "target_unreachable" and sleeps == [2.0, 4.0]
 
 
 # ---------- access_roles: call count, unresolved holders, absent products (review item 6, Q1) ----------
@@ -1118,8 +1145,7 @@ def test_access_roles_all_roles_setting_reads_the_index(run):
     code, out, calls, _ = run("access_roles", _access_router(role_index_allowed=True), {"JIRA_ACCESS_ALL_ROLES": "true"})
     assert code == 0
     assert "/rest/api/3/project/CCB/role" in [p for _, p, _, _ in calls]
-    assert [r["name"] for r in out["projects"][0]["roles"]] == ["Developers", "Administrators"] or \
-           {r["name"] for r in out["projects"][0]["roles"]} == {"Developers", "Administrators"}
+    assert {r["name"] for r in out["projects"][0]["roles"]} == {"Developers", "Administrators"}
 
 
 # ---------- site_inventory on the shared client (review item 10) ----------
@@ -1197,7 +1223,10 @@ def test_change_requests_role_pinned_to_several_ids_reads_each_project(run):
         if path == "/rest/api/3/myself":
             return 200, ME
         if path == "/rest/api/3/field":
-            return 200, FIELD_LIST
+            return 200, FIELD_LIST + [{"id": i, "name": "Change Type", "custom": True}
+                                      for i in ("customfield_10043", "customfield_10120", "customfield_10044")]
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             seen["fields"] = body["fields"]
             return 200, {"issues": [a, b], "isLast": True}
@@ -1208,11 +1237,12 @@ def test_change_requests_role_pinned_to_several_ids_reads_each_project(run):
 
     env = {"JIRA_CHANGE_JQL": "project in (CCB, OPS)", "JIRA_CHANGE_APPROVED_STATUSES": "Approved",
            "JIRA_CHANGE_FIELDS": '{"change_type": "customfield_10043, customfield_10120", "risk": ["customfield_10044"]}'}
-    # customfield ids are not in FIELD_LIST on purpose: pinned ids are never looked up
     a["fields"]["customfield_10043"] = {"value": "Standard"}
     b["fields"]["customfield_10120"] = {"value": "Standard"}
     code, out, _, _ = run("change_requests", router, env)
     assert code == 0, out["metadata"]
+    assert out["metadata"]["checks_disabled"] == [], "a list pin is not a turned-off role"
+    assert out["metadata"]["field_problems"] == {}
     assert out["metadata"]["fields_resolved"]["change_type"] == ["customfield_10043", "customfield_10120"]
     assert out["metadata"]["fields_resolved"]["risk"] == ["customfield_10044"]
     by_key = {t["key"]: t for t in out["tickets"]}
@@ -1241,3 +1271,200 @@ def test_bulk_changelogs_merges_items_of_one_history_across_field_groups():
     assert len(out["1"]) == 1, "one history, not one per field group"
     assert [i["fieldId"] for i in out["1"][0]["items"]] == ["f0", "f10"]
     assert out["1"][0]["created"] == "2026-01-05T00:00:00.000+00:00"
+
+
+# ---------- second review round: pinned ids are checked, lists are not "off", conflicts ----------
+
+def test_mistyped_pinned_field_id_fails_loudly_instead_of_reading_nothing(run):
+    t = _ticket(1, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}, "cf3": APPROVER,
+                "cf4": "2026-10-01T00:00:00.000+0000", "cf6": {"value": "Passed"}})
+    env = {"JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_FIELDS": '{"test_results": "customfield_99999"}'}
+    code, out, _, status = run("change_requests", _cr_router([t]), env)
+    assert code == 1 and status["code"] == "partial_failure"
+    assert out["metadata"]["field_problems"]["test_results"] == "unresolved"
+    assert out["metadata"]["field_candidates"]["test_results"][0]["id"] == "customfield_99999"
+    assert "deployed_without_passing_tests" not in out["tickets"][0]["findings"], "no finding from an unread field"
+
+
+@pytest.mark.parametrize("env", [
+    {"JIRA_CHANGE_FIELDS": '{"approver": ["customfield_10045"], "approved_at": ["customfield_10046"]}'},
+    {"JIRA_CHANGE_FIELDS": '{"approver": "customfield_10045, customfield_10146"}'},
+])
+def test_list_pins_are_not_treated_as_turned_off(run, env):
+    t = _ticket(1, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}, "cf6": {"value": "Passed"},
+                "customfield_10045": APPROVER, "customfield_10046": "2026-10-01T00:00:00.000+0000"})
+    t["fields"]["cf4"] = "2026-10-01T00:00:00.000+0000"
+    extra = [{"id": i, "name": n, "custom": True} for i, n in
+             (("customfield_10045", "CCB Approver"), ("customfield_10046", "CCB Approval Date"), ("customfield_10146", "CCB Approver"))]
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/field":
+            return 200, [f for f in FIELD_LIST if f["name"] not in ("CCB Approver", "CCB Approval Date")] + extra
+        return _cr_router([t])(method, path, params, body)
+
+    code, out, _, status = run("change_requests", router, {"JIRA_CHANGE_JQL": "project = CCB", **env})
+    assert code == 0 and status is None, (out["metadata"], status)
+    assert out["metadata"]["checks_disabled"] == []
+    assert out["tickets"][0]["approval_source"] == "fields" and out["tickets"][0]["findings"] == []
+
+
+@pytest.mark.parametrize("fields", ['{"risk": 5}', '{"risk": true}', '{"risk": ["Change Risk", "x"]}', '{"risk": {"a": 1}}'])
+def test_non_name_non_id_field_values_are_bad_config(monkeypatch, tmp_path, fields):
+    for k, v in {"JIRA_BASE_URL": "https://x.atlassian.net", "JIRA_EMAIL": "e", "JIRA_API_TOKEN": "t",
+                 "JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_FIELDS": fields,
+                 "EVIDENCE_DIR": str(tmp_path), "FETCHER_STATUS_FILE": str(tmp_path / "s.json")}.items():
+        monkeypatch.setenv(k, v)
+    assert load("change_requests").main() == 1
+    assert json.loads((tmp_path / "s.json").read_text())["code"] == "bad_config"
+
+
+def test_change_type_off_with_preapproved_types_is_bad_config(monkeypatch, tmp_path):
+    for k, v in {"JIRA_BASE_URL": "https://x.atlassian.net", "JIRA_EMAIL": "e", "JIRA_API_TOKEN": "t",
+                 "JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_FIELDS": '{"change_type": ""}',
+                 "EVIDENCE_DIR": str(tmp_path), "FETCHER_STATUS_FILE": str(tmp_path / "s.json")}.items():
+        monkeypatch.setenv(k, v)
+    assert load("change_requests").main() == 1
+    assert json.loads((tmp_path / "s.json").read_text())["code"] == "bad_config"
+
+
+def test_change_type_off_is_allowed_when_nothing_is_preapproved(run):
+    t = _ticket(1, "Change Request", "Done", "done", {"cf3": APPROVER, "cf4": "2026-10-01T00:00:00.000+0000",
+                "cf6": {"value": "Passed"}})
+    env = {"JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_FIELDS": '{"change_type": ""}',
+           "JIRA_CHANGE_PREAPPROVED_TYPES": ""}
+    code, out, _, _ = run("change_requests", _cr_router([t]), env)
+    assert code == 0 and out["tickets"][0]["findings"] == []
+
+
+def test_bulk_changelogs_stops_on_a_repeated_page_token():
+    sys.path.insert(0, str(JIRA / "_shared"))
+    import jira_common
+
+    client = jira_common.JiraClient("https://example.atlassian.net", "e", "t")
+    calls = []
+
+    def fake(method, path, operation, params=None, body=None, **kw):
+        calls.append(body.get("nextPageToken"))
+        return {"issueChangeLogs": [], "nextPageToken": "same"}
+
+    client.request = fake
+    out, complete = client.bulk_changelogs(["1"], ["status"])
+    assert complete is False and calls == [None, "same"]
+    assert client.api_failures[0]["type"] == "RepeatedPageToken"
+
+
+def _hist(moves):
+    """Status histories from (date, from_name, from_id, to_name, to_id) tuples."""
+    return [{"issueId": "501", "changeHistories": [
+        {"id": f"h{i}", "created": f"2026-10-{d:02d}T00:00:00.000+00:00", "author": {"displayName": "Dev"},
+         "items": [{"fieldId": "status", "fromString": fn, "from": fi, "toString": tn, "to": ti}]}
+        for i, (d, fn, fi, tn, ti) in enumerate(moves)]}]
+
+
+def test_change_requests_deployment_is_the_first_entry_into_the_done_category(run):
+    # Deployed (done) on day 1, approved day 3, then moved on to Closed (also done) day 5.
+    t = _ticket(1, "Change Request", "Closed", "done", {"cf1": {"value": "Normal"}, "cf3": APPROVER,
+                "cf4": "2026-10-03T00:00:00.000+0000", "cf6": {"value": "Passed"}})
+    t["fields"]["resolutiondate"] = "2026-10-05T00:00:00.000+0000"
+    hist = _hist([(1, "In Progress", "3", "Deployed", "6"), (5, "Deployed", "6", "Closed", "7")])
+    code, out, _, _ = run("change_requests", _cr_router([t], hist), {"JIRA_CHANGE_JQL": "project = CCB"})
+    r = out["tickets"][0]
+    assert r["deployed_at"] == "2026-10-01T00:00:00.000+00:00" and r["reopened"] is False
+    assert "approved_after_deploy" in r["findings"]
+    assert out["metadata"]["done_statuses_known"] is True
+
+
+def test_change_requests_renamed_done_status_is_still_recognised_by_id(run):
+    # The status was called "Done" at the time; it is "Released" now (same id 5).
+    t = _ticket(1, "Change Request", "Released", "done", {"cf1": {"value": "Normal"}, "cf3": APPROVER,
+                "cf4": "2026-10-03T00:00:00.000+0000", "cf6": {"value": "Passed"}})
+    t["fields"]["resolutiondate"] = "2026-10-10T00:00:00.000+0000"
+    hist = _hist([(1, "In Progress", "3", "Done", "5"), (5, "Done", "5", "Reopened", "4"), (10, "Reopened", "4", "Done", "5")])
+    code, out, _, _ = run("change_requests", _cr_router([t], hist), {"JIRA_CHANGE_JQL": "project = CCB"})
+    r = out["tickets"][0]
+    assert r["deployed_at"] == "2026-10-01T00:00:00.000+00:00" and r["reopened"] is True
+    assert r["last_done_at"] == "2026-10-10T00:00:00.000+00:00"
+    assert "approved_after_deploy" in r["findings"]
+
+
+def test_change_requests_without_the_status_catalog_falls_back_to_the_current_status_name(run):
+    t = _ticket(1, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}, "cf3": APPROVER,
+                "cf4": "2026-10-03T00:00:00.000+0000", "cf6": {"value": "Passed"}})
+    hist = _hist([(1, "In Progress", "3", "Done", "5")])
+    base = _cr_router([t], hist)
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/status":
+            return 403, {"errorMessages": ["nope"]}
+        return base(method, path, params, body)
+
+    code, out, _, status = run("change_requests", router, {"JIRA_CHANGE_JQL": "project = CCB"})
+    assert code == 1 and out["metadata"]["done_statuses_known"] is False
+    assert out["tickets"][0]["deployed_at"] == "2026-10-01T00:00:00.000+00:00"
+    assert "approved_after_deploy" in out["tickets"][0]["findings"]
+
+
+def test_audit_records_short_paging_is_not_complete(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if params["offset"] == 0:
+            return 200, {"total": 5, "records": [{"id": 1, "category": "permissions", "created": "2026-10-01T00:00:00.000+0000"},
+                                                 {"id": 2, "category": "permissions", "created": "2026-10-02T00:00:00.000+0000"}]}
+        return 200, {"total": 5, "records": []}
+
+    code, out, _, status = run("audit_records", router)
+    assert code == 1 and status["code"] == "partial_failure"
+    assert out["metadata"]["records_collected"] == 2 and out["metadata"]["records_truncated"] is False
+    assert out["metadata"]["complete"] is False and "2 of 5" in out["metadata"]["incomplete_reason"]
+
+
+def test_access_roles_zero_admin_groups_is_a_failure(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/group/bulk":
+            return 400, {"errorMessages": ["bad request"]}
+        if path == "/rest/api/3/applicationrole":
+            return 200, []
+        if path == "/rest/api/3/project/search":
+            return 200, {"isLast": True, "values": []}
+        raise AssertionError(path)
+
+    code, out, _, status = run("access_roles", router)
+    assert code == 1 and status["code"] == "partial_failure"
+    assert out["summary"]["admin_groups"] == 0 and out["metadata"]["partial_failure"] is True
+    assert out["metadata"]["api_failures"][0]["type"] == "NoAdminGroups"
+
+
+def test_site_inventory_bad_token_is_auth_failed(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/serverInfo":
+            return 200, {"deploymentType": "Cloud"}  # answers anonymously
+        return 401, {"errorMessages": ["bad token"]}
+
+    code, out, calls, status = run("site_inventory", router)
+    assert code == 1 and status["code"] == "auth_failed"
+    assert [p for _, p, _, _ in calls] == ["/rest/api/3/myself"], "aborts on the first 401, nothing else is tried"
+
+
+def test_incident_duplicate_links_and_missing_parent_are_handled(run):
+    inc = _incident(1, {"cf10": {"value": "SEV 1"}, "cf11": {"value": "CAT 1"},
+                        "cf12": "2026-10-05T12:00:00.000+0000", "cf13": "2026-10-05T12:10:00.000+0000"},
+                    links=["IR-7", "IR-7"])
+    pm = {"key": "IR-7", "fields": {"issuetype": {"name": "Post-mortem"}, "status": {"name": "Done"},
+                                    "summary": "pm", "subtasks": [{"key": "IR-10"}]}}
+    ai = {"key": "IR-10", "fields": {"summary": "ai", "duedate": "2099-01-01",
+                                     "status": {"name": "To Do", "statusCategory": {"key": "new"}},
+                                     "assignee": {"displayName": "Owner"}}}  # no parent field
+
+    def bulk(body):
+        pool = {"IR-7": pm, "IR-10": ai}
+        return 200, {"issues": [pool[k] for k in body["issueIdsOrKeys"] if k in pool], "issueErrors": []}
+
+    code, out, _, _ = run("incident_postmortems", _ir_router([inc], bulk=bulk), {"JIRA_INCIDENT_JQL": "project = IR"})
+    i = out["incidents"][0]
+    assert code == 0 and i["findings"] == []
+    assert len(i["postmortems"]) == 1 and len(i["action_items"]) == 1
+    assert i["action_items"][0]["postmortem"] == "IR-7"
+    assert out["summary"]["action_items"]["total"] == 1

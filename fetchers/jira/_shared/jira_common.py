@@ -28,6 +28,9 @@ TIMEOUT = 60
 # increasing wait, and give up after MAX_RETRIES extra attempts.
 RETRY_STATUS = {429, 500, 502, 503, 504}
 MAX_RETRIES = 4
+# A request that raises (timeout, connection reset) is retried fewer times: each
+# attempt can already take the full TIMEOUT, and a run has a fixed time budget.
+MAX_EXCEPTION_RETRIES = 2
 BACKOFF_BASE_SECONDS = 2.0
 MAX_BACKOFF_SECONDS = 60.0
 NONE_LABEL = "(none)"
@@ -87,7 +90,7 @@ class JiraClient:
             except requests.RequestException as e:
                 # Only the exception type: some requests errors quote the request.
                 last_error = type(e).__name__
-                if attempt < MAX_RETRIES:
+                if attempt < MAX_EXCEPTION_RETRIES:
                     delay = self._retry_delay(None, attempt)
                     logger.warning("%s: %s; retrying in %.0fs", operation, last_error, delay)
                     time.sleep(delay)
@@ -170,7 +173,8 @@ class JiraClient:
                 **request_kw,
             )
             if page is NOT_FOUND:
-                return values, True
+                # Only a refused first page means "nothing here"; a later one is a failure.
+                return values, start_at == 0
             if page is None:
                 return values, False
             batch = page.get("values") or []
@@ -250,6 +254,7 @@ class JiraClient:
             chunk = issue_ids[i : i + CHANGELOG_ISSUE_BATCH]
             for group in field_groups or [[]]:
                 token = None
+                tokens_seen: set = set()
                 while True:
                     body = {"issueIdsOrKeys": chunk, "fieldIds": group, "maxResults": 1000}
                     if token:
@@ -279,6 +284,15 @@ class JiraClient:
                     token = page.get("nextPageToken")
                     if not token:
                         break
+                    if token in tokens_seen:
+                        # The endpoint has repeated pages before; a repeated token would loop forever.
+                        self.fail(
+                            "POST /rest/api/3/changelog/bulkfetch", "RepeatedPageToken",
+                            "the server repeated a nextPageToken; history may be incomplete", "partial_failure",
+                        )
+                        complete = False
+                        break
+                    tokens_seen.add(token)
         return out, complete
 
 
@@ -356,39 +370,62 @@ def _id_list(value):
     return None
 
 
+def role_state(value):
+    """Classify one JIRA_*_FIELDS value: "disabled" (empty), "ids" (customfield_ ids),
+    "name" (a field name to look up) or "invalid" (anything else, e.g. a number or a
+    list that is not all ids). Shared by _config and resolve_fields so both agree."""
+    if value is None or (isinstance(value, str) and not value.strip()) or value == []:
+        return "disabled"
+    if isinstance(value, (str, list)) and _id_list(value):
+        return "ids"
+    if isinstance(value, str):
+        return "name"
+    return "invalid"
+
+
+def disabled_roles(merged: dict) -> set:
+    return {role for role, value in merged.items() if role_state(value) == "disabled"}
+
+
+def invalid_roles(merged: dict) -> list:
+    return sorted(role for role, value in merged.items() if role_state(value) == "invalid")
+
+
 def resolve_fields(client: JiraClient, wanted: dict):
     """Map {role: field name, customfield_ id or list of ids} to {role: [field ids]}.
 
-    Names are looked up (case-insensitively) via GET /rest/api/3/field. A role may
-    be pinned to several ids because team-managed projects each create their own
-    copy of a field; a ticket is read from whichever of them holds a value.
-    Returns (ids, problems, candidates) where problems maps role to "unresolved"
-    (no such field), "ambiguous" (several fields share the name) or "disabled"
-    (empty name in the config), and candidates maps each ambiguous role to the
-    matching fields so the operator can pin one or more by customfield_ id.
+    Names are looked up (case-insensitively) via GET /rest/api/3/field, and pinned
+    ids are checked against the same list so a mistyped id is not silently read as
+    an always-empty field. A role may be pinned to several ids because team-managed
+    projects each create their own copy of a field; a ticket is read from whichever
+    of them holds a value. Returns (ids, problems, candidates) where problems maps
+    role to "unresolved" (no such field or id), "ambiguous" (several fields share
+    the name), "invalid" (not a name, id or list of ids) or "disabled" (empty), and
+    candidates maps each ambiguous role to the matching fields so the operator can
+    pin one or more by customfield_ id.
     """
     ids, problems, candidates = {}, {}, {}
-    names = {}
-    for role, name in wanted.items():
-        pinned = _id_list(name) if name not in (None, "") else None
-        if not isinstance(name, (str, list)) or not (name if isinstance(name, list) else name.strip()):
-            problems[role] = "disabled"
-        elif pinned:
-            ids[role] = pinned
-        elif isinstance(name, list):
-            problems[role] = "unresolved"
+    names, pinned = {}, {}
+    for role, value in wanted.items():
+        state = role_state(value)
+        if state == "disabled" or state == "invalid":
+            problems[role] = state
+        elif state == "ids":
+            pinned[role] = _id_list(value)
         else:
-            names[role] = name.strip().lower()
-    if not names:
+            names[role] = value.strip().lower()
+    if not names and not pinned:
         return ids, problems, candidates
     fields = client.request("GET", "/rest/api/3/field", "GET /rest/api/3/field")
     if not isinstance(fields, list):
-        problems.update({role: "unresolved" for role in names})
+        problems.update({role: "unresolved" for role in list(names) + list(pinned)})
         return ids, problems, candidates
     by_name: dict = {}
+    known_ids: set = set()
     for f in fields:
         if isinstance(f, dict) and isinstance(f.get("name"), str) and isinstance(f.get("id"), str):
             schema = f.get("schema") if isinstance(f.get("schema"), dict) else {}
+            known_ids.add(f["id"])
             by_name.setdefault(f["name"].strip().lower(), []).append(
                 {
                     "id": f["id"],
@@ -396,6 +433,13 @@ def resolve_fields(client: JiraClient, wanted: dict):
                     "type": schema.get("custom") or schema.get("type"),
                 }
             )
+    for role, fids in pinned.items():
+        unknown = [fid for fid in fids if fid not in known_ids]
+        if unknown:
+            problems[role] = "unresolved"
+            candidates[role] = [{"id": fid, "name": None, "type": "not a field on this site"} for fid in unknown]
+        else:
+            ids[role] = fids
     for role, name in names.items():
         found = by_name.get(name, [])
         if len(found) == 1:
@@ -423,13 +467,13 @@ def role_values(fields: dict, ids: dict) -> dict:
 
 def field_problem_reason(problems: dict, env_name: str) -> str:
     """Explain unresolved or ambiguous field roles, or return "" when every enabled role resolved."""
-    bad = sorted(f"{role} ({p})" for role, p in problems.items() if p in ("unresolved", "ambiguous"))
+    bad = sorted(f"{role} ({p})" for role, p in problems.items() if p in ("unresolved", "ambiguous", "invalid"))
     if not bad:
         return ""
     return (
         f"fields not resolved: {', '.join(bad)}; findings that depend on them are not reliable. "
-        f"Set {env_name} to a customfield_ id from metadata.field_candidates, "
-        f"or an empty value to turn that check off"
+        f"Set {env_name} to the field's name, a customfield_ id from metadata.field_candidates "
+        f"(a list must hold customfield_ ids only), or an empty value to turn that check off"
     )
 
 

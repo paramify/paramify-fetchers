@@ -80,11 +80,11 @@ def _record(r: dict) -> dict:
         "remote_address": r.get("remoteAddress"),
         "object": {
             "type": obj.get("typeName"),
-            "name": obj.get("name"),
-            "parent": obj.get("parentName"),
+            "name": _clip(obj.get("name")),
+            "parent": _clip(obj.get("parentName")),
         },
         "associated_items": [
-            {"type": a.get("typeName"), "name": a.get("name"), "parent": a.get("parentName")}
+            {"type": a.get("typeName"), "name": _clip(a.get("name")), "parent": _clip(a.get("parentName"))}
             for a in r.get("associatedItems") or []
         ],
         # Values are evidence only for privileged changes; elsewhere the field name is enough.
@@ -194,12 +194,15 @@ def main() -> int:
         "summary": _summarize(records),
         "records": records,
     }
-    incomplete = (
-        f"audit records truncated at JIRA_AUDIT_MAX_RECORDS={max_records}"
-        f" ({reported_total if reported_total is not None else 'unknown'} available)"
-        if truncated
-        else ""
-    )
+    incomplete = ""
+    if truncated:
+        incomplete = (
+            f"audit records truncated at JIRA_AUDIT_MAX_RECORDS={max_records}"
+            f" ({reported_total if reported_total is not None else 'unknown'} available)"
+        )
+    elif reported_total is not None and len(records) < reported_total:
+        # The server stopped paging early (an empty page before `total`): not complete.
+        incomplete = f"only {len(records)} of {reported_total} audit records were returned"
     return write_and_finish(logger, client, evidence, OUTPUT_FILE, incomplete)
 
 

@@ -43,8 +43,9 @@ config_schema:
     env: JIRA_MAX_ISSUES
     default: 2000
     description: >-
-      Stop collecting issues after this many. The evidence records whether the
-      cap was hit (metadata.issues_truncated).
+      Stop collecting issues after this many. Hitting the cap sets
+      metadata.issues_truncated and fails the run as partial, like every other
+      Jira fetcher: raise the cap or narrow JIRA_ISSUE_JQL for a complete run.
 
 evidence_set:
   reference_id: EVD-JIRA-SITE-INVENTORY

@@ -95,7 +95,9 @@ counts as a sensitive change when its category name contains a key word
 (permission, user, group, workflow, security, scheme, project, field, screen,
 system, global, application, role); whatever matched nothing is listed in
 `summary.unclassified_categories` so the list can be checked against a real
-site. Changed values are kept only for sensitive records, shortened to 200
+site. Category names come back in the collector account's language, so a
+non-English collector matches nothing and shows everything as unclassified.
+Changed values are kept only for sensitive records, shortened to 200
 characters with `<` and `>` escaped; other records keep the field name only.
 
 ### `jira_access_roles`
@@ -163,9 +165,13 @@ with no `JIRA_CHANGE_APPROVED_STATUSES`), and for incidents
 `category` or `detected_at` off.
 
 When a change has no deployed-at field, its deployment time is the first move
-into its current done status, so a ticket that was deployed, approved later, and
-then reopened and closed again is still reported as approved after deployment;
-`last_done_at` and `reopened` show the later move.
+into any done-category status (the status list is read once from
+`GET /rest/api/3/status`, so a renamed status or a Deployed-then-Closed workflow
+is still recognised), so a ticket that was deployed, approved later, and then
+reopened and closed again is still reported as approved after deployment;
+`last_done_at` and `reopened` show the later move. Pinned `customfield_` ids are
+checked against the site's field list, so a mistyped id fails the run instead of
+reading an always-empty field.
 
 The same field rules apply to `JIRA_INCIDENT_FIELDS` below.
 
@@ -210,6 +216,8 @@ Every Jira fetcher writes `metadata.complete`, `metadata.partial_failure` (its
 opposite, which is what a validator reads) and `metadata.incomplete_reason`. A
 run is partial when a call failed, a cap was hit, a field did not resolve, or a
 linked issue could not be read. HTTP 429 and 5xx answers are retried up to four
-times (honouring `Retry-After`, otherwise 2, 4, 8 and 16 seconds); a request that
+times (honouring `Retry-After`, otherwise 2, 4, 8 and 16 seconds); a request
+that raises (timeout, connection reset) is retried twice, since each attempt can
+take the full 60 second timeout and a run has a fixed time budget. A request that
 still gets no answer is recorded as one failed call and the run continues, except
 a host that never answers before the first successful call.

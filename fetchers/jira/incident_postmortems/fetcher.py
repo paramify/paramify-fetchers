@@ -20,9 +20,11 @@ from jira_common import (  # noqa: E402
     collector_info,
     connection_settings,
     counts,
+    disabled_roles,
     fetch_issues,
     field_problem_reason,
     int_env,
+    invalid_roles,
     json_env,
     list_env,
     name_of,
@@ -135,7 +137,8 @@ def _linked_keys(f: dict, types: set = None) -> list:
             itype = name_of((other.get("fields") or {}).get("issuetype"))
             if (itype or "").strip().lower() not in types:
                 continue
-        keys.append(other["key"])
+        if other["key"] not in keys:
+            keys.append(other["key"])
     return keys
 
 
@@ -322,7 +325,13 @@ def _config():
     if report_minutes is None or max_items is None:
         return None, "JIRA_INCIDENT_REPORT_MINUTES and JIRA_INCIDENT_MAX_ITEMS must be positive integers"
     merged = {**DEFAULT_FIELDS, **fields}
-    disabled = {role for role, name in merged.items() if not (isinstance(name, str) and name.strip())}
+    invalid = invalid_roles(merged)
+    if invalid:
+        return None, (
+            f"JIRA_INCIDENT_FIELDS values must be a field name, a customfield_ id or a list of "
+            f"ids; not so for: {', '.join(invalid)}"
+        )
+    disabled = disabled_roles(merged)
     required_severities = {t.lower() for t in list_env("JIRA_POSTMORTEM_REQUIRED_SEVERITIES")}
     required_phases = list_env("JIRA_INCIDENT_REQUIRED_PHASES")
     # A setting that depends on a turned-off field would make its check silently
@@ -409,12 +418,14 @@ def main() -> int:
         linked_issues, missing_pm, ok_pm = fetch_issues(client, linked, POSTMORTEM_FIELDS)
         postmortems = {}
         subtask_keys = []
+        subtasks_by_pm: dict = {}
         for pm in linked_issues:
             pf = pm.get("fields") or {}
             if (name_of(pf.get("issuetype")) or "").strip().lower() not in cfg["postmortem_types"]:
                 continue
             subs = [s.get("key") for s in pf.get("subtasks") or [] if s.get("key")]
             subtask_keys.extend(subs)
+            subtasks_by_pm[pm.get("key")] = subs
             postmortems[pm.get("key")] = {
                 "key": pm.get("key"),
                 "summary": pf.get("summary"),
@@ -424,9 +435,13 @@ def main() -> int:
                 "action_item_count": len(subs),
             }
         action_issues, missing_ai, ok_ai = fetch_issues(client, subtask_keys, ACTION_FIELDS)
+        # Attribute each action item by the post-mortem that listed it as a sub-task,
+        # so an item whose parent field is missing is still counted where it belongs.
+        parent_of = {sk: pm for pm, subs in subtasks_by_pm.items() for sk in subs}
         actions: dict = {}
         for a in action_issues:
             rec = _action_record(a, now)
+            rec["postmortem"] = parent_of.get(a.get("key")) or rec["postmortem"]
             actions.setdefault(rec["postmortem"], []).append(rec)
         related_complete = ok_pm and ok_ai
         missing_related = sorted(set(missing_pm) | set(missing_ai))
