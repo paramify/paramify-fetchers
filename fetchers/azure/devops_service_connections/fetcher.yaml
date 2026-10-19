@@ -1,0 +1,113 @@
+name: azure_devops_service_connections
+version: 0.1.0
+description: >
+  For every project in an Azure DevOps organization: each service connection
+  and how it authenticates (workload identity federation, managed identity, or
+  a stored service principal secret or certificate, password or token), its
+  service principal (app) and tenant ids, its Azure subscription or management
+  group, whether every YAML pipeline may use it, and its execution history over
+  the lookback (which pipeline run used it, when, and with what result). Also
+  each variable group (Key Vault-linked or not, how many secret variables, and
+  Key Vault secret expiry) and each secure file. Credentials and variable values
+  are never written. This is evidence of how pipeline secrets are held and
+  rotated, and the join key from an Azure change made by a pipeline back to the
+  run that made it.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: azure_devops_service_connections.json
+  aggregation: per_target
+
+target_schema:
+  organization_url:
+    type: string
+    required: true
+    env: AZURE_DEVOPS_ORG_URL
+    description: >
+      The Azure DevOps organization, as https://dev.azure.com/<org>,
+      https://<org>.visualstudio.com or just <org>. One target per organization.
+  projects:
+    type: string
+    required: false
+    env: AZURE_DEVOPS_PROJECTS
+    description: >
+      Comma-separated project names or ids to limit collection to. Optional:
+      omit to collect every project the identity can read. A named project that is
+      missing fails the run.
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    default: 30
+    env: AZURE_DEVOPS_LOOKBACK_DAYS
+    description: >
+      Service connection executions from this many days back are collected.
+
+secrets:
+  - name: pat
+    env: AZURE_DEVOPS_PAT
+    per_target: true
+    required: false
+    description: >
+      Read-only personal access token for the organization with Service
+      Connections (Read), Variable Groups (Read), Secure Files (Read), Build
+      (Read) for pipeline permissions, and Project and Team (Read). Optional:
+      without it the fetcher signs in as the ambient Entra identity (az login,
+      managed or workload identity, or the category's service principal added to
+      the organization), which needs only read access, such as project Readers:
+      by default Project Valid Users hold the Reader role on service connections
+      and on the Library. Collection covers what the signed-in identity can see,
+      recorded as metadata.collecting_identity.
+
+ksis:
+  - KSI-SVC-ASM      # pipeline secrets: federated or stored, Key Vault-backed variable groups and their expiry
+  - KSI-IAM-SNU      # non-user authentication from pipelines to Azure, and where it is used
+
+evidence_set:
+  reference_id: EVD-AZURE-DEVOPS-SERVICE-CONNECTIONS
+  name: Azure DevOps Service Connections
+  instructions: >
+    Script: fetcher.py. Azure DevOps REST 7.1 per project, every continuation
+    token followed. Population: the projects _apis/projects returns to the
+    identity in metadata.collecting_identity; summary.not_collected lists what is
+    out of scope. Service connections: serviceendpoint/endpoints
+    (includeFailed), one record per connection however many projects share it
+    (`projects`). `auth_method` comes from authorization.scheme, and for a
+    ServicePrincipal scheme from authenticationType (spnKey is a secret,
+    spnCertificate a certificate); `stored_credential` is false for workload
+    identity federation, managed identity and GitHub app connections. Of the
+    authorization parameters only serviceprincipalid and tenantid are written,
+    as `service_principal_id` and `tenant_id`, exactly as Azure DevOps gives
+    them; compare them case-insensitively. For an AzureRM connection, `azure`
+    holds the subscription or management group, scope level, creation mode and
+    the service principal's object ids from the connection's data. Pipeline
+    permissions: pipelines/pipelinepermissions/endpoint/{id} per project;
+    `open_to_all_pipelines` means any YAML pipeline in that project may use it
+    (classic pipelines are not limited by this). Executions:
+    serviceendpoint/{id}/executionhistory per project, read newest first and
+    stopped at the window start; each record names the plan type (Build or
+    Release; other plan types, such as the service querying through the
+    connection, have `pipeline_run` false), the definition, the run or release
+    id and name, its link and the project in that link, start and finish times
+    and result; a record read through two projects is kept once. `last_used` and
+    `last_pipeline_run` are the newest record whenever it was. How long Azure
+    DevOps keeps this history is not documented. `service_principals` groups the
+    connections by service principal id (case-insensitive) with their pipeline
+    runs in the window, the key for joining an Azure change made by that app id
+    to the run that made it. Variable groups:
+    distributedtask/variablegroups; values are never written, only counts of
+    variables and secret variables, and for a Key Vault-linked group the vault,
+    its service connection, last refresh and each linked secret's name, enabled
+    flag and expiry as Azure DevOps last read them. Secure files:
+    distributedtask/securefiles, names and dates only. Signs in with the PAT,
+    else the ambient Entra identity (metadata.auth_mode). A refused call names
+    the PAT scope it needs.
