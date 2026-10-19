@@ -12,6 +12,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_pim_assignments`** (`EVD-AZURE-ENTRA-PIM-ASSIGNMENTS`) — Privileged
+  Identity Management for Entra ID directory roles: who is eligible to activate
+  each role, every active assignment marked `permanent`, `time_bound` or
+  `pim_activated`, and each privileged role's activation rules (MFA or an
+  authentication context, justification, approval and approver count, maximum
+  activation hours) and whether it allows permanent eligible or active
+  assignments. A tenant without Entra ID P2 reads `pim_available: false` and the
+  run succeeds; when any read fails the summary gives no figures, so a denied read
+  never reads as zero standing admins. Needs `RoleManagement.Read.Directory`.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
@@ -769,6 +778,9 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Azure: a Microsoft Graph 403 is reported as `not_authorized`.** msgraph
+  renders a denied call as `<message> (status 403)`, which matched none of the
+  markers, so a Graph fetcher refused a permission failed as `partial_failure`.
 - **`azure_entra_authentication_policy` counts X.509 as phishing-resistant only
   when it is multi-factor** (0.1.0 → 0.2.0). An enabled X.509 certificate method
   was always listed in `phishing_resistant_methods_enabled`, even with its default

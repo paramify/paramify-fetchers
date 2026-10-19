@@ -2732,6 +2732,48 @@ def test_graph_admin_membership_builders_present() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "path,params",
+    [
+        ("role_management.directory.role_definitions", []),
+        ("role_management.directory.role_eligibility_schedule_instances", ["expand"]),
+        ("role_management.directory.role_assignment_schedule_instances", ["expand"]),
+        ("policies.role_management_policy_assignments", ["filter", "expand"]),
+    ],
+)
+def test_graph_pim_builders_present(path: str, params: list[str]) -> None:
+    """azure/entra_pim_assignments walks these and builds each query from `<Builder>GetQueryParameters`."""
+    builder: object = _build("msgraph", "GraphServiceClient")
+    for part in path.split("."):
+        builder = getattr(builder, part, None)
+        assert builder is not None, f"GraphServiceClient.{path} is gone.\n  affected fetchers: azure/entra_pim_assignments"
+    query = getattr(type(builder), f"{type(builder).__name__}GetQueryParameters", None)
+    assert query is not None, f"{type(builder).__name__}GetQueryParameters is gone (azure/entra_pim_assignments)"
+    assert set(params) <= set(inspect.signature(query).parameters), (
+        f"{type(builder).__name__}GetQueryParameters lost one of {params} (azure/entra_pim_assignments)"
+    )
+
+
+def test_graph_pim_rule_models_present() -> None:
+    """The policy-rule fields azure/entra_pim_assignments reads; a rename reads as an unknown rule, not an error."""
+    for module, name, fields in [
+        ("unified_role_management_policy_expiration_rule", "UnifiedRoleManagementPolicyExpirationRule",
+         ["is_expiration_required", "maximum_duration"]),
+        ("unified_role_management_policy_enablement_rule", "UnifiedRoleManagementPolicyEnablementRule", ["enabled_rules"]),
+        ("unified_role_management_policy_approval_rule", "UnifiedRoleManagementPolicyApprovalRule", ["setting"]),
+        ("unified_role_management_policy_authentication_context_rule",
+         "UnifiedRoleManagementPolicyAuthenticationContextRule", ["is_enabled", "claim_value"]),
+        ("approval_settings", "ApprovalSettings", ["is_approval_required", "approval_stages"]),
+        ("unified_role_assignment_schedule_instance", "UnifiedRoleAssignmentScheduleInstance",
+         ["assignment_type", "member_type", "start_date_time", "end_date_time", "principal", "directory_scope_id"]),
+        ("unified_role_eligibility_schedule_instance", "UnifiedRoleEligibilityScheduleInstance",
+         ["member_type", "start_date_time", "end_date_time", "principal"]),
+    ]:
+        model = _import(f"msgraph.generated.models.{module}", name)
+        missing = [f for f in fields if f not in getattr(model, "__dataclass_fields__", {})]
+        assert not missing, f"{name} lost {missing} (azure/entra_pim_assignments)"
+
+
 # ---------------------------------------------------------------------------
 # Credentials: the whole SDK surface of the _shared/azure_rest fetchers
 # ---------------------------------------------------------------------------

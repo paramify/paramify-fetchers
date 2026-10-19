@@ -229,7 +229,8 @@ _CODE_RULES = (
     (
         "not_authorized",
         ("permissionerror",),
-        ("authorizationfailed", "does not have authorization", "forbidden", "(403)",
+        # msgraph's ODataError renders a 403 as "<message> (status 403)".
+        ("authorizationfailed", "does not have authorization", "forbidden", "(403)", "(status 403)",
          "insufficient privileges", "not authorized"),
     ),
     (

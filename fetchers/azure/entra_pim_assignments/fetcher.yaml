@@ -1,0 +1,78 @@
+name: azure_entra_pim_assignments
+version: 0.1.0
+description: >
+  Privileged Identity Management for Microsoft Entra ID directory roles: every
+  eligible assignment (who can activate a role on demand) and every active one,
+  each active grant marked permanent, time-bound or PIM-activated, plus each
+  privileged role's activation rules (MFA or authentication context,
+  justification, approval, maximum activation duration) and whether permanent
+  eligible or active assignments are allowed. Privileged roles are the
+  tenant-wide administrative roles azure_entra_privileged_roles flags.
+  Azure-resource roles are covered by azure_rbac_role_assignments.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_entra_pim_assignments.json
+  aggregation: per_target
+
+target_schema:
+  # Microsoft Graph data is TENANT-scoped: one target per Entra tenant.
+  tenant_id:
+    type: string
+    required: false
+    env: AZURE_TENANT_ID
+    description: >
+      Entra tenant id to collect from, and the discriminator for this fetcher's
+      output filename. Optional — omit to use whichever tenant the ambient
+      credential authenticates into.
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id. Optional and NOT used to scope collection — Graph data
+      is tenant-wide; it is recorded in the payload metadata for correlation only.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+# Microsoft Graph application permission (admin consent): RoleManagement.Read.Directory
+# (role definitions, eligibility and assignment schedule instances, role management
+# policies). Organization.Read.All is optional, for the tenant name. The tenant needs
+# Entra ID P2 or ID Governance; without it PIM is reported unavailable and the run
+# still succeeds. A denied read is recorded and the run exits non-zero (not_authorized).
+
+ksis:
+  - KSI-IAM-JIT
+  - KSI-IAM-ELP
+  - KSI-MLA-ALA
+
+evidence_set:
+  reference_id: EVD-AZURE-ENTRA-PIM-ASSIGNMENTS
+  name: Microsoft Entra ID PIM Role Assignments
+  instructions: >
+    Script: fetcher.py. Microsoft Graph v1.0: GET /roleManagement/directory/roleDefinitions;
+    GET /roleManagement/directory/roleEligibilityScheduleInstances?$expand=principal;
+    GET /roleManagement/directory/roleAssignmentScheduleInstances?$expand=principal;
+    GET /policies/roleManagementPolicyAssignments?$filter=scopeId eq '/' and
+    scopeType eq 'DirectoryRole'&$expand=policy($expand=rules); GET /organization.
+    Paged via @odata.nextLink. An active assignment is pim_activated when its
+    assignmentType is Activated, else permanent when it has no endDateTime, else
+    time_bound. Activation rules come from the policy rules
+    Enablement_EndUser_Assignment (MFA, justification, ticket),
+    Approval_EndUser_Assignment, AuthenticationContext_EndUser_Assignment and
+    Expiration_EndUser_Assignment (maximum duration); permanent assignments are
+    allowed when Expiration_Admin_Eligibility or Expiration_Admin_Assignment does
+    not require expiry. Policies are kept for privileged roles and any role with
+    an assignment. Summary figures are given only when every read succeeded.
