@@ -2,8 +2,7 @@
 
 Four fetchers measure security training completion in Cornerstone Learning
 (Cornerstone OnDemand) through the **Reporting API (RAPI)**: read-only OData
-views over Cornerstone's Real-time Data Warehouse. Each one evidences one part
-of **KSI-CED-RAT**, which asks for general training for all employees,
+views over Cornerstone's Real-time Data Warehouse. Each one evidences asks for general training for all employees,
 role-specific training for high-risk roles, secure software delivery training
 for engineers, and training for incident response and disaster recovery staff.
 
@@ -105,13 +104,7 @@ needs_retraining, `completion_rate_pct` (current / in scope), and the largest
 modified date, version effective date and whether its content changed within
 `content_review_interval_days`.
 
-**null means not measured; 0 means measured and zero.** A course name that
-matches nothing reports its metrics, and the overall summary, as null;
-`config_resolution` lists what did not resolve. That run exits 0 so a typo shows
-up in the evidence instead of turning the nightly run red.
 
-No fetcher decides pass or fail. Whether a completion rate is acceptable is
-Paramify's call, downstream.
 
 ## Output
 
@@ -119,16 +112,3 @@ Paramify's call, downstream.
 still written with `metadata.partial_failure: true`, `metadata.api_failures[]`,
 `metadata.complete: false` and `metadata.incomplete_reason`, and the run exits
 non-zero with the reason in the envelope's `metadata.error`.
-
-## Known limits
-
-- **Not yet run against a live portal.** The collect path is covered offline by
-  `tests/test_cornerstone_fetchers.py`; the first run against a pilot or stage
-  portal is still the gate for populated, complete evidence.
-- Population: without `user_population_filter`, the population is the users who
-  hold the course on their transcript. Users who were never assigned it are
-  invisible, so set the filter for the all-employees measure.
-- Cornerstone recommends its Data Exporter API (DEAPI, `transcript_core`) over
-  RAPI where both cover the data and may deprecate RAPI views over time. The
-  client's read path is the same OData shape, so porting is a change of root and
-  view names.
