@@ -1,13 +1,18 @@
 name: azure_sentinel_incidents
-version: 0.1.0
+version: 0.2.0
 description: >
   For every Microsoft Sentinel workspace in the subscription: the incidents
   created inside the lookback, plus every incident still open however old it
-  is. Each carries its severity, status, classification and reason, owner,
-  created time, and close time, with hours to close. Per workspace: open
-  incidents by severity, the oldest open incident's age, closed incidents left
-  Undetermined, and median and maximum time to close. Also a count cross-check
-  between the incidents API and the SecurityIncident table.
+  is. Each carries its severity, status, classification, reason and comment,
+  owner, created time, and close time, with hours to close. Its response
+  timeline, from every retained update, gives when it was acknowledged and each
+  status, owner and severity change with who made it, plus its tasks, comment
+  count, related analytic rules, and the entities on its alerts. Per workspace:
+  open incidents by severity, the oldest open incident's age, closed incidents
+  left Undetermined, median and maximum time to close, MTTD, MTTA and MTTR per
+  month of the lookback, the open backlog at each month end by severity and
+  owner, and the titles and rules behind recurring incidents. Also a count
+  cross-check between the incidents API and the SecurityIncident table.
 category: azure
 
 supports_targets: true
@@ -57,17 +62,22 @@ config_schema:
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 
 ksis:
-  - KSI-INR-RPI      # Reviewing past incidents — the system-of-record incident history
+  - KSI-INR-RPI      # Reviewing past incidents — the incident history, monthly metrics and recurrence
   - KSI-MLA-RVL      # Reviewing logs — alerts are triaged, classified and closed
+  - KSI-INR-AAR      # After action reports — detection, acknowledgement and close times, tasks and classification comment
+  - KSI-IAM-SUS      # Responding to suspicious activity — escalation (owner and severity changes) and close times
+  - KSI-CNA-ULN      # Using logical networking — each incident's analytic rules and the hosts and IPs involved
+  - KSI-PIY-RES      # Reviewing executive support — open backlog per month by severity and owner
 
 evidence_set:
   reference_id: EVD-AZURE-SENTINEL-INCIDENTS
   name: Azure Sentinel Incidents
   instructions: >
-    Script: fetcher.py. ARM REST per Sentinel workspace: incidents at api-version
-    2025-09-01, every nextLink followed. ARM has no close time, so it comes from
-    SecurityIncident (arg_max by IncidentName). A closed incident last updated
-    before that table's retention is close_time_status not_retained, not
-    missing. completeness compares both sources' counts over the span both still
-    hold. Descriptions, comments and entities are not collected. Roles: Microsoft
-    Sentinel Reader and Log Analytics Reader.
+    Script: fetcher.py. ARM REST per Sentinel workspace: incidents
+    (2025-09-01). Log Analytics: each SecurityIncident update row (close time,
+    status, owner and severity changes, tasks) and SecurityAlert entities joined
+    on AlertIds. Acknowledged is the first update to Active or with an owner.
+    MTTD is created minus first activity; MTTA and MTTR are by month
+    acknowledged and closed. Updates older than SecurityIncident's retention are
+    gone; their close times read not_retained and month-end backlogs null.
+    Roles: Microsoft Sentinel Reader and Log Analytics Reader.

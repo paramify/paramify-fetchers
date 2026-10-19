@@ -94,7 +94,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-12`, `ac-17.3`, `ca-9`, `sc-4`, `sc-7`, `sc-7.7`, `sc-8`, `sc-10`
 
-*13 fetchers:* [`aws_network_acls`](../fetchers/aws/network_acls), [`aws_network_firewall_rules`](../fetchers/aws/network_firewall_rules), [`aws_vpc_network_segmentation`](../fetchers/aws/vpc_network_segmentation), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_databricks_workspace_configuration`](../fetchers/azure/databricks_workspace_configuration), [`azure_network_security_groups`](../fetchers/azure/network_security_groups), [`azure_virtual_wan_configuration`](../fetchers/azure/virtual_wan_configuration), [`azure_vnet_egress_routing`](../fetchers/azure/vnet_egress_routing), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`gcp_vpc_network_configuration`](../fetchers/gcp/vpc_network_configuration), [`k8s_eks_microservice_segmentation`](../fetchers/k8s/eks_microservice_segmentation), [`k8s_kubectl_security`](../fetchers/k8s/kubectl_security)
+*14 fetchers:* [`aws_network_acls`](../fetchers/aws/network_acls), [`aws_network_firewall_rules`](../fetchers/aws/network_firewall_rules), [`aws_vpc_network_segmentation`](../fetchers/aws/vpc_network_segmentation), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_databricks_workspace_configuration`](../fetchers/azure/databricks_workspace_configuration), [`azure_network_security_groups`](../fetchers/azure/network_security_groups), [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`azure_virtual_wan_configuration`](../fetchers/azure/virtual_wan_configuration), [`azure_vnet_egress_routing`](../fetchers/azure/vnet_egress_routing), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`gcp_vpc_network_configuration`](../fetchers/gcp/vpc_network_configuration), [`k8s_eks_microservice_segmentation`](../fetchers/k8s/eks_microservice_segmentation), [`k8s_kubectl_security`](../fetchers/k8s/kubectl_security)
 
 ### SVC — Service Configuration  (7/7)
 
@@ -252,7 +252,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2`, `ac-2.1`, `ac-2.3`, `ac-2.13`, `ac-7`, `ps-4`, `ps-8`
 
-*4 fetchers:* [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules), [`okta_suspicious_activity_management`](../fetchers/okta/suspicious_activity_management), [`wiz_threat_detections`](../fetchers/wiz/threat_detections)
+*5 fetchers:* [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules), [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`okta_suspicious_activity_management`](../fetchers/okta/suspicious_activity_management), [`wiz_threat_detections`](../fetchers/wiz/threat_detections)
 
 ### CMT — Change Management  (3/3)
 
@@ -332,11 +332,11 @@ python tools/gen_ksi_mapping.py
 
 *13 fetchers:* [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`aws_resource_inventory`](../fetchers/aws/resource_inventory), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`crowdstrike_hosts`](../fetchers/crowdstrike/hosts), [`datadog_agent_hosts`](../fetchers/datadog/agent_hosts), [`datadog_apm_services`](../fetchers/datadog/apm_services), [`datadog_containers`](../fetchers/datadog/containers), [`gitlab_project_summary`](../fetchers/gitlab/project_summary), [`k8s_eks_pod_inventory`](../fetchers/k8s/eks_pod_inventory), [`rippling_devices`](../fetchers/rippling/devices), [`sentinelone_agents`](../fetchers/sentinelone/agents), [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets), [`wiz_scan_coverage`](../fetchers/wiz/scan_coverage)
 
-#### ⬜ `KSI-PIY-RES` — Reviewing Executive Support
+#### `KSI-PIY-RES` — Reviewing Executive Support
 
 > Executive support for achieving the provider's security goals is persistently reviewed and demonstrated.
 
-*Organizational — evidenced by HR, training or process, not cloud config.*
+*1 fetcher:* [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents)
 
 #### ⬜ `KSI-PIY-RIS` — Reviewing Investments in Security
 
@@ -398,7 +398,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ir-3`, `ir-4`, `ir-4.1`, `ir-8`
 
-*1 fetcher:* [`datadog_incident_timelines`](../fetchers/datadog/incident_timelines)
+*2 fetchers:* [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`datadog_incident_timelines`](../fetchers/datadog/incident_timelines)
 
 #### ⬜ `KSI-INR-RIR` — Reviewing Incident Response Procedures
 
@@ -570,7 +570,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules) | `KSI-MLA-OSM`, `KSI-MLA-RVL` |
 | [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules) | `KSI-IAM-SUS`, `KSI-MLA-RVL` |
 | [`azure_sentinel_data_sources`](../fetchers/azure/sentinel_data_sources) | `KSI-MLA-LET`, `KSI-MLA-OSM` |
-| [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents) | `KSI-INR-RPI`, `KSI-MLA-RVL` |
+| [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents) | `KSI-CNA-ULN`, `KSI-IAM-SUS`, `KSI-INR-AAR`, `KSI-INR-RPI`, `KSI-MLA-RVL`, `KSI-PIY-RES` |
 | [`azure_sql_encryption_status`](../fetchers/azure/sql_encryption_status) | `KSI-SVC-SIN` |
 | [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups) | `KSI-CNA-OFA`, `KSI-RPL-ABO` |
 | [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration) | `KSI-CNA-MAT`, `KSI-IAM-APM`, `KSI-MLA-LET`, `KSI-SVC-SIN` |

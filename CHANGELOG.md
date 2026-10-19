@@ -577,6 +577,25 @@ schemas and the `paramify` CLI — not the internal code.
   "issue report"; `kind: issue_report` in `fetcher.yaml` is unchanged. The
   catalog descriptor (`paramify catalog --json`) gains an `evidence_set` block
   and `issue_report.format`.
+- **`azure_sentinel_incidents` 0.2.0: response timeline, monthly metrics, rules
+  and entities.** The fetcher now reads every SecurityIncident update row, not
+  only the latest. Each incident gains `acknowledged_time_utc` and
+  `hours_to_acknowledge` (the first update to Active or with an owner),
+  `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
+  who made it), `tasks` with status and completion time, `hours_to_detect`
+  (created minus first activity), `comments_count`, `classification_comment`,
+  `related_analytic_rule_ids`, and the `entities` on its alerts as kind and
+  identifier, from SecurityAlert joined on the incident's alert ids.
+  `history_complete` says whether every update since creation is still
+  retained; an incident already acknowledged before the oldest retained update
+  has no acknowledgement time rather than a late one. Each workspace gains
+  `monthly`: per calendar month of the lookback, MTTD by month created, MTTA by
+  month acknowledged, MTTR by month closed, and the open backlog at month end by
+  severity and owner, which is `null` for month ends older than
+  SecurityIncident's retention. It also gains `recurrence_by_title` and
+  `recurrence_by_rule` (two or more incidents in the lookback),
+  `open_unacknowledged`, and whole-lookback `mttd_hours`, `mtta_hours` and
+  `mttr_hours`. Existing fields are unchanged.
 - **TUI fixes found while recording that walkthrough.** On a manifest with no
   evidence and no scripts, nothing on the Paramify tab held focus, so its keys
   did nothing. Enter in a picker's filter box now takes the highlighted option.

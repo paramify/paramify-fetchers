@@ -150,6 +150,8 @@ class FakeAzure:
             ("union withsource=ParamifySourceTable", table(["ParamifySourceTable", "LastIngested", "Records"], [
                 ["AzureActivity", iso(NOW), 10], ["SecurityAlert", iso(NOW), 2], ["Usage", iso(NOW), 5],
                 ["Heartbeat", iso(NOW), 50]])),
+            ("ModifiedBy", table(HISTORY_COLUMNS, incident_history())),
+            ("SystemAlertId", table(["IncidentName", "AlertId", "Entities"], INCIDENT_ALERT_ENTITIES)),
             ("by ProductName", table(["ProductName", "LastIngested", "Records"], [
                 ["Microsoft Defender Advanced Threat Protection", iso(NOW), 1], ["Azure Sentinel", iso(NOW), 1]])),
             ("SecurityIncident", table(["IncidentName", "Status", "ClosedTime", "CreatedTime"], [
@@ -365,6 +367,133 @@ def test_incidents_without_the_table(azure, tmp_path):
     code, ev = run("sentinel_incidents", tmp_path)
     ws = ws_a(ev)
     assert code == 0 and ws["closed_missing_close_time"] == 1 and "SecurityIncident" in ws["notes"][0]
+
+
+HISTORY_COLUMNS = ["TimeGenerated", "IncidentName", "Status", "Severity", "CreatedTime", "ClosedTime", "ModifiedBy",
+                   "OwnerId", "Owner", "Tasks"]
+
+
+def update(name, at, status, severity, created, closed=None, owner="", by="Incident created from alert", tasks="[]"):
+    return [iso(at), name, status, severity, iso(created), iso(closed) if closed else None, by,
+            "u-1" if owner else "", owner, tasks]
+
+
+def incident_history():
+    """i-closed is triaged, escalated and closed inside the window; i-new was last touched ten days ago."""
+    created = NOW - timedelta(days=3)
+    task = json.dumps([{"title": "Contain host", "status": "Completed", "createdTimeUtc": iso(created),
+                        "lastCompletedTimeUtc": iso(NOW - timedelta(days=2))}])
+    return [
+        update("i-closed", created, "New", "Medium", created),
+        update("i-closed", created + timedelta(hours=12), "Active", "High", created, owner="john@contoso.com",
+               by="john@contoso.com"),
+        update("i-closed", NOW - timedelta(days=2), "Closed", "High", created, NOW - timedelta(days=2),
+               owner="john@contoso.com", by="john@contoso.com", tasks=task),
+        update("i-new", NOW - timedelta(days=10), "New", "High", NOW - timedelta(days=200), owner="john@contoso.com",
+               by="Microsoft XDR"),
+    ]
+
+
+# A process entity defines its host, account and file inline; the top level refers back with $ref.
+INCIDENT_ALERT_ENTITIES = [["i-closed", "a-1", json.dumps([
+    {"$id": "2", "Type": "process", "CommandLine": "powershell -enc AAAA", "ImageFile": {
+        "$id": "3", "Type": "file", "Name": "powershell.exe", "FileHashes": [{"$id": "4", "Type": "filehash", "Value": "abc123"}]},
+     "Account": {"$id": "5", "Type": "account", "Name": "john", "UPNSuffix": "contoso.com"}},
+    {"$ref": "5"},
+    {"$id": "6", "Type": "host", "HostName": "vm1", "FQDN": "vm1.contoso.com"},
+    {"$id": "7", "Type": "ip", "Address": "203.0.113.7"},
+    {"$id": "8", "Type": "ip", "Address": "203.0.113.7"}])]]
+
+
+def test_incidents_response_timeline_and_entities(azure, tmp_path):
+    arm = azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"]
+    arm[1]["properties"].update(firstActivityTimeUtc=iso(NOW - timedelta(days=3, hours=6)),
+                                classificationComment="phishing confirmed, mailbox purged",
+                                additionalData={"alertsCount": 1, "commentsCount": 2})
+    code, ev = run("sentinel_incidents", tmp_path)
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    ws = ws_a(ev)
+    by_name = {i["name"]: i for i in ws["incidents"]}
+    closed = by_name["i-closed"]
+    assert closed["hours_to_detect"] == pytest.approx(6, abs=0.01)
+    assert closed["hours_to_acknowledge"] == pytest.approx(12, abs=0.01) and closed["hours_to_close"] == pytest.approx(24, abs=0.1)
+    assert [(c["from"], c["to"]) for c in closed["status_changes"]] == [("New", "Active"), ("Active", "Closed")]
+    assert closed["owner_changes"] == [{"time": iso(NOW - timedelta(days=2, hours=12)), "from": None,
+                                        "to": "john@contoso.com", "modified_by": "john@contoso.com"}]
+    assert [(c["from"], c["to"]) for c in closed["severity_changes"]] == [("Medium", "High")]
+    assert closed["tasks"] == [{"title": "Contain host", "status": "Completed", "created_time_utc": iso(NOW - timedelta(days=3)),
+                                "completed_time_utc": iso(NOW - timedelta(days=2))}]
+    assert closed["comments_count"] == 2 and closed["classification_comment"].startswith("phishing")
+    assert closed["related_analytic_rule_ids"] == [f"{SI_A}/alertRules/r1"]
+    assert closed["alerts_found"] == 1 and closed["history_complete"] is True and closed["updates_retained"] == 3
+    assert closed["entities"] == [
+        {"kind": "account", "id": "john@contoso.com"}, {"kind": "file", "id": "powershell.exe"},
+        {"kind": "filehash", "id": "abc123"}, {"kind": "host", "id": "vm1.contoso.com"},
+        {"kind": "ip", "id": "203.0.113.7"}, {"kind": "process", "id": "powershell -enc AAAA"}]
+    old = by_name["i-new"]
+    assert old["history_complete"] is False and old["acknowledged_time_utc"] is None and old["entities"] == []
+    assert ws["acknowledged_incidents"] == 1 and ws["mtta_hours"] == pytest.approx(12, abs=0.01)
+    assert ws["recurrence_by_rule"] == [{"rule_id": f"{SI_A}/alertRules/r1", "incidents": 2}]
+    assert ws["recurrence_by_title"] == [] and ev["summary"]["acknowledged_incidents"] == 1
+
+
+def test_incidents_monthly_metrics(azure, tmp_path):
+    arm = azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"]
+    arm.append(incident("i-repeat", "New", NOW - timedelta(days=1)))
+    arm[-1]["properties"]["title"] = "incident i-closed"
+    code, ev = run("sentinel_incidents", tmp_path)
+    ws = ws_a(ev)
+    months = ws["monthly"]
+    assert [m["month"] for m in months] == sorted({(NOW - timedelta(days=d)).strftime("%Y-%m") for d in range(91)})
+    assert sum(m["incidents_created"] for m in months) == 2 and sum(m["incidents_closed"] for m in months) == 1
+    closed_in = next(m for m in months if m["incidents_closed"])
+    assert closed_in["mttr_hours"] == pytest.approx(24, abs=0.1) and closed_in["month"] == (NOW - timedelta(days=2)).strftime("%Y-%m")
+    current = months[-1]
+    # Now: i-new (from its last update) and i-repeat (from the incident itself, which has no retained update) are open.
+    assert current["open_at_end"] == 2 and current["open_at_end_by_severity"] == {"High": 2}
+    assert current["open_at_end_by_owner"] == {"john@contoso.com": 2}
+    assert all(m["updates_retained"] for m in months)
+    assert ws["recurrence_by_title"][0]["title"] == "incident i-closed" and ws["recurrence_by_title"][0]["incidents"] == 2
+
+
+def test_incidents_backlog_before_retention_is_unknown(azure, tmp_path):
+    azure.arm[(f"{WS_A}/tables/SecurityIncident", "2023-09-01")] = {"properties": {"retentionInDays": 30}}
+    code, ev = run("sentinel_incidents", tmp_path)
+    months = ws_a(ev)["monthly"]
+    retained_from = NOW - timedelta(days=30)
+    for m in months:
+        end = azure_rest.parse_time(m["to"])
+        assert (m["open_at_end"] is None) == (end < retained_from)
+        assert m["updates_retained"] == (azure_rest.parse_time(m["from"]) >= retained_from)
+
+
+def test_incident_state_at_a_past_time():
+    state_at = MODS["sentinel_incidents"].state_at
+    at = NOW - timedelta(days=10)
+    base = {"name": "x", "created_time_utc": iso(NOW - timedelta(days=60)), "status": "Closed", "severity": "Low",
+            "owner_user_principal_name": None, "last_modified_time_utc": iso(NOW - timedelta(days=5))}
+    assert state_at({**base, "created_time_utc": iso(NOW)}, [], at) is None
+    row = dict(zip(HISTORY_COLUMNS, update("x", NOW - timedelta(days=12), "Active", "Medium", NOW - timedelta(days=60),
+                                           owner="pat@contoso.com")))
+    assert state_at(base, [row], at) == {"open": True, "severity": "Medium", "owner": "pat@contoso.com"}
+    assert state_at({**base, "last_modified_time_utc": iso(NOW - timedelta(days=40))}, [], at)["open"] is False
+    later = dict(zip(HISTORY_COLUMNS, update("x", NOW - timedelta(days=5), "Closed", "Low", NOW - timedelta(days=60),
+                                             NOW - timedelta(days=5))))
+    assert state_at(base, [later], at)["open"] is True  # closed only after `at`
+    later["ClosedTime"] = iso(NOW - timedelta(days=20))
+    assert state_at(base, [later], at)["open"] is False
+
+
+@pytest.mark.parametrize("entity, expected", [
+    ({"Type": "account", "UserPrincipalName": "a@contoso.com", "Name": "a"}, "a@contoso.com"),
+    ({"Type": "account", "Name": "a", "UPNSuffix": "contoso.com"}, "a@contoso.com"),
+    ({"Type": "host", "HostName": "vm1"}, "vm1"),
+    ({"Type": "mailbox", "MailboxPrimaryAddress": "m@contoso.com"}, "m@contoso.com"),
+    ({"Type": "something-new", "DisplayName": "thing"}, "thing"),
+    ({"Type": "ip"}, None),
+])
+def test_incident_entity_identifiers(entity, expected):
+    assert MODS["sentinel_incidents"].entity_id(entity) == expected
 
 
 def test_automation_rules(azure, tmp_path):
