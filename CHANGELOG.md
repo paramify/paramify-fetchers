@@ -567,11 +567,15 @@ schemas and the `paramify` CLI — not the internal code.
   - Each remediation task's per-resource deployments (status, error, times) are
     listed in `remediation_deployments`, up to `max_remediation_deployments`
     (default 1000), and each is checked against its resource's latest compliance
-    state. New summary keys count resources now compliant, still non-compliant, and
-    succeeded deployments still non-compliant. A state evaluated before the
-    deployment last changed counts as `remediated_resources_not_yet_reevaluated`
-    instead. Azure deletes a task 60 days after its last change, so this covers
-    about the last 60 days at most.
+    state, with `current_state_evaluated_at` and `reevaluated_since_deployment`.
+    New summary keys count resources now compliant, now non-compliant, and
+    succeeded deployments now non-compliant. The non-compliant counts include
+    resources that were fixed and later drifted back; `non_compliance_recurrence`
+    shows the drift when that pair was read. `now_compliant` is null when the state
+    was evaluated before the deployment last changed, and that deployment counts as
+    `remediated_resources_not_yet_reevaluated` instead. When either time is
+    missing, `now_compliant` comes from the state. Azure deletes a task 60 days
+    after its last change, so this covers about the last 60 days at most.
   - From 30 days of history, the summary counts (resource, policy) pairs
     non-compliant throughout and pairs non-compliant only some of the time.
     `history_truncated` is also set when fewer groups come back than the service

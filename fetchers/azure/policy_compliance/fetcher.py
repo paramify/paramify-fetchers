@@ -646,10 +646,11 @@ def summarize_remediation_deployments(deployments: list[dict], truncated: bool) 
         "remediation_deployments_truncated": truncated,
         "remediation_deployments_by_status": dict(sorted(by_status.items())),
         "remediated_resources_now_compliant": sum(1 for d in deployments if d["now_compliant"] is True),
-        "remediated_resources_still_non_compliant": sum(
+        # Includes resources fixed and later drifted back.
+        "remediated_resources_now_non_compliant": sum(
             1 for d in deployments if d["now_compliant"] is False
         ),
-        "succeeded_remediations_still_non_compliant": sum(
+        "succeeded_remediations_now_non_compliant": sum(
             1 for d in deployments
             if d["now_compliant"] is False and str(d.get("status") or "").lower() == "succeeded"
         ),
@@ -745,6 +746,7 @@ def collect_recurrence(client, subscription_id, limit: int, collector: Collector
 
     def _group_count():
         # No $apply example shows a nextLink, so check every group came back.
+        # Counted first: a record landing late, between the two queries, then only adds a row.
         options = QueryOptions(
             from_property=start,
             to=end,
@@ -757,15 +759,14 @@ def collect_recurrence(client, subscription_id, limit: int, collector: Collector
             return project_group_count(row)
         return None
 
+    expected = collector.guard(
+        "policyinsights.policy_states.list_query_results_for_subscription (history group count)",
+        _group_count,
+    )
     collector.guard("policyinsights.policy_states.list_query_results_for_subscription (history)", _groups)
-    if not truncated:
-        expected = collector.guard(
-            "policyinsights.policy_states.list_query_results_for_subscription (history group count)",
-            _group_count,
-        )
-        if expected is not None and len(rows) < expected:
-            logger.warning("history query returned %d of %d groups", len(rows), expected)
-            truncated = True
+    if not truncated and expected is not None and len(rows) < expected:
+        logger.warning("history query returned %d of %d groups", len(rows), expected)
+        truncated = True
     pairs = history_pairs(rows)
     flipping = intermittent_pairs(pairs)
     records = []
@@ -816,6 +817,8 @@ def collect_remediation_deployments(
     }
     deployments: list[dict] = []
     truncated = False
+    # Latest states per (assignment, reference id): tasks re-run on one policy share them.
+    current_by_policy: dict[tuple, dict] = {}
     for task in remediations:
         remaining = limit - len(deployments)
         if remaining <= 0:
@@ -861,11 +864,15 @@ def collect_remediation_deployments(
                 )
             ])
 
-        current = collector.guard(
-            f"policyinsights.policy_states.list_query_results_for_subscription (remediated {name})",
-            _current,
-            default={},
-        )
+        policy = (str(task.get("policy_assignment_id") or "").lower(),
+                  str(task.get("policy_definition_reference_id") or "").lower())
+        if policy not in current_by_policy:
+            current_by_policy[policy] = collector.guard(
+                f"policyinsights.policy_states.list_query_results_for_subscription (remediated {name})",
+                _current,
+                default={},
+            )
+        current = current_by_policy[policy]
         deployments.extend(deployment_record(d, task, current) for d in rows)
     return sorted(deployments, key=lambda d: (d.get("remediation_task_id") or "",
                                               d.get("remediated_resource_id") or "")), truncated

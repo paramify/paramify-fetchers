@@ -245,9 +245,9 @@ def test_collect_recurrence_reads_history_once_then_each_flipping_pair(monkeypat
 
     client = fake_client(policy_states={"list_query_results_for_subscription": query})
     out = fx.collect_recurrence(client, "s1", 1, fx.Collector(logging.getLogger("t")), now=NOW)
-    assert seen[0][0] == "default" and "aggregate($count as evaluations)" in seen[0][1]
-    assert seen[0][3] == datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
-    assert seen[1][1] == f"groupby(({fx.HISTORY_GROUP_KEYS}))/aggregate($count as n)"
+    assert seen[0][0] == "default" and seen[0][1] == f"groupby(({fx.HISTORY_GROUP_KEYS}))/aggregate($count as n)"
+    assert "aggregate($count as evaluations)" in seen[1][1]
+    assert seen[1][3] == datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
     assert len(seen) == 3 and seen[2][2] == "Timestamp asc"
     (record,) = out["records"]
     assert record["resource_id"] == NSG and record["non_compliant_episodes"] == 2
@@ -262,10 +262,25 @@ def test_collect_recurrence_reads_history_once_then_each_flipping_pair(monkeypat
         "history_truncated"] is True
 
     monkeypatch.setattr(fx, "MAX_HISTORY_ROWS", 2)
-    seen.clear()
     assert fx.collect_recurrence(client, "s1", 0, fx.Collector(logging.getLogger("t")), now=NOW)[
         "history_truncated"] is True
-    assert len(seen) == 1
+
+
+@needs_sdk
+def test_history_group_landing_between_the_queries_is_not_truncation():
+    world = [NS(**state(VM), compliance_state="noncompliant", additional_properties={"evaluations": 3})]
+    late = NS(**state(NSG), compliance_state="noncompliant", additional_properties={"evaluations": 1})
+
+    def query(resource, subscription_id, query_options):
+        counting = query_options.apply.endswith("/aggregate($count as n)")
+        result = [NS(additional_properties={"n": len(world)})] if counting else list(world)
+        if len(world) == 1:
+            world.append(late)  # evaluated late, it lands after the first query
+        return result
+
+    client = fake_client(policy_states={"list_query_results_for_subscription": query})
+    out = fx.collect_recurrence(client, "s1", 0, fx.Collector(logging.getLogger("t")), now=NOW)
+    assert out["history_truncated"] is False and len(out["pairs"]) == 2
 
 
 def test_episode_floor_counts_unread_intermittent_pairs():
@@ -304,8 +319,8 @@ def test_deployment_is_checked_against_the_latest_state():
             for rid, status in ((VM, "Succeeded"), (NSG, "Succeeded"), (f"{RG}/x/y/gone", "Failed"))]
     assert [r["now_compliant"] for r in rows] == [True, False, None]
     summary = fx.summarize_remediation_deployments(rows, truncated=False)
-    assert (summary["remediated_resources_now_compliant"], summary["remediated_resources_still_non_compliant"],
-            summary["succeeded_remediations_still_non_compliant"],
+    assert (summary["remediated_resources_now_compliant"], summary["remediated_resources_now_non_compliant"],
+            summary["succeeded_remediations_now_non_compliant"],
             summary["remediated_resources_compliance_unknown"]) == (1, 1, 1, 1)
     assert summary["remediation_deployments_by_status"] == {"Failed": 1, "Succeeded": 2}
 
@@ -325,7 +340,7 @@ def test_state_evaluated_before_the_deployment_is_not_yet_reevaluated():
     assert rows[0]["current_compliance_state"] == "NonCompliant"
     assert rows[0]["current_state_evaluated_at"] == "2026-10-18T09:00:00Z"
     summary = fx.summarize_remediation_deployments(rows, truncated=False)
-    assert (summary["remediated_resources_not_yet_reevaluated"], summary["succeeded_remediations_still_non_compliant"],
+    assert (summary["remediated_resources_not_yet_reevaluated"], summary["succeeded_remediations_now_non_compliant"],
             summary["remediated_resources_now_compliant"], summary["remediated_resources_compliance_unknown"]) == (
         1, 1, 1, 1)
 
@@ -346,11 +361,12 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit():
         listed.append(("resource_group", rg, name))
         return [deployment(f"{RG}/providers/x/y/z")]
 
+    filters = []
+
     def latest(resource, subscription_id, query_options):
         assert query_options.apply is None
         assert query_options.select == "ResourceId, ComplianceState, Timestamp"
-        assert query_options.filter == (
-            f"PolicyAssignmentId eq '{ASSIGN.lower()}' and PolicyDefinitionReferenceId eq 'r1'")
+        filters.append(query_options.filter)
         return [NS(resource_id=VM, compliance_state="Compliant", timestamp=datetime(2026, 10, 19, tzinfo=timezone.utc))]
 
     client = fake_client(
@@ -363,9 +379,14 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit():
          "policy_assignment_id": ASSIGN, "policy_definition_reference_id": "R1", "total_deployments": 2},
         {"id": f"{RG}/providers/Microsoft.PolicyInsights/remediations/t2", "name": "t2",
          "policy_assignment_id": ASSIGN, "policy_definition_reference_id": "r1", "total_deployments": 1},
+        {"id": f"{SUB}/providers/Microsoft.PolicyInsights/remediations/t3", "name": "t3",
+         "policy_assignment_id": ASSIGN, "policy_definition_reference_id": "r2", "total_deployments": 2},
     ]
     rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 10, fx.Collector(logging.getLogger("t")))
-    assert listed == [("subscription", "t1"), ("resource_group", "rg1", "t2")]
+    assert listed == [("subscription", "t1"), ("resource_group", "rg1", "t2"), ("subscription", "t3")]
+    # t1 and t2 remediate one policy (their reference ids differ only in case): one state query.
+    assert filters == [f"PolicyAssignmentId eq '{ASSIGN.lower()}' and PolicyDefinitionReferenceId eq '{ref}'"
+                       for ref in ("r1", "r2")]
     assert [(r["remediated_resource_id"], r["now_compliant"]) for r in rows][:2] == [(VM, True), (NSG, None)]
     assert truncated is False
 
@@ -434,5 +455,5 @@ def test_main_writes_the_new_results_and_summary(monkeypatch, tmp_path):
                 "evaluation_details_resource_limit", "recurrence_pair_limit", "remediation_deployment_limit"):
         assert key in results
     for key in ("evaluation_details_truncated", "recurring_non_compliant_pairs", "history_truncated",
-                "remediation_deployments_truncated", "succeeded_remediations_still_non_compliant"):
+                "remediation_deployments_truncated", "succeeded_remediations_now_non_compliant"):
         assert key in summary
