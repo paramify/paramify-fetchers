@@ -454,8 +454,8 @@ schemas and the `paramify` CLI — not the internal code.
   reach a Sentinel workspace (unknown where a destination can't be read), and
   `azure_entra_risky_users` joins Identity Protection risky users to privileged
   directory roles; a tenant without Entra ID P2 reports that as a state, not a
-  failure. The privileged-role list `azure_entra_privileged_roles` keys on
-  moves to `_shared/entra_graph`, so both fetchers use the same one.
+  failure. It keys on the privileged-role list in `_shared/entra_graph`, the
+  one `azure_entra_privileged_roles` and `azure_entra_mfa_status` use.
 
 - **Three Azure SQL Managed Instance fetchers.** Nothing in the Azure category
   covered Managed Instance, which has its own API surface apart from SQL
