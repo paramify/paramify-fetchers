@@ -4,13 +4,16 @@ description: >
   Every Microsoft Defender for Cloud pricing plan on the subscription (Servers,
   Storage Accounts, Containers, SQL, Key Vault, App Services, …) with its pricing
   tier, sub-plan (for example Servers P1 or P2, DefenderForStorageV2), when it was
-  last set to Standard, remaining free trial, resource coverage status, whether it
-  is enforced on child resources, whether it is deprecated and what replaces it,
+  last set to Standard (enablement_time, null when Azure does not report it, which
+  can be the case for every plan, so it is not a reliable signal for a validator),
+  remaining free trial, resource coverage status, whether it is enforced on child
+  resources, whether it is deprecated and what replaces it,
   whether it is inherited and from which scope, and which per-plan extensions
   (agentless VM scanning, vulnerability assessment, file integrity monitoring, …)
   are enabled — the evidence that vulnerability detection and host/container
   hardening are switched on, not merely available. The summary lists the enabled
-  plans with their sub-plans and enablement times, the plans not enabled, enabled
+  plans with their sub-plans and enablement times (the enablement times can all be
+  null), the plans not enabled, enabled
   plans that do not cover every resource, and deprecated and inherited plans; it
   makes no judgement about which plans a system needs. A subscription that never
   registered the Microsoft.Security resource provider reports

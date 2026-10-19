@@ -701,10 +701,12 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_defender_plans` 0.2.0 records each plan's sub-plan, enablement time
   and inheritance.** Each plan now carries `sub_plan` (Servers `P1` / `P2`,
   `DefenderForStorageV2`, `PerKeyVault`, …), `enablement_time` (the last time it
-  was set to Standard), `resources_coverage_status`, `enforce`, `deprecated` and
-  `replaced_by`, and `inherited` / `inherited_from` with `inherited_from_scope`
-  (`management_group`, `subscription`, `resource_group` or `resource`), all from
-  the same `pricings.list` call. Azure documents inheritance as reported for
+  was set to Standard; `null` when Azure does not report it, which can be the case
+  for every plan, so `enabled_plan_enablement_times` can be all `null` and is not a
+  reliable signal for a validator), `resources_coverage_status`, `enforce`,
+  `deprecated` and `replaced_by`, and `inherited` / `inherited_from` with
+  `inherited_from_scope` (`management_group`, `subscription`, `resource_group` or
+  `resource`), all from the same `pricings.list` call. Azure documents inheritance as reported for
   resource-level pricing only, so at subscription scope it reads `null` and
   `plans_reporting_inheritance` says whether any plan reported it. New summary
   keys: `enabled_plans`, `enabled_plan_sub_plans`, `enabled_plan_enablement_times`,
