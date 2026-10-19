@@ -1,5 +1,5 @@
 name: azure_front_door_origins
-version: 0.2.0
+version: 0.3.0
 description: >
   The back ends behind Azure Front Door Standard/Premium. Every origin group with its
   origins, their priority, weight and region, health probe and load-balancing
@@ -12,7 +12,10 @@ description: >
   profile (public access off, or access restrictions admitting only the profile's
   X-Azure-FDID), and for each app in the subscription, whether a serving origin
   group reaches it and holds an enabled twin in another region with enough plan
-  capacity.
+  capacity. From Azure Monitor metrics over a lookback window, each origin's
+  measured health and request count per hour, rolled up per group and region, so
+  it shows whether every region is healthy and serving and when traffic moved
+  between regions.
 category: azure
 
 config_schema:
@@ -25,6 +28,15 @@ config_schema:
       (case-insensitive). Only apps carrying it are listed in production_apps and
       checked for a regional twin. Leave empty and every app in the subscription is
       checked.
+  metrics_lookback_days:
+    type: integer
+    required: false
+    default: 7
+    env: AZURE_FRONT_DOOR_METRICS_LOOKBACK_DAYS
+    description: >
+      How many days of hourly origin health and request metrics to read, from 1 to
+      30; a larger value is clamped to 30 with a warning. The window ends at the
+      last whole hour.
 
 supports_targets: true
 
@@ -59,6 +71,7 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 ksis:
   - KSI-CNA-OFA   # a second region serves traffic (active-active) or stands by (failover), with health probes; each app has a regional twin with capacity
   - KSI-CNA-RNT   # each App Service origin accepts traffic only through its own Front Door profile
+  - KSI-RPL-TRC   # measured origin health and traffic per region show when traffic failed over between regions
   - KSI-SVC-VCM   # Front Door reaches each origin over HTTPS with a checked certificate, via private link or managed-identity auth
 
 evidence_set:
@@ -131,4 +144,22 @@ evidence_set:
     unknown when either plan is unknown. twin_gaps: not_behind_front_door,
     no_regional_twin, twin_region_unresolved, twin_capacity_short,
     twin_capacity_unknown; regional_twin_ready = none. Summary counts are over
-    serving App Service origins. Maps to KSI-CNA-OFA / KSI-CNA-RNT / KSI-SVC-VCM.
+    serving App Service origins. Origin health and traffic: azure-mgmt-monitor
+    MonitorManagementClient metrics.list per profile at interval PT1H over
+    metrics_lookback_days ending at the last whole hour, with top 1000 (the API
+    returns 10 series otherwise): OriginHealthPercentage (Average, Minimum; filter
+    Origin eq '*' and OriginGroup eq '*') and OriginRequestCount (Total; filter
+    Origin eq '*'). The Origin dimension is lower-cased with any ":port" dropped; a
+    health series matches the origin with that host_name in the named group, and a
+    request series (which has no group dimension and names the origin by the Host
+    header sent to it) every origin whose originHostHeader or host_name it equals,
+    listed in requests_shared_with_groups when that spans groups. Series matching no
+    origin are listed in unmatched_origin_metrics. Healthy hour = the hourly
+    average health is at least successfulSamplesRequired / sampleSize × 100 of the
+    group's load-balancing settings (defaults 3 of 4, so 75); a region is healthy in
+    an hour when any of its origins is, and serving when its origins received
+    requests. The last hour is the newest hour with data. traffic_shifts lists each
+    hour the set of serving regions changed from the previous hour with traffic
+    (newest 100; traffic_shift_count is the total). hourly_by_region is kept for
+    groups whose enabled origins span two or more regions. Maps to KSI-CNA-OFA /
+    KSI-CNA-RNT / KSI-RPL-TRC / KSI-SVC-VCM.

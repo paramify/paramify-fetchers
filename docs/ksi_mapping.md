@@ -15,7 +15,7 @@ python tools/gen_ksi_mapping.py
 
 ## Coverage
 
-**35 of 37** config-evidenceable indicators covered — **94.6%**. Plus 9 organizational indicators (evidenced by HR, training or process, not cloud config), for 46 total.
+**36 of 37** config-evidenceable indicators covered — **97.3%**. Plus 9 organizational indicators (evidenced by HR, training or process, not cloud config), for 46 total.
 
 | Family | | Covered | Gaps |
 |---|---|---|---|
@@ -24,7 +24,7 @@ python tools/gen_ksi_mapping.py
 | `MLA` | Monitoring, Logging, and Auditing | `██████████` 5/5 | — |
 | `IAM` | Identity and Access Management | `██████████` 6/6 | — |
 | `CMT` | Change Management | `██████████` 3/3 | — |
-| `RPL` | Recovery Planning | `█████░░░░░` 1/2 | `KSI-RPL-TRC` |
+| `RPL` | Recovery Planning | `██████████` 2/2 | — |
 | `PIY` | Policy and Inventory | `██████████` 1/1 | — |
 | `SCR` | Supply Chain Risk | `█████░░░░░` 1/2 | `KSI-SCR-MIT` |
 | `CED` | Cybersecurity Education | `██████████` 1/1 | — |
@@ -288,7 +288,7 @@ python tools/gen_ksi_mapping.py
 
 *4 fetchers:* [`aws_codebuild_pipeline_config`](../fetchers/aws/codebuild_pipeline_config), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config), [`wiz_code_findings`](../fetchers/wiz/code_findings)
 
-### RPL — Recovery Planning  (1/2)
+### RPL — Recovery Planning  (2/2)
 
 #### `KSI-RPL-ABO` — Aligning Backups with Objectives
 
@@ -314,13 +314,13 @@ python tools/gen_ksi_mapping.py
 
 *Organizational — evidenced by HR, training or process, not cloud config.*
 
-#### ⏳ `KSI-RPL-TRC` — Testing Recovery Capabilities
+#### `KSI-RPL-TRC` — Testing Recovery Capabilities
 
 > The capability to recover from incidents and contingencies aligned with defined recovery objectives is persistently tested.
 
 *Controls:* `cp-2.1`, `cp-2.3`, `cp-4`, `cp-4.1`, `cp-6`, `cp-6.1`, `cp-9.1`, `cp-10`, `ir-3`, `ir-3.2`
 
-*No fetcher covers this yet — a capability gap, not a mapping gap.*
+*1 fetcher:* [`azure_front_door_origins`](../fetchers/azure/front_door_origins)
 
 ### PIY — Policy and Inventory  (1/1)
 
@@ -418,11 +418,10 @@ python tools/gen_ksi_mapping.py
 
 ## Open gaps
 
-2 config-evidenceable indicators that nothing covers. Each is a **fetcher backlog item** — the evidence does not exist yet, rather than existing and being unmapped.
+1 config-evidenceable indicator that nothing covers. Each is a **fetcher backlog item** — the evidence does not exist yet, rather than existing and being unmapped.
 
 | Indicator | | What would be needed |
 |---|---|---|
-| `KSI-RPL-TRC` | Testing Recovery Capabilities | The capability to recover from incidents and contingencies aligned with defined recovery objectives is persistently tested. |
 | `KSI-SCR-MIT` | Mitigating Supply Chain Risk | Persistently identify, review, and mitigate potential supply chain risks. |
 
 ## By fetcher
@@ -544,7 +543,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_entra_mfa_status`](../fetchers/azure/entra_mfa_status) | `KSI-IAM-APM` |
 | [`azure_entra_privileged_roles`](../fetchers/azure/entra_privileged_roles) | `KSI-IAM-ELP` |
 | [`azure_entra_service_principals`](../fetchers/azure/entra_service_principals) | `KSI-IAM-SNU` |
-| [`azure_front_door_origins`](../fetchers/azure/front_door_origins) | `KSI-CNA-OFA`, `KSI-CNA-RNT`, `KSI-SVC-VCM` |
+| [`azure_front_door_origins`](../fetchers/azure/front_door_origins) | `KSI-CNA-OFA`, `KSI-CNA-RNT`, `KSI-RPL-TRC`, `KSI-SVC-VCM` |
 | [`azure_front_door_tls`](../fetchers/azure/front_door_tls) | `KSI-CNA-MAT`, `KSI-SVC-SIN` |
 | [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-RVP`, `KSI-MLA-LET` |
 | [`azure_front_door_waf_policies`](../fetchers/azure/front_door_waf_policies) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-RVP` |

@@ -239,6 +239,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list_by_subscription_id"],
         "azure/activity_log_alerts",
     ),
+    (
+        "azure.mgmt.monitor",
+        "MonitorManagementClient",
+        "metrics",
+        ["list"],
+        "azure/front_door_origins — hourly origin health and request counts",
+    ),
     # --- network: PR #57 widens this to <33 ---------------------------------
     (
         "azure.mgmt.network",
@@ -2020,6 +2027,30 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
             "total_retention_in_days_as_default",
         ],
         "azure/log_analytics_workspaces — per-table retention",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "Response",
+        ["value"],
+        "azure/front_door_origins — origin health and traffic metrics",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "TimeSeriesElement",
+        ["metadatavalues", "data"],
+        "azure/front_door_origins — a renamed field reads as no metric data, so every origin looks idle",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "MetadataValue",
+        ["name", "value"],
+        "azure/front_door_origins — the Origin and OriginGroup dimensions that tie a series to an origin",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "MetricValue",
+        ["time_stamp", "average", "minimum", "total"],
+        "azure/front_door_origins",
     ),
     (
         "azure.mgmt.monitor.models",

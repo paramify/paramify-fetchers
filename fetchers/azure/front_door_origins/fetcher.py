@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -21,6 +22,7 @@ from azure_common import (  # noqa: E402
     credential,
     failure_reason,
     model_attr,
+    monitor_client,
     provider_registration_status,
     report_failure,
     resolve_subscription,
@@ -55,6 +57,15 @@ ALL_ADDRESSES = ("any", "*", "0.0.0.0/0", "::/0", "internet")
 # Tiers where the platform scales instances itself, so sku.capacity is not an instance count.
 PLATFORM_SCALED_TIERS = ("dynamic", "flexconsumption", "elasticpremium")
 PRODUCTION_TAG_ENV = "AZURE_PRODUCTION_APP_TAG"
+LOOKBACK_ENV = "AZURE_FRONT_DOOR_METRICS_LOOKBACK_DAYS"
+DEFAULT_LOOKBACK_DAYS = 7
+MAX_LOOKBACK_DAYS = 30
+# The metrics API returns only 10 dimension series unless asked for more.
+METRICS_TOP = 1000
+MAX_TRAFFIC_SHIFTS = 100
+# Front Door's documented loadBalancingSettings defaults.
+DEFAULT_SAMPLE_SIZE = 4
+DEFAULT_SUCCESSFUL_SAMPLES = 3
 
 
 # --- projection: the only code here that touches an azure-mgmt model ---
@@ -128,6 +139,31 @@ def project_access_restriction(rule) -> dict:
         "vnet_subnet_resource_id": model_attr(rule, "vnet_subnet_resource_id"),
         "headers": {str(k): [str(v) for v in (vals or [])] for k, vals in (model_attr(rule, "headers") or {}).items()},
     }
+
+
+def project_metric_series(response) -> list[dict]:
+    series = []
+    for metric in model_attr(response, "value") or []:
+        for ts in model_attr(metric, "timeseries") or []:
+            dims = {str(model_attr(model_attr(m, "name"), "value") or "").lower(): model_attr(m, "value")
+                    for m in (model_attr(ts, "metadatavalues") or [])}
+            series.append({
+                "origin": dims.get("origin"),
+                "origin_group": dims.get("origingroup"),
+                "points": [{
+                    "time": hour_key(model_attr(p, "time_stamp")),
+                    "average": model_attr(p, "average"),
+                    "minimum": model_attr(p, "minimum"),
+                    "total": model_attr(p, "total"),
+                } for p in (model_attr(ts, "data") or [])],
+            })
+    return series
+
+
+def hour_key(value) -> str | None:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return str(value) if value else None
 
 
 def project_site_config(config) -> dict:
@@ -613,6 +649,204 @@ def summarize_app_services(app_origins: list[dict], apps: list[dict], production
     return summary
 
 
+# --- live origin health and traffic, from Azure Monitor metrics ---
+
+def metric_host(value) -> str:
+    """The Origin dimension is the origin's host name, sometimes with ":port"."""
+    host = str(value or "").strip().lower()
+    head, _, port = host.rpartition(":")
+    return head if head and port.isdigit() else host
+
+
+def request_keys(origin: dict) -> set:
+    # OriginRequestCount names the origin by the Host header sent to it (origin_host_header), health by host_name.
+    return {k for k in (str(origin["host_name"] or "").lower(), str(origin.get("origin_host_header") or "").lower()) if k}
+
+
+def health_threshold(group: dict) -> float:
+    """The share of probes the group's load-balancing settings require before Front Door calls an origin healthy."""
+    lb = group["load_balancing"] or {}
+    size = lb.get("sample_size") or DEFAULT_SAMPLE_SIZE
+    needed = min(lb.get("successful_samples_required") or DEFAULT_SUCCESSFUL_SAMPLES, size)
+    return round(100 * needed / size, 2)
+
+
+def hourly(series: list[dict]) -> dict:
+    """Per hour: mean of the averages, lowest minimum, and summed totals across the given series."""
+    hours: dict = {}
+    for s in series:
+        for p in s["points"]:
+            h = hours.setdefault(p["time"], {"averages": [], "minimums": [], "total": None})
+            if p["average"] is not None:
+                h["averages"].append(p["average"])
+            if p["minimum"] is not None:
+                h["minimums"].append(p["minimum"])
+            if p["total"] is not None:
+                h["total"] = (h["total"] or 0) + p["total"]
+    return {
+        t: {"health_avg": round(sum(h["averages"]) / len(h["averages"]), 2) if h["averages"] else None,
+            "health_min": min(h["minimums"]) if h["minimums"] else None,
+            "requests": h["total"]}
+        for t, h in hours.items()
+    }
+
+
+def mean(values) -> float | None:
+    values = [v for v in values if v is not None]
+    return round(sum(values) / len(values), 2) if values else None
+
+
+def traffic_shifts(hours: list[str], region_hours: dict) -> list[dict]:
+    """Hours where the set of regions receiving requests changed from the previous hour that had traffic."""
+    shifts, previous = [], None
+    for t in hours:
+        serving = sorted(r for r, by_hour in region_hours.items() if (by_hour.get(t, {}).get("requests") or 0) > 0)
+        if not serving:
+            continue
+        if previous is not None and serving != previous:
+            shifts.append({"time": t, "serving_regions_before": previous, "serving_regions_after": serving})
+        previous = serving
+    return shifts
+
+
+def group_health_record(profile_key_: str, group: dict, health: list[dict], requests: list[dict], shared_hosts: dict) -> dict:
+    threshold = health_threshold(group)
+    group_name = str(group["name"] or "").lower()
+    origin_rows, region_hours = [], {}
+    for o in group["origins"]:
+        host = str(o["host_name"] or "").lower()
+        keys = request_keys(o)
+        o_health = hourly([s for s in health if str(s["origin_group"] or "").lower() == group_name
+                           and metric_host(s["origin"]) == host])
+        o_requests = hourly([s for s in requests if metric_host(s["origin"]) in keys])
+        by_hour = {t: {**o_health.get(t, {"health_avg": None, "health_min": None}),
+                       "requests": o_requests.get(t, {}).get("requests")} for t in set(o_health) | set(o_requests)}
+        times = sorted(by_hour)
+        served = [t for t in times if (by_hour[t]["requests"] or 0) > 0]
+        last = by_hour[times[-1]] if times else {}
+        origin_rows.append({
+            "origin": o["name"],
+            "host_name": o["host_name"],
+            "region": o["region"],
+            "effective_enabled_state": o["effective_enabled_state"],
+            "health_avg": mean(h["health_avg"] for h in by_hour.values()),
+            "health_min": min((h["health_min"] for h in by_hour.values() if h["health_min"] is not None), default=None),
+            "hours_with_health_data": sum(1 for h in by_hour.values() if h["health_avg"] is not None),
+            "hours_healthy": sum(1 for h in by_hour.values() if h["health_avg"] is not None and h["health_avg"] >= threshold),
+            "last_hour_health_avg": last.get("health_avg"),
+            "requests": sum(h["requests"] or 0 for h in by_hour.values()) if o_requests else None,
+            "hours_serving": len(served),
+            "first_hour_serving": served[0] if served else None,
+            "last_hour_serving": served[-1] if served else None,
+            "requests_shared_with_groups": sorted({g for k in keys for g in shared_hosts.get((profile_key_, k), [])
+                                                   if g != group["name"]}),
+        })
+        region = region_hours.setdefault(o["region"] or "unresolved", {})
+        for t, h in by_hour.items():
+            slot = region.setdefault(t, {"health": [], "healthy": False, "requests": 0})
+            if h["health_avg"] is not None:
+                slot["health"].append(h["health_avg"])
+                slot["healthy"] = slot["healthy"] or h["health_avg"] >= threshold
+            slot["requests"] += h["requests"] or 0
+    hours = sorted({t for by_hour in region_hours.values() for t in by_hour})
+    last_hour = hours[-1] if hours else None
+    group_requests = sum(s["requests"] for by_hour in region_hours.values() for s in by_hour.values())
+    regions = []
+    for name, by_hour in sorted(region_hours.items()):
+        with_health = [s for s in by_hour.values() if s["health"]]
+        total = sum(s["requests"] for s in by_hour.values())
+        last = by_hour.get(last_hour, {}) if last_hour else {}
+        regions.append({
+            "region": name,
+            "origins": sorted(r["origin"] for r in origin_rows if (r["region"] or "unresolved") == name),
+            "health_avg": mean(v for s in with_health for v in s["health"]),
+            "hours_with_health_data": len(with_health),
+            "hours_healthy": sum(1 for s in with_health if s["healthy"]),
+            "healthy_last_hour": bool(last.get("healthy")) if last.get("health") else None,
+            "requests": total,
+            "request_share_percentage": round(100 * total / group_requests, 2) if group_requests else None,
+            "hours_serving": sum(1 for s in by_hour.values() if s["requests"] > 0),
+            "serving_last_hour": (last.get("requests") or 0) > 0,
+        })
+    resolved = [r for r in regions if r["region"] != "unresolved"]
+    with_health = [r for r in resolved if r["healthy_last_hour"] is not None]
+    shifts = traffic_shifts(hours, {r: region_hours[r] for r in region_hours if r != "unresolved"})
+    multi_region = len(group["enabled_regions"]) >= 2
+    return {
+        "profile": group["profile"],
+        "origin_group": group["name"],
+        "origin_group_id": group["id"],
+        "serving": group["serving"],
+        "enabled_regions": group["enabled_regions"],
+        "multi_region": multi_region,
+        "health_threshold_percentage": threshold,
+        "has_health_data": bool(with_health),
+        "has_traffic": group_requests > 0,
+        "requests": group_requests,
+        "last_hour": last_hour,
+        "origins": origin_rows,
+        "regions": regions,
+        "all_regions_healthy_last_hour": all(r["healthy_last_hour"] for r in with_health) if with_health else None,
+        "regions_serving_last_hour": [r["region"] for r in resolved if r["serving_last_hour"]],
+        "all_enabled_regions_serving_last_hour": bool(group["enabled_regions"]) and all(
+            any(r["region"] == e and r["serving_last_hour"] for r in resolved) for e in group["enabled_regions"]),
+        "traffic_shift_count": len(shifts),
+        "traffic_shifts": shifts[-MAX_TRAFFIC_SHIFTS:],
+        "hourly_by_region": [
+            {"time": t, "regions": {r: {"requests": region_hours[r].get(t, {}).get("requests", 0),
+                                        "health_avg": mean(region_hours[r].get(t, {}).get("health", []))}
+                                    for r in sorted(region_hours)}}
+            for t in hours
+        ] if multi_region else [],
+    }
+
+
+def origin_health_records(groups: list[dict], metrics_by_profile: dict) -> tuple[list[dict], list[dict]]:
+    """Each group's health and traffic per origin and region, and the metric series matching no origin."""
+    hosts_by_profile: dict = {}
+    for g in groups:
+        for o in g["origins"]:
+            for k in request_keys(o):
+                hosts_by_profile.setdefault((profile_key(g["id"]), k), set()).add(g["name"])
+    records = []
+    for g in groups:
+        key = profile_key(g["id"])
+        metrics = metrics_by_profile.get(key) or {"health": [], "requests": []}
+        records.append(group_health_record(key, g, metrics["health"], metrics["requests"], hosts_by_profile))
+    unmatched = [
+        {"profile_id": key, "metric": metric, "origin": s["origin"], "origin_group": s["origin_group"],
+         "total": sum(p["total"] or 0 for p in s["points"]) if metric == "OriginRequestCount" else None}
+        for key, metrics in sorted(metrics_by_profile.items())
+        for metric, series in (("OriginHealthPercentage", metrics["health"]), ("OriginRequestCount", metrics["requests"]))
+        for s in series
+        if (key, metric_host(s["origin"])) not in hosts_by_profile
+    ]
+    return records, unmatched
+
+
+def summarize_health(records: list[dict], unmatched: list[dict], days: int, window: tuple[str, str]) -> dict:
+    serving = [r for r in records if r["serving"]]
+    multi = [r for r in serving if r["multi_region"]]
+    return {
+        "metrics_lookback_days": days,
+        "metrics_window_start": window[0],
+        "metrics_window_end": window[1],
+        "serving_groups_with_health_data": sum(1 for r in serving if r["has_health_data"]),
+        "serving_groups_with_traffic": sum(1 for r in serving if r["has_traffic"]),
+        "serving_groups_without_traffic": sum(1 for r in serving if not r["has_traffic"]),
+        "serving_groups_all_regions_healthy_last_hour": sum(1 for r in serving if r["all_regions_healthy_last_hour"]),
+        "serving_groups_region_unhealthy_last_hour": sum(1 for r in serving if r["all_regions_healthy_last_hour"] is False),
+        "serving_multi_region_groups": len(multi),
+        "serving_multi_region_groups_all_regions_healthy_last_hour": sum(1 for r in multi if r["all_regions_healthy_last_hour"]),
+        "serving_multi_region_groups_all_regions_serving_last_hour": sum(
+            1 for r in multi if r["all_enabled_regions_serving_last_hour"]),
+        "serving_multi_region_groups_with_traffic_shift": sum(1 for r in multi if r["traffic_shift_count"]),
+        "regions_serving_traffic": sorted({reg["region"] for r in serving for reg in r["regions"]
+                                           if reg["requests"] and reg["region"] != "unresolved"}),
+        "origin_metric_series_unmatched": len(unmatched),
+    }
+
+
 # --- collection (lazy azure imports) ---
 
 def kql_list(values) -> str:
@@ -772,6 +1006,57 @@ def read_site_configs(cred, collector: Collector, sites: list[dict]) -> dict:
     return configs
 
 
+def lookback_days(collector: Collector) -> int:
+    raw = os.environ.get(LOOKBACK_ENV) or str(DEFAULT_LOOKBACK_DAYS)
+    try:
+        days = int(raw)
+    except ValueError:
+        collector.record(f"config {LOOKBACK_ENV}",
+                         ValueError(f"invalid lookback {raw!r}: expected an integer from 1 to {MAX_LOOKBACK_DAYS}"))
+        return DEFAULT_LOOKBACK_DAYS
+    clamped = min(max(days, 1), MAX_LOOKBACK_DAYS)
+    if clamped != days:
+        logger.warning("%s=%d is outside 1-%d; using %d", LOOKBACK_ENV, days, MAX_LOOKBACK_DAYS, clamped)
+    return clamped
+
+
+def metrics_window(days: int, now: datetime) -> tuple[str, str]:
+    # Whole hours only: the current hour's bucket is still filling.
+    end = now.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    start = end - timedelta(days=days)
+    return start.strftime("%Y-%m-%dT%H:%M:%SZ"), end.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def collect_origin_metrics(subscription_id, cred, collector: Collector, profiles: list[dict], window: tuple[str, str]) -> dict:
+    """Hourly OriginHealthPercentage (by origin and group) and OriginRequestCount (by origin) for each profile."""
+    if not profiles:
+        return {}
+    monitor = collector.guard("monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred))
+    if monitor is None:
+        return {}
+    timespan = f"{window[0]}/{window[1]}"
+    metrics = {}
+    for profile in profiles:
+        uri = str(profile["id"]).lstrip("/")
+        metrics[arm_key(profile["id"])] = {
+            "health": collector.guard(
+                f"monitor.metrics.list(OriginHealthPercentage, {profile['name']})",
+                lambda: project_metric_series(monitor.metrics.list(
+                    uri, timespan=timespan, interval=timedelta(hours=1), metricnames="OriginHealthPercentage",
+                    aggregation="Average,Minimum", filter="Origin eq '*' and OriginGroup eq '*'", top=METRICS_TOP)),
+                default=[],
+            ),
+            "requests": collector.guard(
+                f"monitor.metrics.list(OriginRequestCount, {profile['name']})",
+                lambda: project_metric_series(monitor.metrics.list(
+                    uri, timespan=timespan, interval=timedelta(hours=1), metricnames="OriginRequestCount",
+                    aggregation="Total", filter="Origin eq '*'", top=METRICS_TOP)),
+                default=[],
+            ),
+        }
+    return metrics
+
+
 def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[dict], dict]:
     cdn = cdn_client(subscription_id, cred, collector)
     cdn_origins = cdn_client(subscription_id, cred, collector, api_version=ORIGIN_API_VERSION)
@@ -830,6 +1115,9 @@ def main() -> int:
     sites_by_host: dict = {}
     plans_by_key: dict = {}
     configs_by_key: dict = {}
+    metrics_by_profile: dict = {}
+    days = lookback_days(collector)
+    window = metrics_window(days, datetime.now(timezone.utc))
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Cdn")
@@ -850,6 +1138,7 @@ def main() -> int:
         plans_by_key = lookup_plans(graph, collector, sorted({
             arm_key(s["server_farm_id"]) for s in sites_by_key.values() if s.get("server_farm_id")}))
         configs_by_key = read_site_configs(cred, collector, [sites_by_key[k] for k in sorted(origin_sites)])
+        metrics_by_profile = collect_origin_metrics(subscription_id, cred, collector, [c["profile"] for c in collected], window)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -879,15 +1168,18 @@ def main() -> int:
                                              subscription_id)
     production_tag = (os.environ.get(PRODUCTION_TAG_ENV) or "").strip() or None
     apps = production_apps(sites_by_key, subscription_id, production_tag, groups, app_origins, plans_by_key)
+    health, unmatched = origin_health_records(groups, metrics_by_profile)
 
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={"origin_groups": groups, "profiles": profiles, "provider_registration_status": registration,
-                 "app_service_origins": app_origins, "production_apps": apps},
+                 "app_service_origins": app_origins, "production_apps": apps, "origin_health": health,
+                 "unmatched_origin_metrics": unmatched},
         summary={**summarize(profiles, skipped_by_sku, groups), "provider_registration_status": registration,
-                 **summarize_app_services(app_origins, apps, production_tag)},
+                 **summarize_app_services(app_origins, apps, production_tag),
+                 **summarize_health(health, unmatched, days, window)},
     )
     filename = f"azure_front_door_origins_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

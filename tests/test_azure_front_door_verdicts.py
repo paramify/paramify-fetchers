@@ -427,3 +427,141 @@ def test_site_queries_cover_the_subscription_slots_and_hosts():
     assert "subscriptionId =~ 'sub-1'" in queries[0] and "'microsoft.web/sites/slots'" not in queries[0]
     assert "'microsoft.web/sites/slots'" in queries[1] and SITE.format("a").lower() in queries[1]
     assert "mv-expand h = properties.enabledHostNames" in queries[2] and "bad'host" not in queries[2]
+
+
+# --- live origin health and traffic ---
+
+HOURS = [f"2026-10-08T{h:02d}:00:00Z" for h in range(6)]
+
+
+def series(origin, values, key="total", group=None):
+    return {"origin": origin, "origin_group": group,
+            "points": [{"time": t, "average": None, "minimum": None, "total": None,
+                        **({key: v} if key != "health" else {"average": v, "minimum": v})} for t, v in zip(HOURS, values)]}
+
+
+def health_group(load_balancing=None, west_header=None, regions=("eastus", "westus")):
+    east, west = origin_rec("east", regions[0]), origin_rec("west", regions[1])
+    west["origin_host_header"] = west_header
+    return {"id": "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Cdn/profiles/p/originGroups/g", "name": "g",
+            "profile": "p", "serving": True, "load_balancing": load_balancing,
+            "enabled_regions": sorted({r for r in regions if r}), "origins": [east, west]}
+
+
+def failover_metrics(west_host="west.azurewebsites.net"):
+    return {
+        "health": [series("east.azurewebsites.net:443", [100, 100, 100, 50, 0, 0], "health", group="G"),
+                   series("west.azurewebsites.net:443", [100] * 6, "health", group="g")],
+        "requests": [series("east.azurewebsites.net", [10, 10, 10, 0, 0, 0]),
+                     series(west_host, [0, 0, 0, 5, 20, 20])],
+    }
+
+
+@pytest.mark.parametrize("value, host", [
+    pytest.param("App.AzureWebsites.net:443", "app.azurewebsites.net", id="port-stripped"),
+    pytest.param("app.azurewebsites.net", "app.azurewebsites.net", id="no-port"),
+    pytest.param(None, "", id="absent"),
+])
+def test_metric_host(value, host):
+    assert origins.metric_host(value) == host
+
+
+@pytest.mark.parametrize("load_balancing, threshold", [
+    pytest.param(None, 75.0, id="documented-defaults"),
+    pytest.param({"sample_size": 2, "successful_samples_required": 2}, 100.0, id="all-samples"),
+    pytest.param({"sample_size": 4, "successful_samples_required": 9}, 100.0, id="required-capped-at-size"),
+])
+def test_health_threshold(load_balancing, threshold):
+    assert origins.health_threshold({"load_balancing": load_balancing}) == threshold
+
+
+def test_failover_between_regions():
+    [record], unmatched = origins.origin_health_records([health_group()], {fd.arm_key(health_group()["id"]).split(
+        "/origingroups/")[0]: failover_metrics()})
+    assert unmatched == []
+    regions = {r["region"]: r for r in record["regions"]}
+    assert (regions["eastus"]["requests"], regions["westus"]["requests"]) == (30, 45)
+    assert regions["eastus"]["request_share_percentage"] == 40.0
+    assert (regions["eastus"]["hours_healthy"], regions["eastus"]["healthy_last_hour"]) == (3, False)
+    assert record["all_regions_healthy_last_hour"] is False
+    assert record["regions_serving_last_hour"] == ["westus"]
+    assert record["all_enabled_regions_serving_last_hour"] is False
+    assert record["traffic_shifts"] == [
+        {"time": HOURS[3], "serving_regions_before": ["eastus"], "serving_regions_after": ["westus"]}]
+    assert len(record["hourly_by_region"]) == 6
+    east = next(o for o in record["origins"] if o["origin"] == "east")
+    assert (east["health_min"], east["first_hour_serving"], east["last_hour_serving"]) == (0, HOURS[0], HOURS[2])
+
+
+def test_requests_match_the_origin_host_header():
+    group = health_group(west_header="www.contoso.example")
+    key = origins.profile_key(group["id"])
+    [record], unmatched = origins.origin_health_records([group], {key: failover_metrics("www.contoso.example")})
+    assert unmatched == []
+    assert next(o for o in record["origins"] if o["origin"] == "west")["requests"] == 45
+
+
+def test_series_for_no_known_origin_is_reported():
+    group = health_group()
+    key = origins.profile_key(group["id"])
+    metrics = failover_metrics("gone.azurewebsites.net")
+    [record], unmatched = origins.origin_health_records([group], {key: metrics})
+    assert [(u["metric"], u["origin"], u["total"]) for u in unmatched] == [
+        ("OriginRequestCount", "gone.azurewebsites.net", 45)]
+    assert next(o for o in record["origins"] if o["origin"] == "west")["requests"] is None
+
+
+def test_single_region_group_has_no_hourly_breakdown_or_shifts():
+    group = health_group(regions=("eastus", "eastus"))
+    key = origins.profile_key(group["id"])
+    [record], _ = origins.origin_health_records([group], {key: failover_metrics()})
+    assert (record["multi_region"], record["hourly_by_region"], record["traffic_shift_count"]) == (False, [], 0)
+    assert record["regions_serving_last_hour"] == ["eastus"]
+
+
+def test_group_without_metrics_has_no_data():
+    [record], _ = origins.origin_health_records([health_group()], {})
+    assert (record["has_health_data"], record["has_traffic"], record["all_regions_healthy_last_hour"]) == (
+        False, False, None)
+
+
+def test_health_summary():
+    group = health_group()
+    key = origins.profile_key(group["id"])
+    records, unmatched = origins.origin_health_records([group], {key: failover_metrics()})
+    summary = origins.summarize_health(records, unmatched, 7, ("start", "end"))
+    assert summary["serving_multi_region_groups"] == 1
+    assert summary["serving_multi_region_groups_with_traffic_shift"] == 1
+    assert summary["serving_groups_region_unhealthy_last_hour"] == 1
+    assert summary["regions_serving_traffic"] == ["eastus", "westus"]
+    assert summary["metrics_lookback_days"] == 7
+
+
+def test_project_metric_series_reads_dimensions_and_hours():
+    from types import SimpleNamespace as NS
+
+    point = NS(time_stamp=datetime(2026, 10, 8, 3, tzinfo=timezone.utc), average=None, minimum=None, total=7.0)
+    ts = NS(metadatavalues=[NS(name=NS(value="Origin"), value="app.azurewebsites.net")], data=[point])
+    [s] = origins.project_metric_series(NS(value=[NS(timeseries=[ts])]))
+    assert s == {"origin": "app.azurewebsites.net", "origin_group": None,
+                 "points": [{"time": "2026-10-08T03:00:00Z", "average": None, "minimum": None, "total": 7.0}]}
+
+
+def test_metrics_window_uses_whole_hours():
+    assert origins.metrics_window(7, datetime(2026, 10, 8, 3, 41, tzinfo=timezone.utc)) == (
+        "2026-10-01T03:00:00Z", "2026-10-08T03:00:00Z")
+
+
+@pytest.mark.parametrize("raw, days, failed", [
+    pytest.param(None, 7, False, id="default"),
+    pytest.param("90", 30, False, id="clamped"),
+    pytest.param("week", 7, True, id="invalid"),
+])
+def test_lookback_days(monkeypatch, raw, days, failed):
+    if raw is None:
+        monkeypatch.delenv(origins.LOOKBACK_ENV, raising=False)
+    else:
+        monkeypatch.setenv(origins.LOOKBACK_ENV, raw)
+    collector = origins.Collector(origins.logger)
+    assert origins.lookback_days(collector) == days
+    assert (not collector.ok) is failed

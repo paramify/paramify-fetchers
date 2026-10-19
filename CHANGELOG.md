@@ -551,6 +551,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_front_door_origins` 0.3.0: live origin health and traffic per region.**
+  Hourly Azure Monitor metrics for each profile over `metrics_lookback_days`
+  (default 7, at most 30): `OriginHealthPercentage` (average and minimum) by origin
+  and group, and `OriginRequestCount` by origin, matched to origins by host name or
+  origin host header. `origin_health` rolls them up per group and region: health,
+  healthy hours (measured against the share of probes the group's load-balancing
+  settings require), requests and request share, whether every region was healthy
+  and serving in the last hour, and `traffic_shifts`, each hour the set of serving
+  regions changed. Adds KSI-RPL-TRC. Existing fields are unchanged.
 - **`azure_front_door_origins` 0.2.0: App Service origin lockdown and regional
   twins.** Each origin that is an App Service app or slot (by its azureOrigin, its
   private-link target, or the app whose host name it uses) is listed in
