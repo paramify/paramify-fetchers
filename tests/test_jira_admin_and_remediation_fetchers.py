@@ -148,7 +148,7 @@ def test_audit_records_pages_until_total(run):
     def rec(i, cat):
         return {"id": i, "created": f"2026-10-0{i}T00:00:00.000+0000", "category": cat, "summary": "s",
                 "authorAccountId": f"u{i % 2}", "objectItem": {"typeName": "USER", "name": "x"},
-                "changedValues": [{"fieldName": "email", "changedFrom": "a", "changedTo": "b"}]}
+                "changedValues": [{"fieldName": "email", "changedFrom": "a", "changedTo": "<script>" + "b" * 300}]}
 
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
@@ -163,8 +163,14 @@ def test_audit_records_pages_until_total(run):
     assert code == 0
     assert out["summary"]["total"] == 3
     assert out["summary"]["sensitive_changes"]["total"] == 2
+    assert out["summary"]["unclassified_categories"] == {"dashboards": 1}
     assert out["summary"]["oldest_record"].startswith("2026-10-01")
-    assert out["records"][0]["changed_values"][0] == {"field": "email", "from": "a", "to": "b"}
+    cv = out["records"][0]["changed_values"][0]
+    assert cv["field"] == "email" and cv["from"] == "a"
+    assert cv["to"].startswith("&lt;script&gt;") and cv["to"].endswith("...") and len(cv["to"]) <= 203
+    assert "<script>" not in json.dumps(out)
+    # a non-sensitive record keeps the field name only
+    assert out["records"][2]["changed_values"] == [{"field": "email"}]
     assert len([c for c in calls if c[1] == "/rest/api/3/auditing/record"]) == 2
 
 
@@ -1050,3 +1056,67 @@ def test_unreachable_host_before_any_success_aborts(run_raw):
 
     code, out, sleeps, status = run_raw("remediation_items", router, {"JIRA_REMEDIATION_JQL": "labels = x"})
     assert code == 1 and status["code"] == "target_unreachable" and len(sleeps) == 4
+
+
+# ---------- access_roles: call count, unresolved holders, absent products (review item 6, Q1) ----------
+
+def _access_router(role_index_allowed: bool):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/group/bulk":
+            if "applicationKey" not in params:
+                return 400, {"errorMessages": ["applicationKey is required"]}
+            if params["applicationKey"] == "jira-software":
+                return 200, {"isLast": True, "values": [{"groupId": "g-adm", "name": "jira-admins"}]}
+            # products the site does not have
+            return (404 if params["applicationKey"] == "jira-servicedesk" else 400), {"errorMessages": ["no such product"]}
+        if path == "/rest/api/3/group/member":
+            return 200, {"isLast": True, "values": [{"accountId": "a2", "displayName": "Bob", "accountType": "atlassian", "active": True}]}
+        if path == "/rest/api/3/applicationrole":
+            return 200, []
+        if path == "/rest/api/3/project/search":
+            return 200, {"isLast": True, "values": [{"key": "CCB", "name": "Change Board", "projectTypeKey": "software",
+                                                      "lead": {"accountId": "a9", "displayName": "Lead"}}]}
+        if path == "/rest/api/3/project/CCB/permissionscheme":
+            return 200, {"id": 1, "name": "Default", "permissions": [
+                {"permission": "ADMINISTER_PROJECTS", "holder": {"type": "projectRole", "parameter": "10002", "projectRole": {"name": "Administrators"}}},
+                {"permission": "DELETE_ISSUES", "holder": {"type": "reporter"}},
+                {"permission": "MODIFY_REPORTER", "holder": {"type": "userCustomField", "parameter": "customfield_10050"}},
+                {"permission": "BROWSE_PROJECTS", "holder": {"type": "projectRole", "parameter": "10001"}},
+            ]}
+        if path == "/rest/api/3/project/CCB/role":
+            assert role_index_allowed, "the role index must not be read unless JIRA_ACCESS_ALL_ROLES is set"
+            return 200, {"Administrators": "https://example.atlassian.net/rest/api/3/project/CCB/role/10002",
+                         "Developers": "https://example.atlassian.net/rest/api/3/project/CCB/role/10001"}
+        if path == "/rest/api/3/project/CCB/role/10002":
+            return 200, {"name": "Administrators", "actors": [{"type": "atlassian-user-role-actor", "displayName": "Dan", "actorUser": {"accountId": "a4"}}]}
+        if path == "/rest/api/3/project/CCB/role/10001":
+            return 200, {"name": "Developers", "actors": []}
+        raise AssertionError(path)
+    return router
+
+
+def test_access_roles_reads_only_granted_roles_and_lists_unresolved_holders(run):
+    code, out, calls, status = run("access_roles", _access_router(role_index_allowed=False))
+    assert code == 0 and status is None, "an absent product (400/404 per applicationKey) is not a failure"
+    role_calls = [p for _, p, _, _ in calls if p.startswith("/rest/api/3/project/CCB/role")]
+    assert role_calls == ["/rest/api/3/project/CCB/role/10002"]
+    proj = out["projects"][0]
+    assert [r["name"] for r in proj["roles"]] == ["Administrators"]
+    assert {u["account_id"] for u in proj["privileged_users"]} == {"a4"}
+    assert proj["unresolved_privileged_grants"] == [
+        {"permission": "DELETE_ISSUES", "holder_type": "reporter", "parameter": None},
+        {"permission": "MODIFY_REPORTER", "holder_type": "userCustomField", "parameter": "customfield_10050"},
+    ]
+    assert out["summary"]["projects_with_unresolved_privileged_grants"] == ["CCB"]
+    assert out["metadata"]["organization_admins_included"] is False
+    assert [g["name"] for g in out["admin_groups"]] == ["jira-admins"]
+
+
+def test_access_roles_all_roles_setting_reads_the_index(run):
+    code, out, calls, _ = run("access_roles", _access_router(role_index_allowed=True), {"JIRA_ACCESS_ALL_ROLES": "true"})
+    assert code == 0
+    assert "/rest/api/3/project/CCB/role" in [p for _, p, _, _ in calls]
+    assert [r["name"] for r in out["projects"][0]["roles"]] == ["Developers", "Administrators"] or \
+           {r["name"] for r in out["projects"][0]["roles"]} == {"Developers", "Administrators"}

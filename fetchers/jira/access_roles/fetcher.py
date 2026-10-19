@@ -47,6 +47,10 @@ PRIVILEGED_PERMISSIONS = {
 }
 # Holder types that grant a permission to everyone (or every licensed user).
 BROAD_HOLDERS = {"anyone", "applicationRole"}
+# Holder types whose members this fetcher can resolve to accounts. Any other type
+# (reporter, assignee, userCustomField, groupCustomField, ...) is listed per
+# project as an unresolved grant so the summary never silently undercounts.
+RESOLVABLE_HOLDERS = {"user", "group", "projectRole", "projectLead"}
 
 
 def _user(u: dict) -> dict:
@@ -81,10 +85,13 @@ def _admin_groups(client: JiraClient) -> dict:
         if page is NOT_FOUND:
             # The API refused accessType without an applicationKey; ask per product.
             for app_key in APPLICATION_KEYS:
+                # A product the site does not have may answer 400 or 404: not a failure.
                 values, _ = client.paged_values(
                     "/rest/api/3/group/bulk",
                     f"GET /rest/api/3/group/bulk (accessType={access_type}, applicationKey={app_key})",
                     params={"accessType": access_type, "applicationKey": app_key},
+                    quiet_400=True,
+                    allow_404=True,
                 )
                 for g in values:
                     found.setdefault(g.get("groupId"), {"name": g.get("name"), "access_types": set()})[
@@ -157,13 +164,22 @@ def _role_actor(a: dict) -> dict:
     return {"type": "user", "account_id": user.get("accountId"), "display_name": a.get("displayName")}
 
 
-def _project_roles(client: JiraClient, key: str) -> list:
-    index = client.request(
-        "GET", f"/rest/api/3/project/{key}/role", f"GET /rest/api/3/project/{key}/role"
-    )
+def _project_roles(client: JiraClient, key: str, role_ids=None) -> list:
+    """Roles of a project with their actors.
+
+    By default only the roles in `role_ids` (those named in a privileged grant) are
+    read, one call each. With role_ids=None the role index is read and every role
+    follows, which is 2 + R calls per project.
+    """
+    if role_ids is None:
+        index = client.request(
+            "GET", f"/rest/api/3/project/{key}/role", f"GET /rest/api/3/project/{key}/role"
+        )
+        wanted = {str(url).rstrip("/").rsplit("/", 1)[-1]: name for name, url in (index or {}).items()}
+    else:
+        wanted = {rid: None for rid in role_ids if rid}
     roles = []
-    for role_name, url in sorted((index or {}).items()):
-        role_id = str(url).rstrip("/").rsplit("/", 1)[-1]
+    for role_id, role_name in sorted(wanted.items()):
         role = client.request(
             "GET",
             f"/rest/api/3/project/{key}/role/{role_id}",
@@ -238,6 +254,7 @@ def main() -> int:
         return 1
     project_keys = list_env("JIRA_PROJECT_KEYS")
     extra_admin_groups = list_env("JIRA_ADMIN_GROUPS")
+    all_roles = os.environ.get("JIRA_ACCESS_ALL_ROLES", "").strip().lower() in ("1", "true", "yes")
 
     client = JiraClient(base_url, email, api_token)
     now = utc_now()
@@ -330,7 +347,13 @@ def main() -> int:
                     for g in scheme.get("permissions") or []
                     if g.get("permission") in PRIVILEGED_PERMISSIONS
                 ]
-            roles = _project_roles(client, key)
+            granted_roles = sorted({g["holder"].get("role_id") for g in grants if g["holder"]["type"] == "projectRole"})
+            roles = _project_roles(client, key, None if all_roles else granted_roles)
+            unresolved = [
+                {"permission": g["permission"], "holder_type": g["holder"]["type"], "parameter": g["holder"].get("parameter")}
+                for g in grants
+                if g["holder"]["type"] not in RESOLVABLE_HOLDERS | BROAD_HOLDERS
+            ]
             for g in grants:
                 if g["holder"]["type"] == "group":
                     members_of(g["holder"].get("group_id"), g["holder"].get("group_name"))
@@ -348,6 +371,7 @@ def main() -> int:
                     "permission_scheme": {"id": (scheme or {}).get("id"), "name": (scheme or {}).get("name")},
                     "privileged_grants": grants,
                     "broad_privileged_grants": [g for g in grants if g["holder"]["type"] in BROAD_HOLDERS],
+                    "unresolved_privileged_grants": unresolved,
                     "roles": roles,
                     "privileged_users": _privileged_users(grants, roles, lead.get("accountId"), group_members),
                 }
@@ -368,6 +392,8 @@ def main() -> int:
             "base_url": base_url,
             "project_keys": project_keys or None,
             "extra_admin_groups": extra_admin_groups or None,
+            "all_roles_read": all_roles,
+            "organization_admins_included": False,
             "projects_collected": len(projects),
             "projects_truncated": projects_truncated,
             "groups_with_incomplete_membership": sorted(incomplete_groups),
@@ -384,6 +410,9 @@ def main() -> int:
             "permission_schemes": len(schemes),
             "projects_with_broad_privileged_grants": sorted(
                 p["key"] for p in projects if p["broad_privileged_grants"]
+            ),
+            "projects_with_unresolved_privileged_grants": sorted(
+                p["key"] for p in projects if p["unresolved_privileged_grants"]
             ),
             "distinct_project_admin_users": len(project_admins),
             "privileged_users_per_project": {p["key"]: len(p["privileged_users"]) for p in projects},

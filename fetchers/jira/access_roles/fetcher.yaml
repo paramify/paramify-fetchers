@@ -5,9 +5,13 @@ description: >-
   groups with their members (active flag, account type), product access roles,
   and for each project the permission scheme's privileged grants (administer
   project, delete issues and comments, issue security, modify reporter), project
-  role members, the resolved list of privileged users, and grants made to
-  everyone. Requires an account with the Administer Jira global permission;
-  use a read-only scoped token (see fetchers/jira/README.md).
+  role members, the resolved list of privileged users, grants made to
+  everyone, and grants to holder types that cannot be resolved to accounts
+  (reporter, assignee, user or group custom fields). Organization admins, who
+  manage the site from Atlassian Administration without a Jira admin group,
+  are not visible to these APIs and are not included. Requires an account
+  with the Administer Jira global permission; use a read-only scoped token
+  (see fetchers/jira/README.md).
 category: jira
 
 supports_targets: false
@@ -39,6 +43,15 @@ config_schema:
     description: >-
       Comma-separated extra group names to report as administrative alongside
       the groups Jira itself classifies as site-admin or admin access.
+  all_roles:
+    type: boolean
+    required: false
+    env: JIRA_ACCESS_ALL_ROLES
+    default: false
+    description: >-
+      By default only the project roles named in a privileged grant are read
+      (about 1 + K calls per project). Set true to read every role of every
+      project (2 + R calls per project) when the full role membership is wanted.
   max_projects:
     type: integer
     required: false
@@ -62,16 +75,21 @@ evidence_set:
     (includeInactiveUsers=true) for every admin group and every group named in a
     privileged grant or project role; GET /rest/api/3/applicationrole; GET
     /rest/api/3/project/search?expand=lead; and per project GET
-    /rest/api/3/project/{key}/permissionscheme?expand=all, GET
-    /rest/api/3/project/{key}/role and GET /rest/api/3/project/{key}/role/{id}.
+    /rest/api/3/project/{key}/permissionscheme?expand=all and GET
+    /rest/api/3/project/{key}/role/{id} for each role named in a privileged
+    grant (every role, via GET /rest/api/3/project/{key}/role, only with
+    JIRA_ACCESS_ALL_ROLES=true).
     Privileged permissions: ADMINISTER_PROJECTS, DELETE_ISSUES,
     DELETE_ALL_COMMENTS, DELETE_ALL_ATTACHMENTS, DELETE_ALL_WORKLOGS,
     EDIT_ALL_COMMENTS, SET_ISSUE_SECURITY, MODIFY_REPORTER. Grants to `anyone`
-    or `applicationRole` are listed as broad_privileged_grants. Summary:
-    admin_groups, distinct_admin_users, inactive_admin_users,
-    admin_users_by_account_type, projects_scanned,
-    projects_with_broad_privileged_grants, distinct_project_admin_users and
-    privileged_users_per_project. Output: jira_access_roles.json
+    or `applicationRole` are listed as broad_privileged_grants; grants to
+    reporter, assignee or custom-field holders cannot be resolved to accounts
+    and are listed as unresolved_privileged_grants. Organization admins
+    (Atlassian Administration) are not included. Summary: admin_groups,
+    distinct_admin_users, inactive_admin_users, admin_users_by_account_type,
+    projects_scanned, projects_with_broad_privileged_grants,
+    projects_with_unresolved_privileged_grants, distinct_project_admin_users
+    and privileged_users_per_project. Output: jira_access_roles.json
   description: >-
     The people and groups holding administrative and other privileged rights in
     the Jira site and in each project, evidencing that privileged access to the

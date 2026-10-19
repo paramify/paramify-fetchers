@@ -29,28 +29,52 @@ logger = logging.getLogger("jira_audit_records")
 OUTPUT_FILE = "jira_audit_records.json"
 PAGE_LIMIT = 1000
 
-# Categories (lowercased) whose records are privileged configuration changes.
-SENSITIVE_CATEGORIES = {
-    "permissions",
-    "user management",
-    "group management",
-    "workflows",
-    "issue security",
+# Atlassian does not publish the list of audit `category` values (the API
+# reference shows only "group management"), so records are classified by key
+# words in the category name rather than by an exact list. Categories that match
+# nothing are reported in summary.unclassified_categories so a miss is visible
+# and the list can be tuned against a real site.
+SENSITIVE_KEYWORDS = (
+    "permission",
+    "user",
+    "group",
+    "workflow",
+    "security",
+    "scheme",
+    "project",
+    "field",
+    "screen",
     "system",
-    "projects",
-    "fields",
-    "notification schemes",
-    "screens",
-}
+    "global",
+    "application",
+    "role",
+)
+VALUE_LIMIT = 200
+
+
+def is_sensitive(category) -> bool:
+    cat = (category or "").lower()
+    return any(k in cat for k in SENSITIVE_KEYWORDS)
+
+
+def _clip(value):
+    """Shorten a changed value and defuse markup: admin changes can carry HTML or script
+    text (an announcement banner), which can be large and can trip request filters."""
+    if value is None:
+        return None
+    text = str(value).replace("<", "&lt;").replace(">", "&gt;")
+    return text if len(text) <= VALUE_LIMIT else text[:VALUE_LIMIT] + "..."
 
 
 def _record(r: dict) -> dict:
     obj = r.get("objectItem") or {}
+    sensitive = is_sensitive(r.get("category"))
     return {
         "id": r.get("id"),
         "created": r.get("created"),
         "category": r.get("category"),
-        "summary": r.get("summary"),
+        "sensitive": sensitive,
+        "summary": _clip(r.get("summary")),
         "event_source": r.get("eventSource"),
         "author_account_id": r.get("authorAccountId") or r.get("authorKey"),
         "remote_address": r.get("remoteAddress"),
@@ -63,8 +87,11 @@ def _record(r: dict) -> dict:
             {"type": a.get("typeName"), "name": a.get("name"), "parent": a.get("parentName")}
             for a in r.get("associatedItems") or []
         ],
+        # Values are evidence only for privileged changes; elsewhere the field name is enough.
         "changed_values": [
-            {"field": c.get("fieldName"), "from": c.get("changedFrom"), "to": c.get("changedTo")}
+            {"field": c.get("fieldName"), "from": _clip(c.get("changedFrom")), "to": _clip(c.get("changedTo"))}
+            if sensitive
+            else {"field": c.get("fieldName")}
             for c in r.get("changedValues") or []
         ],
     }
@@ -72,7 +99,7 @@ def _record(r: dict) -> dict:
 
 def _summarize(records: list) -> dict:
     created = sorted(r["created"] for r in records if r["created"])
-    sensitive = [r for r in records if (r["category"] or "").lower() in SENSITIVE_CATEGORIES]
+    sensitive = [r for r in records if r["sensitive"]]
     return {
         "total": len(records),
         "oldest_record": created[0] if created else None,
@@ -85,6 +112,7 @@ def _summarize(records: list) -> dict:
             "total": len(sensitive),
             "by_category": counts(r["category"] for r in sensitive),
         },
+        "unclassified_categories": counts(r["category"] for r in records if not r["sensitive"]),
     }
 
 

@@ -153,8 +153,11 @@ class JiraClient:
         self.fail(operation, f"HTTP{resp.status_code}", message, code)
         return None
 
-    def paged_values(self, path, operation, params=None, page_size=50):
-        """Page a `startAt`/`isLast` list endpoint. Returns (values, complete)."""
+    def paged_values(self, path, operation, params=None, page_size=50, **request_kw):
+        """Page a `startAt`/`isLast` list endpoint. Returns (values, complete).
+
+        With allow_404 or quiet_400, a refused first page counts as an empty, complete list.
+        """
         values: list = []
         start_at = 0
         while True:
@@ -163,7 +166,10 @@ class JiraClient:
                 path,
                 operation,
                 params={**(params or {}), "startAt": start_at, "maxResults": page_size},
+                **request_kw,
             )
+            if page is NOT_FOUND:
+                return values, True
             if page is None:
                 return values, False
             batch = page.get("values") or []
