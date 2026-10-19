@@ -461,7 +461,8 @@ def role_values(fields: dict, ids: dict) -> dict:
     """{role: plain value} reading each role from the first of its ids that holds a value."""
     out = {}
     for role, fids in ids.items():
-        out[role] = next((v for v in (field_value(fields.get(fid)) for fid in fids) if v is not None), None)
+        # An empty string is "no value" too: keep looking in the role's other ids.
+        out[role] = next((v for v in (field_value(fields.get(fid)) for fid in fids) if v not in (None, "")), None)
     return out
 
 
