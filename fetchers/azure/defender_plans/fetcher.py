@@ -48,6 +48,7 @@ NOT_REGISTERED = "not_registered"
 UNKNOWN = "unknown"
 
 FULLY_COVERED = "fullycovered"
+COVERAGE_UNKNOWN = "unknown"
 
 _SCOPE_PATTERNS = (
     ("management_group", re.compile(r"^/providers/microsoft\.management/managementgroups/[^/]+$")),
@@ -220,11 +221,11 @@ def summarize(plans: list[dict], registration_status: str) -> dict:
         "enabled_plan_enablement_times": {
             p["resource_name"]: p["enablement_time"] for p in enabled
         },
+        # A plan Azure gave no coverage status is listed as unknown, never read as covered.
         "enabled_plans_not_fully_covered": {
-            p["resource_name"]: p["resources_coverage_status"]
+            p["resource_name"]: p["resources_coverage_status"] or COVERAGE_UNKNOWN
             for p in enabled
-            if p["resources_coverage_status"]
-            and str(p["resources_coverage_status"]).lower() != FULLY_COVERED
+            if str(p["resources_coverage_status"] or "").lower() != FULLY_COVERED
         },
         "plans_not_enabled": _names(
             p for p in plans if not p["enabled"] and not p["deprecated"]

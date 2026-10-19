@@ -14,7 +14,9 @@ description: >
   hardening are switched on, not merely available. The summary lists the enabled
   plans with their sub-plans and enablement times (the enablement times can all be
   null), the plans not enabled, enabled
-  plans that do not cover every resource, and deprecated and inherited plans; it
+  plans that do not cover every resource (an enabled plan Azure reports no
+  coverage status for is listed there as unknown, never read as covered), and
+  deprecated and inherited plans; it
   makes no judgement about which plans a system needs. A subscription that never
   registered the Microsoft.Security resource provider reports
   provider_registration_status: not_registered, which is valid evidence ("not in

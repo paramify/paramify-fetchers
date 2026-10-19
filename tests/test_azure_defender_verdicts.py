@@ -117,9 +117,9 @@ def _serverless_plans():
                resources_coverage_status="FullyCovered"),
         record("StorageAccounts", sub_plan="DefenderForStorageV2", resources_coverage_status="PartiallyCovered",
                extensions=[SimpleNamespace(name="OnUploadMalwareScanning", is_enabled=Flag.TRUE)]),
-        record("KeyVaults", sub_plan="PerKeyVault", enforce=Flag.TRUE,
+        record("KeyVaults", sub_plan="PerKeyVault", enforce=Flag.TRUE, resources_coverage_status="FullyCovered",
                inherited=Flag.TRUE, inherited_from=MG),
-        record("Dns", deprecated=True, replaced_by=["DNS"]),
+        record("Dns", deprecated=True, replaced_by=["DNS"], resources_coverage_status="FullyCovered"),
         record("VirtualMachines", tier=Tier.FREE, resources_coverage_status="NotCovered"),
         record("ContainerRegistry", tier=Tier.FREE, deprecated=True, replaced_by=["Containers"]),
         record("Containers", tier=Tier.FREE, inherited=Flag.TRUE, inherited_from=SUB),
@@ -145,6 +145,19 @@ def test_summary_keeps_deprecated_plans_out_of_not_enabled():
 def test_summary_flags_enabled_plans_that_miss_resources():
     s = dp.summarize(_serverless_plans(), dp.REGISTERED)
     assert s["enabled_plans_not_fully_covered"] == {"StorageAccounts": "PartiallyCovered"}
+
+
+@pytest.mark.parametrize("status,expected", [
+    (None, "unknown"),
+    ("", "unknown"),
+    ("NotCovered", "NotCovered"),
+    ("FullyCovered", None),
+    ("fullycovered", None),
+])
+def test_enabled_plan_without_coverage_status_reads_unknown_not_covered(status, expected):
+    s = dp.summarize([record("SqlServers", resources_coverage_status=status),
+                      record("Api", tier=Tier.FREE)], dp.REGISTERED)
+    assert s["enabled_plans_not_fully_covered"] == ({} if expected is None else {"SqlServers": expected})
 
 
 def test_summary_separates_management_group_inheritance():

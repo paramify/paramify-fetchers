@@ -710,9 +710,11 @@ schemas and the `paramify` CLI — not the internal code.
   resource-level pricing only, so at subscription scope it reads `null` and
   `plans_reporting_inheritance` says whether any plan reported it. New summary
   keys: `enabled_plans`, `enabled_plan_sub_plans`, `enabled_plan_enablement_times`,
-  `enabled_plans_not_fully_covered`, `plans_not_enabled` (deprecated plans left
-  out), `deprecated_plans`, `deprecated_plans_enabled`, `enforced_plans`,
-  `inherited_plans` and `plans_inherited_from_management_group`. The summary does
+  `enabled_plans_not_fully_covered` (an enabled plan with no coverage status is
+  listed as `unknown`, so it never reads as covered), `plans_not_enabled`
+  (deprecated plans left out), `deprecated_plans`, `deprecated_plans_enabled`,
+  `enforced_plans`, `inherited_plans` and `plans_inherited_from_management_group`.
+  The summary does
   not judge which plans a system needs. Existing fields and summary keys are
   unchanged.
 - **`azure_diagnostic_settings` also maps to `KSI-MLA-OSM`**, which its
