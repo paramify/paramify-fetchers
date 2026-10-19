@@ -551,6 +551,29 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_policy_compliance` 0.2.0: what was evaluated, whether remediation took,
+  and what keeps coming back.**
+  - Each listed non-compliant state now carries `evaluation_details`: the
+    expressions Azure Policy evaluated, with field path, operator, actual value and
+    target value, plus any ifNotExists lookup.
+  - The service returns these only per resource, so they are read for at most
+    `max_evaluation_detail_resources` (default 100) of the listed resources. The
+    resources with the most listed states are read first.
+  - `evaluation_details_status` gives the reason a state has no details;
+    `evaluation_details_truncated` says when not every listed resource was read.
+  - Each remediation task's per-resource deployments (status, error, times) are
+    listed in `remediation_deployments`, up to `max_remediation_deployments`
+    (default 1000), and each is checked against its resource's latest compliance
+    state. New summary keys count resources now compliant, still non-compliant, and
+    succeeded deployments still non-compliant.
+  - From 30 days of history, the summary counts (resource, policy) pairs
+    non-compliant throughout and pairs non-compliant only some of the time.
+  - For up to `max_recurrence_pairs` (default 100) of the part-time ones,
+    `non_compliance_recurrence` counts the separate non-compliant episodes and how
+    many times the pair fell back out of compliance. `recurring_non_compliant_pairs`
+    counts pairs with more than one episode.
+  - Every bounded list has a truncation flag. Existing fields are unchanged. Still
+    Reader-only. Also mapped to `KSI-SVC-EIS`.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`
