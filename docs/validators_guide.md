@@ -11,7 +11,7 @@ instead.
 
 **You need:** [the repo installed](../README.md#install) ·
 Node.js (Paramify runs validator regexes as JavaScript, and so does `check`) ·
-[a real run of the fetcher](../README.md#collect-then-upload) ·
+[a real run of the fetcher](cli_guide.md#collect-then-upload) ·
 [a Paramify API key](../uploaders/paramify_evidence/README.md#paramify-api-key) for step 6
 
 ---

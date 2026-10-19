@@ -195,7 +195,7 @@ exit 1:
 
 Export your real credentials, then add the fetcher to a manifest and run it.
 After each edit, the builder lists the secrets still missing
-([manifest commands](../README.md#building-a-manifest)). Your agent's
+([manifest commands](cli_guide.md#building-a-manifest)). Your agent's
 `wire-manifest` skill can do this step.
 
 ![paramify manifest init, add, and two set-secret commands, validate reporting OK, and paramify run finishing okta_password_policy with OK and exit 0](img/authoring_fetcher/04-run.png)
@@ -230,7 +230,7 @@ paramify evidence evidence/run-<timestamp>/<category>_<short_name>.json
 ## 6. Upload it and check Paramify
 
 Preview first. `--dry-run` makes no API calls and shows the evidence set each
-file goes to. Then [upload the run](../README.md#collect-then-upload).
+file goes to. Then [upload the run](cli_guide.md#collect-then-upload).
 
 ![paramify upload --dry-run: one file, okta_password_policy.json, bound for set EVD-OKTA-PASSWORD-POLICY](img/authoring_fetcher/06-upload-preview.png)
 
@@ -248,7 +248,7 @@ file from step 5.
 ![The Okta Password Policy evidence set's artifact opened as JSON in Paramify, showing the policies payload](img/authoring_fetcher/app-01-artifact-json.png)
 
 **Next:** [write validators for it](suggest_validator_guide.md) ·
-[publish its script](../README.md#show-how-evidence-is-generated-optional)
+[publish its script](cli_guide.md#show-how-evidence-is-generated-optional)
 
 ---
 
