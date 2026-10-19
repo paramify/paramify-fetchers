@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import sys
 from pathlib import Path
@@ -86,8 +87,13 @@ def covered(defender_rows=ASSESSMENTS, policy_rows=STATES):
     return {r["id"]: r for r in resources}, inv.summarize(resources, defender, policy)
 
 
-def test_assessment_target_prefers_resource_details_then_its_own_id():
-    assert inv.assessment_target(assessment(SA1)) == SA1
+@pytest.mark.parametrize("key", ["Id", "id", "ResourceId", "resourceId"])
+def test_assessment_target_reads_each_resource_details_spelling(key):
+    row = {**assessment(SITE, n=1), "resourceDetails": {"Source": "Azure", key: SA1}}
+    assert inv.assessment_target(row) == SA1
+
+
+def test_assessment_target_falls_back_to_its_own_id():
     assert inv.assessment_target(assessment(SITE, via_id=True)) == SITE
     assert inv.assessment_target({"id": "", "resourceDetails": None}) is None
 
@@ -103,6 +109,19 @@ def test_assessment_target_prefers_resource_details_then_its_own_id():
 ])
 def test_results_on_children_count_for_the_inventoried_parent(target, expected):
     assert inv.inventory_key(target, KEYS) == expected
+
+
+SLOT = f"{SITE}/slots/staging"
+
+
+@pytest.mark.parametrize("target,expected", [
+    (SLOT, SLOT.lower()),
+    (f"{SLOT}/config/web", SLOT.lower()),
+    (f"{SITE}/config/web", SITE.lower()),
+    (f"{SA1}/providers/Microsoft.Security/advancedThreatProtectionSettings/current", SA1.lower()),
+])
+def test_the_nearest_inventoried_resource_wins(target, expected):
+    assert inv.inventory_key(target, KEYS | {SLOT.lower()}) == expected
 
 
 def test_each_resource_carries_its_counts():
@@ -216,7 +235,6 @@ def test_policy_coverage_and_non_compliance():
 def test_resources_covered_by_neither_are_counted_by_type():
     _, s = covered()
     assert s["resources_covered_by_neither_by_type"] == {"microsoft.insights/actiongroups": 1}
-    assert "types_covered_by_neither" not in s
 
 
 def test_failing_results_outside_the_inventory_are_counted_apart():
@@ -283,24 +301,51 @@ def test_an_empty_inventory_never_passes():
     assert s["all_evaluable_resources_evaluated_by_policy"] is False
 
 
-def test_inventory_summary_keys_are_unchanged():
+V01_SUMMARY = {
+    "total_resources": 5,
+    "resource_type_count": 4,
+    "resources_by_type": {"microsoft.insights/actiongroups": 1, "microsoft.network/virtualnetworks": 1,
+                          "microsoft.storage/storageaccounts": 2, "microsoft.web/sites": 1},
+    "location_count": 1,
+    "resources_by_location": {"eastus": 5},
+    "resource_group_count": 1,
+    "untagged_resources": 0,
+    "tagged_resources": 5,
+}
+V01_RECORD_FIELDS = {"id", "name", "type", "location", "resource_group", "tags", "sku", "kind", "provisioning_state"}
+
+
+def test_inventory_summary_keys_and_record_fields_are_unchanged():
     s = inv.summarize(RESOURCES)
-    assert (s["total_resources"], s["resource_type_count"], s["untagged_resources"]) == (5, 4, 0)
+    assert {k: s[k] for k in V01_SUMMARY} == V01_SUMMARY
     assert s["defender_coverage_collected"] is False
+    assert set(inv.resource_record(row(SA1, "microsoft.storage/storageaccounts"))) == V01_RECORD_FIELDS
+    by_id, _ = covered()
+    assert V01_RECORD_FIELDS < set(by_id[SA1])
 
 
 class FakeGraph:
-    """Serves each query's rows as one page; `truncate` marks one query's result truncated."""
+    """Serves each query's rows `page_size` at a time behind skip tokens.
 
-    def __init__(self, rows_by_table, truncate=None):
-        self.rows_by_table, self.truncate, self.queries = rows_by_table, truncate, []
+    `truncate` marks one table's result truncated, `overcount` reports more records than it serves for one table,
+    and `fail` raises on one table.
+    """
+
+    def __init__(self, rows_by_table, truncate=None, page_size=1000, overcount=None, fail=None):
+        self.rows_by_table, self.truncate, self.page_size = rows_by_table, truncate, page_size
+        self.overcount, self.fail, self.queries = overcount, fail, []
 
     def resources(self, request):
         table = request.query.split(" ", 1)[0]
         self.queries.append(table)
+        if table == self.fail:
+            raise RuntimeError("AuthorizationFailed")
         rows = self.rows_by_table[table]
-        return SimpleNamespace(total_records=len(rows), result_truncated="true" if table == self.truncate else "false",
-                               data=rows, skip_token=None)
+        start = int(request.options.skip_token or 0)
+        end = start + self.page_size
+        return SimpleNamespace(total_records=len(rows) + (1 if table == self.overcount else 0),
+                               result_truncated="true" if table == self.truncate else "false",
+                               data=rows[start:end], skip_token=str(end) if end < len(rows) else None)
 
 
 @pytest.fixture
@@ -337,3 +382,60 @@ def test_truncated_coverage_query_is_a_failure_not_a_gap(monkeypatch, fake_model
     assert out["resources"][0]["defender_assessments"] is None
     assert out["resources"][0]["policy_evaluations"] == 1
     assert out["coverage_queries"]["defender_assessments"]["collected"] is False
+
+
+def test_coverage_rows_on_two_pages_are_all_tallied(monkeypatch, fake_models):
+    graph = FakeGraph({"Resources": [row(SA1, "microsoft.storage/storageaccounts")],
+                       "SecurityResources": [assessment(SA1, n=1), assessment(SA1, "Unhealthy", "High", n=2)],
+                       "PolicyResources": [state(SA1)]}, page_size=1)
+    out, collector = _collect(monkeypatch, graph)
+    assert collector.ok
+    assert graph.queries == ["Resources", "SecurityResources", "SecurityResources", "PolicyResources"]
+    assert out["coverage_queries"]["defender_assessments"]["pages_read"] == 2
+    assert (out["resources"][0]["defender_assessments"], out["resources"][0]["defender_unhealthy_high_severity"]) == (
+        2, 1)
+
+
+def test_a_short_coverage_query_is_a_failure_not_a_gap(monkeypatch, fake_models):
+    graph = FakeGraph({"Resources": [row(SA1, "microsoft.storage/storageaccounts")],
+                       "SecurityResources": [assessment(SA1)], "PolicyResources": [state(SA1)]},
+                      overcount="SecurityResources")
+    out, collector = _collect(monkeypatch, graph)
+    assert [f["operation"] for f in collector.failures] == ["resourcegraph.resources (SecurityResources)"]
+    assert "reported 2 rows but paging returned 1" in collector.failures[0]["message"]
+    assert out["defender"] is None
+    assert out["resources"][0]["defender_assessments"] is None
+    assert out["coverage_queries"]["defender_assessments"]["collected"] is False
+
+
+def test_a_policy_query_that_raises_leaves_policy_unknown(monkeypatch, fake_models):
+    graph = FakeGraph({"Resources": [row(SA1, "microsoft.storage/storageaccounts")],
+                       "SecurityResources": [assessment(SA1)], "PolicyResources": []}, fail="PolicyResources")
+    out, collector = _collect(monkeypatch, graph)
+    assert [f["operation"] for f in collector.failures] == ["resourcegraph.resources (PolicyResources)"]
+    assert (out["policy"], out["resources"][0]["policy_evaluations"]) == (None, None)
+    assert out["resources"][0]["defender_assessments"] == 1
+    assert out["coverage_queries"]["policy_states"]["collected"] is False
+
+
+def test_main_writes_evidence_and_fails_when_a_coverage_query_fails(monkeypatch, fake_models, tmp_path):
+    graph = FakeGraph({"Resources": [row(SA1, "microsoft.storage/storageaccounts")],
+                       "SecurityResources": [assessment(SA1)], "PolicyResources": []}, fail="PolicyResources")
+    failures = []
+    monkeypatch.setattr(inv, "resource_graph_client", lambda cred: graph)
+    monkeypatch.setattr(inv, "credential", lambda: object())
+    monkeypatch.setattr(inv, "load_dotenv", lambda: None)
+    monkeypatch.setattr(inv, "report_failure", lambda reason, code: failures.append((reason, code)))
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", SUB_ID)
+
+    assert inv.main() == 1
+
+    assert len(failures) == 1
+    evidence = json.loads((tmp_path / f"azure_resource_inventory_{SUB_ID}.json").read_text())
+    (resource,) = evidence["results"]["resources"]
+    assert (resource["defender_assessments"], resource["policy_evaluations"]) == (1, None)
+    s = evidence["summary"]
+    assert (s["defender_coverage_collected"], s["policy_coverage_collected"]) == (True, False)
+    assert s["all_evaluable_resources_evaluated_by_policy"] is None
+    assert evidence["results"]["coverage_queries"]["policy_states"]["collected"] is False

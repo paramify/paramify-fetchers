@@ -385,8 +385,8 @@ def collect(subscription_id, cred, collector: Collector) -> dict:
     A coverage query that fails or comes back truncated is recorded as a failure and
     its counts stay null, rather than every resource reading as uncovered.
     """
-    empty = {"resources": [], "total_records": None, "pages": 0, "defender": None, "policy": None,
-             "coverage_queries": {}}
+    empty: dict = {"resources": [], "total_records": None, "pages": 0, "defender": None, "policy": None,
+                   "coverage_queries": {}}
     client = collector.guard("resourcegraph.ResourceGraphClient (init)", lambda: resource_graph_client(cred))
     if client is None:
         return empty
@@ -434,8 +434,8 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    collected = {"resources": [], "total_records": None, "pages": 0, "defender": None, "policy": None,
-                 "coverage_queries": {}}
+    collected: dict = {"resources": [], "total_records": None, "pages": 0, "defender": None, "policy": None,
+                       "coverage_queries": {}}
     if subscription_id and cred is not None:
         collected = collect(subscription_id, cred, collector)
     elif not subscription_id:
