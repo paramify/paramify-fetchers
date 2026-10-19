@@ -1,12 +1,15 @@
 name: azure_sentinel_analytics_rules
-version: 0.1.0
+version: 0.2.0
 description: >
   For every Microsoft Sentinel workspace in the subscription: each analytics
   (detection) rule with its kind, enabled state, severity, MITRE tactics and
-  techniques, source template, schedule and threshold, and whether it creates
-  incidents. Also enabled-rule counts by kind, whether the Fusion multistage
-  correlation rule is present and enabled, and how many of the workspace's rule
-  templates are in use. Rules are listed at the stable and the preview
+  techniques, source template, schedule and threshold, KQL query, suppression
+  settings, and whether it creates incidents. Each rule lists the log tables it
+  reads and which of them received no data in the ingestion window. Per
+  workspace: enabled-rule counts by kind, whether the Fusion multistage
+  correlation rule is present and enabled, how many rule templates are in use,
+  the ingesting tables no enabled rule reads, and the enabled rules reading a
+  table with no data. Rules are listed at the stable and the preview
   api-version and merged by id, because the stable schema has no NRT kind.
 category: azure
 
@@ -44,20 +47,35 @@ target_schema:
       Optional — omit to collect every Sentinel-onboarded workspace in the
       subscription.
 
+config_schema:
+  ingestion_window_days:
+    type: integer
+    required: false
+    default: 14
+    env: SENTINEL_INGESTION_WINDOW_DAYS
+    description: >
+      How far back a table's latest record may be for the table to count as
+      receiving data. The default of 14 matches Sentinel's own rule for showing
+      a connector as connected.
+
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 
 ksis:
   - KSI-MLA-OSM      # Operating SIEM capability — the detections the SIEM runs
-  - KSI-MLA-RVL      # Reviewing logs — logs are persistently reviewed by enabled rules
+  - KSI-MLA-RVL      # Reviewing logs — which ingesting tables enabled rules read, and which they don't
+  - KSI-IAM-SUS      # Responding to suspicious activity — the queries that flag suspicious sign-ins and activity
+  - KSI-MLA-ALA      # Authorizing log access — the rules watching log access, with their queries and suppression
 
 evidence_set:
   reference_id: EVD-AZURE-SENTINEL-ANALYTICS-RULES
   name: Azure Sentinel Analytics Rules
   instructions: >
     Script: fetcher.py. ARM REST per Sentinel workspace: alertRules at
-    api-version 2025-09-01 and 2025-10-01-preview, merged by rule id (seen_in
-    records which listing returned each), plus alertRuleTemplates at 2025-09-01.
-    enabled is properties.enabled. Fusion is kind Fusion or template
-    f71aba3d-28fb-450b-b192-4e76a83015c8; Fusion is disabled by design on
-    workspaces onboarded to the Defender portal. Rule query text is not
-    collected. Role: Microsoft Sentinel Reader.
+    2025-09-01 and 2025-10-01-preview merged by id, alertRuleTemplates, and
+    workspace tables. tables_read: table names in the query, else the
+    template's requiredDataConnectors; incident-creation rules read
+    SecurityAlert from their product. Log Analytics: max(TimeGenerated) per
+    table over the window. Fusion is kind Fusion or template
+    f71aba3d-28fb-450b-b192-4e76a83015c8, disabled by design on workspaces
+    onboarded to the Defender portal. Roles: Microsoft Sentinel Reader and Log
+    Analytics Reader.

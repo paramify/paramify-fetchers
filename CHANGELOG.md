@@ -551,6 +551,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_sentinel_analytics_rules` 0.2.0: rule queries, suppression and the
+  tables each rule reads.** Each rule now carries its KQL `query`,
+  `suppression_enabled` and `suppression_duration`, and `tables_read`: the
+  workspace tables its query names, in code or as a string argument such as
+  `table("SigninLogs")`, else its template's `requiredDataConnectors` data types
+  (`tables_from` says which). A name that is also a column, such as `Operation`,
+  counts only where a table can stand. Incident-creation rules read
+  `SecurityAlert` and have data only when their own product sent an alert. Each
+  workspace lists the tables enabled rules read with their last ingestion, the
+  ingesting tables no enabled rule reads, and the enabled rules reading a table
+  that got nothing in the window (`SENTINEL_INGESTION_WINDOW_DAYS`, default 14).
+  Fusion and other kinds without a query read as `tables_read: null` and are
+  counted in `enabled_rules_tables_unknown`. Existing fields are unchanged. The
+  ingestion query needs Log Analytics Reader as well as Microsoft Sentinel Reader.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`

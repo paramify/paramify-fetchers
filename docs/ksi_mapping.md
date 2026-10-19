@@ -170,7 +170,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `si-11`
 
-*3 fetchers:* [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`splunk_role_index_access`](../fetchers/splunk/role_index_access)
+*4 fetchers:* [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules), [`splunk_role_index_access`](../fetchers/splunk/role_index_access)
 
 #### `KSI-MLA-EVC` — Evaluating Configurations
 
@@ -252,7 +252,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2`, `ac-2.1`, `ac-2.3`, `ac-2.13`, `ac-7`, `ps-4`, `ps-8`
 
-*4 fetchers:* [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules), [`okta_suspicious_activity_management`](../fetchers/okta/suspicious_activity_management), [`wiz_threat_detections`](../fetchers/wiz/threat_detections)
+*5 fetchers:* [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules), [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules), [`okta_suspicious_activity_management`](../fetchers/okta/suspicious_activity_management), [`wiz_threat_detections`](../fetchers/wiz/threat_detections)
 
 ### CMT — Change Management  (3/3)
 
@@ -567,7 +567,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_residual_resources`](../fetchers/azure/residual_resources) | `KSI-SVC-PRR` |
 | [`azure_resource_diagnostic_settings`](../fetchers/azure/resource_diagnostic_settings) | `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_resource_inventory`](../fetchers/azure/resource_inventory) | `KSI-PIY-GIV` |
-| [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules) | `KSI-MLA-OSM`, `KSI-MLA-RVL` |
+| [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules) | `KSI-IAM-SUS`, `KSI-MLA-ALA`, `KSI-MLA-OSM`, `KSI-MLA-RVL` |
 | [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules) | `KSI-IAM-SUS`, `KSI-MLA-RVL` |
 | [`azure_sentinel_data_sources`](../fetchers/azure/sentinel_data_sources) | `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents) | `KSI-INR-RPI`, `KSI-MLA-RVL` |

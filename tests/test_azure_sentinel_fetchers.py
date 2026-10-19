@@ -123,6 +123,7 @@ class FakeAzure:
                 {"name": "65360bb0-8986-4ade-a89d-af3cf44d28aa", "kind": "Scheduled"},
                 {"name": "f71aba3d-28fb-450b-b192-4e76a83015c8", "kind": "Fusion"},
                 {"name": "b3cfc7c0-092c-481c-a55b-34a3979758cb", "kind": "MicrosoftSecurityIncidentCreation"}]},
+            (f"{WS_A}/tables", "2023-09-01"): {"value": WORKSPACE_TABLES},
             (f"{SI_A}/incidents", "2025-09-01"): {"value": [
                 incident("i-new", "New", NOW - timedelta(days=200)),
                 incident("i-closed", "Closed", NOW - timedelta(days=3), "TruePositive"),
@@ -341,6 +342,93 @@ def test_analytics_rules_forbidden_fails_the_run(azure, tmp_path):
     assert code == 1 and ev["metadata"]["partial_failure"] is True
     assert ws_a(ev)["rules"] is None
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+
+
+# OfficeActivity has an Operation column, so the name Operation counts only where a table can stand.
+WORKSPACE_TABLES = [
+    {"name": n, "properties": {"plan": "Analytics", "schema": {
+        "standardColumns": [{"name": "TimeGenerated"}], "columns": [{"name": c} for c in cols]}}}
+    for n, cols in (("AzureActivity", []), ("SigninLogs", []), ("SecurityAlert", []), ("Syslog", []),
+                    ("CommonSecurityLog", []), ("OfficeActivity", ["Operation"]), ("Operation", []),
+                    ("Event", []), ("Usage", []), ("Heartbeat", []))]
+TABLES = {t["name"] for t in WORKSPACE_TABLES}
+AMBIGUOUS = {"Operation"}
+
+
+@pytest.mark.parametrize("query, expected", [
+    ("SigninLogs | where ResultType != '0'", ["SigninLogs"]),
+    ("// SigninLogs | take 1\nAzureActivity | take 1", ["AzureActivity"]),
+    ("let f = (t:string) { table(t) | take 1 };\nunion f('SigninLogs'), f(\"OfficeActivity\")", ["OfficeActivity", "SigninLogs"]),
+    ("OfficeActivity | where Operation == 'x' | summarize make_set(Operation) by Operation", ["OfficeActivity"]),
+    ("OfficeActivity | project UserId, Operation | where true", ["OfficeActivity"]),
+    ("Operation | where OperationStatus == 'Failed'", ["Operation"]),
+    ("union isfuzzy=true Syslog, Operation | take 1", ["Operation", "Syslog"]),
+    ("Syslog | join kind=inner (Operation | take 1) on Computer", ["Operation", "Syslog"]),
+    ("let x = Operation; x | where Detail has 'url // not a comment'", ["Operation"]),
+    ("MyApp_CL | where msg has \"AzureActivity\"", ["MyApp_CL"]),
+    ("OfficeActivity | extend p = pack(\"Operation\", Operation)", ["OfficeActivity"]),
+    ("_Im_NetworkSession | take 1", []),
+])
+def test_analytics_rules_tables_named_in_a_query(query, expected):
+    assert MODS["sentinel_analytics_rules"].query_tables(query, TABLES, AMBIGUOUS) == expected
+
+
+def test_analytics_rules_tables_and_data(azure, tmp_path):
+    azure.arm[(f"{SI_A}/alertRules", "2025-09-01")] = {"value": [
+        rule("signins", "Scheduled", True, query="SigninLogs | where ResultType != '0'",
+             suppressionEnabled=True, suppressionDuration="PT5H"),
+        rule("parser", "Scheduled", True, "tpl-net", query="_Im_NetworkSession | where DstPortNumber == 4444"),
+        rule("off", "Scheduled", False, query="OfficeActivity | take 1"),
+        rule("mde", "MicrosoftSecurityIncidentCreation", True,
+             productFilter="Microsoft Defender Advanced Threat Protection"),
+        rule("mcas", "MicrosoftSecurityIncidentCreation", True, productFilter="Microsoft Cloud App Security"),
+        rule("fusion", "Fusion", True, "f71aba3d-28fb-450b-b192-4e76a83015c8")]}
+    azure.arm[(f"{SI_A}/alertRules", "2025-10-01-preview")] = {"value": [
+        rule("nrt", "NRT", True, query="AzureActivity | where OperationNameValue has 'delete'")]}
+    azure.arm[(f"{SI_A}/alertRuleTemplates", "2025-09-01")] = {"value": [
+        {"name": "tpl-net", "kind": "Scheduled", "properties": {"requiredDataConnectors": [
+            {"connectorId": "PaloAltoNetworks", "dataTypes": ["CommonSecurityLog (PaloAlto)"]}]}}]}
+    azure.queries.insert(0, ("union withsource=ParamifySourceTable", table(
+        ["ParamifySourceTable", "LastIngested", "Records"],
+        [["AzureActivity", iso(NOW), 10], ["SecurityAlert", iso(NOW), 2], ["Syslog", iso(NOW), 7], ["Usage", iso(NOW), 5]])))
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    ws = ws_a(ev)
+    by_name = {r["name"]: r for r in ws["rules"]}
+    signins = by_name["signins"]
+    assert signins["query"].startswith("SigninLogs") and signins["suppression_enabled"] is True
+    assert signins["suppression_duration"] == "PT5H" and ws["enabled_rules_suppressed"] == 1
+    assert (signins["tables_read"], signins["tables_from"], signins["tables_without_data"]) == (
+        ["SigninLogs"], "query", ["SigninLogs"])
+    assert (by_name["parser"]["tables_read"], by_name["parser"]["tables_from"]) == (["CommonSecurityLog"], "template")
+    assert by_name["nrt"]["tables_without_data"] == [] and by_name["nrt"]["seen_in"] == ["preview"]
+    assert by_name["mde"]["tables_without_data"] == [] and by_name["mcas"]["tables_without_data"] == ["SecurityAlert"]
+    assert by_name["fusion"]["tables_read"] is None and ws["enabled_rules_tables_unknown"] == 1
+    assert ws["ingesting_tables_not_read"] == ["Syslog"]  # Usage is workspace telemetry; OfficeActivity's rule is off
+    assert {r["name"]: r["tables_without_data"] for r in ws["enabled_rules_missing_data"]} == {
+        "mcas": ["SecurityAlert"], "parser": ["CommonSecurityLog"], "signins": ["SigninLogs"]}
+    assert [(t["table"], t["enabled_rules"]) for t in ws["tables_read_by_enabled_rules"]] == [
+        ("AzureActivity", 1), ("CommonSecurityLog", 1), ("SecurityAlert", 2), ("SigninLogs", 1)]
+    assert ws["workspace_tables_listed"] == len(WORKSPACE_TABLES) and ws["ingestion_window_days"] == 14
+    assert ev["summary"]["enabled_rules_missing_data"] == 3 and ev["summary"]["ingesting_tables_not_read"] == 1
+
+
+def test_analytics_rules_without_ingestion_leave_data_unknown(azure, tmp_path):
+    azure.queries.insert(0, ("union withsource=ParamifySourceTable", Resp(403, {"error": {
+        "code": "InsufficientAccessError", "message": "no query access"}})))
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+    assert ws["rules"] and all(r["tables_without_data"] is None for r in ws["rules"])
+    assert ws["ingesting_tables_not_read"] is None and ws["enabled_rules_missing_data"] is None
+
+
+def test_analytics_rules_without_the_table_list_still_list_rules(azure, tmp_path):
+    azure.arm[(f"{WS_A}/tables", "2023-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ws["enabled_rules"] == 3
+    assert all(r["tables_read"] is None for r in ws["rules"]) and "ingesting_tables_not_read" not in ws
 
 
 def test_incidents(azure, tmp_path):
