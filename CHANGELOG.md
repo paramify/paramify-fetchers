@@ -12,6 +12,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **CI regression tests for the terminal UI and the demo CLI path.** A new
+  `tui` job runs the TUI's tests on the lowest (8.0) and latest textual 8, and
+  `--fail-on-skip` fails it if any of them skipped, so a broken `tui` install
+  can no longer pass as a page of skips. It adds SVG snapshots of every screen
+  and the key modals over an offline demo workspace (the new `snapshots` extra;
+  `pytest tests/test_tui_snapshots.py --snapshot-update` refreshes them, and a
+  mismatch uploads a side-by-side report), one end-to-end pilot flow (open the
+  demo manifest, add `demo_hello`, run it, read its evidence, upload dry-run,
+  with the network blocked), and a real launch of `paramify tui` and
+  `python -m framework.tui` in a pseudo-terminal that presses `q` and expects a
+  clean exit. The smoke job now also compares `paramify run`, `validate` and
+  `upload --dry-run` on `examples/demo.yaml` with committed goldens
+  (`python tools/cli_goldens.py --update` refreshes them).
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default

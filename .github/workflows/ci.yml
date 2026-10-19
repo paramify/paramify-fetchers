@@ -4,7 +4,10 @@ name: CI
 # is the contract (CLAUDE.md). These jobs gate it:
 #   test      — every fetcher.yaml / category file validates against its JSON Schema
 #   azure-sdk — the Azure SDK operation groups the fetchers read still exist
-#   smoke     — the CLI discovery surface works across all fetchers
+#   smoke     — the CLI discovery surface works across all fetchers, and the
+#               demo run / validate / upload --dry-run output matches its goldens
+#   tui       — the terminal UI on the lowest and latest textual 8: pilot tests,
+#               SVG snapshots, the end-to-end demo flow, and a real pty launch
 #   lint      — the framework's own code passes ruff + mypy
 #   secrets   — no credentials in the tree or its full git history
 # Fetchers can't be integration-tested here (no live tenants); that signal comes
@@ -119,6 +122,55 @@ jobs:
             paramify describe "$f" --json > /dev/null
           done
           echo "smoke ok: described all discovered fetchers"
+      # The headless path a new user takes first, end to end and offline: run the
+      # credential-free demo manifest, validate it, dry-run its upload. Output is
+      # compared with tests/goldens/cli/ after the repo path, run ids and
+      # timestamps are normalised out. Refresh: python tools/cli_goldens.py --update
+      - name: paramify run / validate / upload --dry-run on the demo (goldens)
+        run: python tools/cli_goldens.py
+
+  tui:
+    name: tui (textual ${{ matrix.textual }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The lowest textual the tui extra allows and the newest it resolves to,
+        # so a textual release that breaks the console fails here first.
+        include:
+          - textual: lowest
+            pin: "textual==8.0.*"
+          - textual: latest
+            pin: "textual>=8,<9"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # snapshots extra: pytest-textual-snapshot, kept out of dev because it caps
+      # pytest below 9 (see pyproject.toml).
+      - run: python -m pip install -e ".[dev,tui,snapshots]" "${{ matrix.pin }}"
+      # Same guard as azure-sdk: every TUI module opens with importorskip, so a
+      # failed install would otherwise pass as a page of skips.
+      - name: assert textual and the snapshot plugin actually installed
+        run: python -c "import textual, pytest_textual_snapshot; from importlib.metadata import version; print('textual', version('textual'))"
+      # Pilot suites, SVG snapshots, the end-to-end demo flow and the pty launch.
+      # --fail-on-skip (tests/conftest.py) fails the job if any of them skipped.
+      - name: pytest (TUI)
+        run: >-
+          pytest -q -rs --fail-on-skip --snapshot-report snapshot_report.html
+          tests/test_tui_*.py tests/test_manifest_autosave.py tests/test_target_editor.py
+      # Side-by-side SVG diff of every mismatched snapshot. Refresh after an
+      # intended UI change: pytest tests/test_tui_snapshots.py --snapshot-update
+      - name: upload the snapshot report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: snapshot-report-textual-${{ matrix.textual }}
+          path: snapshot_report.html
+          if-no-files-found: ignore
 
   secrets:
     name: secrets (gitleaks full history)

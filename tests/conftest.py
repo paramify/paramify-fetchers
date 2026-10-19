@@ -27,7 +27,12 @@ Everything here reaches a test as a FIXTURE. pyproject sets
 
 from __future__ import annotations
 
+import json
+import re
+import shutil
+import socket
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict
 
 import pytest
@@ -40,6 +45,39 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return REPO_ROOT
+
+
+# --------------------------------------------------------------------------- #
+# --fail-on-skip
+#
+# Every TUI module opens with pytest.importorskip("textual"), so a tui extra
+# that failed to install skips the whole TUI suite and the run still passes.
+# CI's tui job passes this flag so that a skip fails the run instead.
+# --------------------------------------------------------------------------- #
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--fail-on-skip", action="store_true",
+        help="fail the run if any test or test module is skipped",
+    )
+
+
+def _skipped(config) -> list:
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    return reporter.stats.get("skipped", []) if reporter else []
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if session.config.getoption("--fail-on-skip") and exitstatus == 0 and _skipped(session.config):
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    if config.getoption("--fail-on-skip") and _skipped(config):
+        terminalreporter.write_line(
+            f"--fail-on-skip: {len(_skipped(config))} skipped, so the run fails (-rs lists why)",
+            red=True,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -192,3 +230,97 @@ def fake_response():
 def build_fetcher_fn():
     """build_fetcher itself, for a test that needs an explicit path."""
     return build_fetcher
+
+
+# --------------------------------------------------------------------------- #
+# Offline demo workspace
+#
+# For the TUI snapshot and end-to-end tests: a repo root holding only the
+# credential-free demo fetcher, its manifest (manifests/demo.yaml) and one real
+# run of it, pinned to a fixed run id and timestamps. Catalog growth, the host's
+# .env and the wall clock then cannot change what the screens show.
+# --------------------------------------------------------------------------- #
+
+DEMO_RUN_ID = "2026-01-01T00-00-00Z"
+
+_PINS = [
+    (re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z"), DEMO_RUN_ID),
+    (re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})"), "2026-01-01T00:00:00Z"),
+    (re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}"), "2026-01-01 00:00:00,000"),
+]
+
+
+def _pin(value: Any, roots: list) -> Any:
+    """Strip run ids, timestamps, durations and the root path from run output."""
+    if isinstance(value, dict):
+        return {k: 0.05 if k == "duration_sec" else _pin(v, roots) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_pin(v, roots) for v in value]
+    if isinstance(value, str):
+        for root in roots:
+            value = value.replace(root + "/", "")
+        for pattern, fixed in _PINS:
+            value = pattern.sub(fixed, value)
+    return value
+
+
+def _offline(mp: pytest.MonkeyPatch) -> None:
+    """Hide the host's .env and Paramify env: empty, not unset, as dotenv never overrides a set var."""
+    from framework.custom_tags import ENV_SWITCH
+    from framework.paramify_auth import BASE_URL_ENV, READ_TOKEN_ENV, UPLOAD_TOKEN_ENV
+
+    mp.setenv("PYTHON_DOTENV_DISABLED", "1")
+    for name in (UPLOAD_TOKEN_ENV, READ_TOKEN_ENV, BASE_URL_ENV, ENV_SWITCH):
+        mp.setenv(name, "")
+
+
+@pytest.fixture(scope="session")
+def _demo_template(tmp_path_factory):
+    from framework import api
+
+    root = tmp_path_factory.mktemp("demo-root")
+    no_cache = shutil.ignore_patterns("__pycache__")
+    shutil.copytree(REPO_ROOT / "framework" / "schemas", root / "framework" / "schemas")
+    shutil.copytree(REPO_ROOT / "fetchers" / "demo", root / "fetchers" / "demo", ignore=no_cache)
+    (root / "fetchers" / "_categories").mkdir()
+    shutil.copy(REPO_ROOT / "fetchers" / "_categories" / "demo.yaml", root / "fetchers" / "_categories")
+    (root / "uploaders").symlink_to(REPO_ROOT / "uploaders", target_is_directory=True)
+    (root / "manifests").mkdir()
+    manifest = root / "manifests" / "demo.yaml"
+    shutil.copy(REPO_ROOT / "examples" / "demo.yaml", manifest)
+
+    events: list = []
+    with pytest.MonkeyPatch.context() as mp:
+        _offline(mp)
+        mp.chdir(root)
+        api.run(api.read_manifest(manifest), root, on_event=events.append, manifest_path=manifest)
+
+    roots = sorted({str(root), str(root.resolve())}, key=len, reverse=True)
+    run_dir = next((root / "evidence").glob("run-*"))
+    pinned = run_dir.rename(run_dir.with_name(f"run-{DEMO_RUN_ID}"))
+    for path in pinned.glob("*.json"):
+        path.write_text(json.dumps(_pin(json.loads(path.read_text()), roots), indent=2))
+    return root, _pin(events, roots)
+
+
+@pytest.fixture
+def demo_workspace(_demo_template, tmp_path, monkeypatch):
+    """A fresh, offline copy of the demo root as the cwd; `.run_events` replay its pinned run."""
+    template, events = _demo_template
+    root = tmp_path / "demo"
+    shutil.copytree(template, root, symlinks=True)
+    _offline(monkeypatch)
+    monkeypatch.chdir(root)
+    return SimpleNamespace(root=root, run_events=events)
+
+
+@pytest.fixture
+def no_network(monkeypatch):
+    """Fail any DNS lookup or outbound connection, Paramify's included."""
+    def refuse(*args, **kwargs):
+        where = [a for a in args if not isinstance(a, socket.socket)]
+        raise AssertionError(f"test touched the network: {where!r}")
+
+    monkeypatch.setattr(socket, "getaddrinfo", refuse)
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(socket.socket, "connect_ex", refuse)

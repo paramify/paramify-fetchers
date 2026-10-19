@@ -1,0 +1,12 @@
+$ paramify run examples/demo.yaml
+exit 0
+--- stdout
+Note: no Paramify API token set, so `paramify upload` will need one (PARAMIFY_UPLOAD_API_TOKEN). Collecting anyway.
+
+Run <run-id> → <repo>/evidence/run-<run-id>
+
+  RUN   demo_hello
+        [OK] exit=0 duration=<n>s
+
+_run_metadata.json → <repo>/evidence/run-<run-id>/_run_metadata.json
+--- stderr
