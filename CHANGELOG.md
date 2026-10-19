@@ -708,7 +708,9 @@ schemas and the `paramify` CLI — not the internal code.
   `policy_non_compliant`; a result on a child resource, such as a subnet, counts for
   the inventoried parent. Only Healthy and Unhealthy assessments count:
   NotApplicable ones did not happen (off by policy, for instance) and are counted
-  apart, in `defender_not_applicable` and `defender_not_applicable_total`. The
+  apart, in `defender_not_applicable` and `defender_not_applicable_total`; an
+  assessment with a missing or unexpected status counts in neither, but in
+  `defender_unknown_status_total`. The
   summary lists `resources_without_defender_assessment`
   and `resources_without_policy_evaluation`. A resource counts there only when the
   service covers another resource of its type in the subscription. Types it covers

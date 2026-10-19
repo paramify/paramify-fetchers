@@ -71,9 +71,11 @@ ASSESSMENT_ID_MARKER = "/providers/microsoft.security/assessments/"
 UNHEALTHY = "unhealthy"
 # NotApplicable means the assessment did not happen (OffByPolicy and the like), so it is not coverage.
 ASSESSED = frozenset({"healthy", UNHEALTHY})
+NOT_APPLICABLE = "notapplicable"
 HIGH_SEVERITIES = frozenset({"high", "critical"})
 NON_COMPLIANT = "noncompliant"
-DEFENDER_FIELDS = ("assessments", "not_applicable", "unhealthy", "unhealthy_high", "unhealthy_unknown_severity")
+DEFENDER_FIELDS = ("assessments", "not_applicable", "unknown_status", "unhealthy", "unhealthy_high",
+                   "unhealthy_unknown_severity")
 POLICY_FIELDS = ("evaluations", "non_compliant")
 
 
@@ -113,10 +115,7 @@ def assessment_target(row: dict) -> str | None:
 
 
 def foreign_source(row: dict) -> str | None:
-    """`source:<platform>` for an assessment whose `resourceDetails` source is not Azure (Aws, Gcp, OnPremise).
-
-    Its id can sit under an Azure resource such as the multicloud connector, so it never counts for one.
-    """
+    """`source:<platform>` for a non-Azure `resourceDetails` source, whose id may sit under an Azure connector."""
     details = row.get("resourceDetails")
     if not isinstance(details, dict):
         return None
@@ -200,8 +199,11 @@ def _tally(rows, inventory, subscription_id, target_of, count, fields, foreign_o
 
 def _count_assessment(counts: Counter, row: dict) -> None:
     status = (row.get("status") or "").lower()
-    if status not in ASSESSED:
+    if status == NOT_APPLICABLE:
         counts["not_applicable"] += 1
+        return
+    if status not in ASSESSED:
+        counts["unknown_status"] += 1
         return
     counts["assessments"] += 1
     if status == UNHEALTHY:
@@ -259,8 +261,7 @@ def _coverage(resources: list[dict], tally: dict | None, field: str) -> dict:
     in_scope = [r for r in resources if r["type"] in covered_types]
     missing = sorted(r["id"] for r in in_scope if not r[field])
     other_types = Counter(r["type"] or "unknown" for r in resources if r["type"] not in covered_types)
-    # Covering nothing (not in use, nothing assigned, or an empty inventory, which is what Resource Graph
-    # returns without Reader) must not read as "no gaps".
+    # Covering nothing, or an empty inventory (Resource Graph's answer without Reader), is not "no gaps".
     return {"in_scope": len(in_scope), "covered": len(in_scope) - len(missing), "missing": missing,
             "other_types": sorted_counts(other_types), "all": bool(covered_types) and not missing}
 
@@ -351,6 +352,7 @@ def summarize(resources: list[dict], defender: dict | None = None, policy: dict 
         **_service_summary(resources, defender, "defender_assessments",
                            _coverage(resources, defender, "defender_assessments"), DEFENDER_NAMES),
         "defender_not_applicable_total": _total(defender, "not_applicable"),
+        "defender_unknown_status_total": _total(defender, "unknown_status"),
         "resources_with_unhealthy_high_severity": _resources_with(
             resources, "defender_unhealthy_high_severity", defender),
         "unhealthy_high_severity_assessments": _inside(defender, "unhealthy_high"),

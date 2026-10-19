@@ -159,8 +159,8 @@ def test_high_severity_outside_the_inventory_is_counted():
     assert s["unhealthy_high_severity_assessments"] == 0
     assert s["defender_unhealthy_high_severity_outside_inventory"] == 1
     assert s["defender_unhealthy_without_severity_outside_inventory"] == 1
-    assert tally["outside_by_target"] == {"subscription": {
-        "assessments": 2, "not_applicable": 0, "unhealthy": 2, "unhealthy_high": 1, "unhealthy_unknown_severity": 1}}
+    assert tally["outside_by_target"] == {"subscription": {**dict.fromkeys(inv.DEFENDER_FIELDS, 0),
+        "assessments": 2, "unhealthy": 2, "unhealthy_high": 1, "unhealthy_unknown_severity": 1}}
 
 
 def test_not_applicable_assessments_are_not_coverage():
@@ -174,6 +174,20 @@ def test_not_applicable_assessments_are_not_coverage():
     assert s["types_without_defender_assessment"]["microsoft.web/sites"] == 1
     assert s["all_assessable_resources_assessed_by_defender"] is False
     assert (s["defender_assessments_total"], s["defender_not_applicable_total"]) == (1, 2)
+
+
+def test_a_missing_or_unexpected_status_is_counted_apart():
+    rows = [assessment(SA1, n=1), {**assessment(SA1, n=2), "status": None}, assessment(SA1, "Pending", n=3),
+            assessment(SUB, "", n=4), assessment(SA2, "NotApplicable", n=5)]
+    tally = inv.tally_defender(rows, KEYS, SUB_ID)
+    by_id = {r["id"]: r for r in inv.with_coverage(RESOURCES, tally, None)}
+    assert (by_id[SA1]["defender_assessments"], by_id[SA1]["defender_not_applicable"]) == (1, 0)
+    assert tally["outside_by_target"]["subscription"]["unknown_status"] == 1
+    s = inv.summarize(list(by_id.values()), tally, None)
+    assert (s["defender_assessments_total"], s["defender_not_applicable_total"], s["defender_unknown_status_total"]) == (
+        1, 1, 3)
+    assert s["defender_assessments_total"] + s["defender_not_applicable_total"] + s[
+        "defender_unknown_status_total"] == len(rows)
 
 
 def test_only_not_applicable_rows_never_pass():
@@ -211,7 +225,9 @@ def test_counts_reconcile_with_the_totals():
 
     assert total("defender_assessments") + s["defender_assessments_outside_inventory"] == s["defender_assessments_total"]
     assert s["defender_not_applicable_total"] == sum(1 for r in ASSESSMENTS if r["status"] == "NotApplicable")
-    assert s["defender_assessments_total"] + s["defender_not_applicable_total"] == len(ASSESSMENTS)
+    assert s["defender_unknown_status_total"] == 0
+    assert s["defender_assessments_total"] + s["defender_not_applicable_total"] + s[
+        "defender_unknown_status_total"] == len(ASSESSMENTS)
     assert total("defender_unhealthy") + s["defender_unhealthy_outside_inventory"] == sum(
         1 for r in ASSESSMENTS if r["status"] == "Unhealthy")
     assert total("defender_unhealthy_high_severity") + s["defender_unhealthy_high_severity_outside_inventory"] == sum(
@@ -325,11 +341,7 @@ def test_inventory_summary_keys_and_record_fields_are_unchanged():
 
 
 class FakeGraph:
-    """Serves each query's rows `page_size` at a time behind skip tokens.
-
-    `truncate` marks one table's result truncated, `overcount` reports more records than it serves for one table,
-    and `fail` raises on one table.
-    """
+    """Serves rows `page_size` at a time by skip token; `truncate`, `overcount` and `fail` each break one table."""
 
     def __init__(self, rows_by_table, truncate=None, page_size=1000, overcount=None, fail=None):
         self.rows_by_table, self.truncate, self.page_size = rows_by_table, truncate, page_size
