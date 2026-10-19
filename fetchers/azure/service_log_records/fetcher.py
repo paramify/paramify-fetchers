@@ -1,0 +1,457 @@
+#!/usr/bin/env python3
+"""App Service HTTP logs, SQL Managed Instance audit events and app dependencies as they arrive in Log Analytics."""
+
+import logging
+import sys
+from collections import Counter
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from azure_common import basename, coverage_percentage, sorted_counts  # noqa: E402
+from azure_rest import (  # noqa: E402
+    DIAG_API,
+    LAW_API,
+    ArmError,
+    dig,
+    int_config,
+    iso_duration_days,
+    parse_time,
+    run_subscription,
+)
+
+NAME = "azure_service_log_records"
+WEB_API = "2023-12-01"
+SQL_API = "2023-08-01"
+LOOKBACK_ENV = "SERVICE_LOGS_LOOKBACK_DAYS"
+DEFAULT_LOOKBACK_DAYS = 7
+SAMPLE_ENV = "SERVICE_LOGS_SAMPLE_SIZE"
+DEFAULT_SAMPLE_SIZE = 10
+
+HTTP_TABLE = "AppServiceHTTPLogs"
+AUDIT_TABLE = "AzureDiagnostics"
+DEPENDENCY_TABLE = "AppDependencies"
+HTTP_CATEGORY = "AppServiceHTTPLogs"
+AUDIT_CATEGORY = "SQLSecurityAuditEvents"
+HTTP_GROUPS = frozenset({"alllogs"})
+AUDIT_GROUPS = frozenset({"audit", "alllogs"})
+
+_SCOPE = "| where TimeGenerated > ago({days}d) | where _ResourceId startswith '/subscriptions/{subscription_id}/' "
+HTTP_QUERY = (
+    f"{HTTP_TABLE} " + _SCOPE
+    + "| summarize Records = count(), LastRecord = max(TimeGenerated), ClientIps = dcount(CIp), "
+    "Status2xx = countif(ScStatus between (200 .. 299)), Status3xx = countif(ScStatus between (300 .. 399)), "
+    "Status4xx = countif(ScStatus between (400 .. 499)), Status5xx = countif(ScStatus >= 500), "
+    "Hosts = make_set(CsHost, {sample}) by ResourceId = tolower(_ResourceId)"
+)
+HTTP_LATEST_QUERY = (
+    f"{HTTP_TABLE} " + _SCOPE
+    + "| summarize arg_max(TimeGenerated, CIp, CsHost, CsMethod, CsUriStem, ScStatus) by ResourceId = tolower(_ResourceId)"
+)
+HTTP_CLIENTS_QUERY = (
+    f"{HTTP_TABLE} " + _SCOPE
+    + "| top-nested of ResourceId = tolower(_ResourceId) by Ignore = max(1), "
+    "top-nested {sample} of CIp by Requests = count()"
+)
+AUDIT_QUERY = (
+    f"{AUDIT_TABLE} " + _SCOPE + f"| where Category == '{AUDIT_CATEGORY}' "
+    "| summarize Records = count(), LastRecord = max(TimeGenerated), Failed = countif(succeeded_s =~ 'false') "
+    "by ResourceId = tolower(_ResourceId), Database = database_name_s, Action = action_name_s"
+)
+PRINCIPAL_QUERY = (
+    f"{AUDIT_TABLE} " + _SCOPE + f"| where Category == '{AUDIT_CATEGORY}' "
+    "| summarize Records = count(), Failed = countif(succeeded_s =~ 'false'), LastSeen = max(TimeGenerated), "
+    "ClientIps = make_set(client_ip_s, {sample}) by ResourceId = tolower(_ResourceId), Principal = server_principal_name_s"
+)
+DEPENDENCY_QUERY = (
+    f"{DEPENDENCY_TABLE} " + _SCOPE
+    + "| summarize Calls = sum(ItemCount), Failed = sumif(ItemCount, Success == false), LastCall = max(TimeGenerated) "
+    "by Component = tolower(_ResourceId), AppRole = AppRoleName, Target, DependencyType"
+)
+
+WS_QUERIED = "queried"
+WS_NOT_AUTHORIZED = "not_authorized"
+WS_NOT_FOUND = "not_found"
+WS_ERROR = "error"
+ANALYTICS = "analytics"
+ENTRA = "entra"
+SQL_LOGIN = "sql_login"
+
+logger = logging.getLogger(NAME)
+
+
+# --- pure transforms ---
+
+def id_key(resource_id) -> str:
+    return (resource_id or "").lower().rstrip("/")
+
+
+def exporting_workspaces(settings: list[dict], category: str, groups: frozenset) -> list[str]:
+    """Workspaces of the settings that send `category` to Log Analytics, by name or through a group."""
+    seen: dict = {}
+    for setting in settings or []:
+        props = setting.get("properties") or {}
+        workspace = props.get("workspaceId")
+        if not workspace:
+            continue
+        for log in props.get("logs") or []:
+            named = (log.get("category") or "").lower() == category.lower()
+            grouped = (log.get("categoryGroup") or "").lower() in groups
+            if log.get("enabled") is True and (named or grouped):
+                seen.setdefault(id_key(workspace), workspace)
+    return [seen[k] for k in sorted(seen)]
+
+
+def principal_kind(name) -> str | None:
+    """Entra users sign in by UPN and apps or managed identities as <client id>@<tenant id>; SQL logins have no @."""
+    if not name:
+        return None
+    return ENTRA if "@" in name else SQL_LOGIN
+
+
+def ws_status(exc: BaseException) -> str:
+    message = str(exc).lower()
+    status = getattr(exc, "status", None)
+    if status == 404 or "resourcenotfound" in message or "workspacenotfound" in message:
+        return WS_NOT_FOUND
+    if status in (401, 403) or any(
+        m in message for m in ("(401)", "(403)", "authorizationfailed", "insufficientaccess", "forbidden")
+    ):
+        return WS_NOT_AUTHORIZED
+    return WS_ERROR
+
+
+def table_record(name: str, raw) -> dict:
+    """raw None: the table does not exist in the workspace yet."""
+    props = (raw or {}).get("properties") or {}
+    return {
+        "name": name,
+        "exists": raw is not None,
+        "plan": props.get("plan"),
+        "retention_in_days": props.get("retentionInDays"),
+        "total_retention_in_days": props.get("totalRetentionInDays"),
+    }
+
+
+def readable(table: dict) -> bool:
+    """A missing table holds no records; Basic and Auxiliary tables bill per GB scanned, so they are not queried."""
+    return not table["exists"] or (table["plan"] or "Analytics").lower() == ANALYTICS
+
+
+def _latest(times):
+    parsed = [(parse_time(t), t) for t in times if t]
+    parsed = [p for p in parsed if p[0] is not None]
+    return max(parsed)[1] if parsed else None
+
+
+def _arriving(records, destinations: list[str], workspaces: dict, table: str):
+    """True once records arrived; False only when every destination's table was read (or the destination is gone)."""
+    if not destinations:
+        return None
+    if records:
+        return True
+    for wid in destinations:
+        ws = workspaces.get(id_key(wid)) or {}
+        if ws.get("status") == WS_NOT_FOUND:
+            continue
+        if ws.get("status") != WS_QUERIED or table not in ws.get("read_tables", ()):
+            return None
+    return False
+
+
+def _rows_for(rid: str, destinations: list[str], workspaces: dict, key: str) -> list[dict]:
+    rows = []
+    for wid in destinations:
+        ws = workspaces.get(id_key(wid)) or {}
+        rows.extend(r for r in ws.get(key) or [] if (r.get("ResourceId") or "").lower() == rid)
+    return rows
+
+
+def app_record(site: dict, settings, workspaces: dict, sample: int) -> dict:
+    destinations = exporting_workspaces(settings, HTTP_CATEGORY, HTTP_GROUPS)
+    rid = (site.get("id") or "").lower()
+    summary = _rows_for(rid, destinations, workspaces, "http")
+    latest = _rows_for(rid, destinations, workspaces, "http_latest")
+    clients = _rows_for(rid, destinations, workspaces, "http_clients")
+    records = sum(r.get("Records") or 0 for r in summary)
+    newest_time = _latest(r.get("TimeGenerated") for r in latest)
+    newest = next((r for r in latest if r.get("TimeGenerated") == newest_time), None)
+    return {
+        "id": site.get("id"),
+        "name": site.get("name"),
+        "kind": site.get("kind"),
+        "is_slot": "/slots/" in rid,
+        "diagnostic_settings_read": settings is not None,
+        "http_logs_exported": bool(destinations) if settings is not None else None,
+        "http_log_workspaces": destinations,
+        "http_log_records": records,
+        "last_http_log": _latest(r.get("LastRecord") for r in summary),
+        "distinct_client_ips": max((r.get("ClientIps") or 0 for r in summary), default=0),
+        "status_classes": {k: sum(r.get(f"Status{k}") or 0 for r in summary) for k in ("2xx", "3xx", "4xx", "5xx")},
+        "hosts": sorted({h for r in summary for h in (r.get("Hosts") or [])})[:sample],
+        "top_clients": sorted(
+            ({"client_ip": c.get("CIp"), "requests": c.get("Requests")} for c in clients),
+            key=lambda c: (-(c["requests"] or 0), c["client_ip"] or ""),
+        )[:sample],
+        "latest_request": {
+            "time": newest.get("TimeGenerated"), "client_ip": newest.get("CIp"), "host": newest.get("CsHost"),
+            "method": newest.get("CsMethod"), "uri_stem": newest.get("CsUriStem"), "status": newest.get("ScStatus"),
+        } if newest else None,
+        "http_logs_arriving": _arriving(records, destinations, workspaces, HTTP_TABLE),
+    }
+
+
+def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int) -> dict:
+    destinations = exporting_workspaces(settings, AUDIT_CATEGORY, AUDIT_GROUPS)
+    rid = (mi.get("id") or "").lower()
+    rows = _rows_for(rid, destinations, workspaces, "audit")
+    principal_rows = _rows_for(rid, destinations, workspaces, "principals")
+    records = sum(r.get("Records") or 0 for r in rows)
+    listed = {(d.get("name") or "").lower(): d["name"] for d in databases or [] if d.get("name")}
+    dbs: dict = {}
+    for r in rows:
+        name = r.get("Database")
+        if not name:
+            continue
+        db = dbs.setdefault(name.lower(), {"name": listed.get(name.lower(), name), "times": [], "records": 0, "failed": 0})
+        db["records"] += r.get("Records") or 0
+        db["failed"] += r.get("Failed") or 0
+        db["times"].append(r.get("LastRecord"))
+    for key, name in listed.items():
+        dbs.setdefault(key, {"name": name, "times": [], "records": 0, "failed": 0})
+    db_records = [
+        {"name": db["name"], "listed": key in listed, "audit_records": db["records"], "failed_events": db["failed"],
+         "last_audit_record": _latest(db["times"])}
+        for key, db in sorted(dbs.items())
+    ]
+    principals = {}
+    for r in principal_rows:
+        name = r.get("Principal") or ""
+        p = principals.setdefault(name, {"records": 0, "failed": 0, "times": [], "ips": set()})
+        p["records"] += r.get("Records") or 0
+        p["failed"] += r.get("Failed") or 0
+        p["times"].append(r.get("LastSeen"))
+        p["ips"].update(ip for ip in r.get("ClientIps") or [] if ip)
+    principal_records = sorted(
+        (
+            {"principal": name or None, "kind": principal_kind(name), "events": p["records"], "failed_events": p["failed"],
+             "last_seen": _latest(p["times"]), "client_ips": sorted(p["ips"])[:sample]}
+            for name, p in principals.items()
+        ),
+        key=lambda p: (-p["events"], p["principal"] or ""),
+    )
+    kinds = Counter(p["kind"] for p in principal_records)
+    actions = Counter()
+    for r in rows:
+        actions[r.get("Action") or "unknown"] += r.get("Records") or 0
+    return {
+        "id": mi.get("id"),
+        "name": mi.get("name"),
+        "diagnostic_settings_read": settings is not None,
+        "audit_exported": bool(destinations) if settings is not None else None,
+        "audit_workspaces": destinations,
+        "audit_records": records,
+        "failed_audit_events": sum(r.get("Failed") or 0 for r in rows),
+        "last_audit_record": _latest(r.get("LastRecord") for r in rows),
+        "audit_actions": sorted_counts(actions),
+        "databases": db_records,
+        "principals": principal_records[:sample],
+        "principals_total": len(principal_records),
+        "entra_principals": kinds[ENTRA],
+        "sql_login_principals": kinds[SQL_LOGIN],
+        "unnamed_principal_events": sum(p["events"] for p in principal_records if p["kind"] is None),
+        "audit_arriving": _arriving(records, destinations, workspaces, AUDIT_TABLE),
+    }
+
+
+def dependency_records(workspaces: dict, sample: int) -> list[dict]:
+    roles: dict = {}
+    for ws in workspaces.values():
+        for r in ws.get("dependencies") or []:
+            key = (r.get("Component") or "", r.get("AppRole") or "")
+            role = roles.setdefault(key, {})
+            target = role.setdefault((r.get("Target") or "", r.get("DependencyType") or ""), {"calls": 0, "failed": 0, "times": []})
+            target["calls"] += r.get("Calls") or 0
+            target["failed"] += r.get("Failed") or 0
+            target["times"].append(r.get("LastCall"))
+    out = []
+    for (component, app_role), targets in sorted(roles.items()):
+        ranked = sorted(
+            ({"target": t or None, "type": kind or None, "calls": v["calls"], "failed_calls": v["failed"],
+              "last_call": _latest(v["times"])} for (t, kind), v in targets.items()),
+            key=lambda t: (-t["calls"], t["target"] or ""),
+        )
+        out.append({
+            "app_role": app_role or None,
+            "component_id": component or None,
+            "targets_total": len(ranked),
+            "dependency_types": sorted({t["type"] for t in ranked if t["type"]}),
+            "targets": ranked[:sample],
+        })
+    return out
+
+
+def _min_retention(workspaces: list[dict], table: str):
+    days = [
+        t["retention_in_days"] for w in workspaces for t in w.get("tables") or []
+        if t["name"] == table and t["exists"] and isinstance(t["retention_in_days"], int)
+    ]
+    return min(days) if days else None
+
+
+def summarize(apps: list[dict], instances: list[dict], dependencies: list[dict], workspaces: list[dict], days: int) -> dict:
+    exporting_apps = [a for a in apps if a["http_logs_exported"]]
+    exporting_mis = [m for m in instances if m["audit_exported"]]
+    status = Counter(w["status"] for w in workspaces)
+    databases = [d for m in instances for d in m["databases"] if d["listed"]]
+    with_http = sum(1 for a in exporting_apps if a["http_logs_arriving"] is True)
+    with_audit = sum(1 for m in exporting_mis if m["audit_arriving"] is True)
+    return {
+        "lookback_days": days,
+        "apps": len(apps),
+        "apps_exporting_http_logs": len(exporting_apps),
+        "apps_with_http_log_records": with_http,
+        "apps_without_http_log_records": sum(1 for a in exporting_apps if a["http_logs_arriving"] is False),
+        "apps_http_logs_unknown": sum(1 for a in exporting_apps if a["http_logs_arriving"] is None),
+        "http_log_arrival_percentage": coverage_percentage(with_http, len(exporting_apps)),
+        "http_log_records": sum(a["http_log_records"] for a in apps),
+        "managed_instances": len(instances),
+        "instances_exporting_audit": len(exporting_mis),
+        "instances_with_audit_records": with_audit,
+        "instances_without_audit_records": sum(1 for m in exporting_mis if m["audit_arriving"] is False),
+        "instances_audit_unknown": sum(1 for m in exporting_mis if m["audit_arriving"] is None),
+        "audit_records": sum(m["audit_records"] for m in instances),
+        "failed_audit_events": sum(m["failed_audit_events"] for m in instances),
+        "audit_actions": sorted_counts(sum((Counter(m["audit_actions"]) for m in instances), Counter())),
+        "audit_principals": sum(m["principals_total"] for m in instances),
+        "entra_principals": sum(m["entra_principals"] for m in instances),
+        "sql_login_principals": sum(m["sql_login_principals"] for m in instances),
+        "unnamed_principal_events": sum(m["unnamed_principal_events"] for m in instances),
+        "managed_databases": len(databases),
+        "managed_databases_with_audit_records": sum(1 for d in databases if d["audit_records"]),
+        "app_roles_with_dependencies": len(dependencies),
+        "dependency_targets": sum(d["targets_total"] for d in dependencies),
+        "dependency_types": sorted({t for d in dependencies for t in d["dependency_types"]}),
+        "log_workspaces": len(workspaces),
+        "log_workspaces_queried": status[WS_QUERIED],
+        "log_workspaces_not_authorized": status[WS_NOT_AUTHORIZED],
+        "log_workspaces_not_found": status[WS_NOT_FOUND],
+        "http_log_retention_days": _min_retention(workspaces, HTTP_TABLE),
+        "audit_log_retention_days": _min_retention(workspaces, AUDIT_TABLE),
+        "dependency_retention_days": _min_retention(workspaces, DEPENDENCY_TABLE),
+    }
+
+
+# --- collection ---
+
+def _optional_table(client, workspace_id: str, table: str):
+    try:
+        return client.get(f"{workspace_id}/tables/{table}", LAW_API)
+    except ArmError as exc:
+        if exc.status == 404:
+            return None
+        raise
+
+
+def read_workspace(client, workspace_id: str, subscription_id: str, days: int, sample: int, collector) -> dict:
+    """A refused or deleted workspace is evidence; any other failure fails the run."""
+    out = {"workspace_id": workspace_id, "name": basename(workspace_id), "status": WS_QUERIED, "error": None,
+           "tables": [], "read_tables": []}
+    scope = {"days": days, "subscription_id": subscription_id, "sample": sample}
+    try:
+        customer_id = dig(client.get(workspace_id, LAW_API), "properties", "customerId")
+        if not customer_id:
+            raise LookupError(f"no customerId on workspace {workspace_id}")
+        out["tables"] = [table_record(t, _optional_table(client, workspace_id, t))
+                         for t in (HTTP_TABLE, AUDIT_TABLE, DEPENDENCY_TABLE)]
+        ready = {t["name"] for t in out["tables"] if t["exists"] and readable(t)}
+        timespan = iso_duration_days(days)
+        queries = (
+            (HTTP_TABLE, "http", HTTP_QUERY), (HTTP_TABLE, "http_latest", HTTP_LATEST_QUERY),
+            (HTTP_TABLE, "http_clients", HTTP_CLIENTS_QUERY), (AUDIT_TABLE, "audit", AUDIT_QUERY),
+            (AUDIT_TABLE, "principals", PRINCIPAL_QUERY), (DEPENDENCY_TABLE, "dependencies", DEPENDENCY_QUERY),
+        )
+        for table, key, kql in queries:
+            out[key] = client.query(customer_id, kql.format(**scope), timespan) if table in ready else []
+        out["read_tables"] = sorted(t["name"] for t in out["tables"] if readable(t))
+    except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
+        status = ws_status(exc)
+        if status == WS_ERROR:
+            collector.record(f"loganalytics.query(service logs, {workspace_id})", exc)
+        else:
+            logger.warning("Log Analytics workspace %s: %s (%s)", workspace_id, status, exc)
+        return {**out, "status": status, "error": " ".join(str(exc).split())[:300], "read_tables": []}
+    return out
+
+
+def _settings(client, resource_id: str, collector):
+    return collector.guard(
+        f"insights.diagnosticSettings.list({resource_id})",
+        lambda: client.list(f"{resource_id}/providers/Microsoft.Insights/diagnosticSettings", DIAG_API),
+    )
+
+
+def collect(client, subscription_id: str, collector) -> tuple:
+    days = int_config(LOOKBACK_ENV, DEFAULT_LOOKBACK_DAYS)
+    sample = int_config(SAMPLE_ENV, DEFAULT_SAMPLE_SIZE)
+    base = f"/subscriptions/{subscription_id}/providers"
+    sites = collector.guard("web.sites.list", lambda: client.list(f"{base}/Microsoft.Web/sites", WEB_API)) or []
+    for site in list(sites):
+        slots = collector.guard(f"web.sites.slots.list({site.get('name')})",
+                                lambda site=site: client.list(f"{site['id']}/slots", WEB_API))
+        sites.extend(slots or [])
+    instances = collector.guard(
+        "sql.managedInstances.list", lambda: client.list(f"{base}/Microsoft.Sql/managedInstances", SQL_API)
+    ) or []
+    databases = {
+        id_key(mi["id"]): collector.guard(
+            f"sql.managedDatabases.list({mi.get('name')})",
+            lambda mi=mi: client.list(f"{mi['id']}/databases", SQL_API),
+        )
+        for mi in instances
+    }
+    site_settings = {id_key(s["id"]): _settings(client, s["id"], collector) for s in sites}
+    mi_settings = {id_key(m["id"]): _settings(client, m["id"], collector) for m in instances}
+
+    wanted: dict = {}
+    for settings in site_settings.values():
+        for w in exporting_workspaces(settings, HTTP_CATEGORY, HTTP_GROUPS):
+            wanted.setdefault(id_key(w), w)
+    for settings in mi_settings.values():
+        for w in exporting_workspaces(settings, AUDIT_CATEGORY, AUDIT_GROUPS):
+            wanted.setdefault(id_key(w), w)
+    workspaces = {k: read_workspace(client, wanted[k], subscription_id, days, sample, collector) for k in sorted(wanted)}
+
+    apps = sorted(
+        (app_record(s, site_settings[id_key(s["id"])], workspaces, sample) for s in sites),
+        key=lambda a: (a["id"] or "").lower(),
+    )
+    mis = sorted(
+        (instance_record(m, mi_settings[id_key(m["id"])], databases[id_key(m["id"])], workspaces, sample)
+         for m in instances),
+        key=lambda m: (m["id"] or "").lower(),
+    )
+    dependencies = dependency_records(workspaces, sample)
+    workspace_records = [
+        {k: ws[k] for k in ("workspace_id", "name", "status", "error", "tables", "read_tables")}
+        for ws in workspaces.values()
+    ]
+    results = {
+        "apps": apps,
+        "managed_instances": mis,
+        "app_dependencies": dependencies,
+        "workspaces": workspace_records,
+        "lookback_days": days,
+        "sample_size": sample,
+        "queries": {"http": HTTP_QUERY, "http_latest": HTTP_LATEST_QUERY, "http_clients": HTTP_CLIENTS_QUERY,
+                    "audit": AUDIT_QUERY, "principals": PRINCIPAL_QUERY, "dependencies": DEPENDENCY_QUERY},
+    }
+    return results, summarize(apps, mis, dependencies, workspace_records, days)
+
+
+def main() -> int:
+    return run_subscription(fetcher=NAME, logger=logger, collect=collect)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

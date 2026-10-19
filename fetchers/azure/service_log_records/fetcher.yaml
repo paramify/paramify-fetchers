@@ -1,0 +1,102 @@
+name: azure_service_log_records
+version: 0.1.0
+description: >
+  Whether App Service HTTP logs and SQL Managed Instance audit events actually reach
+  Log Analytics, read from the records themselves. For every App Service app and slot:
+  whether a diagnostic setting sends AppServiceHTTPLogs to a workspace, the records
+  that arrived over the lookback, the last one, status classes, hosts and top client
+  IPs. For every SQL managed instance: whether SQLSecurityAuditEvents is exported,
+  the audit events that arrived, the last one, actions, events per database, and the
+  principals that connect, split into Entra principals and SQL logins. Records
+  arriving is what shows a T-SQL server audit is running, which no ARM call can show.
+  Also each app role's dependencies (the data stores and services it calls) from
+  AppDependencies, and each table's retention.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_service_log_records.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+config_schema:
+  service_logs_lookback_days:
+    type: integer
+    required: false
+    default: 7
+    env: SERVICE_LOGS_LOOKBACK_DAYS
+    description: Days of log records to summarize.
+  service_logs_sample_size:
+    type: integer
+    required: false
+    default: 10
+    env: SERVICE_LOGS_SAMPLE_SIZE
+    description: >
+      Cap on each sampled list: hosts and top client IPs per app, principals and
+      their client IPs per instance, and dependency targets per app role.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-ULN
+  - KSI-IAM-SNU
+  - KSI-MLA-LET
+  - KSI-MLA-OSM
+  - KSI-PIY-GIV
+  - KSI-SVC-VCM
+
+evidence_set:
+  reference_id: EVD-AZURE-SERVICE-LOG-RECORDS
+  name: Azure Service Log Records
+  instructions: >
+    Script: fetcher.py. Reader at subscription scope, plus Reader or Log Analytics
+    Reader on destination workspaces in other subscriptions. ARM REST, nextLink
+    followed to the end: Microsoft.Web/sites (api 2023-12-01) and each site's slots;
+    Microsoft.Sql/managedInstances (2023-08-01) and each instance's databases; each
+    app's, slot's and instance's diagnosticSettings (2021-05-01-preview). An app
+    exports HTTP logs when a setting with a workspaceId enables category
+    AppServiceHTTPLogs or group allLogs; an instance exports audit when one enables
+    SQLSecurityAuditEvents or group audit or allLogs. Each of those workspaces: GET
+    the workspace (2023-09-01) for its customerId and GET tables/{name} for
+    AppServiceHTTPLogs, AzureDiagnostics and AppDependencies (plan, retentionInDays,
+    totalRetentionInDays; 404 means the table has never received a record). Analytics
+    tables are queried (POST /v1/workspaces/{customerId}/query, timespan the
+    lookback), each query filtered to TimeGenerated > ago({days}d) and _ResourceId in
+    this subscription: AppServiceHTTPLogs summarized per resource (count, last
+    record, dcount(CIp), ScStatus classes, hosts), arg_max(TimeGenerated) for the
+    latest request, and top-nested client IPs; AzureDiagnostics where Category ==
+    'SQLSecurityAuditEvents' summarized per instance, database_name_s and
+    action_name_s, and per server_principal_name_s (events, failed events where
+    succeeded_s is false, last seen, client_ip_s); AppDependencies summed by
+    ItemCount per component, AppRoleName, Target and DependencyType. A principal is
+    entra when its name contains @ (Entra users sign in by UPN, apps and managed
+    identities as client id@tenant id), sql_login otherwise, and unnamed when the
+    event has no principal name. Basic and Auxiliary tables are not queried (they
+    bill per GB scanned). http_logs_arriving and audit_arriving are true when
+    records arrived, false when every destination's table was read (or the table or
+    destination does not exist) and none did, and null when a destination refused
+    the read (403, not_authorized), its table is Basic or Auxiliary, or nothing is
+    exported. A refused or deleted destination does not fail the run; any other
+    failure does.
