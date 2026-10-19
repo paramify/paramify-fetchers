@@ -52,6 +52,19 @@ async def _until(pilot, done, what: str, timeout: float = 30.0) -> None:
     raise AssertionError(f"timed out waiting for {what}")
 
 
+def _focused_in(page) -> bool:
+    focused = page.app.focused
+    return focused is not None and not focused.disabled and page in focused.ancestors_with_self
+
+
+async def _tab(pilot, key: str, page_type):
+    # Page keys only fire once focus lands in the page, which the app defers past a refresh.
+    await pilot.press(key)
+    page = pilot.app.screen.query_one(page_type)
+    await _until(pilot, lambda: _focused_in(page), f"focus in {page_type.__name__}")
+    return page
+
+
 def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch):
     root = demo_workspace.root
     shutil.rmtree(root / "evidence")
@@ -72,8 +85,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch):
             assert isinstance(app.screen, WorkspaceScreen)
 
             # Manifest: add demo_hello through the picker; the edit is saved.
-            await pilot.press("2")
-            page = app.screen.query_one(ManifestPage)
+            page = await _tab(pilot, "2", ManifestPage)
             assert "manifest is empty" in _text(page.query_one("#manifest-empty-hint"))
             await pilot.press("a")
             assert isinstance(app.screen, MultiPickerModal)
@@ -87,8 +99,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch):
             assert yaml.safe_load(manifest.read_text())["run"] == shipped["run"]
 
             # Run: execute it for real.
-            await pilot.press("3")
-            run = app.screen.query_one(RunPage)
+            run = await _tab(pilot, "3", RunPage)
             await pilot.press("ctrl+r")
             banner = run.query_one("#run-banner")
             await _until(pilot, lambda: "run complete" in _text(banner), "the run")
@@ -99,8 +110,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch):
             [run_dir] = (root / "evidence").glob("run-*")
 
             # Evidence: the run and its file, then the enveloped evidence itself.
-            await pilot.press("4")
-            evidence = app.screen.query_one(EvidencePage)
+            evidence = await _tab(pilot, "4", EvidencePage)
             [listed_run] = _rows(evidence.query_one("#evidence-runs", DataTable))
             assert listed_run[0] == run_dir.name.removeprefix("run-")
             assert listed_run[2:] == ["1", "0"]
@@ -114,8 +124,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch):
             await pilot.press("escape")
 
             # Paramify: with no token the upload is refused before anything is sent.
-            await pilot.press("5")
-            upload = app.screen.query_one(UploadPage)
+            upload = await _tab(pilot, "5", UploadPage)
             ready = dict(row[:2] for row in _rows(upload.query_one("#evidence-summary", DataTable)))
             assert ready["selected run"] == listed_run[0]
             assert ready["result"] == "1/1 ok"
@@ -130,6 +139,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch):
             await _until(pilot, lambda: "preview complete" in _text(upload_banner), "the scripts preview")
             assert "[create] demo_hello  set=EVD-DEMO-HELLO" in _log(log)
             assert _text(upload_banner) == "preview complete — create=1 update=0 drift=0 noop=0"
+            await _until(pilot, lambda: _focused_in(upload), "focus back in the Paramify page")
 
             # Upload dry-run: the TUI has no switch, so fake a token and force dry_run=True.
             monkeypatch.setenv(UPLOAD_TOKEN_ENV, "unused")
