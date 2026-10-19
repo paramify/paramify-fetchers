@@ -356,6 +356,21 @@ def test_check_allowlist_is_trimmed_and_still_overrides_skips(tmp_path):
     assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_35"]
 
 
+@pytest.mark.parametrize("env,flag,expected", [
+    ({"CHECKOV_BICEP_CHECKS": "CKV_AZURE_3,CKV_AZURE_44 CKV_AZURE_35"}, "--check", "CKV_AZURE_3,CKV_AZURE_44,CKV_AZURE_35"),
+    ({"CHECKOV_BICEP_CHECKS": "CKV_AZURE_3 CKV_AZURE_44"}, "--check", "CKV_AZURE_3,CKV_AZURE_44"),
+    ({"CHECKOV_SKIP_CHECKS": "CKV_AZURE_3 CKV_AZURE_44"}, "--skip-check", "CKV_AZURE_3,CKV_AZURE_44"),
+    ({"CHECKOV_SKIP_CHECKS": "CKV_AZURE_3\tCKV_AZURE_44"}, "--skip-check", "CKV_AZURE_3,CKV_AZURE_44"),
+])
+def test_check_ids_separated_by_whitespace(tmp_path, env, flag, expected):
+    code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]), **env)
+    assert code == 0
+    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
+    assert argv[argv.index(flag) + 1] == expected
+    if flag == "--skip-check":
+        assert payload["metadata"]["skip_checks"] == expected.split(",")
+
+
 def test_skip_paths_are_recorded(tmp_path):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
                                 CHECKOV_SKIP_PATHS="modules/new-syntax.bicep, legacy")
@@ -648,10 +663,21 @@ def test_real_checkov_skips_a_path_with_spaces(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
-def test_real_checkov_runs_every_trimmed_check(tmp_path):
-    code, payload, status, _ = run(tmp_path, {"azuredeploy.json": ARM}, real_checkov=True,
-                                   CHECKOV_BICEP_CHECKS="CKV_AZURE_3, CKV_AZURE_44")
+@pytest.mark.parametrize("checks", ["CKV_AZURE_3, CKV_AZURE_44", "CKV_AZURE_3 CKV_AZURE_44"])
+def test_real_checkov_runs_every_trimmed_check(tmp_path, checks):
+    code, payload, status, _ = run(tmp_path, {"azuredeploy.json": ARM}, real_checkov=True, CHECKOV_BICEP_CHECKS=checks)
     assert code == 0, status
     r = payload["results"]
     ran = {c["check_id"] for k in ("passed_checks", "failed_checks", "skipped_checks") for c in r[k]}
     assert ran == {"CKV_AZURE_3", "CKV_AZURE_44"}
+
+
+@pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
+def test_real_checkov_skips_space_separated_check_ids(tmp_path):
+    code, payload, status, _ = run(tmp_path, {"azuredeploy.json": ARM}, real_checkov=True,
+                                   CHECKOV_SKIP_CHECKS="CKV_AZURE_3 CKV_AZURE_44")
+    assert code == 0, status
+    r = payload["results"]
+    ran = {c["check_id"] for k in ("passed_checks", "failed_checks", "skipped_checks") for c in r[k]}
+    assert ran and not ran & {"CKV_AZURE_3", "CKV_AZURE_44"}
+    assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_3", "CKV_AZURE_44"]

@@ -99,11 +99,12 @@ _TARGET_SRC="$REPO_URL"; [ "$SOURCE_TYPE" = "tfvc" ] && _TARGET_SRC="$REPO_URL/$
 _TARGET_ID="$(printf '%s' "$_TARGET_SRC" | sed -e 's#^https\{0,1\}://##' -e 's#\.git$##' | tr -c 'A-Za-z0-9._-' '_')"
 OUTPUT_JSON="$OUTPUT_DIR/${COMPONENT}_${_TARGET_ID}.json"
 
-# Split a comma- or newline-separated list into _SPLIT, each entry trimmed, empty entries dropped.
+# Split a list on commas, newlines and any extra separators in $2 into _SPLIT, each entry trimmed,
+# empty entries dropped.
 split_list() {
     local -a raw; local e
     _SPLIT=()
-    IFS=$',\n' read -r -d '' -a raw <<< "$1"
+    IFS=$',\n'"${2:-}" read -r -d '' -a raw <<< "$1"
     for e in "${raw[@]}"; do
         e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"
         [ -n "$e" ] && _SPLIT+=("$e")
@@ -111,8 +112,9 @@ split_list() {
     return 0
 }
 
-# checkov splits --check on commas without trimming, so it gets the cleaned CSV.
-split_list "${CHECKOV_BICEP_CHECKS:-}"
+# checkov splits --check on commas without trimming, so it gets the cleaned CSV. Check ids never
+# contain whitespace, so spaces and tabs separate them too; skip paths may contain spaces.
+split_list "${CHECKOV_BICEP_CHECKS:-}" $' \t'
 REQUESTED_CHECKS="$(IFS=,; printf '%s' "${_SPLIT[*]}")"
 split_list "${CHECKOV_SKIP_PATHS:-}"
 SKIP_PATHS=("${_SPLIT[@]}")
@@ -136,7 +138,7 @@ if [ "$DEFAULT_SKIPS_APPLIED" = "true" ] && [ -f "$DEFAULT_SKIP_CHECKS_FILE" ]; 
         add_skip "$c"
     done < "$DEFAULT_SKIP_CHECKS_FILE"
 fi
-split_list "${CHECKOV_SKIP_CHECKS:-}"
+split_list "${CHECKOV_SKIP_CHECKS:-}" $' \t'
 for c in "${_SPLIT[@]}"; do add_skip "$c"; done
 
 # --- skip-resources (defaults file + config), applied post-scan ---
