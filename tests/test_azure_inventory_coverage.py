@@ -129,7 +129,78 @@ def test_summary_counts_high_severity_and_what_fell_outside_the_inventory():
     _, s = covered()
     assert (s["resources_with_unhealthy_high_severity"], s["unhealthy_high_severity_assessments"]) == (1, 2)
     assert s["unhealthy_assessments_without_severity"] == 1
-    assert (s["defender_assessments_total"], s["defender_assessments_outside_inventory"]) == (7, 1)
+    assert (s["defender_assessments_total"], s["defender_assessments_outside_inventory"]) == (6, 1)
+    assert s["defender_not_applicable_total"] == 1
+
+
+def test_high_severity_outside_the_inventory_is_counted():
+    rows = [assessment(SUB, "Unhealthy", "High", n=1), assessment(SUB, "Unhealthy", "", n=2)]
+    tally = inv.tally_defender(rows, KEYS, SUB_ID)
+    s = inv.summarize(inv.with_coverage(RESOURCES, tally, None), tally, None)
+    assert s["unhealthy_high_severity_assessments"] == 0
+    assert s["defender_unhealthy_high_severity_outside_inventory"] == 1
+    assert s["defender_unhealthy_without_severity_outside_inventory"] == 1
+    assert tally["outside_by_target"] == {"subscription": {
+        "assessments": 2, "not_applicable": 0, "unhealthy": 2, "unhealthy_high": 1, "unhealthy_unknown_severity": 1}}
+
+
+def test_not_applicable_assessments_are_not_coverage():
+    rows = [assessment(SA1, n=1), assessment(SA2, "NotApplicable", n=2), assessment(SITE, "NotApplicable", n=3)]
+    tally = inv.tally_defender(rows, KEYS, SUB_ID)
+    resources = inv.with_coverage(RESOURCES, tally, None)
+    by_id = {r["id"]: r for r in resources}
+    assert (by_id[SA2]["defender_assessments"], by_id[SA2]["defender_not_applicable"]) == (0, 1)
+    s = inv.summarize(resources, tally, None)
+    assert s["resources_without_defender_assessment"] == [SA2]
+    assert s["types_without_defender_assessment"]["microsoft.web/sites"] == 1
+    assert s["all_assessable_resources_assessed_by_defender"] is False
+    assert (s["defender_assessments_total"], s["defender_not_applicable_total"]) == (1, 2)
+
+
+def test_only_not_applicable_rows_never_pass():
+    tally = inv.tally_defender([assessment(SA1, "NotApplicable", n=1)], KEYS, SUB_ID)
+    s = inv.summarize(inv.with_coverage(RESOURCES, tally, None), tally, None)
+    assert (s["resources_assessed_by_defender"], s["defender_assessed_percentage"]) == (0, 0)
+    assert s["all_assessable_resources_assessed_by_defender"] is False
+
+
+CONNECTOR = f"{RG}/providers/Microsoft.Security/securityConnectors/aws-example"
+
+
+@pytest.mark.parametrize("details", [
+    {"Source": "Aws", "Id": f"{CONNECTOR}/securityentitydata/aws-ec2-instance-example"},
+    {"source": "Aws", "id": f"{CONNECTOR}/securityentitydata/aws-ec2-instance-example"},
+    {"Source": "Gcp", "Id": SA1},
+    {"Source": "OnPremise", "machineName": "host-example"},
+])
+def test_non_azure_assessments_never_count_for_an_inventoried_resource(details):
+    keys = KEYS | {CONNECTOR.lower()}
+    source = (details.get("Source") or details.get("source")).lower()
+    aid = f"{CONNECTOR}/providers/Microsoft.Security/assessments/00000001-aaaa-bbbb-cccc-000000000000"
+    tally = inv.tally_defender([{"id": aid, "resourceDetails": details, "status": "Unhealthy",
+                                 "severity": "High"}], keys, SUB_ID)
+    assert tally["by_resource"] == {}
+    assert tally["outside_by_target"][f"source:{source}"]["unhealthy_high"] == 1
+
+
+def test_counts_reconcile_with_the_totals():
+    by_id, s = covered()
+    resources = by_id.values()
+
+    def total(field):
+        return sum(r[field] for r in resources)
+
+    assert total("defender_assessments") + s["defender_assessments_outside_inventory"] == s["defender_assessments_total"]
+    assert s["defender_not_applicable_total"] == sum(1 for r in ASSESSMENTS if r["status"] == "NotApplicable")
+    assert s["defender_assessments_total"] + s["defender_not_applicable_total"] == len(ASSESSMENTS)
+    assert total("defender_unhealthy") + s["defender_unhealthy_outside_inventory"] == sum(
+        1 for r in ASSESSMENTS if r["status"] == "Unhealthy")
+    assert total("defender_unhealthy_high_severity") + s["defender_unhealthy_high_severity_outside_inventory"] == sum(
+        1 for r in ASSESSMENTS if r["status"] == "Unhealthy" and r["severity"] in ("High", "Critical"))
+    assert total("policy_evaluations") + s["policy_evaluations_outside_inventory"] == s["policy_evaluations_total"]
+    assert s["policy_evaluations_total"] == len(STATES)
+    assert total("policy_non_compliant") + s["policy_non_compliant_outside_inventory"] == sum(
+        1 for r in STATES if r["complianceState"] == "NonCompliant")
 
 
 def test_policy_coverage_and_non_compliance():
@@ -151,8 +222,7 @@ def test_resources_covered_by_neither_are_counted_by_type():
 def test_failing_results_outside_the_inventory_are_counted_apart():
     _, s = covered()
     assert (s["defender_unhealthy_outside_inventory"], s["policy_non_compliant_outside_inventory"]) == (1, 1)
-    all_non_compliant = sum(1 for r in STATES if r["complianceState"] == "NonCompliant")
-    assert s["non_compliant_policy_evaluations"] + s["policy_non_compliant_outside_inventory"] == all_non_compliant
+    assert s["defender_unhealthy_high_severity_outside_inventory"] == 1
 
 
 @pytest.mark.parametrize("target,expected", [
@@ -179,11 +249,12 @@ def test_outside_breakdown_by_target():
     rows = [assessment(SUB, "Unhealthy", n=1), assessment(SUB, n=2),
             assessment(f"{RG}/providers/Microsoft.Web/sites/deleted-app", "Unhealthy", n=3)]
     tally = inv.tally_defender(rows, KEYS, SUB_ID)
+    zero = dict.fromkeys(inv.DEFENDER_FIELDS, 0)
     assert tally["outside_by_target"] == {
-        "microsoft.web/sites": {"total": 1, "unhealthy": 1},
-        "subscription": {"total": 2, "unhealthy": 1},
+        "microsoft.web/sites": {**zero, "assessments": 1, "unhealthy": 1},
+        "subscription": {**zero, "assessments": 2, "unhealthy": 1},
     }
-    assert (tally["outside_inventory"], tally["outside_failing"]) == (3, 2)
+    assert (tally["outside"]["assessments"], tally["outside"]["unhealthy"]) == (3, 2)
 
 
 def test_a_service_that_covers_nothing_does_not_pass():

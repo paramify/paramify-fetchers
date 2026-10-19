@@ -69,8 +69,12 @@ POLICY_QUERY = (
 
 ASSESSMENT_ID_MARKER = "/providers/microsoft.security/assessments/"
 UNHEALTHY = "unhealthy"
+# NotApplicable means the assessment did not happen (OffByPolicy and the like), so it is not coverage.
+ASSESSED = frozenset({"healthy", UNHEALTHY})
 HIGH_SEVERITIES = frozenset({"high", "critical"})
 NON_COMPLIANT = "noncompliant"
+DEFENDER_FIELDS = ("assessments", "not_applicable", "unhealthy", "unhealthy_high", "unhealthy_unknown_severity")
+POLICY_FIELDS = ("evaluations", "non_compliant")
 
 
 # --- pure transforms (Resource Graph rows are plain dicts already) ---
@@ -106,6 +110,18 @@ def assessment_target(row: dict) -> str | None:
     assessment_id = row.get("id") or ""
     cut = assessment_id.lower().rfind(ASSESSMENT_ID_MARKER)
     return assessment_id[:cut] if cut > 0 else None
+
+
+def foreign_source(row: dict) -> str | None:
+    """`source:<platform>` for an assessment whose `resourceDetails` source is not Azure (Aws, Gcp, OnPremise).
+
+    Its id can sit under an Azure resource such as the multicloud connector, so it never counts for one.
+    """
+    details = row.get("resourceDetails")
+    if not isinstance(details, dict):
+        return None
+    source = str(details.get("Source") or details.get("source") or "").strip().lower()
+    return None if source in ("", "azure") else f"source:{source}"
 
 
 def inventory_key(target: str | None, inventory: set[str]) -> str | None:
@@ -156,38 +172,39 @@ def target_kind(target: str | None, subscription_id: str | None = None) -> str:
     return "subscription > " + _arm_type(rest) if rest[0] == "providers" else "unparsed"
 
 
-def _tally(rows, inventory, subscription_id, target_of, failing_label, is_failing, count_inside) -> dict:
-    """Counts per inventoried resource, and results about anything else counted by what they target."""
+def _tally(rows, inventory, subscription_id, target_of, count, fields, foreign_of=lambda row: None) -> dict:
+    """Counts per inventoried resource, and the same counts for results about anything else, by what they target."""
     by_resource: dict[str, Counter] = {}
     outside: dict[str, Counter] = {}
     for row in rows:
-        target = target_of(row)
-        key = inventory_key(target, inventory)
+        target, foreign = target_of(row), foreign_of(row)
+        key = None if foreign else inventory_key(target, inventory)
         if key is None:
-            outside.setdefault(target_kind(target, subscription_id), Counter()).update(
-                {"total": 1, failing_label: int(is_failing(row))})
-            continue
-        count_inside(by_resource.setdefault(key, Counter()), row)
+            count(outside.setdefault(foreign or target_kind(target, subscription_id), Counter()), row)
+        else:
+            count(by_resource.setdefault(key, Counter()), row)
+
+    def total(counters) -> dict:
+        summed: Counter = Counter()
+        for counts in counters:
+            summed.update(counts)
+        return {field: summed[field] for field in fields}
+
     return {
         "by_resource": by_resource,
-        "rows": len(rows),
-        "outside_inventory": sum(c["total"] for c in outside.values()),
-        "outside_failing": sum(c[failing_label] for c in outside.values()),
-        "outside_by_target": {kind: dict(outside[kind]) for kind in sorted(outside)},
+        "inside": total(by_resource.values()),
+        "outside": total(outside.values()),
+        "outside_by_target": {kind: total([outside[kind]]) for kind in sorted(outside)},
     }
 
 
-def _unhealthy(row: dict) -> bool:
-    return (row.get("status") or "").lower() == UNHEALTHY
-
-
-def _non_compliant(row: dict) -> bool:
-    return (row.get("complianceState") or "").lower() == NON_COMPLIANT
-
-
 def _count_assessment(counts: Counter, row: dict) -> None:
+    status = (row.get("status") or "").lower()
+    if status not in ASSESSED:
+        counts["not_applicable"] += 1
+        return
     counts["assessments"] += 1
-    if _unhealthy(row):
+    if status == UNHEALTHY:
         counts["unhealthy"] += 1
         severity = (row.get("severity") or "").lower()
         if severity in HIGH_SEVERITIES:
@@ -198,19 +215,19 @@ def _count_assessment(counts: Counter, row: dict) -> None:
 
 def _count_state(counts: Counter, row: dict) -> None:
     counts["evaluations"] += 1
-    if _non_compliant(row):
+    if (row.get("complianceState") or "").lower() == NON_COMPLIANT:
         counts["non_compliant"] += 1
 
 
 def tally_defender(rows: list[dict], inventory: set[str], subscription_id: str | None = None) -> dict:
-    """Assessments, unhealthy and unhealthy High/Critical counts per inventoried resource."""
-    return _tally(rows, inventory, subscription_id, assessment_target, "unhealthy", _unhealthy, _count_assessment)
+    """Assessed (Healthy or Unhealthy), not applicable, unhealthy and unhealthy High/Critical counts per resource."""
+    return _tally(rows, inventory, subscription_id, assessment_target, _count_assessment, DEFENDER_FIELDS,
+                  foreign_source)
 
 
 def tally_policy(rows: list[dict], inventory: set[str], subscription_id: str | None = None) -> dict:
     """Policy states (one per resource, assignment and policy) and non-compliant states per inventoried resource."""
-    return _tally(rows, inventory, subscription_id, lambda row: row.get("resourceId"), "non_compliant",
-                  _non_compliant, _count_state)
+    return _tally(rows, inventory, subscription_id, lambda row: row.get("resourceId"), _count_state, POLICY_FIELDS)
 
 
 def with_coverage(resources: list[dict], defender: dict | None, policy: dict | None) -> list[dict]:
@@ -225,6 +242,7 @@ def with_coverage(resources: list[dict], defender: dict | None, policy: dict | N
         out.append({
             **r,
             "defender_assessments": count(defender, key, "assessments"),
+            "defender_not_applicable": count(defender, key, "not_applicable"),
             "defender_unhealthy": count(defender, key, "unhealthy"),
             "defender_unhealthy_high_severity": count(defender, key, "unhealthy_high"),
             "policy_evaluations": count(policy, key, "evaluations"),
@@ -251,8 +269,16 @@ def _resources_with(resources: list[dict], field: str, tally: dict | None) -> in
     return None if tally is None else sum(1 for r in resources if r[field])
 
 
-def _sum_of(resources: list[dict], field: str, tally: dict | None) -> int | None:
-    return None if tally is None else sum(r[field] for r in resources)
+def _inside(tally: dict | None, field: str) -> int | None:
+    return None if tally is None else tally["inside"][field]
+
+
+def _outside(tally: dict | None, field: str) -> int | None:
+    return None if tally is None else tally["outside"][field]
+
+
+def _total(tally: dict | None, field: str) -> int | None:
+    return None if tally is None else tally["inside"][field] + tally["outside"][field]
 
 
 def _service_summary(resources, tally, field, cov, names) -> dict:
@@ -260,8 +286,8 @@ def _service_summary(resources, tally, field, cov, names) -> dict:
     known = tally is not None
     return {
         names["complete"]: known,
-        names["total"]: tally["rows"] if known else None,
-        names["outside"]: tally["outside_inventory"] if known else None,
+        names["total"]: _total(tally, names["count"]),
+        names["outside"]: _outside(tally, names["count"]),
         names["resources"]: _resources_with(resources, field, tally),
         names["in_scope"]: cov["in_scope"],
         names["percentage"]: coverage_percentage(cov["covered"], cov["in_scope"]) if known else None,
@@ -273,6 +299,7 @@ def _service_summary(resources, tally, field, cov, names) -> dict:
 
 
 DEFENDER_NAMES = {
+    "count": "assessments",
     "complete": "defender_coverage_complete",
     "total": "defender_assessments_total",
     "outside": "defender_assessments_outside_inventory",
@@ -286,6 +313,7 @@ DEFENDER_NAMES = {
 }
 
 POLICY_NAMES = {
+    "count": "evaluations",
     "complete": "policy_coverage_complete",
     "total": "policy_evaluations_total",
     "outside": "policy_evaluations_outside_inventory",
@@ -322,17 +350,19 @@ def summarize(resources: list[dict], defender: dict | None = None, policy: dict 
         "tagged_resources": len(resources) - untagged,
         **_service_summary(resources, defender, "defender_assessments",
                            _coverage(resources, defender, "defender_assessments"), DEFENDER_NAMES),
+        "defender_not_applicable_total": _total(defender, "not_applicable"),
         "resources_with_unhealthy_high_severity": _resources_with(
             resources, "defender_unhealthy_high_severity", defender),
-        "unhealthy_high_severity_assessments": _sum_of(resources, "defender_unhealthy_high_severity", defender),
-        "unhealthy_assessments_without_severity": None if defender is None else sum(
-            c["unhealthy_unknown_severity"] for c in defender["by_resource"].values()),
-        "defender_unhealthy_outside_inventory": None if defender is None else defender["outside_failing"],
+        "unhealthy_high_severity_assessments": _inside(defender, "unhealthy_high"),
+        "unhealthy_assessments_without_severity": _inside(defender, "unhealthy_unknown_severity"),
+        "defender_unhealthy_outside_inventory": _outside(defender, "unhealthy"),
+        "defender_unhealthy_high_severity_outside_inventory": _outside(defender, "unhealthy_high"),
+        "defender_unhealthy_without_severity_outside_inventory": _outside(defender, "unhealthy_unknown_severity"),
         **_service_summary(resources, policy, "policy_evaluations",
                            _coverage(resources, policy, "policy_evaluations"), POLICY_NAMES),
         "resources_with_non_compliant_policy": _resources_with(resources, "policy_non_compliant", policy),
-        "non_compliant_policy_evaluations": _sum_of(resources, "policy_non_compliant", policy),
-        "policy_non_compliant_outside_inventory": None if policy is None else policy["outside_failing"],
+        "non_compliant_policy_evaluations": _inside(policy, "non_compliant"),
+        "policy_non_compliant_outside_inventory": _outside(policy, "non_compliant"),
         "resources_covered_by_neither_by_type": neither,
     }
 

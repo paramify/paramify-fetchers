@@ -5,10 +5,12 @@ description: >
   from Azure Resource Graph's `Resources` table rather than service by service: each
   resource's id, name, type, location, resource group, tags, SKU and kind where the
   resource type has them, and its provisioning state. Each resource also carries its
-  Defender for Cloud coverage (assessments, unhealthy assessments and unhealthy
-  High/Critical assessments, from `SecurityResources`) and its Azure Policy coverage
-  (policy states and non-compliant states, from `PolicyResources`); results on a
-  child resource, such as a subnet, count for the inventoried parent. The summary
+  Defender for Cloud coverage (assessments that came back Healthy or Unhealthy,
+  unhealthy assessments and unhealthy High/Critical assessments, from
+  `SecurityResources`; NotApplicable assessments did not happen and are counted
+  apart, never as coverage) and its Azure Policy coverage (policy states and
+  non-compliant states, from `PolicyResources`); results on a child resource, such
+  as a subnet, count for the inventoried parent. The summary
   gives the total count and the counts by resource type and by location, how many
   resources carry no tags, and for Defender and for Policy the resources not covered.
   A resource counts as not covered only when its type is covered on some other
@@ -19,8 +21,11 @@ description: >
   resources and their children only: assessments and policy states about the
   subscription itself, a resource group, or anything else not in the inventory (a
   deleted resource, a type Resource Graph keeps outside `Resources`) are counted
-  apart, with their own unhealthy and non-compliant totals, and broken down by the
-  type of what they target (never its name) under results.coverage_queries.
+  apart, with their own unhealthy, unhealthy High/Critical and non-compliant totals,
+  and broken down by the type of what they target (never its name) under
+  results.coverage_queries. Assessments of AWS, GCP or on-premises machines (a
+  `resourceDetails` source other than Azure) always count there, by source, even
+  when their id sits under an inventoried resource such as a multicloud connector.
   Every query is paged to the end — a result Resource Graph reports as
   truncated, or a page count that disagrees with its own total, is a collection
   failure rather than a short list, and a failed coverage query leaves that
