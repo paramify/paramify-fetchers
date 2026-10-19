@@ -2,10 +2,12 @@
 
 import json
 import logging
+import math
 import os
 import re
 import statistics
 import sys
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,8 +19,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
 
 from fetcher_status import report_failure  # noqa: E402
 
+logger = logging.getLogger("jira_common")
+
 PAGE_SIZE = 100
 TIMEOUT = 60
+# Jira Cloud rate-limits (429) and has transient 5xx answers; a run of a thousand
+# calls will see some. Retry with the Retry-After header when present, else an
+# increasing wait, and give up after MAX_RETRIES extra attempts.
+RETRY_STATUS = {429, 500, 502, 503, 504}
+MAX_RETRIES = 4
+BACKOFF_BASE_SECONDS = 2.0
+MAX_BACKOFF_SECONDS = 60.0
 NONE_LABEL = "(none)"
 NOT_FOUND = object()
 # POST /rest/api/3/changelog/bulkfetch accepts at most 1000 issues and 10 field ids.
@@ -45,22 +56,63 @@ class JiraClient:
         )
         self.failure_codes.append(code)
 
+    @staticmethod
+    def _retry_delay(resp, attempt: int) -> float:
+        retry_after = (getattr(resp, "headers", None) or {}).get("Retry-After") if resp is not None else None
+        if retry_after:
+            try:
+                delay = float(retry_after)
+            except (TypeError, ValueError):
+                delay = None
+            if delay is not None and math.isfinite(delay):
+                return max(0.0, min(delay, MAX_BACKOFF_SECONDS))
+        return min(BACKOFF_BASE_SECONDS ** (attempt + 1), MAX_BACKOFF_SECONDS)
+
+    def _send(self, method, path, operation, params, body):
+        """One request with retries. Returns the response, or None after recording the failure."""
+        last_error = None
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                # Redirects are not followed: a redirected request could carry the
+                # credential or a POST body to a path or host it was never meant for.
+                resp = self.session.request(
+                    method,
+                    f"{self.base_url}{path}",
+                    params=params,
+                    json=body,
+                    timeout=TIMEOUT,
+                    allow_redirects=False,
+                )
+            except requests.RequestException as e:
+                # Only the exception type: some requests errors quote the request.
+                last_error = type(e).__name__
+                if attempt < MAX_RETRIES:
+                    delay = self._retry_delay(None, attempt)
+                    logger.warning("%s: %s; retrying in %.0fs", operation, last_error, delay)
+                    time.sleep(delay)
+                    continue
+                break
+            if resp.status_code in RETRY_STATUS and attempt < MAX_RETRIES:
+                delay = self._retry_delay(resp, attempt)
+                logger.warning("%s returned HTTP %s; retrying in %.0fs", operation, resp.status_code, delay)
+                time.sleep(delay)
+                continue
+            return resp
+
+        # Every attempt raised. Before any call has succeeded the host is simply not
+        # reachable and nothing later can work; after one, this is one failed call
+        # and the run goes on with the failure recorded.
+        if not self.authenticated:
+            self.fail(operation, last_error or "RequestException", "no response after retries", "target_unreachable")
+            raise Abort
+        self.fail(operation, last_error or "RequestException", "no response after retries", "partial_failure")
+        return None
+
     def request(self, method, path, operation, *, params=None, body=None, allow_404=False, quiet_400=False):
         """Return the decoded JSON body, NOT_FOUND (when allowed), or None on failure."""
-        try:
-            # Redirects are not followed: a redirected request could carry the
-            # credential or a POST body to a path or host it was never meant for.
-            resp = self.session.request(
-                method,
-                f"{self.base_url}{path}",
-                params=params,
-                json=body,
-                timeout=TIMEOUT,
-                allow_redirects=False,
-            )
-        except requests.RequestException as e:
-            self.fail(operation, type(e).__name__, str(e), "target_unreachable")
-            raise Abort from e
+        resp = self._send(method, path, operation, params, body)
+        if resp is None:
+            return None
 
         if resp.status_code == 200:
             self.authenticated = True

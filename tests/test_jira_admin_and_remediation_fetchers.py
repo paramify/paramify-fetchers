@@ -955,3 +955,98 @@ def test_incident_unreadable_action_items_are_not_reported_as_none(run):
     assert i["postmortems"][0]["action_item_count"] == 2 and i["action_items"] == []
     assert out["metadata"]["related_issues_not_visible"] == ["IR-10", "IR-11"]
     assert code == 1 and out["metadata"]["partial_failure"] is True
+
+
+# ---------- retries and timeouts (review item 4) ----------
+
+@pytest.fixture
+def run_raw(monkeypatch, tmp_path):
+    """Like `run`, but the router returns a full FakeResponse (headers) or raises."""
+    def _run(name: str, router, env: dict | None = None):
+        sleeps = []
+        monkeypatch.setattr("time.sleep", lambda s: sleeps.append(s))
+
+        def fake_request(self, method, url, params=None, json=None, timeout=None, **kw):
+            assert kw.get("allow_redirects") is False
+            return router(method, url.split(".atlassian.net", 1)[1], params or {}, json or {})
+
+        monkeypatch.setattr(requests.Session, "request", fake_request)
+        for k, v in {"JIRA_BASE_URL": "https://example.atlassian.net", "JIRA_EMAIL": "svc@example.com",
+                     "JIRA_API_TOKEN": "t", "EVIDENCE_DIR": str(tmp_path),
+                     "FETCHER_STATUS_FILE": str(tmp_path / "status.json"), **(env or {})}.items():
+            monkeypatch.setenv(k, v)
+        mod = load(name)
+        code = mod.main()
+        out_path = tmp_path / mod.OUTPUT_FILE
+        out = json.loads(out_path.read_text()) if out_path.exists() else None
+        status = tmp_path / "status.json"
+        return code, out, sleeps, (json.loads(status.read_text()) if status.exists() else None)
+    return _run
+
+
+def test_429_is_retried_after_the_retry_after_header(run_raw):
+    seen = {"search": 0}
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return FakeResponse(200, ME)
+        if path == "/rest/api/3/search/jql":
+            seen["search"] += 1
+            if seen["search"] == 1:
+                r = FakeResponse(429, {"errorMessages": ["rate limit"]})
+                r.headers["Retry-After"] = "3"
+                return r
+            return FakeResponse(200, {"issues": [], "isLast": True})
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return FakeResponse(200, {"issueChangeLogs": []})
+        raise AssertionError(path)
+
+    code, out, sleeps, status = run_raw("remediation_items", router, {"JIRA_REMEDIATION_JQL": "labels = x"})
+    assert code == 0 and status is None
+    assert seen["search"] == 2 and sleeps == [3.0]
+    assert out["metadata"]["api_failures"] == [] and out["metadata"]["complete"] is True
+
+
+def test_5xx_gives_up_after_backoff_and_is_recorded(run_raw):
+    calls = {"n": 0}
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return FakeResponse(200, ME)
+        if path == "/rest/api/3/search/jql":
+            calls["n"] += 1
+            return FakeResponse(503, {"errorMessages": ["down"]})
+        raise AssertionError(path)
+
+    code, out, sleeps, status = run_raw("remediation_items", router, {"JIRA_REMEDIATION_JQL": "labels = x"})
+    assert calls["n"] == 5 and sleeps == [2.0, 4.0, 8.0, 16.0]
+    assert code == 1 and status["code"] == "partial_failure"
+    assert out["metadata"]["api_failures"][0]["type"] == "HTTP503"
+    assert out["metadata"]["partial_failure"] is True
+
+
+def test_timeout_after_a_success_is_one_failed_call_not_an_abort(run_raw):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return FakeResponse(200, ME)
+        if path == "/rest/api/3/search/jql":
+            return FakeResponse(200, {"issues": [_issue(1, "To Do", "new")], "isLast": True})
+        if path == "/rest/api/3/changelog/bulkfetch":
+            raise requests.ReadTimeout("slow")
+        raise AssertionError(path)
+
+    code, out, sleeps, status = run_raw("remediation_items", router, {"JIRA_REMEDIATION_JQL": "labels = x"})
+    assert len(sleeps) == 4
+    assert out is not None and out["summary"]["total"] == 1, "the run kept its evidence"
+    assert out["metadata"]["status_history_complete"] is False
+    assert out["metadata"]["api_failures"][0]["type"] == "ReadTimeout"
+    assert "slow" not in json.dumps(out), "exception text is not echoed"
+    assert code == 1 and status["code"] == "partial_failure"
+
+
+def test_unreachable_host_before_any_success_aborts(run_raw):
+    def router(method, path, params, body):
+        raise requests.ConnectionError("nope")
+
+    code, out, sleeps, status = run_raw("remediation_items", router, {"JIRA_REMEDIATION_JQL": "labels = x"})
+    assert code == 1 and status["code"] == "target_unreachable" and len(sleeps) == 4
