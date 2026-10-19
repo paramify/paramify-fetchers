@@ -13,10 +13,11 @@ schemas and the `paramify` CLI — not the internal code.
 ### Added
 
 - **CI regression tests for the terminal UI and the demo CLI path.** A new
-  `tui` job runs the TUI's tests on the lowest (8.0) and latest textual 8, and
-  `--fail-on-skip` fails it if any of them skipped, so a broken `tui` install
-  can no longer pass as a page of skips. It adds SVG snapshots of every screen
-  and the key modals over an offline demo workspace (the new `snapshots` extra;
+  `tui` job runs the TUI's tests on the lowest (8.0.0) and latest textual 8, and
+  `--fail-on-skip` fails it if any of them skipped or xfailed, so a broken `tui`
+  install can no longer pass as a page of skips. It adds SVG snapshots of every
+  screen and the key modals over an offline demo workspace, compared on the
+  latest textual only (the new `snapshots` extra;
   `pytest tests/test_tui_snapshots.py --snapshot-update` refreshes them, and a
   mismatch uploads a side-by-side report), one end-to-end pilot flow (open the
   demo manifest, add `demo_hello`, run it, read its evidence, upload dry-run,
