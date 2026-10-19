@@ -551,6 +551,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_entra_service_principals` 0.2.0: owners and granted API permissions.**
+  Each service principal now lists its owners and its application's owners
+  (`has_owner`), its application permissions named from the resource's app roles,
+  and its delegated grants, with privileged Microsoft Graph permissions flagged.
+  The summary adds ownerless principals holding credentials and principals holding
+  privileged Graph permissions; the existing fields are unchanged. Delegated grants
+  need Directory.Read.All and read null without it. Also maps to KSI-CNA-MAT.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`

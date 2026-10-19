@@ -1,5 +1,5 @@
 name: azure_entra_service_principals
-version: 0.1.0
+version: 0.2.0
 description: >
   Every Microsoft Entra ID service principal, the tenant's non-user accounts, with
   its type (application, managed identity, legacy, social IdP), whether it is
@@ -9,7 +9,11 @@ description: >
   in this tenant, the application's own secrets, certificates and federated
   identity credentials. Summarizes how non-user accounts authenticate (managed
   identity, federated, certificate, secret) and which stored credentials are
-  expired, expire within 30 days, or never expire.
+  expired, expire within 30 days, or never expire. Also records the owners of
+  each application and service principal, and the API permissions every
+  non-Microsoft principal holds (application permissions and delegated grants),
+  flagging privileged Microsoft Graph permissions and ownerless principals that
+  hold credentials.
 category: azure
 
 supports_targets: true
@@ -56,14 +60,18 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 # Microsoft Graph permission (application permission, admin consent):
-#   Application.Read.All   — /servicePrincipals, /applications and their
-#                            federatedIdentityCredentials. Directory.Read.All also
-#                            covers them.
+#   Application.Read.All   — /servicePrincipals, /applications, their owners,
+#                            federatedIdentityCredentials and appRoleAssignments.
+#                            Directory.Read.All also covers them.
+#   Directory.Read.All     — optional; /oauth2PermissionGrants (delegated grants).
+#                            Without it the delegated figures read null.
 #   Organization.Read.All  — optional; the tenant name/domain recorded as provenance.
-# A denied read is recorded as an API failure and the run exits non-zero.
+# The Directory Readers role covers all of them. Any other denied read is recorded as
+# an API failure and the run exits non-zero.
 
 ksis:
   - KSI-IAM-SNU
+  - KSI-CNA-MAT
 
 evidence_set:
   reference_id: EVD-AZURE-ENTRA-SERVICE-PRINCIPALS
@@ -74,5 +82,10 @@ evidence_set:
     $select=id,appId,displayName,servicePrincipalType,accountEnabled,appOwnerOrganizationId,alternativeNames,passwordCredentials,keyCredentials;
     GET /applications with $select=id,appId,displayName,passwordCredentials,keyCredentials
     and $expand=federatedIdentityCredentials (only this tenant's own applications,
-    never one call per application); GET /organization. Both collections paged via
+    never one call per application); GET /applications and GET /servicePrincipals
+    with $expand=owners, and GET /servicePrincipals with $expand=appRoleAssignments
+    (one $expand per request; an object at the 20-item $expand limit is re-read via
+    /owners or /appRoleAssignments); GET /servicePrincipals/{id}?$select=appRoles per
+    resource an assignment names; GET /oauth2PermissionGrants (permission:
+    Directory.Read.All, optional); GET /organization. Collections paged via
     @odata.nextLink and joined on appId.

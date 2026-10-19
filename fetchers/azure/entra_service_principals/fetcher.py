@@ -10,7 +10,11 @@ identity credentials. What the evidence answers is how each non-user account
 authenticates: platform-managed (managed identity), federated (no stored secret),
 certificate, or client secret. It also answers whether each stored credential expires.
 
-Two Graph reads, never one per principal:
+It also records who owns each application and service principal, and which API
+permissions each non-Microsoft principal holds: application permissions (app role
+assignments) and delegated grants, with privileged Microsoft Graph permissions flagged.
+
+Paged collection reads, never one per principal except past `$expand`'s 20-item limit:
 
 - `GET /servicePrincipals` returns every principal with its SP-held credentials. Most
   of them in a typical tenant are Microsoft first-party apps, which hold nothing locally
@@ -21,6 +25,9 @@ Two Graph reads, never one per principal:
   an application at 20 federated credentials, and 20 is also `$expand`'s per-collection
   limit, so the expansion is complete. No per-application
   `/federatedIdentityCredentials` call is needed.
+- `$expand=owners` on both collections and `$expand=appRoleAssignments` on the
+  principals (Graph allows one `$expand` per request), `GET /oauth2PermissionGrants`,
+  and one read per resource principal to name its app roles.
 
 The two are joined on `appId`. The credential expiry classification mirrors
 azure_entra_app_registrations (itself ported from Prowler's
@@ -50,6 +57,7 @@ from azure_common import (  # noqa: E402
     report_failure,
 )
 from entra_graph import (  # noqa: E402
+    aguard,
     graph_attr,
     graph_list,
     paginate,
@@ -124,6 +132,65 @@ HELD_ON_APPLICATION = "application"
 # The `alternativeNames` entry that says whether a managed identity is user-assigned
 # ("isExplicit=True") or system-assigned ("isExplicit=False").
 IS_EXPLICIT_PREFIX = "isexplicit="
+
+# Graph returns at most 20 expanded directory objects and no nextLink for the rest.
+EXPAND_LIMIT = 20
+OWNER_SELECT = ("id", "displayName", "userPrincipalName", "accountEnabled")
+OWNERS_EXPAND = f"owners($select={','.join(OWNER_SELECT)})"
+RESOURCE_SELECT = ("id", "appId", "displayName", "appRoles")
+
+MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+# An assignment of this appRoleId grants access to the resource but no named role.
+DEFAULT_ACCESS_ROLE_ID = "00000000-0000-0000-0000-000000000000"
+CONSENT_ALL_PRINCIPALS = "AllPrincipals"
+
+# Microsoft Graph permissions (application or delegated) that let the holder grant itself
+# more access, take over users' sign-in, change the controls that protect the tenant, or
+# read or write tenant-wide data.
+PRIVILEGED_GRAPH_PERMISSIONS = frozenset(
+    {
+        # --- can grant itself or anyone any role or permission ---
+        "RoleManagement.ReadWrite.Directory",
+        "AppRoleAssignment.ReadWrite.All",
+        "Application.ReadWrite.All",
+        "DelegatedPermissionGrant.ReadWrite.All",
+        "Directory.ReadWrite.All",
+        "RoleAssignmentSchedule.ReadWrite.Directory",
+        "RoleEligibilitySchedule.ReadWrite.Directory",
+        "RoleManagementPolicy.ReadWrite.Directory",
+        "PrivilegedAccess.ReadWrite.AzureAD",
+        "PrivilegedAccess.ReadWrite.AzureADGroup",
+        "PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup",
+        "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
+        # --- can take over users' sign-in ---
+        "User.ReadWrite.All",
+        "User-PasswordProfile.ReadWrite.All",
+        "UserAuthenticationMethod.ReadWrite.All",
+        "Group.ReadWrite.All",
+        "GroupMember.ReadWrite.All",
+        "Domain.ReadWrite.All",
+        "IdentityProvider.ReadWrite.All",
+        "Organization.ReadWrite.All",
+        # --- can change the controls that protect the tenant ---
+        "Policy.ReadWrite.ConditionalAccess",
+        "Policy.ReadWrite.AuthenticationMethod",
+        "Policy.ReadWrite.PermissionGrant",
+        "Policy.ReadWrite.Authorization",
+        # --- tenant-wide data access ---
+        "Mail.Read",
+        "Mail.ReadWrite",
+        "Mail.Send",
+        "MailboxSettings.ReadWrite",
+        "Files.Read.All",
+        "Files.ReadWrite.All",
+        "Sites.Read.All",
+        "Sites.ReadWrite.All",
+        "Sites.FullControl.All",
+        "Chat.Read.All",
+        "Chat.ReadWrite.All",
+        "ChannelMessage.Read.All",
+    }
+)
 
 
 # --- projections: the only code here that touches a Graph model ---
@@ -200,6 +267,51 @@ def project_application(app) -> dict:
             project_federated_credential(f)
             for f in (getattr(app, "federated_identity_credentials", None) or [])
         ],
+    }
+
+
+def project_owner(owner) -> dict:
+    """An owner is a user or a service principal; only users carry a UPN."""
+    return {
+        "id": graph_attr(owner, "id"),
+        "odata_type": graph_attr(owner, "odata_type"),
+        "display_name": graph_attr(owner, "display_name"),
+        "user_principal_name": graph_attr(owner, "user_principal_name"),
+        "account_enabled": graph_attr(owner, "account_enabled"),
+    }
+
+
+def project_app_role_assignment(assignment) -> dict:
+    return {
+        "id": graph_attr(assignment, "id"),
+        "app_role_id": graph_attr(assignment, "app_role_id"),
+        "resource_id": graph_attr(assignment, "resource_id"),
+        "resource_display_name": graph_attr(assignment, "resource_display_name"),
+        "created_date_time": graph_attr(assignment, "created_date_time"),
+    }
+
+
+def project_permission_grant(grant) -> dict:
+    return {
+        "id": graph_attr(grant, "id"),
+        "client_id": graph_attr(grant, "client_id"),
+        "consent_type": graph_attr(grant, "consent_type"),
+        "principal_id": graph_attr(grant, "principal_id"),
+        "resource_id": graph_attr(grant, "resource_id"),
+        "scope": graph_attr(grant, "scope"),
+    }
+
+
+def project_resource(sp) -> dict:
+    """A resource principal (an API such as Microsoft Graph) with its app role names."""
+    return {
+        "id": graph_attr(sp, "id"),
+        "app_id": graph_attr(sp, "app_id"),
+        "display_name": graph_attr(sp, "display_name"),
+        "app_roles": {
+            str(graph_attr(r, "id")): graph_attr(r, "value")
+            for r in (getattr(sp, "app_roles", None) or [])
+        },
     }
 
 
@@ -394,6 +506,135 @@ def unmatched_application_record(app: dict) -> dict:
     }
 
 
+def _principal_type(odata_type) -> str:
+    """'#microsoft.graph.servicePrincipal' -> 'ServicePrincipal'."""
+    tail = str(odata_type or "").rsplit(".", 1)[-1]
+    return (tail[:1].upper() + tail[1:]) if tail else "Unknown"
+
+
+def owner_record(owner: dict) -> dict:
+    enabled = owner.get("account_enabled")
+    return {
+        "id": owner.get("id"),
+        "principal_type": _principal_type(owner.get("odata_type")),
+        "display_name": owner.get("display_name"),
+        "user_principal_name": owner.get("user_principal_name"),
+        "account_enabled": None if enabled is None else bool(enabled),
+    }
+
+
+def _owner_records(owners: list[dict] | None) -> list[dict] | None:
+    if owners is None:
+        return None
+    return sorted(
+        (owner_record(o) for o in owners),
+        key=lambda r: ((r["user_principal_name"] or r["display_name"] or "").lower(), r["id"] or ""),
+    )
+
+
+def is_privileged_permission(resource_app_id, permission) -> bool:
+    return resource_app_id == MICROSOFT_GRAPH_APP_ID and permission in PRIVILEGED_GRAPH_PERMISSIONS
+
+
+def application_permission_record(assignment: dict, resources: dict) -> dict:
+    """One app role assignment, named from the resource's appRoles."""
+    resource = resources.get(assignment.get("resource_id")) or {}
+    role_id = str(assignment.get("app_role_id") or "")
+    permission = (
+        None if role_id == DEFAULT_ACCESS_ROLE_ID else (resource.get("app_roles") or {}).get(role_id)
+    )
+    return {
+        "resource_id": assignment.get("resource_id"),
+        "resource_app_id": resource.get("app_id"),
+        "resource_display_name": assignment.get("resource_display_name") or resource.get("display_name"),
+        "app_role_id": assignment.get("app_role_id"),
+        "permission": permission,
+        "default_access": role_id == DEFAULT_ACCESS_ROLE_ID,
+        "privileged": is_privileged_permission(resource.get("app_id"), permission),
+        "created_date_time": assignment.get("created_date_time"),
+    }
+
+
+def delegated_grant_record(grant: dict, resources: dict) -> dict:
+    """One delegated grant: AllPrincipals is admin consent for every user, Principal one user."""
+    resource = resources.get(grant.get("resource_id")) or {}
+    scopes = sorted({s for s in str(grant.get("scope") or "").split() if s})
+    return {
+        "resource_id": grant.get("resource_id"),
+        "resource_app_id": resource.get("app_id"),
+        "resource_display_name": resource.get("display_name"),
+        "consent_type": grant.get("consent_type"),
+        "principal_id": grant.get("principal_id"),
+        "scopes": scopes,
+        "privileged_scopes": [s for s in scopes if is_privileged_permission(resource.get("app_id"), s)],
+    }
+
+
+def _privileged_flag(app_perms: list | None, grants: list | None) -> bool | None:
+    """True if either holds a privileged permission; None if that can't be ruled out."""
+    if any(p["privileged"] for p in app_perms or []) or any(
+        g["privileged_scopes"] for g in grants or []
+    ):
+        return True
+    return None if app_perms is None or grants is None else False
+
+
+def add_access(records: list[dict], unmatched: list[dict], access: dict) -> None:
+    """Attach owners and granted API permissions; a None input means it was unreadable.
+
+    `access` holds `sp_owners` and `app_owners` (object id -> owners),
+    `app_role_assignments` (principal id -> assignments), `grants` (client principal id
+    -> grants) and `resources` (resource principal id -> projected resource).
+    """
+    sp_owners, app_owners = access.get("sp_owners"), access.get("app_owners")
+    assignments, grants = access.get("app_role_assignments"), access.get("grants")
+    resources = access.get("resources") or {}
+    for r in records:
+        owners = None if sp_owners is None else _owner_records(sp_owners.get(r["id"], []))
+        app_id = r["application_object_id"]
+        application_owners = (
+            None if app_owners is None or not app_id else _owner_records(app_owners.get(app_id, []))
+        )
+        r["owner_eligible"] = r["ownership"] not in (OWNER_MICROSOFT, OWNER_MANAGED_IDENTITY)
+        r["owners"] = owners
+        r["application_owners"] = application_owners
+        if owners is None or (app_id and application_owners is None):
+            r["has_owner"] = None
+        else:
+            r["has_owner"] = bool(owners or application_owners)
+
+        app_perms = None
+        if assignments is not None:
+            app_perms = sorted(
+                (application_permission_record(a, resources) for a in assignments.get(r["id"], [])),
+                key=lambda p: (
+                    p["resource_display_name"] or "", p["permission"] or "", str(p["app_role_id"] or "")
+                ),
+            )
+        sp_grants = None
+        if grants is not None:
+            sp_grants = sorted(
+                (delegated_grant_record(g, resources) for g in grants.get(r["id"], [])),
+                key=lambda g: (
+                    g["resource_display_name"] or "", g["consent_type"] or "", g["principal_id"] or ""
+                ),
+            )
+        r["application_permissions"] = app_perms
+        r["delegated_permission_grants"] = sp_grants
+        r["privileged_application_permissions"] = (
+            None if app_perms is None else sorted({p["permission"] for p in app_perms if p["privileged"]})
+        )
+        r["privileged_delegated_permissions"] = (
+            None if sp_grants is None else sorted({s for g in sp_grants for s in g["privileged_scopes"]})
+        )
+        r["has_privileged_permission"] = _privileged_flag(app_perms, sp_grants)
+
+    for a in unmatched:
+        owners = None if app_owners is None else _owner_records(app_owners.get(a["id"], []))
+        a["owners"] = owners
+        a["has_owner"] = None if owners is None else bool(owners)
+
+
 def build_records(
     service_principals: list[dict], applications: list[dict], tenant_id: str | None, now: datetime
 ) -> tuple[list[dict], list[dict]]:
@@ -414,7 +655,7 @@ def build_records(
     return records, unmatched
 
 
-def summarize(records: list[dict], unmatched_apps: list[dict]) -> dict:
+def summarize(records: list[dict], unmatched_apps: list[dict], readable: dict | None = None) -> dict:
     """Counts of how the tenant's non-user accounts authenticate, and credential health.
 
     The authentication-method counts overlap on purpose (see `service_principal_record`),
@@ -490,13 +731,265 @@ def summarize(records: list[dict], unmatched_apps: list[dict]) -> dict:
         "federated_identity_credentials_on_applications_without_service_principal": sum(
             a["federated_identity_credential_count"] for a in unmatched_apps
         ),
+        **access_summary(records, unmatched_apps, readable),
+    }
+
+
+def access_summary(records: list[dict], unmatched_apps: list[dict], readable: dict | None) -> dict:
+    """Owner and API-permission counts; a figure that needs an unreadable read is None."""
+    readable = readable or {}
+    owners_ok = readable.get("owners", False)
+    perms_ok = readable.get("application_permissions", False)
+    grants_ok = readable.get("delegated_grants", False)
+    eligible = [r for r in records if r.get("owner_eligible")]
+    ownerless = [r for r in eligible if r.get("has_owner") is False]
+    non_microsoft = [r for r in records if r["ownership"] != OWNER_MICROSOFT]
+
+    def held(r):
+        return r["credential_count"] or r["federated_identity_credential_count"]
+
+    def when(ok, value):
+        return value if ok else None
+
+    with_priv_app = [r for r in non_microsoft if r.get("privileged_application_permissions")]
+    return {
+        # --- who owns each app and service principal ---
+        "owners_readable": owners_ok,
+        "owner_eligible_service_principals": len(eligible),
+        "service_principals_without_owner": when(owners_ok, len(ownerless)),
+        "ownerless_service_principals_with_credentials": when(
+            owners_ok, sum(1 for r in ownerless if held(r))
+        ),
+        "ownerless_applications_without_service_principal": when(
+            owners_ok, sum(1 for a in unmatched_apps if a.get("has_owner") is False)
+        ),
+        # --- which API permissions non-Microsoft service principals hold ---
+        "application_permissions_readable": perms_ok,
+        "delegated_grants_readable": grants_ok,
+        "service_principals_with_application_permissions": when(
+            perms_ok, sum(1 for r in non_microsoft if r.get("application_permissions"))
+        ),
+        "application_permission_assignments": when(
+            perms_ok, sum(len(r.get("application_permissions") or []) for r in non_microsoft)
+        ),
+        "service_principals_with_delegated_grants": when(
+            grants_ok, sum(1 for r in non_microsoft if r.get("delegated_permission_grants"))
+        ),
+        "delegated_permission_grants": when(
+            grants_ok, sum(len(r.get("delegated_permission_grants") or []) for r in non_microsoft)
+        ),
+        "admin_consented_delegated_grants": when(
+            grants_ok,
+            sum(
+                1
+                for r in non_microsoft
+                for g in r.get("delegated_permission_grants") or []
+                if g["consent_type"] == CONSENT_ALL_PRINCIPALS
+            ),
+        ),
+        # --- which of them hold privileged Microsoft Graph permissions ---
+        "service_principals_with_privileged_application_permissions": when(perms_ok, len(with_priv_app)),
+        "managed_identities_with_privileged_application_permissions": when(
+            perms_ok, sum(1 for r in with_priv_app if r["is_managed_identity"])
+        ),
+        "ownerless_service_principals_with_privileged_application_permissions": when(
+            perms_ok and owners_ok,
+            sum(1 for r in with_priv_app if r.get("owner_eligible") and r.get("has_owner") is False),
+        ),
+        "privileged_application_permissions_held": when(
+            perms_ok, sorted({p for r in with_priv_app for p in r["privileged_application_permissions"]})
+        ),
+        "service_principals_with_privileged_delegated_grants": when(
+            grants_ok, sum(1 for r in non_microsoft if r.get("privileged_delegated_permissions"))
+        ),
+        "privileged_delegated_permissions_granted": when(
+            grants_ok,
+            sorted({s for r in non_microsoft for s in r.get("privileged_delegated_permissions") or []}),
+        ),
     }
 
 
 # --- collection (lazy msgraph imports) ---
 
+class _Deferred:
+    """Holds failures from an optional read so a 403 can be told apart from the rest."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, BaseException]] = []
+
+    def record(self, operation: str, exc: BaseException) -> None:
+        self.calls.append((operation, exc))
+
+
+async def _expanded(collector, operation, builder, config, attr, item_reader) -> dict | None:
+    """{object id: related models} from one paged $expand read; None if any read failed.
+
+    An object whose expansion hit EXPAND_LIMIT is re-read on its own, paged, because
+    Graph drops the rest without a nextLink.
+    """
+    before = len(collector.failures)
+    related = {}
+    for obj in await paginate(collector, operation, builder, config):
+        oid = graph_attr(obj, "id")
+        items = list(getattr(obj, attr, None) or [])
+        if len(items) >= EXPAND_LIMIT:
+            items = await item_reader(oid)
+        related[oid] = items
+    return related if len(collector.failures) == before else None
+
+
+async def _access(collector: Collector, client, service_principals: list[dict]) -> tuple[dict, dict]:
+    """Owners, app role assignments, delegated grants, and the app role names they need."""
+    from kiota_abstractions.base_request_configuration import RequestConfiguration
+    from msgraph.generated.applications.applications_request_builder import (
+        ApplicationsRequestBuilder,
+    )
+    from msgraph.generated.applications.item.owners.owners_request_builder import (
+        OwnersRequestBuilder as AppOwners,
+    )
+    from msgraph.generated.service_principals.item.owners.owners_request_builder import (
+        OwnersRequestBuilder as SpOwners,
+    )
+    from msgraph.generated.service_principals.item.service_principal_item_request_builder import (
+        ServicePrincipalItemRequestBuilder as SpItem,
+    )
+    from msgraph.generated.service_principals.service_principals_request_builder import (
+        ServicePrincipalsRequestBuilder,
+    )
+
+    apps_query = ApplicationsRequestBuilder.ApplicationsRequestBuilderGetQueryParameters
+    sps_query = ServicePrincipalsRequestBuilder.ServicePrincipalsRequestBuilderGetQueryParameters
+
+    def expand(query, expansion):
+        return RequestConfiguration(query_parameters=query(select=["id"], expand=[expansion]))
+
+    async def app_owners_of(oid):
+        return await paginate(
+            collector,
+            f"graph.applications({oid}).owners.get",
+            client.applications.by_application_id(oid).owners,
+            RequestConfiguration(
+                query_parameters=AppOwners.OwnersRequestBuilderGetQueryParameters(select=list(OWNER_SELECT))
+            ),
+        )
+
+    async def sp_owners_of(oid):
+        return await paginate(
+            collector,
+            f"graph.servicePrincipals({oid}).owners.get",
+            client.service_principals.by_service_principal_id(oid).owners,
+            RequestConfiguration(
+                query_parameters=SpOwners.OwnersRequestBuilderGetQueryParameters(select=list(OWNER_SELECT))
+            ),
+        )
+
+    async def assignments_of(oid):
+        return await paginate(
+            collector,
+            f"graph.servicePrincipals({oid}).appRoleAssignments.get",
+            client.service_principals.by_service_principal_id(oid).app_role_assignments,
+        )
+
+    def projected(related, projection):
+        if related is None:
+            return None
+        return {oid: [projection(m) for m in models] for oid, models in related.items()}
+
+    app_owners = projected(
+        await _expanded(
+            collector,
+            "graph.applications.get($expand=owners)",
+            client.applications,
+            expand(apps_query, OWNERS_EXPAND),
+            "owners",
+            app_owners_of,
+        ),
+        project_owner,
+    )
+    sp_owners = projected(
+        await _expanded(
+            collector,
+            "graph.servicePrincipals.get($expand=owners)",
+            client.service_principals,
+            expand(sps_query, OWNERS_EXPAND),
+            "owners",
+            sp_owners_of,
+        ),
+        project_owner,
+    )
+
+    before = len(collector.failures)
+    assignments = projected(
+        await _expanded(
+            collector,
+            "graph.servicePrincipals.get($expand=appRoleAssignments)",
+            client.service_principals,
+            expand(sps_query, "appRoleAssignments"),
+            "app_role_assignments",
+            assignments_of,
+        ),
+        project_app_role_assignment,
+    )
+    # Names and appIds come from the principal list; only app role names need a read.
+    resources = {
+        sp["id"]: {
+            "id": sp["id"], "app_id": sp["app_id"], "display_name": sp["display_name"], "app_roles": {}
+        }
+        for sp in service_principals
+    }
+    resource_config = RequestConfiguration(
+        query_parameters=SpItem.ServicePrincipalItemRequestBuilderGetQueryParameters(
+            select=list(RESOURCE_SELECT)
+        )
+    )
+    resource_ids = {a["resource_id"] for items in (assignments or {}).values() for a in items}
+    for rid in sorted(r for r in resource_ids if r):
+        model = await aguard(
+            collector,
+            f"graph.servicePrincipals({rid}).get(appRoles)",
+            lambda rid=rid: client.service_principals.by_service_principal_id(rid).get(
+                request_configuration=resource_config
+            ),
+        )
+        if model is not None:
+            resources[rid] = project_resource(model)
+    permissions_ok = assignments is not None and len(collector.failures) == before
+
+    # Delegated grants need Directory.Read.All, which Application.Read.All does not cover,
+    # so a 403 leaves them unreadable instead of failing the run.
+    deferred = _Deferred()
+    grant_models = await paginate(
+        deferred, "graph.oauth2PermissionGrants.get", client.oauth2_permission_grants
+    )
+    failures = [{"type": type(e).__name__, "message": str(e)} for _, e in deferred.calls]
+    grants: dict | None = None
+    if not failures:
+        grants = {}
+        for g in (project_permission_grant(m) for m in grant_models):
+            grants.setdefault(g["client_id"], []).append(g)
+    elif classify_failure_code(failures) == "not_authorized":
+        logger.warning("Delegated permission grants are unreadable without Directory.Read.All")
+    else:
+        for operation, exc in deferred.calls:
+            collector.record(operation, exc)
+
+    access = {
+        "sp_owners": sp_owners,
+        "app_owners": app_owners,
+        "app_role_assignments": assignments if permissions_ok else None,
+        "grants": grants,
+        "resources": resources,
+    }
+    readable = {
+        "owners": sp_owners is not None and app_owners is not None,
+        "application_permissions": permissions_ok,
+        "delegated_grants": grants is not None,
+    }
+    return access, readable
+
+
 async def _collect(collector: Collector, cred, now: datetime):
-    """Two paged reads (service principals; this tenant's applications), joined."""
+    """Principals and this tenant's applications, joined, then owners and permissions."""
 
     async def _work(client):
         tenant = await resolve_tenant(collector, client)
@@ -543,10 +1036,12 @@ async def _collect(collector: Collector, cred, now: datetime):
         records, unmatched = build_records(
             service_principals, applications, tenant.get("tenant_id"), now
         )
-        return records, unmatched, tenant
+        access, readable = await _access(collector, client, service_principals)
+        add_access(records, unmatched, access)
+        return records, unmatched, tenant, readable
 
     result = await with_graph_client(collector, cred, _work, default=None)
-    return result if result is not None else ([], [], {"tenant_source": "unresolved"})
+    return result if result is not None else ([], [], {"tenant_source": "unresolved"}, {})
 
 
 def main() -> int:
@@ -572,8 +1067,9 @@ def main() -> int:
         records: list[dict] = []
         unmatched: list[dict] = []
         tenant = {"tenant_source": "unresolved"}
+        readable: dict = {}
     else:
-        records, unmatched, tenant = asyncio.run(_collect(collector, cred, now))
+        records, unmatched, tenant, readable = asyncio.run(_collect(collector, cred, now))
 
     # No `provider_registration_status()` call, deliberately: Graph is not an ARM
     # resource provider, and every tenant has service principals (Microsoft's own apps
@@ -589,8 +1085,9 @@ def main() -> int:
             "service_principals": records,
             "applications_without_service_principal": unmatched,
             "evaluated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "privileged_graph_permissions_checked": sorted(PRIVILEGED_GRAPH_PERMISSIONS),
         },
-        summary=summarize(records, unmatched),
+        summary=summarize(records, unmatched, readable),
     )
 
     filename = f"azure_entra_service_principals_{tenant_filename_key(tenant)}.json"
