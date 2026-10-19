@@ -345,7 +345,12 @@ class CsodClient:
     def get_json(self, operation: str, url: str, params: Optional[Dict[str, str]] = None,
                  page_size: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """One read-only GET. Returns the JSON object, or None after recording the failure."""
-        if not (url.startswith(self.views_url) and _is_views_path(urlparse(url).path)):
+        parsed_url = urlparse(url)
+        # Compare the host case-insensitively (a nextLink may capitalize it) and
+        # the path exactly; a mismatch is a bug in the caller, not a run failure.
+        if not (parsed_url.scheme == "https" and parsed_url.netloc.lower() == self._host.lower()
+                and not parsed_url.username and not parsed_url.password
+                and _is_views_path(parsed_url.path)):
             raise ValueError("csod_client only reads Reporting API views")
         size = page_size or self.page_size
         last_response: Any = None

@@ -157,6 +157,9 @@ def _user_record(user_id: Any, rows: List[Dict[str, Any]], now: datetime, retrai
         "latest_registration": {
             "training_object_id": latest.get("transc_object_id"),
             "reg_num": latest.get("reg_num"),
+            # Cornerstone's own status code, unmapped, so a reviewer can check
+            # the derived status against it (e.g. Withdrawn, Failed, Equivalent).
+            "cornerstone_status_id": latest.get("user_lo_status_id"),
             "assigned_at": _iso(parse_ts(latest.get("user_lo_assigned_dt"))),
             "due_at": _iso(due),
             "days_overdue": (now - due).days if status == "overdue" and due else None,

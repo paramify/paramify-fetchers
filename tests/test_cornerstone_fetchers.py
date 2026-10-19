@@ -489,3 +489,18 @@ def test_allowlist_bypass_is_recorded_in_evidence(fake, tmp_path, monkeypatch):
     monkeypatch.setenv("CSOD_ALLOW_CUSTOM_ENDPOINTS", "true")
     code, ev = run("security_awareness_training", tmp_path)
     assert code == 0 and ev["portal"]["custom_endpoint_override"] is True
+
+
+def test_capitalized_host_in_next_link_is_followed_not_crashed(fake):
+    client = csod_client.build_client(["vw_rpt_training:read"])
+    link = "https://ACME.csod.com/services/api/x/odata/api/views/vw_rpt_training"
+    assert client._check_next_link(link)
+    # get_json must accept what _check_next_link accepted, instead of raising.
+    payload = client.get_json("x", link, params={"$filter": "lo_title eq 'none'"})
+    assert payload is not None and payload["value"] == []
+
+
+def test_raw_cornerstone_status_id_is_exposed(fake, tmp_path):
+    code, ev = run("security_awareness_training", tmp_path)
+    assert code == 0
+    assert users_by_id(ev)[1]["latest_registration"]["cornerstone_status_id"] == 1
