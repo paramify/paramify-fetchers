@@ -1,6 +1,4 @@
-"""The credential-free path through the TUI, offline: welcome → demo manifest →
-add demo_hello → run → evidence → Paramify tab → upload dry-run.
-"""
+"""Offline TUI path: welcome → demo manifest → add demo_hello → run → evidence → upload dry-run."""
 
 from __future__ import annotations
 
@@ -133,8 +131,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch):
             assert "[create] demo_hello  set=EVD-DEMO-HELLO" in _log(log)
             assert _text(upload_banner) == "preview complete — create=1 update=0 drift=0 noop=0"
 
-            # Upload dry-run. The TUI has no dry-run switch, so stand in a token for
-            # the preflight and send the confirmed upload through dry_run=True.
+            # Upload dry-run: the TUI has no switch, so fake a token and force dry_run=True.
             monkeypatch.setenv(UPLOAD_TOKEN_ENV, "unused")
             real_upload = api.upload_run
             monkeypatch.setattr(api, "upload_run", lambda *a, **kw: real_upload(*a, **{**kw, "dry_run": True}))

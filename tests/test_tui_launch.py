@@ -1,8 +1,4 @@
-"""Launch the real TUI in a pseudo-terminal, press q, expect a clean exit.
-
-The pilot tests drive FetcherApp in-process; this covers what they skip: the
-entry points, argument parsing, the terminal driver and teardown.
-"""
+"""Launch the real TUI entry points in a pseudo-terminal, press q, expect a clean exit."""
 
 from __future__ import annotations
 

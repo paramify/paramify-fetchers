@@ -1,8 +1,4 @@
-"""SVG snapshots of every TUI screen and the key modals, on the offline demo workspace.
-
-Each compares with tests/__snapshots__/test_tui_snapshots/<test>.svg. After an
-intended UI change: pytest tests/test_tui_snapshots.py --snapshot-update
-"""
+"""SVG snapshots of every TUI screen and key modal; refresh with --snapshot-update."""
 
 from __future__ import annotations
 

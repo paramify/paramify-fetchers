@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Compare the headless CLI's output on the demo manifest with committed goldens.
-
-    python tools/cli_goldens.py            # exit 1 with a diff if any output changed
-    python tools/cli_goldens.py --update   # rewrite tests/goldens/cli/ from this run
-
-Runs `paramify run examples/demo.yaml`, `paramify validate examples/demo.yaml`
-and `paramify upload --dry-run` on the new run, from the repo root, with no
-.env and no Paramify token, base URL or tag switch. The repo path, run ids,
-timestamps and durations are normalised out; the run directory it made is
-removed afterwards. CI's smoke job runs the check.
-"""
+"""Check the demo's `paramify run`/`validate`/`upload --dry-run` output against tests/goldens/cli/."""
 
 from __future__ import annotations
 

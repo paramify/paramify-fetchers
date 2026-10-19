@@ -32,10 +32,7 @@ dependencies = [
 tui = ["textual>=8,<9"]
 checkov = ["checkov"]
 dev = ["pytest", "ruff", "mypy"]
-# SVG snapshots of the TUI (tests/test_tui_snapshots.py; CI's tui job). Kept out of
-# dev on purpose: pytest-textual-snapshot pins syrupy 4.8.0, which caps pytest below
-# 9, and the rest of the suite runs on pytest 9. Exact pin: a plugin release can
-# change the SVG it writes and churn every snapshot.
+# TUI SVG snapshots; not in dev because its syrupy 4.8.0 pin caps pytest below 9.
 snapshots = ["pytest-textual-snapshot==1.1.0"]
 # Azure category (fetchers/azure/*). Majors are pinned for the reasons spelled
 # out in requirements.txt: six breaking changes across azure-mgmt majors, every

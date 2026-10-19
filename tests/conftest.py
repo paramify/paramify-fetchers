@@ -48,11 +48,7 @@ def repo_root() -> Path:
 
 
 # --------------------------------------------------------------------------- #
-# --fail-on-skip
-#
-# Every TUI module opens with pytest.importorskip("textual"), so a tui extra
-# that failed to install skips the whole TUI suite and the run still passes.
-# CI's tui job passes this flag so that a skip fails the run instead.
+# --fail-on-skip: the tui job's guard against a missing textual passing as skips.
 # --------------------------------------------------------------------------- #
 
 def pytest_addoption(parser):
@@ -235,12 +231,7 @@ def build_fetcher_fn():
 
 
 # --------------------------------------------------------------------------- #
-# Offline demo workspace
-#
-# For the TUI snapshot and end-to-end tests: a repo root holding only the
-# credential-free demo fetcher, its manifest (manifests/demo.yaml) and one real
-# run of it, pinned to a fixed run id and timestamps. Catalog growth, the host's
-# .env and the wall clock then cannot change what the screens show.
+# Offline demo workspace (TUI snapshot and e2e tests): demo fetcher only, one pinned run.
 # --------------------------------------------------------------------------- #
 
 DEMO_RUN_ID = "2026-01-01T00-00-00Z"
