@@ -714,8 +714,15 @@ schemas and the `paramify` CLI — not the internal code.
   for is not a gap. `all_assessable_resources_assessed_by_defender` and
   `all_evaluable_resources_evaluated_by_policy` are false when the service covers
   nothing at all. Also new: coverage percentages, unhealthy High/Critical and
-  non-compliant counts, `types_covered_by_neither`, and
-  `results.coverage_queries` with each query's page count and reported total. Every
+  non-compliant counts on inventoried resources, and
+  `resources_covered_by_neither_by_type` (uncovered resources of every type, gaps
+  and never-covered types alike). Assessments and policy states about anything not
+  inventoried (the subscription, resource groups, deleted resources) are counted
+  apart, with `defender_unhealthy_outside_inventory` and
+  `policy_non_compliant_outside_inventory`, so the inventoried counts plus these add
+  up to the totals. `results.coverage_queries` gives each query's page count,
+  reported total and `outside_inventory_by_target`, a count of those results by the
+  type of what they target (never its name). Every
   query is paged to the end; a coverage query that fails or comes back truncated
   is a collection failure, and that service's counts stay null rather than reading
   as uncovered. Also mapped to `KSI-MLA-EVC`, `KSI-CNA-EIS` and `KSI-SVC-EIS`.

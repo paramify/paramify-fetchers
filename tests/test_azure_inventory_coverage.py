@@ -25,7 +25,8 @@ def _load(name):
 inv = _load("resource_inventory")
 Collector = sys.modules["azure_common"].Collector
 
-SUB = "/subscriptions/00000000-0000-0000-0000-000000000000"
+SUB_ID = "00000000-0000-0000-0000-000000000000"
+SUB = f"/subscriptions/{SUB_ID}"
 RG = f"{SUB}/resourceGroups/rg-example"
 SA1 = f"{RG}/providers/Microsoft.Storage/storageAccounts/saone"
 SA2 = f"{RG}/providers/Microsoft.Storage/storageAccounts/satwo"
@@ -79,8 +80,8 @@ STATES = [
 
 
 def covered(defender_rows=ASSESSMENTS, policy_rows=STATES):
-    defender = None if defender_rows is None else inv.tally_defender(defender_rows, KEYS)
-    policy = None if policy_rows is None else inv.tally_policy(policy_rows, KEYS)
+    defender = None if defender_rows is None else inv.tally_defender(defender_rows, KEYS, SUB_ID)
+    policy = None if policy_rows is None else inv.tally_policy(policy_rows, KEYS, SUB_ID)
     resources = inv.with_coverage(RESOURCES, defender, policy)
     return {r["id"]: r for r in resources}, inv.summarize(resources, defender, policy)
 
@@ -141,9 +142,48 @@ def test_policy_coverage_and_non_compliance():
     assert (s["policy_evaluations_total"], s["policy_evaluations_outside_inventory"]) == (5, 1)
 
 
-def test_types_covered_by_neither():
+def test_resources_covered_by_neither_are_counted_by_type():
     _, s = covered()
-    assert s["types_covered_by_neither"] == {"microsoft.insights/actiongroups": 1}
+    assert s["resources_covered_by_neither_by_type"] == {"microsoft.insights/actiongroups": 1}
+    assert "types_covered_by_neither" not in s
+
+
+def test_failing_results_outside_the_inventory_are_counted_apart():
+    _, s = covered()
+    assert (s["defender_unhealthy_outside_inventory"], s["policy_non_compliant_outside_inventory"]) == (1, 1)
+    all_non_compliant = sum(1 for r in STATES if r["complianceState"] == "NonCompliant")
+    assert s["non_compliant_policy_evaluations"] + s["policy_non_compliant_outside_inventory"] == all_non_compliant
+
+
+@pytest.mark.parametrize("target,expected", [
+    (SUB, "subscription"),
+    (f"{SUB}/", "subscription"),
+    (RG.upper(), "resource_group"),
+    (f"{SUB}/providers/Microsoft.Security/pricings/VirtualMachines", "subscription > microsoft.security/pricings"),
+    (f"{RG}/providers/Microsoft.Web/sites/deleted-app", "microsoft.web/sites"),
+    (f"{RG}/providers/Microsoft.KeyVault/vaults/kv-gone/keys/k1", "microsoft.keyvault/vaults/keys"),
+    (f"{RG}/providers/Microsoft.Storage/storageAccounts/sagone/providers/Microsoft.Security/"
+     "advancedThreatProtectionSettings/current",
+     "microsoft.storage/storageaccounts > microsoft.security/advancedthreatprotectionsettings"),
+    ("/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg", "other_subscription"),
+    ("/providers/Microsoft.Management/managementGroups/mg-example", "management_group"),
+    ("", "no_target"),
+    (None, "no_target"),
+    ("not-an-arm-id", "unparsed"),
+])
+def test_targets_outside_the_inventory_are_described_by_id_shape(target, expected):
+    assert inv.target_kind(target, SUB_ID) == expected
+
+
+def test_outside_breakdown_by_target():
+    rows = [assessment(SUB, "Unhealthy", n=1), assessment(SUB, n=2),
+            assessment(f"{RG}/providers/Microsoft.Web/sites/deleted-app", "Unhealthy", n=3)]
+    tally = inv.tally_defender(rows, KEYS, SUB_ID)
+    assert tally["outside_by_target"] == {
+        "microsoft.web/sites": {"total": 1, "unhealthy": 1},
+        "subscription": {"total": 2, "unhealthy": 1},
+    }
+    assert (tally["outside_inventory"], tally["outside_failing"]) == (3, 2)
 
 
 def test_a_service_that_covers_nothing_does_not_pass():
@@ -161,7 +201,8 @@ def test_failed_query_leaves_coverage_unknown():
     assert s["policy_coverage_complete"] is False
     assert all(s[k] is None for k in (
         "policy_evaluations_total", "resources_without_policy_evaluation", "policy_evaluated_percentage",
-        "all_evaluable_resources_evaluated_by_policy", "types_covered_by_neither"))
+        "all_evaluable_resources_evaluated_by_policy", "resources_covered_by_neither_by_type",
+        "policy_non_compliant_outside_inventory"))
     assert s["defender_coverage_complete"] is True
 
 
@@ -201,7 +242,7 @@ def fake_models(monkeypatch):
 def _collect(monkeypatch, graph):
     monkeypatch.setattr(inv, "resource_graph_client", lambda cred: graph)
     collector = Collector(logging.getLogger("test"))
-    return inv.collect(SUB.rsplit("/", 1)[-1], object(), collector), collector
+    return inv.collect(SUB_ID, object(), collector), collector
 
 
 def test_collect_joins_three_queries(monkeypatch, fake_models):
@@ -212,6 +253,7 @@ def test_collect_joins_three_queries(monkeypatch, fake_models):
     assert graph.queries == ["Resources", "SecurityResources", "PolicyResources"]
     assert (out["resources"][0]["defender_assessments"], out["resources"][0]["policy_evaluations"]) == (1, 1)
     assert out["coverage_queries"]["defender_assessments"]["complete"] is True
+    assert out["coverage_queries"]["policy_states"]["outside_inventory_by_target"] == {}
 
 
 def test_truncated_coverage_query_is_a_failure_not_a_gap(monkeypatch, fake_models):

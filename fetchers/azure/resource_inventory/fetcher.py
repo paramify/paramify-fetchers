@@ -118,41 +118,99 @@ def inventory_key(target: str | None, inventory: set[str]) -> str | None:
     return None
 
 
-def tally_defender(rows: list[dict], inventory: set[str]) -> dict:
+def _arm_type(segments: list[str]) -> str:
+    """The resource type an id's `providers/...` segments name, with any extension type after " > "."""
+    chunks: list[list[str]] = []
+    i = 0
+    while i < len(segments):
+        if segments[i] == "providers" and i + 1 < len(segments):
+            chunks.append([segments[i + 1]])
+            i += 2
+        elif chunks:
+            chunks[-1].append(segments[i])
+            i += 2
+        else:
+            i += 1
+    return " > ".join("/".join(chunk) for chunk in chunks) or "unparsed"
+
+
+def target_kind(target: str | None, subscription_id: str | None = None) -> str:
+    """What a result outside the inventory is about, by id shape only: never a name."""
+    key = (target or "").strip().lower().rstrip("/")
+    if not key:
+        return "no_target"
+    parts = key.split("/")[1:]
+    if parts[:3] == ["providers", "microsoft.management", "managementgroups"]:
+        return "management_group"
+    if parts[:1] != ["subscriptions"] or len(parts) < 2:
+        return "unparsed"
+    if subscription_id and parts[1] != subscription_id.lower():
+        return "other_subscription"
+    rest = parts[2:]
+    if not rest:
+        return "subscription"
+    if rest[0] == "resourcegroups":
+        if len(rest) == 2:
+            return "resource_group"
+        return _arm_type(rest[2:]) if rest[2:3] == ["providers"] else "unparsed"
+    return "subscription > " + _arm_type(rest) if rest[0] == "providers" else "unparsed"
+
+
+def _tally(rows, inventory, subscription_id, target_of, failing_label, is_failing, count_inside) -> dict:
+    """Counts per inventoried resource, and results about anything else counted by what they target."""
+    by_resource: dict[str, Counter] = {}
+    outside: dict[str, Counter] = {}
+    for row in rows:
+        target = target_of(row)
+        key = inventory_key(target, inventory)
+        if key is None:
+            outside.setdefault(target_kind(target, subscription_id), Counter()).update(
+                {"total": 1, failing_label: int(is_failing(row))})
+            continue
+        count_inside(by_resource.setdefault(key, Counter()), row)
+    return {
+        "by_resource": by_resource,
+        "rows": len(rows),
+        "outside_inventory": sum(c["total"] for c in outside.values()),
+        "outside_failing": sum(c[failing_label] for c in outside.values()),
+        "outside_by_target": {kind: dict(outside[kind]) for kind in sorted(outside)},
+    }
+
+
+def _unhealthy(row: dict) -> bool:
+    return (row.get("status") or "").lower() == UNHEALTHY
+
+
+def _non_compliant(row: dict) -> bool:
+    return (row.get("complianceState") or "").lower() == NON_COMPLIANT
+
+
+def _count_assessment(counts: Counter, row: dict) -> None:
+    counts["assessments"] += 1
+    if _unhealthy(row):
+        counts["unhealthy"] += 1
+        severity = (row.get("severity") or "").lower()
+        if severity in HIGH_SEVERITIES:
+            counts["unhealthy_high"] += 1
+        elif not severity:
+            counts["unhealthy_unknown_severity"] += 1
+
+
+def _count_state(counts: Counter, row: dict) -> None:
+    counts["evaluations"] += 1
+    if _non_compliant(row):
+        counts["non_compliant"] += 1
+
+
+def tally_defender(rows: list[dict], inventory: set[str], subscription_id: str | None = None) -> dict:
     """Assessments, unhealthy and unhealthy High/Critical counts per inventoried resource."""
-    by_resource: dict[str, Counter] = {}
-    outside = 0
-    for row in rows:
-        key = inventory_key(assessment_target(row), inventory)
-        if key is None:
-            outside += 1
-            continue
-        counts = by_resource.setdefault(key, Counter())
-        counts["assessments"] += 1
-        if (row.get("status") or "").lower() == UNHEALTHY:
-            counts["unhealthy"] += 1
-            severity = (row.get("severity") or "").lower()
-            if severity in HIGH_SEVERITIES:
-                counts["unhealthy_high"] += 1
-            elif not severity:
-                counts["unhealthy_unknown_severity"] += 1
-    return {"by_resource": by_resource, "rows": len(rows), "outside_inventory": outside}
+    return _tally(rows, inventory, subscription_id, assessment_target, "unhealthy", _unhealthy, _count_assessment)
 
 
-def tally_policy(rows: list[dict], inventory: set[str]) -> dict:
+def tally_policy(rows: list[dict], inventory: set[str], subscription_id: str | None = None) -> dict:
     """Policy states (one per resource, assignment and policy) and non-compliant states per inventoried resource."""
-    by_resource: dict[str, Counter] = {}
-    outside = 0
-    for row in rows:
-        key = inventory_key(row.get("resourceId"), inventory)
-        if key is None:
-            outside += 1
-            continue
-        counts = by_resource.setdefault(key, Counter())
-        counts["evaluations"] += 1
-        if (row.get("complianceState") or "").lower() == NON_COMPLIANT:
-            counts["non_compliant"] += 1
-    return {"by_resource": by_resource, "rows": len(rows), "outside_inventory": outside}
+    return _tally(rows, inventory, subscription_id, lambda row: row.get("resourceId"), "non_compliant",
+                  _non_compliant, _count_state)
 
 
 def with_coverage(resources: list[dict], defender: dict | None, policy: dict | None) -> list[dict]:
@@ -269,22 +327,25 @@ def summarize(resources: list[dict], defender: dict | None = None, policy: dict 
         "unhealthy_high_severity_assessments": _sum_of(resources, "defender_unhealthy_high_severity", defender),
         "unhealthy_assessments_without_severity": None if defender is None else sum(
             c["unhealthy_unknown_severity"] for c in defender["by_resource"].values()),
+        "defender_unhealthy_outside_inventory": None if defender is None else defender["outside_failing"],
         **_service_summary(resources, policy, "policy_evaluations",
                            _coverage(resources, policy, "policy_evaluations"), POLICY_NAMES),
         "resources_with_non_compliant_policy": _resources_with(resources, "policy_non_compliant", policy),
         "non_compliant_policy_evaluations": _sum_of(resources, "policy_non_compliant", policy),
-        "types_covered_by_neither": neither,
+        "policy_non_compliant_outside_inventory": None if policy is None else policy["outside_failing"],
+        "resources_covered_by_neither_by_type": neither,
     }
 
 
 # --- collection (lazy azure imports) ---
 
-def _query_status(query: str, result: dict | None) -> dict:
+def _query_status(query: str, result: dict | None, tally: dict | None) -> dict:
     return {
         "query": query,
         "complete": result is not None,
         "pages_read": None if result is None else result["pages"],
         "total_records_reported": None if result is None else result["total_records"],
+        "outside_inventory_by_target": None if tally is None else tally["outside_by_target"],
     }
 
 
@@ -312,8 +373,8 @@ def collect(subscription_id, cred, collector: Collector) -> dict:
 
     assessments = _read("SecurityResources", DEFENDER_QUERY)
     states = _read("PolicyResources", POLICY_QUERY)
-    defender = None if assessments is None else tally_defender(assessments["rows"], keys)
-    policy = None if states is None else tally_policy(states["rows"], keys)
+    defender = None if assessments is None else tally_defender(assessments["rows"], keys, subscription_id)
+    policy = None if states is None else tally_policy(states["rows"], keys, subscription_id)
     return {
         "resources": with_coverage(resources, defender, policy),
         "total_records": inventory["total_records"],
@@ -321,8 +382,8 @@ def collect(subscription_id, cred, collector: Collector) -> dict:
         "defender": defender,
         "policy": policy,
         "coverage_queries": {
-            "defender_assessments": _query_status(DEFENDER_QUERY, assessments),
-            "policy_states": _query_status(POLICY_QUERY, states),
+            "defender_assessments": _query_status(DEFENDER_QUERY, assessments, defender),
+            "policy_states": _query_status(POLICY_QUERY, states, policy),
         },
     }
 

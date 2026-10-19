@@ -15,7 +15,13 @@ description: >
   resource in the subscription; types the service covers on no resource (types it
   has no recommendations or assigned policies for, or a service not in use) are
   listed apart with their counts, and a service that covers nothing never reads as
-  complete. Every query is paged to the end — a result Resource Graph reports as
+  complete. The unhealthy, High/Critical and non-compliant counts cover inventoried
+  resources and their children only: assessments and policy states about the
+  subscription itself, a resource group, or anything else not in the inventory (a
+  deleted resource, a type Resource Graph keeps outside `Resources`) are counted
+  apart, with their own unhealthy and non-compliant totals, and broken down by the
+  type of what they target (never its name) under results.coverage_queries.
+  Every query is paged to the end — a result Resource Graph reports as
   truncated, or a page count that disagrees with its own total, is a collection
   failure rather than a short list, and a failed coverage query leaves that
   service's counts null rather than every resource uncovered. Resource Graph indexes
