@@ -1,6 +1,6 @@
 # Checkov
 
-Checkov fetchers scan Terraform and Kubernetes infrastructure-as-code repositories for security misconfigurations. The fetcher clones the target repo via git, runs the `checkov` CLI against it, and writes a findings report with pass/fail/skipped check counts and per-check details.
+Checkov fetchers scan Terraform, Kubernetes and Bicep/ARM infrastructure-as-code repositories for security misconfigurations. The fetcher clones the target repo via git, runs the `checkov` CLI against it, and writes a findings report with pass/fail/skipped check counts and per-check details. `checkov_bicep` can also download an Azure DevOps TFVC folder instead of cloning; see [its README](bicep/README.md#tfvc-source).
 
 ## Prerequisites
 
@@ -30,6 +30,8 @@ Checkov fetchers work with any git host that supports HTTPS token authentication
 **GitLab:** Create a Project Access Token with `read_repository` scope (see [`../gitlab/README.md`](../gitlab/README.md) for steps). The same token works for both the GitLab fetchers and Checkov.
 
 **GitHub:** Create a Personal Access Token (classic) or a fine-grained PAT with `Contents: Read` permission on the target repository.
+
+**Azure DevOps:** Create a PAT with `Code (Read)` scope. Use the clone URL without the `<org>@` prefix (`checkov_bicep` drops it for you).
 
 ## Wiring into a manifest
 
