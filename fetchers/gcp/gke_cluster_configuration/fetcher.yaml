@@ -1,11 +1,12 @@
 name: gcp_gke_cluster_configuration
-version: 0.1.0
+version: 0.1.1
 description: >
   For each GKE cluster in the project, reports the security posture that
   separates a hardened cluster from a default one: private nodes and private
   control-plane endpoint, master-authorized networks, network policy, legacy ABAC
   (the one path that bypasses RBAC), Workload Identity, shielded nodes, Binary
-  Authorization, control-plane logging/monitoring components, etcd secrets
+  Authorization (from its evaluation mode, falling back to the deprecated
+  enabled flag only when no mode is set), control-plane logging/monitoring components, etcd secrets
   encryption with a CMEK, release channel, and per node pool auto-upgrade,
   auto-repair, boot-disk CMEK and service account.
 category: gcp
