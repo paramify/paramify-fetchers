@@ -65,6 +65,9 @@ permissions:
 - [Write an issue-report fetcher](issue_report_fetchers_guide.md), the
   [issue-report reference](issue_report_fetchers.md), and the
   [Wiz pipeline fetchers](wiz_pipeline_fetchers.md)
+- [Write a comparator](comparators_guide.md), the
+  [comparator reference](comparators.md), and the
+  [comparator design](comparators_design.md)
 
 ## FedRAMP KSI coverage
 

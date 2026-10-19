@@ -38,7 +38,7 @@ Every fetcher ships a `fetcher.yaml` in its directory. The schema is enforced; s
 | `output.aggregation` | enum | `per_target` \| `aggregate` (only meaningful with fanout) |
 | `secrets[].per_target` | bool | Secret resolved per-target instead of once per fetcher |
 | `target_schema.<field>.env` | string | Env var the runner sets from this field per target |
-| `depends_on` | array | Fetcher names this one depends on (not yet honored by the runner) |
+| `depends_on` | array | The fetchers whose evidence from the same run this one reads. Non-empty makes it a comparator, which lives under `comparators/`, runs after its inputs, and takes no secrets or targets. See [`comparators.md`](comparators.md). |
 | `evidence_set` | object | Paramify evidence-set identity: `{reference_id, name, instructions?, description?, frequency?}`. Carried into envelope metadata and used by the uploader to get-or-create the set. `frequency` is how often the set expects a new artifact, one of Paramify's values (`DAILY`, `THREE_DAY`, `WEEKLY`, … `ANNUAL`, or `NOT_SET`); it defaults to `THREE_DAY`. Required for `kind: inventory`; not allowed on `kind: issue_report`. |
 | `issue_report` | object | Paramify assessment-intake identity: `{assessment_type, title?}`. Required for, and only valid on, `kind: issue_report`. Carries no assessment id — that is per-customer and lives in the manifest. |
 | `ksis` | array | FedRAMP KSIs this fetcher's evidence speaks to (1+) — *suggested / related* mappings, not a claim that the fetcher alone satisfies the indicator. Intrinsic to the fetcher; per-customer control mappings stay Paramify-side. |
@@ -100,6 +100,7 @@ The runner exec's the fetcher's entry script with a tightly controlled environme
 - **`FETCHER_STATUS_FILE`** — path the fetcher reports its failure reason to (see [Output](#output)). Deliberately outside `EVIDENCE_DIR`, so it is never collected as evidence; it lives in a per-invocation temp dir that goes away with the invocation
 - **Declared secrets** — every entry from `secrets[]` resolved and set on the env var named in `secrets[].env`. An optional secret (`required: false`) whose reference cannot be resolved is skipped rather than injected, so the fetcher's own credential chain reaches ambient identity — see [Secret references](run_manifest_reference.md#secret-references)
 - **Target fields (fanout only)** — each `target_schema` field with an `env` mapping set to the target's value
+- **`COMPARATOR_INPUTS` (comparators only)** — path of the runner's index of the inputs' files from this run, outside `EVIDENCE_DIR`. A comparator gets no category secrets, config or passthrough env. See [`comparators.md`](comparators.md#how-the-runner-runs-one)
 - **A minimal inherited env** — `PATH`, `HOME`, `LANG`, `LC_ALL`, `LC_CTYPE`, `USER`, `TZ`, `PYTHONUNBUFFERED=1`
 
 The runner does NOT pass the customer's full environment through. If your fetcher needs an env var, declare it.
@@ -133,7 +134,9 @@ fetcher-defined. Error data goes in exactly these three places and nowhere else:
   `error` is a one-line human-readable reason and is the only required field.
   `code` is an optional machine-readable category — `auth_failed`,
   `not_authorized`, `target_unreachable`, `rate_limited`, `bad_config`,
-  `partial_failure`, `internal_error`. Prefer a `code` here over inventing an
+  `partial_failure`, `internal_error`, and, for a comparator, `input_failed`
+  (an input failed or is missing, so its evidence holds the cause). Prefer a
+  `code` here over inventing an
   exit code: exit codes are a scarce space shared with the shell and signals.
   Had more than one thing fail, summarize it into `error` yourself; a `failures`
   array is reserved for the per-item ledger but is not read yet.
@@ -232,7 +235,7 @@ Discovery, validation, and runs all go through the `framework.api` facade. One C
 The CLI command surface (`paramify <cmd>`, each accepting `--json`):
 
 ```bash
-paramify list                       # discovered fetchers (flat); walks fetchers/*/*/fetcher.yaml, validates each
+paramify list                       # discovered fetchers (flat); walks fetchers/*/*/ and comparators/*/*/fetcher.yaml, validates each
 paramify catalog                    # categories -> fetchers -> editable fields
 paramify describe <fetcher>         # one fetcher's config/secrets/target fields
 paramify manifests                  # discovered run manifests (manifests/*.yaml)

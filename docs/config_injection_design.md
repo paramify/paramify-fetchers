@@ -137,5 +137,6 @@ still override these (config/passthrough applied first, target fields last).
 - The `manifest set-platform-config <category> key=value` and
   `set-passthrough <category> ENV_VAR ...` subcommands of the manifest builder
   edit the `platforms:` block described above.
-- Independent of (and already integrated with) the envelope/uploader work;
-  comparator `depends_on` remains unhonored.
+- Independent of (and already integrated with) the envelope/uploader work.
+  A comparator (`depends_on`) gets none of its category's config, secrets or
+  passthrough env; see [`comparators.md`](comparators.md#how-the-runner-runs-one).

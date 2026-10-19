@@ -59,6 +59,7 @@ one ad-hoc shape per fetcher.
 | `exit_code` | int | runner | Raw exit code (incl. 124 = timeout) |
 | `error` | string (optional) | runner | Bounded stderr tail, with injected secret values redacted (see *Secrets in stderr* below); present only when `status` = `failed` |
 | `evidence_set` | object (optional) | fetcher.yaml | `reference_id`/`name`/`frequency` (+ `instructions`/`description` when present) for uploader routing; present when the fetcher declares one |
+| `inputs` | array (optional) | runner | A comparator's inputs from the same run: each input file's `fetcher_name`, `target`, `run_id`, `collected_at`, `status` and `file`. Present only on a comparator's envelope; built from the runner's own records, never from a payload. See [`comparators.md`](comparators.md#output) |
 
 `schema_version` (top level) versions the envelope format itself, so it can
 evolve without breaking consumers.
@@ -155,8 +156,10 @@ def wrap_outputs(result, fetcher, run_id, run_dir):
 - **Non-JSON outputs** (`output.type: csv|html`) — out of scope for v0.x; every
   current fetcher is JSON. Later: a payload-by-reference variant (`payload_path`
   + `content_type`) rather than inlining. Note it, don't build it.
-- **Comparators** — when they land, they read *payload* of prior envelopes, not the
-  bare file. (No comparator exists yet, so nothing breaks now.)
+- **Comparators** — read the *payload* of their inputs' envelopes in place, and
+  check each file's `fetcher_name` and `run_id` first, so a half-written or
+  foreign file is reported missing rather than compared. See
+  [`comparators.md`](comparators.md).
 - **Re-runs / idempotency** — wrapping keys off the per-invocation output diff and
   the already-enveloped check, so re-running a manifest produces the same shape.
 

@@ -114,7 +114,7 @@ Required fields (validated against `framework/schemas/fetcher_schema.json`):
 - `output` — `{type: json|csv|html, path: <filename>.json}` (relative filename inside `EVIDENCE_DIR`)
 - `secrets` — list of `{name, env}` pairs covering every env var read
 
-Optional: `category`, `config_schema`, `supports_targets`, `target_schema`, `depends_on`. Plus optional sub-fields used for fanout: `output.aggregation`, `secrets[].per_target`, `target_schema.<field>.env`.
+Optional: `category`, `config_schema`, `supports_targets`, `target_schema`. Comparators only: `depends_on` (see [comparators.md](comparators.md)). Plus optional sub-fields used for fanout: `output.aggregation`, `secrets[].per_target`, `target_schema.<field>.env`.
 
 #### `evidence_set` block
 
@@ -436,7 +436,8 @@ runner set no status file, and it never fails the run: the exit code stays
 authoritative.
 
 Codes: `auth_failed`, `not_authorized`, `target_unreachable`, `rate_limited`,
-`bad_config`, `partial_failure`, `internal_error`. Prefer one of these over a new
+`bad_config`, `partial_failure`, `internal_error` (and `input_failed`, which only
+a comparator reports). Prefer one of these over a new
 exit code — see [`fetcher_contract.md`](fetcher_contract.md) § Output for the full
 rule, including where failure data goes *inside* your payload.
 

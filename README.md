@@ -168,6 +168,7 @@ To ask for a new platform or fetcher, post in [Fetcher requests](https://github.
   for evidence, and [`docs/pipelines_guide.md`](docs/pipelines_guide.md) for scan
   reports.
 - **Write a fetcher:** [`docs/authoring_fetcher_guide.md`](docs/authoring_fetcher_guide.md).
+- **Match records across fetchers:** [`docs/comparators_guide.md`](docs/comparators_guide.md) writes a comparator.
 - **How it works:** [`docs/architecture.md`](docs/architecture.md) explains the four parts, the evidence envelope and the repo layout.
 - **FedRAMP KSI coverage:** [`docs/ksi_mapping.md`](docs/ksi_mapping.md).
 

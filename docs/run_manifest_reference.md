@@ -24,7 +24,11 @@ run:
       targets: [ ... ]       # required only when a target field is required (see below)
 ```
 
-The runner walks `run.fetchers[]` and invokes each in order. v0.x is serial — no parallelism, no `depends_on` ordering, no retries.
+The runner walks `run.fetchers[]` and invokes each in order, except that a
+comparator (a fetcher with `depends_on`) moves after every input the manifest
+holds. v0.x is serial — no parallelism, no retries. A comparator reads only its
+inputs' files from the same run, so every input must be in the same manifest
+([comparators](comparators.md#how-the-runner-runs-one)).
 
 ---
 
@@ -236,6 +240,12 @@ Written at the end of every run. Captures what ran, when, how long, what came ou
       "stderr_tail": "...last 4000 chars of stderr — present only on non-zero exit..."
     },
     {
+      "fetcher_name": "demo_policy_check",
+      "exit_code": 0,
+      "outputs": ["demo_policy_check.json"],
+      "inputs": [{"fetcher_name": "demo_hello", "status": "success", "file": "demo_hello.json", "...": "..."}]
+    },
+    {
       "fetcher_name": "gitlab_ci_cd_pipeline_config",
       "fetcher_version": "0.1.0",
       "target": {"project_id": "group/change-management", "url": "..."},
@@ -245,7 +255,7 @@ Written at the end of every run. Captures what ran, when, how long, what came ou
 }
 ```
 
-This is the v0.x stand-in for the eventual envelope schema. It records each invocation (one row per single-target fetcher; N rows per fanout fetcher). Failed invocations also carry a bounded `stderr_tail` (last 4000 chars) so an unattended run is diagnosable from the artifact alone.
+This is the v0.x stand-in for the eventual envelope schema. It records each invocation (one row per single-target fetcher; N rows per fanout fetcher). Failed invocations also carry a bounded `stderr_tail` (last 4000 chars) so an unattended run is diagnosable from the artifact alone. A comparator's invocation also carries `inputs`, the same list as its envelope's [`metadata.inputs`](comparators.md#output).
 
 Each invocation is killed if it exceeds its timeout (default 600s; override per fetcher via `runtime.timeout` in `fetcher.yaml`). A killed invocation is recorded with `exit_code: 124`.
 
@@ -393,6 +403,7 @@ resolves it from its own environment at run time.
 - `targets[]` is supplied only when the fetcher has at least one required target field; a `supports_targets` fetcher whose target fields are all optional may omit `targets[]` (the runner does a single ambient invocation)
 - Every declared secret (per fetcher + per target) has a corresponding entry in the manifest
 - Every `kind: issue_report` entry has a `config.assessment_id` and a valid `config.close_cycle` (entry or platform level) — reported as an error here rather than refused at run time, because a report collected with nowhere to go is still a report worth having on disk
+- Every input a comparator names in `depends_on` is in the manifest (fix: `paramify manifest add <input>`). A comparator's category config and secrets are not required: the runner gives it none
 
 `validate` does NOT check whether `${env:...}` references resolve at runtime — that's discovered only at `run` time, with a structured error per failing invocation. It also doesn't check that an `assessment_id` still exists in the workspace; a deleted assessment surfaces at intake.
 
@@ -407,7 +418,7 @@ The full per-invocation record is in `_run_metadata.json` — use that for selec
 
 ## What the manifest does NOT yet support
 
-- **`depends_on` ordering** — declared in the fetcher schema for future comparator use; runner does not honor it
+- **Comparator inputs from another run** — a comparator reads only inputs from the same run, by design
 - **Parallel execution** — runner is serial only
 - **Retry policy** — no automatic retries on transient failures
 - **Multiple manifests in one invocation** — one manifest per `run` call

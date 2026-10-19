@@ -78,12 +78,21 @@ their checks.
    on a fanout one), missing required config (platform or per-fetcher), and
    missing secrets including per-target ones. Treat its `errors[]` as the gap list.
 
-2. **Presence gap (validate can't see this):** if the fetcher is **absent** from
+2. **Comparator inputs:** a comparator (`describe` shows `depends_on`) reads
+   only its inputs' evidence from the same run, so every input must be in the
+   manifest too. `validate` reports each missing one as
+   `reads <input>, which is not in the manifest`. A comparator takes no secrets,
+   targets or category config. Its only other gap is a required field in its own
+   `config_schema`, set on its entry with `paramify manifest set-config <name>
+   key=value` (never under `platforms.<category>.config`, which it ignores). Its
+   inputs still need their own wiring.
+
+3. **Presence gap (validate can't see this):** if the fetcher is **absent** from
    `run.fetchers:`, `validate` says nothing about it — it only checks entries
    that exist. So an absent fetcher = a `manifest add` is needed, even on a clean
    `validate`. Check presence yourself in Phase 1.
 
-3. **Env-var gap (validate can't see this either):** `validate` confirms a
+4. **Env-var gap (validate can't see this either):** `validate` confirms a
    secret has a `${env:VAR}` ref, not that `VAR` is exported. Best-effort, check
    each referenced var is set (presence only — never print values):
    ```bash
@@ -101,6 +110,7 @@ Build the exact command sequence from the gaps. Map each gap to one command:
 | Gap | Command |
 |-----|---------|
 | Fetcher absent | `manifest add <fetcher>` |
+| Comparator input absent | `manifest add <input>` (order doesn't matter; the runner runs inputs first) |
 | Missing secret | `manifest set-secret <fetcher> <secret_name> <ENV_VAR>` |
 | Missing per-fetcher config | `manifest set-config <fetcher> key=value` |
 | Missing platform config | `manifest set-platform-config <category> key=value` |
@@ -136,7 +146,7 @@ first when several edits are involved.
 2. **Hand back the run command** and state the boundary plainly: a clean
    `validate` means the wiring is correct, **not** that credentials work or the
    data is right — that's the user's real run to confirm. Remind them the
-   `${env:VAR}` vars must be set in the shell first (Phase 2 step 3).
+   `${env:VAR}` vars must be set in the shell first (Phase 2 step 4).
    ```bash
    paramify run <manifest>
    ```

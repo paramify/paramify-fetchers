@@ -101,7 +101,8 @@ See `framework/schemas/fetcher_schema.json`. Required fields:
 
 Optional fields:
 
-- `category`, `config_schema`, `supports_targets`, `target_schema`, `depends_on`
+- `category`, `config_schema`, `supports_targets`, `target_schema`
+- `depends_on`, for comparators only (see [`comparators.md`](comparators.md))
 
 Plus optional sub-fields that became real when the first fanout fetcher landed:
 
@@ -258,12 +259,13 @@ Comparators satisfy the same contract as fetchers. Their distinguishing properti
 
 - Their "source" is a directory of prior envelope files, not an external API
 - They declare `depends_on: [fetcher_a, fetcher_b]` in their `fetcher.yaml`
-- The runner ensures dependencies complete (with acceptable status) before invoking
+- The runner runs them after their inputs in the same run, and checks that every input has finished before invoking; a failed input does not skip the comparator
+- They read their inputs' files in place, from the same run only, and get no credentials
 - They produce envelope output just like any other fetcher
 
 So "reconcile Okta against Rippling" is just a fetcher whose inputs happen to be other fetchers' outputs. No special category, no special runtime, no special data store.
 
-Structurally identical to fetchers. Filed under a separate `comparators/` directory for human navigation, but the runner treats them the same way.
+Structurally identical to fetchers. Filed under a separate `comparators/` directory for human navigation; the runner orders them after their inputs and gives them no credentials. Built: see [`comparators.md`](comparators.md) and the decisions in [`comparators_design.md`](comparators_design.md).
 
 ---
 
@@ -345,7 +347,7 @@ paramify-fetchers/
 │   ├── paramify/                     # 3 Python FedRAMP KSI VER reports (fanout per program); _shared/ver_common.py
 │   └── checkov/                      # 2 bash IaC scanners (terraform + kubernetes)
 │
-├── comparators/                      # scaffold only (_template/); no comparator ported, runner doesn't honor depends_on
+├── comparators/                      # cross-source comparators: _lib/ reader, _template/, demo/policy_check
 │
 ├── uploaders/
 │   ├── paramify_evidence/            # BUILT — get-or-create evidence set + multipart upload
@@ -448,7 +450,7 @@ Done since the last revision:
 
 What's deferred:
 
-- **Comparators** — `comparators/_template/` scaffold exists but no comparator ported; `depends_on` is in the schema but not honored by the runner because nothing consumes it (`runner/logger.py`, `retry.py`, `dependency_graph.py` are still empty stubs)
+- **Comparators beyond the demo** — the runner honors `depends_on` (`runner/dependency_graph.py`), and `demo_policy_check` is the only comparator so far; `runner/logger.py` and `retry.py` are still empty stubs
 - **Structured exit codes** — still binary 0/1 (plus 124 = runner timeout-kill). Categorized auth/network/internal/partial codes are contract-era work.
 - **Catalog generator** — fetchers self-describe; the derived `catalog.json` walker isn't written yet
 - **`aggregate` mode** — declared in schema; no fetcher uses it yet

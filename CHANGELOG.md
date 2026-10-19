@@ -12,6 +12,33 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Comparators** — a fetcher whose inputs are other fetchers' evidence from the
+  same run, declared with `depends_on`. Comparators live in a separate
+  `comparators/<category>/<name>/` tree and share the fetchers' namespace.
+  Discovery rejects unknown or cyclic inputs, inputs that write no JSON evidence,
+  and a fetcher in the wrong tree; the schema rejects a comparator with secrets,
+  targets, non-JSON output or no `evidence_set`. The runner runs each comparator
+  after its inputs, checks that every input has finished before starting it (and
+  records it as failed with `runner_setup_failed` if not), runs it even when an
+  input failed, gives it no category secrets, config or passthrough env, and
+  passes an index of the inputs' files in `$COMPARATOR_INPUTS`. Inputs are read in
+  place from the same run only; nothing is copied. The envelope gets an optional
+  `metadata.inputs` (each input file's run, target, status and collection time),
+  and the comparator's `_run_metadata.json` record carries the same list. `paramify
+  validate` reports an input missing from the manifest, with the fix. The shared
+  reader `comparators/_lib/comparator_inputs.py` applies one policy: failed or
+  partial inputs, including an inventory the runner marked incomplete, are compared
+  and the result is partial (exit 1); a missing input, a file that isn't a complete
+  envelope from this run, or an inventory with `records_included: false` makes
+  every summary value `null`. Ships with `comparators/_template/`, the credential-free
+  `demo_policy_check` (`EVD-DEMO-POLICY-CHECK`, `examples/demo_comparator.yaml`),
+  `docs/comparators.md`, `docs/comparators_guide.md` and
+  `docs/comparators_design.md`. `paramify list` shows `reads=<inputs>` and
+  `describe` shows `depends_on`; the `create-fetcher` skill has a comparator route
+  and `wire-manifest` treats a missing input as a gap.
+- **`input_failed` status code** — what a comparator reports when an input failed
+  or is missing, so triage looks at that input's evidence. Accepted by
+  `report_failure` in both `fetchers/_lib/fetcher_status.py` and `status.sh`.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
