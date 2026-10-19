@@ -125,7 +125,8 @@ config_schema:
     type: string
     env: CHECKOV_SKIP_PATHS
     description: >-
-      CSV of paths to skip during the scan, recorded in metadata.skip_paths. Also how to
+      CSV of paths to skip during the scan, recorded in metadata.skip_paths. Each entry is
+      trimmed and passed whole, so it may contain spaces. Also how to
       exclude a file checkov cannot parse, which otherwise fails the run. file_counts still
       counts skipped files.
   checks:

@@ -70,6 +70,7 @@ printf '%s' "$status"
 # Prints $STUB_REPORT with __ROOT__ replaced by the --directory it was given.
 _STUB_CHECKOV = r"""#!/bin/bash
 printf '%s\n' "$*" > "$STUB_LOG/checkov.args"
+printf '%s\n' "$@" > "$STUB_LOG/checkov.argv"
 dir=""; prev=""
 for a in "$@"; do [ "$prev" = "--directory" ] && dir="$a"; prev="$a"; done
 sed "s#__ROOT__#$dir#g" "$STUB_REPORT"
@@ -319,6 +320,15 @@ def test_effective_skip_list_is_recorded(tmp_path):
     assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_35"]
     assert payload["metadata"]["default_skip_checks_applied"] is True
     assert payload["metadata"]["skip_paths"] == []
+
+
+def test_skip_path_with_spaces_is_one_argument(tmp_path):
+    code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
+                                CHECKOV_SKIP_PATHS=" My Templates/legacy , ,other ")
+    assert code == 0
+    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--skip-path"] == ["My Templates/legacy", "other"]
+    assert payload["metadata"]["skip_paths"] == ["My Templates/legacy", "other"]
 
 
 def test_skip_paths_are_recorded(tmp_path):
@@ -589,3 +599,24 @@ def test_real_checkov_scans_a_tfvc_download(tmp_path):
     failed = payload["results"]["failed_checks"]
     assert any(c["check_id"] == "CKV_AZURE_3" and c["file_path"].endswith("azuredeploy.json") for c in failed)
     assert payload["metadata"]["changeset"] == 4217
+
+
+@pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
+def test_real_checkov_skips_a_path_with_spaces(tmp_path):
+    # Split on its space, the path would become "My" and "Templates/legacy", and the second skips both folders.
+    files = {"My Templates/legacy/azuredeploy.json": ARM, "Templates/legacy/azuredeploy.json": ARM}
+
+    def scanned(payload):
+        r = payload["results"]
+        return {c["file_path"] for k in ("passed_checks", "failed_checks", "skipped_checks") for c in r[k]}
+
+    (tmp_path / "all").mkdir()
+    code, payload, status, _ = run(tmp_path / "all", files, real_checkov=True)
+    assert code == 0, status
+    assert scanned(payload) == {"/My Templates/legacy/azuredeploy.json", "/Templates/legacy/azuredeploy.json"}
+
+    (tmp_path / "skip").mkdir()
+    code, payload, status, _ = run(tmp_path / "skip", files, real_checkov=True, CHECKOV_SKIP_PATHS="My Templates/legacy")
+    assert code == 0, status
+    assert scanned(payload) == {"/Templates/legacy/azuredeploy.json"}
+    assert payload["metadata"]["skip_paths"] == ["My Templates/legacy"]

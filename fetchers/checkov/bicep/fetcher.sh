@@ -187,7 +187,6 @@ if [ "$SOURCE_TYPE" = "tfvc" ]; then
         exit 1
     fi
     WHERE="$TFVC_PATH in $REPO_URL (changeset $CHANGESET)"
-    BRANCH_ARGS=""
     log_info "Downloaded $WHERE"
 else
     if ! checkov_clone_repo "$REPO_URL" "$BRANCH" "$TOKEN" "$GIT_USER" "$COMPONENT"; then
@@ -197,7 +196,6 @@ else
         exit 1
     fi
     WHERE="$REPO_URL (branch $SCANNED_BRANCH, commit ${COMMIT_SHA:0:12})"
-    BRANCH_ARGS="--branch $SCANNED_BRANCH"
     log_info "Cloned $REPO_URL @ ${COMMIT_SHA:0:12} (branch $SCANNED_BRANCH)"
 fi
 
@@ -214,25 +212,32 @@ if [ "$BICEP_FILES" -eq 0 ] && [ "$ARM_FILES" -eq 0 ]; then
 fi
 
 # --- build checkov args ---
+# An array, so a value with spaces (a skip path, the checks dir) stays one argument.
 # No --quiet: it strips passed_checks, skipped_checks and parsing_errors from the JSON.
-CHECKOV_ARGS="--framework bicep,arm --output json --repo-id $REPO_ID $BRANCH_ARGS"
-[ "${CHECKOV_SOFT_FAIL:-true}" = "true" ] && CHECKOV_ARGS="$CHECKOV_ARGS --soft-fail"
-[ "${CHECKOV_COMPACT:-true}" = "true" ]   && CHECKOV_ARGS="$CHECKOV_ARGS --compact"
-[ -n "${CHECKOV_BICEP_CHECKS:-}" ]        && CHECKOV_ARGS="$CHECKOV_ARGS --check $CHECKOV_BICEP_CHECKS"
+CHECKOV_ARGS=(--framework bicep,arm --output json --repo-id "$REPO_ID")
+[ "$SOURCE_TYPE" = "git" ]                && CHECKOV_ARGS+=(--branch "$SCANNED_BRANCH")
+[ "${CHECKOV_SOFT_FAIL:-true}" = "true" ] && CHECKOV_ARGS+=(--soft-fail)
+[ "${CHECKOV_COMPACT:-true}" = "true" ]   && CHECKOV_ARGS+=(--compact)
+[ -n "${CHECKOV_BICEP_CHECKS:-}" ]        && CHECKOV_ARGS+=(--check "$CHECKOV_BICEP_CHECKS")
 if [ -n "${CHECKOV_EXTERNAL_CHECKS_DIR:-}" ] && [ -d "$CHECKOV_EXTERNAL_CHECKS_DIR" ]; then
-    CHECKOV_ARGS="$CHECKOV_ARGS --external-checks-dir $CHECKOV_EXTERNAL_CHECKS_DIR"
+    CHECKOV_ARGS+=(--external-checks-dir "$CHECKOV_EXTERNAL_CHECKS_DIR")
 fi
 
-[ -n "$SKIP_CHECKS_LIST" ] && CHECKOV_ARGS="$CHECKOV_ARGS --skip-check $SKIP_CHECKS_LIST"
+[ -n "$SKIP_CHECKS_LIST" ] && CHECKOV_ARGS+=(--skip-check "$SKIP_CHECKS_LIST")
 
+# Each comma-separated entry, trimmed, is one --skip-path; metadata.skip_paths splits the same way.
 if [ -n "${CHECKOV_SKIP_PATHS:-}" ]; then
-    for p in $(echo "$CHECKOV_SKIP_PATHS" | tr ',' ' '); do CHECKOV_ARGS="$CHECKOV_ARGS --skip-path $p"; done
+    IFS=',' read -ra _P <<< "$CHECKOV_SKIP_PATHS"
+    for p in "${_P[@]}"; do
+        p="${p#"${p%%[![:space:]]*}"}"; p="${p%"${p##*[![:space:]]}"}"
+        [ -n "$p" ] && CHECKOV_ARGS+=(--skip-path "$p")
+    done
 fi
 
 # --- run checkov ---
 RAW="$(mktemp)"; ERR="$(mktemp)"; NORM="$(mktemp)"
 log_info "Scanning $BICEP_FILES Bicep and $ARM_FILES ARM template files"
-checkov --directory "$CLONE_DIR" $CHECKOV_ARGS > "$RAW" 2> "$ERR"
+checkov --directory "$CLONE_DIR" "${CHECKOV_ARGS[@]}" > "$RAW" 2> "$ERR"
 
 # One report per framework with results: an array for both, an object for one, a bare summary for none.
 if ! jq -e 'if type=="array" then all(.[]; type=="object" and has("summary"))
