@@ -769,6 +769,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →
+  0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
+  counterpart of `DenyAction`, was reported as `unresolved` with no reason and
+  raised `unresolved_effect_assignments`. It now resolves to `auditAction`, an
+  audit-only effect. `mutate`, `addToNetworkGroup` and `enforceSetting`, which
+  built-in definitions also use, now resolve as enforcing effects. Any other
+  unrecognised value is still unresolved, but its `reason` now names the value
+  (`unknown effect value 'X'`). Two new summary keys count unresolved member
+  policies: `unresolved_member_policies`, and
+  `unresolved_member_policies_not_enforced` for those under DoNotEnforce. A
+  partly resolved initiative is classed by its resolved members alone, so these
+  keys show what that class leaves out.
 - **`azure_entra_authentication_policy` counts X.509 as phishing-resistant only
   when it is multi-factor** (0.1.0 → 0.2.0). An enabled X.509 certificate method
   was always listed in `phishing_resistant_methods_enabled`, even with its default
