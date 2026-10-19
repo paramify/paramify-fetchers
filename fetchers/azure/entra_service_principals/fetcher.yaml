@@ -84,8 +84,9 @@ evidence_set:
     and $expand=federatedIdentityCredentials (only this tenant's own applications,
     never one call per application); GET /applications and GET /servicePrincipals
     with $expand=owners, and GET /servicePrincipals with $expand=appRoleAssignments
-    (one $expand per request; an object at the 20-item $expand limit is re-read via
-    /owners or /appRoleAssignments); GET /servicePrincipals/{id}?$select=appRoles per
+    (one $expand per request; an object at the 20-item $expand limit, or with an
+    expanded assignment missing its resourceId, is re-read via /owners or
+    /appRoleAssignments); GET /servicePrincipals/{id}?$select=appRoles per
     resource an assignment names; GET /oauth2PermissionGrants (permission:
     Directory.Read.All, optional); GET /organization. Collections paged via
     @odata.nextLink and joined on appId.

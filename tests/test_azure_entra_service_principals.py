@@ -299,6 +299,21 @@ def test_owners_past_the_expand_limit_are_read_per_object(monkeypatch, tmp_path)
     assert len(by_id["sp-owned"]["application_owners"]) == 25
 
 
+def test_an_expanded_assignment_without_its_resource_is_read_per_object(monkeypatch, tmp_path):
+    graph = FakeGraph(**_tenant())
+    for sp in graph.assignments.items:
+        if sp.id == "sp-orphan":
+            sp.app_role_assignments = [ns(**{**vars(a), "resource_id": None, "resource_display_name": None})
+                                       for a in sp.app_role_assignments]
+    code, evidence, _ = _run(monkeypatch, tmp_path, graph)
+
+    assert code == 0
+    by_id = {r["id"]: r for r in evidence["results"]["service_principals"]}
+    (perm,) = by_id["sp-orphan"]["application_permissions"]
+    assert perm["permission"] == "RoleManagement.ReadWrite.Directory"
+    assert perm["privileged"] is True
+
+
 def test_denied_owner_read_fails_the_run_with_null_owner_figures(monkeypatch, tmp_path):
     graph = FakeGraph(**_tenant())
     graph.app_owners.error = DENIED

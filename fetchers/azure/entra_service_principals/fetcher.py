@@ -821,18 +821,20 @@ class _Deferred:
         self.calls.append((operation, exc))
 
 
-async def _expanded(collector, operation, builder, config, attr, item_reader) -> dict | None:
+async def _expanded(
+    collector, operation, builder, config, attr, item_reader, incomplete=None
+) -> dict | None:
     """{object id: related models} from one paged $expand read; None if any read failed.
 
     An object whose expansion hit EXPAND_LIMIT is re-read on its own, paged, because
-    Graph drops the rest without a nextLink.
+    Graph drops the rest without a nextLink; so is one with an `incomplete` item.
     """
     before = len(collector.failures)
     related = {}
     for obj in await paginate(collector, operation, builder, config):
         oid = graph_attr(obj, "id")
         items = list(getattr(obj, attr, None) or [])
-        if len(items) >= EXPAND_LIMIT:
+        if len(items) >= EXPAND_LIMIT or (incomplete and any(incomplete(i) for i in items)):
             items = await item_reader(oid)
         related[oid] = items
     return related if len(collector.failures) == before else None
@@ -927,6 +929,9 @@ async def _access(collector: Collector, client, service_principals: list[dict]) 
             expand(sps_query, "appRoleAssignments"),
             "app_role_assignments",
             assignments_of,
+            # Measured: the expansion can return an assignment with resourceId null that
+            # the principal's own /appRoleAssignments returns whole.
+            incomplete=lambda a: graph_attr(a, "resource_id") is None,
         ),
         project_app_role_assignment,
     )
