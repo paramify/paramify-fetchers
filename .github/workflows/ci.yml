@@ -143,9 +143,14 @@ jobs:
         # so a textual release that breaks the console fails here first.
         include:
           - textual: lowest
-            pin: "textual==8.0.*"
+            pin: "textual==8.0.0"
+            # SVGs are compared on latest only, since a textual minor can render
+            # differently. --deselect, not --ignore: an ignore does not drop a
+            # file named on the command line, and a skip would trip --fail-on-skip.
+            pytest-args: "--deselect tests/test_tui_snapshots.py"
           - textual: latest
             pin: "textual>=8,<9"
+            pytest-args: ""
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -165,6 +170,7 @@ jobs:
       - name: pytest (TUI)
         run: >-
           pytest -q -rs --fail-on-skip --snapshot-report snapshot_report.html
+          ${{ matrix.pytest-args }}
           tests/test_tui_*.py tests/test_manifest_autosave.py tests/test_target_editor.py
       # Side-by-side SVG diff of every mismatched snapshot. Refresh after an
       # intended UI change: pytest tests/test_tui_snapshots.py --snapshot-update

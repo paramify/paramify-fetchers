@@ -40,7 +40,9 @@ secret makes the build fail.
 
 CI's `tui` job runs the terminal UI's tests on the lowest and latest textual 8.
 They include SVG snapshots of every screen, which need the `snapshots` extra.
-That extra holds pytest below 9, so give it its own venv:
+CI compares the snapshots on the latest textual only, because a textual minor
+release can render differently. The extra holds pytest below 9, so give it its
+own venv:
 
 ```bash
 pip install -e '.[dev,tui,snapshots]'
