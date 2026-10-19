@@ -1,15 +1,20 @@
 name: azure_key_vault_key_rotation
-version: 0.1.0
+version: 0.2.0
 description: >
   For every key in every key vault in the subscription, the rotation policy (its
   lifetime actions, the rotate/notify trigger durations and the expiry applied to new
   versions) and the key's own enabled state, creation / update / expiration dates and
   public strength parameters — plus every secret's name, enabled state and expiration
-  date. Spans both Key Vault planes: the management plane enumerates what each vault
-  holds, and a per-vault data-plane KeyClient reads the rotation policies the
-  management plane cannot see. A vault the credential holds no data-plane grant on is
-  reported as data_plane_status inaccessible rather than failing the run. No key
-  material or secret value is ever read.
+  date, and every certificate's expiry, issuer, validity and whether its policy
+  auto-renews it. Also every App Service certificate in the subscription with its
+  expiry and where it comes from (a Key Vault certificate, an App Service managed
+  certificate, or an uploaded PFX). Spans both Key Vault planes: the management plane
+  enumerates what each vault holds, and per-vault data-plane KeyClient and
+  CertificateClient calls read what the management plane cannot see. A vault the
+  credential holds no data-plane grant on is reported as data_plane_status
+  inaccessible, and as certificates_status not_authorized, rather than failing the run
+  or reading as a vault with no certificates. No key material, secret value or
+  certificate body is ever read.
 category: azure
 
 supports_targets: true
@@ -51,4 +56,28 @@ evidence_set:
     Script: fetcher.py. Azure SDK calls (azure-mgmt-keyvault KeyVaultManagementClient):
     vaults.list_by_subscription(), keys.list(), keys.get(), secrets.list(); then
     (azure-keyvault-keys KeyClient): list_properties_of_keys(),
-    get_key_rotation_policy().
+    get_key_rotation_policy(); (azure-keyvault-certificates CertificateClient):
+    list_properties_of_certificates(), get_certificate_policy(); and
+    (azure-mgmt-web WebSiteManagementClient): certificates.list().
+    Reader covers the management plane and App Service certificates. Key Vault
+    certificates need a data-plane grant: Key Vault Reader (RBAC vaults) or the
+    certificates list and get permissions (access-policy vaults).
+    A vault whose certificate list answers 401 or 403 gets certificates_status
+    "not_authorized" and certificates_message, with an empty certificates list
+    that means "could not see", not "none". Any other error listing certificates
+    fails the run and reads certificates_status "failed".
+    Each Key Vault certificate carries expires, expired, days_until_expiry,
+    x509_thumbprint and its policy (issuer_name, subject, validity_in_months, key
+    shape and lifetime_actions). auto_renew_enabled is true when a lifetime action
+    is AutoRenew and null when the policy could not be read (policy_readable
+    false); certificate_auto_renew_percentage counts readable policies only.
+    results.app_service_certificates: one record per Microsoft.Web/certificates
+    resource with expiration_date, expired, days_until_expiry, host_names and
+    source: "key_vault" (key_vault_id set; App Service syncs it from the vault),
+    "managed" (canonical_name set; App Service renews it) or "uploaded" (a PFX
+    nobody renews). key_vault_sync_succeeded is false when the last sync from Key
+    Vault did not succeed (key_vault_secret_status), and
+    key_vault_certificate_auto_renew is the backing Key Vault certificate's
+    auto_renew_enabled when that vault's certificates were readable, else null.
+    The PFX, the public certificate blob and the password are never read.
+    Expiring within 30 days counts certificates not yet expired.

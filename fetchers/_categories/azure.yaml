@@ -78,6 +78,7 @@ requires:
     - azure-identity
     - azure-mgmt-cdn
     - azure-keyvault-keys
+    - azure-keyvault-certificates
     - azure-mgmt-authorization
     - azure-mgmt-compute
     - azure-mgmt-containerregistry

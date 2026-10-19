@@ -551,6 +551,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_key_vault_key_rotation` 0.2.0 covers certificates.** Each vault now
+  lists its certificates with their expiry (`expired`, `days_until_expiry`),
+  thumbprint and policy: issuer, validity, key shape and lifetime actions, read as
+  `auto_renew_enabled`. A vault whose certificate list answers 401 or 403 reads
+  `certificates_status: not_authorized` instead of looking like a vault with no
+  certificates, and any other error fails the run. New
+  `results.app_service_certificates` lists every App Service certificate with its
+  expiry and `source`: `key_vault`, `managed` or `uploaded`. A Key Vault-backed one
+  says whether its last sync succeeded and, where the vault was readable, whether
+  the certificate behind it auto-renews. The PFX, certificate blob and password are
+  never read. Summary adds certificate and App Service certificate counts, expired
+  and expiring-within-30-days counts, and `certificate_auto_renew_percentage` over
+  readable policies. Adds the `azure-keyvault-certificates` dependency. Existing
+  fields are unchanged.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`

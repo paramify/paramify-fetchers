@@ -853,6 +853,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list_properties_of_keys", "get_key_rotation_policy"],
         "azure/key_vault_key_rotation — rotation policy is data-plane only",
     ),
+    (
+        "azure.keyvault.certificates",
+        "CertificateClient",
+        None,
+        ["list_properties_of_certificates", "get_certificate_policy"],
+        "azure/key_vault_key_rotation — certificates and their auto-renew policy are data-plane only",
+    ),
     # --- Log Analytics ---------------------------------------------------------
     (
         "azure.mgmt.loganalytics",
@@ -931,6 +938,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "app_service_plans",
         ["list"],
         "azure/app_service_plans",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "certificates",
+        ["list"],
+        "azure/key_vault_key_rotation — App Service certificates",
     ),
     (
         "azure.mgmt.databricks",
@@ -1497,6 +1511,13 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "SiteProperties",
         ["server_farm_id", "redundancy_mode"],
         "azure/app_service_plans — server_farm_id is how sites join their plan",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "CertificateProperties",
+        ["expiration_date", "key_vault_id", "key_vault_secret_status", "canonical_name", "thumbprint"],
+        "azure/key_vault_key_rotation — a renamed key_vault_id or canonical_name "
+        "reads a Key Vault or managed certificate as an uploaded one",
     ),
     (
         "azure.mgmt.network.models",
