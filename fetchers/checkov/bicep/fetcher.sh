@@ -99,10 +99,27 @@ _TARGET_SRC="$REPO_URL"; [ "$SOURCE_TYPE" = "tfvc" ] && _TARGET_SRC="$REPO_URL/$
 _TARGET_ID="$(printf '%s' "$_TARGET_SRC" | sed -e 's#^https\{0,1\}://##' -e 's#\.git$##' | tr -c 'A-Za-z0-9._-' '_')"
 OUTPUT_JSON="$OUTPUT_DIR/${COMPONENT}_${_TARGET_ID}.json"
 
+# Split a comma- or newline-separated list into _SPLIT, each entry trimmed, empty entries dropped.
+split_list() {
+    local -a raw; local e
+    _SPLIT=()
+    IFS=$',\n' read -r -d '' -a raw <<< "$1"
+    for e in "${raw[@]}"; do
+        e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"
+        [ -n "$e" ] && _SPLIT+=("$e")
+    done
+    return 0
+}
+
+# checkov splits --check on commas without trimming, so it gets the cleaned CSV.
+split_list "${CHECKOV_BICEP_CHECKS:-}"
+REQUESTED_CHECKS="$(IFS=,; printf '%s' "${_SPLIT[*]}")"
+split_list "${CHECKOV_SKIP_PATHS:-}"
+SKIP_PATHS=("${_SPLIT[@]}")
+
 # --- skip-checks: the shipped defaults (unless use_default_skip_checks is false) + CHECKOV_SKIP_CHECKS,
 # minus explicitly-requested checks. --skip-check leaves no trace in checkov's output, so it goes in metadata.
 SKIP_CHECKS_LIST=""
-REQUESTED_CHECKS="${CHECKOV_BICEP_CHECKS:-}"
 add_skip() {
     local c="$1"; [ -z "$c" ] && return
     case ",$REQUESTED_CHECKS," in *",$c,"*) return ;; esac
@@ -119,10 +136,8 @@ if [ "$DEFAULT_SKIPS_APPLIED" = "true" ] && [ -f "$DEFAULT_SKIP_CHECKS_FILE" ]; 
         add_skip "$c"
     done < "$DEFAULT_SKIP_CHECKS_FILE"
 fi
-if [ -n "${CHECKOV_SKIP_CHECKS:-}" ]; then
-    IFS=',' read -ra _U <<< "$CHECKOV_SKIP_CHECKS"
-    for c in "${_U[@]}"; do add_skip "$(printf '%s' "$c" | xargs)"; done
-fi
+split_list "${CHECKOV_SKIP_CHECKS:-}"
+for c in "${_SPLIT[@]}"; do add_skip "$c"; done
 
 # --- skip-resources (defaults file + config), applied post-scan ---
 SKIP_RESOURCES_LIST=""
@@ -147,7 +162,7 @@ metadata_json() {
           --arg path "$TFVC_PATH" --arg version "$TFVC_VERSION" \
           --argjson changeset "${CHANGESET:-null}" --arg csdate "$CHANGESET_DATE" \
           --arg skips "$SKIP_CHECKS_LIST" --argjson defaults "$DEFAULT_SKIPS_APPLIED" \
-          --arg skipres "$SKIP_RESOURCES_LIST" --arg skippaths "${CHECKOV_SKIP_PATHS:-}" \
+          --arg skipres "$SKIP_RESOURCES_LIST" --arg skippaths "$(printf '%s\n' "${SKIP_PATHS[@]}")" \
        '{source_type: $type, repo_url: $repo}
         + (if $type == "tfvc" then
              {tfvc_path: $path, requested_version: $version, changeset: $changeset,
@@ -159,7 +174,7 @@ metadata_json() {
          skip_checks: ($skips | split(",") | map(select(. != ""))),
          default_skip_checks_applied: $defaults,
          skip_resources: ($skipres | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))),
-         skip_paths: ($skippaths | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != "")))}'
+         skip_paths: ($skippaths | split("\n") | map(select(. != "")))}'
 }
 
 # A result with nothing scanned: counts are null, not 0, so no reader can take it for a clean scan.
@@ -214,25 +229,19 @@ fi
 # --- build checkov args ---
 # An array, so a value with spaces (a skip path, the checks dir) stays one argument.
 # No --quiet: it strips passed_checks, skipped_checks and parsing_errors from the JSON.
-CHECKOV_ARGS=(--framework bicep,arm --output json --repo-id "$REPO_ID")
+CHECKOV_ARGS=(--framework "bicep,arm" --output json --repo-id "$REPO_ID")
 [ "$SOURCE_TYPE" = "git" ]                && CHECKOV_ARGS+=(--branch "$SCANNED_BRANCH")
 [ "${CHECKOV_SOFT_FAIL:-true}" = "true" ] && CHECKOV_ARGS+=(--soft-fail)
 [ "${CHECKOV_COMPACT:-true}" = "true" ]   && CHECKOV_ARGS+=(--compact)
-[ -n "${CHECKOV_BICEP_CHECKS:-}" ]        && CHECKOV_ARGS+=(--check "$CHECKOV_BICEP_CHECKS")
+[ -n "$REQUESTED_CHECKS" ]               && CHECKOV_ARGS+=(--check "$REQUESTED_CHECKS")
 if [ -n "${CHECKOV_EXTERNAL_CHECKS_DIR:-}" ] && [ -d "$CHECKOV_EXTERNAL_CHECKS_DIR" ]; then
     CHECKOV_ARGS+=(--external-checks-dir "$CHECKOV_EXTERNAL_CHECKS_DIR")
 fi
 
 [ -n "$SKIP_CHECKS_LIST" ] && CHECKOV_ARGS+=(--skip-check "$SKIP_CHECKS_LIST")
 
-# Each comma-separated entry, trimmed, is one --skip-path; metadata.skip_paths splits the same way.
-if [ -n "${CHECKOV_SKIP_PATHS:-}" ]; then
-    IFS=',' read -ra _P <<< "$CHECKOV_SKIP_PATHS"
-    for p in "${_P[@]}"; do
-        p="${p#"${p%%[![:space:]]*}"}"; p="${p%"${p##*[![:space:]]}"}"
-        [ -n "$p" ] && CHECKOV_ARGS+=(--skip-path "$p")
-    done
-fi
+# One --skip-path per split_list entry; metadata.skip_paths is the same list.
+for p in "${SKIP_PATHS[@]}"; do CHECKOV_ARGS+=(--skip-path "$p"); done
 
 # --- run checkov ---
 RAW="$(mktemp)"; ERR="$(mktemp)"; NORM="$(mktemp)"

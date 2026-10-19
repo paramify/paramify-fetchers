@@ -15,7 +15,8 @@
 checkov_require_tools() {
     local component="$1" missing=0 t
     shift
-    for t in ${*:-git checkov jq}; do
+    [ $# -eq 0 ] && set -- git checkov jq
+    for t in "$@"; do
         if ! command -v "$t" >/dev/null 2>&1; then
             printf '%s ERROR %s required tool not found on PATH: %s\n' \
                 "$(date -u +'%Y-%m-%d %H:%M:%S')" "$component" "$t" >&2

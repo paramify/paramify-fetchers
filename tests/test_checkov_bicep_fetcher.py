@@ -331,6 +331,31 @@ def test_skip_path_with_spaces_is_one_argument(tmp_path):
     assert payload["metadata"]["skip_paths"] == ["My Templates/legacy", "other"]
 
 
+@pytest.mark.parametrize("raw,expected", [
+    ("modules/new.bicep,\nlegacy\n", ["modules/new.bicep", "legacy"]),   # a YAML literal block
+    ("a\nb", ["a", "b"]),
+    ("\n", []),
+])
+def test_skip_paths_split_on_newlines_too(tmp_path, raw, expected):
+    code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
+                                CHECKOV_SKIP_PATHS=raw)
+    assert code == 0
+    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--skip-path"] == expected
+    assert payload["metadata"]["skip_paths"] == expected
+
+
+def test_check_allowlist_is_trimmed_and_still_overrides_skips(tmp_path):
+    code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
+                                CHECKOV_BICEP_CHECKS="CKV_AZURE_3, CKV_AZURE_44,",
+                                CHECKOV_SKIP_CHECKS="CKV_AZURE_44,\n CKV_AZURE_35")
+    assert code == 0
+    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
+    assert argv[argv.index("--check") + 1] == "CKV_AZURE_3,CKV_AZURE_44"
+    assert argv[argv.index("--skip-check") + 1] == "CKV_AZURE_35"
+    assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_35"]
+
+
 def test_skip_paths_are_recorded(tmp_path):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
                                 CHECKOV_SKIP_PATHS="modules/new-syntax.bicep, legacy")
@@ -620,3 +645,13 @@ def test_real_checkov_skips_a_path_with_spaces(tmp_path):
     assert code == 0, status
     assert scanned(payload) == {"/Templates/legacy/azuredeploy.json"}
     assert payload["metadata"]["skip_paths"] == ["My Templates/legacy"]
+
+
+@pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
+def test_real_checkov_runs_every_trimmed_check(tmp_path):
+    code, payload, status, _ = run(tmp_path, {"azuredeploy.json": ARM}, real_checkov=True,
+                                   CHECKOV_BICEP_CHECKS="CKV_AZURE_3, CKV_AZURE_44")
+    assert code == 0, status
+    r = payload["results"]
+    ran = {c["check_id"] for k in ("passed_checks", "failed_checks", "skipped_checks") for c in r[k]}
+    assert ran == {"CKV_AZURE_3", "CKV_AZURE_44"}
