@@ -254,15 +254,15 @@ def with_coverage(resources: list[dict], defender: dict | None, policy: dict | N
 def _coverage(resources: list[dict], tally: dict | None, field: str) -> dict:
     """Gaps among the types the service covered at least one resource of; other types are listed apart."""
     if tally is None:
-        return {"in_scope": None, "covered": None, "missing": None, "other_types": None, "complete": None}
+        return {"in_scope": None, "covered": None, "missing": None, "other_types": None, "all": None}
     covered_types = {r["type"] for r in resources if r[field]}
     in_scope = [r for r in resources if r["type"] in covered_types]
     missing = sorted(r["id"] for r in in_scope if not r[field])
     other_types = Counter(r["type"] or "unknown" for r in resources if r["type"] not in covered_types)
-    # A service that covered nothing (not in use, nothing assigned) must not read as "no gaps".
-    complete = not missing and (bool(covered_types) or not resources)
+    # Covering nothing (not in use, nothing assigned, or an empty inventory, which is what Resource Graph
+    # returns without Reader) must not read as "no gaps".
     return {"in_scope": len(in_scope), "covered": len(in_scope) - len(missing), "missing": missing,
-            "other_types": sorted_counts(other_types), "complete": complete}
+            "other_types": sorted_counts(other_types), "all": bool(covered_types) and not missing}
 
 
 def _resources_with(resources: list[dict], field: str, tally: dict | None) -> int | None:
@@ -285,7 +285,7 @@ def _service_summary(resources, tally, field, cov, names) -> dict:
     """One service's summary keys, under that service's own names; None throughout when its query failed."""
     known = tally is not None
     return {
-        names["complete"]: known,
+        names["collected"]: known,
         names["total"]: _total(tally, names["count"]),
         names["outside"]: _outside(tally, names["count"]),
         names["resources"]: _resources_with(resources, field, tally),
@@ -294,13 +294,13 @@ def _service_summary(resources, tally, field, cov, names) -> dict:
         names["missing"]: cov["missing"],
         names["missing_count"]: len(cov["missing"]) if known else None,
         names["other_types"]: cov["other_types"],
-        names["all"]: cov["complete"],
+        names["all"]: cov["all"],
     }
 
 
 DEFENDER_NAMES = {
     "count": "assessments",
-    "complete": "defender_coverage_complete",
+    "collected": "defender_coverage_collected",
     "total": "defender_assessments_total",
     "outside": "defender_assessments_outside_inventory",
     "resources": "resources_assessed_by_defender",
@@ -314,7 +314,7 @@ DEFENDER_NAMES = {
 
 POLICY_NAMES = {
     "count": "evaluations",
-    "complete": "policy_coverage_complete",
+    "collected": "policy_coverage_collected",
     "total": "policy_evaluations_total",
     "outside": "policy_evaluations_outside_inventory",
     "resources": "resources_evaluated_by_policy",
@@ -372,7 +372,7 @@ def summarize(resources: list[dict], defender: dict | None = None, policy: dict 
 def _query_status(query: str, result: dict | None, tally: dict | None) -> dict:
     return {
         "query": query,
-        "complete": result is not None,
+        "collected": result is not None,
         "pages_read": None if result is None else result["pages"],
         "total_records_reported": None if result is None else result["total_records"],
         "outside_inventory_by_target": None if tally is None else tally["outside_by_target"],

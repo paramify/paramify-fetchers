@@ -16,8 +16,9 @@ description: >
   A resource counts as not covered only when its type is covered on some other
   resource in the subscription; types the service covers on no resource (types it
   has no recommendations or assigned policies for, or a service not in use) are
-  listed apart with their counts, and a service that covers nothing never reads as
-  complete. The unhealthy, High/Critical and non-compliant counts cover inventoried
+  listed apart with their counts, and a service that covers nothing, or an empty
+  inventory (what Resource Graph returns to a caller without Reader), never reads
+  as complete. The unhealthy, High/Critical and non-compliant counts cover inventoried
   resources and their children only: assessments and policy states about the
   subscription itself, a resource group, or anything else not in the inventory (a
   deleted resource, a type Resource Graph keeps outside `Resources`) are counted

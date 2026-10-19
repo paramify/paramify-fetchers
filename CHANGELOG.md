@@ -716,7 +716,9 @@ schemas and the `paramify` CLI — not the internal code.
   and `types_without_policy_evaluation`, so a type Defender has no recommendations
   for is not a gap. `all_assessable_resources_assessed_by_defender` and
   `all_evaluable_resources_evaluated_by_policy` are false when the service covers
-  nothing at all. Also new: coverage percentages, unhealthy High/Critical and
+  nothing at all, and on an empty inventory, which is what Resource Graph returns
+  to a caller without Reader. `defender_coverage_collected` and
+  `policy_coverage_collected` say whether each coverage query was read to the end. Also new: coverage percentages, unhealthy High/Critical and
   non-compliant counts on inventoried resources, and
   `resources_covered_by_neither_by_type` (uncovered resources of every type, gaps
   and never-covered types alike). Assessments and policy states about anything not

@@ -269,23 +269,24 @@ def test_failed_query_leaves_coverage_unknown():
     by_id, s = covered(policy_rows=None)
     assert by_id[SA1]["policy_evaluations"] is None
     assert by_id[SA1]["defender_assessments"] == 3
-    assert s["policy_coverage_complete"] is False
+    assert s["policy_coverage_collected"] is False
     assert all(s[k] is None for k in (
         "policy_evaluations_total", "resources_without_policy_evaluation", "policy_evaluated_percentage",
         "all_evaluable_resources_evaluated_by_policy", "resources_covered_by_neither_by_type",
         "policy_non_compliant_outside_inventory"))
-    assert s["defender_coverage_complete"] is True
+    assert s["defender_coverage_collected"] is True
 
 
-def test_empty_inventory_has_nothing_to_cover():
+def test_an_empty_inventory_never_passes():
     s = inv.summarize([], inv.tally_defender([], set()), inv.tally_policy([], set()))
-    assert (s["all_assessable_resources_assessed_by_defender"], s["defender_assessed_percentage"]) == (True, 0)
+    assert (s["all_assessable_resources_assessed_by_defender"], s["defender_assessed_percentage"]) == (False, 0)
+    assert s["all_evaluable_resources_evaluated_by_policy"] is False
 
 
 def test_inventory_summary_keys_are_unchanged():
     s = inv.summarize(RESOURCES)
     assert (s["total_resources"], s["resource_type_count"], s["untagged_resources"]) == (5, 4, 0)
-    assert s["defender_coverage_complete"] is False
+    assert s["defender_coverage_collected"] is False
 
 
 class FakeGraph:
@@ -323,7 +324,7 @@ def test_collect_joins_three_queries(monkeypatch, fake_models):
     assert collector.ok
     assert graph.queries == ["Resources", "SecurityResources", "PolicyResources"]
     assert (out["resources"][0]["defender_assessments"], out["resources"][0]["policy_evaluations"]) == (1, 1)
-    assert out["coverage_queries"]["defender_assessments"]["complete"] is True
+    assert out["coverage_queries"]["defender_assessments"]["collected"] is True
     assert out["coverage_queries"]["policy_states"]["outside_inventory_by_target"] == {}
 
 
@@ -335,4 +336,4 @@ def test_truncated_coverage_query_is_a_failure_not_a_gap(monkeypatch, fake_model
     assert out["defender"] is None
     assert out["resources"][0]["defender_assessments"] is None
     assert out["resources"][0]["policy_evaluations"] == 1
-    assert out["coverage_queries"]["defender_assessments"]["complete"] is False
+    assert out["coverage_queries"]["defender_assessments"]["collected"] is False
