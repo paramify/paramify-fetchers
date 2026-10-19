@@ -1,6 +1,6 @@
 name: aws_organizations_scp
-version: 0.2.0
-description: Lists AWS Organizations service control policies (SCPs) with their JSON content and the OUs/accounts they attach to, plus the organization and its roots.
+version: 0.3.0
+description: Lists AWS Organizations service control policies (SCPs) with their JSON content and the OUs/accounts they attach to, plus the organization and its roots. Records whether the SCPs could be read (PolicyRead) and, optionally, the SCPs that apply to each named account. Needs the management account or a delegated administrator; see fetchers/aws/README.md.
 category: aws
 
 supports_targets: true
@@ -14,6 +14,13 @@ output:
   path: aws_organizations_scp.json
   aggregation: per_target
 
+config_schema:
+  effective_scp_accounts:
+    type: string
+    default: ""
+    env: SCP_EFFECTIVE_ACCOUNTS
+    description: Comma-separated AWS account IDs, or `all` for every account in the organization. For each, records the SCPs attached to the account, each OU above it and the root (EffectiveScps). Empty (the default) turns this off. `all` makes one list-parents call per account.
+
 target_schema:
   region:
     type: string
@@ -24,7 +31,7 @@ target_schema:
     type: string
     required: false
     env: AWS_PROFILE
-    description: AWS named profile (credentials resolved from ~/.aws / SSO).
+    description: AWS named profile (credentials resolved from ~/.aws / SSO). To run from a non-management account without delegation, point it at a profile whose role_arn is a read-only role in the management account.
 secrets: []
 
 ksis:
@@ -34,4 +41,4 @@ ksis:
 evidence_set:
   reference_id: EVD-ORGANIZATIONS-SCP
   name: Organizations Service Control Policies
-  instructions: 'Script: fetcher.sh. Commands executed: aws organizations describe-organization, aws organizations list-roots, aws organizations list-policies --filter SERVICE_CONTROL_POLICY, aws organizations describe-policy, aws organizations list-targets-for-policy.'
+  instructions: 'Script: fetcher.sh. Commands executed: aws organizations describe-organization, aws organizations list-roots, aws organizations list-policies --filter SERVICE_CONTROL_POLICY, aws organizations describe-policy, aws organizations list-targets-for-policy (plus list-accounts, list-parents, list-policies-for-target when effective_scp_accounts is set). PolicyRead.Status denied or error means the SCPs could not be read.'

@@ -12,6 +12,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`aws_organizations_scp` can record the SCPs that apply to each account.**
+  Set `effective_scp_accounts` (env `SCP_EFFECTIVE_ACCOUNTS`) to comma-separated
+  account IDs, or `all`. For each account the fetcher walks `list-parents` up
+  to the root and records `EffectiveScps: [{AccountId, IsManagementAccount,
+  Status, Reason, Path, Policies}]`, each policy tagged with the level it is
+  attached to. It reuses the targets already collected, so a full read adds
+  only the parent walk. An account that cannot be read gets its own status and
+  does not stop the others. Off by default.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
@@ -769,6 +777,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`aws_organizations_scp` no longer reports a denied read as "no SCPs"**
+  (0.2.0 → 0.3.0). From a member account that is neither the management
+  account nor a delegated administrator, `describe-organization` succeeds
+  but every SCP call is AccessDenied, and the evidence still said
+  `"Roots": [], "ServiceControlPolicies": []`. A list that could not be read
+  is now `null`, and a new `PolicyRead` block says whether the SCPs were read:
+  `{"Status": "ok" | "not_enabled" | "denied" | "error", "Reason": ...}`. An
+  empty list now only ever means the organization has no SCPs. Also new:
+  `ScpsEnabled` (whether the SCP policy type is enabled on the root) and
+  `OrganizationsInUse: true` on the in-use path; an SCP whose targets could not
+  be read has `Targets: null`, and an unreadable organization is
+  `Organization: null`. Existing keys keep their order. The exit code is
+  unchanged. `fetchers/aws/README.md` now documents the two ways to run it
+  from a non-management account: a read-only delegation policy, or a profile
+  that assumes a role in the management account.
 - **`azure_entra_authentication_policy` counts X.509 as phishing-resistant only
   when it is multi-factor** (0.1.0 → 0.2.0). An enabled X.509 certificate method
   was always listed in `phishing_resistant_methods_enabled`, even with its default
@@ -842,6 +865,7 @@ schemas and the `paramify` CLI — not the internal code.
   the other uploaders (`PARAMIFY_UPLOAD_API_TOKEN`, falling back to
   `PARAMIFY_API_TOKEN`) and reports a failed evidence-set lookup as its own
   error rather than a bare HTTP exception.
+
 - **`aws_security_groups` shows all-traffic and IPv6 rules** (0.2.0 → 0.3.0).
   A rule with no port range — protocol `-1`, "All traffic" — was dropped from
   the evidence, so an inbound all-traffic rule from `0.0.0.0/0` and every

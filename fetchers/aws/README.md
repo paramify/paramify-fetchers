@@ -46,6 +46,70 @@ aws sso login --profile commercial
 aws sts get-caller-identity --profile commercial
 ```
 
+## Organizations SCPs (`aws_organizations_scp`)
+
+Reading service control policies needs more than an IAM policy. `ListRoots`, `ListPolicies`, `DescribePolicy`, `ListTargetsForPolicy`, `ListParents`, `ListPoliciesForTarget` and `ListAccounts` can only be called from the organization's **management account** or a **member account that is a delegated administrator** ([API reference](https://docs.aws.amazon.com/organizations/latest/APIReference/API_ListPolicies.html)). `DescribeOrganization` works from any member account.
+
+So an IAM policy in a plain member account (a shared-services account, say) is not enough on its own: the fetcher reads the organization, then gets AccessDenied on every SCP call. It records that as `PolicyRead.Status: "denied"` with `Roots` and `ServiceControlPolicies` set to `null`, not as an organization with no SCPs, and exits non-zero (`not_authorized`).
+
+Actions the fetcher calls: `organizations:DescribeOrganization`, `ListRoots`, `ListPolicies`, `DescribePolicy`, `ListTargetsForPolicy`. With `effective_scp_accounts` set, it also calls `ListParents`, `ListAccounts` (for `all`) and `ListPoliciesForTarget` (only when a per-policy read failed). The AWS managed policy `AWSOrganizationsReadOnlyAccess` covers all of them.
+
+Run it from the management account, or from another account in one of two ways.
+
+**A. Delegate read-only access to the runner's account.** In the management account, attach a resource-based delegation policy ([how](https://docs.aws.amazon.com/organizations/latest/userguide/orgs-policy-delegate.html), [examples](https://docs.aws.amazon.com/organizations/latest/userguide/security_iam_resource-based-policy-examples.html)). `111122223333` is the runner's account:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ParamifyReadScps",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::111122223333:root" },
+      "Action": [
+        "organizations:DescribeOrganization",
+        "organizations:DescribePolicy",
+        "organizations:ListRoots",
+        "organizations:ListParents",
+        "organizations:ListPolicies",
+        "organizations:ListPoliciesForTarget",
+        "organizations:ListTargetsForPolicy",
+        "organizations:ListAccounts"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+```bash
+# In the management account
+aws organizations put-resource-policy --content file://delegation.json
+```
+
+The runner's role also needs the same actions in its own identity policy (or `AWSOrganizationsReadOnlyAccess`). AWS states this outright: without IAM permissions in the delegated account, the caller is treated as not having them.
+
+**B. Assume a read-only role in the management account.** Create a role in the management account that the runner's role may assume, with `AWSOrganizationsReadOnlyAccess`. Then point a target `profile` at it:
+
+```ini
+# credential_source: or Environment / EcsContainer, or use source_profile = <runner profile>
+[profile org-management]
+role_arn = arn:aws:iam::<management-account-id>:role/ParamifyOrganizationsReadOnly
+credential_source = Ec2InstanceMetadata
+```
+
+```bash
+paramify manifest add-target aws_organizations_scp profile=org-management
+```
+
+Notes:
+
+- SCPs don't affect users or roles in the management account. They apply to every member account, including the root user and accounts that are delegated administrators ([SCPs](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps.html)). In `EffectiveScps`, the management account's entry has `IsManagementAccount: true`.
+- `DescribeEffectivePolicy` does not support SCPs, so `EffectiveScps` is built by walking from each account up to the root and collecting the SCPs attached at every level.
+- `effective_scp_accounts: all` makes one `list-parents` call per account, one at a time. In a very large organization this can run past the runner's default 600s timeout. If it does, list the accounts you need instead.
+- Delegation policies don't accept `NotAction` or `NotResource` (from June 30, 2026). Use the explicit action list above.
+- Not verified against AWS docs: whether wildcard actions (`organizations:List*`) work in a delegation policy, and whether a role ARN works as the `Principal`. The AWS examples use explicit actions and the account. Being a delegated administrator for some *other* AWS service (`register-delegated-administrator`) is a separate mechanism, and we have not confirmed that it allows these reads. Use the delegation policy.
+
 ## Wiring into a manifest
 
 AWS fetchers declare no secrets — credentials flow through the credential chain, not the manifest.
