@@ -178,7 +178,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ca-7`, `cm-2`, `cm-6`, `si-7.7`
 
-*10 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_config_conformance_packs`](../fetchers/aws/config_conformance_packs), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`azure_policy_compliance`](../fetchers/azure/policy_compliance), [`checkov_kubernetes`](../fetchers/checkov/kubernetes), [`checkov_terraform`](../fetchers/checkov/terraform), [`datadog_infra_agent_checks`](../fetchers/datadog/infra_agent_checks), [`wiz_cloud_configuration_posture`](../fetchers/wiz/cloud_configuration_posture), [`wiz_host_configuration_posture`](../fetchers/wiz/host_configuration_posture)
+*11 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_config_conformance_packs`](../fetchers/aws/config_conformance_packs), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`azure_policy_assignments`](../fetchers/azure/policy_assignments), [`azure_policy_compliance`](../fetchers/azure/policy_compliance), [`checkov_bicep`](../fetchers/checkov/bicep), [`checkov_kubernetes`](../fetchers/checkov/kubernetes), [`checkov_terraform`](../fetchers/checkov/terraform), [`datadog_infra_agent_checks`](../fetchers/datadog/infra_agent_checks), [`wiz_cloud_configuration_posture`](../fetchers/wiz/cloud_configuration_posture), [`wiz_host_configuration_posture`](../fetchers/wiz/host_configuration_posture)
 
 #### `KSI-MLA-LET` — Logging Event Types
 
@@ -427,7 +427,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-234 of 242 fetchers carry a mapping.
+235 of 243 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -588,10 +588,11 @@ python tools/gen_ksi_mapping.py
 |---|---|
 | [`betterstack_public_status_page`](../fetchers/betterstack/public_status_page) | `KSI-CNA-OFA` |
 
-### checkov  (2)
+### checkov  (3)
 
 | Fetcher | Indicators |
 |---|---|
+| [`checkov_bicep`](../fetchers/checkov/bicep) | `KSI-MLA-EVC` |
 | [`checkov_kubernetes`](../fetchers/checkov/kubernetes) | `KSI-MLA-EVC` |
 | [`checkov_terraform`](../fetchers/checkov/terraform) | `KSI-MLA-EVC` |
 
