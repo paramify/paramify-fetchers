@@ -374,6 +374,15 @@ def detail_resources(states: list[dict]) -> list[str]:
     return [spelling[key] for key in sorted(counts, key=lambda k: (-counts[k], k))]
 
 
+def has_evaluation_details(details) -> bool:
+    """An evaluated expression or an ifNotExists lookup; a returned state can carry neither."""
+    return bool(details) and bool(
+        details.get("evaluated_expressions")
+        or details.get("if_not_exists_resource_id")
+        or details.get("if_not_exists_total_resources") is not None
+    )
+
+
 def attach_evaluation_details(states: list[dict], results: dict[str, list[dict] | None]) -> None:
     """Give each listed state its evaluation details, or the reason it has none.
 
@@ -391,9 +400,10 @@ def attach_evaluation_details(states: list[dict], results: dict[str, list[dict] 
                 status = DETAILS_FAILED
             else:
                 by_pair = {pair_key({**d, "resource_id": resource_id}): d for d in found}
-                match = by_pair.get(pair_key(state))
-                status = DETAILS_COLLECTED if match else DETAILS_NOT_RETURNED
-                details = (match or {}).get("evaluation_details")
+                details = (by_pair.get(pair_key(state)) or {}).get("evaluation_details")
+                if not has_evaluation_details(details):
+                    details = None
+                status = DETAILS_COLLECTED if details else DETAILS_NOT_RETURNED
         state["evaluation_details"] = details
         state["evaluation_details_status"] = status
 

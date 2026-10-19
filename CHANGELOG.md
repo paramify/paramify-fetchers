@@ -559,7 +559,9 @@ schemas and the `paramify` CLI — not the internal code.
   - The service returns these only per resource, so they are read for at most
     `max_evaluation_detail_resources` (default 100) of the listed resources. The
     resources with the most listed states are read first.
-  - `evaluation_details_status` gives the reason a state has no details;
+  - `evaluation_details_status` gives the reason a state has no details. It is
+    `collected` only when Azure returned an evaluated expression or an ifNotExists
+    lookup; a state returned without either is `not_returned`.
     `evaluation_details_truncated` says when not every listed resource was read.
   - Each remediation task's per-resource deployments (status, error, times) are
     listed in `remediation_deployments`, up to `max_remediation_deployments`

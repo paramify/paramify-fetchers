@@ -110,7 +110,7 @@ def test_detail_resources_dedupe_case_and_rank_by_listed_states():
 def test_attach_evaluation_details_says_why_a_state_has_none():
     states = [state(VM), state(VM, ref="gone"), state(NSG), state(SUB),
               state(f"{RG}/providers/Microsoft.Web/sites/app")]
-    details = {"evaluated_expressions": [], "evaluated_expressions_truncated": False}
+    details = fx.project_evaluation_details(NS(evaluated_expressions=[expression()], if_not_exists_details=None))
     fx.attach_evaluation_details(states, {
         VM.lower(): [{**state(None), "evaluation_details": details}],
         NSG.lower(): None,
@@ -121,6 +121,33 @@ def test_attach_evaluation_details_says_why_a_state_has_none():
     summary = fx.summarize_evaluation_details(states, eligible=3, requested=2)
     assert summary["non_compliant_states_with_evaluation_details"] == 1
     assert summary["evaluation_details_truncated"] is True
+
+
+# A state the per-resource query returns with no details, or with an empty details object.
+@pytest.mark.parametrize("raw", [None, NS(evaluated_expressions=[], if_not_exists_details=None),
+                                 NS(evaluated_expressions=None, if_not_exists_details=NS(resource_id=None,
+                                                                                          total_resources=None))],
+                         ids=["null", "no_expressions", "empty_if_not_exists"])
+def test_state_returned_without_details_is_not_returned(raw):
+    states = [state(VM), state(VM, ref="r2")]
+    with_details = fx.project_evaluation_details(NS(evaluated_expressions=[expression()], if_not_exists_details=None))
+    fx.attach_evaluation_details(states, {VM.lower(): [
+        {**state(None), "evaluation_details": with_details},
+        {**state(None, ref="r2"), "evaluation_details": fx.project_evaluation_details(raw)},
+    ]})
+    assert [s["evaluation_details_status"] for s in states] == ["collected", "not_returned"]
+    assert states[1]["evaluation_details"] is None
+    summary = fx.summarize_evaluation_details(states, eligible=1, requested=1)
+    assert summary["non_compliant_states_with_evaluation_details"] == 1
+    assert summary["non_compliant_states_by_evaluation_details_status"] == {"collected": 1, "not_returned": 1}
+
+
+def test_if_not_exists_lookup_alone_counts_as_details():
+    details = fx.project_evaluation_details(NS(evaluated_expressions=[],
+                                               if_not_exists_details=NS(resource_id=None, total_resources=0)))
+    states = [state(VM)]
+    fx.attach_evaluation_details(states, {VM.lower(): [{**state(None), "evaluation_details": details}]})
+    assert states[0]["evaluation_details_status"] == "collected"
 
 
 def fake_client(**operations):
