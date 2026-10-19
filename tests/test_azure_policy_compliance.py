@@ -23,9 +23,15 @@ _spec = importlib.util.spec_from_file_location(
 fx = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(fx)
 
-needs_sdk = pytest.mark.skipif(
-    importlib.util.find_spec("azure.mgmt.policyinsights") is None, reason="azure extra not installed"
-)
+
+def _has_sdk() -> bool:
+    try:
+        return importlib.util.find_spec("azure.mgmt.policyinsights") is not None
+    except ModuleNotFoundError:  # find_spec imports the parent package, and the test job has no azure
+        return False
+
+
+needs_sdk = pytest.mark.skipif(not _has_sdk(), reason="azure extra not installed")
 
 SUB = "/subscriptions/s1"
 RG = f"{SUB}/resourceGroups/rg1"
