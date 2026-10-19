@@ -90,7 +90,13 @@ date, days to close.
 
 Calls `GET /rest/api/3/auditing/record` (offset/limit 1000, from/to). Issue edits
 are not in this log, and organization-level (admin.atlassian.com) audit is not
-collected.
+collected. Atlassian does not publish the audit `category` values, so a record
+counts as a sensitive change when its category name contains a key word
+(permission, user, group, workflow, security, scheme, project, field, screen,
+system, global, application, role); whatever matched nothing is listed in
+`summary.unclassified_categories` so the list can be checked against a real
+site. Changed values are kept only for sensitive records, shortened to 200
+characters with `<` and `>` escaped; other records keep the field name only.
 
 ### `jira_access_roles`
 
@@ -98,15 +104,21 @@ collected.
 |---|---|---|---|
 | `project_keys` | `JIRA_PROJECT_KEYS` | all visible | Comma-separated project keys to scan |
 | `admin_groups` | `JIRA_ADMIN_GROUPS` | (none) | Extra group names to treat as administrative |
-| `max_projects` | `JIRA_ACCESS_MAX_PROJECTS` | `200` | Project cap |
+| `all_roles` | `JIRA_ACCESS_ALL_ROLES` | `false` | Read every project role (2 + R calls per project) instead of only the roles named in a privileged grant |
+| `max_projects` | `JIRA_ACCESS_MAX_PROJECTS` | `200` | Project cap; hitting it fails the run as partial |
 
 Calls `GET /rest/api/3/group/bulk` (accessType site-admin and admin),
 `/group/member`, `/applicationrole`, `/project/search`, and per project
-`/project/{key}/permissionscheme?expand=all`, `/project/{key}/role` and
-`/project/{key}/role/{id}`. Privileged permissions are administer project,
-delete issues/comments/attachments/worklogs, edit all comments, set issue
-security and modify reporter; grants of those to `anyone` or an application
-role are flagged as `broad_privileged_grants`.
+`/project/{key}/permissionscheme?expand=all` and `/project/{key}/role/{id}` for
+each role named in a privileged grant (the role index only with
+`JIRA_ACCESS_ALL_ROLES`). Privileged permissions are administer project, delete
+issues/comments/attachments/worklogs, edit all comments, set issue security and
+modify reporter; grants of those to `anyone` or an application role are flagged
+as `broad_privileged_grants`, and grants to holder types the fetcher cannot
+resolve to accounts (`reporter`, `assignee`, user or group custom fields) are
+listed per project as `unresolved_privileged_grants` so the counts are never
+silently low. Organization admins (Atlassian Administration) are not visible to
+these APIs and are not included.
 
 ### `jira_change_requests`
 
@@ -126,10 +138,34 @@ Custom field names differ per site, so the fetcher looks them up by name with
 several fields, is listed in `metadata.field_problems` and fails the run as
 `partial_failure`, because the findings that depend on that field would be wrong.
 For an ambiguous name, `metadata.field_candidates` lists every matching field id;
-pin one by setting that role to its `customfield_` id in `JIRA_CHANGE_FIELDS`, or
-set the role to an empty value to turn its checks off. Sites with Jira Service
-Management often have their own "Change type" and "Change risk" fields, so pin
-those two by id. Comment bodies are not collected, only the count.
+pin the right one by setting that role to its `customfield_` id in
+`JIRA_CHANGE_FIELDS`. Sites with Jira Service Management often have their own
+"Change type" and "Change risk" fields, so pin those two by id. Team-managed
+projects each create their own copy of a custom field, so a role may be pinned to
+several ids (`"change_type": "customfield_10043,customfield_10120"` or a JSON
+list); a ticket is read from whichever of them holds a value. Comment bodies are
+not collected, only the count.
+
+The default names are the ones used while building the fetcher, not a Jira
+standard, so on a new site the first run usually fails with `field_problems`
+until `JIRA_CHANGE_FIELDS` names that site's fields. That is deliberate: the
+mapping has to be confirmed per site before any finding means anything.
+
+Setting a role to an empty value turns its checks off. Every finding that can no
+longer be produced is listed in `metadata.checks_disabled`, so an evidence file
+never looks clean about a check that did not run. A setting that depends on a
+turned-off field is refused as `bad_config` rather than silently passing or
+failing every ticket: no approval source at all (`approver` or `approved_at` off
+with no `JIRA_CHANGE_APPROVED_STATUSES`), and for incidents
+`JIRA_POSTMORTEM_REQUIRED_SEVERITIES` with `severity` off,
+`JIRA_INCIDENT_REQUIRED_PHASES` with `phase` off, or
+`JIRA_INCIDENT_CATEGORY_TARGETS` / `JIRA_INCIDENT_REPORT_MINUTES` with
+`category` or `detected_at` off.
+
+When a change has no deployed-at field, its deployment time is the first move
+into its current done status, so a ticket that was deployed, approved later, and
+then reopened and closed again is still reported as approved after deployment;
+`last_done_at` and `reopened` show the later move.
 
 The same field rules apply to `JIRA_INCIDENT_FIELDS` below.
 
@@ -169,3 +205,11 @@ in `issues`; narrow `jql` to the relevant projects to shape the evidence.
 `$EVIDENCE_DIR/jira_site_inventory.json`. When any call fails, the file is still
 written with `metadata.partial_failure: true` and `metadata.api_failures[]`, and
 the run exits non-zero with the reason in the envelope's `metadata.error`.
+
+Every Jira fetcher writes `metadata.complete`, `metadata.partial_failure` (its
+opposite, which is what a validator reads) and `metadata.incomplete_reason`. A
+run is partial when a call failed, a cap was hit, a field did not resolve, or a
+linked issue could not be read. HTTP 429 and 5xx answers are retried up to four
+times (honouring `Retry-After`, otherwise 2, 4, 8 and 16 seconds); a request that
+still gets no answer is recorded as one failed call and the run continues, except
+a host that never answers before the first successful call.

@@ -16,12 +16,12 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from jira_common import (  # noqa: E402
     Abort,
     JiraClient,
+    all_field_ids,
     collector_info,
     connection_settings,
     counts,
     fetch_issues,
     field_problem_reason,
-    field_value,
     int_env,
     json_env,
     list_env,
@@ -30,6 +30,7 @@ from jira_common import (  # noqa: E402
     parse_ts,
     report_failure,
     resolve_fields,
+    role_values,
     utc_now,
     write_and_finish,
 )
@@ -102,7 +103,7 @@ def _category_target(category, targets: dict):
     return lowered[max(matches, key=len)] if matches else None
 
 
-def _history(histories: list, phase_id) -> tuple:
+def _history(histories: list, phase_ids: set) -> tuple:
     moves, phases = [], []
     for h in histories:
         for item in h.get("items") or []:
@@ -115,7 +116,7 @@ def _history(histories: list, phase_id) -> tuple:
             }
             if fid == "status":
                 moves.append(entry)
-            elif phase_id and fid == phase_id:
+            elif fid in phase_ids:
                 phases.append(entry)
     key = lambda m: str(m["at"] or "")  # noqa: E731
     return sorted(moves, key=key), sorted(phases, key=key)
@@ -162,8 +163,8 @@ def _incident_record(issue, histories, ids, cfg, postmortems: dict, actions: dic
     resolved = name_of(status.get("statusCategory"), "key") == "done"
     resolution = name_of(f.get("resolution"))
     no_review = resolved and (resolution or "").strip().lower() in cfg["no_review"]
-    custom = {role: field_value(f.get(fid)) for role, fid in ids.items()}
-    moves, phase_changes = _history(histories, ids.get("phase"))
+    custom = role_values(f, ids)
+    moves, phase_changes = _history(histories, set(ids.get("phase") or []))
 
     detected = custom.get("detected_at")
     reported = custom.get("reported_at") or f.get("created")
@@ -395,9 +396,9 @@ def main() -> int:
         collector = collector_info(client)
         ids, problems, candidates = resolve_fields(client, cfg["fields"])
         raw, truncated, _ = client.search_issues(
-            jql, INCIDENT_FIELDS + sorted(set(ids.values())), cfg["max_items"]
+            jql, INCIDENT_FIELDS + all_field_ids(ids), cfg["max_items"]
         )
-        history_fields = ["status"] + ([ids["phase"]] if "phase" in ids else [])
+        history_fields = ["status"] + list(ids.get("phase") or [])
         histories, history_complete = client.bulk_changelogs(
             [str(i.get("id")) for i in raw if i.get("id")], history_fields
         )

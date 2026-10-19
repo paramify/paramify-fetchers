@@ -34,6 +34,7 @@ NONE_LABEL = "(none)"
 NOT_FOUND = object()
 # POST /rest/api/3/changelog/bulkfetch accepts at most 1000 issues and 10 field ids.
 CHANGELOG_ISSUE_BATCH = 1000
+CHANGELOG_FIELD_BATCH = 10
 
 
 class Abort(Exception):
@@ -241,34 +242,43 @@ class JiraClient:
         out: dict = {}
         seen: set = set()
         complete = True
+        # The endpoint takes at most 10 field ids, so more are fetched in groups and
+        # the items of a history that several groups return are merged.
+        field_groups = [field_ids[i : i + CHANGELOG_FIELD_BATCH] for i in range(0, len(field_ids), CHANGELOG_FIELD_BATCH)]
+        histories: dict = {}
         for i in range(0, len(issue_ids), CHANGELOG_ISSUE_BATCH):
             chunk = issue_ids[i : i + CHANGELOG_ISSUE_BATCH]
-            token = None
-            while True:
-                body = {"issueIdsOrKeys": chunk, "fieldIds": field_ids[:10], "maxResults": 1000}
-                if token:
-                    body["nextPageToken"] = token
-                page = self.request(
-                    "POST",
-                    "/rest/api/3/changelog/bulkfetch",
-                    "POST /rest/api/3/changelog/bulkfetch",
-                    body=body,
-                )
-                if page is None:
-                    complete = False
-                    break
-                for log in page.get("issueChangeLogs") or []:
-                    issue_id = str(log.get("issueId"))
-                    for h in log.get("changeHistories") or []:
-                        hid = (issue_id, h.get("id"))
-                        if hid in seen:
-                            continue
-                        seen.add(hid)
-                        # bulkfetch returns `created` as epoch milliseconds, not ISO text.
-                        out.setdefault(issue_id, []).append({**h, "created": iso_ts(h.get("created"))})
-                token = page.get("nextPageToken")
-                if not token:
-                    break
+            for group in field_groups or [[]]:
+                token = None
+                while True:
+                    body = {"issueIdsOrKeys": chunk, "fieldIds": group, "maxResults": 1000}
+                    if token:
+                        body["nextPageToken"] = token
+                    page = self.request(
+                        "POST",
+                        "/rest/api/3/changelog/bulkfetch",
+                        "POST /rest/api/3/changelog/bulkfetch",
+                        body=body,
+                    )
+                    if page is None:
+                        complete = False
+                        break
+                    for log in page.get("issueChangeLogs") or []:
+                        issue_id = str(log.get("issueId"))
+                        for h in log.get("changeHistories") or []:
+                            hid = (issue_id, h.get("id"))
+                            if hid not in seen:
+                                seen.add(hid)
+                                # bulkfetch returns `created` as epoch milliseconds, not ISO text.
+                                histories[hid] = {**h, "created": iso_ts(h.get("created")), "items": []}
+                                out.setdefault(issue_id, []).append(histories[hid])
+                            known = histories[hid]["items"]
+                            for item in h.get("items") or []:
+                                if item not in known:
+                                    known.append(item)
+                    token = page.get("nextPageToken")
+                    if not token:
+                        break
         return out, complete
 
 
@@ -334,21 +344,39 @@ def number_stats(values: list) -> dict:
 ISSUE_KEY = re.compile(r"^[A-Z][A-Z0-9_]{0,254}-[0-9]{1,12}$")
 
 
-def resolve_fields(client: JiraClient, wanted: dict):
-    """Map {role: field name or customfield_ id} to {role: field id} via GET /rest/api/3/field.
+_FIELD_ID = re.compile(r"customfield_[0-9]{1,10}")
 
-    Names are case-insensitive. Returns (ids, problems, candidates) where problems maps
-    role to "unresolved" (no such field), "ambiguous" (several fields share the name) or
-    "disabled" (empty name in the config), and candidates maps each ambiguous role to the
-    matching fields so the operator can pin one by its customfield_ id.
+
+def _id_list(value):
+    """The customfield_ ids in a config value (a string, comma-separated string or list), or None."""
+    parts = value if isinstance(value, list) else str(value).split(",")
+    cleaned = [str(p).strip() for p in parts if str(p).strip()]
+    if cleaned and all(_FIELD_ID.fullmatch(p) for p in cleaned):
+        return list(dict.fromkeys(cleaned))
+    return None
+
+
+def resolve_fields(client: JiraClient, wanted: dict):
+    """Map {role: field name, customfield_ id or list of ids} to {role: [field ids]}.
+
+    Names are looked up (case-insensitively) via GET /rest/api/3/field. A role may
+    be pinned to several ids because team-managed projects each create their own
+    copy of a field; a ticket is read from whichever of them holds a value.
+    Returns (ids, problems, candidates) where problems maps role to "unresolved"
+    (no such field), "ambiguous" (several fields share the name) or "disabled"
+    (empty name in the config), and candidates maps each ambiguous role to the
+    matching fields so the operator can pin one or more by customfield_ id.
     """
     ids, problems, candidates = {}, {}, {}
     names = {}
     for role, name in wanted.items():
-        if not isinstance(name, str) or not name.strip():
+        pinned = _id_list(name) if name not in (None, "") else None
+        if not isinstance(name, (str, list)) or not (name if isinstance(name, list) else name.strip()):
             problems[role] = "disabled"
-        elif re.fullmatch(r"customfield_[0-9]{1,10}", name.strip()):
-            ids[role] = name.strip()
+        elif pinned:
+            ids[role] = pinned
+        elif isinstance(name, list):
+            problems[role] = "unresolved"
         else:
             names[role] = name.strip().lower()
     if not names:
@@ -371,13 +399,26 @@ def resolve_fields(client: JiraClient, wanted: dict):
     for role, name in names.items():
         found = by_name.get(name, [])
         if len(found) == 1:
-            ids[role] = found[0]["id"]
+            ids[role] = [found[0]["id"]]
         elif found:
             problems[role] = "ambiguous"
             candidates[role] = found[:10]
         else:
             problems[role] = "unresolved"
     return ids, problems, candidates
+
+
+def all_field_ids(ids: dict) -> list:
+    """Every resolved field id, sorted and de-duplicated."""
+    return sorted({fid for fids in ids.values() for fid in fids})
+
+
+def role_values(fields: dict, ids: dict) -> dict:
+    """{role: plain value} reading each role from the first of its ids that holds a value."""
+    out = {}
+    for role, fids in ids.items():
+        out[role] = next((v for v in (field_value(fields.get(fid)) for fid in fids) if v is not None), None)
+    return out
 
 
 def field_problem_reason(problems: dict, env_name: str) -> str:

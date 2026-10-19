@@ -517,7 +517,7 @@ def test_change_requests_unresolved_fields_are_reported(run):
 
     code, out, _, _ = run("change_requests", router, {"JIRA_CHANGE_JQL": "project = CCB"})
     assert code == 1
-    assert out["metadata"]["fields_resolved"] == {"approver": "cf3"}
+    assert out["metadata"]["fields_resolved"] == {"approver": ["cf3"]}
     assert out["metadata"]["field_problems"]["risk"] == "unresolved"
     assert out["metadata"]["complete"] is False
     assert "risk (unresolved)" in out["metadata"]["incomplete_reason"]
@@ -557,7 +557,7 @@ def test_change_requests_ambiguous_field_fails_loudly_and_lists_candidates(run):
     env["JIRA_CHANGE_FIELDS"] = env["JIRA_CHANGE_FIELDS"][:-1] + ', "change_type": "customfield_10043"}'
     code, out, _, _ = run("change_requests", router, env)
     assert code == 0 and out["metadata"]["complete"] is True
-    assert out["metadata"]["fields_resolved"]["change_type"] == "customfield_10043"
+    assert out["metadata"]["fields_resolved"]["change_type"] == ["customfield_10043"]
     assert out["metadata"]["field_candidates"] == {}
 
 
@@ -1182,3 +1182,62 @@ def test_site_inventory_cap_is_partial_and_401_after_success_does_not_abort(run)
     assert code == 1 and status["code"] == "not_authorized"
     assert out["projects"], "everything before the failed call is still in the file"
     assert out["metadata"]["api_failures"][0]["type"] == "HTTP401"
+
+
+# ---------- team-managed projects: one role, several field ids (review item 9) ----------
+
+def test_change_requests_role_pinned_to_several_ids_reads_each_project(run):
+    # Two team-managed projects each have their own "Change Type" field.
+    a = _ticket(1, "Change Request", "Done", "done", {"cf1": {"value": "Standard"}, "cf6": {"value": "Passed"}})
+    b = _ticket(2, "Change Request", "Done", "done", {"cf20": {"value": "Standard"}, "cf6": {"value": "Passed"}})
+    b["key"] = "OPS-2"
+    seen = {}
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, FIELD_LIST
+        if path == "/rest/api/3/search/jql":
+            seen["fields"] = body["fields"]
+            return 200, {"issues": [a, b], "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            seen.setdefault("history_fields", []).append(body["fieldIds"])
+            return 200, {"issueChangeLogs": []}
+        raise AssertionError(path)
+
+    env = {"JIRA_CHANGE_JQL": "project in (CCB, OPS)", "JIRA_CHANGE_APPROVED_STATUSES": "Approved",
+           "JIRA_CHANGE_FIELDS": '{"change_type": "customfield_10043, customfield_10120", "risk": ["customfield_10044"]}'}
+    # customfield ids are not in FIELD_LIST on purpose: pinned ids are never looked up
+    a["fields"]["customfield_10043"] = {"value": "Standard"}
+    b["fields"]["customfield_10120"] = {"value": "Standard"}
+    code, out, _, _ = run("change_requests", router, env)
+    assert code == 0, out["metadata"]
+    assert out["metadata"]["fields_resolved"]["change_type"] == ["customfield_10043", "customfield_10120"]
+    assert out["metadata"]["fields_resolved"]["risk"] == ["customfield_10044"]
+    by_key = {t["key"]: t for t in out["tickets"]}
+    assert by_key["CCB-1"]["preapproved"] is True and by_key["OPS-2"]["preapproved"] is True
+    assert {"customfield_10043", "customfield_10120"} <= set(seen["fields"])
+    # 11 field ids (status + 10) are fetched in two groups, never silently cut to 10
+    assert len(seen["history_fields"]) == 2 and sum(len(g) for g in seen["history_fields"]) == 11
+
+
+def test_bulk_changelogs_merges_items_of_one_history_across_field_groups():
+    sys.path.insert(0, str(JIRA / "_shared"))
+    import jira_common
+
+    client = jira_common.JiraClient("https://example.atlassian.net", "e", "t")
+    pages = []
+
+    def fake(method, path, operation, params=None, body=None, **kw):
+        pages.append(body["fieldIds"])
+        fid = body["fieldIds"][0]
+        return {"issueChangeLogs": [{"issueId": "1", "changeHistories": [
+            {"id": "h1", "created": 1767571200000, "items": [{"fieldId": fid, "toString": "x"}]}]}]}
+
+    client.request = fake
+    out, complete = client.bulk_changelogs(["1"], [f"f{i}" for i in range(12)])
+    assert complete and len(pages) == 2 and [len(p) for p in pages] == [10, 2]
+    assert len(out["1"]) == 1, "one history, not one per field group"
+    assert [i["fieldId"] for i in out["1"][0]["items"]] == ["f0", "f10"]
+    assert out["1"][0]["created"] == "2026-01-05T00:00:00.000+00:00"

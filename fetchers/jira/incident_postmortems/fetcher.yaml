@@ -38,11 +38,17 @@ config_schema:
     description: >-
       JSON object overriding the Jira field names for each role. Keys: severity,
       category, detected_at, reported_at, phase. Defaults: "Severity", "Incident
-      Category", "Detected At", "Reported At", "Incident Phase". A value may be a
-      field id such as customfield_10054; an empty value disables that role.
-      Names that match no field, or several fields, are listed in
-      metadata.field_problems and fail the run as partial; for several,
-      metadata.field_candidates lists the ids to choose from.
+      Category", "Detected At", "Reported At", "Incident Phase" (the names used
+      while building the fetcher, so a new site usually needs its own). A value
+      may be a field id such as customfield_10054, or several ids
+      (comma-separated or a JSON list) when team-managed projects each have
+      their own copy of the field. An empty value turns that role's checks off;
+      metadata.checks_disabled lists the findings that can then no longer be
+      produced, and a setting that depends on the turned-off field
+      (required severities, required phases, category targets, report window)
+      is refused as bad_config. Names that match no field, or several fields,
+      are listed in metadata.field_problems and fail the run as partial; for
+      several, metadata.field_candidates lists the ids to choose from.
       Without a reported-at field the ticket's created time is used and counted
       in summary.reported_time_from_ticket_created.
   report_minutes:
@@ -110,15 +116,21 @@ evidence_set:
     POST /rest/api/3/issue/bulkfetch. Per incident: minutes_to_report (detected
     to reported), category target, phases_seen, post-mortems and action items.
     Only links to the configured post-mortem types are followed; a linked
-    post-mortem the collector cannot read is reported as postmortem_not_visible
-    and fails the run as partial. Findings: missing_detected_time,
-    detected_or_reported_time_unparseable, reported_before_detected,
-    reported_late, category_notification_target_missed, missing_severity,
-    missing_category, category_without_target, phases_missing,
-    resolved_without_postmortem, postmortem_not_visible,
-    postmortem_without_action_items,
-    unassigned_action_items, overdue_action_items. Descriptions and comments are
-    not collected. Output: jira_incident_postmortems.json
+    post-mortem or action item the collector cannot read (hidden, or the bulk
+    call failed) is reported as postmortem_not_visible or
+    action_items_not_visible, never as absent, and fails the run as partial.
+    Findings: missing_detected_time, detected_or_reported_time_unparseable,
+    reported_before_detected, reported_late,
+    category_notification_target_missed, missing_severity, missing_category,
+    category_without_target, phases_missing, resolved_without_postmortem,
+    postmortem_not_visible, postmortem_without_action_items,
+    action_items_not_visible, unassigned_action_items, overdue_action_items. A
+    finding is produced only when the field it reads is turned on;
+    metadata.checks_disabled lists the rest, and
+    summary.incidents_without_report_timing counts incidents whose report time
+    could not be measured. metadata.partial_failure is true whenever the run is
+    incomplete. Descriptions and comments are not collected. Output:
+    jira_incident_postmortems.json
   description: >-
     Incident tickets with their reporting times, response phases and linked
     post-mortems with assigned action items, evidencing that incidents are

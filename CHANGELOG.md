@@ -36,6 +36,33 @@ schemas and the `paramify` CLI — not the internal code.
   that matches no Jira field, or several, now fails the run as `partial_failure`
   instead of silently skipping the checks that need it. Ambiguous names list their
   matching ids in `metadata.field_candidates`.
+- **`jira_change_requests`, `jira_incident_postmortems`** (review of PR #174): a
+  check whose field role is turned off no longer produces its finding on every
+  ticket; `metadata.checks_disabled` lists the findings that cannot be produced,
+  and a setting that depends on a turned-off field (required severities, required
+  phases, category targets, report window, or no approval source at all) is
+  refused as `bad_config`. A failed `issue/bulkfetch` marks its keys as not
+  visible (`postmortem_not_visible`, `action_items_not_visible`) instead of
+  reporting the post-mortem or action items as absent. The deployment time of a
+  reopened change is its first move into the done status, so a late approval is
+  still caught. A role may be pinned to several `customfield_` ids for
+  team-managed projects; changelog reads with more than 10 field ids are made in
+  groups instead of being cut to 10.
+- **All Jira fetchers**: `metadata.partial_failure` now follows
+  `metadata.complete` (a hit cap or an unresolved field is partial, not only a
+  failed call). HTTP 429 and 5xx are retried with `Retry-After` or backoff, and a
+  request that still gets no answer after the first success is one failed call
+  rather than the end of the run. `jira_site_inventory` (0.1.1) uses the shared
+  client instead of its own drifted copy.
+- **`jira_access_roles`**: reads only the project roles named in a privileged
+  grant (`JIRA_ACCESS_ALL_ROLES=true` reads every role), lists grants to holder
+  types it cannot resolve (`reporter`, `assignee`, custom fields) as
+  `unresolved_privileged_grants`, tolerates a product the site does not have in
+  the `group/bulk` fallback, and states that organization admins are not included.
+- **`jira_audit_records`**: sensitive changes are matched by key words in the
+  category name with `summary.unclassified_categories` for what matched nothing
+  (Atlassian does not publish the category list); changed values are kept only
+  for sensitive records, shortened and markup-escaped.
 
 ### Added
 

@@ -14,11 +14,11 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from jira_common import (  # noqa: E402
     Abort,
     JiraClient,
+    all_field_ids,
     collector_info,
     connection_settings,
     counts,
     field_problem_reason,
-    field_value,
     int_env,
     json_env,
     list_env,
@@ -26,6 +26,7 @@ from jira_common import (  # noqa: E402
     parse_ts,
     report_failure,
     resolve_fields,
+    role_values,
     utc_now,
     write_and_finish,
 )
@@ -91,7 +92,7 @@ def _lower_set(values) -> set:
 def _transitions(histories: list, field_ids: dict) -> tuple:
     """Return (status_moves, field_changes) from changelog histories, oldest first."""
     moves, changes = [], []
-    watched = {fid: role for role, fid in field_ids.items()}
+    watched = {fid: role for role, fids in field_ids.items() for fid in fids}
     for h in histories:
         for item in h.get("items") or []:
             fid = item.get("fieldId") or item.get("field")
@@ -133,7 +134,7 @@ def _record(issue: dict, histories: list, ids: dict, cfg: dict, now) -> dict:
     status = f.get("status") or {}
     category = name_of(status.get("statusCategory"), "key")
     issue_type = name_of(f.get("issuetype"))
-    custom = {role: field_value(f.get(fid)) for role, fid in ids.items()}
+    custom = role_values(f, ids)
     moves, changes = _transitions(histories, ids)
 
     approved_status_move = next(
@@ -370,11 +371,11 @@ def main() -> int:
         collector = collector_info(client)
         ids, problems, candidates = resolve_fields(client, cfg["fields"])
         raw, truncated, _ = client.search_issues(
-            jql, BASE_FIELDS + sorted(set(ids.values())), cfg["max_items"]
+            jql, BASE_FIELDS + all_field_ids(ids), cfg["max_items"]
         )
         histories, history_complete = client.bulk_changelogs(
             [str(i.get("id")) for i in raw if i.get("id")],
-            ["status"] + sorted(set(ids.values()))[:9],
+            ["status"] + all_field_ids(ids),
         )
         records = [
             _record(i, histories.get(str(i.get("id")), []), ids, cfg, now) for i in raw
