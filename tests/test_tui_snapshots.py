@@ -93,8 +93,10 @@ def test_manifest(shot):
     assert shot("2")
 
 
-def test_manifest_add_fetchers_picker(shot):
-    assert shot("2", "a")
+def test_manifest_add_fetchers_picker(shot, demo_workspace):
+    root = demo_workspace.root
+    api.dump_manifest(api.init_manifest(), root / "manifests" / "empty.yaml", root)
+    assert shot("2", "a", *"demo_hello", "enter", manifest="manifests/empty.yaml")
 
 
 def test_manifest_remove_confirm(shot):

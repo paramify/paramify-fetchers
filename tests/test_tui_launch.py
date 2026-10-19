@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import select
+import shutil
 import struct
 import subprocess
 import sys
@@ -30,6 +31,11 @@ _ESCAPES = re.compile(rb"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|[P
 
 WORKSPACE = "paramify fetcher"
 WELCOME = "collect compliance evidence"
+
+
+def _paramify() -> str:
+    beside = Path(sys.executable).with_name("paramify")
+    return str(beside) if beside.exists() else (shutil.which("paramify") or str(beside))
 
 
 def _launch(argv: list, ready: str) -> tuple:
@@ -71,7 +77,7 @@ def _launch(argv: list, ready: str) -> tuple:
 @pytest.mark.parametrize(
     "argv, ready",
     [
-        ([str(Path(sys.executable).with_name("paramify")), "tui", "--manifest", "examples/demo.yaml"], WORKSPACE),
+        ([_paramify(), "tui", "--manifest", "examples/demo.yaml"], WORKSPACE),
         ([sys.executable, "-m", "framework.tui", "--manifest", "examples/demo.yaml"], WORKSPACE),
         ([sys.executable, "-m", "framework.tui"], WELCOME),
     ],
