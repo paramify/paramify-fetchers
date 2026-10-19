@@ -5,11 +5,15 @@ Azure Storage is ALWAYS encrypted at rest, so "encrypted: true" can never fail; 
 varies is `encryption.key_source` (customer-managed Key Vault key vs
 Microsoft.Storage) and whether infrastructure (double) encryption is on.
 Ported from prowler/providers/azure/services/storage/storage_service.py (Apache-2.0).
+Also geo-replication health, access-key age (from keyCreationTime; keys are never
+listed), blob containers and owner / classification tags.
 """
 
 import logging
 import os
+import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -48,6 +52,37 @@ KEY_SOURCE_KEYVAULT = "microsoft.keyvault"
 BENIGN_UNSUPPORTED_SERVICE = (
     "Blob is not supported for the account.",
     "File is not supported for the account.",
+)
+
+# Standard_GRS / RAGRS / GZRS / RAGZRS replicate to a secondary region; RA* can read from it.
+GEO_REDUNDANT_SKU = re.compile(r"G(Z)?RS$", re.IGNORECASE)
+READ_ACCESS_SKU = re.compile(r"RAG(Z)?RS$", re.IGNORECASE)
+
+STATS_COLLECTED = "collected"
+STATS_UNAVAILABLE = "unavailable"
+STATS_FAILED = "failed"
+STATS_NOT_APPLICABLE = "not_applicable"
+# The service's answer while the secondary cannot report a sync time; a posture, not a failed run.
+LAST_SYNC_UNAVAILABLE = ("lastsynctimeunavailable", "last sync time is unavailable")
+
+CONTAINERS_COLLECTED = "collected"
+CONTAINERS_NOT_SUPPORTED = "not_supported"
+CONTAINERS_FAILED = "failed"
+CONTAINERS_NOT_ATTEMPTED = "not_attempted"
+
+ACCESS_KEY_NAMES = ("key1", "key2")
+ACCESS_KEY_AGE_BENCHMARK_DAYS = 90
+
+# Matched case-insensitively with punctuation ignored, so "Data-Classification" is "DataClassification".
+OWNER_TAG_KEYS_ENV = "AZURE_STORAGE_OWNER_TAG_KEYS"
+CLASSIFICATION_TAG_KEYS_ENV = "AZURE_STORAGE_CLASSIFICATION_TAG_KEYS"
+DEFAULT_OWNER_TAG_KEYS = ("Owner", "OwnerEmail", "TechnicalOwner", "BusinessOwner", "DataOwner")
+DEFAULT_CLASSIFICATION_TAG_KEYS = (
+    "Classification",
+    "DataClassification",
+    "DataSensitivity",
+    "Sensitivity",
+    "Confidentiality",
 )
 
 
@@ -97,6 +132,45 @@ def project_storage_account(account) -> dict:
         # --- durability / replication ---
         "replication_settings": model_attr(sku, "name"),
         "allow_cross_tenant_replication": model_attr(account, "allow_cross_tenant_replication"),
+        "primary_location": model_attr(account, "primary_location"),
+        "secondary_location": model_attr(account, "secondary_location"),
+        "status_of_primary": model_attr(account, "status_of_primary"),
+        "status_of_secondary": model_attr(account, "status_of_secondary"),
+        "last_geo_failover_time": model_attr(account, "last_geo_failover_time"),
+        # When each key was last generated; the keys themselves are never listed.
+        "key_creation_time": {
+            name: model_attr(model_attr(account, "key_creation_time"), name) for name in ACCESS_KEY_NAMES
+        },
+        "tags": model_attr(account, "tags"),
+    }
+
+
+def project_geo_replication_stats(stats) -> dict:
+    """Read a `GeoReplicationStats` model (from get_properties expand=geoReplicationStats)."""
+    return {
+        "status": model_attr(stats, "status"),
+        "last_sync_time": model_attr(stats, "last_sync_time"),
+        "can_failover": model_attr(stats, "can_failover"),
+        "can_planned_failover": model_attr(stats, "can_planned_failover"),
+        "post_failover_redundancy": model_attr(stats, "post_failover_redundancy"),
+        "post_planned_failover_redundancy": model_attr(stats, "post_planned_failover_redundancy"),
+    }
+
+
+def project_container(container) -> dict:
+    """Read a `ListContainerItem`; metadata values are dropped, only their keys are kept."""
+    versioning = model_attr(container, "immutable_storage_with_versioning")
+    metadata = model_attr(container, "metadata")
+    return {
+        "id": model_attr(container, "id"),
+        "name": model_attr(container, "name"),
+        "public_access": model_attr(container, "public_access"),
+        # None when the list response carried no metadata field at all.
+        "metadata_keys": sorted(metadata.keys()) if metadata is not None else None,
+        "has_immutability_policy": model_attr(container, "has_immutability_policy"),
+        "has_legal_hold": model_attr(container, "has_legal_hold"),
+        "version_level_immutability": model_attr(versioning, "enabled"),
+        "last_modified_time": model_attr(container, "last_modified_time"),
     }
 
 
@@ -159,13 +233,109 @@ def _semicolon_list(value) -> list:
     return str(value).rstrip(";").split(";")
 
 
-def account_record(account: dict) -> dict:
+def _as_datetime(value) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _iso_utc(value) -> str | None:
+    moment = _as_datetime(value)
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if moment else None
+
+
+def _normalize_tag_key(key) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(key or "").lower())
+
+
+def tag_keys_from_env(env_name: str, default: tuple) -> tuple:
+    """Comma-separated tag keys from the environment, else the defaults."""
+    raw = os.environ.get(env_name) or ""
+    keys = tuple(k.strip() for k in raw.split(",") if k.strip())
+    return keys or default
+
+
+def tag_value(tags: dict | None, keys) -> str | None:
+    """The first of `keys` present on the resource, compared without case or punctuation."""
+    by_key = {_normalize_tag_key(k): v for k, v in (tags or {}).items()}
+    for key in keys:
+        value = by_key.get(_normalize_tag_key(key))
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def access_key_records(created: dict | None, expiration_days: int | None, now: datetime) -> list[dict]:
+    """Age of key1 and key2 from keyCreationTime, against keyPolicy.keyExpirationPeriodInDays."""
+    records = []
+    for name in ACCESS_KEY_NAMES:
+        moment = _as_datetime((created or {}).get(name))
+        age = (now - moment).days if moment else None
+        records.append({
+            "name": name,
+            "created": _iso_utc(moment),
+            "age_days": age,
+            "exceeds_expiration_period": (
+                age > expiration_days if age is not None and expiration_days is not None else None
+            ),
+        })
+    return records
+
+
+def geo_replication_stats_record(
+    stats: dict | None, stats_status: str, now: datetime, message: str | None = None
+) -> dict:
+    """Secondary-region health; `sync_lag_minutes` is how far the secondary trails the primary."""
+    stats = stats or {}
+    last_sync = _as_datetime(stats.get("last_sync_time"))
+    return {
+        "stats_status": stats_status,
+        "status": stats.get("status"),
+        "last_sync_time": _iso_utc(last_sync),
+        "sync_lag_minutes": int((now - last_sync).total_seconds() // 60) if last_sync else None,
+        "can_failover": stats.get("can_failover"),
+        "can_planned_failover": stats.get("can_planned_failover"),
+        "post_failover_redundancy": stats.get("post_failover_redundancy"),
+        "post_planned_failover_redundancy": stats.get("post_planned_failover_redundancy"),
+        "message": message,
+    }
+
+
+def container_record(container: dict, account_allows_public_access: bool) -> dict:
+    """One blob container; anonymous access needs both the container level and the account switch."""
+    public_access = container.get("public_access") or "None"
+    has_level = str(public_access).lower() != "none"
+    return {
+        "id": container.get("id"),
+        "name": container.get("name"),
+        "public_access": public_access,
+        "anonymous_access_effective": has_level and bool(account_allows_public_access),
+        "metadata_keys": container.get("metadata_keys"),
+        "has_immutability_policy": bool(container.get("has_immutability_policy") or False),
+        "has_legal_hold": bool(container.get("has_legal_hold") or False),
+        "version_level_immutability": bool(container.get("version_level_immutability") or False),
+        "last_modified_time": _iso_utc(container.get("last_modified_time")),
+    }
+
+
+def account_record(
+    account: dict,
+    now: datetime | None = None,
+    owner_tag_keys: tuple = DEFAULT_OWNER_TAG_KEYS,
+    classification_tag_keys: tuple = DEFAULT_CLASSIFICATION_TAG_KEYS,
+) -> dict:
     """Normalize one projected storage account into an evidence record.
 
     Prowler's defaults are preserved: the API omits allow_cross_tenant_replication,
     allow_shared_key_access and the network_rule_set fields when they sit at their
     (permissive) service defaults, so absent must read as that default, not as None.
     """
+    now = now or datetime.now(timezone.utc)
     resource_id = account.get("id")
     network_rule_set = account.get("network_rule_set") or {}
 
@@ -175,6 +345,13 @@ def account_record(account: dict) -> dict:
     cross_tenant = account.get("allow_cross_tenant_replication")
     shared_key = account.get("allow_shared_key_access")
     entra_auth = account.get("default_to_entra_authorization")
+
+    sku = str(account.get("replication_settings") or "")
+    expiration_days = int(key_expiration) if key_expiration is not None else None
+    keys = access_key_records(account.get("key_creation_time"), expiration_days, now)
+    ages = [k["age_days"] for k in keys if k["age_days"] is not None]
+    exceeds = [k["exceeds_expiration_period"] for k in keys]
+    tags = account.get("tags") or {}
 
     return {
         "id": resource_id,
@@ -216,6 +393,29 @@ def account_record(account: dict) -> dict:
         # Filled in by the blob/file enrichment; None = not collected (no endpoint).
         "blob_properties": None,
         "file_service_properties": None,
+        # --- geo-replication (stats filled in by the get_properties enrichment) ---
+        "geo_redundant": bool(GEO_REDUNDANT_SKU.search(sku)),
+        "read_access_secondary": bool(READ_ACCESS_SKU.search(sku)),
+        "primary_location": account.get("primary_location"),
+        "secondary_location": account.get("secondary_location"),
+        "status_of_primary": account.get("status_of_primary"),
+        "status_of_secondary": account.get("status_of_secondary"),
+        "last_geo_failover_time": _iso_utc(account.get("last_geo_failover_time")),
+        "geo_replication_stats": None,
+        # --- access-key age ---
+        "access_keys": keys,
+        "access_key_max_age_days": max(ages) if ages else None,
+        # None when there is no expiry policy or a key's creation time is unknown.
+        "access_keys_within_expiration_period": (
+            False if True in exceeds else None if None in exceeds else True
+        ),
+        # --- containers (filled in by the blob_containers enrichment) ---
+        "containers_status": CONTAINERS_NOT_ATTEMPTED,
+        "containers": None,
+        # --- ownership ---
+        "tags": dict(sorted(tags.items())),
+        "owner_tag": tag_value(tags, owner_tag_keys),
+        "classification_tag": tag_value(tags, classification_tag_keys),
     }
 
 
@@ -291,6 +491,60 @@ def summarize(accounts: list[dict]) -> dict:
             for a in accounts
             if dig(a, "file_service_properties", "share_delete_retention_policy", "enabled")
         ),
+        **summarize_replication_keys_containers(accounts),
+    }
+
+
+def summarize_replication_keys_containers(accounts: list[dict]) -> dict:
+    geo = [a for a in accounts if a.get("geo_redundant")]
+    stats = [a["geo_replication_stats"] for a in geo if a.get("geo_replication_stats")]
+    collected = [s for s in stats if s["stats_status"] == STATS_COLLECTED]
+    lags = [s["sync_lag_minutes"] for s in collected if s["sync_lag_minutes"] is not None]
+    ages = [a["access_key_max_age_days"] for a in accounts if a.get("access_key_max_age_days") is not None]
+    containers = [c for a in accounts for c in (a.get("containers") or [])]
+    return {
+        # --- geo-replication ---
+        "geo_redundant_accounts": len(geo),
+        "read_access_geo_redundant_accounts": sum(1 for a in geo if a["read_access_secondary"]),
+        "geo_replication_stats_collected_accounts": len(collected),
+        "geo_replication_live_accounts": sum(
+            1 for s in collected if str(s["status"] or "").lower() == "live"
+        ),
+        "geo_replication_max_sync_lag_minutes": max(lags) if lags else None,
+        "geo_failover_ready_accounts": sum(1 for s in collected if s["can_failover"]),
+        "secondary_unavailable_accounts": sum(
+            1 for a in geo if str(a.get("status_of_secondary") or "").lower() == "unavailable"
+        ),
+        "geo_failed_over_accounts": sum(1 for a in accounts if a.get("last_geo_failover_time")),
+        # --- access-key age ---
+        "access_key_age_known_accounts": sum(
+            1
+            for a in accounts
+            if a.get("access_keys") and all(k["age_days"] is not None for k in a["access_keys"])
+        ),
+        "access_key_max_age_days": max(ages) if ages else None,
+        "accounts_with_access_key_older_than_90_days": sum(
+            1 for age in ages if age > ACCESS_KEY_AGE_BENCHMARK_DAYS
+        ),
+        "accounts_with_access_key_beyond_expiration_period": sum(
+            1 for a in accounts if a.get("access_keys_within_expiration_period") is False
+        ),
+        # --- containers ---
+        "total_containers": len(containers),
+        "containers_with_public_access_level": sum(
+            1 for c in containers if str(c["public_access"]).lower() != "none"
+        ),
+        "anonymously_accessible_containers": sum(1 for c in containers if c["anonymous_access_effective"]),
+        "containers_with_immutability_policy": sum(1 for c in containers if c["has_immutability_policy"]),
+        "containers_with_legal_hold": sum(1 for c in containers if c["has_legal_hold"]),
+        "accounts_with_containers_not_collected": sum(
+            1 for a in accounts if a.get("containers_status") == CONTAINERS_FAILED
+        ),
+        # --- ownership ---
+        "accounts_with_owner_tag": sum(1 for a in accounts if a.get("owner_tag") is not None),
+        "accounts_with_classification_tag": sum(
+            1 for a in accounts if a.get("classification_tag") is not None
+        ),
     }
 
 
@@ -301,13 +555,20 @@ def _is_benign_unsupported(exc: BaseException) -> bool:
     return any(marker in message for marker in BENIGN_UNSUPPORTED_SERVICE)
 
 
-def collect_storage_accounts(subscription_id, cred, collector: Collector) -> list[dict]:
-    """One storage_accounts.list() plus a blob/file service GET per account.
+def collect_storage_accounts(
+    subscription_id, cred, collector: Collector, now: datetime | None = None
+) -> list[dict]:
+    """One storage_accounts.list() plus a blob/file service GET and a container list per account,
+    and a get_properties(expand=geoReplicationStats) per geo-redundant account.
 
-    The list response already carries the encryption / network / key-policy fields;
-    only versioning and the soft-delete policies need the per-account GETs.
+    The list response already carries the encryption / network / key-policy fields and
+    keyCreationTime, so key age needs no key read; listKeys is never called.
     """
     from azure.mgmt.storage import StorageManagementClient
+
+    now = now or datetime.now(timezone.utc)
+    owner_keys = tag_keys_from_env(OWNER_TAG_KEYS_ENV, DEFAULT_OWNER_TAG_KEYS)
+    classification_keys = tag_keys_from_env(CLASSIFICATION_TAG_KEYS_ENV, DEFAULT_CLASSIFICATION_TAG_KEYS)
 
     def _client():
         return StorageManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
@@ -319,7 +580,8 @@ def collect_storage_accounts(subscription_id, cred, collector: Collector) -> lis
     def _list():
         # ItemPaged: the SDK follows nextLink itself, so pagination is handled.
         return [
-            account_record(project_storage_account(a)) for a in client.storage_accounts.list()
+            account_record(project_storage_account(a), now, owner_keys, classification_keys)
+            for a in client.storage_accounts.list()
         ]
 
     accounts = collector.guard("storage.storage_accounts.list", _list, default=[])
@@ -352,8 +614,46 @@ def collect_storage_accounts(subscription_id, cred, collector: Collector) -> lis
                 )
             ),
         )
+        if account["geo_redundant"]:
+            account["geo_replication_stats"] = _geo_replication_stats(client, collector, group, name, now)
+        _collect_containers(client, collector, account, group, name)
 
     return sorted(accounts, key=lambda r: r.get("id") or "")
+
+
+def _geo_replication_stats(client, collector: Collector, group: str, name: str, now: datetime) -> dict:
+    """get_properties(expand=geoReplicationStats); LastSyncTimeUnavailable is a posture, not a failure."""
+    try:
+        account = client.storage_accounts.get_properties(group, name, expand="geoReplicationStats")
+    except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
+        message = " ".join(str(exc).split())[:300]
+        if any(marker in message.lower() for marker in LAST_SYNC_UNAVAILABLE):
+            logger.warning("storage account %s: last sync time unavailable — %s", name, message)
+            return geo_replication_stats_record(None, STATS_UNAVAILABLE, now, message)
+        collector.record(f"storage.storage_accounts.get_properties geoReplicationStats ({name})", exc)
+        return geo_replication_stats_record(None, STATS_FAILED, now, message)
+    stats = model_attr(account, "geo_replication_stats")
+    if stats is None:
+        return geo_replication_stats_record(None, STATS_NOT_APPLICABLE, now)
+    return geo_replication_stats_record(project_geo_replication_stats(stats), STATS_COLLECTED, now)
+
+
+def _collect_containers(client, collector: Collector, account: dict, group: str, name: str) -> None:
+    """blob_containers.list(): every container's access level and immutability flags."""
+    try:
+        listed = [project_container(c) for c in client.blob_containers.list(group, name)]
+    except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
+        if _is_benign_unsupported(exc):
+            account["containers_status"] = CONTAINERS_NOT_SUPPORTED
+            return
+        collector.record(f"storage.blob_containers.list ({name})", exc)
+        account["containers_status"] = CONTAINERS_FAILED
+        return
+    allows_public = account["allow_blob_public_access"]
+    account["containers_status"] = CONTAINERS_COLLECTED
+    account["containers"] = sorted(
+        (container_record(c, allows_public) for c in listed), key=lambda r: r.get("name") or ""
+    )
 
 
 def _service_properties(collector: Collector, operation: str, account_name: str, fn):
@@ -406,7 +706,7 @@ def main() -> int:
                 "in use; reporting status not_registered",
                 subscription_id,
             )
-        accounts = collect_storage_accounts(subscription_id, cred, collector)
+        accounts = collect_storage_accounts(subscription_id, cred, collector, datetime.now(timezone.utc))
     elif not subscription_id:
         collector.record(
             "resolve_subscription",

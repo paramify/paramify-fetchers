@@ -1,5 +1,5 @@
 name: azure_storage_encryption_status
-version: 0.1.0
+version: 0.2.0
 description: >
   For each storage account in the subscription, reports whether the encryption key
   is customer-managed (Key Vault) or platform-managed, whether infrastructure
@@ -9,7 +9,12 @@ description: >
   authorization, replication SKU, cross-tenant replication, plus blob versioning /
   container soft delete and file share soft delete / SMB channel encryption. Azure
   Storage is always encrypted at rest, so the evidence that varies is CMK vs
-  Microsoft-managed, not "encrypted: true/false".
+  Microsoft-managed, not "encrypted: true/false". Also each account's secondary
+  region and, for geo-redundant accounts, geo-replication health (status, last sync
+  time, whether it can fail over); the age of both access keys against the key
+  expiry policy, from keyCreationTime (the keys themselves are never listed); every
+  blob container's public access level, metadata keys and immutability / legal-hold
+  flags; and the account's tags with its owner and classification tag values.
 category: azure
 
 supports_targets: true
@@ -22,6 +27,25 @@ output:
   type: json
   path: azure_storage_encryption_status.json
   aggregation: per_target
+
+config_schema:
+  owner_tag_keys:
+    type: string
+    required: false
+    default: Owner,OwnerEmail,TechnicalOwner,BusinessOwner,DataOwner
+    env: AZURE_STORAGE_OWNER_TAG_KEYS
+    description: >
+      Comma-separated tag keys that name an account's owner, tried in order. Matched
+      without case or punctuation, so "data-owner" matches DataOwner. The first one
+      present fills owner_tag.
+  classification_tag_keys:
+    type: string
+    required: false
+    default: Classification,DataClassification,DataSensitivity,Sensitivity,Confidentiality
+    env: AZURE_STORAGE_CLASSIFICATION_TAG_KEYS
+    description: >
+      Comma-separated tag keys that give an account's data classification, tried in
+      order and matched the same way. The first one present fills classification_tag.
 
 target_schema:
   subscription_id:
@@ -45,6 +69,9 @@ ksis:
   - KSI-SVC-SIN
   - KSI-SVC-ASM
   - KSI-CNA-RNT
+  - KSI-CNA-OFA   # secondary region, replication health and failover readiness
+  - KSI-RPL-ABO   # geo-replicated copy and its last sync time
+  - KSI-PIY-GIV   # containers with owner and classification tags
 
 evidence_set:
   reference_id: EVD-AZURE-STORAGE-ENC
@@ -52,4 +79,34 @@ evidence_set:
   instructions: >
     Script: fetcher.py. Azure SDK calls (azure-mgmt-storage StorageManagementClient):
     storage_accounts.list(), blob_services.get_service_properties(),
-    file_services.get_service_properties().
+    file_services.get_service_properties(), blob_containers.list(), and
+    storage_accounts.get_properties(expand="geoReplicationStats") for each
+    geo-redundant account. Reader on the subscription is sufficient. listKeys and
+    any other call that returns a key or SAS token are never made.
+    Geo-replication: geo_redundant is true for a GRS, RA-GRS, GZRS or RA-GZRS SKU,
+    read_access_secondary for RA-GRS or RA-GZRS. primary_location,
+    secondary_location, status_of_primary, status_of_secondary and
+    last_geo_failover_time come from the list. geo_replication_stats (null on
+    accounts that are not geo-redundant) carries stats_status ("collected",
+    "unavailable" when the service reports LastSyncTimeUnavailable, "failed" when
+    the read failed and the run exits 1, "not_applicable" when no stats came back),
+    status (Live, Bootstrap, Unavailable), last_sync_time, sync_lag_minutes (minutes
+    from last_sync_time to the collection time), can_failover,
+    can_planned_failover and the post-failover redundancy.
+    Access keys: access_keys lists key1 and key2 with created (keyCreationTime),
+    age_days and exceeds_expiration_period against key_expiration_period_in_days
+    (null when the account has no key expiry policy or the creation time is
+    unknown). access_keys_within_expiration_period is false when either key is
+    older than the policy, null when there is no policy or a creation time is
+    unknown. Read key age with allow_shared_key_access: keys on an account with
+    shared key access off cannot be used.
+    Containers: containers_status is "collected", "not_supported" (an account kind
+    with no Blob service), "failed" (the run exits 1) or "not_attempted".
+    containers lists each container's public_access (None, Blob, Container),
+    anonymous_access_effective (a public level and allow_blob_public_access on the
+    account), metadata_keys (keys only, never values; null when the list response
+    carried no metadata), has_immutability_policy, has_legal_hold,
+    version_level_immutability and last_modified_time.
+    Ownership: tags holds the account's tags; owner_tag and classification_tag are
+    the values of the first configured owner_tag_keys / classification_tag_keys tag
+    present, else null. Existing fields are unchanged.

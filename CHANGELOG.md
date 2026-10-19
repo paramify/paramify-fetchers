@@ -551,6 +551,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_storage_encryption_status` 0.2.0 adds geo-replication, access-key age
+  and containers.** Each account now carries its primary and secondary region and
+  their status, and a geo-redundant account its replication health from
+  `get_properties(expand=geoReplicationStats)`: status, last sync time,
+  `sync_lag_minutes` and whether it can fail over. A `LastSyncTimeUnavailable`
+  answer reads `stats_status: unavailable` rather than failing the run. Both
+  access keys get an age from `keyCreationTime`, judged against the key expiry
+  policy (`access_keys_within_expiration_period`); `listKeys` is never called.
+  Every blob container is listed with its public access level,
+  `anonymous_access_effective` (the account must allow it too), metadata keys
+  (never values) and its immutability and legal-hold flags. The account's tags
+  are recorded with `owner_tag` and `classification_tag`, taken from tag keys set
+  by the new `owner_tag_keys` and `classification_tag_keys` config. Summary adds
+  geo-replication, key-age, container and tag counts. Also maps to `KSI-CNA-OFA`,
+  `KSI-RPL-ABO` and `KSI-PIY-GIV`. Existing fields are unchanged.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`
