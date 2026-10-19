@@ -1,0 +1,101 @@
+name: azure_devops_permissions
+version: 0.1.0
+description: >
+  For one Azure DevOps organization: every explicit permission entry in the
+  security namespaces that govern the organization, projects, Git and TFVC
+  repositories, build and release pipelines, environments, service
+  connections, the library and audit streams. Each entry gives the identity or
+  group, the scope it applies at, and the actions allowed and denied, with the
+  inherited and effective rights Azure DevOps reports. High-impact rights
+  (managing permissions, deleting a project, editing or bypassing policies,
+  administering builds, releases, service connections and audit streams) set
+  on anyone other than the built-in admin groups are flagged. This is evidence
+  of least privilege in the delivery platform.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: azure_devops_permissions.json
+  aggregation: per_target
+
+target_schema:
+  organization_url:
+    type: string
+    required: true
+    env: AZURE_DEVOPS_ORG_URL
+    description: >
+      The Azure DevOps organization, as https://dev.azure.com/<org>,
+      https://<org>.visualstudio.com or just <org>. One target per organization.
+  projects:
+    type: string
+    required: false
+    env: AZURE_DEVOPS_PROJECTS
+    description: >
+      Comma-separated project names or ids to limit project-scoped entries to.
+      Optional: omit to keep every project. Organization-level entries are
+      always kept. A named project that is missing fails the run.
+
+secrets:
+  - name: pat
+    env: AZURE_DEVOPS_PAT
+    per_target: true
+    required: false
+    description: >
+      Personal access token for the organization with Security (Manage),
+      Identity (Read) and Project and Team (Read). Azure DevOps has no
+      read-only scope for access control lists; the fetcher only reads.
+      Optional: without it the fetcher signs in as the ambient Entra identity
+      (az login, managed or workload identity, or the category's service
+      principal added to the organization), which needs to be an organization
+      member that can view permissions in each namespace; the least privilege
+      for that is not yet measured. Collection covers what the signed-in
+      identity can see, recorded as metadata.collecting_identity.
+
+ksis:
+  - KSI-IAM-ELP      # who holds which delivery-platform rights, and high-impact rights outside admin groups
+
+evidence_set:
+  reference_id: EVD-AZURE-DEVOPS-PERMISSIONS
+  name: Azure DevOps Permissions
+  instructions: >
+    Script: fetcher.py. Azure DevOps REST 7.1. Namespaces: _apis/securitynamespaces,
+    keeping Collection, Project, Git Repositories, VersionControlItems and
+    VersionControlPrivileges (TFVC), Build, ReleaseManagement,
+    ServiceEndpoints, Environment, Library and AuditLog; a namespace the
+    organization does not have is listed in namespaces_not_found. Each one's
+    access control lists come from _apis/accesscontrollists/{namespace} with
+    recurse and includeExtendedInfo, every token. An entry is one access
+    control entry with an allow or deny bit set: its token, the `scope` the
+    token denotes (organization, project, repository, branch, path, folder,
+    pipeline, release_stage, environment, service_connection, variable_group,
+    secure_file), the project, the resource id, whether the token inherits
+    from its parent, and the allowed, denied, inherited and effective actions
+    decoded with the namespace's action names (results.namespaces maps each
+    name to its display name). Identities are resolved with _apis/identities
+    by descriptor; `kind` is user, group, entra_group, service_principal or
+    service_identity, and `admin_group` marks Project Collection
+    Administrators, Project Collection Service Accounts, Project Collection
+    Build Administrators and the Project, Build, Release and Endpoint
+    Administrators groups. `high_impact_allowed` lists the explicitly allowed
+    (and not denied) high-impact actions: Collection GENERIC_WRITE and
+    MANAGE_ENTERPRISE_POLICIES; Project GENERIC_WRITE, DELETE,
+    UPDATE_VISIBILITY and ADMINISTER_BUILD; Git ManagePermissions,
+    EditPolicies, PolicyExempt, PullRequestBypassPolicy, DeleteRepository and
+    ForcePush; TFVC AdminProjectRights, CheckinOther and AdminConfiguration;
+    Build AdministerBuildPermissions, EditBuildDefinition,
+    DeleteBuildDefinition and OverrideBuildCheckInValidation; Release
+    AdministerReleasePermissions, EditReleaseDefinition,
+    DeleteReleaseDefinition and ManageReleaseApprovers; ServiceEndpoints,
+    Environment and Library Administer (Environment also Manage); AuditLog
+    Manage_Streams and Delete_Streams. `high_impact_outside_admin_groups`
+    flags such an entry on an identity that is not an admin group.
+    branch_policy_bypass_holders lists who may bypass Git branch policies.
+    Signs in with the PAT, else the ambient Entra identity (metadata.auth_mode).
+    A refused call names the PAT scope it needs.

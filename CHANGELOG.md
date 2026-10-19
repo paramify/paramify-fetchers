@@ -12,6 +12,26 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_devops_permissions`** (`EVD-AZURE-DEVOPS-PERMISSIONS`): who may do what
+  in an Azure DevOps organization. Every explicit permission entry in the
+  namespaces that govern the organization, projects, Git and TFVC repositories,
+  build and release pipelines, environments, service connections, the library and
+  audit streams, read with `recurse` and `includeExtendedInfo`. Each entry records:
+  - the identity, resolved by descriptor (user, group, Entra group, service
+    principal or service identity);
+  - the scope its token denotes (organization, project, repository, branch, path,
+    pipeline, release stage, environment, service connection, variable group,
+    secure file) and the project;
+  - the allowed, denied, inherited and effective actions by name.
+
+  High-impact rights set on anyone other than the built-in admin groups are
+  flagged: managing permissions, deleting a project, editing or bypassing
+  policies, force-pushing, checking in other users' changes, administering
+  builds, releases, service connections, environments and the library, and
+  managing audit streams. `branch_policy_bypass_holders` lists who may bypass Git
+  branch policies. PAT scopes: Security (Manage), because Azure DevOps has no
+  read-only scope for access control lists (the fetcher only reads), plus
+  Identity (Read) and Project and Team (Read).
 - **`azure_devops_audit_streams`** (`EVD-AZURE-DEVOPS-AUDIT-STREAMS`): whether an
   Azure DevOps organization exports its audit log, which it otherwise keeps for
   90 days. Records:
