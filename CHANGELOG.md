@@ -769,6 +769,28 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_authentication_policy` counts X.509 as phishing-resistant only
+  when it is multi-factor** (0.1.0 → 0.2.0). An enabled X.509 certificate method
+  was always listed in `phishing_resistant_methods_enabled`, even with its default
+  authentication mode set to `x509CertificateSingleFactor`, which does not satisfy
+  MFA by itself. It now counts only when the default mode is
+  `x509CertificateMultiFactor`; a new summary field,
+  `x509_certificate_multi_factor`, reports the mode (`null` when it is not
+  reported).
+- **`azure_entra_mfa_status` finds every admin** (0.1.0 → 0.2.0). Admin status
+  came only from the registration report's `isAdmin` flag, which exists only on
+  users with a registration row, so an admin who had registered nothing was
+  counted as a non-admin and `admin_mfa_coverage_percentage` was overstated.
+  Admins are now the holders of privileged directory roles (the same list
+  `azure_entra_privileged_roles` uses), directly or through a role-assignable
+  group, plus anyone the report flags. Each user carries
+  `privileged_directory_roles` and `is_admin_in_registration_report`; the summary
+  adds `admin_users_without_mfa`, `admin_users_without_registration_details` and
+  `admin_role_membership_readable`. The fetcher now reads `GET /directoryRoles`,
+  the members of each privileged role and the transitive members of any group
+  holding one: covered by `Directory.Read.All`, which the Entra fetchers already
+  document (or `RoleManagement.Read.Directory` + `GroupMember.Read.All`). If that
+  read is denied the run fails and the admin figures read `null`.
 - **Checkov evidence no longer overstates pass rates** (`checkov_terraform` and
   `checkov_kubernetes` 0.1.0 → 0.2.0). `skip_resources` deleted failed checks on
   matching resources, so they left `total_checks` and raised
