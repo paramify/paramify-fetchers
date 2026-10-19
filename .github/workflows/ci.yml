@@ -104,6 +104,8 @@ jobs:
   smoke:
     name: smoke (CLI discovery)
     runs-on: ubuntu-latest
+    # The goldens step runs real commands; a hang should not hold a runner for 6h.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -132,6 +134,8 @@ jobs:
   tui:
     name: tui (textual ${{ matrix.textual }})
     runs-on: ubuntu-latest
+    # A wedged app or pty would otherwise hold the runner for the 6h default.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:

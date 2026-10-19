@@ -6,6 +6,7 @@ intended UI change: pytest tests/test_tui_snapshots.py --snapshot-update
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -34,7 +35,7 @@ class _Frozen(datetime):
 
 
 @pytest.fixture
-def shot(snap_compare, demo_workspace, monkeypatch):
+def shot(snap_compare, demo_workspace, no_network, monkeypatch):
     """Open the app on MANIFEST (or the welcome screen for None), press keys, compare."""
     monkeypatch.setattr(chrome, "datetime", _Frozen)
     monkeypatch.setattr(welcome, "datetime", _Frozen)
@@ -43,7 +44,7 @@ def shot(snap_compare, demo_workspace, monkeypatch):
 
     async def settle(pilot) -> None:
         app = pilot.app
-        await app.workers.wait_for_complete()
+        await asyncio.wait_for(app.workers.wait_for_complete(), 30)
         await pilot.pause()
         # Jump the welcome animation to its settled frame.
         clock.now = 10.0
@@ -125,5 +126,5 @@ def test_paramify(shot):
     assert shot("5")
 
 
-def test_paramify_scripts_preview(shot, no_network):
+def test_paramify_scripts_preview(shot):
     assert shot("5", "p")

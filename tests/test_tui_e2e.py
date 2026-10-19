@@ -152,4 +152,4 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch):
             assert _text(upload_banner) == "evidence upload complete — uploaded=0 duplicates=0 errors=0"
             assert not (run_dir / "upload_log.json").exists()
 
-    asyncio.run(drive())
+    asyncio.run(asyncio.wait_for(drive(), 120))

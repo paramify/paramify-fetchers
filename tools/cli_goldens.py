@@ -59,6 +59,7 @@ def _normalise(text: str) -> str:
 def _capture(args: list) -> str:
     proc = subprocess.run(
         [_paramify(), *args], cwd=REPO_ROOT, env=_env(), capture_output=True, text=True,
+        timeout=120,
     )
     shown = " ".join(["paramify", *args])
     return _normalise(

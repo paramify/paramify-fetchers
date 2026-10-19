@@ -316,11 +316,17 @@ def demo_workspace(_demo_template, tmp_path, monkeypatch):
 
 @pytest.fixture
 def no_network(monkeypatch):
-    """Fail any DNS lookup or outbound connection, Paramify's included."""
+    """Refuse name lookups, connects and sendto, and fail at teardown if any were tried."""
+    attempts: list = []
+
     def refuse(*args, **kwargs):
         where = [a for a in args if not isinstance(a, socket.socket)]
+        attempts.append(where)
         raise AssertionError(f"test touched the network: {where!r}")
 
-    monkeypatch.setattr(socket, "getaddrinfo", refuse)
-    monkeypatch.setattr(socket.socket, "connect", refuse)
-    monkeypatch.setattr(socket.socket, "connect_ex", refuse)
+    for name in ("getaddrinfo", "gethostbyname", "gethostbyname_ex"):
+        monkeypatch.setattr(socket, name, refuse)
+    for name in ("connect", "connect_ex", "sendto"):
+        monkeypatch.setattr(socket.socket, name, refuse)
+    yield attempts
+    assert not attempts, f"network attempts (the app may have swallowed the error): {attempts}"
