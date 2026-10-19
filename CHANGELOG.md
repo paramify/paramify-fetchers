@@ -735,6 +735,25 @@ schemas and the `paramify` CLI — not the internal code.
   `monitored_operation_coverage_reaching_human` does the same for the existing
   map. `action_groups` and `monitored_operation_coverage` are
   unchanged.
+- **`azure_defender_plans` 0.2.0 records each plan's sub-plan, enablement time
+  and inheritance.** Each plan now carries `sub_plan` (Servers `P1` / `P2`,
+  `DefenderForStorageV2`, `PerKeyVault`, …), `enablement_time` (the last time it
+  was set to Standard; `null` when Azure does not report it, which can be the case
+  for every plan, so `enabled_plan_enablement_times` can be all `null` and is not a
+  reliable signal for a validator), `resources_coverage_status`, `enforce`,
+  `deprecated` and `replaced_by`, and `inherited` / `inherited_from` with
+  `inherited_from_scope` (`management_group`, `subscription`, `resource_group` or
+  `resource`), all from the same `pricings.list` call. Azure documents inheritance as reported for
+  resource-level pricing only, so at subscription scope it reads `null` and
+  `plans_reporting_inheritance` says whether any plan reported it. New summary
+  keys: `enabled_plans`, `enabled_plan_sub_plans`, `enabled_plan_enablement_times`,
+  `enabled_plans_not_fully_covered` (an enabled plan with no coverage status is
+  listed as `unknown`, so it never reads as covered), `plans_not_enabled`
+  (deprecated plans left out), `deprecated_plans`, `deprecated_plans_enabled`,
+  `enforced_plans`, `inherited_plans` and `plans_inherited_from_management_group`.
+  The summary does
+  not judge which plans a system needs. Existing fields and summary keys are
+  unchanged.
 - **`azure_diagnostic_settings` also maps to `KSI-MLA-OSM`**, which its
   subscription activity-log export already evidenced.
 - **`KSI-SVC-PRR` counts as config-evidenceable.** Its residual elements are a
@@ -806,6 +825,26 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →
+  0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
+  counterpart of `DenyAction`, was reported as `unresolved` with no reason and
+  raised `unresolved_effect_assignments`. It now resolves to `auditAction`, an
+  audit-only effect. `mutate` and `addToNetworkGroup` (both in Microsoft's
+  effects reference) and `enforceSetting` (used by built-in definitions) now
+  resolve as enforcing effects. Every assignment's `policy_effects.effect_counts`
+  and the summary's `member_policy_effect_counts` therefore gain four keys,
+  zero unless used: `auditAction`, `mutate`, `addToNetworkGroup` and
+  `enforceSetting`. Any other unrecognised value is still unresolved, but its
+  `reason` now names the value (`unknown effect value 'X'`). Two new summary
+  keys count unresolved member policies: `unresolved_member_policies`, and
+  `unresolved_member_policies_not_enforced` for those in any assignment whose
+  enforcementMode is not Default. Members of an initiative whose definition
+  can't be read aren't counted; that assignment shows only in
+  `unresolved_effect_assignments`. The per-assignment fields are unchanged: a
+  partly resolved DoNotEnforce initiative is still classed by its resolved
+  members, so its `effect_class` can read `audit_only` and
+  `enforcing_effects_not_enforced` false. The new summary keys are where that
+  gap shows.
 - **`azure_entra_authentication_policy` counts X.509 as phishing-resistant only
   when it is multi-factor** (0.1.0 → 0.2.0). An enabled X.509 certificate method
   was always listed in `phishing_resistant_methods_enabled`, even with its default

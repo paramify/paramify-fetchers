@@ -1807,6 +1807,15 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["default_value"],
         "azure/policy_assignments — the default an unset effect parameter falls back to",
     ),
+    # --- Defender plans: a renamed field reads as "no sub-plan" or "not inherited" ---
+    (
+        "azure.mgmt.security.models",
+        "Pricing",
+        ["pricing_tier", "sub_plan", "free_trial_remaining_time", "enablement_time",
+         "enforce", "inherited", "inherited_from", "resources_coverage_status",
+         "deprecated", "replaced_by", "extensions"],
+        "azure/defender_plans",
+    ),
     # --- Defender regulatory compliance: a renamed count reads as 0 failed ---
     (
         "azure.mgmt.security.models",

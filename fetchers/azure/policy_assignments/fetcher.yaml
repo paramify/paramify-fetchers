@@ -1,5 +1,5 @@
 name: azure_policy_assignments
-version: 0.2.0
+version: 0.3.0
 description: >
   Every Azure Policy assignment in effect on the subscription — its own and the ones
   inherited from a management group: display name, the referenced policy definition
@@ -13,7 +13,9 @@ description: >
   initiative, following parameterized effects through the assignment's value, then
   the initiative's default, then the definition's default; so the evidence says
   which assignments actually enforce (an enforcing effect under enforcementMode
-  Default) and which only audit.
+  Default) and which only audit. An effect value it does not recognise is reported
+  as unresolved with that value in its reason, and the summary counts unresolved
+  member policies, overall and under DoNotEnforce.
 category: azure
 
 supports_targets: true
