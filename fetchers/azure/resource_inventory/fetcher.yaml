@@ -88,4 +88,15 @@ evidence_set:
     tostring(properties.resourceId), complianceState =
     tostring(properties.complianceState) | order by id asc". The three are joined by
     resource id in the fetcher. Reader is sufficient — Resource Graph returns only
-    the resources the caller can read.
+    the resources the caller can read. Every policy state, Exempt and Unknown
+    included, counts toward policy_evaluations, so toward
+    resources_evaluated_by_policy and policy_evaluated_percentage; only NonCompliant
+    counts toward policy_non_compliant. Each query stops at 1,000 pages (1,000,000
+    rows), a guard in the fetcher rather than a documented Resource Graph limit. A
+    query past it is a collection failure, never a truncated result: the run exits
+    1, with that service's counts null and the error in metadata.api_failures.
+    PolicyResources, one state per resource, assignment and policy, is the query a
+    large subscription can push past it. A query that long will usually hit the
+    runner's default 600-second timeout first (exit 124, no evidence file).
+    KSI-CNA-EIS and KSI-SVC-EIS are supporting evidence: Defender's coverage and
+    unhealthy findings, not the enforcement or remediation itself.
