@@ -855,6 +855,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`checkov_bicep` passes its list settings to checkov intact** (0.2.0 →
+  0.2.1). `checks`, `skip_checks` and `skip_paths` take entries separated by
+  commas or newlines, and each entry is trimmed and passed to checkov whole.
+  Before:
+  - a `skip_paths` entry with a space (`My Templates/legacy`) became two skip
+    paths, and each piece could skip folders it was not meant to;
+  - `checks` with a space after a comma (`CKV_AZURE_3, CKV_AZURE_44`), or one
+    id per line, failed the run;
+  - `skip_checks` read only its first line, so checks listed below it still
+    ran.
+
+  `metadata.skip_paths` now lists exactly the paths checkov was told to skip.
+  It used to show a path with a space, or several lines, as one entry.
 - **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →
   0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
   counterpart of `DenyAction`, was reported as `unresolved` with no reason and

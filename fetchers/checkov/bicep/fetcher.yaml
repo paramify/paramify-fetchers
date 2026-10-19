@@ -1,5 +1,5 @@
 name: checkov_bicep
-version: 0.2.0
+version: 0.2.1
 description: >
   Runs Checkov IaC security scanning over the Bicep and ARM templates in a repo.
   Clones the repo (generic git, any host, including Azure DevOps), or with
