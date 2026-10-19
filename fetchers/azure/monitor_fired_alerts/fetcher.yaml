@@ -1,0 +1,81 @@
+name: azure_monitor_fired_alerts
+version: 0.1.0
+description: >
+  Every Azure Monitor alert fired in the subscription in the last 30 days (Azure
+  keeps fired alerts that long): the rule that fired it, severity, signal type,
+  monitor condition, alert state, and fired, resolved and last-modified times, with
+  each alert's state history showing who acknowledged and closed it, when, and
+  whether its action groups ran. Every metric, log search, smart detector and
+  activity log alert rule is listed with its fire count and last fired time, so
+  enabled rules that never fired stand out.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_monitor_fired_alerts.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-MLA-ALA
+  - KSI-MLA-RVL
+
+evidence_set:
+  reference_id: EVD-AZURE-MONITOR-FIRED-ALERTS
+  name: Azure Monitor Fired Alerts
+  instructions: >
+    Script: fetcher.py. Reader (or Monitoring Reader) at subscription scope. ARM REST
+    with nextLink followed to the end. resource.providers.get for
+    Microsoft.AlertsManagement and Microsoft.Insights; an unregistered provider is
+    skipped and reported in provider_registration_status. (1) GET
+    Microsoft.AlertsManagement/alertsSummary?groupby=alertState&timeRange=30d (api
+    2019-05-05-preview) for the total, then GET
+    Microsoft.AlertsManagement/alerts?timeRange=30d&pageCount=250 (same api; without
+    timeRange the list covers one day). all_alerts_listed is true when the list holds
+    at least alertsSummary's total. Per alert from properties.essentials: alert_rule_id
+    (alertRule; null for built-in alerts such as Azure Backup's), rule_type from the
+    rule id's provider type (metricAlerts metric, scheduledQueryRules log_search,
+    smartDetectorAlertRules smart_detector, activityLogAlerts activity_log),
+    severity, signal_type, monitor_service, monitor_condition (Fired / Resolved),
+    alert_state (New / Acknowledged / Closed), target resource, fired_at
+    (startDateTime), resolved_at (monitorConditionResolvedDateTime), last_modified_at
+    and last_modified_by, actions_suppressed (actionStatus.isSuppressed). (2) Per
+    alert, GET {alert id}/history: every modification (event, old and new value,
+    time, who, comments). acknowledged_at/by is the first StateChange to
+    Acknowledged; closed_at/by is the last StateChange to Closed, set only while the
+    alert is Closed; closed_by_person is false when that actor is System.
+    hours_to_acknowledge and hours_to_close count from fired_at. actions_triggered
+    and actions_failed count ActionsTriggered and ActionsFailed events (action groups
+    run or failed). A history that answers 404 or 403 is history_status not_found or
+    not_authorized, leaves those fields null and does not fail the run; any other
+    error does. (3) GET Microsoft.Insights/metricAlerts (2018-03-01),
+    scheduledQueryRules (2023-12-01), activityLogAlerts (2020-10-01) and
+    Microsoft.AlertsManagement/smartDetectorAlertRules (2021-04-01). Each rule
+    (enabled from properties.enabled, or properties.state == Enabled for smart
+    detectors) carries fire_count, last_fired_at and open_alerts from the alerts
+    whose alertRule matches its id, case-insensitively. A rule that fired but is not
+    in those lists (another subscription, or deleted) is added with listed false.

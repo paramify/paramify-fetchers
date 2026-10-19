@@ -12,6 +12,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_monitor_fired_alerts`** (`EVD-AZURE-MONITOR-FIRED-ALERTS`) — every
+  Azure Monitor alert fired in the last 30 days (the time Azure keeps them): rule,
+  severity, signal type, monitor condition, alert state, and fired, resolved and
+  last-modified times. Each alert's state history gives `acknowledged_at` /
+  `acknowledged_by`, `closed_at` / `closed_by` (with `closed_by_person` false for
+  System), hours to acknowledge and close, and how many times its action groups ran
+  or failed. A history that answers 404 or 403 reads unknown without failing the
+  run. Every metric, log search, smart detector and activity log alert rule is
+  listed with `fire_count`, `last_fired_at` and `open_alerts`, so enabled rules that
+  never fired stand out (`enabled_rules_never_fired`); a rule that fired but is not
+  in the subscription is kept with `listed: false`. The alert list is checked
+  against Alerts Management's own summary total (`all_alerts_listed`).
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default

@@ -170,7 +170,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `si-11`
 
-*3 fetchers:* [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`splunk_role_index_access`](../fetchers/splunk/role_index_access)
+*4 fetchers:* [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`azure_monitor_fired_alerts`](../fetchers/azure/monitor_fired_alerts), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`splunk_role_index_access`](../fetchers/splunk/role_index_access)
 
 #### `KSI-MLA-EVC` — Evaluating Configurations
 
@@ -202,7 +202,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2.4`, `ac-6.9`, `au-2`, `au-6`, `au-6.1`, `si-4`, `si-4.4`
 
-*17 fetchers:* [`aws_cloudwatch_high_availability`](../fetchers/aws/cloudwatch_high_availability), [`aws_guard_duty`](../fetchers/aws/guard_duty), [`aws_guard_duty_findings`](../fetchers/aws/guard_duty_findings), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_alert_rules`](../fetchers/azure/alert_rules), [`azure_log_analytics_query_audit`](../fetchers/azure/log_analytics_query_audit), [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules), [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules), [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`crowdstrike_detections`](../fetchers/crowdstrike/detections), [`datadog_monitors_list`](../fetchers/datadog/monitors_list), [`datadog_siem_detection_rules`](../fetchers/datadog/siem_detection_rules), [`datadog_siem_signals`](../fetchers/datadog/siem_signals), [`sentinelone_activities`](../fetchers/sentinelone/activities), [`sentinelone_cloud_detection_rules`](../fetchers/sentinelone/cloud_detection_rules), [`splunk_alert_delivery`](../fetchers/splunk/alert_delivery), [`splunk_alert_rules`](../fetchers/splunk/alert_rules)
+*18 fetchers:* [`aws_cloudwatch_high_availability`](../fetchers/aws/cloudwatch_high_availability), [`aws_guard_duty`](../fetchers/aws/guard_duty), [`aws_guard_duty_findings`](../fetchers/aws/guard_duty_findings), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_alert_rules`](../fetchers/azure/alert_rules), [`azure_log_analytics_query_audit`](../fetchers/azure/log_analytics_query_audit), [`azure_monitor_fired_alerts`](../fetchers/azure/monitor_fired_alerts), [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules), [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules), [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`crowdstrike_detections`](../fetchers/crowdstrike/detections), [`datadog_monitors_list`](../fetchers/datadog/monitors_list), [`datadog_siem_detection_rules`](../fetchers/datadog/siem_detection_rules), [`datadog_siem_signals`](../fetchers/datadog/siem_signals), [`sentinelone_activities`](../fetchers/sentinelone/activities), [`sentinelone_cloud_detection_rules`](../fetchers/sentinelone/cloud_detection_rules), [`splunk_alert_delivery`](../fetchers/splunk/alert_delivery), [`splunk_alert_rules`](../fetchers/splunk/alert_rules)
 
 ### IAM — Identity and Access Management  (6/6)
 
@@ -427,7 +427,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-234 of 242 fetchers carry a mapping.
+235 of 243 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -514,7 +514,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (63)
+### azure  (64)
 
 | Fetcher | Indicators |
 |---|---|
@@ -556,6 +556,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces) | `KSI-MLA-ALA`, `KSI-MLA-OSM` |
 | [`azure_log_storage_immutability`](../fetchers/azure/log_storage_immutability) | `KSI-MLA-OSM` |
 | [`azure_managed_redis_configuration`](../fetchers/azure/managed_redis_configuration) | `KSI-CNA-OFA`, `KSI-CNA-RNT`, `KSI-IAM-SNU`, `KSI-SVC-SIN` |
+| [`azure_monitor_fired_alerts`](../fetchers/azure/monitor_fired_alerts) | `KSI-MLA-ALA`, `KSI-MLA-RVL` |
 | [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration) | `KSI-CNA-MAT`, `KSI-CNA-OFA`, `KSI-MLA-LET`, `KSI-RPL-ABO`, `KSI-SVC-SIN` |
 | [`azure_network_security_groups`](../fetchers/azure/network_security_groups) | `KSI-CNA-DFP`, `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-ULN` |
 | [`azure_policy_assignments`](../fetchers/azure/policy_assignments) | `KSI-CNA-EIS`, `KSI-CNA-IBP`, `KSI-MLA-EVC`, `KSI-SVC-ACM` |
