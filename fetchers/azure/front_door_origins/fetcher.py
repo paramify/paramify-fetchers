@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Azure Front Door origin groups and origins: regions serving traffic, and how Front Door connects to each origin, for one subscription."""
+"""Azure Front Door origin groups and origins: regions serving traffic, how Front Door connects to each origin, whether each App Service origin only accepts its own profile, and which apps lack a regional twin, for one subscription."""
 
 import logging
 import os
@@ -48,6 +48,13 @@ ORIGIN_API_VERSION = "2026-07-01"
 LOOKUP_CHUNK = 50
 PAGE_SIZE = 1000
 MAX_PAGES = 100
+FRONT_DOOR_SERVICE_TAG = "azurefrontdoor.backend"
+FDID_HEADER = "x-azure-fdid"
+# An access-restriction address matching every caller; "Any" is ARM's synthetic "Allow all" rule.
+ALL_ADDRESSES = ("any", "*", "0.0.0.0/0", "::/0", "internet")
+# Tiers where the platform scales instances itself, so sku.capacity is not an instance count.
+PLATFORM_SCALED_TIERS = ("dynamic", "flexconsumption", "elasticpremium")
+PRODUCTION_TAG_ENV = "AZURE_PRODUCTION_APP_TAG"
 
 
 # --- projection: the only code here that touches an azure-mgmt model ---
@@ -108,6 +115,26 @@ def project_origin(origin) -> dict:
         },
         "provisioning_state": model_attr(props, "provisioning_state"),
         "deployment_status": model_attr(props, "deployment_status"),
+    }
+
+
+def project_access_restriction(rule) -> dict:
+    return {
+        "name": model_attr(rule, "name"),
+        "priority": model_attr(rule, "priority"),
+        "action": model_attr(rule, "action"),
+        "tag": model_attr(rule, "tag"),
+        "ip_address": model_attr(rule, "ip_address"),
+        "vnet_subnet_resource_id": model_attr(rule, "vnet_subnet_resource_id"),
+        "headers": {str(k): [str(v) for v in (vals or [])] for k, vals in (model_attr(rule, "headers") or {}).items()},
+    }
+
+
+def project_site_config(config) -> dict:
+    return {
+        "public_network_access": model_attr(config, "public_network_access"),
+        "ip_security_restrictions": [project_access_restriction(r) for r in (model_attr(config, "ip_security_restrictions") or [])],
+        "ip_security_restrictions_default_action": model_attr(config, "ip_security_restrictions_default_action"),
     }
 
 
@@ -271,6 +298,321 @@ def summarize(profiles: list[dict], skipped_by_sku: dict, groups: list[dict]) ->
     }
 
 
+# --- App Service origins: lockdown to Front Door, and regional twins ---
+
+def is_web_site_id(resource_id: str | None) -> bool:
+    parts = arm_key(resource_id).split("/")
+    return (len(parts) in (9, 11) and parts[1] == "subscriptions" and parts[6:8] == ["microsoft.web", "sites"]
+            and (len(parts) == 9 or parts[9] == "slots"))
+
+
+def origin_site_id(origin: dict, sites_by_host: dict) -> tuple[str | None, str | None]:
+    """The App Service app (or slot) behind an origin: its azureOrigin, its private-link target, else the app owning its host name."""
+    if is_web_site_id(origin["azure_origin_id"]):
+        return arm_key(origin["azure_origin_id"]), "azure_origin"
+    link = origin["private_link"] or {}
+    if is_web_site_id(link.get("target_id")):
+        # A slot's private link targets the parent app with group id "sites-<slot>".
+        group_id = str(link.get("group_id") or "").lower()
+        slot = group_id[len("sites-"):] if group_id.startswith("sites-") and "/slots/" not in arm_key(link["target_id"]) else ""
+        return arm_key(link["target_id"]) + (f"/slots/{slot}" if slot else ""), "private_link_target"
+    host = str(origin["host_name"] or "").lower()
+    if host in sites_by_host:
+        return sites_by_host[host], "host_name"
+    return None, None
+
+
+def plan_record(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    sku = row.get("sku") or {}
+    tier = str(sku.get("tier") or "")
+    capacity = sku.get("capacity")
+    platform_scaled = tier.lower() in PLATFORM_SCALED_TIERS
+    return {
+        "id": row.get("id"),
+        "name": row.get("name"),
+        "location": normalize_region(row.get("location")),
+        "sku_name": sku.get("name"),
+        "sku_tier": tier or None,
+        "sku_capacity": capacity,
+        "instance_count": capacity if isinstance(capacity, int) and not platform_scaled else None,
+        "platform_scaled": platform_scaled,
+        "zone_redundant": bool(row.get("zone_redundant") or False),
+    }
+
+
+def profile_key(child_id: str | None) -> str:
+    return arm_key(child_id).split("/origingroups/")[0]
+
+
+def normalize_region(location) -> str | None:
+    return str(location).lower().replace(" ", "") if location else None
+
+
+def header_values(rule: dict, name: str) -> list[str]:
+    values = next((v for k, v in (rule["headers"] or {}).items() if str(k).lower() == name), None) or []
+    return sorted({part.strip().lower() for v in values for part in str(v).split(",") if part.strip()})
+
+
+def is_front_door_rule(rule: dict) -> bool:
+    return (str(rule["tag"] or "").lower() == "servicetag"
+            and str(rule["ip_address"] or "").strip().lower() == FRONT_DOOR_SERVICE_TAG)
+
+
+def matches_all_callers(rule: dict) -> bool:
+    return (str(rule["ip_address"] or "").strip().lower() in ALL_ADDRESSES
+            and not rule["vnet_subnet_resource_id"] and not rule["headers"])
+
+
+def public_allow_rules(rules: list[dict], default_action) -> tuple[list[dict], bool]:
+    """Allow rules a public caller can match before any catch-all rule, and whether unmatched callers are let in."""
+    ordered = sorted(rules, key=lambda r: r["priority"] if isinstance(r["priority"], int) else 1 << 31)
+    allows = []
+    for rule in ordered:
+        if matches_all_callers(rule):
+            return allows, str(rule["action"] or "Allow").lower() == "allow"
+        if str(rule["action"] or "Allow").lower() == "allow":
+            allows.append(rule)
+    # Unset default: no rules allows everyone; any rule denies the rest.
+    return allows, str(default_action or ("Deny" if rules else "Allow")).lower() == "allow"
+
+
+def lockdown(public_network_access, config: dict | None, profile_fdid: str | None, known_fdids: set,
+             private_link: bool) -> dict:
+    """Whether only Front Door can reach the app: public access off, or access restrictions admitting only known profiles' X-Azure-FDID."""
+    rules = (config or {}).get("ip_security_restrictions") or []
+    allows, unmatched_allowed = public_allow_rules(rules, (config or {}).get("ip_security_restrictions_default_action"))
+    fd_rules = [r for r in allows if is_front_door_rule(r)]
+    allowed_fdids = sorted({v for r in fd_rules for v in header_values(r, FDID_HEADER)})
+    own = str(profile_fdid or "").lower() or None
+    record = {
+        "public_network_access_disabled": str(public_network_access or "").lower() == "disabled",
+        "access_restrictions_read": config is not None,
+        "access_restrictions": rules,
+        "access_restrictions_default_action": (config or {}).get("ip_security_restrictions_default_action"),
+        "unmatched_public_callers_allowed": unmatched_allowed if config is not None else None,
+        "front_door_allow_rules": [r["name"] for r in fd_rules],
+        "non_front_door_allow_rules": [r["name"] for r in allows if not is_front_door_rule(r)],
+        "allowed_front_door_ids": allowed_fdids,
+        "profile_front_door_id": profile_fdid,
+        "profile_front_door_id_allowed": None if own is None or config is None else own in allowed_fdids,
+        "other_front_door_ids_allowed": [f for f in allowed_fdids if f != own],
+    }
+    if record["public_network_access_disabled"]:
+        return {**record, "locked_to_front_door": True, "lockdown_basis": "public_network_access_disabled", "lockdown_gaps": []}
+    gaps = []
+    if config is None:
+        gaps.append("access_restrictions_unread")
+    else:
+        if unmatched_allowed:
+            gaps.append("public_access_unrestricted")
+        if record["non_front_door_allow_rules"]:
+            gaps.append("non_front_door_allow_rule")
+        if any(not header_values(r, FDID_HEADER) for r in fd_rules):
+            gaps.append("front_door_rule_without_fdid")
+        if set(allowed_fdids) - known_fdids - {own}:
+            gaps.append("unknown_front_door_id_allowed")
+        # Over private link Front Door skips access restrictions, so only a public origin needs its own id admitted.
+        if not private_link and not gaps:
+            if own is None:
+                gaps.append("profile_front_door_id_unknown")
+            elif own not in allowed_fdids:
+                gaps.append("profile_front_door_id_not_allowed")
+    basis = None
+    if not gaps:
+        basis = "front_door_id_restricted" if fd_rules else "no_public_allow_rule"
+    return {**record, "locked_to_front_door": not gaps, "lockdown_basis": basis, "lockdown_gaps": gaps}
+
+
+def app_service_origin_records(groups: list[dict], profile_fdids: dict, sites_by_key: dict, sites_by_host: dict,
+                               plans_by_key: dict, configs_by_key: dict, subscription_id) -> list[dict]:
+    known = {str(f).lower() for f in profile_fdids.values() if f}
+    own_sub = f"/subscriptions/{str(subscription_id or '').lower()}/"
+    records = []
+    for group in groups:
+        for origin in group["origins"]:
+            site_id, source = origin_site_id(origin, sites_by_host)
+            if site_id is None:
+                continue
+            site = sites_by_key.get(site_id)
+            base = {
+                "profile": group["profile"],
+                "origin_group": group["name"],
+                "origin_group_id": group["id"],
+                "origin": origin["name"],
+                "origin_id": origin["id"],
+                "host_name": origin["host_name"],
+                "serving": group["serving"] and origin["effective_enabled_state"] == "Enabled",
+                "private_link": origin["private_link"] is not None,
+                "site_id": site_id,
+                "site_id_source": source,
+                "site_found": site is not None,
+            }
+            if site is None:
+                # The whole target subscription was listed, so a miss there is a deleted app; elsewhere it may be out of reach.
+                gap = "site_not_found" if site_id.startswith(own_sub) else "site_not_visible"
+                records.append({**base, "site_name": None, "site_kind": None, "site_state": None, "site_location": None,
+                                "public_network_access": None, "plan": None, "locked_to_front_door": False,
+                                "lockdown_basis": None, "lockdown_gaps": [gap]})
+                continue
+            config = configs_by_key.get(site_id)
+            public_access = (config or {}).get("public_network_access") or site.get("public_network_access") or None
+            records.append({
+                **base,
+                "site_name": site.get("name"),
+                "site_kind": site.get("kind"),
+                "site_state": site.get("state") or None,
+                "site_location": normalize_region(site.get("location")),
+                "public_network_access": public_access,
+                "plan": plan_record(plans_by_key.get(arm_key(site.get("server_farm_id")))),
+                **lockdown(public_access, config, profile_fdids.get(profile_key(group["id"])), known,
+                           origin["private_link"] is not None),
+            })
+    return records
+
+
+def is_function_app(kind) -> bool:
+    return "functionapp" in str(kind or "").lower()
+
+
+def matches_tag(tags: dict | None, production_tag: str | None) -> bool:
+    if not production_tag:
+        return True
+    key, _, value = production_tag.partition("=")
+    found = next((v for k, v in (tags or {}).items() if str(k).lower() == key.strip().lower()), None)
+    if found is None:
+        return False
+    return not value or str(found).strip().lower() == value.strip().lower()
+
+
+def capacity_covers(twin_plan: dict | None, own_plan: dict | None) -> bool | None:
+    """Can the twin's plan take this app's load: platform-scaled, or at least as many instances."""
+    if not twin_plan or not own_plan:
+        return None
+    if twin_plan["platform_scaled"]:
+        return True
+    if own_plan["instance_count"] is None or twin_plan["instance_count"] is None:
+        return None
+    return twin_plan["instance_count"] >= own_plan["instance_count"]
+
+
+def web_app_record(site: dict, groups_by_key: dict, app_origins: list[dict], origins_by_key: dict, plan: dict | None) -> dict:
+    key = arm_key(site["id"])
+    own_region = normalize_region(site.get("location"))
+    mine = [r for r in app_origins if r["site_id"] == key]
+    serving = [r for r in mine if r["serving"]]
+    twins, unresolved = [], False
+    for row in serving:
+        group = groups_by_key[arm_key(row["origin_group_id"])]
+        for other in group["origins"]:
+            if arm_key(other["id"]) == arm_key(row["origin_id"]) or other["effective_enabled_state"] != "Enabled":
+                continue
+            twin_app = origins_by_key.get(arm_key(other["id"]))
+            if twin_app and twin_app["site_id"] == key:
+                continue
+            if not other["region"]:
+                unresolved = True
+                continue
+            if other["region"] == own_region:
+                continue
+            twin_plan = (twin_app or {}).get("plan")
+            twins.append({
+                "profile": row["profile"],
+                "origin_group": row["origin_group"],
+                "origin": other["name"],
+                "region": other["region"],
+                "site_id": (twin_app or {}).get("site_id"),
+                "active": other["priority"] is None or other["priority"] == group["best_priority"],
+                "plan": twin_plan,
+                "capacity_covers": capacity_covers(twin_plan, plan),
+            })
+    covers = [t["capacity_covers"] for t in twins]
+    sufficient = True if True in covers else (False if covers and all(c is False for c in covers) else None)
+    gaps = []
+    if not serving:
+        gaps.append("not_behind_front_door")
+    elif not twins:
+        gaps.append("twin_region_unresolved" if unresolved or not own_region else "no_regional_twin")
+    elif sufficient is False:
+        gaps.append("twin_capacity_short")
+    elif sufficient is None:
+        gaps.append("twin_capacity_unknown")
+    return {
+        "id": site["id"],
+        "name": site.get("name"),
+        "kind": site.get("kind"),
+        "app_type": "function_app" if is_function_app(site.get("kind")) else "web_app",
+        "state": site.get("state") or None,
+        "location": own_region,
+        "public_network_access": site.get("public_network_access") or None,
+        "plan": plan,
+        "origin_groups": [{"profile": r["profile"], "origin_group": r["origin_group"], "origin": r["origin"],
+                           "serving": r["serving"]} for r in mine],
+        "in_origin_group": bool(mine),
+        "behind_front_door": bool(serving),
+        "regional_twins": twins,
+        "has_regional_twin": bool(twins),
+        "twin_capacity_sufficient": sufficient if twins else None,
+        "regional_twin_ready": not gaps,
+        "twin_gaps": gaps,
+    }
+
+
+def production_apps(sites_by_key: dict, subscription_id, production_tag, groups: list[dict], app_origins: list[dict],
+                    plans_by_key: dict) -> list[dict]:
+    """Every app (not slot) in the subscription, narrowed by the production tag when set, with its regional-twin verdict."""
+    groups_by_key = {arm_key(g["id"]): g for g in groups}
+    origins_by_key = {arm_key(r["origin_id"]): r for r in app_origins}
+    return [
+        web_app_record(site, groups_by_key, app_origins, origins_by_key,
+                       plan_record(plans_by_key.get(arm_key(site.get("server_farm_id")))))
+        for _, site in sorted(sites_by_key.items())
+        if str(site.get("type") or "").lower() == "microsoft.web/sites"
+        and str(site.get("subscriptionId") or "").lower() == str(subscription_id or "").lower()
+        and matches_tag(site.get("tags"), production_tag)
+    ]
+
+
+def summarize_app_services(app_origins: list[dict], apps: list[dict], production_tag: str | None) -> dict:
+    serving = [r for r in app_origins if r["serving"]]
+
+    def gap(name: str) -> int:
+        return sum(1 for r in serving if name in r["lockdown_gaps"])
+
+    summary = {
+        "app_service_origins": len(app_origins),
+        "serving_app_service_origins": len(serving),
+        "serving_app_service_origins_locked_to_front_door": sum(1 for r in serving if r["locked_to_front_door"]),
+        "serving_app_service_origins_not_locked": sum(1 for r in serving if not r["locked_to_front_door"]),
+        "serving_app_service_origins_public_network_access_disabled": sum(
+            1 for r in serving if r.get("public_network_access_disabled")),
+        "serving_app_service_origins_site_not_found": gap("site_not_found"),
+        "serving_app_service_origins_site_not_visible": gap("site_not_visible"),
+        "serving_app_service_origins_access_restrictions_unread": gap("access_restrictions_unread"),
+        "serving_app_service_origins_public_access_unrestricted": gap("public_access_unrestricted"),
+        "serving_app_service_origins_non_front_door_allow_rule": gap("non_front_door_allow_rule"),
+        "serving_app_service_origins_front_door_rule_without_fdid": gap("front_door_rule_without_fdid"),
+        "serving_app_service_origins_unknown_front_door_id_allowed": gap("unknown_front_door_id_allowed"),
+        "serving_app_service_origins_profile_front_door_id_not_allowed": gap("profile_front_door_id_not_allowed"),
+        "serving_app_service_origins_profile_front_door_id_unknown": gap("profile_front_door_id_unknown"),
+        "production_tag": production_tag,
+    }
+    for app_type in ("web_app", "function_app"):
+        typed = [a for a in apps if a["app_type"] == app_type]
+        summary.update({
+            f"production_{app_type}s": len(typed),
+            f"production_{app_type}s_behind_front_door": sum(1 for a in typed if a["behind_front_door"]),
+            f"production_{app_type}s_not_behind_front_door": sum(1 for a in typed if not a["behind_front_door"]),
+            f"production_{app_type}s_regional_twin_ready": sum(1 for a in typed if a["regional_twin_ready"]),
+            f"production_{app_type}s_without_regional_twin": sum(
+                1 for a in typed if {"no_regional_twin", "twin_region_unresolved"} & set(a["twin_gaps"])),
+            f"production_{app_type}s_twin_capacity_short": sum(1 for a in typed if "twin_capacity_short" in a["twin_gaps"]),
+            f"production_{app_type}s_twin_capacity_unknown": sum(1 for a in typed if "twin_capacity_unknown" in a["twin_gaps"]),
+        })
+    return summary
+
+
 # --- collection (lazy azure imports) ---
 
 def kql_list(values) -> str:
@@ -301,40 +643,133 @@ def region_queries(resource_ids: list[str], host_names: list[str]) -> list[str]:
     return queries
 
 
-def lookup_regions(cred, collector: Collector, resource_ids: list[str], host_names: list[str]) -> tuple[dict, dict]:
-    """Location of each origin's target resource, by ARM id and by host name, from Resource Graph."""
-    if not resource_ids and not host_names:
-        return {}, {}
+def graph_client(cred, collector: Collector):
     from azure.mgmt.resourcegraph import ResourceGraphClient
-    from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
 
-    client = collector.guard(
+    return collector.guard(
         "resourcegraph.ResourceGraphClient (init)", lambda: ResourceGraphClient(credential=cred, **arm_client_kwargs())
     )
-    if client is None:
+
+
+def graph_rows(client, query: str) -> list[dict]:
+    from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
+
+    rows, skip_token, pages = [], None, 0
+    while True:
+        # No subscription filter: an origin can live in any subscription the credential reads.
+        response = client.resources(QueryRequest(
+            query=query, options=QueryRequestOptions(top=PAGE_SIZE, skip_token=skip_token, result_format="objectArray")
+        ))
+        rows += model_attr(response, "data") or []
+        skip_token, pages = model_attr(response, "skip_token"), pages + 1
+        if not skip_token:
+            return rows
+        if pages >= MAX_PAGES:
+            raise RuntimeError(f"Resource Graph paging did not terminate after {pages} page(s)")
+
+
+def lookup_regions(client, collector: Collector, resource_ids: list[str], host_names: list[str]) -> tuple[dict, dict]:
+    """Location of each origin's target resource, by ARM id and by host name, from Resource Graph."""
+    if client is None or (not resource_ids and not host_names):
         return {}, {}
-
-    def run(query: str) -> list[dict]:
-        rows, skip_token, pages = [], None, 0
-        while True:
-            # No subscription filter: an origin can live in any subscription the credential reads.
-            response = client.resources(QueryRequest(
-                query=query, options=QueryRequestOptions(top=PAGE_SIZE, skip_token=skip_token, result_format="objectArray")
-            ))
-            rows += model_attr(response, "data") or []
-            skip_token, pages = model_attr(response, "skip_token"), pages + 1
-            if not skip_token:
-                return rows
-            if pages >= MAX_PAGES:
-                raise RuntimeError(f"Resource Graph paging did not terminate after {pages} page(s)")
-
     found: dict = {}
     for n, query in enumerate(region_queries(resource_ids, host_names)):
-        for row in collector.guard(f"resourcegraph.resources (origin regions {n + 1})", lambda: run(query), default=[]):
+        for row in collector.guard(f"resourcegraph.resources (origin regions {n + 1})", lambda: graph_rows(client, query), default=[]):
             if row.get("key") and row.get("location"):
                 found[row["key"].rstrip("/")] = str(row["location"]).lower().replace(" ", "")
     hosts = {h.lower() for h in host_names}
     return ({k: v for k, v in found.items() if k not in hosts}, {k: v for k, v in found.items() if k in hosts})
+
+
+SITE_TYPES = "type in~ ('microsoft.web/sites', 'microsoft.web/sites/slots')"
+SITE_COLUMNS = (
+    "key = tolower(id), id, name, type, kind, location, subscriptionId, tags, state = tostring(properties.state),"
+    " server_farm_id = tostring(properties.serverFarmId), public_network_access = tostring(properties.publicNetworkAccess)"
+)
+
+
+def site_queries(subscription_id: str, site_ids: list[str], host_names: list[str]) -> list[str]:
+    """Every app in the subscription, plus each origin's app or slot by id or host name in any subscription."""
+    queries = []
+    if subscription_id and "'" not in subscription_id:
+        queries.append(f"resources | where type =~ 'microsoft.web/sites' and subscriptionId =~ '{subscription_id}'"
+                       f" | project {SITE_COLUMNS}, host = ''")
+    for i in range(0, len(site_ids), LOOKUP_CHUNK):
+        ids = kql_list(site_ids[i:i + LOOKUP_CHUNK])
+        if ids:
+            queries.append(f"resources | where {SITE_TYPES} and id in~ ({ids}) | project {SITE_COLUMNS}, host = ''")
+    for i in range(0, len(host_names), LOOKUP_CHUNK):
+        hosts = kql_list(host_names[i:i + LOOKUP_CHUNK])
+        if hosts:
+            queries.append(f"resources | where {SITE_TYPES} | mv-expand h = properties.enabledHostNames to typeof(string)"
+                           f" | where h in~ ({hosts}) | project {SITE_COLUMNS}, host = tolower(h)")
+    return queries
+
+
+def plan_queries(plan_ids: list[str]) -> list[str]:
+    queries = []
+    for i in range(0, len(plan_ids), LOOKUP_CHUNK):
+        ids = kql_list(plan_ids[i:i + LOOKUP_CHUNK])
+        if ids:
+            queries.append(f"resources | where type =~ 'microsoft.web/serverfarms' and id in~ ({ids})"
+                           " | project key = tolower(id), id, name, location, sku, zone_redundant = tobool(properties.zoneRedundant)")
+    return queries
+
+
+def lookup_sites(client, collector: Collector, subscription_id: str, site_ids: list[str], host_names: list[str]) -> tuple[dict, dict]:
+    """App Service apps from Resource Graph keyed by lower-cased id, and the app owning each looked-up host name."""
+    if client is None:
+        return {}, {}
+    sites, by_host = {}, {}
+    for n, query in enumerate(site_queries(subscription_id, site_ids, host_names)):
+        for row in collector.guard(f"resourcegraph.resources (sites {n + 1})", lambda: graph_rows(client, query), default=[]):
+            if not row.get("key"):
+                continue
+            key = row["key"].rstrip("/")
+            sites[key] = {k: v for k, v in row.items() if k not in ("key", "host")}
+            if row.get("host"):
+                by_host[row["host"]] = key
+    return sites, by_host
+
+
+def lookup_plans(client, collector: Collector, plan_ids: list[str]) -> dict:
+    plans: dict = {}
+    if client is None:
+        return plans
+    for n, query in enumerate(plan_queries(plan_ids)):
+        for row in collector.guard(f"resourcegraph.resources (plans {n + 1})", lambda: graph_rows(client, query), default=[]):
+            if row.get("key"):
+                plans[row["key"].rstrip("/")] = {k: v for k, v in row.items() if k != "key"}
+    return plans
+
+
+def read_site_configs(cred, collector: Collector, sites: list[dict]) -> dict:
+    """config/web (access restrictions) for each app or slot, on a client per subscription."""
+    from azure.mgmt.web import WebSiteManagementClient
+
+    clients: dict = {}
+    configs = {}
+    for site in sites:
+        parts = str(site["id"]).split("/")
+        sub, rg, name = parts[2], parts[4], parts[8]
+        slot = parts[10] if len(parts) == 11 else None
+        if sub.lower() not in clients:
+            clients[sub.lower()] = collector.guard(
+                f"web.WebSiteManagementClient (init {sub})",
+                lambda: WebSiteManagementClient(credential=cred, subscription_id=sub, **arm_client_kwargs()),
+            )
+        client = clients[sub.lower()]
+        if client is None:
+            continue
+        if slot:
+            config = collector.guard(f"web.web_apps.get_configuration_slot({name}/{slot})",
+                                     lambda: project_site_config(client.web_apps.get_configuration_slot(rg, name, slot)))
+        else:
+            config = collector.guard(f"web.web_apps.get_configuration({name})",
+                                     lambda: project_site_config(client.web_apps.get_configuration(rg, name)))
+        if config is not None:
+            configs[arm_key(site["id"])] = config
+    return configs
 
 
 def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[dict], dict]:
@@ -346,6 +781,11 @@ def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[
     collected = []
     for profile in profiles:
         rg, name = resource_group_from_id(profile["id"]), profile["name"]
+        # The X-Azure-FDID value Front Door stamps on every request it forwards.
+        profile["front_door_id"] = collector.guard(
+            f"cdn.profiles.get({name})",
+            lambda: model_attr(model_attr(cdn.profiles.get(rg, name), "properties"), "front_door_id"),
+        )
         groups = collector.guard(
             f"cdn.afd_origin_groups.list_by_profile({name})",
             lambda: [project_origin_group(g) for g in cdn_origins.afd_origin_groups.list_by_profile(rg, name)],
@@ -386,6 +826,10 @@ def main() -> int:
     skipped_by_sku: dict = {}
     regions_by_id: dict = {}
     regions_by_host: dict = {}
+    sites_by_key: dict = {}
+    sites_by_host: dict = {}
+    plans_by_key: dict = {}
+    configs_by_key: dict = {}
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Cdn")
@@ -395,7 +839,17 @@ def main() -> int:
         origins = [o for c in collected for g in c["origin_groups"] for o in g["origins_projected"]]
         ids = sorted({arm_key(i) for o in origins for i in (o["azure_origin_id"], (o["private_link"] or {}).get("target_id")) if i})
         hosts = sorted({str(o["host_name"]).lower() for o in origins if o["host_name"]})
-        regions_by_id, regions_by_host = lookup_regions(cred, collector, ids, hosts)
+        graph = graph_client(cred, collector)
+        regions_by_id, regions_by_host = lookup_regions(graph, collector, ids, hosts)
+        known_sites = [(o, origin_site_id(o, {})[0]) for o in origins]
+        sites_by_key, sites_by_host = lookup_sites(
+            graph, collector, subscription_id, sorted({k for _, k in known_sites if k}),
+            sorted({str(o["host_name"]).lower() for o, k in known_sites if o["host_name"] and not k}),
+        )
+        origin_sites = {origin_site_id(o, sites_by_host)[0] for o in origins} & set(sites_by_key)
+        plans_by_key = lookup_plans(graph, collector, sorted({
+            arm_key(s["server_farm_id"]) for s in sites_by_key.values() if s.get("server_farm_id")}))
+        configs_by_key = read_site_configs(cred, collector, [sites_by_key[k] for k in sorted(origin_sites)])
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -420,12 +874,20 @@ def main() -> int:
             "origin_count": sum(g["total_origins"] for g in profile_groups),
         })
 
+    profile_fdids = {arm_key(p["id"]): p.get("front_door_id") for p in profiles}
+    app_origins = app_service_origin_records(groups, profile_fdids, sites_by_key, sites_by_host, plans_by_key, configs_by_key,
+                                             subscription_id)
+    production_tag = (os.environ.get(PRODUCTION_TAG_ENV) or "").strip() or None
+    apps = production_apps(sites_by_key, subscription_id, production_tag, groups, app_origins, plans_by_key)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={"origin_groups": groups, "profiles": profiles, "provider_registration_status": registration},
-        summary={**summarize(profiles, skipped_by_sku, groups), "provider_registration_status": registration},
+        results={"origin_groups": groups, "profiles": profiles, "provider_registration_status": registration,
+                 "app_service_origins": app_origins, "production_apps": apps},
+        summary={**summarize(profiles, skipped_by_sku, groups), "provider_registration_status": registration,
+                 **summarize_app_services(app_origins, apps, production_tag)},
     )
     filename = f"azure_front_door_origins_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

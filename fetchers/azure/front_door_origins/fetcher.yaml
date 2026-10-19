@@ -1,5 +1,5 @@
 name: azure_front_door_origins
-version: 0.1.0
+version: 0.2.0
 description: >
   The back ends behind Azure Front Door Standard/Premium. Every origin group with its
   origins, their priority, weight and region, health probe and load-balancing
@@ -7,8 +7,24 @@ description: >
   or stands by for failover. For each group, how Front Door connects to its origins:
   the protocol each serving route forwards with, certificate name checking, private
   link and managed-identity origin authentication, so an origin reached over plain
-  HTTP or the public internet without authentication is visible.
+  HTTP or the public internet without authentication is visible. For each App
+  Service origin, whether the app accepts traffic only through its own Front Door
+  profile (public access off, or access restrictions admitting only the profile's
+  X-Azure-FDID), and for each app in the subscription, whether a serving origin
+  group reaches it and holds an enabled twin in another region with enough plan
+  capacity.
 category: azure
+
+config_schema:
+  production_tag:
+    type: string
+    required: false
+    env: AZURE_PRODUCTION_APP_TAG
+    description: >
+      Tag that marks production App Service apps, as `key=value` or just `key`
+      (case-insensitive). Only apps carrying it are listed in production_apps and
+      checked for a regional twin. Leave empty and every app in the subscription is
+      checked.
 
 supports_targets: true
 
@@ -41,7 +57,8 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-CNA-OFA   # a second region serves traffic (active-active) or stands by (failover), with health probes
+  - KSI-CNA-OFA   # a second region serves traffic (active-active) or stands by (failover), with health probes; each app has a regional twin with capacity
+  - KSI-CNA-RNT   # each App Service origin accepts traffic only through its own Front Door profile
   - KSI-SVC-VCM   # Front Door reaches each origin over HTTPS with a checked certificate, via private link or managed-identity auth
 
 evidence_set:
@@ -80,4 +97,38 @@ evidence_set:
     private link and the group has no managed-identity authentication);
     connection_protected = serving and none apply. Private link status is reported
     as returned; measured null on approved, working links, so it is not used.
-    Maps to KSI-CNA-OFA / KSI-SVC-VCM.
+    App Service origins: per profile cdn profiles.get for properties.frontDoorId,
+    the value Front Door sends as X-Azure-FDID. An origin's app is its azureOrigin
+    when that is a Microsoft.Web site or slot, else its private-link target (group id
+    sites-<slot> means that slot), else the app or slot whose enabledHostNames holds
+    its host name. Resource Graph lists every microsoft.web/sites in the subscription
+    and each origin's app or slot in any readable subscription (kind, location,
+    state, serverFarmId, publicNetworkAccess, tags), and each app's
+    microsoft.web/serverfarms (sku, properties.zoneRedundant); an app it does not
+    return is site_not_found in the target subscription (deleted) and
+    site_not_visible elsewhere. azure-mgmt-web WebSiteManagementClient
+    web_apps.get_configuration (get_configuration_slot for a slot) reads config/web:
+    publicNetworkAccess (else the Resource Graph value) and the access restrictions.
+    locked_to_front_door: publicNetworkAccess Disabled, or the public rules (lowest
+    priority first, up to the first rule matching every caller, whose action decides
+    unmatched callers; with none, an unset default action allows all when there are
+    no rules and denies otherwise) leave unmatched callers denied and every allow rule
+    is a ServiceTag AzureFrontDoor.Backend rule carrying X-Azure-FDID values that are
+    the profile's frontDoorId or another collected profile's, and a public (non
+    private-link) origin's rules admit its own profile's id. Access restrictions are
+    not evaluated on private-endpoint traffic, so a private-link origin needs no
+    rule. lockdown_gaps: public_access_unrestricted, non_front_door_allow_rule,
+    front_door_rule_without_fdid, unknown_front_door_id_allowed,
+    profile_front_door_id_not_allowed, profile_front_door_id_unknown,
+    access_restrictions_unread, site_not_found, site_not_visible. publicNetworkAccess
+    unset counts as enabled. production_apps: every app (not slot) in the
+    subscription, or only those with the production_tag tag; app_type function_app
+    when kind contains functionapp. behind_front_door = an enabled origin in a
+    serving group reaches it. A regional twin is another enabled origin in such a
+    group, on a different app, whose resolved region differs from the app's location;
+    capacity_covers = the twin's plan is platform-scaled (Dynamic, FlexConsumption,
+    ElasticPremium) or has at least as many instances (sku.capacity) as the app's;
+    unknown when either plan is unknown. twin_gaps: not_behind_front_door,
+    no_regional_twin, twin_region_unresolved, twin_capacity_short,
+    twin_capacity_unknown; regional_twin_ready = none. Summary counts are over
+    serving App Service origins. Maps to KSI-CNA-OFA / KSI-CNA-RNT / KSI-SVC-VCM.

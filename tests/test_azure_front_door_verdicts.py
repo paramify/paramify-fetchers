@@ -226,3 +226,204 @@ def test_origin_group_needs_an_enabled_origin_to_be_protected(states, protected,
                                   [origin(s) for s in states], [path], {}, {})
     assert record["connection_protected"] is protected
     assert record["unprotected_reasons"] == reasons
+
+
+# --- App Service origin lockdown and regional twins ---
+
+OWN_FDID = "00000000-0000-0000-0000-0000000000aa"
+OTHER_FDID = "00000000-0000-0000-0000-0000000000bb"
+UNKNOWN_FDID = "00000000-0000-0000-0000-0000000000cc"
+SITE = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Web/sites/{}"
+
+
+def rule(name, priority=100, action="Allow", tag="Default", ip="10.0.0.0/8", headers=None, subnet=None):
+    return {"name": name, "priority": priority, "action": action, "tag": tag, "ip_address": ip,
+            "vnet_subnet_resource_id": subnet, "headers": headers or {}}
+
+
+def fd_rule(*fdids, priority=100, header="x-azure-fdid"):
+    return rule("front-door", priority, tag="ServiceTag", ip="AzureFrontDoor.Backend",
+                headers={header: list(fdids)} if fdids else None)
+
+
+def config(*rules, default=None, public_network_access=None):
+    return {"public_network_access": public_network_access, "ip_security_restrictions": list(rules),
+            "ip_security_restrictions_default_action": default}
+
+
+@pytest.mark.parametrize("public, cfg, private_link, locked, basis, gaps", [
+    pytest.param("Disabled", config(rule("Allow all", 2147483647, ip="Any")), False, True,
+                 "public_network_access_disabled", [], id="public-access-disabled"),
+    pytest.param("Enabled", config(fd_rule(OWN_FDID)), False, True, "front_door_id_restricted", [], id="own-fdid-only"),
+    pytest.param("Enabled", config(fd_rule(OWN_FDID.upper(), header="X-Azure-FDID")), False, True,
+                 "front_door_id_restricted", [], id="header-and-id-case-insensitive"),
+    pytest.param("Enabled", config(fd_rule(OWN_FDID, OTHER_FDID)), False, True, "front_door_id_restricted", [],
+                 id="own-and-known-profile"),
+    pytest.param(None, config(rule("Allow all", 2147483647, ip="Any")), False, False, None,
+                 ["public_access_unrestricted"], id="allow-all-and-unset-public-access"),
+    pytest.param("Enabled", config(), False, False, None, ["public_access_unrestricted"], id="no-rules"),
+    pytest.param("Enabled", config(fd_rule(OWN_FDID), default="Allow"), False, False, None,
+                 ["public_access_unrestricted"], id="default-allow"),
+    pytest.param("Enabled", config(fd_rule()), False, False, None, ["front_door_rule_without_fdid"],
+                 id="service-tag-without-fdid"),
+    pytest.param("Enabled", config(fd_rule(OWN_FDID, UNKNOWN_FDID)), False, False, None,
+                 ["unknown_front_door_id_allowed"], id="unknown-fdid"),
+    pytest.param("Enabled", config(fd_rule(OTHER_FDID)), False, False, None, ["profile_front_door_id_not_allowed"],
+                 id="other-profile-only"),
+    pytest.param("Enabled", config(fd_rule(OWN_FDID), rule("office", 200)), False, False, None,
+                 ["non_front_door_allow_rule"], id="ip-allow-bypasses-front-door"),
+    pytest.param("Enabled", config(fd_rule(OWN_FDID, priority=50), rule("Deny all", 100, "Deny", ip="Any"),
+                                   rule("office", 200)), False, True, "front_door_id_restricted", [],
+                 id="allow-after-catch-all-deny-is-unreachable"),
+    pytest.param("Enabled", config(rule("Deny all", 100, "Deny", ip="Any")), True, True, "no_public_allow_rule", [],
+                 id="private-link-public-denied"),
+    pytest.param("Enabled", config(rule("Deny all", 100, "Deny", ip="Any")), False, False, None,
+                 ["profile_front_door_id_not_allowed"], id="public-origin-front-door-shut-out"),
+    pytest.param("Enabled", None, False, False, None, ["access_restrictions_unread"], id="config-unread"),
+])
+def test_app_service_lockdown(public, cfg, private_link, locked, basis, gaps):
+    record = origins.lockdown(public, cfg, OWN_FDID, {OWN_FDID, OTHER_FDID}, private_link)
+    assert record["locked_to_front_door"] is locked
+    assert record["lockdown_basis"] == basis
+    assert record["lockdown_gaps"] == gaps
+
+
+def test_lockdown_reports_the_ids_it_compared():
+    record = origins.lockdown("Enabled", config(fd_rule(OWN_FDID, UNKNOWN_FDID), rule("office", 200)), OWN_FDID,
+                              {OWN_FDID}, False)
+    assert record["allowed_front_door_ids"] == [OWN_FDID, UNKNOWN_FDID]
+    assert record["profile_front_door_id_allowed"] is True
+    assert record["other_front_door_ids_allowed"] == [UNKNOWN_FDID]
+    assert record["non_front_door_allow_rules"] == ["office"]
+
+
+def test_unknown_profile_front_door_id_is_a_gap():
+    record = origins.lockdown("Enabled", config(fd_rule(OWN_FDID)), None, set(), False)
+    assert record["lockdown_gaps"] == ["unknown_front_door_id_allowed"]
+    record = origins.lockdown("Enabled", config(rule("Deny all", 100, "Deny", ip="Any")), None, set(), False)
+    assert record["lockdown_gaps"] == ["profile_front_door_id_unknown"]
+
+
+def projected_origin(name, host="app.azurewebsites.net", azure_origin=None, target=None, group_id="sites"):
+    return {"id": f"/originGroups/g/origins/{name}", "name": name, "host_name": host, "azure_origin_id": azure_origin,
+            "private_link": None if target is None else {"target_id": target, "group_id": group_id,
+                                                         "private_endpoint_location": "eastus", "status": None}}
+
+
+@pytest.mark.parametrize("origin, expected", [
+    pytest.param(projected_origin("o", azure_origin=SITE.format("App")), (SITE.format("app").lower(), "azure_origin"),
+                 id="azure-origin"),
+    pytest.param(projected_origin("o", target=SITE.format("app")), (SITE.format("app").lower(), "private_link_target"),
+                 id="private-link"),
+    pytest.param(projected_origin("o", target=SITE.format("app"), group_id="sites-Staging"),
+                 (SITE.format("app").lower() + "/slots/staging", "private_link_target"), id="private-link-slot"),
+    pytest.param(projected_origin("o", host="app.contoso.example"), (SITE.format("app").lower(), "host_name"),
+                 id="host-name"),
+    pytest.param(projected_origin("o", host="acct.blob.core.windows.net",
+                                  target="/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/acct",
+                                  group_id="blob"), (None, None), id="storage-origin"),
+])
+def test_origin_site_id(origin, expected):
+    assert origins.origin_site_id(origin, {"app.contoso.example": SITE.format("app").lower()}) == expected
+
+
+def origin_rec(name, region, site=None, enabled="Enabled", priority=1):
+    return {"id": f"/subscriptions/s/resourceGroups/rg/providers/Microsoft.Cdn/profiles/p/originGroups/g/origins/{name}",
+            "name": name, "host_name": f"{name}.azurewebsites.net", "azure_origin_id": None,
+            "private_link": {"target_id": SITE.format(site), "group_id": "sites", "private_endpoint_location": region,
+                             "status": None} if site else None,
+            "effective_enabled_state": enabled, "priority": priority, "region": region}
+
+
+def site_row(name, location, plan, kind="app", public="Disabled"):
+    return {"id": SITE.format(name), "name": name, "type": "Microsoft.Web/sites", "kind": kind, "location": location,
+            "subscriptionId": "s", "tags": {"Environment": "Prod"}, "state": "Running",
+            "server_farm_id": f"/subscriptions/s/resourceGroups/rg/providers/Microsoft.Web/serverfarms/{plan}",
+            "public_network_access": public}
+
+
+def plan_row(name, capacity, tier="PremiumV3"):
+    return {"id": f"/subscriptions/s/resourceGroups/rg/providers/Microsoft.Web/serverfarms/{name}", "name": name,
+            "location": "East US", "sku": {"name": "P1v3", "tier": tier, "capacity": capacity}, "zone_redundant": True}
+
+
+def twin_fixture(east_capacity=2, west_capacity=2, west_tier="PremiumV3", west_region="westus", west_enabled="Enabled",
+                 serving=True):
+    group = {"id": "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Cdn/profiles/p/originGroups/g", "name": "g",
+             "profile": "p", "serving": serving, "best_priority": 1,
+             "origins": [origin_rec("east", "eastus", "app-east"),
+                         origin_rec("west", west_region, "app-west", enabled=west_enabled)]}
+    sites = {origins.arm_key(SITE.format(n)): site_row(n, loc, f"plan-{n}")
+             for n, loc in (("app-east", "eastus"), ("app-west", "westus"), ("app-lonely", "eastus"))}
+    plans = {origins.arm_key(plan_row(f"plan-{n}", c)["id"]): plan_row(f"plan-{n}", c, t)
+             for n, c, t in (("app-east", east_capacity, "PremiumV3"), ("app-west", west_capacity, west_tier),
+                             ("app-lonely", 1, "PremiumV3"))}
+    app_origins = origins.app_service_origin_records([group], {}, sites, {}, plans, {}, "s")
+    apps = origins.production_apps(sites, "s", None, [group], app_origins, plans)
+    return app_origins, {a["name"]: a for a in apps}
+
+
+@pytest.mark.parametrize("kwargs, ready, gaps, sufficient", [
+    pytest.param({}, True, [], True, id="equal-capacity-twin"),
+    pytest.param({"east_capacity": 3, "west_capacity": 1}, False, ["twin_capacity_short"], False, id="smaller-twin"),
+    pytest.param({"east_capacity": 3, "west_capacity": 0, "west_tier": "ElasticPremium"}, True, [], True,
+                 id="platform-scaled-twin"),
+    pytest.param({"west_region": "eastus"}, False, ["no_regional_twin"], None, id="twin-in-same-region"),
+    pytest.param({"west_region": None}, False, ["twin_region_unresolved"], None, id="twin-region-unresolved"),
+    pytest.param({"west_enabled": "Disabled"}, False, ["no_regional_twin"], None, id="twin-disabled"),
+    pytest.param({"serving": False}, False, ["not_behind_front_door"], None, id="group-not-serving"),
+])
+def test_regional_twin(kwargs, ready, gaps, sufficient):
+    _, apps = twin_fixture(**kwargs)
+    east = apps["app-east"]
+    assert east["regional_twin_ready"] is ready
+    assert east["twin_gaps"] == gaps
+    assert east["twin_capacity_sufficient"] is sufficient
+
+
+def test_app_outside_every_origin_group_is_flagged():
+    _, apps = twin_fixture()
+    lonely = apps["app-lonely"]
+    assert (lonely["in_origin_group"], lonely["behind_front_door"], lonely["twin_gaps"]) == (
+        False, False, ["not_behind_front_door"])
+
+
+@pytest.mark.parametrize("subscription, gap", [
+    pytest.param("s", "site_not_found", id="deleted-in-target-subscription"),
+    pytest.param("other", "site_not_visible", id="outside-target-subscription"),
+])
+def test_origin_to_missing_site_is_not_locked(subscription, gap):
+    group = {"id": "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Cdn/profiles/p/originGroups/g", "name": "g",
+             "profile": "p", "serving": True, "best_priority": 1, "origins": [origin_rec("gone", None, "app-gone")]}
+    [record] = origins.app_service_origin_records([group], {}, {}, {}, {}, {}, subscription)
+    assert (record["site_found"], record["locked_to_front_door"], record["lockdown_gaps"]) == (False, False, [gap])
+
+
+def test_app_service_summary_counts_serving_origins_and_app_types():
+    app_origins, apps = twin_fixture(east_capacity=3, west_capacity=1)
+    func = {**apps["app-lonely"], "app_type": "function_app"}
+    summary = origins.summarize_app_services(app_origins, [apps["app-east"], apps["app-west"], func], None)
+    assert summary["serving_app_service_origins"] == 2
+    assert summary["serving_app_service_origins_locked_to_front_door"] == 2
+    assert summary["production_web_apps"] == 2
+    assert summary["production_web_apps_twin_capacity_short"] == 1
+    assert summary["production_web_apps_regional_twin_ready"] == 1
+    assert summary["production_function_apps_not_behind_front_door"] == 1
+
+
+@pytest.mark.parametrize("tag, matched", [
+    pytest.param(None, True, id="unset"),
+    pytest.param("environment=prod", True, id="key-and-value-case-insensitive"),
+    pytest.param("environment", True, id="key-only"),
+    pytest.param("environment=dev", False, id="other-value"),
+    pytest.param("tier=web", False, id="missing-key"),
+])
+def test_production_tag(tag, matched):
+    assert origins.matches_tag({"Environment": "Prod"}, tag) is matched
+
+
+def test_site_queries_cover_the_subscription_slots_and_hosts():
+    queries = origins.site_queries("sub-1", [SITE.format("a").lower()], ["a.azurewebsites.net", "bad'host"])
+    assert "subscriptionId =~ 'sub-1'" in queries[0] and "'microsoft.web/sites/slots'" not in queries[0]
+    assert "'microsoft.web/sites/slots'" in queries[1] and SITE.format("a").lower() in queries[1]
+    assert "mv-expand h = properties.enabledHostNames" in queries[2] and "bad'host" not in queries[2]
