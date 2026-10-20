@@ -240,7 +240,9 @@ def test_every_fetcher_follows_the_shape(name):
     if name != "log_storage_immutability":
         assert spec["target_schema"]["workspaces"]["env"] == azure_rest.WORKSPACES_ENV
     assert spec["evidence_set"]["reference_id"].startswith("EVD-AZURE-")
-    assert len(spec["evidence_set"]["instructions"].split()) <= 80
+    instructions = spec["evidence_set"]["instructions"]
+    if not instructions.startswith(f"Script: azure/{name}/fetcher.py\n"):  # the plain-text layout is checked in test_contracts
+        assert len(instructions.split()) <= 80
     declared = {f["env"] for f in (spec.get("config_schema") or {}).values()}
     used = {getattr(MODS[name], a) for a in ("WINDOW_ENV", "LOOKBACK_ENV") if hasattr(MODS[name], a)}
     assert used <= declared
@@ -346,11 +348,18 @@ def test_analytics_rules_forbidden_fails_the_run(azure, tmp_path):
 
 
 def test_incidents(azure, tmp_path):
+    xdr = azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"][0]["properties"]
+    xdr.update(providerName="Microsoft XDR", providerIncidentId="4521")
+    xdr["additionalData"]["providerIncidentUrl"] = "https://security.microsoft.com/incidents/4521"
     code, ev = run("sentinel_incidents", tmp_path)
     assert code == 0
     ws = ws_a(ev)
     names = [i["name"] for i in ws["incidents"]]
     assert names == ["i-closed", "i-new"]  # the old closed one is outside the lookback
+    assert {k: ws["incidents"][1][k] for k in ("provider_name", "provider_incident_id", "provider_incident_url")} == {
+        "provider_name": "Microsoft XDR", "provider_incident_id": "4521",
+        "provider_incident_url": "https://security.microsoft.com/incidents/4521"}
+    assert ws["incidents"][0]["provider_incident_id"] is None
     closed = ws["incidents"][0]
     assert closed["closed_time_utc"] and closed["hours_to_close"] == pytest.approx(24, abs=0.1)
     assert ws["open_incidents"] == 1 and ws["oldest_open_age_days"] == pytest.approx(200, abs=0.1)

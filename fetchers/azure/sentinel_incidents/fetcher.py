@@ -117,6 +117,9 @@ def project_incident(incident: Dict[str, Any], closed: Dict[str, Any]) -> Dict[s
         "hours_to_detect": hours_between(parse_time(props.get("firstActivityTimeUtc")), parse_time(created)),
         "hours_to_close": hours_between(parse_time(created), parse_time(closed_time)),
         "provider_name": props.get("providerName"),
+        # Defender XDR's own incident id and link for incidents synced from it; Graph alerts carry the same id.
+        "provider_incident_id": props.get("providerIncidentId"),
+        "provider_incident_url": extra.get("providerIncidentUrl"),
         "related_analytic_rules": len(props.get("relatedAnalyticRuleIds") or []),
         "related_analytic_rule_ids": props.get("relatedAnalyticRuleIds") or [],
         "alerts_count": extra.get("alertsCount"),

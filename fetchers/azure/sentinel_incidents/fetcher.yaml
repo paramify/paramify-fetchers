@@ -1,18 +1,9 @@
 name: azure_sentinel_incidents
 version: 0.2.0
-description: >
-  For every Microsoft Sentinel workspace in the subscription: the incidents
-  created inside the lookback, plus every incident still open however old it
-  is. Each carries its severity, status, classification, reason and comment,
-  owner, created time, and close time, with hours to close. Its response
-  timeline, from every retained update, gives when it was acknowledged and each
-  status, owner and severity change with who made it, plus its tasks, comment
-  count, related analytic rules, and the entities on its alerts. Per workspace:
-  open incidents by severity, the oldest open incident's age, closed incidents
-  left Undetermined, median and maximum time to close, MTTD, MTTA and MTTR per
-  month of the lookback, the open backlog at each month end by severity and
-  owner, and the titles and rules behind recurring incidents. Also a count
-  cross-check between the incidents API and the SecurityIncident table.
+description: >-
+  Shows each Sentinel workspace's recent and open incidents with their response
+  timeline, entities and owner, plus monthly detection, acknowledgement and
+  close times and the open backlog.
 category: azure
 
 supports_targets: true
@@ -72,12 +63,35 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-SENTINEL-INCIDENTS
   name: Azure Sentinel Incidents
-  instructions: >
-    Script: fetcher.py. ARM REST per Sentinel workspace: incidents
-    (2025-09-01). Log Analytics: each SecurityIncident update row (close time,
-    status, owner and severity changes, tasks) and SecurityAlert entities joined
-    on AlertIds. Acknowledged is the first update to Active or with an owner.
-    MTTD is created minus first activity; MTTA and MTTR are by month
-    acknowledged and closed. Updates older than SecurityIncident's retention are
-    gone; their close times read not_retained and month-end backlogs null.
-    Roles: Microsoft Sentinel Reader and Log Analytics Reader.
+  instructions: |
+    Script: azure/sentinel_incidents/fetcher.py
+
+    Access: Microsoft Sentinel Reader and Log Analytics Reader.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.OperationalInsights/workspaces and onboardingStates (per workspace) — finds the Sentinel workspaces
+    - GET Microsoft.SecurityInsights/incidents — every incident, with its Defender XDR id and link when it came from there
+    - KQL on SecurityIncident — every update row: close times, status, owner and severity changes, and tasks, which the incident list lacks
+    - KQL on SecurityIncident joined to SecurityAlert — the entities on each incident's alerts
+    - GET Microsoft.OperationalInsights/workspaces/tables/SecurityIncident — the table's retention
+
+    Output: azure_sentinel_incidents_<subscription>.json — for each Sentinel workspace, every incident in the window with its severity, status, owner, response timeline and entities, and detection, acknowledgement and close times per month.
+
+    Summary fields:
+
+    Which workspaces were checked?
+    - workspaces_collected — Number of Sentinel workspaces read
+    - workspaces_without_sentinel — Number of workspaces skipped because Sentinel isn't turned on
+
+    Are incidents being worked and closed?
+    - incidents_in_scope — Number of incidents created in the lookback period (default 90 days), plus older incidents still open
+    - open_incidents — Number of incidents still open (New or Active)
+    - closed_incidents — Number of in-scope incidents that are closed
+    - acknowledged_incidents — Number of in-scope incidents with a known acknowledgement time. An incident is acknowledged at its first update that moves it to Active or gives it an owner; one already acknowledged before the incident log's oldest retained update has no known time
+    - open_unacknowledged — Number of open incidents still New with no owner
+    - recurring_titles — Number of incident titles shared by two or more in-scope incidents, up to 25 per workspace
+
+    Can every close time be shown?
+    - closed_missing_close_time — Number of closed incidents whose close time wasn't found, even though it should still be within retention
+    - closed_close_time_not_retained — Number of closed incidents whose close record is older than the incident log's retention, so the close time is gone

@@ -611,8 +611,10 @@ schemas and the `paramify` CLI — not the internal code.
   who made it), `tasks` with status and completion time, `hours_to_detect`
   (created minus first activity), `comments_count`, `classification_comment`,
   `related_analytic_rule_ids`, and the `entities` on its alerts as kind and
-  identifier, from SecurityAlert joined on the incident's alert ids.
-  `history_complete` says whether every update since creation is still
+  identifier, from SecurityAlert joined on the incident's alert ids, plus
+  `provider_incident_id` and `provider_incident_url`: for an incident synced
+  from Defender XDR, its id and link there, the id Microsoft Graph alerts give
+  as `incidentId`. `history_complete` says whether every update since creation is still
   retained; an incident already acknowledged before the oldest retained update
   has no acknowledgement time rather than a late one. Each workspace gains
   `monthly`: per calendar month of the lookback, MTTD by month created, MTTA by
