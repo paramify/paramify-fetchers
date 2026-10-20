@@ -1,0 +1,118 @@
+name: azure_entra_dormant_identities
+version: 0.1.0
+description: >-
+  Shows whether any dormant, never-used, guest or deleted user or service principal still holds an Entra directory role or an Azure role in the subscription.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_entra_dormant_identities.json
+  aggregation: per_target
+
+config_schema:
+  dormant_days:
+    type: integer
+    required: false
+    default: 90
+    env: ENTRA_DORMANT_DAYS
+    description: >
+      An enabled identity with no successful sign-in in this many days counts as
+      dormant, as does an account created more than this many days ago that has
+      never signed in.
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription whose role assignments are checked. Optional — omit to use
+      the first enabled subscription the ambient credential can see; set one target
+      per subscription to fan out. Users, directory roles and sign-in activity come
+      from the subscription's Entra tenant.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+# Microsoft Graph permissions (application permission, admin consent):
+#   User.Read.All       — /users.
+#   AuditLog.Read.All   — users' signInActivity and the service principal sign-in
+#                         activity report; both also need Entra ID P1 or P2.
+#   Directory.Read.All  — /directoryRoles and their members, groups' transitive
+#                         members, and /directoryObjects/getByIds. The Directory
+#                         Readers role covers it.
+# Azure: Reader on the subscription for its role assignments and definitions.
+# A denied read is recorded as an API failure and the run exits non-zero; without
+# sign-in activity the users and their roles are still listed and the dormancy
+# figures read null.
+
+ksis:
+  - KSI-IAM-ELP
+  - KSI-IAM-AAM
+
+evidence_set:
+  reference_id: EVD-AZURE-ENTRA-DORMANT-IDENTITIES
+  name: Microsoft Entra ID Dormant, Guest and Deleted Identities Holding Roles
+  instructions: |
+    Script: azure/entra_dormant_identities/fetcher.py
+
+    Access: Microsoft Graph User.Read.All, AuditLog.Read.All and Directory.Read.All (or the Directory Readers role) with an Entra ID P1 or P2 licence, and Reader on the subscription. Without AuditLog.Read.All or the licence, the users and their roles are still listed and the dormancy fields read null.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - Microsoft Graph GET /users with sign-in activity — every user, when it was created and when it last signed in (read again without sign-in activity if that is refused)
+    - Microsoft Graph GET /reports/servicePrincipalSignInActivities on the beta endpoint — when each app or managed identity last signed in
+    - Microsoft Graph GET /directoryRoles and GET /directoryRoles/{id}/members (per role) — who holds each active directory role
+    - GET Microsoft.Authorization/roleDefinitions and GET Microsoft.Authorization/roleAssignments — every Azure role assignment that applies in the subscription, including those inherited from management groups and made below it, with its role name
+    - Microsoft Graph GET /groups/{id}/transitiveMembers on the beta endpoint (per group holding a role) — who holds the role through the group; beta because v1.0 leaves out service principals
+    - Microsoft Graph POST /directoryObjects/getByIds — the service principals holding a role, and which assigned principals no longer exist
+
+    Output: azure_entra_dormant_identities_<subscription>.json — every user and every role-holding service principal with its last sign-in and the roles it holds, plus each deleted principal that an Azure role assignment still names.
+
+    Summary fields:
+
+    What was checked?
+    - dormant_after_days — Days without a successful sign-in after which an enabled identity counts as dormant (90 unless ENTRA_DORMANT_DAYS sets it)
+    - user_sign_in_activity — Whether users' sign-in activity was read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused or failed)
+    - service_principal_sign_in_activity — Whether the service principal sign-in activity report was read: read, not_licensed or not_read
+    - directory_roles_readable — True if every active directory role, its members and the members of groups holding one were read; false if any read of directory roles, their members or group members failed
+    - azure_roles_readable — True if the subscription's Azure role assignments, role names and the members of groups holding one were read; false if any read of Azure role assignments, role names or group members failed
+    - principal_lookup_readable — True if the directory lookup of role-holding service principals and assigned principals succeeded; false if it failed, and the deleted-principal fields read null
+    - users_checked — Number of users in the tenant
+    - service_principals_holding_roles — Number of service principals (apps and managed identities) holding a directory role or an Azure role in the subscription
+
+    Who holds a role?
+    - users_holding_roles — Number of users holding a directory role or an Azure role in the subscription, directly or through a group
+    - users_holding_directory_roles — Number of users holding an active directory role, directly or through a role-assignable group
+    - users_holding_privileged_directory_roles — Number of users holding a directory role that grants tenant-wide administrative power (the list shared with azure_entra_privileged_roles)
+    - users_holding_azure_roles — Number of users holding an Azure role that applies in the subscription, directly or through a group
+    - service_principals_holding_directory_roles — Number of service principals holding an active directory role
+    - service_principals_holding_azure_roles — Number of service principals holding an Azure role that applies in the subscription
+
+    Are enabled accounts in use?
+    - enabled_users — Number of users whose account is enabled
+    - guest_users — Number of guest (external) users
+    - dormant_users — Number of dormant users: enabled, with no successful sign-in in the last dormant_after_days days, or with none at all and created more than that many days ago; null if sign-in activity wasn't read
+    - users_never_signed_in — Number of users with no sign-in attempt on record, successful or not; null if sign-in activity wasn't read
+    - dormant_service_principals_holding_roles — Number of enabled role-holding service principals with no sign-in as a client (app-only or on behalf of a user) in the last dormant_after_days days, or none on record; a managed identity or Microsoft app missing from the report counts as unknown, not dormant; null if the service principal report wasn't read
+    - service_principals_holding_roles_without_recorded_sign_in — Number of role-holding service principals with no sign-in as a client in the report; null if the report wasn't read
+    - service_principals_holding_roles_dormancy_unknown — Number of role-holding managed identities and Microsoft apps missing from the sign-in report, whose dormancy can't be judged because Microsoft doesn't document the report covering them; null if the report wasn't read
+
+    Does any dormant, unused, guest or deleted identity hold a role?
+    - dormant_users_holding_roles — Number of dormant users holding a directory role or an Azure role; null if sign-in activity or the roles weren't read
+    - never_signed_in_users_holding_roles — Number of users that never signed in and hold a directory role or an Azure role; null if sign-in activity or the roles weren't read
+    - guest_users_holding_roles — Number of guest users holding a directory role or an Azure role; null if the roles weren't read
+    - disabled_users_holding_roles — Number of disabled users still holding a directory role or an Azure role; null if the roles weren't read
+    - deleted_principals_holding_azure_roles — Number of principals an Azure role assignment still names that the directory no longer has (deleted users, groups or apps); partner-tenant groups aren't checked; null if the roles or the directory lookup weren't read
+    - azure_role_assignments_to_deleted_principals — Number of Azure role assignments that name a deleted principal; null if the roles or the directory lookup weren't read
+    - no_inactive_identity_holds_a_role — True if no dormant or never-signed-in user, guest user, dormant service principal or deleted principal holds a role; false if any does; null if none was found but sign-in activity, the roles or the directory lookup couldn't be read, or a role-holding service principal's dormancy is unknown
