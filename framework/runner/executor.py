@@ -34,6 +34,7 @@ from framework.contract import (
     PlatformConfig,
     PlatformSpec,
     TargetInstance,
+    config_hint,
     effective_secrets,
 )
 from framework.discovery import DISCOVERY_DIR
@@ -197,13 +198,9 @@ def _apply_config(
         val = values.get(name)
         if val is None:
             if fdef.required:
-                where = (
-                    f"set it on this entry: paramify manifest set-config {fetcher.name} {name}=<value>; "
-                    f"a comparator ignores platforms.{fetcher.category}.config"
-                    if fetcher.is_comparator
-                    else f"set it under platforms.{fetcher.category}.config or the fetcher's config"
+                raise RuntimeError(
+                    f"{fetcher.name}: required config '{name}' has no value ({config_hint(fetcher, name)})"
                 )
-                raise RuntimeError(f"{fetcher.name}: required config '{name}' has no value ({where})")
             continue
         env[fdef.env] = _coerce_env(val)
 
@@ -616,11 +613,10 @@ def run_entry(
     issue-reports/ subdirectory instead, and reports its outputs relative to the
     run dir either way (see invocation_dir / _invoke).
 
-    A comparator gets `inputs_index` as $COMPARATOR_INPUTS and nothing from its
-    category: no secrets, config or passthrough env, so it gets no credentials from the runner.
+    A comparator gets `inputs_index` as $COMPARATOR_INPUTS. Callers pick the
+    category blocks with contract.platform_for, which gives a comparator none: no
+    secrets, config or passthrough env, so it gets no credentials from the runner.
     """
-    if fetcher.is_comparator:
-        platform_spec, platform_cfg = None, None
     output_dir.mkdir(parents=True, exist_ok=True)
     inv_dir = invocation_dir(fetcher, output_dir)
     inv_dir.mkdir(parents=True, exist_ok=True)

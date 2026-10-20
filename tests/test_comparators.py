@@ -184,21 +184,26 @@ def test_order_appends_a_cycle_rather_than_looping(build_fetcher_fn, tmp_path):
     ("evidence", "json", True), ("inventory", "json", True),
     ("issue_report", "csv", False), ("discovery", "json", False), ("evidence", "csv", False),
 ])
-def test_problems_accepts_only_json_evidence_inputs(build_fetcher_fn, tmp_path, kind, output, ok):
+def test_invalid_accepts_only_json_evidence_inputs(build_fetcher_fn, tmp_path, kind, output, ok):
     fx = {"src": _f(build_fetcher_fn, tmp_path, "src", kind=kind, output_type=output),
           "c": _f(build_fetcher_fn, tmp_path, "c", ["src"])}
-    problems = dependency_graph.problems(fx)
-    assert (problems == []) is ok, problems
+    invalid = dependency_graph.invalid(fx)
+    assert (invalid == {}) is ok, invalid
 
 
-def test_problems_names_unknown_inputs_and_cycles(build_fetcher_fn, tmp_path):
-    fx = {"c": _f(build_fetcher_fn, tmp_path, "c", ["nope"]),
-          "self": _f(build_fetcher_fn, tmp_path, "self", ["self"]),
-          "p": _f(build_fetcher_fn, tmp_path, "p", ["q"]), "q": _f(build_fetcher_fn, tmp_path, "q", ["p"])}
-    problems = dependency_graph.problems(fx)
-    assert "c: depends_on names an unknown fetcher: nope" in problems
-    assert "dependency cycle: self -> self" in problems
-    assert "dependency cycle: p -> q -> p" in problems
+def test_invalid_names_unknown_inputs_cycles_and_what_reads_them(build_fetcher_fn, tmp_path):
+    fx = {name: _f(build_fetcher_fn, tmp_path, name, deps) for name, deps in {
+        "c": ["nope"], "self": ["self"], "p": ["q"], "q": ["p"],
+        "reader": ["c"], "late": ["gone"], "fine": [],
+    }.items()}
+    assert dependency_graph.invalid(fx, {"gone": "misplaced"}) == {
+        "c": "depends_on names an unknown fetcher: nope",
+        "self": "dependency cycle: self -> self",
+        "p": "dependency cycle: p -> q -> p",
+        "q": "dependency cycle: p -> q -> p",
+        "reader": "depends_on c, which is left out of the catalog",
+        "late": "depends_on gone, which is left out of the catalog",
+    }
 
 
 def test_discovery_finds_comparators_beside_fetchers(tmp_path):
@@ -207,29 +212,81 @@ def test_discovery_finds_comparators_beside_fetchers(tmp_path):
     found = discover_fetchers(tmp_path)
     assert found[cmp].is_comparator and found[cmp].depends_on == [src]
     assert not found[src].is_comparator
+    assert found.excluded == {}
 
 
-def test_discovery_rejects_an_unknown_input(tmp_path):
-    comparator(tmp_path, "cmp", ["testcat_nope"], PROBE)
-    with pytest.raises(ValueError, match="unknown fetcher: testcat_nope"):
-        discover_fetchers(tmp_path)
-
-
-def test_discovery_rejects_a_comparator_under_fetchers(tmp_path):
+def test_a_comparator_with_an_unknown_input_is_left_out_and_the_rest_still_runs(tmp_path):
     src = input_fetcher(tmp_path, "src")
-    input_fetcher(tmp_path, "sneaky", extra=f"depends_on:\n  - {src}\n")
-    with pytest.raises(ValueError, match="belongs under comparators/"):
-        discover_fetchers(tmp_path)
+    cmp = comparator(tmp_path, "cmp", ["testcat_nope"], PROBE)
+    reader = comparator(tmp_path, "reader", [cmp], PROBE)
+    found = discover_fetchers(tmp_path)
+
+    assert set(found) == {src}
+    why = found.excluded[cmp]
+    assert why.endswith("cmp/fetcher.yaml: depends_on names an unknown fetcher: testcat_nope")
+    assert found.excluded[reader].endswith(f"depends_on {cmp}, which is left out of the catalog")
+    rows = [{"name": cmp, "reason": why}, {"name": reader, "reason": found.excluded[reader]}]
+    assert api.catalog(tmp_path)["excluded"] == rows
+    assert api.doctor(tmp_path)["excluded"] == rows
+
+    m = manifest(tmp_path, src, cmp)
+    assert api.validate(m, tmp_path) == [f"entry[1] uses {cmp}, which discovery left out: {why}"]
+    _, _, events = run(tmp_path, m)
+    assert [(e["fetcher"], e["reason"]) for e in events if e["event"] == "fetcher_skip"] == [(cmp, why)]
+    assert any(e["event"] == "fetcher_result" and e["fetcher"] == src and e["exit_code"] == 0 for e in events)
 
 
-def test_discovery_rejects_a_collector_under_comparators(tmp_path):
-    input_fetcher(tmp_path, "src")
+def test_a_fetcher_with_a_leftover_depends_on_is_left_out_with_how_to_migrate(tmp_path):
+    src = input_fetcher(tmp_path, "src")
+    # A collector with a secret: the comparator schema rules would otherwise bury the cause.
+    legacy = input_fetcher(tmp_path, "legacy", extra=f"depends_on:\n  - {src}\n")
+    yaml_path = tmp_path / "fetchers" / "testcat" / "legacy" / "fetcher.yaml"
+    yaml_path.write_text(yaml_path.read_text().replace("secrets: []", "secrets:\n  - name: token\n    env: T\n"))
+    found = discover_fetchers(tmp_path)
+
+    assert set(found) == {src}
+    assert found.excluded[legacy] == (
+        f"{yaml_path}: declares depends_on, which now makes it a comparator. Move it to "
+        "comparators/<category>/<name>/ if it compares other fetchers' evidence; "
+        "otherwise delete depends_on, which fetchers never used"
+    )
+
+
+def test_a_collector_under_comparators_is_left_out(tmp_path):
+    src = input_fetcher(tmp_path, "src")
     d = tmp_path / "comparators" / "testcat" / "plain"
     d.mkdir(parents=True)
     shutil.copy(tmp_path / "fetchers" / "testcat" / "src" / "fetcher.yaml", d / "fetcher.yaml")
     (d / "fetcher.yaml").write_text((d / "fetcher.yaml").read_text().replace("testcat_src", "testcat_plain"))
-    with pytest.raises(ValueError, match="declares no depends_on"):
+    found = discover_fetchers(tmp_path)
+    assert set(found) == {src}
+    assert "declares no depends_on" in found.excluded["testcat_plain"]
+
+
+def test_a_malformed_fetcher_yaml_still_stops_discovery(tmp_path):
+    input_fetcher(tmp_path, "src")
+    comparator(tmp_path, "cmp", ["testcat_src"], PROBE, extra="supports_targets: true\n")
+    with pytest.raises(ValueError, match="schema validation failed"):
         discover_fetchers(tmp_path)
+
+
+def test_catalog_gives_a_comparator_nothing_from_its_category(tmp_path):
+    src = input_fetcher(tmp_path, "src")
+    (tmp_path / "fetchers" / "_categories").mkdir(parents=True)
+    for cat in ("cmpcat", "testcat"):
+        (tmp_path / "fetchers" / "_categories" / f"{cat}.yaml").write_text(
+            "secrets:\n  - name: token\n    env: TOKEN\n    required: false\n"
+            "config_schema:\n  base_url:\n    type: string\n    env: URL\n"
+        )
+    alone = comparator(tmp_path, "alone", [src], PROBE, category="cmpcat")
+    beside = comparator(tmp_path, "beside", [src], PROBE)
+    cats = {c["name"]: c for c in api.catalog(tmp_path)["categories"]}
+
+    assert cats["cmpcat"]["platform"] is None
+    assert [f["name"] for f in cats["testcat"]["platform"]["config"]] == ["base_url"]
+    described = {f["name"]: f for c in cats.values() for f in c["fetchers"]}
+    assert described[alone]["secrets"] == described[beside]["secrets"] == []
+    assert [s["name"] for s in described[src]["secrets"]] == ["token"]
 
 
 def _comparator_doc(**over) -> dict:

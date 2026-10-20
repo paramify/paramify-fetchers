@@ -5,7 +5,7 @@ run, and reads the files they wrote. See docs/comparators.md.
 """
 
 from collections import Counter
-from typing import List, Mapping, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence
 
 from framework.contract import Fetcher, ManifestEntry
 
@@ -13,25 +13,45 @@ from framework.contract import Fetcher, ManifestEntry
 INPUT_KINDS = ("evidence", "inventory")
 
 
-def problems(fetchers: Mapping[str, Fetcher]) -> List[str]:
-    """Why the declared inputs can't run: unknown names, inputs that write no JSON evidence, cycles."""
-    out: List[str] = []
+def invalid(fetchers: Mapping[str, Fetcher], left_out: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
+    """Each comparator that can't run, with why: an unknown input, one that writes no JSON
+    evidence, a cycle, or an input that is itself left out (`left_out` seeds those)."""
+    out: Dict[str, str] = {}
+    gone = dict(left_out or {})
+    while True:
+        found = _problems({n: f for n, f in fetchers.items() if n not in out}, gone)
+        if not found:
+            return out
+        out.update(found)
+        gone.update(found)
+
+
+def _problems(fetchers: Mapping[str, Fetcher], gone: Mapping[str, str]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
     for name in sorted(fetchers):
         for dep in fetchers[name].depends_on:
             src = fetchers.get(dep)
-            if src is None:
-                out.append(f"{name}: depends_on names an unknown fetcher: {dep}")
+            if dep in gone:
+                out[name] = f"depends_on {dep}, which is left out of the catalog"
+            elif src is None:
+                out[name] = f"depends_on names an unknown fetcher: {dep}"
             elif src.kind not in INPUT_KINDS or src.output_type != "json":
-                out.append(
-                    f"{name}: depends_on {dep}, which writes no JSON evidence "
+                out[name] = (
+                    f"depends_on {dep}, which writes no JSON evidence "
                     f"(kind {src.kind}, output {src.output_type})"
                 )
-    return out + _cycles(fetchers)
+            else:
+                continue
+            break
+    for cycle in _cycles(fetchers):
+        for name in cycle[:-1]:
+            out.setdefault(name, "dependency cycle: " + " -> ".join(cycle))
+    return out
 
 
-def _cycles(fetchers: Mapping[str, Fetcher]) -> List[str]:
+def _cycles(fetchers: Mapping[str, Fetcher]) -> List[List[str]]:
     visiting, done = set(), set()
-    found: List[str] = []
+    found: List[List[str]] = []
 
     def visit(path: List[str]) -> None:
         name = path[-1]
@@ -40,8 +60,7 @@ def _cycles(fetchers: Mapping[str, Fetcher]) -> List[str]:
             if dep not in fetchers or dep in done:
                 continue
             if dep in visiting:
-                cycle = path[path.index(dep):] + [dep]
-                found.append("dependency cycle: " + " -> ".join(cycle))
+                found.append(path[path.index(dep):] + [dep])
             else:
                 visit(path + [dep])
         visiting.discard(name)

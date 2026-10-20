@@ -15,9 +15,12 @@ schemas and the `paramify` CLI — not the internal code.
 - **Comparators** — a fetcher whose inputs are other fetchers' evidence from the
   same run, declared with `depends_on`. Comparators live in a separate
   `comparators/<category>/<name>/` tree and share the fetchers' namespace.
-  Discovery rejects unknown or cyclic inputs, inputs that write no JSON evidence,
-  and a fetcher in the wrong tree; the schema rejects a comparator with secrets,
-  targets, non-JSON output or no `evidence_set`. The runner runs each comparator
+  Discovery leaves out a comparator with unknown or cyclic inputs or inputs that
+  write no JSON evidence, and a fetcher in the wrong tree (a fetcher that kept a
+  never-used `depends_on` is told to move or delete it), so the rest of the catalog
+  still runs; `list`, `doctor`, `validate` and `run` say why. The schema rejects a
+  comparator with secrets, targets, non-JSON output or no `evidence_set`. The
+  runner runs each comparator
   after its inputs, checks that every input has finished before starting it (and
   records it as failed with `runner_setup_failed` if not), runs it even when an
   input failed, gives it no category secrets, config or passthrough env, and

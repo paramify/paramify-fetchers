@@ -39,13 +39,16 @@ from packaging.utils import canonicalize_name
 
 from framework import samples as _samples
 from framework import yaml_io
-from framework.config_loader import discover_fetchers, discover_platforms
+from framework.config_loader import discover_fetchers, discover_platforms, excluded
 from framework.contract import (
     ConfigField,
     InvocationResult,
     Secret,
     TargetField,
+    config_hint,
     effective_secrets,
+    platform_category,
+    platform_for,
 )
 from framework.custom_tags import category_display_names
 from framework.envelope import ENVELOPE_KEYS, is_enveloped, wrap_outputs
@@ -139,8 +142,6 @@ def _target_descriptor(f: TargetField) -> dict:
 
 
 def _fetcher_descriptor(f, platform_spec=None) -> dict:
-    if f.is_comparator:
-        platform_spec = None  # the runner gives a comparator nothing from its category
     d = {
         "name": f.name,
         "version": f.version,
@@ -204,7 +205,8 @@ def catalog(root: Path) -> dict:
     for name in sorted(by_category):
         spec = platforms.get(name)
         platform_block = None
-        if spec is not None:
+        # The block is what the category's fetchers take; a comparator takes none of it.
+        if spec is not None and any(platform_category(f) for f in by_category[name]):
             platform_block = {
                 "config": [_config_descriptor(c) for c in spec.config_schema.values()],
                 "secrets": [_secret_descriptor(s) for s in spec.secrets],
@@ -216,12 +218,16 @@ def catalog(root: Path) -> dict:
             "display_name": spec.display_name if spec else None,
             "platform": platform_block,
             "fetchers": [
-                _fetcher_descriptor(f, spec)
+                _fetcher_descriptor(f, platform_for(f, platforms))
                 for f in sorted(by_category[name], key=lambda x: x.name)
             ],
         })
 
-    return {"categories": categories, "fetcher_count": len(fetchers)}
+    return {
+        "categories": categories,
+        "fetcher_count": len(fetchers),
+        "excluded": [{"name": n, "reason": why} for n, why in sorted(excluded(fetchers).items())],
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -479,9 +485,9 @@ def doctor(
         entries = (data.get("run") or {}).get("fetchers") or []
         used_cats = sorted({
             c for c in (
-                fetchers[e["use"]].category
+                platform_category(fetchers[e["use"]])
                 for e in entries
-                if e.get("use") in fetchers and not fetchers[e["use"]].is_comparator
+                if e.get("use") in fetchers
             )
             if c
         })
@@ -600,6 +606,8 @@ def doctor(
         "upload": upload,
         "upload_required": require_upload,
         "probes": probes,
+        # Informational: a manifest that uses one fails validate, which gates `ok`.
+        "excluded": [{"name": n, "reason": why} for n, why in sorted(excluded(fetchers).items())],
         "ok": ok,
     }
 
@@ -921,7 +929,11 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
 
     for i, entry in enumerate(parsed.entries):
         if entry.use not in fetchers:
-            errors.append(f"entry[{i}] uses unknown fetcher: {entry.use}")
+            why = excluded(fetchers).get(entry.use)
+            errors.append(
+                f"entry[{i}] uses {entry.use}, which discovery left out: {why}" if why
+                else f"entry[{i}] uses unknown fetcher: {entry.use}"
+            )
             continue
         fetcher = fetchers[entry.use]
 
@@ -945,8 +957,8 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
         if not fetcher.supports_targets and entry.targets:
             errors.append(f"{entry.use}: does not support targets but manifest has targets[]")
 
-        spec = None if fetcher.is_comparator else platforms.get(fetcher.category)
-        platform_cfg = None if fetcher.is_comparator else parsed.platforms.get(fetcher.category)
+        spec = platform_for(fetcher, platforms)
+        platform_cfg = platform_for(fetcher, parsed.platforms)
         combined = {}
         if spec:
             combined.update(spec.config_schema)
@@ -957,13 +969,7 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             in_platform = platform_cfg and name in platform_cfg.config
             in_entry = name in entry.config
             if not (in_platform or in_entry):
-                where = (
-                    f"set it on this entry: paramify manifest set-config {entry.use} {name}=<value>; "
-                    f"a comparator ignores platforms.{fetcher.category}.config"
-                    if fetcher.is_comparator
-                    else f"platforms.{fetcher.category}.config or fetcher config"
-                )
-                errors.append(f"{entry.use}: required config '{name}' not set ({where})")
+                errors.append(f"{entry.use}: required config '{name}' not set ({config_hint(fetcher, name)})")
 
         # An issue report with no assessment collects fine but can never be
         # intaken, so the gap is reported here rather than at upload time — after
@@ -1173,11 +1179,13 @@ def run(
 
     for entry in entries:
         if entry.use not in fetchers:
-            emit({"event": "fetcher_skip", "fetcher": entry.use, "reason": "not discovered"})
+            reason = excluded(fetchers).get(entry.use, "not discovered")
+            emit({"event": "fetcher_skip", "fetcher": entry.use, "reason": reason})
             overall_ok = False
             pending[entry.use] -= 1
             continue
         fetcher = fetchers[entry.use]
+        spec, platform_cfg = platform_for(fetcher, platforms), platform_for(fetcher, parsed.platforms)
         # An ambient run (supports_targets, no targets[]) is a single invocation.
         n_targets = len(entry.targets) if (fetcher.supports_targets and entry.targets) else 1
         start_event = {
@@ -1231,12 +1239,7 @@ def run(
         # can't drift.
         assessment = None
         if fetcher.is_issue_report:
-            _, values = merged_config(
-                fetcher,
-                platforms.get(fetcher.category or ""),
-                parsed.platforms.get(fetcher.category or ""),
-                entry,
-            )
+            _, values = merged_config(fetcher, spec, platform_cfg, entry)
             assessment = {
                 ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
                 ASSESSMENT_NAME_FIELD: values.get(ASSESSMENT_NAME_FIELD),
@@ -1248,8 +1251,8 @@ def run(
                 fetcher,
                 entry,
                 run_dir,
-                platforms.get(fetcher.category or ""),
-                parsed.platforms.get(fetcher.category or ""),
+                spec,
+                platform_cfg,
                 on_line=on_line,
                 on_note=on_note,
                 inputs_index=inputs_index,
@@ -3041,16 +3044,13 @@ def effective_config(
         if f is None:
             out[use] = []
             continue
-        spec = specs.get(f.category) if f.category and not f.is_comparator else None
+        spec = platform_for(f, specs)
         schema: Dict[str, ConfigField] = {}
         if spec:
             schema.update(spec.config_schema)
         schema.update(f.config_schema)  # fetcher overrides platform on a name clash
 
-        platform_values = (
-            {} if f.is_comparator
-            else ((all_platforms.get(f.category or "") or {}).get("config")) or {}
-        )
+        platform_values = (platform_for(f, all_platforms) or {}).get("config") or {}
         entry_values = (_find_entry(m, use) or {}).get("config") or {}
 
         fields: List[dict] = []

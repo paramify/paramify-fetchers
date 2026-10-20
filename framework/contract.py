@@ -6,7 +6,7 @@ documented in framework/schemas/*.json and parsed by config_loader / manifest_lo
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, TypeVar
 
 
 @dataclass
@@ -43,6 +43,30 @@ def effective_secrets(fetcher, platform_spec=None) -> List["Secret"]:
     for s in fetcher.secrets:
         merged[s.name] = s
     return list(merged.values())
+
+
+T = TypeVar("T")
+
+
+def platform_category(fetcher: "Fetcher") -> Optional[str]:
+    """The category whose platform block this fetcher takes; None for a comparator, which takes none."""
+    return None if fetcher.is_comparator else fetcher.category
+
+
+def platform_for(fetcher: "Fetcher", platforms: Mapping[str, T]) -> Optional[T]:
+    """The fetcher's entry in `platforms` (a spec, a manifest block, or raw config), by platform_category."""
+    category = platform_category(fetcher)
+    return platforms.get(category) if category else None
+
+
+def config_hint(fetcher: "Fetcher", name: str) -> str:
+    """Where to set required config field `name` when nothing supplies it."""
+    if fetcher.is_comparator:
+        return (
+            f"set it on this entry: paramify manifest set-config {fetcher.name} {name}=<value>; "
+            f"a comparator ignores platforms.{fetcher.category}.config"
+        )
+    return f"set it under platforms.{fetcher.category}.config or the fetcher's config"
 
 
 @dataclass

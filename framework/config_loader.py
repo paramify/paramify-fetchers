@@ -7,7 +7,7 @@ starts with `_` (e.g. _shared, _categories, _template).
 
 import json
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from jsonschema import Draft202012Validator
 
@@ -59,17 +59,30 @@ def _fetcher_dirs(tree_root: Path):
                 yield fetcher_dir
 
 
-def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
-    """Walk fetchers/*/*/fetcher.yaml and comparators/*/*/fetcher.yaml. Returns {fetcher_name: Fetcher}.
+class Catalog(Dict[str, Fetcher]):
+    """{fetcher_name: Fetcher}, plus `excluded`: {name: why} for each fetcher.yaml left out."""
 
-    One namespace for both trees. Raises ValueError on schema-invalid yaml,
-    duplicate names, a fetcher in the wrong tree, or a comparator whose inputs
-    are unknown, write no JSON evidence, or form a cycle.
+    def __init__(self) -> None:
+        super().__init__()
+        self.excluded: Dict[str, str] = {}
+
+
+def excluded(fetchers: Mapping[str, Fetcher]) -> Dict[str, str]:
+    """What discovery left out, for a plain dict too."""
+    return getattr(fetchers, "excluded", {})
+
+
+def discover_fetchers(repo_root: Path) -> Catalog:
+    """Walk fetchers/*/*/fetcher.yaml and comparators/*/*/fetcher.yaml into one namespace.
+
+    Raises ValueError on schema-invalid yaml or duplicate names. A fetcher in the
+    wrong tree, or a comparator whose inputs can't run, is left out instead and
+    recorded in `excluded`, so it can't take the rest of the catalog down with it.
     """
     schema = _load_schema(repo_root)
     validator = Draft202012Validator(schema)
 
-    fetchers: Dict[str, Fetcher] = {}
+    fetchers = Catalog()
     trees = [repo_root / FETCHERS_DIR]
     if (repo_root / COMPARATORS_DIR).is_dir():
         trees.append(repo_root / COMPARATORS_DIR)
@@ -81,23 +94,19 @@ def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
                 continue
 
             data = yaml_io.load_path(yaml_path)
+            # Before the schema, whose comparator rules would bury this in a list of errors.
+            misplaced = _misplaced(data, tree_root.name == COMPARATORS_DIR)
+            if misplaced:
+                name = data.get("name") if isinstance(data, dict) else None
+                fetchers.excluded[name if isinstance(name, str) else str(yaml_path)] = f"{yaml_path}: {misplaced}"
+                continue
+
             errors = list(validator.iter_errors(data))
             if errors:
                 detail = "\n".join(f"  {e.message}" for e in errors)
                 raise ValueError(f"{yaml_path}: schema validation failed:\n{detail}")
 
             fetcher = _parse_fetcher(data, fetcher_dir)
-            in_comparators = tree_root.name == COMPARATORS_DIR
-            if fetcher.is_comparator and not in_comparators:
-                raise ValueError(
-                    f"{yaml_path}: declares depends_on, so it is a comparator and "
-                    f"belongs under {COMPARATORS_DIR}/<category>/<name>/"
-                )
-            if in_comparators and not fetcher.is_comparator:
-                raise ValueError(
-                    f"{yaml_path}: is under {COMPARATORS_DIR}/ but declares no depends_on; "
-                    f"a fetcher that collects from a source belongs under {FETCHERS_DIR}/"
-                )
             if fetcher.name in fetchers:
                 raise ValueError(
                     f"Duplicate fetcher name '{fetcher.name}': "
@@ -105,10 +114,25 @@ def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
                 )
             fetchers[fetcher.name] = fetcher
 
-    problems = dependency_graph.problems(fetchers)
-    if problems:
-        raise ValueError("comparator inputs are invalid:\n" + "\n".join(f"  {p}" for p in problems))
+    for name, why in dependency_graph.invalid(fetchers, fetchers.excluded).items():
+        fetchers.excluded[name] = f"{fetchers.pop(name).path / 'fetcher.yaml'}: {why}"
     return fetchers
+
+
+def _misplaced(data: Any, in_comparators: bool) -> Optional[str]:
+    declares_inputs = isinstance(data, dict) and bool(data.get("depends_on"))
+    if declares_inputs and not in_comparators:
+        return (
+            f"declares depends_on, which now makes it a comparator. Move it to "
+            f"{COMPARATORS_DIR}/<category>/<name>/ if it compares other fetchers' evidence; "
+            f"otherwise delete depends_on, which fetchers never used"
+        )
+    if in_comparators and not declares_inputs:
+        return (
+            f"is under {COMPARATORS_DIR}/ but declares no depends_on; "
+            f"a fetcher that collects from a source belongs under {FETCHERS_DIR}/"
+        )
+    return None
 
 
 def _parse_secrets(raw) -> list:

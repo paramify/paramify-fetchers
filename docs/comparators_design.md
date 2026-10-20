@@ -74,13 +74,17 @@ secrets: []
 - `depends_on` is already in `fetcher_schema.json`. A non-empty list is what
   makes a fetcher a comparator. There is no new `kind`.
 - Every input is required.
-- Discovery rejects:
-  - an unknown name;
-  - a cycle;
-  - an input of `kind: issue_report` or `discovery`, or one whose output isn't
-    JSON (only JSON is enveloped);
-  - a comparator that declares targets or secrets (the schema);
-  - a comparator outside `comparators/`, or a non-comparator inside it.
+- The schema rejects a comparator that declares targets or secrets.
+- As built, discovery leaves out the one comparator, rather than failing the
+  catalog, when an input:
+  - has an unknown name;
+  - is part of a cycle;
+  - is `kind: issue_report` or `discovery`, or has output that isn't JSON (only
+    JSON is enveloped);
+  - is itself left out.
+
+  It also leaves out a comparator outside `comparators/` and a non-comparator
+  inside it. `validate`, `run` and `doctor` report each one with its reason.
 - The schema also requires a comparator to be `kind: evidence` with JSON output
   and an `evidence_set`, since its one job is an uploadable file.
 - A comparator gets no credentials: no category secrets and no passthrough env.

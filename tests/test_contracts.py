@@ -98,6 +98,8 @@ def test_discovery_does_not_raise() -> None:
     """The aggregate gate: discovery validates + dedupes, raising on violations."""
     fetchers = discover_fetchers(REPO_ROOT)
     assert fetchers, "discover_fetchers returned nothing"
+    # Users get a scoped exclusion; this repo ships none.
+    assert fetchers.excluded == {}, fetchers.excluded
     discover_platforms(REPO_ROOT)  # must not raise on any category file
 
 

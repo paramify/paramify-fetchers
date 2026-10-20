@@ -154,8 +154,8 @@ paramify upload --dry-run
 
 | Symptom | Fix |
 |---|---|
-| Every `paramify` command fails with `depends_on names an unknown fetcher` | A copied template still lists `<input_fetcher_a>`. Name real fetchers in `depends_on`. |
-| `declares depends_on, so it is a comparator and belongs under comparators/` | Move the directory to `comparators/<category>/<short_name>/`. |
+| `left out of the catalog: … depends_on names an unknown fetcher` | A copied template still lists `<input_fetcher_a>`. Name real fetchers in `depends_on`. |
+| `declares depends_on, which now makes it a comparator` | Move the directory to `comparators/<category>/<short_name>/`, or delete `depends_on` if it collects from a source. |
 | `which writes no JSON evidence` | An input is an issue report, a discovery fetcher, or writes CSV or HTML. Compare a JSON evidence fetcher instead. |
 | The comparator shows `[FAIL]` with `input_failed` | Open the evidence of the input its `error` names; that file holds the cause. |
 | Every summary value is `null` | An input is missing: not in the manifest, not run, or no complete file. `metadata.error` says which. |

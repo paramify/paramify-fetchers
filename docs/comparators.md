@@ -30,15 +30,22 @@ Comparators share one namespace with fetchers (`<category>_<short_name>`), and
 `paramify list`, `describe`, `catalog`, `ksi`, the TUI and uploads see them like
 any fetcher. `list` adds `reads=<inputs>`, and `describe` shows `depends_on`.
 
-Discovery fails when:
+Discovery leaves a `fetcher.yaml` out of the catalog, and the rest still runs,
+when:
 
-- a `fetcher.yaml` under `fetchers/` declares `depends_on`, or one under
-  `comparators/` declares none. The error names the file.
+- one under `fetchers/` declares `depends_on`, or one under `comparators/`
+  declares none. A fetcher that kept `depends_on` from before comparators is told
+  to move or delete it.
 - a `depends_on` entry names an unknown fetcher, or an input writes no JSON
-  evidence (see [Inputs](#inputs)). The error names the comparator
-  (`<name>: depends_on …`).
-- the inputs form a cycle, including a comparator that lists itself. The error
-  names the cycle (`dependency cycle: a -> b -> a`).
+  evidence (see [Inputs](#inputs)).
+- the inputs form a cycle, including a comparator that lists itself
+  (`dependency cycle: a -> b -> a`).
+- an input is itself left out.
+
+Each reason starts with the file's path. `paramify list` prints it to stderr,
+`doctor` lists it under "Left out of the catalog", and `validate` and `run` give
+it for any manifest entry that uses the fetcher. A schema-invalid `fetcher.yaml`
+or a duplicate name still stops discovery, as for any fetcher.
 
 ## `fetcher.yaml`
 

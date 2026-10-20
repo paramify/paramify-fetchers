@@ -661,6 +661,12 @@ def list_cmd(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
             f"  {style.name(col)} {style.dim(ver)} [{style.dim('{:6s}'.format(tag))}]"
             f" {style.dim('category=')}{style.env(f['category'] or '-')}{reads}"
         )
+    _print_excluded(cat["excluded"])
+
+
+def _print_excluded(rows: List[dict]) -> None:
+    for row in rows:
+        _err(f"  {style.mark('SKIP')}  {style.name(row['name'])} left out of the catalog: {row['reason']}")
 
 
 @app.command("catalog")
@@ -851,6 +857,10 @@ def doctor_cmd(
                     f"installed, needs {pkg['required']}"
                 )
         typer.echo("  fix: pip install -r requirements.txt")
+
+    if rep.get("excluded"):
+        typer.echo(f"\n{style.head('Left out of the catalog')}:")
+        _print_excluded(rep["excluded"])
 
     if rep.get("probes"):
         typer.echo(f"\n{style.head('Credentials (live)')}:")
