@@ -1,13 +1,7 @@
 name: azure_monitor_fired_alerts
 version: 0.1.0
-description: >
-  Every Azure Monitor alert fired in the subscription in the last 30 days (Azure
-  keeps fired alerts that long): the rule that fired it, severity, signal type,
-  monitor condition, alert state, and fired, resolved and last-modified times, with
-  each alert's state history showing who acknowledged and closed it, when, and
-  whether its action groups ran. Every metric, log search, smart detector and
-  activity log alert rule is listed with its fire count and last fired time, so
-  enabled rules that never fired stand out.
+description: >-
+  Lists every Azure Monitor alert fired in the last 30 days, who acknowledged and closed it and when, and how often each alert rule fired.
 category: azure
 
 supports_targets: true
@@ -47,35 +41,55 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-MONITOR-FIRED-ALERTS
   name: Azure Monitor Fired Alerts
-  instructions: >
-    Script: fetcher.py. Reader (or Monitoring Reader) at subscription scope. ARM REST
-    with nextLink followed to the end. resource.providers.get for
-    Microsoft.AlertsManagement and Microsoft.Insights; an unregistered provider is
-    skipped and reported in provider_registration_status. (1) GET
-    Microsoft.AlertsManagement/alertsSummary?groupby=alertState&timeRange=30d (api
-    2019-05-05-preview) for the total, then GET
-    Microsoft.AlertsManagement/alerts?timeRange=30d&pageCount=250 (same api; without
-    timeRange the list covers one day). all_alerts_listed is true when the list holds
-    at least alertsSummary's total. Per alert from properties.essentials: alert_rule_id
-    (alertRule; null for built-in alerts such as Azure Backup's), rule_type from the
-    rule id's provider type (metricAlerts metric, scheduledQueryRules log_search,
-    smartDetectorAlertRules smart_detector, activityLogAlerts activity_log),
-    severity, signal_type, monitor_service, monitor_condition (Fired / Resolved),
-    alert_state (New / Acknowledged / Closed), target resource, fired_at
-    (startDateTime), resolved_at (monitorConditionResolvedDateTime), last_modified_at
-    and last_modified_by, actions_suppressed (actionStatus.isSuppressed). (2) Per
-    alert, GET {alert id}/history: every modification (event, old and new value,
-    time, who, comments). acknowledged_at/by is the first StateChange to
-    Acknowledged; closed_at/by is the last StateChange to Closed, set only while the
-    alert is Closed; closed_by_person is false when that actor is System.
-    hours_to_acknowledge and hours_to_close count from fired_at. actions_triggered
-    and actions_failed count ActionsTriggered and ActionsFailed events (action groups
-    run or failed). A history that answers 404 or 403 is history_status not_found or
-    not_authorized, leaves those fields null and does not fail the run; any other
-    error does. (3) GET Microsoft.Insights/metricAlerts (2018-03-01),
-    scheduledQueryRules (2023-12-01), activityLogAlerts (2020-10-01) and
-    Microsoft.AlertsManagement/smartDetectorAlertRules (2021-04-01). Each rule
-    (enabled from properties.enabled, or properties.state == Enabled for smart
-    detectors) carries fire_count, last_fired_at and open_alerts from the alerts
-    whose alertRule matches its id, case-insensitively. A rule that fired but is not
-    in those lists (another subscription, or deleted) is added with listed false.
+  instructions: |
+    Script: azure/monitor_fired_alerts/fetcher.py
+
+    Access: Reader or Monitoring Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.AlertsManagement and Microsoft.Insights — skips an unregistered provider
+    - GET Microsoft.AlertsManagement/alertsSummary — Azure's own count of alerts in the 30 days, to prove none were missed
+    - GET Microsoft.AlertsManagement/alerts — every alert fired in the 30 days Azure keeps them
+    - GET {alert id}/history (per alert) — who acknowledged and closed it, when, and whether its action groups ran
+    - GET Microsoft.Insights/metricAlerts, scheduledQueryRules, activityLogAlerts and GET Microsoft.AlertsManagement/smartDetectorAlertRules — every alert rule, to count its fires
+
+    Output: azure_monitor_fired_alerts_<subscription>.json — each fired alert with its rule, severity, state, times and history, and each alert rule with how often and when it last fired.
+
+    Summary fields:
+
+    Were all fired alerts collected?
+    - window_days — Number of days of fired alerts collected (30, all Azure keeps)
+    - alerts_fired — Number of alerts fired in the window
+    - alerts_summary_total — Number of alerts in the window by Azure's own alert summary; null if it couldn't be read
+    - all_alerts_listed — True if at least alerts_summary_total alerts were listed; false if fewer were; null if the summary couldn't be read
+    - alert_histories_read — Number of alerts whose state history was read
+    - alert_histories_unread — Number of alerts whose state history couldn't be read (deleted or refused), so who acknowledged or closed them is unknown
+    - provider_registration_status — Whether Microsoft.AlertsManagement and Microsoft.Insights are registered on the subscription: registered, not_registered or unknown for each
+
+    What fired?
+    - alerts_by_severity — Number of alerts for each severity (Sev0 most severe to Sev4)
+    - alerts_by_monitor_service — Number of alerts for each source that raised them, such as Platform (metric alerts), Log Analytics or Azure Backup
+    - alerts_by_rule_type — Number of alerts for each kind of rule that fired them (metric, log_search, smart_detector, activity_log, other); none for built-in alerts that have no rule, such as Azure Backup's
+    - alerts_by_monitor_condition — Number of alerts for each monitor condition: Fired (the condition still holds) or Resolved (it cleared)
+
+    Was each alert notified, reviewed and closed?
+    - alerts_with_notifications — Number of alerts whose history shows an action group ran
+    - alerts_with_failed_notifications — Number of alerts whose history shows an action group failed
+    - alerts_with_actions_suppressed — Number of alerts whose notifications an alert processing rule suppressed
+    - alerts_by_state — Number of alerts for each review state: New, Acknowledged or Closed
+    - alerts_open — Number of alerts not in the Closed state
+    - alerts_acknowledged — Number of alerts someone acknowledged, now or earlier in their history
+    - alerts_closed — Number of alerts in the Closed state
+    - alerts_closed_by_person — Number of closed alerts whose closing change was made by a user rather than by System
+    - median_hours_to_close — Number of hours from an alert firing to its closing change, the median across closed alerts with a readable history; null if none
+    - max_hours_to_close — Number of hours from an alert firing to its closing change, the longest across closed alerts with a readable history; null if none
+    - oldest_open_alert_fired_at — Time of firing of the oldest alert not in the Closed state; null if every alert is closed
+
+    Does every rule fire?
+    - alert_rules_listed — Number of listed alert rules: metric, log search, smart detector and activity log alert rules the subscription's rule lists return
+    - alert_rules_by_type — Number of listed alert rules of each kind (metric, log_search, smart_detector, activity_log)
+    - enabled_alert_rules — Number of listed alert rules that are enabled
+    - rules_that_fired — Number of alert rules, listed or not, with at least one alert in the window
+    - enabled_rules_never_fired — Number of enabled listed alert rules with no alert in the window
+    - rules_fired_not_listed — Number of alert rules that fired an alert in the window but aren't in the subscription's rule lists (in another subscription, or deleted)
