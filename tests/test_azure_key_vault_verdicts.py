@@ -46,6 +46,12 @@ class HttpResponseError(Exception):
         self.status_code = status_code
 
 
+class ClientAuthenticationError(HttpResponseError):
+    def __init__(self, message="DefaultAzureCredential failed to retrieve a token"):
+        Exception.__init__(self, message)
+        self.status_code = None
+
+
 class ServiceRequestError(Exception):
     pass
 
@@ -65,8 +71,12 @@ def policy(*actions, issuer="Self"):
               lifetime_actions=[ns(action=a, lifetime_percentage=80, days_before_expiry=None) for a in actions])
 
 
-def fake_certificates(monkeypatch, listed=(), list_error=None, policies=None):
+def fake_certificates(monkeypatch, listed=(), list_error=None, policies=None, page_error=None):
     policies = policies or {}
+
+    def pages():
+        yield from listed
+        raise page_error
 
     class CertificateClient:
         def __init__(self, vault_url, credential):
@@ -75,7 +85,7 @@ def fake_certificates(monkeypatch, listed=(), list_error=None, policies=None):
         def list_properties_of_certificates(self):
             if list_error:
                 raise list_error
-            return iter(listed)
+            return pages() if page_error else iter(listed)
 
         def get_certificate_policy(self, name):
             result = policies.get(name)
@@ -104,7 +114,17 @@ def test_refused_certificate_list_is_not_authorized_not_zero_certificates(monkey
     assert (summary["certificate_not_authorized_vaults"], summary["certificate_accessible_vaults"]) == (1, 0)
 
 
-@pytest.mark.parametrize("error", [HttpResponseError(500, "boom"), ServiceRequestError("connection reset")])
+def test_refusal_on_a_later_page_is_not_authorized_with_no_partial_list(monkeypatch):
+    fake_certificates(monkeypatch, listed=[cert_props("first")], page_error=HttpResponseError(403, "Forbidden"))
+    v, c = vault(), collector()
+    kv.collect_certificates(v, object(), c, NOW)
+    assert (v["certificates_status"], v["certificates"], c.ok) == ("not_authorized", [], True)
+
+
+@pytest.mark.parametrize("error", [
+    HttpResponseError(500, "boom"), HttpResponseError(404, "vault gone"), ClientAuthenticationError(),
+    ServiceRequestError("connection reset"),
+])
 def test_other_certificate_list_failures_fail_the_run(monkeypatch, error):
     fake_certificates(monkeypatch, list_error=error)
     v, c = vault(), collector()
@@ -147,8 +167,9 @@ def test_readable_vault_lists_certificates_with_auto_renew(monkeypatch):
             summary["certificates_with_auto_renew"], summary["certificate_auto_renew_percentage"]) == (3, 2, 1, 50)
 
 
-def test_policy_read_failure_other_than_refusal_is_recorded(monkeypatch):
-    fake_certificates(monkeypatch, listed=[cert_props("web")], policies={"web": HttpResponseError(500)})
+@pytest.mark.parametrize("error", [HttpResponseError(500), ClientAuthenticationError()])
+def test_policy_read_failure_other_than_refusal_is_recorded(monkeypatch, error):
+    fake_certificates(monkeypatch, listed=[cert_props("web")], policies={"web": error})
     v, c = vault(), collector()
     kv.collect_certificates(v, object(), c, NOW)
     assert (v["certificates_status"], v["certificates"][0]["policy_readable"], c.ok) == ("accessible", False, False)
@@ -219,6 +240,7 @@ def test_app_service_projection_never_reads_secret_fields():
 @pytest.mark.parametrize("props, source", [
     ({"key_vault_id": VAULT_ID, "key_vault_secret_name": "web", "key_vault_secret_status": "Succeeded"}, "key_vault"),
     ({"canonical_name": "www.example.com"}, "managed"),
+    ({"domain_validation_method": "http-token"}, "managed"),
     ({}, "uploaded"),
 ])
 def test_app_service_certificate_source(props, source):
@@ -248,6 +270,21 @@ def test_key_vault_sync_status_and_auto_renew_link():
     assert summary["app_service_certificates_key_vault_sync_failing"] == 1
 
 
+@pytest.mark.parametrize("status, succeeded", [
+    ("Succeeded", True),
+    (None, None), ("Unknown", None), ("Initialized", None), ("WaitingOnCertificateOrder", None),
+    ("CertificateOrderFailed", False), ("OperationNotPermittedOnKeyVault", False),
+    ("AzureServiceUnauthorizedToAccessKeyVault", False), ("KeyVaultDoesNotExist", False),
+    ("KeyVaultSecretDoesNotExist", False), ("UnknownError", False),
+])
+def test_key_vault_sync_status(status, succeeded):
+    record = kv.app_service_certificate_record(kv.project_app_service_certificate(web_cert(
+        "a", key_vault_id=VAULT_ID, key_vault_secret_name="web", key_vault_secret_status=status)), NOW)
+    assert record["key_vault_sync_succeeded"] is succeeded
+    assert kv.summarize_certificates([], [record])["app_service_certificates_key_vault_sync_failing"] == (
+        1 if succeeded is False else 0)
+
+
 def test_unreadable_vault_gives_no_auto_renew_answer():
     vaults = [{"id": VAULT_ID, "certificates_status": "not_authorized", "certificates": []}]
     record = kv.app_service_certificate_record(kv.project_app_service_certificate(web_cert(
@@ -267,6 +304,24 @@ def test_app_service_list_uses_reader_arm_call(monkeypatch):
         ["a", "b"], ["managed", "uploaded"], True)
 
 
+@pytest.mark.parametrize("failing", ["init", "list"])
+def test_app_service_certificate_list_failure_fails_the_run(monkeypatch, failing):
+    def listing():
+        raise HttpResponseError(403, "does not have authorization to perform action Microsoft.Web/certificates/read")
+
+    def client(**_):
+        if failing == "init":
+            raise RuntimeError("client init failed")
+        return ns(certificates=ns(list=listing))
+
+    monkeypatch.setitem(sys.modules, "azure.mgmt.web", ns(WebSiteManagementClient=client))
+    c = collector()
+    assert kv.collect_app_service_certificates("sub", object(), c, [], NOW) == []
+    assert c.ok is False
+    assert c.failures[0]["operation"] == (
+        "web.WebSiteManagementClient (init)" if failing == "init" else "web.certificates.list")
+
+
 # --- the existing evidence is unchanged ---
 
 def test_existing_vault_and_summary_keys_are_kept():
@@ -279,3 +334,16 @@ def test_existing_vault_and_summary_keys_are_kept():
         "keys_with_rotation_policy", "keys_with_rotation_enabled", "rotation_enabled_percentage",
         "keys_with_expiration", "key_expiration_percentage", "total_secrets", "enabled_secrets",
         "secrets_with_expiration", "secret_expiration_percentage"}
+
+
+def test_new_summary_keys_overwrite_nothing_and_results_keep_their_keys():
+    assert not set(kv.summarize([])) & set(kv.summarize_certificates([], []))
+    record = kv.vault_record(vault())
+    results, summary = kv.evidence_sections([record], "registered", [], "not_registered")
+    assert (results["key_vaults"], results["provider_registration_status"]) == ([record], "registered")
+    assert set(results) == {"key_vaults", "provider_registration_status", "app_service_certificates",
+                            "web_provider_registration_status"}
+    assert set(summary) == set(kv.summarize([record])) | set(kv.summarize_certificates([record], [])) | {
+        "provider_registration_status", "web_provider_registration_status"}
+    assert (summary["provider_registration_status"], summary["web_provider_registration_status"]) == (
+        "registered", "not_registered")

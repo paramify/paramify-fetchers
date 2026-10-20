@@ -1515,7 +1515,18 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     (
         "azure.mgmt.web.models",
         "CertificateProperties",
-        ["expiration_date", "key_vault_id", "key_vault_secret_status", "canonical_name", "thumbprint"],
+        [
+            "expiration_date",
+            "key_vault_id",
+            "key_vault_secret_name",
+            "key_vault_secret_status",
+            "canonical_name",
+            "domain_validation_method",
+            "thumbprint",
+            "host_names",
+            "issuer",
+            "subject_name",
+        ],
         "azure/key_vault_key_rotation — a renamed key_vault_id or canonical_name "
         "reads a Key Vault or managed certificate as an uploaded one",
     ),

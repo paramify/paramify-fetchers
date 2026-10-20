@@ -1,20 +1,7 @@
 name: azure_key_vault_key_rotation
 version: 0.2.0
-description: >
-  For every key in every key vault in the subscription, the rotation policy (its
-  lifetime actions, the rotate/notify trigger durations and the expiry applied to new
-  versions) and the key's own enabled state, creation / update / expiration dates and
-  public strength parameters — plus every secret's name, enabled state and expiration
-  date, and every certificate's expiry, issuer, validity and whether its policy
-  auto-renews it. Also every App Service certificate in the subscription with its
-  expiry and where it comes from (a Key Vault certificate, an App Service managed
-  certificate, or an uploaded PFX). Spans both Key Vault planes: the management plane
-  enumerates what each vault holds, and per-vault data-plane KeyClient and
-  CertificateClient calls read what the management plane cannot see. A vault the
-  credential holds no data-plane grant on is reported as data_plane_status
-  inaccessible, and as certificates_status not_authorized, rather than failing the run
-  or reading as a vault with no certificates. No key material, secret value or
-  certificate body is ever read.
+description: >-
+  Shows whether Key Vault keys rotate, whether keys, secrets and certificates expire, whether certificates renew themselves, and where each App Service certificate comes from.
 category: azure
 
 supports_targets: true
@@ -52,32 +39,67 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-KEYVAULT-ROTATION
   name: Azure Key Vault Key Rotation
-  instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-keyvault KeyVaultManagementClient):
-    vaults.list_by_subscription(), keys.list(), keys.get(), secrets.list(); then
-    (azure-keyvault-keys KeyClient): list_properties_of_keys(),
-    get_key_rotation_policy(); (azure-keyvault-certificates CertificateClient):
-    list_properties_of_certificates(), get_certificate_policy(); and
-    (azure-mgmt-web WebSiteManagementClient): certificates.list().
-    Reader covers the management plane and App Service certificates. Key Vault
-    certificates need a data-plane grant: Key Vault Reader (RBAC vaults) or the
-    certificates list and get permissions (access-policy vaults).
-    A vault whose certificate list answers 401 or 403 gets certificates_status
-    "not_authorized" and certificates_message, with an empty certificates list
-    that means "could not see", not "none". Any other error listing certificates
-    fails the run and reads certificates_status "failed".
-    Each Key Vault certificate carries expires, expired, days_until_expiry,
-    x509_thumbprint and its policy (issuer_name, subject, validity_in_months, key
-    shape and lifetime_actions). auto_renew_enabled is true when a lifetime action
-    is AutoRenew and null when the policy could not be read (policy_readable
-    false); certificate_auto_renew_percentage counts readable policies only.
-    results.app_service_certificates: one record per Microsoft.Web/certificates
-    resource with expiration_date, expired, days_until_expiry, host_names and
-    source: "key_vault" (key_vault_id set; App Service syncs it from the vault),
-    "managed" (canonical_name set; App Service renews it) or "uploaded" (a PFX
-    nobody renews). key_vault_sync_succeeded is false when the last sync from Key
-    Vault did not succeed (key_vault_secret_status), and
-    key_vault_certificate_auto_renew is the backing Key Vault certificate's
-    auto_renew_enabled when that vault's certificates were readable, else null.
-    The PFX, the public certificate blob and the password are never read.
-    Expiring within 30 days counts certificates not yet expired.
+  instructions: |
+    Script: azure/key_vault_key_rotation/fetcher.py
+
+    Access: Reader on the subscription. Optional: Key Vault Reader on each vault (RBAC vaults) or an access policy with key and certificate list and get (access-policy vaults); without it, that vault's certificates read not_authorized and key rotation comes from the management plane only.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.KeyVault and Microsoft.Web — tells "not in use" from "none there"; a failure fails the run
+    - vaults.list_by_subscription() — every key vault
+    - keys.list() and keys.get() (per key) — keys, their dates and rotation policy
+    - secrets.list() (per vault) — secret names and expiry dates, never values
+    - KeyClient.list_properties_of_keys() and get_key_rotation_policy() (per vault, per key) — rotation policies on the data plane
+    - CertificateClient.list_properties_of_certificates() and get_certificate_policy() (per vault, per certificate) — certificate expiry and renewal policy; a 401 or 403 is that vault's not_authorized answer, any other error fails the run
+    - certificates.list() (App Service) — App Service certificates, their expiry and source; a failure fails the run
+
+    Output: azure_key_vault_key_rotation_<subscription>.json — every key vault's keys with their rotation policies, secrets with their expiry, and certificates with their expiry and renewal policy, plus every App Service certificate with its expiry and where it comes from; no key material, secret value, certificate body or PFX password is read.
+
+    Summary fields:
+
+    What was checked?
+    - total_key_vaults — Number of key vaults in the subscription
+    - data_plane_accessible_vaults — Number of key vaults whose keys this credential could list on the data plane
+    - data_plane_inaccessible_vaults — Number of key vaults that refused this credential on the data plane (no data-plane role or access policy); a permission gap, not a failed run
+    - rbac_authorization_vaults — Number of key vaults that use Azure RBAC rather than access policies for data-plane permissions
+    - certificate_accessible_vaults — Number of key vaults whose certificates this credential could list
+    - certificate_not_authorized_vaults — Number of key vaults that refused to list their certificates (HTTP 401 or 403, read as not_authorized); their certificates are unknown, not zero
+    - provider_registration_status — Whether Key Vault (Microsoft.KeyVault) is registered on the subscription: registered, not_registered or unknown
+    - web_provider_registration_status — Whether App Service (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown; not_registered means no App Service in use rather than zero certificates
+
+    Do keys rotate?
+    - total_keys — Number of keys across all key vaults
+    - enabled_keys — Number of keys that are enabled
+    - keys_with_readable_rotation_policy — Number of keys whose rotation policy could be read on either plane ("readable": the plane answered with a policy or with "there is none")
+    - keys_with_rotation_policy — Number of keys with a rotation policy
+    - keys_with_rotation_enabled — Number of keys whose rotation policy has a rotate action
+    - rotation_enabled_percentage — Percentage of keys with a readable rotation policy that rotate = keys_with_rotation_enabled / keys_with_readable_rotation_policy × 100 (a whole number, 0–100); 0 when keys_with_readable_rotation_policy is 0. Keys whose policy couldn't be read are left out of both
+
+    Do keys and secrets expire?
+    - keys_with_expiration — Number of keys with an expiration date set
+    - key_expiration_percentage — Percentage of keys with an expiration date = keys_with_expiration / total_keys × 100 (a whole number, 0–100); 0 when total_keys is 0
+    - total_secrets — Number of secrets across all key vaults
+    - enabled_secrets — Number of secrets that are enabled
+    - secrets_with_expiration — Number of secrets with an expiration date set
+    - secret_expiration_percentage — Percentage of secrets with an expiration date = secrets_with_expiration / total_secrets × 100 (a whole number, 0–100); 0 when total_secrets is 0
+
+    Do Key Vault certificates renew themselves?
+    - total_certificates — Number of certificates in the key vaults whose certificates could be listed
+    - certificates_with_readable_policy — Number of Key Vault certificates whose policy could be read
+    - certificates_with_auto_renew — Number of Key Vault certificates whose policy has an AutoRenew lifetime action, so Key Vault renews them before they expire
+    - certificate_auto_renew_percentage — Percentage of Key Vault certificates with a readable policy that auto-renew = certificates_with_auto_renew / certificates_with_readable_policy × 100 (a whole number, 0–100); 0 when certificates_with_readable_policy is 0. Certificates whose policy couldn't be read, and vaults that refused the list, are left out of both
+
+    Are certificates expired or about to expire?
+    - expired_certificates — Number of Key Vault certificates past their expiry date when the fetcher ran
+    - certificates_expiring_within_30_days — Number of Key Vault certificates not yet expired that expire within 30 days
+    - expired_app_service_certificates — Number of App Service certificates past their expiry date when the fetcher ran
+    - app_service_certificates_expiring_within_30_days — Number of App Service certificates not yet expired that expire within 30 days
+
+    Where do App Service certificates come from?
+    - total_app_service_certificates — Number of App Service certificates in the subscription
+    - app_service_certificates_by_source — Number of App Service certificates from each source:
+      - key_vault (synced from a Key Vault secret; the record's key_vault_certificate_auto_renew is that vault certificate's auto-renew, or null when the vault's certificates couldn't be read or it holds no certificate of that name, as for an App Service Certificate order)
+      - managed (an App Service managed certificate, recognised by its canonical name or domain validation method; App Service renews it)
+      - uploaded (an uploaded PFX file that nobody renews)
+    - app_service_certificates_key_vault_sync_failing — Number of Key Vault-backed App Service certificates whose last sync from the vault failed (an error status such as KeyVaultSecretDoesNotExist); Succeeded, pending (Initialized, WaitingOnCertificateOrder) and unknown statuses are not counted

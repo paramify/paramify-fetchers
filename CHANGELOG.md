@@ -587,10 +587,15 @@ schemas and the `paramify` CLI — not the internal code.
   expiry and `source`: `key_vault`, `managed` or `uploaded`. A Key Vault-backed one
   says whether its last sync succeeded and, where the vault was readable, whether
   the certificate behind it auto-renews. The PFX, certificate blob and password are
-  never read. Summary adds certificate and App Service certificate counts, expired
-  and expiring-within-30-days counts, and `certificate_auto_renew_percentage` over
-  readable policies. Adds the `azure-keyvault-certificates` dependency. Existing
-  fields are unchanged.
+  never read. `web_provider_registration_status` in results and summary tells "App
+  Service not in use" from "no certificates"; a failing `certificates.list()` or
+  Microsoft.Web `providers.get()` fails the run. Summary adds certificate and App
+  Service certificate counts, expired and expiring-within-30-days counts, and
+  `certificate_auto_renew_percentage` over readable policies. Adds the
+  `azure-keyvault-certificates` dependency to the `azure` extra. Existing fields are
+  unchanged. A read-only production run with Reader exercised the `not_authorized`
+  path and the App Service list; readable vault certificates and managed or uploaded
+  App Service certificates are proven by synthetic tests only.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`

@@ -72,7 +72,8 @@ CERTIFICATES_ACCESSIBLE = "accessible"
 CERTIFICATES_NOT_AUTHORIZED = "not_authorized"
 CERTIFICATES_FAILED = "failed"
 CERTIFICATES_NOT_ATTEMPTED = "not_attempted"
-UNREADABLE_STATUS = {401: CERTIFICATES_NOT_AUTHORIZED, 403: CERTIFICATES_NOT_AUTHORIZED, 404: "not_found"}
+REFUSED_STATUS_CODES = {401, 403}
+NOT_FOUND_STATUS_CODE = 404
 
 AUTO_RENEW_ACTION = "autorenew"
 EXPIRY_WARNING_DAYS = 30
@@ -81,7 +82,9 @@ EXPIRY_WARNING_DAYS = 30
 APP_SERVICE_SOURCE_KEY_VAULT = "key_vault"
 APP_SERVICE_SOURCE_MANAGED = "managed"
 APP_SERVICE_SOURCE_UPLOADED = "uploaded"
+# keyVaultSecretStatus: Succeeded syncs; these are still pending or unknown; every other value is a failure.
 KEY_VAULT_SYNC_SUCCEEDED = "succeeded"
+KEY_VAULT_SYNC_UNDECIDED = {"unknown", "initialized", "waitingoncertificateorder"}
 
 
 # --- projection: the only code that touches an SDK model ---
@@ -331,6 +334,7 @@ def project_app_service_certificate(certificate) -> dict:
         "expiration_date": model_attr(properties, "expiration_date"),
         "thumbprint": model_attr(properties, "thumbprint"),
         "canonical_name": model_attr(properties, "canonical_name"),
+        "domain_validation_method": model_attr(properties, "domain_validation_method"),
         "key_vault_id": model_attr(properties, "key_vault_id"),
         "key_vault_secret_name": model_attr(properties, "key_vault_secret_name"),
         "key_vault_secret_status": model_attr(properties, "key_vault_secret_status"),
@@ -480,12 +484,20 @@ def certificate_record(
 
 
 def app_service_source(certificate: dict) -> str:
-    """Key Vault-backed, App Service managed (has a canonical name), or an uploaded PFX."""
+    """Key Vault-backed, App Service managed (a canonical name or domain validation), or an uploaded PFX."""
     if certificate.get("key_vault_id"):
         return APP_SERVICE_SOURCE_KEY_VAULT
-    if certificate.get("canonical_name"):
+    if certificate.get("canonical_name") or certificate.get("domain_validation_method"):
         return APP_SERVICE_SOURCE_MANAGED
     return APP_SERVICE_SOURCE_UPLOADED
+
+
+def key_vault_sync_succeeded(sync_status) -> bool | None:
+    """True on Succeeded, None while missing, unknown or pending, False on any error status."""
+    status = str(sync_status or "").strip().lower()
+    if not status or status in KEY_VAULT_SYNC_UNDECIDED:
+        return None
+    return status == KEY_VAULT_SYNC_SUCCEEDED
 
 
 def key_vault_auto_renew_index(vaults: list[dict]) -> dict:
@@ -529,9 +541,7 @@ def app_service_certificate_record(
         "key_vault_id": vault_id,
         "key_vault_secret_name": secret_name,
         "key_vault_secret_status": sync_status,
-        "key_vault_sync_succeeded": (
-            str(sync_status or "").lower() == KEY_VAULT_SYNC_SUCCEEDED if from_key_vault else None
-        ),
+        "key_vault_sync_succeeded": key_vault_sync_succeeded(sync_status) if from_key_vault else None,
         "key_vault_certificate_auto_renew": (
             (auto_renew_index or {}).get((arm_id_key(vault_id), str(secret_name or "").lower()))
             if from_key_vault
@@ -849,11 +859,9 @@ def collect_rotation_policies(vault: dict, cred, collector: Collector) -> None:
     vault["keys"] = merge_rotation_policies(vault.get("keys") or [], policies)
 
 
-def data_plane_read_status(exc: BaseException) -> str | None:
-    """not_authorized (401/403) or not_found (404) for an HTTP refusal; None is a real failure."""
-    if not is_data_plane_inaccessible(exc):
-        return None
-    return UNREADABLE_STATUS.get(getattr(exc, "status_code", None))
+def http_status(exc: BaseException) -> int | None:
+    """The HTTP status of a Key Vault HttpResponseError; None for anything else, credential failures included."""
+    return getattr(exc, "status_code", None) if is_data_plane_inaccessible(exc) else None
 
 
 def _first_line(exc: BaseException) -> str:
@@ -879,7 +887,7 @@ def collect_certificates(vault: dict, cred, collector: Collector, now: datetime)
         listed = list(client.list_properties_of_certificates())
     except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
         vault["certificates_message"] = " ".join(str(exc).split())[:300]
-        if data_plane_read_status(exc) == CERTIFICATES_NOT_AUTHORIZED:
+        if http_status(exc) in REFUSED_STATUS_CODES:
             logger.warning(
                 "key vault %s: certificates not readable by this credential — %s", name, _first_line(exc)
             )
@@ -897,7 +905,7 @@ def collect_certificates(vault: dict, cred, collector: Collector, now: datetime)
             try:
                 policy, readable = project_certificate_policy(client.get_certificate_policy(cert_name)), True
             except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash
-                if data_plane_read_status(exc) is None:
+                if http_status(exc) not in REFUSED_STATUS_CODES | {NOT_FOUND_STATUS_CODE}:
                     collector.record(
                         f"keyvault.certificates.get_certificate_policy ({name}/{cert_name})", exc
                     )
@@ -950,6 +958,25 @@ def collect_app_service_certificates(
     )
 
 
+def evidence_sections(
+    vaults: list[dict], registration: str, app_service_certificates: list[dict], web_registration: str
+) -> tuple[dict, dict]:
+    """The payload's results and summary."""
+    results = {
+        "key_vaults": vaults,
+        "provider_registration_status": registration,
+        "app_service_certificates": app_service_certificates,
+        "web_provider_registration_status": web_registration,
+    }
+    summary = {
+        **summarize(vaults),
+        **summarize_certificates(vaults, app_service_certificates),
+        "provider_registration_status": registration,
+        "web_provider_registration_status": web_registration,
+    }
+    return results, summary
+
+
 def main() -> int:
     logging.basicConfig(
         level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -998,22 +1025,13 @@ def main() -> int:
             ),
         )
 
+    results, summary = evidence_sections(vaults, registration, app_service_certificates, web_registration)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={
-            "key_vaults": vaults,
-            "provider_registration_status": registration,
-            "app_service_certificates": app_service_certificates,
-            "web_provider_registration_status": web_registration,
-        },
-        summary={
-            **summarize(vaults),
-            **summarize_certificates(vaults, app_service_certificates),
-            "provider_registration_status": registration,
-            "web_provider_registration_status": web_registration,
-        },
+        results=results,
+        summary=summary,
     )
 
     filename = (
