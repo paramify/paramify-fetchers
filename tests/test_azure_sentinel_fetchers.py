@@ -152,11 +152,14 @@ class FakeAzure:
                 ["Heartbeat", iso(NOW), 50]])),
             ("ModifiedBy", table(HISTORY_COLUMNS, incident_history())),
             ("SystemAlertId", table(["IncidentName", "AlertId", "Entities"], INCIDENT_ALERT_ENTITIES)),
-            ("by ProductName", table(["ProductName", "LastIngested", "Records"], [
-                ["Microsoft Defender Advanced Threat Protection", iso(NOW), 1], ["Azure Sentinel", iso(NOW), 1]])),
-            ("SecurityIncident", table(["IncidentName", "Status", "ClosedTime", "CreatedTime", "Tasks"], [
+            ("arg_max(TimeGenerated, Status, ClosedTime", table(["IncidentName", "Status", "ClosedTime", "CreatedTime", "Tasks"], [
                 ["i-closed", "Closed", iso(NOW - timedelta(days=2)), iso(NOW - timedelta(days=3)), INCIDENT_TASKS],
                 ["i-new", "New", None, iso(NOW - timedelta(days=200)), "[]"]])),
+            ("by ProductName", table(["ProductName", "LastIngested", "Records"], [
+                ["Microsoft Defender Advanced Threat Protection", iso(NOW), 1], ["Azure Sentinel", iso(NOW), 1]])),
+            ("SecurityIncident", table(["IncidentName", "Status", "ClosedTime", "CreatedTime"], [
+                ["i-closed", "Closed", iso(NOW - timedelta(days=2)), iso(NOW - timedelta(days=3))],
+                ["i-new", "New", None, iso(NOW - timedelta(days=200))]])),
             ("by Week", table(["Week", "Actor", "Queries", "Users"], [
                 [iso(sunday), "human", 4, 2], [iso(sunday), "application", 9, 0]])),
             ("by User", table(["User", "Queries", "LastQuery"], [["alice@contoso.com", 4, iso(NOW)]])),
