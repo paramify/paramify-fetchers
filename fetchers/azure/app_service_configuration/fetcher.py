@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from app_service import is_web_app, web_client  # noqa: E402
 from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
@@ -41,19 +42,14 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
 
 logger = logging.getLogger("azure_app_service_configuration")
-
-# `kind` is comma-joined: "app", "app,linux", "app,linux,container", "functionapp",
-# "functionapp,linux". Prowler's split.
-WEB_APP_KIND_PREFIX = "app"
-FUNCTION_APP_KIND_PREFIX = "functionapp"
 
 # minTlsVersion is a bare version string on this API ("1.0" … "1.3"), not the
 # "TLS1_2" spelling azure-mgmt-storage uses.
@@ -285,18 +281,6 @@ def project_web_app_stack(stack) -> list[dict]:
 
 
 # --- pure transforms (flat snake_case dicts in, evidence records out) ---
-
-def is_web_app(kind) -> bool:
-    """Prowler's split: `kind` starting with "app" is a web app, not a function app.
-
-    No `kind` counts as a web app — Prowler's default (`getattr(app, "kind", "app")`),
-    and the API omits `kind` only for plain Windows web apps.
-    """
-    text = str(kind or WEB_APP_KIND_PREFIX).lower()
-    return text.startswith(WEB_APP_KIND_PREFIX) and not text.startswith(
-        FUNCTION_APP_KIND_PREFIX
-    )
-
 
 def effective_client_cert_mode(client_cert_enabled, client_cert_mode) -> str:
     """Ported verbatim from Prowler's `App._get_client_cert_mode`.
@@ -770,12 +754,7 @@ def collect_web_apps(subscription_id, cred, collector: Collector) -> list[dict]:
     """One web_apps.list(), then two Reader-permitted GETs per app: `config/web` for the
     runtime versions and protocol settings, `config/authsettingsV2` for Easy Auth.
     """
-    from azure.mgmt.web import WebSiteManagementClient
-
-    def _client():
-        return WebSiteManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
-
-    client = collector.guard("web.WebSiteManagementClient (init)", _client)
+    client = web_client(subscription_id, cred, collector)
     if client is None:
         return []
 
