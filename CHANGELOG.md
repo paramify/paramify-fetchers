@@ -594,11 +594,11 @@ schemas and the `paramify` CLI — not the internal code.
     code, which Policy Insights has returned with a 409) is retried once, 5 s
     later. A run makes at most 3 retries, and none after a retry is refused again,
     since the refusal is then systematic. Still refused, that resource's states
-    are `not_authorized`, with the error code and
-    refused action (never the principal) in `evaluation_details_reason`, and it is
-    counted in `evaluation_details_not_authorized_resources`. It does not fail the
-    run, since the details only enrich the states; any other error on that read,
-    a 404 or a 5xx included, still does.
+    are `not_authorized`, with the error code and refused action (never the
+    principal) in `evaluation_details_reason`, and it is counted in
+    `evaluation_details_not_authorized_resources`. It does not fail the run, since
+    the details only enrich the states; any other error on that read, a 404 or a
+    5xx included, still does.
     `evaluation_details_truncated` says when not every listed resource was read.
   - Each remediation task's per-resource deployments (status, error, times) are
     listed in `remediation_deployments`, up to `max_remediation_deployments`

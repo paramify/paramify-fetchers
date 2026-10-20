@@ -12,7 +12,8 @@ do; this is the result of evaluating them. Reads from azure-mgmt-policyinsights:
   policy_states.list_query_results_for_resource
                                              each listed resource's evaluated
                                              expressions (actual vs target), bounded;
-                                             a read refused twice is a status, not a failure
+                                             a refused read (retried at most 3 times a run)
+                                             is a status, not a failure
   policy_states ("default", grouped)         30 days of history, for recurrence
   remediations.list_for_subscription         remediation tasks and their deployments
   remediations.list_deployments_at_...       each task's per-resource deployments
@@ -116,8 +117,8 @@ DETAILS_NOT_IN_RESULT = "not_in_detail_result"
 DETAILS_NOT_REQUESTED = "not_requested"
 DETAILS_UNSUPPORTED_SCOPE = "unsupported_scope"
 DETAILS_FAILED = "failed"
-# Policy Insights refused the resource's read, and again on one retry. Enrichment only, so it
-# is recorded on the states and does not fail the run; any other error still does.
+# Policy Insights refused the resource's read (retried at most 3 times a run). Enrichment only,
+# so it is recorded on the states and does not fail the run; any other error still does.
 DETAILS_NOT_AUTHORIZED = "not_authorized"
 # Read from the parsed ARM error, never the message: Policy Insights has answered
 # AuthorizationFailed as a 409, and refusals have cleared on a later read.
