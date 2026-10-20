@@ -35,8 +35,8 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-MLA-ALA
-  - KSI-MLA-RVL
+  - KSI-MLA-ALA      # Authorizing log access — each alert's history shows who reviewed and closed it, and when
+  - KSI-MLA-RVL      # Reviewing logs — fired alerts are acknowledged and closed, and rules that never fire stand out
 
 evidence_set:
   reference_id: EVD-AZURE-MONITOR-FIRED-ALERTS
@@ -61,27 +61,27 @@ evidence_set:
     Were all fired alerts collected?
     - window_days — Number of days of fired alerts collected (30, all Azure keeps)
     - alerts_fired — Number of alerts fired in the window
-    - alerts_summary_total — Number of alerts in the window by Azure's own alert summary; null if it couldn't be read
-    - all_alerts_listed — True if at least alerts_summary_total alerts were listed; false if fewer were; null if the summary couldn't be read
+    - alerts_summary_total — Number of alerts in the window by Azure's own alert summary; null if it couldn't be read or Microsoft.AlertsManagement isn't registered
+    - all_alerts_listed — True if at least alerts_summary_total alerts were listed; false if fewer were; null if the summary couldn't be read or Microsoft.AlertsManagement isn't registered
     - alert_histories_read — Number of alerts whose state history was read
     - alert_histories_unread — Number of alerts whose state history couldn't be read (deleted or refused), so who acknowledged or closed them is unknown
     - provider_registration_status — Whether Microsoft.AlertsManagement and Microsoft.Insights are registered on the subscription: registered, not_registered or unknown for each
 
     What fired?
-    - alerts_by_severity — Number of alerts for each severity (Sev0 most severe to Sev4)
-    - alerts_by_monitor_service — Number of alerts for each source that raised them, such as Platform (metric alerts), Log Analytics or Azure Backup
+    - alerts_by_severity — Number of alerts for each severity (Sev0 most severe to Sev4), or unknown when an alert has none
+    - alerts_by_monitor_service — Number of alerts for each source that raised them, such as Platform (metric alerts), Log Analytics or Azure Backup, or unknown when an alert has none
     - alerts_by_rule_type — Number of alerts for each kind of rule that fired them (metric, log_search, smart_detector, activity_log, other); none for built-in alerts that have no rule, such as Azure Backup's
-    - alerts_by_monitor_condition — Number of alerts for each monitor condition: Fired (the condition still holds) or Resolved (it cleared)
+    - alerts_by_monitor_condition — Number of alerts for each monitor condition: Fired (the condition still holds), Resolved (it cleared), or unknown when an alert has none
 
     Was each alert notified, reviewed and closed?
-    - alerts_with_notifications — Number of alerts whose history shows an action group ran
-    - alerts_with_failed_notifications — Number of alerts whose history shows an action group failed
+    - alerts_with_notifications — Number of alerts whose history shows an action group ran; null while any alert's history is unread (alert_histories_unread above 0), never a partial count
+    - alerts_with_failed_notifications — Number of alerts whose history shows an action group failed; null while any alert's history is unread (alert_histories_unread above 0), never a partial count
     - alerts_with_actions_suppressed — Number of alerts whose notifications an alert processing rule suppressed
-    - alerts_by_state — Number of alerts for each review state: New, Acknowledged or Closed
+    - alerts_by_state — Number of alerts for each review state: New, Acknowledged, Closed, or unknown when an alert has none
     - alerts_open — Number of alerts not in the Closed state
-    - alerts_acknowledged — Number of alerts someone acknowledged, now or earlier in their history
+    - alerts_acknowledged — Number of alerts someone acknowledged, now or earlier in their history; null while any alert's history is unread (alert_histories_unread above 0), never a partial count
     - alerts_closed — Number of alerts in the Closed state
-    - alerts_closed_by_person — Number of closed alerts whose closing change was made by a user rather than by System
+    - alerts_closed_by_person — Number of closed alerts whose closing change (the last change to Closed; an earlier close on an alert that was reopened doesn't count) was made by any actor other than System, which includes service principals and automation acting through the API as well as people; null while any alert's history is unread (alert_histories_unread above 0), never a partial count
     - median_hours_to_close — Number of hours from an alert firing to its closing change, the median across closed alerts with a readable history; null if none
     - max_hours_to_close — Number of hours from an alert firing to its closing change, the longest across closed alerts with a readable history; null if none
     - oldest_open_alert_fired_at — Time of firing of the oldest alert not in the Closed state; null if every alert is closed
@@ -90,6 +90,6 @@ evidence_set:
     - alert_rules_listed — Number of listed alert rules: metric, log search, smart detector and activity log alert rules the subscription's rule lists return
     - alert_rules_by_type — Number of listed alert rules of each kind (metric, log_search, smart_detector, activity_log)
     - enabled_alert_rules — Number of listed alert rules that are enabled
-    - rules_that_fired — Number of alert rules, listed or not, with at least one alert in the window
-    - enabled_rules_never_fired — Number of enabled listed alert rules with no alert in the window
-    - rules_fired_not_listed — Number of alert rules that fired an alert in the window but aren't in the subscription's rule lists (in another subscription, or deleted)
+    - rules_that_fired — Number of alert rules, listed or not, with at least one alert in the window; null if the alert list wasn't read (Microsoft.AlertsManagement not registered, or the list failed)
+    - enabled_rules_never_fired — Number of enabled listed alert rules with no alert in the window; null if the alert list wasn't read
+    - rules_fired_not_listed — Number of alert rules that fired an alert in the window but aren't in the subscription's rule lists: in another subscription, deleted, a kind the fetcher doesn't list (such as Prometheus rule groups or classic alert rules), or its rule list failed or its provider isn't registered; null if the alert list wasn't read

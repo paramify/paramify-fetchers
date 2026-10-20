@@ -184,10 +184,10 @@ class _ListClient:
 def test_alerts_are_listed_over_thirty_days_and_checked_against_the_summary_total():
     client = _ListClient([raw_alert(1), raw_alert(2)], 3)
     collector = sys.modules["azure_common"].Collector(fa.logger)
-    alerts, total = fa.collect_alerts(client, "s1", collector)
+    alerts, total, read = fa.collect_alerts(client, "s1", collector)
     assert ("list", f"{SUB}/providers/Microsoft.AlertsManagement/alerts", {"timeRange": "30d", "pageCount": "250"}) in client.calls
     assert ("get", f"{SUB}/providers/Microsoft.AlertsManagement/alertsSummary?groupby=alertState&timeRange=30d") in client.calls
-    assert (len(alerts), total, collector.ok) == (2, 3, True)
+    assert (len(alerts), total, read, collector.ok) == (2, 3, True, True)
     assert fa.summarize(alerts, [], total)["all_alerts_listed"] is False
 
 
@@ -237,3 +237,75 @@ def test_summary_without_alerts_or_a_summary_total():
     summary = fa.summarize([], [], None)
     assert (summary["alerts_fired"], summary["all_alerts_listed"], summary["median_hours_to_close"],
             summary["oldest_open_alert_fired_at"]) == (0, None, None, None)
+
+
+def test_rule_fires_are_unknown_when_the_alerts_were_not_read():
+    rules = [fa.rule_record("metric", {"id": METRIC_RULE, "properties": {"enabled": True}})]
+    [rule] = fa.rule_activity(rules, [], alerts_read=False)
+    assert (rule["fire_count"], rule["last_fired_at"], rule["open_alerts"]) == (None, None, None)
+    summary = fa.summarize([], [rule], None, alerts_read=False)
+    assert (summary["rules_that_fired"], summary["enabled_rules_never_fired"], summary["rules_fired_not_listed"],
+            summary["enabled_alert_rules"]) == (None, None, None, 1)
+
+
+def test_history_counts_are_unknown_while_any_history_is_unread():
+    alerts = [alert(n, status=fa.HISTORY_NOT_AUTHORIZED, state="Closed") for n in (1, 2, 3)]
+    summary = fa.summarize(alerts, [], 3)
+    assert {k: summary[k] for k in ("alert_histories_unread", "alerts_closed", "alerts_acknowledged",
+                                    "alerts_closed_by_person", "alerts_with_notifications",
+                                    "alerts_with_failed_notifications")} == {
+        "alert_histories_unread": 3, "alerts_closed": 3, "alerts_acknowledged": None, "alerts_closed_by_person": None,
+        "alerts_with_notifications": None, "alerts_with_failed_notifications": None}
+
+
+class _Subscription:
+    """Alert lists and rule lists for one subscription; `failing` paths answer the given error."""
+
+    def __init__(self, failing=None, error=None):
+        self.failing, self.error, self.lists = failing, error, []
+
+    def get(self, path, api_version):
+        if path.endswith("/history"):
+            return {"properties": {"modifications": []}}
+        return {"properties": {"total": 1}}
+
+    def list(self, path, api_version, params=None):
+        self.lists.append(path.split("/providers/", 1)[1])
+        if self.failing and path.endswith(self.failing):
+            raise self.error
+        if path.endswith("/Microsoft.AlertsManagement/alerts"):
+            return [raw_alert(1)]
+        if path.endswith("/metricAlerts"):
+            return [{"id": METRIC_RULE, "name": "cpu-high", "properties": {"enabled": True}}]
+        return []
+
+
+def registered(alerts_management=fa.REGISTRATION_UNKNOWN, insights=fa.REGISTRATION_UNKNOWN):
+    return {"Microsoft.AlertsManagement": alerts_management, "Microsoft.Insights": insights}
+
+
+def test_collect_rules_skips_an_unregistered_provider_and_records_a_failed_list():
+    client, collector = _Subscription("/smartDetectorAlertRules", azure_rest.ArmError(500, "InternalServerError", "x")), \
+        sys.modules["azure_common"].Collector(fa.logger)
+    rules = fa.collect_rules(client, "s1", registered(insights=fa.NOT_REGISTERED), collector)
+    assert (client.lists, rules, collector.ok) == (["Microsoft.AlertsManagement/smartDetectorAlertRules"], [], False)
+
+
+def test_collect_reads_alerts_then_counts_each_rules_fires():
+    client, collector = _Subscription(), sys.modules["azure_common"].Collector(fa.logger)
+    alerts, rules, total, read = fa.collect(client, "s1", registered(), collector)
+    assert (len(alerts), total, read, collector.ok) == (1, 1, True, True)
+    assert [(r["name"], r["fire_count"]) for r in rules] == [("cpu-high", 1)]
+
+
+@pytest.mark.parametrize("registration, failing, total, ok", [
+    (registered(alerts_management=fa.NOT_REGISTERED), None, None, True),
+    (registered(), "/Microsoft.AlertsManagement/alerts", 1, False),
+])
+def test_collect_leaves_rule_fires_unknown_when_the_alerts_were_not_read(registration, failing, total, ok):
+    client = _Subscription(failing, azure_rest.ArmError(403, "AuthorizationFailed", "no"))
+    collector = sys.modules["azure_common"].Collector(fa.logger)
+    alerts, rules, summary_total, read = fa.collect(client, "s1", registration, collector)
+    assert (alerts, summary_total, read, collector.ok) == ([], total, False, ok)
+    assert [(r["name"], r["fire_count"]) for r in rules] == [("cpu-high", None)]
+    assert fa.summarize(alerts, rules, summary_total, read)["enabled_rules_never_fired"] is None

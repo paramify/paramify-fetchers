@@ -174,7 +174,9 @@ def _latest(times):
     return max(parsed)[1] if parsed else None
 
 
-def _fires(alerts: list[dict]) -> dict:
+def _fires(alerts: list[dict], read: bool = True) -> dict:
+    if not read:
+        return {"fire_count": None, "last_fired_at": None, "open_alerts": None}
     return {
         "fire_count": len(alerts),
         "last_fired_at": _latest(a["fired_at"] for a in alerts),
@@ -182,8 +184,8 @@ def _fires(alerts: list[dict]) -> dict:
     }
 
 
-def rule_activity(rules: list[dict], alerts: list[dict]) -> list[dict]:
-    """Every listed rule with its fires, plus rules that fired but are not in the subscription's lists."""
+def rule_activity(rules: list[dict], alerts: list[dict], alerts_read: bool = True) -> list[dict]:
+    """Every listed rule with its fires, plus rules that fired but are not in the subscription's lists; fires are unknown if the alerts were not read."""
     fired: dict = {}
     for a in alerts:
         if a["alert_rule_id"]:
@@ -192,7 +194,7 @@ def rule_activity(rules: list[dict], alerts: list[dict]) -> list[dict]:
     for rule in rules:
         key = (rule["id"] or "").lower()
         listed.add(key)
-        out.append({**rule, "listed": True, **_fires(fired.get(key, []))})
+        out.append({**rule, "listed": True, **_fires(fired.get(key, []), alerts_read)})
     for key, group in fired.items():
         if key not in listed:
             first = group[0]
@@ -203,8 +205,14 @@ def rule_activity(rules: list[dict], alerts: list[dict]) -> list[dict]:
     return sorted(out, key=lambda r: (r["id"] or "").lower())
 
 
-def summarize(alerts: list[dict], rules: list[dict], summary_total) -> dict:
+def summarize(alerts: list[dict], rules: list[dict], summary_total, alerts_read: bool = True) -> dict:
     closed = [a for a in alerts if (a["alert_state"] or "").lower() == STATE_CLOSED]
+    # A count over histories is unknown, never a partial number, while any history is unread.
+    histories_read = all(a["history_status"] == HISTORY_READ for a in alerts)
+
+    def from_histories(n):
+        return n if histories_read else None
+
     open_alerts = [a for a in alerts if (a["alert_state"] or "").lower() != STATE_CLOSED]
     close_hours = [a["hours_to_close"] for a in closed if a["hours_to_close"] is not None]
     listed = [r for r in rules if r["listed"]]
@@ -219,13 +227,13 @@ def summarize(alerts: list[dict], rules: list[dict], summary_total) -> dict:
         "alerts_by_monitor_service": sorted_counts(Counter(a["monitor_service"] or "unknown" for a in alerts)),
         "alerts_by_rule_type": sorted_counts(Counter(a["rule_type"] or "none" for a in alerts)),
         "alerts_open": len(open_alerts),
-        "alerts_acknowledged": sum(
+        "alerts_acknowledged": from_histories(sum(
             1 for a in alerts if a["acknowledged_at"] or (a["alert_state"] or "").lower() == STATE_ACKNOWLEDGED
-        ),
+        )),
         "alerts_closed": len(closed),
-        "alerts_closed_by_person": sum(1 for a in closed if a["closed_by_person"]),
-        "alerts_with_notifications": sum(1 for a in alerts if a["actions_triggered"]),
-        "alerts_with_failed_notifications": sum(1 for a in alerts if a["actions_failed"]),
+        "alerts_closed_by_person": from_histories(sum(1 for a in closed if a["closed_by_person"])),
+        "alerts_with_notifications": from_histories(sum(1 for a in alerts if a["actions_triggered"])),
+        "alerts_with_failed_notifications": from_histories(sum(1 for a in alerts if a["actions_failed"])),
         "alerts_with_actions_suppressed": sum(1 for a in alerts if a["actions_suppressed"]),
         "median_hours_to_close": round(median(close_hours), 2) if close_hours else None,
         "max_hours_to_close": max(close_hours) if close_hours else None,
@@ -237,9 +245,11 @@ def summarize(alerts: list[dict], rules: list[dict], summary_total) -> dict:
         "alert_rules_listed": len(listed),
         "alert_rules_by_type": sorted_counts(Counter(r["rule_type"] for r in listed)),
         "enabled_alert_rules": sum(1 for r in listed if r["enabled"]),
-        "rules_that_fired": sum(1 for r in rules if r["fire_count"]),
-        "enabled_rules_never_fired": sum(1 for r in listed if r["enabled"] and not r["fire_count"]),
-        "rules_fired_not_listed": sum(1 for r in rules if not r["listed"]),
+        "rules_that_fired": sum(1 for r in rules if r["fire_count"]) if alerts_read else None,
+        "enabled_rules_never_fired": (
+            sum(1 for r in listed if r["enabled"] and not r["fire_count"]) if alerts_read else None
+        ),
+        "rules_fired_not_listed": sum(1 for r in rules if not r["listed"]) if alerts_read else None,
     }
 
 
@@ -282,7 +292,7 @@ def collect_alerts(client, subscription_id: str, collector: Collector) -> tuple:
     alerts = [alert_record(a) for a in raw or []]
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         alerts = list(pool.map(lambda a: read_history(client, a, collector), alerts))
-    return alerts, total if isinstance(total, int) else None
+    return alerts, total if isinstance(total, int) else None, raw is not None
 
 
 def collect_rules(client, subscription_id: str, registration: dict, collector: Collector) -> list[dict]:
@@ -296,6 +306,16 @@ def collect_rules(client, subscription_id: str, registration: dict, collector: C
         )
         rules.extend(rule_record(rule_type, r) for r in listed or [])
     return rules
+
+
+def collect(client, subscription_id: str, registration: dict, collector: Collector) -> tuple:
+    """(alerts, rules, summary total, whether the alert list was read)."""
+    alerts: list[dict] = []
+    total, alerts_read = None, False
+    if registration["Microsoft.AlertsManagement"] != NOT_REGISTERED:
+        alerts, total, alerts_read = collect_alerts(client, subscription_id, collector)
+    rules = rule_activity(collect_rules(client, subscription_id, registration, collector), alerts, alerts_read)
+    return alerts, rules, total, alerts_read
 
 
 def main() -> int:
@@ -316,15 +336,12 @@ def main() -> int:
 
     alerts: list[dict] = []
     rules: list[dict] = []
-    total = None
+    total, alerts_read = None, False
     registration = {ns: REGISTRATION_UNKNOWN for ns in ("Microsoft.AlertsManagement", "Microsoft.Insights")}
     if subscription_id and cred is not None:
         for ns in registration:
             registration[ns] = provider_registration_status(collector, subscription_id, cred, ns)
-        client = AzureRestClient(cred)
-        if registration["Microsoft.AlertsManagement"] != NOT_REGISTERED:
-            alerts, total = collect_alerts(client, subscription_id, collector)
-        rules = rule_activity(collect_rules(client, subscription_id, registration, collector), alerts)
+        alerts, rules, total, alerts_read = collect(AzureRestClient(cred), subscription_id, registration, collector)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -345,7 +362,7 @@ def main() -> int:
             "time_range": TIME_RANGE,
             "provider_registration_status": registration,
         },
-        summary={**summarize(alerts, rules, total), "provider_registration_status": registration},
+        summary={**summarize(alerts, rules, total, alerts_read), "provider_registration_status": registration},
     )
 
     filename = f"azure_monitor_fired_alerts_{sanitize_for_filename(subscription_id or 'unknown')}.json"

@@ -23,7 +23,8 @@ schemas and the `paramify` CLI — not the internal code.
   listed with `fire_count`, `last_fired_at` and `open_alerts`, so enabled rules that
   never fired stand out (`enabled_rules_never_fired`); a rule that fired but is not
   in the subscription is kept with `listed: false`. The alert list is checked
-  against Alerts Management's own summary total (`all_alerts_listed`).
+  against Alerts Management's own summary total (`all_alerts_listed`). Counts that
+  need an alert list or history that wasn't read are null, never 0.
 - **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
   over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
   Code (Read). It records Bicep and ARM checks together, each tagged with its
