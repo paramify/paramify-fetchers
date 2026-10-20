@@ -67,21 +67,28 @@ evidence_set:
     treats unset as Enabled; a consumption-only environment without a VNet is public).
     mtls_enabled and peer_traffic_encryption_enabled are the environment's peer authentication and
     peer traffic encryption settings, both off by default. app_logs_destination is log-analytics,
-    azure-monitor or none. audit_logs_exported is true when a diagnostic setting with a destination
-    enables ContainerAppSystemLogs, ContainerAppConsoleLogs or the audit or allLogs group.
+    azure-monitor or none. audit_logs_exported is true when app_logs_destination is log-analytics
+    (the environment ships its logs to the workspace itself); with azure-monitor it is true when a
+    diagnostic setting with a destination enables ContainerAppSystemLogs, ContainerAppConsoleLogs or the
+    audit or allLogs group, and null when those settings could not be read; with none it is false.
     Apps and jobs: secrets_stored_in_app counts secrets held in the app's own configuration rather than
     as Key Vault references; registries_password_based counts registries pulled with a password secret
     instead of a managed identity. plain_env_vars_with_secret_like_names counts environment variables
     set as plain values (not secretRef) whose names contain secret, password, token, apikey,
     connectionstring, accesskey, privatekey, credential or similar; it is a name heuristic, so a match
     means "review", not "secret confirmed". An app is internet_facing when its ingress is external and
-    its environment is not internal-only (environment_internal_only is null when the environment was
-    not in the subscription's list); ingress_allow_insecure allows plain HTTP; ingress_ip_restrictions
+    its environment's network_exposure is public, so an environment that is internal or has public
+    network access Disabled is not internet-facing; an environment not in the subscription's list
+    counts as public (environment_internal_only is then null); ingress_allow_insecure allows plain HTTP; ingress_ip_restrictions
     is the number of client IP rules. auth_enabled is the app's Easy Auth platform switch and
     unauthenticated_client_action what happens to a caller who is not signed in (RedirectToLoginPage,
     Return401, Return403, AllowAnonymous); both null when the auth configs could not be read.
-    container_apps_internet_facing_without_auth counts apps reachable from the internet with Easy Auth
-    off, which means the container itself must authenticate callers.
+    auth_required is whether Easy Auth stops an unauthenticated request: false when Easy Auth is off or
+    set to AllowAnonymous (which lets every caller through), true when it redirects or rejects, and null
+    when the configs could not be read or Easy Auth is on without an action.
+    container_apps_internet_facing_without_auth counts internet-facing apps where auth_required is false,
+    so the container itself must authenticate callers; container_apps_allow_anonymous counts apps with
+    Easy Auth on but set to AllowAnonymous.
     Images: image_tag_mutable is true when the reference has no tag or the tag is latest and no digest
     pins it, so what runs can change without a deployment; image_pinned_by_digest marks an @sha256
     reference. image_registries lists every registry images are pulled from, for comparison with an
@@ -91,9 +98,10 @@ evidence_set:
     username and no managed identity. customer_managed_key is true when encryption properties are set;
     confidential_compute when a confidential compute policy is set. azure_file_volumes counts Azure
     Files volumes, whose storage account key is stored in the container group definition.
-    log_analytics_configured is the group's own diagnostics setting; logs_exported is true when a
-    diagnostic setting with a destination enables ContainerInstanceLog, ContainerEvent or the allLogs
-    group. Lists that could not be read are null and set metadata.partial_failure.
+    log_analytics_configured is the group's own diagnostics.logAnalytics setting, the usual way a
+    container group ships its logs (counted in container_groups_log_analytics_configured); logs_exported
+    is true when that is set, or when a diagnostic setting with a destination enables
+    ContainerInstanceLog, ContainerEvent or the allLogs group. Lists that could not be read are null and set metadata.partial_failure.
     provider_registration_status_container_apps (Microsoft.App) and
     provider_registration_status_container_instances (Microsoft.ContainerInstance) are reported
     separately, so zero resources of either kind can be told from a provider that is off. A summary

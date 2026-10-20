@@ -57,8 +57,7 @@ evidence_set:
   instructions: >
     Script: fetcher.py. Azure SDK calls: azure-mgmt-mongocluster MongoClusterMgmtClient
     mongo_clusters.list() and firewall_rules.list_by_mongo_cluster per cluster; azure-mgmt-kusto
-    KustoManagementClient clusters.list(), clusters.list_callout_policies,
-    cluster_principal_assignments.list, databases.list_by_cluster and
+    KustoManagementClient clusters.list(), cluster_principal_assignments.list, databases.list_by_cluster and
     database_principal_assignments.list per cluster and database; azure-mgmt-eventhub
     EventHubManagementClient namespaces.list(), namespaces.get_network_rule_set,
     namespaces.list_authorization_rules, event_hubs.list_by_namespace and
@@ -66,9 +65,13 @@ evidence_set:
     diagnostic_settings.list for each cluster and namespace. No call reads a key, connection string or
     administrator password.
     MongoDB clusters: public_access is disabled when publicNetworkAccess is Disabled; otherwise only
-    firewall rules admit traffic, so it is allow_all when a rule spans 0.0.0.0-255.255.255.255,
-    restricted when rules exist without one, and no_rules when none do (nothing public can connect);
-    null when the rules could not be read. allow_azure_services marks the 0.0.0.0-0.0.0.0 rule.
+    firewall rules admit traffic, judged on the distinct addresses all rules admit together
+    (firewall_allowed_address_count and firewall_allowed_address_percentage, overlaps merged, the
+    Azure-services rule excluded): allow_all when that is every IPv4 address (so a range split into
+    halves counts), broad when it is wider than a /8 (16,777,216 addresses) or when the "allow Azure
+    services" rule is present (it admits every Azure-hosted client from any tenant), restricted when narrower,
+    and no_rules when there are none (nothing public can connect); null when the rules could not be
+    read. Each rule also carries its own address_count, so a validator can set a stricter threshold. allow_azure_services marks the 0.0.0.0-0.0.0.0 rule.
     tls_enforced_by_platform is always true: MongoDB vCore accepts TLS 1.2 and above only and has no
     setting to weaken it, so no TLS field is read. auth_modes lists the allowed authentication modes
     (NativeAuth is username and password, MicrosoftEntraID is Entra). high_availability_enabled is true for any target mode other than
@@ -76,18 +79,23 @@ evidence_set:
     is the Data API (HTTP access to the cluster). audit_logs_exported is true when a diagnostic setting
     with a destination enables vCoreMongoRequests or the audit or allLogs group.
     Data Explorer clusters: network_exposure is private when publicNetworkAccess is Disabled, restricted
-    when allowed_ip_ranges is set, and open otherwise (an empty allow-list does not restrict).
+    when allowed_ip_ranges is set and does not admit every IPv4 address, and open otherwise (an empty
+    allow-list, or one such as 0.0.0.0/0, does not restrict). vnet_injected is true when the cluster has
+    a VNet configuration whose state is not Disabled (vnet_injection_state records it; Disabled means the
+    cluster has left the VNet).
     trusts_any_tenant is true when trustedExternalTenants contains "*", which lets principals from any
     Entra tenant be granted access. purge_enabled allows hard deletion of records. Each database records
     soft_delete_days (retention) and hot_cache_days. callout_policies are the cluster's rules for
-    calling out to external services (SQL, web APIs, storage); allowed marks those with outbound
-    access Allow. Principal assignments at cluster and database level carry the role, principal type
+    calling out to external services (SQL, web APIs, storage), read from the cluster itself (the
+    listCalloutPolicies action needs more than Reader; an empty list means none is set); allowed marks
+    those with outbound access Allow. Principal assignments at cluster and database level carry the role, principal type
     (User, Group, App), name and id as Azure returns them (the name of a user principal includes the
     sign-in address, as the portal shows it); admin is true for AllDatabasesAdmin and Admin. audit_logs_exported is true when a setting enables Command, Query,
     Journal or the audit or allLogs group.
     Event Hubs namespaces: tls_below_1_2 is true when minimumTlsVersion is 1.0 or 1.1.
     network_exposure is private when the namespace's or the network rule set's publicNetworkAccess is
-    Disabled, restricted when the rule set's default action is Deny, open otherwise, and null when the
+    Disabled, restricted when the rule set's default action is Deny (open if an IP rule such as
+    0.0.0.0/0 then admits every IPv4 address), open otherwise, and null when the
     rule set could not be read and the namespace does not disable public access. local_auth_enabled is
     true unless disableLocalAuth is true (it defaults to false). authorization_rules lists each shared
     access policy and its rights; shared_key_full_control is true when local auth is enabled and a

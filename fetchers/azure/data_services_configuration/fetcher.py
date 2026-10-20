@@ -22,7 +22,6 @@ from azure_common import (  # noqa: E402
     credential,
     failure_reason,
     list_diagnostic_settings,
-    logs_exported,
     model_attr,
     monitor_client,
     provider_registration_status,
@@ -31,6 +30,15 @@ from azure_common import (  # noqa: E402
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
+)
+from diagnostics import audit_logging_summary  # noqa: E402
+from ip_ranges import (  # noqa: E402
+    BROAD_ADDRESS_COUNT,
+    IPV4_ADDRESSES,
+    cidrs_allow_all,
+    coverage_percentage,
+    ipv4_range,
+    union_address_count,
 )
 
 logger = logging.getLogger("azure_data_services_configuration")
@@ -84,7 +92,7 @@ def diagnostics_record(monitor, collector: Collector, resource: dict, categories
         )
     return {
         "diagnostic_settings": diagnostics,
-        "audit_logs_exported": logs_exported(diagnostics, categories=categories),
+        "audit_logs_exported": audit_logging_summary(diagnostics, categories)["audit_logging_enabled"],
     }
 
 
@@ -95,22 +103,39 @@ def diagnostics_record(monitor, collector: Collector, resource: dict, categories
 def project_firewall_rule(rule) -> dict:
     props = model_attr(rule, "properties")
     start, end = model_attr(props, "start_ip_address"), model_attr(props, "end_ip_address")
+    span = ipv4_range(start, end)
     return {
         "name": model_attr(rule, "name"),
         "start_ip_address": start,
         "end_ip_address": end,
+        "address_count": None if span is None else span[1] - span[0] + 1,
         "allow_all": (start, end) == ALLOW_ALL_RANGE,
         # Azure's "Allow Azure services" convention is the 0.0.0.0 - 0.0.0.0 rule.
         "allow_azure_services": (start, end) == AZURE_SERVICES_RANGE,
     }
 
 
+def firewall_coverage(rules: list) -> dict:
+    """Distinct addresses all rules admit together, so split or near-total ranges are judged as one."""
+    ranges = [
+        ipv4_range(r["start_ip_address"], r["end_ip_address"]) for r in rules if not r["allow_azure_services"]
+    ]
+    count = union_address_count(ranges)
+    return {"firewall_allowed_address_count": count, "firewall_allowed_address_percentage": coverage_percentage(count)}
+
+
 def mongo_public_access(public_network_access, rules: list) -> str:
-    """disabled / allow_all / restricted / no_rules: with public access on, only firewall rules admit traffic."""
+    """disabled / allow_all / broad / restricted / no_rules, judged on how wide the rules are together.
+
+    The "allow Azure services" rule (0.0.0.0 - 0.0.0.0) admits every Azure-hosted client from any
+    tenant, so a cluster with it is broad however narrow its other rules are."""
     if str(public_network_access or "").lower() == "disabled":
         return "disabled"
-    if any(r["allow_all"] for r in rules):
+    count = firewall_coverage(rules)["firewall_allowed_address_count"]
+    if count >= IPV4_ADDRESSES:
         return "allow_all"
+    if count > BROAD_ADDRESS_COUNT or any(r["allow_azure_services"] for r in rules):
+        return "broad"
     return "restricted" if rules else "no_rules"
 
 
@@ -187,10 +212,12 @@ def project_kusto_cluster(cluster) -> dict:
     ip_ranges = model_attr(cluster, "allowed_ip_range_list") or []
     if str(pna or "").lower() == "disabled":
         exposure = "private"
-    elif ip_ranges:
+    elif ip_ranges and not cidrs_allow_all(ip_ranges):
         exposure = "restricted"
     else:
+        # No allow-list, or one that admits every IPv4 address (0.0.0.0/0).
         exposure = "open"
+    vnet = model_attr(cluster, "virtual_network_configuration")
     return {
         "id": model_attr(cluster, "id"),
         "name": model_attr(cluster, "name"),
@@ -204,7 +231,9 @@ def project_kusto_cluster(cluster) -> dict:
         "public_network_access": pna,
         "allowed_ip_ranges": ip_ranges,
         "network_exposure": exposure,
-        "vnet_injected": model_attr(cluster, "virtual_network_configuration") is not None,
+        # A configuration whose state is Disabled is a cluster that has left its VNet.
+        "vnet_injected": vnet is not None and compact(model_attr(vnet, "state")) != "disabled",
+        "vnet_injection_state": model_attr(vnet, "state"),
         "private_endpoint_connections": private_endpoints(model_attr(cluster, "private_endpoint_connections")),
         "restrict_outbound_network_access": model_attr(cluster, "restrict_outbound_network_access"),
         "outbound_restricted": compact(model_attr(cluster, "restrict_outbound_network_access")) == "enabled",
@@ -217,6 +246,12 @@ def project_kusto_cluster(cluster) -> dict:
         "accepted_audiences": [model_attr(a, "value") for a in model_attr(cluster, "accepted_audiences") or []],
         "purge_enabled": bool(model_attr(cluster, "enable_purge") or False),
         "streaming_ingest_enabled": bool(model_attr(cluster, "enable_streaming_ingest") or False),
+        # Read from the cluster model: the listCalloutPolicies POST action needs more than Reader.
+        # Azure omits the property when no callout policy is set.
+        "callout_policies": sorted(
+            (project_callout_policy(p) for p in model_attr(cluster, "callout_policies") or []),
+            key=lambda p: p["uri_regex"] or "",
+        ),
     }
 
 
@@ -298,7 +333,9 @@ def namespace_record(namespace: dict, rules, auth_rules, hubs) -> dict:
     elif pna_disabled:
         exposure = "private"
     elif str(default_action or "allow").lower() == "deny":
-        exposure = "restricted"
+        # Deny-by-default with an IP rule that admits every IPv4 address (0.0.0.0/0) restricts nothing.
+        ip_masks = [model_attr(r, "ip_mask") for r in model_attr(rules, "ip_rules") or []]
+        exposure = "open" if cidrs_allow_all(ip_masks) else "restricted"
     else:
         exposure = "open"
     manage_rules = [r for r in auth_rules or [] if r["manage"]]
@@ -336,6 +373,7 @@ def summarize(mongo: list, kusto: list, eventhub: list) -> dict:
         "total_mongo_clusters": len(mongo),
         "mongo_clusters_public_access_disabled": count(mongo, lambda m: m["public_access"] == "disabled"),
         "mongo_clusters_firewall_allow_all": count(mongo, lambda m: m["public_access"] == "allow_all"),
+        "mongo_clusters_firewall_broad": count(mongo, lambda m: m["public_access"] == "broad"),
         "mongo_clusters_firewall_restricted": count(mongo, lambda m: m["public_access"] == "restricted"),
         "mongo_clusters_public_access_unknown": count(mongo, lambda m: m["public_access"] is None),
         "mongo_clusters_with_private_endpoints": count(mongo, lambda m: m["private_endpoint_connections"]),
@@ -437,7 +475,11 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
                 **cluster,
                 "firewall_rules": None if rules is None else sorted(rules, key=lambda r: r["name"] or ""),
                 "public_access": None if rules is None else mongo_public_access(cluster["public_network_access"], rules),
-                **diagnostics_record(monitor, collector, cluster, ("vcoremongorequests",)),
+                **(
+                    {"firewall_allowed_address_count": None, "firewall_allowed_address_percentage": None}
+                    if rules is None else firewall_coverage(rules)
+                ),
+                **diagnostics_record(monitor, collector, cluster, ("vCoreMongoRequests",)),
             }
         )
 
@@ -462,19 +504,14 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
                     for p in kusto_client.database_principal_assignments.list(rg, name, db["name"])
                 ],
             )
-        callouts = collector.guard(
-            f"kusto.clusters.list_callout_policies({rg}/{name})",
-            lambda rg=rg, name=name: [project_callout_policy(p) for p in kusto_client.clusters.list_callout_policies(rg, name)],
-        )
         kusto_records.append(
             {
                 **cluster,
-                "callout_policies": None if callouts is None else sorted(callouts, key=lambda p: p["uri_regex"] or ""),
                 "cluster_principals": None
                 if principals is None
                 else sorted(principals, key=lambda p: (p["role"] or "", p["principal_name"] or "")),
                 "databases": None if databases is None else sorted(databases, key=lambda d: d["name"] or ""),
-                **diagnostics_record(monitor, collector, cluster, ("command", "query", "journal")),
+                **diagnostics_record(monitor, collector, cluster, ("Command", "Query", "Journal")),
             }
         )
 
@@ -514,7 +551,7 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
                     None if auth_rules is None else sorted(auth_rules, key=lambda r: r["name"] or ""),
                     None if hubs is None else sorted(hubs, key=lambda h: h["name"] or ""),
                 ),
-                **diagnostics_record(monitor, collector, namespace, ("runtimeauditlogs",)),
+                **diagnostics_record(monitor, collector, namespace, ("RuntimeAuditLogs",)),
             }
         )
     key = lambda r: r["id"] or ""  # noqa: E731

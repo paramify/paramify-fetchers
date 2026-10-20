@@ -5,25 +5,22 @@ import logging
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
 from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from arm_rest import arm_rest_client, list_all  # noqa: E402
 from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
-    arm_client_kwargs,
-    arm_list,
     basename,
     build_payload,
     classify_failure_code,
     credential,
     failure_reason,
     list_diagnostic_settings,
-    logs_exported,
     monitor_client,
     provider_registration_status,
     report_failure,
@@ -32,6 +29,9 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from diagnostics import log_export_summary  # noqa: E402
+from foundry_connections import compact, connection_fields  # noqa: E402
+from ip_ranges import cidrs_allow_all  # noqa: E402
 
 logger = logging.getLogger("azure_ai_hub_configuration")
 
@@ -40,53 +40,19 @@ logger = logging.getLogger("azure_ai_hub_configuration")
 WORKSPACES_API = "2024-10-01"
 WORKSPACES_PATH = "/providers/Microsoft.MachineLearningServices/workspaces"
 
-# Connection auth types that keep a credential in the connection, and those that keep none.
-STORED_SECRET_AUTH = {
-    "apikey",
-    "customkeys",
-    "pat",
-    "usernamepassword",
-    "accesskey",
-    "sas",
-    "accountkey",
-    "serviceprincipal",
-    "oauth2",
-}
-KEYLESS_AUTH = {"aad", "managedidentity", "projectmanagedidentity", "agenticidentity", "useridentity"}
 # systemDatastoresAuthMode values that avoid the storage account key.
 IDENTITY_DATASTORE_MODES = {"identity", "userdelegationsas"}
-# Datastore credential types that keep a secret in the workspace; None means identity-based access.
-STORED_CREDENTIAL_TYPES = {"accountkey", "sas", "serviceprincipal", "certificate"}
-
-
-def compact(name) -> str:
-    return "".join(ch for ch in str(name or "").lower() if ch.isalnum())
-
-
-def stored_secret(auth_type):
-    """True for auth types that keep a credential in the connection, False for keyless, None if unrecognised."""
-    kind = compact(auth_type)
-    if kind in STORED_SECRET_AUTH:
-        return True
-    if kind in KEYLESS_AUTH or kind == "none":
-        return False
-    return None
-
-
-def strip_query(target) -> str:
-    """A connection target without query string or fragment, which can carry a SAS token."""
-    text = str(target or "")
-    if "://" not in text:
-        return text
-    parts = urlsplit(text)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+# Datastore credential types that keep a secret in the workspace, and "None", identity-based access.
+STORED_CREDENTIAL_TYPES = {"accountkey", "sas", "serviceprincipal", "certificate", "kerberoskeytab", "kerberospassword"}
+NO_STORED_CREDENTIAL_TYPES = {"none"}
 
 
 def network_exposure(public_network_access, ip_allowlist) -> str:
     """private / restricted / open. Azure treats an unset publicNetworkAccess as Enabled."""
     if str(public_network_access or "").lower() == "disabled":
         return "private"
-    if ip_allowlist:
+    # An allow-list that admits every IPv4 address (0.0.0.0/0) restricts nothing.
+    if ip_allowlist and not cidrs_allow_all(ip_allowlist):
         return "restricted"
     return "open"
 
@@ -167,6 +133,13 @@ def project_workspace(raw: dict) -> dict:
         "storage_account_id": props.get("storageAccount"),
         "container_registry_id": props.get("containerRegistry"),
         "application_insights_id": props.get("applicationInsights"),
+        # Settings a project leaves unset and takes from its hub; resolved by apply_hub_inheritance.
+        "_unset": {
+            "network": pna is None and not allowlist,
+            "isolation": not managed.get("isolationMode"),
+            "encryption": not encryption,
+        },
+        "inherited_from_hub": [],
     }
 
 
@@ -178,7 +151,9 @@ def project_datastore(raw: dict) -> dict:
         "name": raw.get("name"),
         "datastore_type": props.get("datastoreType"),
         "credentials_type": cred,
-        "stored_credentials": compact(cred) in STORED_CREDENTIAL_TYPES,
+        # Null for a type this fetcher does not recognise: unknown, never "no stored credential".
+        "stored_credentials": True if compact(cred) in STORED_CREDENTIAL_TYPES
+        else False if compact(cred) in NO_STORED_CREDENTIAL_TYPES else None,
         "is_default": props.get("isDefault"),
     }
 
@@ -194,8 +169,9 @@ def project_endpoint(raw: dict, kind: str) -> dict:
         "auth_mode": auth,
         "key_auth": compact(auth) == "key",
         "public_network_access": pna,
-        # Online endpoints default to Enabled; serverless endpoints have no setting and are public.
-        "public": str(pna or "enabled").lower() != "disabled",
+        # Online endpoints default to Enabled. A serverless endpoint without its own setting follows its
+        # workspace's public network access; resolve_serverless_public fills it in once that is known.
+        "public": None if kind == "serverless" and pna is None else str(pna or "enabled").lower() != "disabled",
         "state": props.get("provisioningState") or props.get("endpointState"),
         "model_id": (props.get("modelSettings") or {}).get("modelId"),
     }
@@ -206,41 +182,31 @@ def project_compute(raw: dict) -> dict:
     inner = props.get("properties") or {}
     compute_type = props.get("computeType")
     public_ip = inner.get("enableNodePublicIp")
-    # AmlCompute nodes get public IPs unless enableNodePublicIp is set to false.
-    if public_ip is None and compact(compute_type) == "amlcompute":
+    # AmlCompute clusters and compute instances get public IPs unless enableNodePublicIp is set to false.
+    if public_ip is None and compact(compute_type) in ("amlcompute", "computeinstance"):
         public_ip = True
     ssh = (inner.get("sshSettings") or {}).get("sshPublicAccess")
+    remote_login = inner.get("remoteLoginPortPublicAccess")
     return {
         "name": raw.get("name"),
         "compute_type": compute_type,
         "state": props.get("provisioningState"),
         "public_ip": None if public_ip is None else bool(public_ip),
         "ssh_public_access": ssh,
-        "ssh_public": compact(ssh) == "enabled",
-        "remote_login_port_public_access": inner.get("remoteLoginPortPublicAccess"),
+        "remote_login_port_public_access": remote_login,
+        # Compute instances set sshPublicAccess; AmlCompute clusters set remoteLoginPortPublicAccess.
+        "ssh_public": compact(ssh) == "enabled" or compact(remote_login) == "enabled",
     }
 
 
 def project_connection(raw: dict) -> dict:
-    """One workspace connection; credentials are never read (the list does not return them)."""
-    props = raw.get("properties") or {}
-    auth = props.get("authType")
-    return {
-        "id": raw.get("id"),
-        "name": raw.get("name"),
-        "category": props.get("category"),
-        "auth_type": auth,
-        "uses_stored_secret": stored_secret(auth),
-        "unauthenticated": compact(auth) == "none",
-        "target": strip_query(props.get("target")),
-        "is_shared_to_all": props.get("isSharedToAll"),
-    }
+    return connection_fields(raw)
 
 
 def summarize(workspaces: list[dict]) -> dict:
     connections = [c for w in workspaces for c in w["connections"] or []]
-    # A project inherits its hub's connections: count each (category, auth, target) once across workspaces.
-    distinct = {(c["category"], c["auth_type"], c["target"]): c for c in connections}.values()
+    # A project repeats its hub's connections under its own id (measured); those repeats are not counted again.
+    distinct = [c for c in connections if not c.get("repeats_hub_connection")]
     datastores = [d for w in workspaces for d in w["datastores"] or []]
     endpoints = [e for w in workspaces for e in w["endpoints"] or []]
     computes = [c for w in workspaces for c in w["computes"] or []]
@@ -279,9 +245,13 @@ def summarize(workspaces: list[dict]) -> dict:
             workspaces, lambda w: compact(w["identity_type"] or "none") == "none"
         ),
         "workspaces_diagnostic_logs_exported": count(workspaces, lambda w: w["diagnostic_logs_exported"] is True),
+        "workspaces_diagnostic_logs_not_exported": count(
+            workspaces, lambda w: w["diagnostic_logs_exported"] is False
+        ),
         "workspaces_diagnostic_logs_unknown": count(workspaces, lambda w: w["diagnostic_logs_exported"] is None),
         "total_datastores": len(datastores),
-        "datastores_with_stored_credentials": count(datastores, lambda d: d["stored_credentials"]),
+        "datastores_with_stored_credentials": count(datastores, lambda d: d["stored_credentials"] is True),
+        "datastores_credentials_unknown": count(datastores, lambda d: d["stored_credentials"] is None),
         "workspaces_datastores_unknown": count(workspaces, lambda w: w["datastores"] is None),
         "total_endpoints": len(endpoints),
         "endpoints_key_auth": count(endpoints, lambda e: e["key_auth"]),
@@ -304,23 +274,14 @@ def summarize(workspaces: list[dict]) -> dict:
 
 
 def collect(subscription_id, cred, collector: Collector) -> list[dict]:
-    def _client():
-        # Any management client supplies the authenticated ARM pipeline; this one is already a dependency.
-        try:
-            from azure.mgmt.resource.resources import ResourceManagementClient  # lazy
-        except ImportError:  # pragma: no cover - depends on installed SDK version
-            from azure.mgmt.resource import ResourceManagementClient  # lazy
-
-        return ResourceManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
-
-    client = collector.guard("resource.ResourceManagementClient (init)", _client)
+    client = collector.guard("arm_rest.arm_rest_client (init)", lambda: arm_rest_client(cred))
     if client is None:
         return []
     workspaces = collector.guard(
         "machinelearningservices.workspaces.list",
         lambda: [
             project_workspace(w)
-            for w in arm_list(client, f"/subscriptions/{subscription_id}{WORKSPACES_PATH}?api-version={WORKSPACES_API}")
+            for w in list_all(client, f"/subscriptions/{subscription_id}{WORKSPACES_PATH}", WORKSPACES_API)["items"]
         ],
         default=[],
     )
@@ -336,13 +297,13 @@ def collect(subscription_id, cred, collector: Collector) -> list[dict]:
             f"machinelearningservices.connections.list({label})",
             lambda workspace=workspace: [
                 project_connection(c)
-                for c in arm_list(client, f"{workspace['id']}/connections?api-version={WORKSPACES_API}")
+                for c in list_all(client, f"{workspace['id']}/connections", WORKSPACES_API)["items"]
             ],
         )
         def _sub(name, project, workspace=workspace, label=label):
             rows = collector.guard(
                 f"machinelearningservices.{name}.list({label})",
-                lambda: [project(r) for r in arm_list(client, f"{workspace['id']}/{name}?api-version={WORKSPACES_API}")],
+                lambda: [project(r) for r in list_all(client, f"{workspace['id']}/{name}", WORKSPACES_API)["items"]],
             )
             return None if rows is None else sorted(rows, key=lambda r: r["name"] or "")
 
@@ -354,6 +315,7 @@ def collect(subscription_id, cred, collector: Collector) -> list[dict]:
                 f"monitor.diagnostic_settings.list({label})",
                 lambda workspace=workspace: list_diagnostic_settings(monitor, workspace["id"]),
             )
+        exported = log_export_summary(diagnostics)
         records.append(
             {
                 **workspace,
@@ -362,10 +324,64 @@ def collect(subscription_id, cred, collector: Collector) -> list[dict]:
                 "endpoints": None if online is None or serverless is None else online + serverless,
                 "computes": _sub("computes", project_compute),
                 "diagnostic_settings": diagnostics,
-                "diagnostic_logs_exported": logs_exported(diagnostics, categories=("computeinstanceevent",)),
+                "diagnostic_logs_exported": exported["logs_exported"],
+                "exported_log_categories": exported["exported_log_categories"],
+                "exported_log_category_groups": exported["exported_log_category_groups"],
             }
         )
+    mark_hub_repeats(records)
+    apply_hub_inheritance(records)
+    resolve_serverless_public(records)
     return sorted(records, key=lambda r: r["id"] or "")
+
+
+def apply_hub_inheritance(workspaces: list[dict]) -> None:
+    """A project inherits network access, managed-network isolation and encryption from its hub
+    when it leaves them unset. A project whose hub is not in this subscription keeps Azure's defaults."""
+    hubs = {(w["id"] or "").lower(): w for w in workspaces if compact(w["kind"]) == "hub"}
+    for w in workspaces:
+        unset = w.pop("_unset", {})
+        hub = hubs.get((w["hub_resource_id"] or "").lower())
+        if hub is None or compact(w["kind"]) != "project":
+            continue
+        if unset.get("network"):
+            w["public_network_access"] = hub["public_network_access"]
+            w["ip_allowlist"] = hub["ip_allowlist"]
+            w["network_exposure"] = hub["network_exposure"]
+            w["private_endpoint_but_public_access"] = bool(
+                w["private_endpoint_connections"] or hub["private_endpoint_connections"]
+            ) and w["network_exposure"] != "private"
+            w["inherited_from_hub"].append("network_access")
+        if unset.get("isolation"):
+            w["managed_network_isolation_mode"] = hub["managed_network_isolation_mode"]
+            w["outbound_restricted"] = hub["outbound_restricted"]
+            w["inherited_from_hub"].append("managed_network_isolation")
+        if unset.get("encryption"):
+            w["encryption_status"] = hub["encryption_status"]
+            w["customer_managed_key"] = hub["customer_managed_key"]
+            w["key_identifier"] = hub["key_identifier"]
+            w["inherited_from_hub"].append("encryption")
+    for w in workspaces:
+        w.pop("_unset", None)
+
+
+def resolve_serverless_public(workspaces: list[dict]) -> None:
+    """A serverless endpoint without its own setting is public exactly when its workspace is not private."""
+    for w in workspaces:
+        for e in w["endpoints"] or []:
+            if e["public"] is None:
+                e["public"] = w["network_exposure"] != "private"
+
+
+def mark_hub_repeats(workspaces: list[dict]) -> None:
+    """Flag each project connection that repeats one of its own hub's, so it is not counted twice."""
+    hub_names = {
+        (w["id"] or "").lower(): {c["name"] for c in w["connections"] or []} for w in workspaces
+    }
+    for w in workspaces:
+        own_hub = hub_names.get((w["hub_resource_id"] or "").lower())
+        for c in w["connections"] or []:
+            c["repeats_hub_connection"] = own_hub is not None and c["name"] in own_hub
 
 
 def main() -> int:

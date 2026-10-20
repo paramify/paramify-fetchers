@@ -57,18 +57,22 @@ schemas and the `paramify` CLI — not the internal code.
   (internal-only or public, mTLS and peer traffic encryption, log destination),
   apps and jobs (secrets stored in the app rather than Key Vault, password-based
   registry pulls, plain environment variables with secret-looking names,
-  internet-facing ingress and whether Easy Auth protects it, images running a
+  internet-facing ingress and whether Easy Auth stops an unauthenticated caller
+  (AllowAnonymous does not), images running a
   mutable tag rather than pinned by digest) and Container Instances
   container groups (public IP, VNet placement, registry credentials, Azure
   Files volumes, logging). `azure_data_services_configuration` reports MongoDB
-  vCore clusters (allow-all firewall rules, native versus Entra authentication,
+  vCore clusters (firewall rules judged on how many addresses they admit
+  together, native versus Entra authentication,
   high availability), Data Explorer clusters (open allow-lists, trust of any
   external tenant, purge rights, callout policies, principal assignments) and
   Event Hubs namespaces (minimum TLS, network rules, shared keys with Manage
   rights while local auth is on at namespace and hub level, geo-replication,
   event hub retention and capture), each with customer-managed keys and audit
-  log export. Shared: `arm_request` / `arm_list` for ARM JSON
-  reads through an SDK client's pipeline, and `logs_exported`. Adds
+  log export. ARM JSON is read through the shared `arm_rest` client and log export
+  through `_shared/diagnostics.py`. New shared modules: `foundry_connections.py`
+  (connection auth types, also used by `azure_ai_services_configuration`) and
+  `ip_ranges.py` (firewall-range width). Adds
   azure-mgmt-appcontainers, azure-mgmt-containerinstance, azure-mgmt-mongocluster,
   azure-mgmt-kusto and azure-mgmt-eventhub.
 

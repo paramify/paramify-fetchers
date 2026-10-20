@@ -21,7 +21,6 @@ from azure_common import (  # noqa: E402
     credential,
     failure_reason,
     list_diagnostic_settings,
-    logs_exported,
     model_attr,
     monitor_client,
     provider_registration_status,
@@ -31,6 +30,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from diagnostics import audit_logging_summary  # noqa: E402
 
 logger = logging.getLogger("azure_container_workloads_configuration")
 
@@ -223,25 +223,60 @@ def project_auth_config(configs) -> dict:
     could not be read.
     """
     if configs is None:
-        return {"auth_enabled": None, "unauthenticated_client_action": None, "auth_identity_providers": None}
+        return {"auth_enabled": None, "unauthenticated_client_action": None, "auth_required": None,
+                "auth_identity_providers": None}
     current = next(iter(configs), None)
     platform = prop(current, "platform") if current is not None else None
     validation = prop(current, "global_validation") if current is not None else None
     providers = prop(current, "identity_providers") if current is not None else None
     enabled = bool(model_attr(platform, "enabled") or False)
+    action = model_attr(validation, "unauthenticated_client_action")
     return {
         "auth_enabled": enabled,
-        "unauthenticated_client_action": model_attr(validation, "unauthenticated_client_action"),
+        "unauthenticated_client_action": action,
+        "auth_required": auth_required(enabled, action),
         "auth_identity_providers": sorted(
-            name for name in ("azure_active_directory", "google", "github", "apple", "facebook", "twitter", "custom_open_id_connect_providers")
+            # Attribute names as azure-mgmt-appcontainers 5.x spells them (git_hub, not github).
+            name for name in (
+                "azure_active_directory", "google", "git_hub", "apple", "facebook", "twitter",
+                "azure_static_web_apps", "custom_open_id_connect_providers",
+            )
             if model_attr(providers, name)
         ),
     }
 
 
+def auth_required(enabled, action):
+    """Whether Easy Auth stops an unauthenticated request; AllowAnonymous lets it through, so it is not.
+
+    Null when Easy Auth is on but sets no action: unknown, never read as protected.
+    """
+    if enabled is None:
+        return None
+    if not enabled or compact(action) == "allowanonymous":
+        return False
+    return True if action else None
+
+
+def environment_logs_exported(destination, diagnostics):
+    """log-analytics ships app logs itself; azure-monitor relies on the environment's diagnostic settings."""
+    kind = compact(destination)
+    if kind == "loganalytics":
+        return True
+    if kind == "azuremonitor":
+        return audit_logging_summary(
+            diagnostics, ("ContainerAppSystemLogs", "ContainerAppConsoleLogs")
+        )["audit_logging_enabled"]
+    return False
+
+
 def internet_facing(ingress_external: bool, environment) -> bool:
-    """External ingress on an environment that is not internal-only; an unlisted environment counts as not internal."""
-    return bool(ingress_external) and (environment is None or not environment["internal_only"])
+    """External ingress on an environment whose network exposure is public.
+
+    An internal-only environment, or one with public network access Disabled, is not reachable
+    from the internet; an unlisted environment counts as public, so unknown is never read as safe.
+    """
+    return bool(ingress_external) and (environment is None or environment["network_exposure"] == "public")
 
 
 # --------------------------------------------------------------------------- #
@@ -342,9 +377,12 @@ def summarize(environments, apps, jobs, groups) -> dict:
             apps, lambda a: a["internet_facing"] and not a["ingress_ip_restrictions"]
         ),
         "container_apps_internet_facing_without_auth": count(
-            apps, lambda a: a["internet_facing"] and a["auth_enabled"] is False
+            apps, lambda a: a["internet_facing"] and a["auth_required"] is False
         ),
-        "container_apps_auth_unknown": count(apps, lambda a: a["auth_enabled"] is None),
+        "container_apps_allow_anonymous": count(
+            apps, lambda a: a["auth_enabled"] is True and a["auth_required"] is False
+        ),
+        "container_apps_auth_unknown": count(apps, lambda a: a["auth_required"] is None),
         "total_jobs": len(jobs),
         "workloads_with_secrets_stored_in_app": count(workloads, lambda w: w["secrets_stored_in_app"]),
         "workloads_registries_password_based": count(workloads, lambda w: w["registries_password_based"]),
@@ -371,6 +409,7 @@ def summarize(environments, apps, jobs, groups) -> dict:
         "container_groups_customer_managed_key": count(groups, lambda g: g["customer_managed_key"]),
         "container_groups_confidential_compute": count(groups, lambda g: g["confidential_compute"]),
         "container_groups_azure_file_volumes": count(groups, lambda g: g["azure_file_volumes"]),
+        "container_groups_log_analytics_configured": count(groups, lambda g: g["log_analytics_configured"]),
         "container_groups_logs_exported": count(groups, lambda g: g["logs_exported"] is True),
         "container_groups_logs_unknown": count(groups, lambda g: g["logs_exported"] is None),
     }
@@ -428,9 +467,7 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
     env_by_id = {(e["id"] or "").lower(): e for e in environments}
     for env in environments:
         env["diagnostic_settings"] = diagnostics_for(env)
-        env["audit_logs_exported"] = logs_exported(
-            env["diagnostic_settings"], categories=("containerappsystemlogs", "containerappconsolelogs")
-        )
+        env["audit_logs_exported"] = environment_logs_exported(env["app_logs_destination"], env["diagnostic_settings"])
     for app in apps:
         configs = collector.guard(
             f"appcontainers.container_apps_auth_configs.list_by_container_app({app['resource_group']}/{app['name']})",
@@ -440,14 +477,17 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
         )
         app.update(project_auth_config(configs))
         env = env_by_id.get((app["environment_id"] or "").lower())
-        # Internet-facing needs external ingress on an environment that is not internal-only.
+        # Internet-facing needs external ingress on an environment whose network exposure is public.
         app["environment_internal_only"] = None if env is None else env["internal_only"]
         app["internet_facing"] = internet_facing(app["ingress_external"], env)
     for group in groups:
         group["diagnostic_settings"] = diagnostics_for(group)
-        group["logs_exported"] = logs_exported(
-            group["diagnostic_settings"], categories=("containerinstancelog", "containerevent")
-        )
+        # Container Instances usually ship logs through properties.diagnostics.logAnalytics rather than
+        # a diagnostic setting; either one counts as exported.
+        via_settings = audit_logging_summary(
+            group["diagnostic_settings"], ("ContainerInstanceLog", "ContainerEvent")
+        )["audit_logging_enabled"]
+        group["logs_exported"] = True if group["log_analytics_configured"] else via_settings
     key = lambda r: r["id"] or ""  # noqa: E731
     return sorted(environments, key=key), sorted(apps, key=key), sorted(jobs, key=key), sorted(groups, key=key)
 
