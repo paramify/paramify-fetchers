@@ -3,7 +3,7 @@
 # git repo with provenance. Source this from a fetcher entry script:
 #
 #   . "$(dirname "$0")/../_shared/clone.sh"
-#   checkov_require_tools "$COMPONENT" || exit 1
+#   checkov_require_tools "$COMPONENT" [tool ...] || exit 1     (default tools: git checkov jq)
 #   checkov_clone_repo "$REPO_URL" "$BRANCH" "$TOKEN" "$GIT_USER" "$COMPONENT" || ...
 #       on success sets globals: CLONE_DIR, COMMIT_SHA, SCANNED_BRANCH,
 #                                BRANCH_FALLBACK (true|false)   (return 0)
@@ -14,7 +14,8 @@
 # Verify the external tools the scanner needs are on PATH. Returns 1 if any missing.
 checkov_require_tools() {
     local component="$1" missing=0 t
-    for t in git checkov jq; do
+    shift
+    for t in ${*:-git checkov jq}; do
         if ! command -v "$t" >/dev/null 2>&1; then
             printf '%s ERROR %s required tool not found on PATH: %s\n' \
                 "$(date -u +'%Y-%m-%d %H:%M:%S')" "$component" "$t" >&2
