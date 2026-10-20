@@ -110,17 +110,16 @@ LIMITATIONS = [
     "Activity Log events are control-plane requests, kept 90 days. A slot swap names who requested it, "
     "when and on which slot; the slot it swapped with is not logged. A publish-profile download (publishxml) "
     "or a publishing-credentials read (config/publishingcredentials/list) names who obtained the shared Web "
-    "Deploy, FTP and Kudu credentials, not whether or when they were used. ListPublishingCredentials events "
-    "the platform logs with no caller are not counted.",
+    "Deploy, FTP and Kudu credentials, not whether or when they were used. ListPublishingCredentials events, "
+    "which the platform logs with no caller, identity type or app id, are not counted.",
     "Web Deploy, FTP and Kudu uploads made with those credentials go to the app's deployment endpoints, not "
     "Azure Resource Manager, so they leave no Activity Log entry: what content they shipped, which commit "
     "it was, and who uploaded it are not visible here. Whether basic-auth publishing is switched off, which "
-    "removes those shared credentials, is reported by azure_app_service_configuration "
-    "(basic_auth_publishing). Nothing older than the Activity Log window is seen.",
-    "Runtime versions travel with a slot swap; TLS version and cipher suite, FTPS, HTTP/2, remote debugging, "
-    "HTTPS-only, client certificates, public network access and access restrictions stay with the slot. "
-    "matches_production is posture parity between a slot and production, not what production runs after a "
-    "swap.",
+    "removes those shared credentials, is reported by azure_app_service_configuration. Nothing older than "
+    "the Activity Log window is seen.",
+    "Microsoft lists runtime versions as swapped; HTTPS-only, TLS, client certificates and access restrictions "
+    "stay with the slot. matches_production is posture parity between a slot and production, not what "
+    "production runs after a swap.",
 ]
 
 
@@ -458,8 +457,8 @@ def summarize(apps: list[dict], excluded_function_apps: int, window: dict) -> di
         # --- any deployment evidence ---
         "apps_with_deployment_evidence": sum(1 for a in apps if has_deployment_evidence(a)),
         "apps_without_deployment_evidence": sum(
-            1 for a in apps if not has_deployment_evidence(a) and history_read(a) and complete
-        ),
+            1 for a in apps if not has_deployment_evidence(a) and history_read(a)
+        ) if complete else None,
         # --- slots vs production ---
         "slots_matching_production": sum(1 for s in slots if s.get("matches_production") is True),
         "slots_differing_from_production": sum(1 for s in slots if s.get("matches_production") is False),

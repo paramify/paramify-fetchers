@@ -103,21 +103,21 @@ evidence_set:
     - latest_slot_swap_time — Time of the newest slot swap request in the window (ISO 8601 UTC); null if there is none or the Activity Log couldn't be read
     - publish_profile_downloads — Number of publish profile download requests (publishxml, the Web Deploy and FTP credentials Visual Studio uses) in the window
     - apps_with_publish_profile_downloads — Number of web apps whose publish profile was downloaded in the window, for the app or a slot
-    - publishing_credential_reads — Number of requests reading a web app's or slot's publishing credentials through config/publishingcredentials/list (the Kudu and FTP user name and password pipelines and the portal fetch) in the window
+    - publishing_credential_reads — Number of requests reading a web app's or slot's publishing credentials through config/publishingcredentials/list (the Kudu and FTP user name and password that pipelines and the portal fetch) in the window
     - apps_with_publishing_credential_reads — Number of web apps whose publishing credentials were read in the window, for the app or a slot
     - package_deployments — Number of MSDeploy, OneDeploy or ZipDeploy deployment requests made through Azure Resource Manager in the window
     - apps_with_package_deployments — Number of web apps with at least one package deployment through Azure Resource Manager in the window
-    - deployment_activity_by_caller_type — Number of slot swaps, publish profile downloads, publishing credential reads and package deployments for each kind of requester:
+    - deployment_activity_by_caller_type — Number of slot swaps, publish profile downloads, publishing credential reads and package deployments on listed web apps and slots, for each kind of requester:
       - user (a person: the token's identity type is user, or the caller is a user name containing @)
       - app (a service principal or managed identity: the token's identity type is app)
       - unknown (the log names neither)
-    - deployment_activity_on_unlisted_sites — Number of the same requests on a site this run didn't list (a deleted app or slot, or a function app), counted here instead of on an app
+    - deployment_activity_on_unlisted_sites — Number of the same requests on a site this run didn't list (a deleted app or slot, a function app, or a slot whose list couldn't be read), counted here instead of on an app
 
     Is there any trace of how each app is deployed?
-    - apps_with_deployment_evidence — Number of web apps with deployment evidence: a Kudu deployment record, slot swap, publish profile download, publishing credential read or package deployment on the app or a slot
-    - apps_without_deployment_evidence — Number of web apps with none of that deployment evidence on the app or any slot, counted only when every Kudu read succeeded and the whole Activity Log window was read
+    - apps_with_deployment_evidence — Number of web apps with deployment evidence: a Kudu deployment record, slot swap, publish profile download, publishing credential read or package deployment on the app or a slot. When the Activity Log couldn't be read, only Kudu records count
+    - apps_without_deployment_evidence — Number of web apps with none of that deployment evidence on the app or any slot where every Kudu read succeeded; null if the Activity Log window wasn't read in full (the read failed or stopped at 200,000 events)
 
     Do the slots match production?
-    - slots_matching_production — Number of deployment slots whose compared settings all match production. Compared: minimum TLS version and cipher suite, the SCM (deployment) site's minimum TLS version, FTPS state, HTTP/2, remote debugging, runtime versions, the main and SCM sites' access restrictions (rules in priority order, names ignored, and default actions), whether SCM uses the main site's rules, HTTPS-only, client certificates and public network access. Only the runtime versions travel with a swap; the rest stay with the slot, so a match is posture parity between slot and production, and a slot locked down differently on purpose reads as differing
+    - slots_matching_production — Number of deployment slots whose compared settings all match production. Compared: minimum TLS version and cipher suite, the SCM (deployment) site's minimum TLS version, FTPS state, HTTP/2, remote debugging, runtime versions, the main and SCM sites' access restrictions (rules in priority order, names ignored, and default actions), whether SCM uses the main site's rules, HTTPS-only, client certificates and public network access. Microsoft lists runtime versions as swapped; HTTPS-only, TLS, client certificates and access restrictions stay with the slot, so a match is posture parity between slot and production, and a slot locked down differently on purpose reads as differing
     - slots_differing_from_production — Number of deployment slots with at least one compared setting that differs from production
     - slots_comparison_unknown — Number of deployment slots not compared because the slot's or production's settings couldn't be read

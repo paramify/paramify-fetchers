@@ -315,7 +315,7 @@ def test_unread_activity_log_leaves_activity_null_and_evidence_unknown(monkeypat
     assert all(a["activity"] is None for a in apps)
     summary = deploys.summarize(apps, 1, {"days": 90, "complete": False, "cut_reason": "read_failed"})
     assert summary["apps_without_kudu_deployment_records"] == 2
-    assert summary["apps_without_deployment_evidence"] == 0
+    assert summary["apps_without_deployment_evidence"] is None
     assert summary["activity_log_complete"] is False
     assert summary["slot_swaps"] is None and summary["deployment_activity_by_caller_type"] is None
 
@@ -373,13 +373,13 @@ def test_non_integer_activity_log_days_falls_back_to_90(monkeypatch, caplog):
     assert "not a whole number" in caplog.text
 
 
-def test_window_cut_at_the_cap_keeps_counts_but_no_app_reads_as_without_evidence(monkeypatch):
+def test_window_cut_at_the_cap_keeps_counts_and_leaves_no_evidence_unknown(monkeypatch):
     apps, _, _ = collect(monkeypatch, web_client(deployments={}), events=[])
     summary = summary_of(apps, {"days": 90, "complete": False, "cut_reason": "max_events",
                                 "requests_on_unlisted_sites": {c: 0 for c in deploys.ACTIVITY_CATEGORIES}})
     assert summary["slot_swaps"] == 0 and summary["deployment_activity_on_unlisted_sites"] == 0
     assert summary["activity_log_complete"] is False
-    assert summary["apps_without_deployment_evidence"] == 0
+    assert summary["apps_without_deployment_evidence"] is None
 
 
 # --- deployment source and slot drift ---
@@ -488,5 +488,5 @@ def test_main_with_the_activity_log_denied_leaves_activity_unknown(monkeypatch, 
     assert all(s["activity"] is None for a in apps for s in [a, *a["slots"]])
     summary = evidence["summary"]
     assert summary["slot_swaps"] is None and summary["publish_profile_downloads"] is None
-    assert summary["apps_without_deployment_evidence"] == 0
+    assert summary["apps_without_deployment_evidence"] is None
     assert summary["apps_with_deployment_evidence"] == 0
