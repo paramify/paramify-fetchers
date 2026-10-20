@@ -27,8 +27,11 @@ GRAPH_APP_ID = sps.MICROSOFT_GRAPH_APP_ID
 ROLE_RW_DIRECTORY = "10000000-0000-0000-0000-000000000001"
 ROLE_DIR_RW = "10000000-0000-0000-0000-000000000002"
 ROLE_USER_READ = "10000000-0000-0000-0000-000000000003"
-DENIED = Exception("Insufficient privileges to complete the operation. (403)")
-SERVER_ERROR = Exception("Service unavailable (500)")
+ROLE_MAIL_READ = "10000000-0000-0000-0000-000000000004"
+ROLE_UNKNOWN = "10000000-0000-0000-0000-0000000000ff"
+# The form kiota's APIError takes: "<message> (status <code>)".
+DENIED = Exception("Insufficient privileges to complete the operation. (status 403)")
+SERVER_ERROR = Exception("Service unavailable (status 500)")
 
 # The summary keys of 0.1.0, which this change must keep.
 V010_SUMMARY_KEYS = {
@@ -68,9 +71,9 @@ def _app(oid, app_id, name, secrets=0):
               key_credentials=[], federated_identity_credentials=[])
 
 
-def _user(oid):
+def _user(oid, enabled=True):
     return ns(id=oid, odata_type="#microsoft.graph.user", display_name=f"User {oid}",
-              user_principal_name=f"{oid}@contoso.test", account_enabled=True)
+              user_principal_name=f"{oid}@contoso.test", account_enabled=enabled)
 
 
 def _assignment(role_id, resource_id="sp-graph", resource_name="Microsoft Graph"):
@@ -89,6 +92,7 @@ GRAPH_SP = _sp(
         ns(id=ROLE_RW_DIRECTORY, value="RoleManagement.ReadWrite.Directory"),
         ns(id=ROLE_DIR_RW, value="Directory.ReadWrite.All"),
         ns(id=ROLE_USER_READ, value="User.Read.All"),
+        ns(id=ROLE_MAIL_READ, value="Mail.Read"),
     ],
 )
 
@@ -128,8 +132,10 @@ class FakeGraph:
         self.sp_owners = Builder([ns(id=s.id, owners=sp_owners.get(s.id, [])[:20]) for s in service_principals])
         self.app_owners = Builder([ns(id=a.id, owners=app_owners.get(a.id, [])[:20]) for a in applications])
         self.assignments = Builder(
-            [ns(id=s.id, app_role_assignments=assignments.get(s.id, [])) for s in service_principals]
+            [ns(id=s.id, app_role_assignments=assignments.get(s.id, [])[:20]) for s in service_principals]
         )
+        self.assignment_items = {k: Builder(v) for k, v in assignments.items()}
+        self.resource_error = {}
         self.service_principals = Collection(
             {"": Builder(service_principals), "owners": self.sp_owners, "appRoleAssignments": self.assignments},
             service_principals,
@@ -142,11 +148,13 @@ class FakeGraph:
 
         async def resource_get(oid, request_configuration=None):
             self.resource_reads.append(oid)
+            if oid in self.resource_error:
+                raise self.resource_error[oid]
             return by_id[oid]
 
         self.service_principals.by_service_principal_id = lambda oid: ns(
             owners=self.sp_owner_items.get(oid, Builder()),
-            app_role_assignments=Builder(assignments.get(oid, [])),
+            app_role_assignments=self.assignment_items.get(oid, Builder()),
             get=lambda request_configuration=None: resource_get(oid, request_configuration),
         )
         self.applications.by_application_id = lambda oid: ns(owners=self.app_owner_items.get(oid, Builder()))
@@ -198,8 +206,8 @@ def _run(monkeypatch, tmp_path, graph):
 
 def _tenant():
     """An owned app, an ownerless app with a secret and a privileged role, a managed
-    identity with a privileged role, a vendor app with admin-consented Mail.Read, and an
-    ownerless app registration with no service principal."""
+    identity with a privileged role, a vendor app with admin-consented delegated Mail.Read
+    and Directory.ReadWrite.All, and an ownerless app registration with no service principal."""
     service_principals = [
         GRAPH_SP,
         _sp("sp-owned", "app-id-owned", "Owned app"),
@@ -222,7 +230,7 @@ def _tenant():
             "sp-mi": [_assignment(ROLE_DIR_RW)],
         },
         grants=[
-            _grant("sp-vendor", "openid Mail.Read"),
+            _grant("sp-vendor", "openid Mail.Read Directory.ReadWrite.All"),
             _grant("sp-owned", "User.Read", consent="Principal", principal="u-1"),
         ],
     )
@@ -236,13 +244,18 @@ def test_owners_and_privileged_permissions(monkeypatch, tmp_path):
     summary = evidence["summary"]
     assert V010_SUMMARY_KEYS <= set(summary)
     assert summary["owners_readable"] is True
+    assert summary["owner_details_readable"] is True
     assert summary["owner_eligible_service_principals"] == 3
+    # The orphan app registered here and the vendor app, whose owners live in its own tenant.
     assert summary["service_principals_without_owner"] == 2
+    assert summary["tenant_owned_service_principals_without_owner"] == 1
     assert summary["ownerless_service_principals_with_credentials"] == 1
+    assert summary["service_principals_with_only_disabled_owners"] == 0
     assert summary["ownerless_applications_without_service_principal"] == 1
     assert summary["application_permissions_readable"] is True
     assert summary["service_principals_with_application_permissions"] == 3
     assert summary["application_permission_assignments"] == 4
+    assert summary["application_permissions_unnamed"] == 0
     assert summary["service_principals_with_privileged_application_permissions"] == 2
     assert summary["managed_identities_with_privileged_application_permissions"] == 1
     # The managed identity holds a privileged role too, but cannot have an owner.
@@ -254,11 +267,12 @@ def test_owners_and_privileged_permissions(monkeypatch, tmp_path):
     assert summary["service_principals_with_delegated_grants"] == 2
     assert summary["admin_consented_delegated_grants"] == 1
     assert summary["service_principals_with_privileged_delegated_grants"] == 1
-    assert summary["privileged_delegated_permissions_granted"] == ["Mail.Read"]
+    # Delegated Mail.Read reaches only the signed-in user's own mailbox.
+    assert summary["privileged_delegated_permissions_granted"] == ["Directory.ReadWrite.All"]
 
     by_id = {r["id"]: r for r in evidence["results"]["service_principals"]}
     owned = by_id["sp-owned"]
-    assert owned["owners"] == [] and owned["has_owner"] is True
+    assert owned["owners"] == [] and owned["has_owner"] is True and owned["has_enabled_owner"] is True
     assert owned["application_owners"][0]["principal_type"] == "User"
     perms = {p["permission"]: p for p in owned["application_permissions"]}
     assert perms[None]["default_access"] is True and perms[None]["privileged"] is False
@@ -268,12 +282,17 @@ def test_owners_and_privileged_permissions(monkeypatch, tmp_path):
     assert by_id["sp-mi"]["owner_eligible"] is False
     assert by_id["sp-graph"]["owner_eligible"] is False
     (vendor_grant,) = by_id["sp-vendor"]["delegated_permission_grants"]
-    assert vendor_grant["scopes"] == ["Mail.Read", "openid"]
-    assert vendor_grant["privileged_scopes"] == ["Mail.Read"]
+    assert vendor_grant["scopes"] == ["Directory.ReadWrite.All", "Mail.Read", "openid"]
+    assert vendor_grant["privileged_scopes"] == ["Directory.ReadWrite.All"]
     assert by_id["sp-vendor"]["has_privileged_permission"] is True
+    assert by_id["sp-vendor"]["application_owners"] == []  # no app registration in this tenant
     (unused,) = evidence["results"]["applications_without_service_principal"]
     assert unused["has_owner"] is False
-    assert "RoleManagement.ReadWrite.Directory" in evidence["results"]["privileged_graph_permissions_checked"]
+    checked = evidence["results"]
+    assert "RoleManagement.ReadWrite.Directory" in checked["privileged_graph_permissions_checked"]
+    assert "Mail.Read" in checked["privileged_graph_permissions_checked"]
+    assert "RoleManagement.ReadWrite.Directory" in checked["privileged_delegated_graph_permissions_checked"]
+    assert "Mail.Read" not in checked["privileged_delegated_graph_permissions_checked"]
     # Role names are read once per resource that an assignment points at.
     assert sorted(graph.resource_reads) == ["sp-graph", "sp-owned"]
 
@@ -287,6 +306,61 @@ def test_a_privileged_name_on_another_resource_is_not_privileged():
     assert record["privileged"] is False
 
 
+def test_tenant_data_permissions_are_privileged_only_as_application_permissions():
+    resources = {"sp-graph": {"app_id": GRAPH_APP_ID, "display_name": "Microsoft Graph",
+                              "app_roles": {ROLE_MAIL_READ: "Mail.Read"}}}
+    application = sps.application_permission_record(
+        {"resource_id": "sp-graph", "app_role_id": ROLE_MAIL_READ}, resources
+    )
+    delegated = sps.delegated_grant_record(
+        {"resource_id": "sp-graph", "scope": "Mail.Read Files.Read.All Application.ReadWrite.OwnedBy"}, resources
+    )
+    assert application["privileged"] is True
+    assert delegated["privileged_scopes"] == ["Application.ReadWrite.OwnedBy"]
+
+
+def test_an_unnamed_permission_is_unknown_on_graph_and_not_privileged_elsewhere():
+    resources = {
+        "sp-graph": {"app_id": GRAPH_APP_ID, "display_name": "Microsoft Graph", "app_roles": {}},
+        "sp-other": {"app_id": "not-graph", "display_name": "Other API", "app_roles": {}},
+    }
+    on_graph = sps.application_permission_record({"resource_id": "sp-graph", "app_role_id": ROLE_UNKNOWN}, resources)
+    elsewhere = sps.application_permission_record({"resource_id": "sp-other", "app_role_id": ROLE_UNKNOWN}, resources)
+    missing = sps.application_permission_record({"resource_id": None, "app_role_id": ROLE_UNKNOWN}, resources)
+    assert (on_graph["permission"], on_graph["privileged"]) == (None, None)
+    assert elsewhere["privileged"] is False
+    assert missing["privileged"] is None
+
+
+def test_unnamed_graph_permission_is_counted_and_leaves_the_flag_unknown(monkeypatch, tmp_path):
+    tenant = _tenant()
+    tenant["assignments"]["sp-owned"].append(_assignment(ROLE_UNKNOWN))
+    code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
+
+    assert code == 0
+    assert evidence["summary"]["application_permissions_unnamed"] == 1
+    by_id = {r["id"]: r for r in evidence["results"]["service_principals"]}
+    assert by_id["sp-owned"]["has_privileged_permission"] is None
+
+
+def test_only_disabled_owners_and_unread_owner_state(monkeypatch, tmp_path):
+    tenant = _tenant()
+    tenant["app_owners"]["app-orphan"] = [_user("u-gone", enabled=False)]
+    code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
+    assert code == 0
+    summary = evidence["summary"]
+    assert summary["service_principals_with_only_disabled_owners"] == 1
+    assert summary["service_principals_without_owner"] == 1
+    by_id = {r["id"]: r for r in evidence["results"]["service_principals"]}
+    assert by_id["sp-orphan"]["has_owner"] is True and by_id["sp-orphan"]["has_enabled_owner"] is False
+
+    # An owner returned without its account state (id only) leaves the figure unknown.
+    tenant["app_owners"]["app-orphan"] = [_user("u-gone", enabled=None)]
+    _, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
+    assert evidence["summary"]["owner_details_readable"] is False
+    assert evidence["summary"]["service_principals_with_only_disabled_owners"] is None
+
+
 def test_owners_past_the_expand_limit_are_read_per_object(monkeypatch, tmp_path):
     tenant = _tenant()
     tenant["app_owners"] = {"app-owned": [_user(f"u-{i}") for i in range(25)]}
@@ -297,6 +371,31 @@ def test_owners_past_the_expand_limit_are_read_per_object(monkeypatch, tmp_path)
     assert graph.app_owner_items["app-owned"].calls == 1
     by_id = {r["id"]: r for r in evidence["results"]["service_principals"]}
     assert len(by_id["sp-owned"]["application_owners"]) == 25
+
+
+def test_service_principal_owners_past_the_expand_limit_are_read_per_object(monkeypatch, tmp_path):
+    tenant = _tenant()
+    tenant["sp_owners"] = {"sp-orphan": [_user(f"u-{i}") for i in range(21)]}
+    graph = FakeGraph(**tenant)
+    code, evidence, _ = _run(monkeypatch, tmp_path, graph)
+
+    assert code == 0
+    assert graph.sp_owner_items["sp-orphan"].calls == 1
+    by_id = {r["id"]: r for r in evidence["results"]["service_principals"]}
+    assert len(by_id["sp-orphan"]["owners"]) == 21
+
+
+def test_assignments_past_the_expand_limit_are_read_per_object(monkeypatch, tmp_path):
+    tenant = _tenant()
+    tenant["assignments"]["sp-mi"] = [_assignment(ROLE_USER_READ) for _ in range(24)] + [_assignment(ROLE_DIR_RW)]
+    graph = FakeGraph(**tenant)
+    code, evidence, _ = _run(monkeypatch, tmp_path, graph)
+
+    assert code == 0
+    assert graph.assignment_items["sp-mi"].calls == 1
+    by_id = {r["id"]: r for r in evidence["results"]["service_principals"]}
+    assert len(by_id["sp-mi"]["application_permissions"]) == 25
+    assert by_id["sp-mi"]["privileged_application_permissions"] == ["Directory.ReadWrite.All"]
 
 
 def test_an_expanded_assignment_without_its_resource_is_read_per_object(monkeypatch, tmp_path):
@@ -331,6 +430,36 @@ def test_denied_owner_read_fails_the_run_with_null_owner_figures(monkeypatch, tm
     assert summary["service_principals_with_privileged_application_permissions"] == 2
     by_id = {r["id"]: r for r in evidence["results"]["service_principals"]}
     assert by_id["sp-orphan"]["has_owner"] is None
+
+
+def test_denied_service_principal_owner_read_fails_the_run(monkeypatch, tmp_path):
+    graph = FakeGraph(**_tenant())
+    graph.sp_owners.error = DENIED
+    code, evidence, status = _run(monkeypatch, tmp_path, graph)
+
+    assert code == 1
+    assert status["code"] == "not_authorized"
+    summary = evidence["summary"]
+    assert summary["owners_readable"] is False
+    assert summary["owner_details_readable"] is False
+    assert summary["service_principals_without_owner"] is None
+    assert summary["service_principals_with_only_disabled_owners"] is None
+    by_id = {r["id"]: r for r in evidence["results"]["service_principals"]}
+    assert by_id["sp-owned"]["owners"] is None and by_id["sp-owned"]["has_owner"] is None
+
+
+def test_a_failed_app_role_name_read_leaves_permissions_unreadable(monkeypatch, tmp_path):
+    graph = FakeGraph(**_tenant())
+    graph.resource_error["sp-graph"] = DENIED
+    code, evidence, status = _run(monkeypatch, tmp_path, graph)
+
+    assert code == 1
+    assert status["code"] == "not_authorized"
+    summary = evidence["summary"]
+    assert summary["application_permissions_readable"] is False
+    assert summary["application_permission_assignments"] is None
+    assert summary["application_permissions_unnamed"] is None
+    assert summary["service_principals_with_privileged_application_permissions"] is None
 
 
 def test_denied_app_role_assignments_fail_the_run_with_null_permission_figures(monkeypatch, tmp_path):
