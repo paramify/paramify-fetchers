@@ -332,11 +332,11 @@ python tools/gen_ksi_mapping.py
 
 *13 fetchers:* [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`aws_resource_inventory`](../fetchers/aws/resource_inventory), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`crowdstrike_hosts`](../fetchers/crowdstrike/hosts), [`datadog_agent_hosts`](../fetchers/datadog/agent_hosts), [`datadog_apm_services`](../fetchers/datadog/apm_services), [`datadog_containers`](../fetchers/datadog/containers), [`gitlab_project_summary`](../fetchers/gitlab/project_summary), [`k8s_eks_pod_inventory`](../fetchers/k8s/eks_pod_inventory), [`rippling_devices`](../fetchers/rippling/devices), [`sentinelone_agents`](../fetchers/sentinelone/agents), [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets), [`wiz_scan_coverage`](../fetchers/wiz/scan_coverage)
 
-#### `KSI-PIY-RES` — Reviewing Executive Support
+#### ⬜ `KSI-PIY-RES` — Reviewing Executive Support
 
 > Executive support for achieving the provider's security goals is persistently reviewed and demonstrated.
 
-*1 fetcher:* [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents)
+*Organizational — evidenced by HR, training or process, not cloud config.*
 
 #### ⬜ `KSI-PIY-RIS` — Reviewing Investments in Security
 
@@ -570,7 +570,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules) | `KSI-MLA-OSM`, `KSI-MLA-RVL` |
 | [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules) | `KSI-IAM-SUS`, `KSI-MLA-RVL` |
 | [`azure_sentinel_data_sources`](../fetchers/azure/sentinel_data_sources) | `KSI-MLA-LET`, `KSI-MLA-OSM` |
-| [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents) | `KSI-CNA-ULN`, `KSI-IAM-SUS`, `KSI-INR-AAR`, `KSI-INR-RPI`, `KSI-MLA-RVL`, `KSI-PIY-RES` |
+| [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents) | `KSI-CNA-ULN`, `KSI-IAM-SUS`, `KSI-INR-AAR`, `KSI-INR-RPI`, `KSI-MLA-RVL` |
 | [`azure_sql_encryption_status`](../fetchers/azure/sql_encryption_status) | `KSI-SVC-SIN` |
 | [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups) | `KSI-CNA-OFA`, `KSI-RPL-ABO` |
 | [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration) | `KSI-CNA-MAT`, `KSI-IAM-APM`, `KSI-MLA-LET`, `KSI-SVC-SIN` |

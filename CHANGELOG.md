@@ -604,26 +604,37 @@ schemas and the `paramify` CLI — not the internal code.
   catalog descriptor (`paramify catalog --json`) gains an `evidence_set` block
   and `issue_report.format`.
 - **`azure_sentinel_incidents` 0.2.0: response timeline, monthly metrics, rules
-  and entities.** The fetcher now reads every SecurityIncident update row, not
-  only the latest. Each incident gains `acknowledged_time_utc` and
-  `hours_to_acknowledge` (the first update to Active or with an owner),
-  `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
-  who made it), `tasks` with status and completion time, `hours_to_detect`
-  (created minus first activity), `comments_count`, `classification_comment`,
-  `related_analytic_rule_ids`, and the `entities` on its alerts as kind and
-  identifier, from SecurityAlert joined on the incident's alert ids, plus
-  `provider_incident_id` and `provider_incident_url`: for an incident synced
-  from Defender XDR, its id and link there, the id Microsoft Graph alerts give
-  as `incidentId`. `history_complete` says whether every update since creation is still
-  retained; an incident already acknowledged before the oldest retained update
-  has no acknowledgement time rather than a late one. Each workspace gains
-  `monthly`: per calendar month of the lookback, MTTD by month created, MTTA by
-  month acknowledged, MTTR by month closed, and the open backlog at month end by
-  severity and owner, which is `null` for month ends older than
-  SecurityIncident's retention. It also gains `recurrence_by_title` and
-  `recurrence_by_rule` (two or more incidents in the lookback),
-  `open_unacknowledged`, and whole-lookback `mttd_hours`, `mtta_hours` and
-  `mttr_hours`. Existing fields are unchanged.
+  and entities.** Besides the latest SecurityIncident row per incident, which
+  still gives close times and now tasks, the fetcher reads every update row in
+  the lookback. Each incident gains:
+  - `acknowledged_time_utc` and `hours_to_acknowledge`: the first update by a
+    person that moves it to Active or gives it a new owner. The creation row and
+    changes by automation rules or the Defender XDR sync don't count.
+  - `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
+    who made it), and `tasks` with status and completion time.
+  - `hours_to_detect` (first activity to creation), `comments_count`,
+    `classification_comment` and `related_analytic_rule_ids`.
+  - the `entities` on its alerts, as kind and identifier, from SecurityAlert
+    joined on the incident's alert ids: up to 25 of each kind, processes as image
+    name and process id, URLs without query string or credentials. Entities read
+    as `null` when the alerts can't be read.
+  - `provider_incident_id` and `provider_incident_url`: for an incident synced
+    from Defender XDR, its id and link there; Microsoft Graph alerts give the same
+    id as `incidentId`.
+  - `history_complete`: whether the incident was created inside the history
+    read, which starts at the lookback or SecurityIncident's retention, whichever
+    is later. One already acknowledged before its oldest update read has no
+    acknowledgement time rather than a late one.
+
+  Each workspace gains `monthly`: per calendar month of the lookback, MTTD by
+  month created, MTTA by month acknowledged, MTTR by month closed, and the open
+  backlog at month end by severity and owner, which is `null` for month ends
+  older than SecurityIncident's retention. It also gains `recurring_titles`,
+  `recurrence_by_title` and `recurrence_by_rule` (two or more incidents created
+  in the lookback), `open_unacknowledged`, and `mttd_hours`, `mtta_hours` and
+  `mttr_hours`. When the update history can't be read, the timeline fields,
+  `monthly` and `acknowledged_incidents` are `null` rather than empty. Existing
+  fields are unchanged; KSI-PIY-RES is not mapped, since it isn't evidenceable.
 - **TUI fixes found while recording that walkthrough.** On a manifest with no
   evidence and no scripts, nothing on the Paramify tab held focus, so its keys
   did nothing. Enter in a picker's filter box now takes the highlighted option.

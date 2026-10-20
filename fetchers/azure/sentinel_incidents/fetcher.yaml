@@ -58,7 +58,6 @@ ksis:
   - KSI-INR-AAR      # After action reports — detection, acknowledgement and close times, tasks and classification comment
   - KSI-IAM-SUS      # Responding to suspicious activity — escalation (owner and severity changes) and close times
   - KSI-CNA-ULN      # Using logical networking — each incident's analytic rules and the hosts and IPs involved
-  - KSI-PIY-RES      # Reviewing executive support — open backlog per month by severity and owner
 
 evidence_set:
   reference_id: EVD-AZURE-SENTINEL-INCIDENTS
@@ -66,17 +65,19 @@ evidence_set:
   instructions: |
     Script: azure/sentinel_incidents/fetcher.py
 
-    Access: Microsoft Sentinel Reader and Log Analytics Reader.
+    Access: Microsoft Sentinel Reader and Log Analytics Reader on each Sentinel workspace.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
-    - GET Microsoft.OperationalInsights/workspaces and onboardingStates (per workspace) — finds the Sentinel workspaces
-    - GET Microsoft.SecurityInsights/incidents — every incident, with its Defender XDR id and link when it came from there
-    - KQL on SecurityIncident — every update row: close times, status, owner and severity changes, and tasks, which the incident list lacks
-    - KQL on SecurityIncident joined to SecurityAlert — the entities on each incident's alerts
-    - GET Microsoft.OperationalInsights/workspaces/tables/SecurityIncident — the table's retention
+    - GET Microsoft.OperationalInsights/workspaces — the subscription's Log Analytics workspaces
+    - GET Microsoft.SecurityInsights/onboardingStates (per workspace) — finds the Sentinel workspaces
+    - GET Microsoft.SecurityInsights/incidents (per workspace) — every incident, with its Defender XDR id and link when it came from there
+    - KQL on SecurityIncident, latest row per incident (per workspace) — close times and tasks, which the incident list lacks
+    - KQL on SecurityIncident, every row in the lookback (per workspace) — status, owner and severity changes and who made them
+    - KQL on SecurityIncident joined to SecurityAlert (per workspace) — the entities on each incident's alerts, up to 25 of each kind, with processes as image name and process id and URLs without their query string
+    - GET Microsoft.OperationalInsights/workspaces/tables/SecurityIncident (per workspace) — the table's retention
 
-    Output: azure_sentinel_incidents_<subscription>.json — for each Sentinel workspace, every incident in the window with its severity, status, owner, response timeline and entities, and detection, acknowledgement and close times per month.
+    Output: azure_sentinel_incidents_<subscription>.json — for each Sentinel workspace, every incident created in the lookback (default 90 days) plus older ones still open, with its severity, status, owner, response timeline and entities, and per month the mean time to detect (first activity, the earliest alert's event, to creation), acknowledge and close, and the open backlog at month end, which is null for month ends older than the SecurityIncident table's retention.
 
     Summary fields:
 
@@ -85,13 +86,13 @@ evidence_set:
     - workspaces_without_sentinel — Number of workspaces skipped because Sentinel isn't turned on
 
     Are incidents being worked and closed?
-    - incidents_in_scope — Number of incidents created in the lookback period (default 90 days), plus older incidents still open
+    - incidents_in_scope — Number of incidents created in the lookback, plus older incidents still open
     - open_incidents — Number of incidents still open (New or Active)
     - closed_incidents — Number of in-scope incidents that are closed
-    - acknowledged_incidents — Number of in-scope incidents with a known acknowledgement time. An incident is acknowledged at its first update that moves it to Active or gives it an owner; one already acknowledged before the incident log's oldest retained update has no known time
+    - acknowledged_incidents — Number of in-scope incidents with a known acknowledgement time; null if no workspace's SecurityIncident history could be read. An incident is acknowledged at the first update by a person that moves it to Active or gives it a new owner. Its creation and changes by automation rules or the Defender XDR sync don't count, so incidents worked only in the Defender portal show none. An incident created before the lookback, or already acknowledged before the oldest update read, has no known time
     - open_unacknowledged — Number of open incidents still New with no owner
-    - recurring_titles — Number of incident titles shared by two or more in-scope incidents, up to 25 per workspace
+    - recurring_titles — Number of incident titles shared by two or more incidents created in the lookback
 
     Can every close time be shown?
-    - closed_missing_close_time — Number of closed incidents whose close time wasn't found, even though it should still be within retention
-    - closed_close_time_not_retained — Number of closed incidents whose close record is older than the incident log's retention, so the close time is gone
+    - closed_missing_close_time — Number of closed incidents whose close time wasn't found in the SecurityIncident table, even though it should still be within the table's retention
+    - closed_close_time_not_retained — Number of closed incidents whose close record is older than the SecurityIncident table's retention, so the close time is gone
