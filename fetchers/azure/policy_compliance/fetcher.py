@@ -12,7 +12,7 @@ do; this is the result of evaluating them. Reads from azure-mgmt-policyinsights:
   policy_states.list_query_results_for_resource
                                              each listed resource's evaluated
                                              expressions (actual vs target), bounded;
-                                             a refused read is a status, not a failure
+                                             a read refused twice is a status, not a failure
   policy_states ("default", grouped)         30 days of history, for recurrence
   remediations.list_for_subscription         remediation tasks and their deployments
   remediations.list_deployments_at_...       each task's per-resource deployments
@@ -30,6 +30,7 @@ import logging
 import os
 import re
 import sys
+import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -115,11 +116,13 @@ DETAILS_NOT_IN_RESULT = "not_in_detail_result"
 DETAILS_NOT_REQUESTED = "not_requested"
 DETAILS_UNSUPPORTED_SCOPE = "unsupported_scope"
 DETAILS_FAILED = "failed"
-# The identity may not read the resource (e.g. a deny assignment); enrichment only, so it
-# is recorded on the states and does not fail the run. Any other error still does.
+# Policy Insights refused the resource's read, and again on one retry. Enrichment only, so it
+# is recorded on the states and does not fail the run; any other error still does.
 DETAILS_NOT_AUTHORIZED = "not_authorized"
-# Matched on the message: Policy Insights has answered AuthorizationFailed as a 409.
-NOT_AUTHORIZED_MARKERS = ("authorizationfailed", "does not have authorization", "forbidden", "(403)")
+# Read from the parsed ARM error, never the message: Policy Insights has answered
+# AuthorizationFailed as a 409, and refusals have cleared on a later read.
+REFUSAL_CODES = {"authorizationfailed", "linkedauthorizationfailed"}
+REFUSAL_RETRY_SECONDS = 5
 
 
 # --- projections: the only code here that touches an azure-mgmt model ---
@@ -417,19 +420,21 @@ def has_evaluation_details(details) -> bool:
     )
 
 
+def _error_code(exc: BaseException) -> str:
+    return str(getattr(getattr(exc, "error", None), "code", None) or "")
+
+
 def is_not_authorized(exc: BaseException) -> bool:
-    """The identity may not read this resource, as opposed to a broken or throttled call."""
-    if getattr(exc, "status_code", None) == 403:
-        return True
-    message = f"{getattr(exc, 'message', '') or ''} {exc}".lower()
-    return any(marker in message for marker in NOT_AUTHORIZED_MARKERS)
+    """A refused read (403, or an AuthorizationFailed error code), as opposed to a broken call."""
+    return getattr(exc, "status_code", None) == 403 or _error_code(exc).lower() in REFUSAL_CODES
 
 
 def refusal_reason(exc: BaseException) -> str:
-    """The action Azure refused when it names one, else the error's start; never the principal."""
-    text = " ".join(str(exc).split())
-    action = re.search(r"on action '([^']+)'", text)
-    return f"not authorized to {action.group(1)}" if action else text[:200]
+    """What was refused: the error code and the action Azure names; never the principal or a scope."""
+    code = _error_code(exc)
+    code = code if re.fullmatch(r"[A-Za-z]+", code) else f"HTTP {getattr(exc, 'status_code', None)}"
+    action = re.search(r"\baction '([A-Za-z][\w.-]*(?:/[\w.-]+)+)'", " ".join(str(exc).split()))
+    return f"Policy Insights refused the read ({code})" + (f" on {action.group(1)}" if action else "")
 
 
 def attach_evaluation_details(
@@ -774,15 +779,23 @@ def collect_evaluation_details(client, states: list[dict], limit: int, collector
             ]
 
         operation = f"policyinsights.policy_states.list_query_results_for_resource({basename(resource_id)})"
+        key = arm_id_key(resource_id)
         try:
-            results[arm_id_key(resource_id)] = _read()
+            try:
+                results[key] = _read()
+            except Exception as exc:  # noqa: BLE001 — a refusal is retried once, anything else is not
+                if not is_not_authorized(exc):
+                    raise
+                logger.info("%s: %s; retrying once", operation, refusal_reason(exc))
+                time.sleep(REFUSAL_RETRY_SECONDS)
+                results[key] = _read()
         except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
             if not is_not_authorized(exc):
                 collector.record(operation, exc)
-                results[arm_id_key(resource_id)] = None
+                results[key] = None
                 continue
-            refused[arm_id_key(resource_id)] = refusal_reason(exc)
-            logger.warning("%s: %s; recorded on its states", operation, refused[arm_id_key(resource_id)])
+            refused[key] = refusal_reason(exc)
+            logger.warning("%s: %s; recorded on its states", operation, refused[key])
     attach_evaluation_details(states, results, refused)
     # A limit of 0 skips them, which is not truncation.
     return {"eligible": len(eligible), "requested": len(selected),

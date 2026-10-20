@@ -205,62 +205,159 @@ def test_collect_evaluation_details_queries_each_resource_up_to_the_limit():
     assert calls == []
 
 
-class _RefusedAs409(Exception):
-    """How Policy Insights answered a resource the identity may not read: AuthorizationFailed, HTTP 409."""
-    status_code = 409
+GUID = "11111111-2222-3333-4444-555555555555"
+APP = f"{RG}/providers/Microsoft.Web/sites/app"
 
 
-def _status(code, message):
-    exc = Exception(message)
-    exc.status_code = code
-    return exc
+class _ArmError(Exception):
+    """An azure-core HttpResponseError as the fetcher sees it: status, the parsed ARM error, the message."""
+
+    def __init__(self, status_code, code, message):
+        super().__init__(f"({code}) {message}" if code else message)
+        self.status_code = status_code
+        self.error = NS(code=code) if code else None
 
 
-@pytest.mark.parametrize("exc, refused", [
-    (_RefusedAs409("(AuthorizationFailed) Encountered an error while authorizing the client 'someone' with "
-                   "object id 'x' on action 'Microsoft.Web/sites/read' over scope '/subscriptions/s1/...'"), True),
-    (_status(403, "Forbidden"), True),
-    (_status(503, "(503) Service Unavailable"), False),
-    (_status(429, "(429) TooManyRequests"), False),
-], ids=["authorization_failed_409", "forbidden_403", "unavailable_503", "throttled_429"])
-def test_only_a_refusal_is_not_authorized(exc, refused):
-    assert fx.is_not_authorized(exc) is refused
+# ARM's AuthorizationFailed bodies, with a made-up principal and scope.
+REFUSALS = {
+    "standard_403": (403, "AuthorizationFailed",
+                     f"The client 'jane.doe@contoso.com' with object id '{GUID}' does not have authorization to "
+                     f"perform action 'Microsoft.Web/sites/read' over scope '/subscriptions/{GUID}/resourceGroups/rg1/"
+                     "providers/Microsoft.Web/sites/app' or the scope is invalid."),
+    "deny_assignment_403": (403, "AuthorizationFailed",
+                            f"The client 'jane.doe@contoso.com' with object id '{GUID}' has permission to perform "
+                            f"action 'Microsoft.Web/sites/read' on scope '/subscriptions/{GUID}/resourceGroups/rg1'; "
+                            f"however, the access is denied because of the deny assignment with name 'deny' and Id "
+                            f"'{GUID}' at scope '/subscriptions/{GUID}'."),
+    "policy_insights_409": (409, "AuthorizationFailed",
+                            f"Encountered an error while authorizing the client 'jane.doe@contoso.com' with object id "
+                            f"'{GUID}' on action 'Microsoft.Web/sites/config/read' over scope '/subscriptions/{GUID}/"
+                            "resourceGroups/rg1/providers/Microsoft.Web/sites/app/config/web'. If the issue persists, "
+                            "make sure the subscription is registered to 'Microsoft.PolicyInsights'."),
+    "no_action_403": (403, "AuthorizationFailed",
+                      f"The client 'jane.doe@contoso.com' with object id '{GUID}' is not authorized."),
+    "unparsed_403": (403, None, f"Forbidden: client 'jane.doe@contoso.com' object id '{GUID}' /subscriptions/{GUID}"),
+}
+
+
+@pytest.mark.parametrize("kind, reason", [
+    ("standard_403", "Policy Insights refused the read (AuthorizationFailed) on Microsoft.Web/sites/read"),
+    ("deny_assignment_403", "Policy Insights refused the read (AuthorizationFailed) on Microsoft.Web/sites/read"),
+    ("policy_insights_409", "Policy Insights refused the read (AuthorizationFailed) on Microsoft.Web/sites/config/read"),
+    ("no_action_403", "Policy Insights refused the read (AuthorizationFailed)"),
+    ("unparsed_403", "Policy Insights refused the read (HTTP 403)"),
+])
+def test_refusal_reason_names_the_code_and_action_never_the_principal(kind, reason):
+    exc = _ArmError(*REFUSALS[kind])
+    assert fx.is_not_authorized(exc)
+    assert fx.refusal_reason(exc) == reason
+    for leak in ("client '", "object id", "jane", "/subscriptions/", GUID):
+        assert leak not in fx.refusal_reason(exc)
+
+
+@pytest.mark.parametrize("exc", [
+    _ArmError(404, "ResourceNotFound", "The Resource 'Microsoft.Web/sites/forbidden-zone' under resource group "
+                                       "'forbidden-rg' was not found."),
+    _ArmError(500, "InternalServerError", "Failed for /resourceGroups/forbidden-rg: AuthorizationFailed upstream (403)"),
+    _ArmError(429, "TooManyRequests", "Throttled."),
+    _ArmError(503, "ServiceUnavailable", "Try again."),
+    _ArmError(409, "Conflict", "(AuthorizationFailed) in a resource name is not a refusal"),
+], ids=["not_found_404", "server_error_500", "throttled_429", "unavailable_503", "conflict_409"])
+def test_customer_text_never_makes_a_refusal(exc):
+    assert not fx.is_not_authorized(exc)
+
+
+def _detail_rows(resource_id):
+    return [NS(resource_id=resource_id, policy_assignment_id=ASSIGN, policy_definition_id=DEF,
+               policy_definition_reference_id="r1",
+               policy_evaluation_details=NS(evaluated_expressions=[expression()], if_not_exists_details=None))]
 
 
 @needs_sdk
-def test_refused_detail_read_marks_its_states_and_does_not_fail_the_run():
-    app = f"{RG}/providers/Microsoft.Web/sites/app"
+def test_refused_detail_read_is_retried_once_then_marks_its_states(monkeypatch):
+    monkeypatch.setattr(fx, "REFUSAL_RETRY_SECONDS", 0)
+    calls = []
 
     def per_resource(resource, resource_id, query_options):
+        calls.append(resource_id.rsplit("/", 1)[-1])
         if resource_id.endswith("/app"):
-            raise _RefusedAs409("(AuthorizationFailed) Encountered an error while authorizing the client "
-                                "'someone@example.com' with object id 'x' on action 'microsoft.web/sites/read' "
-                                f"over scope '{app}'.")
+            raise _ArmError(*REFUSALS["policy_insights_409"])
         if "nsg1" in resource_id:
-            raise RuntimeError("(503) Service Unavailable")
-        return [NS(resource_id=VM, policy_assignment_id=ASSIGN, policy_definition_id=DEF,
-                   policy_definition_reference_id="r1",
-                   policy_evaluation_details=NS(evaluated_expressions=[expression()], if_not_exists_details=None))]
+            raise _ArmError(503, "ServiceUnavailable", "Try again.")
+        return _detail_rows(VM)
 
     client = fake_client(policy_states={"list_query_results_for_resource": per_resource})
     collector = fx.Collector(logging.getLogger("test"))
-    states = [state(app), state(app, ref="r2"), state(VM), state(NSG)]
+    states = [state(APP), state(APP, ref="r2"), state(VM), state(NSG)]
     out = fx.collect_evaluation_details(client, states, 10, collector)
+    # The refusal is read twice; the 503 is not retried here.
+    assert sorted(calls) == ["app", "app", "nsg1", "vm1"]
     assert out["not_authorized"] == 1
+    refused = "Policy Insights refused the read (AuthorizationFailed) on Microsoft.Web/sites/config/read"
     assert [(s["evaluation_details_status"], s["evaluation_details_reason"]) for s in states] == [
-        ("not_authorized", "not authorized to microsoft.web/sites/read"),
-        ("not_authorized", "not authorized to microsoft.web/sites/read"),
-        ("collected", None),
-        ("failed", None),
-    ]
-    # Only the 503 is a collection failure; the refusal names no principal in the evidence.
+        ("not_authorized", refused), ("not_authorized", refused), ("collected", None), ("failed", None)]
     assert [f["operation"] for f in collector.failures] == [
         "policyinsights.policy_states.list_query_results_for_resource(nsg1)"]
-    assert "someone" not in json.dumps(states)
+    assert "jane" not in json.dumps(states)
     summary = fx.summarize_evaluation_details(states, out)
     assert summary["evaluation_details_not_authorized_resources"] == 1
     assert summary["non_compliant_states_by_evaluation_details_status"] == {
         "collected": 1, "failed": 1, "not_authorized": 2}
+
+
+@needs_sdk
+def test_refusal_that_clears_on_the_retry_is_collected(monkeypatch):
+    monkeypatch.setattr(fx, "REFUSAL_RETRY_SECONDS", 0)
+    answers = [_ArmError(*REFUSALS["policy_insights_409"]), _detail_rows(APP)]
+
+    def per_resource(resource, resource_id, query_options):
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    client = fake_client(policy_states={"list_query_results_for_resource": per_resource})
+    collector = fx.Collector(logging.getLogger("test"))
+    states = [state(APP)]
+    out = fx.collect_evaluation_details(client, states, 10, collector)
+    assert (states[0]["evaluation_details_status"], out["not_authorized"], collector.ok) == ("collected", 0, True)
+
+
+@needs_sdk
+@pytest.mark.parametrize("error, exit_code", [
+    (lambda: _ArmError(*REFUSALS["standard_403"]), 0),
+    (lambda: _ArmError(503, "ServiceUnavailable", "Try again."), 1),
+], ids=["refusal_alone", "server_error"])
+def test_main_exit_code_for_a_refused_or_failed_detail_read(monkeypatch, tmp_path, error, exit_code):
+    monkeypatch.setattr(fx, "load_dotenv", lambda: None)
+    monkeypatch.setattr(fx, "REFUSAL_RETRY_SECONDS", 0)
+    for env in (fx.MAX_NON_COMPLIANT_ENV, fx.MAX_DETAIL_RESOURCES_ENV, fx.MAX_RECURRENCE_PAIRS_ENV,
+                fx.MAX_REMEDIATION_DEPLOYMENTS_ENV):
+        monkeypatch.delenv(env, raising=False)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    monkeypatch.setattr(fx, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
+    monkeypatch.setattr(fx, "credential", lambda: object())
+    monkeypatch.setattr(fx, "provider_registration_status", lambda *a: "registered")
+
+    def refused_read(resource, resource_id, query_options):
+        raise error()
+
+    def collect(subscription_id, cred, collector, limits):
+        collected = fx.empty_collection()
+        collected["states"] = [state(APP)]
+        collected["details"] = fx.collect_evaluation_details(
+            fake_client(policy_states={"list_query_results_for_resource": refused_read}),
+            collected["states"], limits["detail_resources"], collector)
+        return collected
+
+    monkeypatch.setattr(fx, "collect_compliance", collect)
+    assert fx.main() == exit_code
+    payload = json.loads((tmp_path / "azure_policy_compliance_s1.json").read_text())
+    assert payload["metadata"]["partial_failure"] is bool(exit_code)
+    assert (tmp_path / "status.json").exists() is bool(exit_code)
+    expected = "not_authorized" if exit_code == 0 else "failed"
+    assert payload["results"]["non_compliant_states"][0]["evaluation_details_status"] == expected
 
 
 # --- recurrence ---
