@@ -574,7 +574,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "SecurityCenter",
         "assessments_metadata",
         ["list_by_subscription"],
-        "azure/defender_assessments — the only source of severity; "
+        "azure/defender_assessments — categories, type and fallback severity; "
         "assessments.list returns no metadata",
     ),
     (
@@ -899,7 +899,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         None,
         ["resources"],
         "azure/resource_inventory, azure/front_door_origins (origin regions), "
-        "azure/resource_diagnostic_settings, azure/change_provenance, azure/residual_resources",
+        "azure/resource_diagnostic_settings, azure/change_provenance, azure/residual_resources, "
+        "azure/defender_assessments (each assessment's own severity)",
     ),
     # --- deployment history: left azure-mgmt-resource for its own distribution -
     (
@@ -967,15 +968,18 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure.mgmt.policyinsights",
         "PolicyInsightsClient",
         "policy_states",
-        ["summarize_for_subscription", "list_query_results_for_subscription"],
-        "azure/policy_compliance",
+        ["summarize_for_subscription", "list_query_results_for_subscription",
+         "list_query_results_for_resource"],
+        "azure/policy_compliance — evaluation details need the per-resource query",
     ),
     (
         "azure.mgmt.policyinsights",
         "PolicyInsightsClient",
         "remediations",
-        ["list_for_subscription"],
-        "azure/policy_compliance",
+        ["list_for_subscription", "list_deployments_at_subscription",
+         "list_deployments_at_resource_group", "list_deployments_at_resource",
+         "list_deployments_at_management_group"],
+        "azure/policy_compliance — per-resource remediation deployments",
     ),
     # --- Front Door WAF ------------------------------------------------------
     (
@@ -1879,6 +1883,44 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "RemediationDeploymentSummary",
         ["total_deployments", "successful_deployments", "failed_deployments"],
         "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "QueryOptions",
+        ["filter", "top", "expand", "apply", "from_property", "to", "select", "order_by"],
+        "azure/policy_compliance — a dropped option silently widens or empties a query",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyState",
+        ["policy_evaluation_details", "policy_definition_reference_id", "additional_properties"],
+        "azure/policy_compliance — evaluation details, and the grouped history count",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyEvaluationDetails",
+        ["evaluated_expressions", "if_not_exists_details"],
+        "azure/policy_compliance — expected vs actual values",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "ExpressionEvaluationDetails",
+        ["expression", "expression_kind", "path", "operator", "expression_value",
+         "target_value", "result"],
+        "azure/policy_compliance — expected vs actual values",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "IfNotExistsEvaluationDetails",
+        ["resource_id", "total_resources"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "RemediationDeployment",
+        ["remediated_resource_id", "deployment_id", "status", "resource_location", "error",
+         "created_on", "last_updated_on"],
+        "azure/policy_compliance — per-resource remediation deployments",
     ),
     (
         "msgraph.generated.models.service_principal",
