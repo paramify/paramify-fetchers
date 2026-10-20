@@ -72,7 +72,12 @@ STACKS = [
               windows_runtime_settings=runtime("~20", eol(2026, 4, 30))),
         minor("22-lts", windows_runtime_settings=runtime("~22", eol(2027, 4, 30))),
     ),
-    stack("php", minor("5.6", windows_runtime_settings=runtime("5.6", eol(2021, 2, 1), True))),
+    stack("php", minor("5.6", windows_runtime_settings=runtime("5.6", eol(2021, 2, 1), True)),
+          minor("7.4", windows_runtime_settings=runtime("7.4", eol(2022, 11, 28), True))),
+    # Java on Windows spells its runtimes as bare majors, which a Node version can collide with.
+    stack("java", minor("17", windows_runtime_settings=runtime("17", eol(2031, 9, 30))),
+          minor("21", windows_runtime_settings=runtime("21", eol(2031, 9, 30))),
+          minor("11", windows_runtime_settings=runtime("11", eol(2027, 9, 30)))),
     stack("python", minor("3.12", linux_runtime_settings=runtime("PYTHON|3.12", eol(2028, 10, 31)))),
     stack(
         "javacontainers",
@@ -171,10 +176,21 @@ def test_windows_default_framework_is_unknown_while_the_node_setting_is_unread()
 
 
 @pytest.mark.parametrize("node, past", [("~20", True), ("20.11.1", True), ("~22", False), ("10.14.9", None)])
-def test_windows_node_version_replaces_the_default_framework(node, past):
+def test_windows_node_version_is_judged_beside_the_default_framework(node, past):
     record = support("app", net_framework_version="v4.0", node_version=node, node_version_read=True)
     assert record["past_end_of_support"] is past
-    assert [r["setting"] for r in record["declared_runtimes"]] == ["WEBSITE_NODE_DEFAULT_VERSION"]
+    framework, node_record = record["declared_runtimes"]
+    assert (framework["setting"], framework["stack"]) == ("net_framework_version", "dotnet")
+    assert node_record["setting"] == "WEBSITE_NODE_DEFAULT_VERSION"
+
+
+@pytest.mark.parametrize("node", ["17", "21", "11", "7.4.0"])
+def test_node_version_never_matches_the_java_or_php_stack(node):
+    record = support("app", net_framework_version="v4.0", node_version=node, node_version_read=True)
+    node_record = record["declared_runtimes"][1]
+    assert node_record["stack"] is None and node_record["past_end_of_support"] is None
+    assert record["past_end_of_support"] is None
+    assert support("app", java_version="17")["declared_runtimes"][0]["stack"] == "java"
 
 
 def test_legacy_php_alongside_dotnet_is_reported_past_end_of_support():
@@ -382,9 +398,32 @@ PEM_HEADER = "-----BEGIN " + "PRIVATE KEY-----"
     ("STORAGE_CONNECTION_STRING", "DefaultEndpointsProtocol=https;AccountName=st;EndpointSuffix=core.windows.net",
      None),
     ("EVENTHUB_SAS_KEY", "Endpoint=sb://x.servicebus.windows.net/;EntityPath=hub;", None),
+    ("DATAVERSE_CONNECTIONSTRING", "AuthType=ClientSecret;Url=https://x.example;ClientId=0000;ClientSecret=xxxx",
+     "credential_in_value"),
+    ("LEGACY", "Server=db;DbPassword=xxxx;", "credential_in_value"),
+    ("PAYMENT_API_KEY", "Host=pay.example.net;ApiKey=xxxx;", "credential_in_value"),
+    ("APIM", "Url=https://x.example;SubscriptionKey=xxxx", "credential_in_value"),
+    ("API_KEY", "abc;def=ghi;", "secret_like_name"),
+    ("SERVICEBUS", "Endpoint=sb://x.servicebus.windows.net/;SharedAccessKeyName=Root;EntityPath=hub", None),
+    ("VAULT_SETTINGS", "VaultUri=https://kv.vault.azure.net/;SecretUri=https://kv.vault.azure.net/secrets/x", None),
 ])
 def test_literal_secret_reason(name, value, reason):
     assert appsvc.literal_secret_reason(name, value) == reason
+
+
+def test_dataverse_connection_string_with_a_client_secret_is_flagged():
+    value = "AuthType=ClientSecret;Url=https://x.example;ClientId=0000;ClientSecret=xxxx"
+    assert appsvc.literal_secret_reason("Dataverse", value, by_name=False) == "credential_in_value"
+
+
+@pytest.mark.parametrize("value, kept", [
+    ("~20", "~20"), ("20.11.1", "20.11.1"),
+    ("@Microsoft.KeyVault(SecretUri=https://kv-app.vault.azure.net/secrets/node/)", "unrecognised"),
+    ("node-lts please", "unrecognised"),
+])
+def test_only_a_version_shaped_node_setting_is_kept(value, kept):
+    found = appsvc.project_literal_secrets(ns(properties={"website_node_default_version": value}), None)
+    assert found["node_version"] == kept
 
 
 def test_connection_strings_are_judged_by_their_value_only():
@@ -521,7 +560,32 @@ def test_scanned_node_setting_feeds_runtime_support_and_is_not_a_secret(monkeypa
                                                  "web-b": config(net_framework_version="v4.0")})
     apps, _ = collect(monkeypatch, client, scan=True)
     a, b = apps["web-a"]["runtime_support"], apps["web-b"]["runtime_support"]
-    assert [r["setting"] for r in a["declared_runtimes"]] == ["WEBSITE_NODE_DEFAULT_VERSION"]
+    assert [r["setting"] for r in a["declared_runtimes"]] == ["net_framework_version", "WEBSITE_NODE_DEFAULT_VERSION"]
     assert a["past_end_of_support"] is True and a["runtimes_past_end_of_support"] == ["~20"]
     assert b["past_end_of_support"] is False and b["declared_runtimes"][0]["stack"] == "dotnet"
     assert apps["web-a"]["literal_secret_scan"]["literal_secrets"] == []
+
+
+def test_unrecognised_node_setting_is_written_as_a_placeholder_only(monkeypatch):
+    reference = "@Microsoft.KeyVault(SecretUri=https://kv-app.vault.azure.net/secrets/node/)"
+    client = web_client(settings={"web-a": ns(properties={"WEBSITE_NODE_DEFAULT_VERSION": reference})}, strings={})
+    client.web_apps.get_configuration = per_app({"web-a": config(net_framework_version="v4.0"),
+                                                 "web-b": config()})
+    apps, _ = collect(monkeypatch, client, scan=True)
+    node = apps["web-a"]["runtime_support"]["declared_runtimes"][1]
+    assert node["value"] == "unrecognised" and node["past_end_of_support"] is None
+    assert "SecretUri" not in json.dumps(list(apps.values()), default=str)
+
+
+def test_a_conflict_that_is_not_a_lock_is_a_failure(monkeypatch):
+    conflict = Exception("(Conflict) The operation conflicts with another in progress")
+    conflict.status_code = 409
+    apps, collector = collect(monkeypatch, web_client(settings={"web-a": conflict}, strings={}), scan=True)
+    assert not collector.ok and apps["web-a"]["literal_secret_scan"]["status"] == "error"
+
+
+def test_scope_locked_is_read_from_the_error_code(monkeypatch):
+    locked = Exception("Operation returned an invalid status 'Conflict'")
+    locked.status_code, locked.error = 409, ns(code="ScopeLocked")
+    apps, collector = collect(monkeypatch, web_client(settings={"web-a": locked}, strings={}), scan=True)
+    assert collector.ok and apps["web-a"]["literal_secret_scan"]["status"] == "not_read"

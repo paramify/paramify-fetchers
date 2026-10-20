@@ -99,6 +99,9 @@ CUSTOM_CONTAINER_PREFIXES = ("docker|", "compose|", "kube|")
 JAVA_RUNTIME_KEY = re.compile(r"java\d+Runtime")
 # A Windows app's Node version is this app setting, not config/web; only config/list returns it.
 NODE_VERSION_SETTING = "WEBSITE_NODE_DEFAULT_VERSION"
+# The one setting value written: kept only when it is a version number.
+NODE_VERSION_SHAPE = re.compile(r"^~?\d+(\.\d+){0,2}$")
+NODE_VERSION_UNRECOGNISED = "unrecognised"
 # The .NET Framework version every Windows app carries unless .NET (Core) replaces it.
 WINDOWS_DEFAULT_FRAMEWORK = "v4.0"
 NODE_VERSION_UNREAD = (
@@ -114,7 +117,8 @@ SCAN_OFF, SCAN_DONE, SCAN_NOT_AUTHORIZED, SCAN_NOT_READ, SCAN_ERROR = (
 )
 SETTING_REFERENCE_PREFIXES = ("@microsoft.keyvault(", "@microsoft.appconfiguration(")
 CREDENTIAL_IN_VALUE = re.compile(
-    r"(?:^|[;,\s])(?:password|pwd|accountkey|sharedaccesskey|sharedaccesssignature|accesskey|secret)\s*=\s*[^;,\s]"
+    r"(?:^|[;,\s])\w*(?:password|pwd|accountkey|sharedaccesskey|sharedaccesssignature|accesskey|secret|apikey|"
+    r"subscriptionkey)\s*=\s*[^;,\s]"
     r"|[?&]sig=[^&\s]"
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
     r"|://[^/\s:@]*:[^/\s@]+@",
@@ -129,25 +133,30 @@ NOT_SECRET_NAME_WORDS = frozenset({
 })
 # Named like secrets, documented as not secret.
 NOT_SECRET_SETTINGS = frozenset({"appinsights_instrumentationkey", "applicationinsights_connection_string"})
-# key=value; pairs: a connection string, judged by its value only.
-KEY_VALUE_PAIRS = re.compile(r"[^=;\s]+=[^;]*;")
+# A value made wholly of key=value; pairs: a connection string, judged by its value only.
+KEY_VALUE_PAIRS = re.compile(r"(?:\s*[^=;\s][^=;]*=[^;]*;)+(?:\s*[^=;\s][^=;]*=[^;]*)?\s*")
 LIMITATIONS = [
     "Deployment slots are not read: web_apps.list() returns production sites, and each slot carries its own "
     "TLS, access restrictions, basic-auth policy and settings.",
     f"On Windows, a Node app's version is the {NODE_VERSION_SETTING} app setting, which only config/list "
-    f"returns. With the literal-secret scan off or refused, the .NET Framework {WINDOWS_DEFAULT_FRAMEWORK} "
-    "every such app carries reads as unknown rather than as its runtime.",
+    f"returns, and is matched to the Node stack only. With the literal-secret scan off or refused, the .NET "
+    f"Framework {WINDOWS_DEFAULT_FRAMEWORK} every such app carries reads as unknown rather than as its runtime. "
+    "The portal and Visual Studio templates long added the setting to every Windows app, so it may be a stale "
+    "default on a non-Node app; both runtimes are then judged.",
     f"The literal-secret scan is off unless {SCAN_ENV} is true, and needs {CONFIG_LIST_PERMISSION}, which "
     "returns setting values. Values are classified in memory and never written; only setting names and "
-    "the reason each was flagged are. A ReadOnly lock refuses config/list (409 ScopeLocked); that app reads "
-    "not_read, not a collection failure.",
+    f"the reason each was flagged are, plus {NODE_VERSION_SETTING} when it is a version number (anything else "
+    f"is written as {NODE_VERSION_UNRECOGNISED}). A ReadOnly lock refuses config/list (409 ScopeLocked); that "
+    "app reads not_read, not a collection failure.",
     "A setting holds a literal secret when it is not a Key Vault or App Configuration reference and either "
-    "its value carries a credential (Password=, Pwd=, AccountKey=, SharedAccessKey=, SharedAccessSignature=, "
-    "AccessKey= or Secret=, a SAS sig= parameter, a private key, or a password in a URL), or it is an app "
+    "its value carries a credential (a key ending in Password, Pwd, AccountKey, SharedAccessKey, "
+    "SharedAccessSignature, AccessKey, Secret, ApiKey or SubscriptionKey followed by =, such as ClientSecret= "
+    "or DbPassword=; a SAS sig= parameter; a private key; or a password in a URL), or it is an app "
     "setting whose name contains password, passwd, secret, API key, access key, account key, private key or "
     "credential, or has the word key, token, pwd or sas, unless the name also has id, name, uri, url, "
     "endpoint, vault, version, header, enabled, path, file, lifetime, expiry, expiration or type, and whose "
-    "value is a single word of at least 8 characters that is not a URL, a boolean or key=value; pairs. "
+    "value is a single word of at least 8 characters that is not a URL, a boolean or made wholly of "
+    "key=value; pairs. "
     "Application Insights' instrumentation key and connection string never count.",
     "The scan is a heuristic, so 0 does not prove there are no literal secrets: a secret under an ordinary "
     "name with no credential syntax is missed, and a long non-secret value under a secret-like name is flagged.",
@@ -302,7 +311,9 @@ def project_literal_secrets(app_settings, connection_strings) -> dict:
     """Read config/list results into setting NAMES and reasons only; every value is dropped here."""
     settings = model_attr(app_settings, "properties") or {}
     strings = model_attr(connection_strings, "properties") or {}
-    node_version = settings.get(NODE_VERSION_SETTING)
+    node_version = next(
+        (str(v).strip() for k, v in settings.items() if str(k).upper() == NODE_VERSION_SETTING and v), None
+    )
     found = [
         {"name": str(name), "kind": "app_setting", "reason": reason}
         for name, value in settings.items()
@@ -316,7 +327,8 @@ def project_literal_secrets(app_settings, connection_strings) -> dict:
         "app_settings_read": len(settings),
         "connection_strings_read": len(strings),
         "literal_secrets": sorted(found, key=lambda r: (r["kind"], r["name"])),
-        "node_version": str(node_version).strip() if node_version else None,
+        "node_version": node_version if not node_version or NODE_VERSION_SHAPE.match(node_version)
+        else NODE_VERSION_UNRECOGNISED,
     }
 
 
@@ -521,7 +533,7 @@ def could_be_secret(text: str) -> bool:
         and not any(c.isspace() for c in text)
         and text.lower() not in ("true", "false")
         and not re.match(r"^[a-z][a-z0-9+.-]*://", text, re.IGNORECASE)
-        and not KEY_VALUE_PAIRS.search(text)
+        and not KEY_VALUE_PAIRS.fullmatch(text)
     )
 
 
@@ -561,10 +573,10 @@ def java_container_runtime(container, version) -> str:
 
 
 def runtime_index(entries: list[dict]) -> dict:
-    """(os, lower-cased runtime) -> the first stack entry declaring it."""
+    """(os, lower-cased runtime) -> the stack entries declaring it, in stack-list order."""
     index: dict = {}
     for entry in entries:
-        index.setdefault((entry["os"], str(entry["runtime"]).lower()), entry)
+        index.setdefault((entry["os"], str(entry["runtime"]).lower()), []).append(entry)
     return index
 
 
@@ -625,8 +637,12 @@ def unread_default_record(setting, value) -> dict:
 
 def runtime_record(setting, value, os_name, index: dict, now: datetime) -> dict:
     custom_container = value.lower().startswith(CUSTOM_CONTAINER_PREFIXES)
+    # A Node version like "17" or "7.4.0" would otherwise land on the Java or PHP stack.
+    stack = "node" if setting == NODE_VERSION_SETTING else None
     entry = None if custom_container else next(
-        (index[(os_name, key)] for key in runtime_keys(setting, value) if (os_name, key) in index), None
+        (e for key in runtime_keys(setting, value) for e in index.get((os_name, key), [])
+         if stack is None or str(e["stack"]).lower() == stack),
+        None,
     )
     eol = _parse_time(entry["end_of_life_date"]) if entry and entry.get("end_of_life_date") else None
     if entry is None:
@@ -652,15 +668,13 @@ def runtime_support_record(
 ) -> dict:
     """Any declared runtime past end of support makes the app past it; an unmatched one makes it unknown.
 
-    On Windows the default .NET Framework v4.0 is not a Node app's runtime: it is dropped when a Node
-    version is set, and unknown when the Node setting was not read.
+    On Windows the default .NET Framework v4.0 reads unknown while the Node setting is unread: it may be
+    a Node app's default rather than its runtime.
     """
     runtimes = []
     for setting, value, os_name in declared_runtimes(kind, config, node_version):
         default = (is_windows_code_app(kind, config) and setting == "net_framework_version"
                    and value.lower() == WINDOWS_DEFAULT_FRAMEWORK)
-        if default and node_version:
-            continue
         if default and not node_version_read:
             runtimes.append(unread_default_record(setting, value))
             continue
@@ -1028,7 +1042,8 @@ def _attach_publishing_and_references(client, collector: Collector, app, group, 
 
 
 def is_scope_locked(exc: BaseException) -> bool:
-    return getattr(exc, "status_code", None) == 409 or "scopelocked" in str(exc).lower()
+    code = model_attr(getattr(exc, "error", None), "code")
+    return str(code or "").lower() == "scopelocked" or "scopelocked" in str(exc).lower()
 
 
 def _scan_literal_secrets(client, collector: Collector, group, name) -> tuple[dict, dict | None]:

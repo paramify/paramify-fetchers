@@ -28,7 +28,8 @@ config_schema:
       Key Vault or App Configuration reference. Values are classified in memory and
       never written; only setting names and why each was flagged are. The same read
       gives a Windows Node app's version (WEBSITE_NODE_DEFAULT_VERSION) for runtime
-      support. Off by default, so plain Reader is enough.
+      support, the one value written, and only when it is a version number. Off by
+      default, so plain Reader is enough.
 
 target_schema:
   subscription_id:
@@ -81,7 +82,7 @@ evidence_set:
     - web_apps.get_auth_settings_v2_without_secrets() (per app) — App Service Authentication (Easy Auth)
     - web_apps.get_scm_allowed() and get_ftp_allowed() (per app) — whether basic-auth publishing is allowed
     - web_apps.get_app_settings_key_vault_references() and get_site_connection_string_key_vault_references() (per app) — which settings resolve from Key Vault, without reading values
-    - web_apps.list_application_settings() and list_connection_strings() (per app, only when scan_literal_secrets is on) — finds settings holding a literal secret, and a Windows app's Node version; secret values are never written
+    - web_apps.list_application_settings() and list_connection_strings() (per app, only when scan_literal_secrets is on) — finds settings holding a literal secret, and a Windows app's Node version; no other value is written, and the Node version only when it is a version number
     - provider.get_web_app_stacks() — App Service's runtime list with end-of-life dates
     - diagnostic_settings.list() (per app) — which log categories are exported
 
@@ -137,12 +138,12 @@ evidence_set:
     - apps_scanned_for_literal_secrets — Number of web apps whose app settings and connection strings were read; null if the scan is off
     - apps_literal_secret_scan_not_authorized — Number of web apps whose settings could not be read because Microsoft.Web/sites/config/list/action is not granted; null if the scan is off
     - apps_literal_secret_scan_not_read — Number of web apps the scan skipped without a failure: a ReadOnly lock refused config/list (409 ScopeLocked), or the app's id has no resource group; null if the scan is off
-    - apps_with_literal_secrets — Number of scanned web apps with at least one setting holding a literal secret; null if the scan is off. A setting counts when it is not a Key Vault or App Configuration reference and either its value carries a credential (Password=, Pwd=, AccountKey=, SharedAccessKey=, SharedAccessSignature=, AccessKey= or Secret=, a SAS sig= parameter, a private key, or a password in a URL), or it is an app setting whose name contains password, passwd, secret, API key, access key, account key, private key or credential, or has the word key, token, pwd or sas, unless the name also has id, name, uri, url, endpoint, vault, version, header, enabled, path, file, lifetime, expiry, expiration or type, and whose value is a single word of 8 or more characters that is not a URL, a boolean or key=value; pairs. Application Insights' instrumentation key and connection string never count. This is a heuristic, so 0 doesn't prove there are no literal secrets
+    - apps_with_literal_secrets — Number of scanned web apps with at least one setting holding a literal secret; null if the scan is off. A setting counts when it is not a Key Vault or App Configuration reference and either its value carries a credential (a key ending in Password, Pwd, AccountKey, SharedAccessKey, SharedAccessSignature, AccessKey, Secret, ApiKey or SubscriptionKey followed by =, such as ClientSecret= or DbPassword=; a SAS sig= parameter; a private key; or a password in a URL), or it is an app setting whose name contains password, passwd, secret, API key, access key, account key, private key or credential, or has the word key, token, pwd or sas, unless the name also has id, name, uri, url, endpoint, vault, version, header, enabled, path, file, lifetime, expiry, expiration or type, and whose value is a single word of 8 or more characters that is not a URL, a boolean or made wholly of key=value; pairs. Application Insights' instrumentation key and connection string never count. This is a heuristic, so 0 doesn't prove there are no literal secrets
     - literal_secret_settings — Number of app settings and connection strings holding a literal secret across the scanned web apps; null if the scan is off
 
     Are the runtimes still supported?
     - apps_with_declared_runtime — Number of web apps whose configuration names at least one language runtime version
-    - apps_with_runtime_past_end_of_support — Number of web apps with at least one declared runtime past end of support (matched by its exact spelling to App Service's runtime list, and marked deprecated there or past its end-of-life date). On Windows a Node app's version is the WEBSITE_NODE_DEFAULT_VERSION app setting, read only when scan_literal_secrets is on; without it, the .NET Framework v4.0 every such Windows app carries reads as unknown rather than as its runtime
+    - apps_with_runtime_past_end_of_support — Number of web apps with at least one declared runtime past end of support (matched by its spelling to App Service's runtime list, and marked deprecated there or past its end-of-life date). On Windows a Node app's version is the WEBSITE_NODE_DEFAULT_VERSION app setting, read only when scan_literal_secrets is on and matched to the Node stack only, as written or as ~major or major.minor; without it, the .NET Framework v4.0 every such Windows app carries reads as unknown rather than as its runtime. The portal and Visual Studio templates long added that setting to every Windows app, so it may be a stale default on a non-Node app; both runtimes are then judged
     - apps_with_runtime_support_unknown — Number of web apps with no runtime past end of support where support is unknown: nothing declared, a custom container, a runtime not in App Service's list, a Windows app on .NET Framework v4.0 whose Node setting wasn't read, or a failed read
 
     Is the app logging?

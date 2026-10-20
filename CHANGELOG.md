@@ -618,8 +618,9 @@ schemas and the `paramify` CLI — not the internal code.
     reason (`credential_in_value` or `secret_like_name`). Values are classified in memory
     and never written. A 403 reads `not_authorized` for that app and a ReadOnly lock's 409
     reads `not_read`; neither is a collection failure. The same read supplies a Windows
-    app's Node version (`WEBSITE_NODE_DEFAULT_VERSION`) to runtime support; without it, a
-    Windows app on the default .NET Framework v4.0 reads as unknown rather than supported.
+    app's Node version (`WEBSITE_NODE_DEFAULT_VERSION`, matched to the Node stack only and
+    written only when it is a version number) to runtime support; without it, a Windows
+    app on the default .NET Framework v4.0 reads as unknown rather than supported.
     Production sites only; deployment slots are not read.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
