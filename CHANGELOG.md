@@ -54,6 +54,28 @@ schemas and the `paramify` CLI — not the internal code.
   security.txt and key Paramify publishes, served locally; the key's facts match
   `gpg --show-keys`. Not run live against paramify.com (blocked from the test
   environment). No KSI mapping.
+- **A `zendesk` category and its first fetcher, `zendesk_help_center_section`**
+  (`EVD-ZENDESK-HELP-CENTER-SECTION`). Given a Help Center section URL, it lists
+  the section's articles through the Help Center API as an anonymous user, so
+  only public articles count. It follows `next_page` to the end and fails the
+  run when the collected number differs from the API's `count` or any API call
+  fails. Each article keeps Zendesk's own fields and body HTML, plus plain
+  text, a text hash, any "Last updated" date in the text, and an anonymous GET
+  of its page recording whether it was sent to a sign-in page or met a
+  Cloudflare bot challenge (a challenge leaves `all_articles_public` null,
+  since public access could not be checked). Fixed fields
+  come first: article count, newest and oldest `updated_at`,
+  `days_since_last_update`, `all_articles_public`, and two Paramify-specific
+  keyword heuristics for a Secure Configuration Guide
+  (`mentions_top_level_admin`, `scg_terms`) that show keyword presence, not
+  adequate guidance, plus `all_user_segments_everyone` (no article is
+  restricted to a user segment). An empty section is recorded, not failed.
+  Run live against support.paramify.com's Recommended Secure Configuration
+  section (4 articles, matching the API's `count`). There, Cloudflare
+  challenged every anonymous article-page GET, so `all_articles_public`
+  read null. No KSI mapping. The README's supported services grid lists
+  Zendesk, using the Simple Icons `zendesk` mark (CC0) in light and dark
+  variants (`fetchers/logos/zendesk.svg` and `zendesk-dark.svg`).
 - **A `web` category and its first fetcher, `web_page_text`**
   (`EVD-WEB-PAGE-TEXT`). It fetches one public URL per target, with no
   credential, and records the text the page served. For HTML that is the
