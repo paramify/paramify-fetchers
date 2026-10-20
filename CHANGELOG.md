@@ -855,6 +855,24 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_defender_assessments` reports each assessment's own severity**
+  (0.1.1 → 0.2.0). Severity came from the subscription's assessment metadata
+  catalogue, which can rate a check lower than the assessment itself does (App
+  Service authentication, for one, is High on the assessment and Low in the
+  catalogue), so `unhealthy_by_severity` undercounted High findings. Severity
+  now comes from each assessment's `properties.metadata.severity` in Resource
+  Graph (`SecurityResources`, one query paged to the end), with the catalogue
+  only as a fallback. Each record gains `severity_source` (`assessment`,
+  `catalogue`, or `null` when neither has one), and the summary gains
+  `severity_from_catalogue_count` and `severity_unknown_count`, and
+  `unhealthy_severity_from_catalogue_count` and
+  `unhealthy_severity_unknown_count` for Unhealthy records only, since an
+  Unhealthy record with no severity is missing from `unhealthy_by_severity`.
+  The catalogue still supplies categories, threats, type, user impact,
+  implementation effort and policy definition id. A failed
+  Resource Graph query is a collection failure (exit 1), and every record falls
+  back to the catalogue. Other fields are unchanged.
+
 - **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →
   0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
   counterpart of `DenyAction`, was reported as `unresolved` with no reason and
