@@ -551,6 +551,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_rbac_role_assignments` 0.3.0: PIM eligibility, standing and activation
+  rules.** Every active grant, at every scope, now carries `standing`:
+  `permanent`, `time_bound` or `pim_activated`. The value is read from its PIM
+  schedule instance; a grant made outside PIM has no schedule and is permanent.
+  PIM-eligible assignments are listed in `eligible_role_assignments`. The
+  over-broad roles' subscription-scope PIM settings are in `pim_role_policies`:
+  MFA or authentication context, justification, approval, maximum activation
+  hours, and whether permanent eligible or active assignments are allowed. The
+  summary adds the standing, eligibility and policy keys; each reads null when
+  the PIM read it depends on fails. Without Entra ID P2, `pim_available` is false
+  and the run succeeds. Every existing field and summary key is unchanged. Needs
+  only Reader.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`

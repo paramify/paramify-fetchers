@@ -12,6 +12,9 @@ a resource group or a single resource are in `role_assignments_below_subscriptio
 with their own `below_subscription_*` / `all_scopes_*` summary keys, so a count a
 validator already reads never changes meaning.
 
+PIM adds keys, never changes one: each grant's standing, the eligible assignments, and
+the over-broad roles' activation rules.
+
 Projections ported from Prowler's
 prowler/providers/azure/services/iam/iam_service.py `_get_role_assignments` and
 `_get_roles` (Apache-2.0) — same SDK, same two calls, same `atScope()` filter. The
@@ -139,6 +142,60 @@ def project_role_definition(definition) -> dict:
         "role_name": model_attr(definition, "role_name"),
         "role_type": model_attr(definition, "role_type"),
         "description": model_attr(definition, "description"),
+    }
+
+
+def _iso(value):
+    return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def project_schedule_instance(instance) -> dict:
+    """A PIM `RoleAssignmentScheduleInstance` or `RoleEligibilityScheduleInstance`; absent fields read None."""
+    return {
+        "id": model_attr(instance, "id"),
+        "scope": model_attr(instance, "scope"),
+        "principal_id": model_attr(instance, "principal_id"),
+        "principal_type": model_attr(instance, "principal_type"),
+        "role_definition_id": model_attr(instance, "role_definition_id"),
+        "origin_role_assignment_id": model_attr(instance, "origin_role_assignment_id"),
+        "assignment_type": model_attr(instance, "assignment_type"),
+        "member_type": model_attr(instance, "member_type"),
+        "status": model_attr(instance, "status"),
+        "start_date_time": _iso(model_attr(instance, "start_date_time")),
+        "end_date_time": _iso(model_attr(instance, "end_date_time")),
+        "condition": model_attr(instance, "condition"),
+    }
+
+
+def project_policy_rule(rule) -> dict:
+    setting = model_attr(rule, "setting")
+    projected = {
+        "id": model_attr(rule, "id"),
+        "rule_type": model_attr(rule, "rule_type"),
+        "is_expiration_required": model_attr(rule, "is_expiration_required"),
+        "maximum_duration": model_attr(rule, "maximum_duration"),
+        "enabled_rules": model_attr(rule, "enabled_rules"),
+        "is_enabled": model_attr(rule, "is_enabled"),
+        "claim_value": model_attr(rule, "claim_value"),
+        "approval": None if setting is None else {
+            "is_approval_required": model_attr(setting, "is_approval_required"),
+            "is_requestor_justification_required": model_attr(setting, "is_requestor_justification_required"),
+            "approval_mode": model_attr(setting, "approval_mode"),
+            "primary_approver_count": sum(
+                len(model_attr(stage, "primary_approvers") or []) for stage in model_attr(setting, "approval_stages") or []
+            ),
+        },
+    }
+    return {k: v for k, v in projected.items() if v is not None}
+
+
+def project_policy_assignment(assignment) -> dict:
+    """A PIM `RoleManagementPolicyAssignment`; its effective rules are the policy as it applies at this scope."""
+    return {
+        "scope": model_attr(assignment, "scope"),
+        "role_definition_id": model_attr(assignment, "role_definition_id"),
+        "policy_id": model_attr(assignment, "policy_id"),
+        "rules": [project_policy_rule(r) for r in model_attr(assignment, "effective_rules") or []],
     }
 
 
@@ -355,6 +412,183 @@ def summarize_all_scopes(at_scope: list[dict], below: list[dict]) -> dict:
     }
 
 
+# --- PIM: eligibility, standing and activation rules ---
+
+STANDING_PERMANENT = "permanent"
+STANDING_TIME_BOUND = "time_bound"
+STANDING_PIM_ACTIVATED = "pim_activated"
+STANDINGS = (STANDING_PERMANENT, STANDING_PIM_ACTIVATED, STANDING_TIME_BOUND)
+# Without Entra ID P2 (or ID Governance) the PIM lists answer 400 with one of these, which is a state, not a failure.
+PIM_UNAVAILABLE_MARKERS = ("aadpremiumlicenserequired", "tenantnotonboarded")
+MFA, JUSTIFICATION, TICKETING = "MultiFactorAuthentication", "Justification", "Ticketing"
+
+
+def provisioned(instance: dict) -> bool:
+    return (instance.get("status") or "Provisioned") == "Provisioned"
+
+
+def standing(schedule: dict | None) -> str:
+    """An active grant with no PIM schedule was made outside PIM and has no end date, so it is permanent."""
+    if schedule is None:
+        return STANDING_PERMANENT
+    if (schedule.get("assignment_type") or "").lower() == "activated":
+        return STANDING_PIM_ACTIVATED
+    return STANDING_TIME_BOUND if schedule.get("end_date_time") else STANDING_PERMANENT
+
+
+def add_pim_fields(records: list[dict], schedules: list[dict] | None) -> None:
+    """Mark each active grant permanent, time_bound or pim_activated from its PIM schedule; None when unread."""
+    by_origin = {
+        str(s.get("origin_role_assignment_id") or "").lower(): s
+        for s in sorted(schedules or [], key=lambda s: s.get("id") or "")
+    }
+    for record in records:
+        schedule = by_origin.get(str(record.get("id") or "").lower())
+        record.update(
+            standing=None if schedules is None else standing(schedule),
+            pim_schedule_found=None if schedules is None else schedule is not None,
+            pim_assignment_type=(schedule or {}).get("assignment_type"),
+            pim_member_type=(schedule or {}).get("member_type"),
+            pim_start_date_time=(schedule or {}).get("start_date_time"),
+            pim_end_date_time=(schedule or {}).get("end_date_time"),
+        )
+
+
+def eligibility_record(instance: dict, role_names: dict[str, dict]) -> dict:
+    guid = role_definition_guid(instance.get("role_definition_id"))
+    definition = role_names.get(str(guid).lower()) if guid else None
+    over_broad = OVER_BROAD_BUILTIN_ROLES.get(str(guid).lower()) if guid else None
+    level = scope_level(instance.get("scope"))
+    return {
+        "id": instance.get("id"),
+        "scope": instance.get("scope"),
+        "scope_level": level,
+        "inherited_from_above_subscription": level in (SCOPE_MANAGEMENT_GROUP, SCOPE_ROOT),
+        "principal_id": instance.get("principal_id"),
+        "principal_type": instance.get("principal_type"),
+        "role_definition_id": instance.get("role_definition_id"),
+        "role_definition_guid": guid,
+        "role_name": (definition or {}).get("role_name"),
+        "role_name_resolved": definition is not None,
+        "is_over_broad_builtin": over_broad is not None,
+        "over_broad_role": over_broad,
+        "can_grant_roles": str(guid).lower() in ROLE_GRANTING_ROLES if guid else False,
+        "member_type": instance.get("member_type"),
+        "start_date_time": instance.get("start_date_time"),
+        "end_date_time": instance.get("end_date_time"),
+        "is_permanent": not instance.get("end_date_time"),
+        "has_condition": bool(instance.get("condition")),
+    }
+
+
+def duration_hours(value: str | None) -> float | None:
+    """Hours in an ISO-8601 duration such as PT8H or P1DT12H; None when there is none."""
+    if not value or not value.startswith("P"):
+        return None
+    date, _, time = value[1:].partition("T")
+    total = float(date[:-1]) * 24 if date.endswith("D") else 0.0
+    number = ""
+    for ch in time:
+        if ch.isdigit() or ch == ".":
+            number += ch
+            continue
+        total += float(number or 0) * {"H": 1, "M": 1 / 60, "S": 1 / 3600}.get(ch, 0)
+        number = ""
+    return round(total, 2)
+
+
+def policy_record(assignment: dict) -> dict:
+    """One over-broad role's PIM settings at this scope, read from its effective rules."""
+    rules = {r.get("id"): r for r in assignment["rules"]}
+
+    def enabled(rule_id: str, value: str) -> bool | None:
+        rule = rules.get(rule_id)
+        return None if rule is None else value in (rule.get("enabled_rules") or [])
+
+    def allows_permanent(rule_id: str) -> bool | None:
+        required = (rules.get(rule_id) or {}).get("is_expiration_required")
+        return None if required is None else not required
+
+    activation = rules.get("Expiration_EndUser_Assignment") or {}
+    approval = (rules.get("Approval_EndUser_Assignment") or {}).get("approval") or {}
+    context = rules.get("AuthenticationContext_EndUser_Assignment") or {}
+    guid = role_definition_guid(assignment.get("role_definition_id"))
+    return {
+        "role_name": OVER_BROAD_BUILTIN_ROLES.get(str(guid).lower()),
+        "role_definition_guid": guid,
+        "scope": assignment.get("scope"),
+        "policy_id": assignment.get("policy_id"),
+        "activation_maximum_duration": activation.get("maximum_duration"),
+        "activation_maximum_hours": duration_hours(activation.get("maximum_duration")),
+        "activation_requires_mfa": enabled("Enablement_EndUser_Assignment", MFA),
+        "activation_requires_justification": enabled("Enablement_EndUser_Assignment", JUSTIFICATION),
+        "activation_requires_ticket": enabled("Enablement_EndUser_Assignment", TICKETING),
+        "activation_requires_approval": approval.get("is_approval_required"),
+        "activation_approver_count": approval.get("primary_approver_count"),
+        "activation_authentication_context": context.get("claim_value") if context.get("is_enabled") else None,
+        "permanent_eligible_assignment_allowed": allows_permanent("Expiration_Admin_Eligibility"),
+        "eligible_assignment_maximum_duration": (rules.get("Expiration_Admin_Eligibility") or {}).get("maximum_duration"),
+        "permanent_active_assignment_allowed": allows_permanent("Expiration_Admin_Assignment"),
+        "active_assignment_maximum_duration": (rules.get("Expiration_Admin_Assignment") or {}).get("maximum_duration"),
+        "active_assignment_requires_mfa": enabled("Enablement_Admin_Assignment", MFA),
+        "active_assignment_requires_justification": enabled("Enablement_Admin_Assignment", JUSTIFICATION),
+        "rules": sorted(
+            (r for r in assignment["rules"] if not str(r.get("id") or "").startswith("Notification_")),
+            key=lambda r: r.get("id") or "",
+        ),
+    }
+
+
+def summarize_pim(
+    active: list[dict], schedules_read: bool, eligible: list[dict] | None, policies: list[dict] | None, pim_available: bool | None
+) -> dict:
+    """PIM keys over every scope; null where the PIM read they depend on failed."""
+    over_broad = [a for a in active if a["is_over_broad_builtin"]]
+    permanent = [a for a in over_broad if a.get("standing") == STANDING_PERMANENT]
+    eligible_over_broad = [e for e in eligible or [] if e["is_over_broad_builtin"]]
+
+    def roles(pred) -> list[str] | None:
+        return None if policies is None else sorted({p["role_name"] for p in policies if pred(p)})
+
+    def standing_figure(value):
+        return value if schedules_read else None
+
+    def eligible_figure(value):
+        return None if eligible is None else value
+
+    return {
+        "pim_available": pim_available,
+        "assignments_by_standing": standing_figure({s: sum(1 for a in active if a.get("standing") == s) for s in STANDINGS}),
+        "over_broad_assignments_by_standing": standing_figure(
+            {s: sum(1 for a in over_broad if a["standing"] == s) for s in STANDINGS}
+        ),
+        "permanent_over_broad_assignments": standing_figure(len(permanent)),
+        "permanent_over_broad_user_assignments": standing_figure(sum(1 for a in permanent if a["principal_type"] == "User")),
+        "principals_with_permanent_over_broad_access": standing_figure(
+            len({a["principal_id"] for a in permanent if a["principal_id"]})
+        ),
+        "assignments_without_pim_schedule": standing_figure(sum(1 for a in active if a.get("pim_schedule_found") is False)),
+        "eligible_role_assignments": eligible_figure(len(eligible or [])),
+        "eligible_over_broad_assignments": eligible_figure(len(eligible_over_broad)),
+        "permanently_eligible_over_broad_assignments": eligible_figure(sum(1 for e in eligible_over_broad if e["is_permanent"])),
+        "principals_eligible_for_over_broad_roles": eligible_figure(
+            len({e["principal_id"] for e in eligible_over_broad if e["principal_id"]})
+        ),
+        "over_broad_roles_activation_without_mfa_or_auth_context": roles(
+            lambda p: p["activation_requires_mfa"] is False and not p["activation_authentication_context"]
+        ),
+        "over_broad_roles_activation_without_justification": roles(lambda p: p["activation_requires_justification"] is False),
+        "over_broad_roles_activation_without_approval": roles(lambda p: p["activation_requires_approval"] is False),
+        "over_broad_roles_allowing_permanent_active_assignment": roles(lambda p: p["permanent_active_assignment_allowed"] is True),
+        "over_broad_roles_allowing_permanent_eligible_assignment": roles(
+            lambda p: p["permanent_eligible_assignment_allowed"] is True
+        ),
+        "max_over_broad_activation_hours": None if policies is None else max(
+            (p["activation_maximum_hours"] for p in policies if p["activation_maximum_hours"] is not None), default=None
+        ),
+    }
+
+
 # --- collection (lazy azure imports) ---
 
 def collect_role_assignments(
@@ -449,6 +683,66 @@ def collect_role_assignments(
     )
 
 
+def pim_unavailable(exc: BaseException) -> bool:
+    return any(m in str(exc).lower() for m in PIM_UNAVAILABLE_MARKERS)
+
+
+def collect_pim(subscription_id, cred, collector: Collector, role_names: dict[str, dict]) -> dict:
+    """PIM schedule instances, eligibilities and the over-broad roles' policies, unfiltered: at, above and below the subscription."""
+    from azure.mgmt.authorization import AuthorizationManagementClient
+
+    out: dict = {"available": None, "schedules": None, "eligible": None, "policies": None, "notes": []}
+    client = collector.guard(
+        "authorization.AuthorizationManagementClient (init, PIM)",
+        lambda: AuthorizationManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs()),
+    )
+    if client is None:
+        return out
+    scope = f"/subscriptions/{subscription_id}"
+    reads = {
+        "schedules": (
+            "authorization.role_assignment_schedule_instances.list_for_scope",
+            lambda: [project_schedule_instance(i) for i in client.role_assignment_schedule_instances.list_for_scope(scope=scope)],
+        ),
+        "eligible": (
+            "authorization.role_eligibility_schedule_instances.list_for_scope",
+            lambda: [project_schedule_instance(i) for i in client.role_eligibility_schedule_instances.list_for_scope(scope=scope)],
+        ),
+        "policies": (
+            "authorization.role_management_policy_assignments.list_for_scope",
+            lambda: [
+                project_policy_assignment(a)
+                for a in client.role_management_policy_assignments.list_for_scope(scope=scope)
+                if str(role_definition_guid(model_attr(a, "role_definition_id"))).lower() in OVER_BROAD_BUILTIN_ROLES
+            ],
+        ),
+    }
+    unavailable = failed = False
+    for key, (operation, read) in reads.items():
+        try:
+            out[key] = read()
+        except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
+            if pim_unavailable(exc):
+                unavailable = True
+                out["notes"].append(f"{operation}: {' '.join(str(exc).split())[:300]}")
+            else:
+                collector.record(operation, exc)
+                failed = True
+    if unavailable:
+        # No PIM in the tenant: nothing is eligible and every active grant is permanent.
+        return {**out, "available": False, "schedules": [], "eligible": [], "policies": None}
+    out["available"] = None if failed else True
+    out["schedules"] = None if out["schedules"] is None else [s for s in out["schedules"] if provisioned(s)]
+    if out["eligible"] is not None:
+        out["eligible"] = sorted(
+            (eligibility_record(e, role_names) for e in out["eligible"] if provisioned(e)),
+            key=lambda e: (e["scope"] or "", e["role_name"] or "", e["principal_id"] or ""),
+        )
+    if out["policies"] is not None:
+        out["policies"] = sorted((policy_record(p) for p in out["policies"]), key=lambda p: p["role_name"] or "")
+    return out
+
+
 def main() -> int:
     logging.basicConfig(
         level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -468,6 +762,7 @@ def main() -> int:
 
     assignments: list[dict] = []
     below_subscription: list[dict] = []
+    pim: dict = {"available": None, "schedules": None, "eligible": None, "policies": None, "notes": []}
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list calls: Azure returns an empty list, not an error, for an
@@ -481,9 +776,10 @@ def main() -> int:
                 "reporting status not_registered",
                 subscription_id,
             )
-        assignments, below_subscription, _ = collect_role_assignments(
+        assignments, below_subscription, role_names = collect_role_assignments(
             subscription_id, cred, collector
         )
+        pim = collect_pim(subscription_id, cred, collector, role_names)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -493,6 +789,7 @@ def main() -> int:
             ),
         )
 
+    add_pim_fields(assignments + below_subscription, pim["schedules"])
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -506,11 +803,18 @@ def main() -> int:
             # In the evidence so a reader knows which GUIDs decided the flags.
             "over_broad_builtin_roles_checked": dict(sorted(OVER_BROAD_BUILTIN_ROLES.items())),
             "assignment_scope_filter": "atScope()",
+            "pim_available": pim["available"],
+            "eligible_role_assignments": pim["eligible"],
+            "pim_role_policies": pim["policies"],
+            "pim_notes": pim["notes"],
         },
         summary={
             **summarize(assignments),
             **summarize_all_scopes(assignments, below_subscription),
             "provider_registration_status": registration,
+            **summarize_pim(
+                assignments + below_subscription, pim["schedules"] is not None, pim["eligible"], pim["policies"], pim["available"]
+            ),
         },
     )
 

@@ -1,5 +1,5 @@
 name: azure_rbac_role_assignments
-version: 0.2.0
+version: 0.3.0
 description: >
   Every Azure RBAC role assignment that applies at the subscription scope or above,
   with its scope classified (tenant root / management group / subscription / resource
@@ -10,7 +10,12 @@ description: >
   access to itself, and ABAC conditions are reported since they narrow a broad role's
   real reach. Assignments made below the subscription — on a resource group or a
   single resource — are collected as a separate list with their own counts by scope
-  level, so the subscription-and-above counts keep their meaning.
+  level, so the subscription-and-above counts keep their meaning. With Privileged
+  Identity Management (Entra ID P2), every active grant is also marked permanent,
+  time-bound or PIM-activated, PIM-eligible assignments are listed, and the
+  over-broad roles' activation rules (MFA or authentication context,
+  justification, approval, maximum activation duration, whether permanent
+  assignments are allowed) are reported.
 category: azure
 
 supports_targets: true
@@ -60,3 +65,14 @@ evidence_set:
     subscription scope and above, role_assignments.list_for_subscription() unfiltered
     for the resource-group and resource grants below it (the unfiltered result minus
     the atScope() set), and resource.providers.get for Microsoft.Authorization.
+    PIM (2020-10-01, unfiltered so at, above and below the subscription):
+    role_assignment_schedule_instances.list_for_scope,
+    role_eligibility_schedule_instances.list_for_scope and
+    role_management_policy_assignments.list_for_scope (the four over-broad roles'
+    effective rules at the subscription). An active grant is matched to its schedule
+    instance by originRoleAssignmentId: pim_activated when assignmentType is
+    Activated, time_bound when it has an end date, else permanent; a grant with no
+    schedule instance was made outside PIM and is permanent. Policy rules govern
+    assignments made through PIM, not role assignments written directly. Without
+    Entra ID P2 the PIM lists answer AadPremiumLicenseRequired: pim_available is
+    false, nothing is eligible and every grant is permanent. Role: Reader.
