@@ -32,7 +32,7 @@ works:
 
 ## 2. Have real evidence
 
-[Run the fetcher against a real tenant](../README.md#collect-then-upload).
+[Run the fetcher against a real tenant](cli_guide.md#collect-then-upload).
 Output from a fake-credential smoke test is empty, so there's nothing to write
 validators against. If there's no local run, the skill can pull an existing
 artifact from the workspace instead.
@@ -82,7 +82,7 @@ their `validators/_cases/` files.
 ## 4. Publish to Paramify
 
 Ask the agent to sync, or run it yourself (add `--dry-run` to preview first).
-It uploads the evidence ([upload details](../README.md#collect-then-upload))
+It uploads the evidence ([upload details](cli_guide.md#collect-then-upload))
 and then syncs the validators ([how sync works](../uploaders/paramify_validators/README.md#what-it-does-per-validator)).
 The upload has to come first, because a validator can only be attached to an
 evidence set that already exists.
@@ -139,5 +139,5 @@ the agent reported in phase 5.
 | App verdicts differ from what the agent reported | The app copy was edited, or is out of date. `--update` overwrites it with the repo version ([sync options](../uploaders/paramify_validators/README.md#run-it)). |
 
 **More detail:** [the skill](../.claude/skills/suggest-validator/SKILL.md) ·
-[validator design](validators_design.md) ·
+[writing one by hand](validators_guide.md) ·
 [sync internals](../uploaders/paramify_validators/README.md)

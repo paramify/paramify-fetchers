@@ -4,7 +4,7 @@ Fetchers write raw evidence dicts; the runner calls `wrap_outputs()` after each
 invocation to add the `{schema_version, metadata, payload}` wrapper so every
 evidence file is self-describing and the uploader has one shape to read. This
 keeps the v0.x "fetchers write raw dicts" interim clause true — the framework
-adds the envelope, not the fetcher. See docs/envelope_design.md.
+adds the envelope, not the fetcher. See docs/envelope_guide.md.
 """
 
 import json
@@ -46,7 +46,7 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
         # heuristic — it assumes the last thing logged is why the run failed, which
         # is false for any fetcher whose final log line is an INFO message — so it
         # is the second choice, not the first. The payload is never consulted: it
-        # is fetcher-shaped and unredacted. See docs/fetcher_contract.md.
+        # is fetcher-shaped and unredacted. See docs/fetcher_contract_guide.md, step 4.
         error = result.error or (result.stderr[-_ERROR_TAIL_CHARS:] if result.stderr else None)
         if error:
             meta["error"] = error

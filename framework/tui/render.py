@@ -61,7 +61,7 @@ def _field_table(title: str, fields: List[dict]) -> RenderableType:
 
 # --------------------------------------------------------------------------- #
 # Kind and destination: what a fetcher produces and where it goes. The two
-# kinds part ways at exactly this point (docs/issue_report_fetchers.md), so
+# kinds part ways at exactly this point (docs/issue_report_fetchers_guide.md), so
 # every view of a fetcher states both before anything else about it.
 # --------------------------------------------------------------------------- #
 

@@ -48,10 +48,20 @@ azure-mgmt-subscription>=3.1.1,<4
 azure-mgmt-resource>=26.0.0,<27
 # Resource Graph: one query over every ARM resource, for the subscription inventory.
 azure-mgmt-resourcegraph>=8.0.1,<9
+# ARM deployment history (correlation ids, output resources); the deployments
+# operation group left azure-mgmt-resource for its own distribution.
+azure-mgmt-resource-deployments>=2.0.0,<3
 
 # Storage, networking, Defender for Cloud.
 azure-mgmt-storage>=25.1.0,<26
 azure-mgmt-network>=31.0.1,<34
+# Front Door WAF policies (Microsoft.Network/FrontDoorWebApplicationFirewallPolicies).
+# 2.0.0 moved every field under `properties`; the fetchers read that shape.
+azure-mgmt-frontdoor>=2.0.0,<3
+# Front Door Standard/Premium profiles, endpoints, routes, domains, security policies.
+# 14.0.0 has no isProfileLevel / association routes; the fetchers pin api-version 2026-07-01
+# on a dedicated client and read both by wire key.
+azure-mgmt-cdn>=14.0.0,<15
 azure-mgmt-security>=7.0.0,<8
 
 # Identity and access. msgraph-sdk pulls msgraph-core, the microsoft-kiota-*
@@ -66,6 +76,7 @@ azure-mgmt-rdbms>=10.1.1,<11
 azure-mgmt-postgresqlflexibleservers>=2.0.0,<3
 azure-mgmt-cosmosdb>=10.0.0,<11
 azure-mgmt-redisenterprise>=3.1.0,<4
+azure-mgmt-redis>=14.5.0,<15
 azure-mgmt-dns>=9.0.0,<10
 azure-mgmt-privatedns>=2.0.0,<3
 

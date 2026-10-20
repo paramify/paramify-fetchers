@@ -2,8 +2,8 @@
 """Stand up a fake GitLab API and run the SCN fetcher against it.
 
 Not a unit-test convention (the repo hasn't settled on one yet) — this is the
-end-to-end wiring + parsing check described in docs/authoring_a_fetcher.md
-§Testing, done against a fake tenant instead of a real one.
+end-to-end wiring + parsing check described in docs/authoring_fetcher_guide.md
+(step 3), done against a fake tenant instead of a real one.
 
 The headline fixture is CHANGE_MR: a change-request template filled in the way
 people actually fill them in — some fields written, some left as placeholders.

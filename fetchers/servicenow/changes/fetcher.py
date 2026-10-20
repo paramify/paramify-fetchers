@@ -25,7 +25,7 @@ def report_failure(reason: str, code: str | None = None) -> None:
     to the tail of stderr, which is whatever you logged last. `code` is a
     machine-readable category (auth_failed, not_authorized, not_enabled,
     target_unreachable, rate_limited, bad_config, partial_failure).
-    See docs/fetcher_contract.md § Output.
+    See docs/fetcher_contract_guide.md, step 6.
     """
     path = os.environ.get("FETCHER_STATUS_FILE")
     if not path:

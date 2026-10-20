@@ -8,7 +8,7 @@
 #       exit 1
 #   fi
 #
-# See docs/fetcher_contract.md § Output. The Python twin is fetcher_status.py in
+# See docs/fetcher_contract_guide.md, step 6. The Python twin is fetcher_status.py in
 # this directory; keep the two behaviours identical.
 
 # _fetcher_label <path-to-entry-script> -- "<category>_<name>", matching the

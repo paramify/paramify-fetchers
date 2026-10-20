@@ -350,7 +350,7 @@ def _failure_evidence(
 
     Written on every failure path, so the file on disk says why rather than
     being absent or — worse — present and empty. Shape per the contract's
-    payload ledger (docs/fetcher_contract.md § Output).
+    payload ledger (docs/fetcher_contract_guide.md, step 5).
     """
     return {
         "collected_at": current_timestamp(),

@@ -1,0 +1,83 @@
+name: azure_front_door_origins
+version: 0.1.0
+description: >
+  The back ends behind Azure Front Door Standard/Premium. Every origin group with its
+  origins, their priority, weight and region, health probe and load-balancing
+  settings, and whether more than one region actually serves traffic (active-active)
+  or stands by for failover. For each group, how Front Door connects to its origins:
+  the protocol each serving route forwards with, certificate name checking, private
+  link and managed-identity origin authentication, so an origin reached over plain
+  HTTP or the public internet without authentication is visible.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_front_door_origins.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-OFA   # a second region serves traffic (active-active) or stands by (failover), with health probes
+  - KSI-SVC-VCM   # Front Door reaches each origin over HTTPS with a checked certificate, via private link or managed-identity auth
+
+evidence_set:
+  reference_id: EVD-AZURE-FRONTDOOR-ORIGINS
+  name: Azure Front Door Origins
+  instructions: >
+    Script: fetcher.py. Azure SDK calls (azure-mgmt-cdn CdnManagementClient):
+    profiles.list() kept to sku Standard_AzureFrontDoor / Premium_AzureFrontDoor
+    (other CDN SKUs counted in skipped_profiles_by_sku); per profile
+    afd_origin_groups.list_by_profile and per group afd_origins.list_by_origin_group on
+    a client pinned to api-version 2026-07-01 (certificateNameCheckValidationMode,
+    customCertificateSubjects and tokenDestinationHeader are read by wire key);
+    afd_endpoints.list_by_profile, routes.list_by_endpoint, rule_sets.list_by_profile
+    and rules.list_by_rule_set; azure-mgmt-resourcegraph ResourceGraphClient.resources
+    for origin regions. Reader is sufficient — all reads. Region: an origin has no
+    region field, so it is the Resource Graph location of its azureOrigin resource,
+    else of its private-link target, else of the App Service site (enabledHostNames)
+    or storage account (primaryEndpoints) whose host name it uses; otherwise null
+    (region_source null). The query spans every subscription the credential can read;
+    an origin elsewhere stays unresolved. private_link.private_endpoint_location is
+    Front Door's private endpoint region, not the origin's, and is not used as one.
+    enabledState absent reads as Enabled and enforceCertificateNameCheck absent as
+    true (documented defaults). Active origins are the enabled ones at the best
+    (lowest) priority, plus any with no priority; multi_region_active_active = active
+    origins span two or more resolved regions; multi_region_failover = enabled
+    origins do. Paths: each route reaches its originGroup, and each
+    RouteConfigurationOverride action in a rule set attached to it reaches the
+    override's group (the route's own when unset), with forwarding_protocol from the
+    route or the override (absent = MatchRequest). protocols_to_origin is Https for
+    HttpsOnly, Http for HttpOnly, and for MatchRequest Https when the route accepts
+    only HTTPS (as in azure_front_door_tls) else both. serving = an enabled route on
+    an enabled endpoint reaches the group. unprotected_reasons: no_enabled_origin
+    (every origin in the group is disabled), http_to_origin (a serving path can
+    forward HTTP), certificate_name_check_disabled (an enabled
+    origin skips it), no_private_link_or_origin_auth (not every enabled origin uses
+    private link and the group has no managed-identity authentication);
+    connection_protected = serving and none apply. Private link status is reported
+    as returned; measured null on approved, working links, so it is not used.
+    Maps to KSI-CNA-OFA / KSI-SVC-VCM.

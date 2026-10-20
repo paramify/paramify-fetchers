@@ -1,3 +1,4 @@
+display_name: Azure
 description: >
   Azure evidence fetchers (python, official azure-mgmt-* SDKs). Each fetcher
   authenticates with azure-identity's DefaultAzureCredential — there is no
@@ -75,6 +76,7 @@ secrets:
 requires:
   python_packages:
     - azure-identity
+    - azure-mgmt-cdn
     - azure-keyvault-keys
     - azure-mgmt-authorization
     - azure-mgmt-compute
@@ -83,6 +85,7 @@ requires:
     - azure-mgmt-cosmosdb
     - azure-mgmt-databricks
     - azure-mgmt-dns
+    - azure-mgmt-frontdoor
     - azure-mgmt-keyvault
     - azure-mgmt-loganalytics
     - azure-mgmt-monitor
@@ -93,8 +96,10 @@ requires:
     - azure-mgmt-rdbms
     - azure-mgmt-recoveryservices
     - azure-mgmt-recoveryservicesbackup
+    - azure-mgmt-redis
     - azure-mgmt-redisenterprise
     - azure-mgmt-resource
+    - azure-mgmt-resource-deployments
     - azure-mgmt-resource-policy
     - azure-mgmt-resourcegraph
     - azure-mgmt-security
