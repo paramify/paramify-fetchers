@@ -58,7 +58,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_access_reviews/fetcher.py
 
-    Access: Microsoft Graph AccessReview.Read.All, in a tenant with Entra ID P2 or ID Governance. Optional: Organization.Read.All; without it, the tenant name reads null.
+    Access: Microsoft Graph AccessReview.Read.All, in a tenant with Entra ID P2 or ID Governance. The application permission, with admin consent, is recommended. A delegated run (as a signed-in user) needs AccessReview.Read.All in the token and a user holding Security Reader or Identity Governance Administrator. A missing permission or role reads not_authorized. Optional: Organization.Read.All; without it, the tenant name reads null.
 
     Commands Executed:
     - Microsoft Graph GET /organization — the tenant's name and domain
@@ -90,7 +90,7 @@ evidence_set:
     - monthly_auto_removal_percentage — Percentage of active review series with monthly auto-removal = active_definitions_monthly_auto_removal / active_review_definitions × 100 (a whole number, 0–100); 0 when active_review_definitions is 0
     - active_definitions_without_monthly_auto_removal — List of active review series names without monthly auto-removal
     - all_active_definitions_monthly_auto_removal — True if every active review series has monthly auto-removal; false if any doesn't, or none is active
-    - active_self_review_definitions — List of active review series names where users review their own access (no reviewers named on the series or on any of its stages)
+    - active_self_review_definitions — List of active review series names where users review their own access (no reviewers named on the series; for a multi-stage series, none named on any of its stages, since Graph then ignores the series' own list)
 
     Are the reviews running on schedule?
     - active_recurring_definitions_without_completed_cycle — List of active recurring review series names with no completed run yet (a run is completed when its status is Completed, AutoReviewed, Applying or Applied)

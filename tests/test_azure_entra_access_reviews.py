@@ -18,6 +18,7 @@ FETCHER = REPO_ROOT / "fetchers" / "azure" / "entra_access_reviews" / "fetcher.p
 spec = importlib.util.spec_from_file_location("azure_entra_access_reviews_under_test", FETCHER)
 ar = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ar)
+REAL_QUERY = ar._query
 
 NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
 
@@ -168,6 +169,15 @@ def test_a_multi_stage_series_takes_its_reviewers_from_the_stages():
     assert by_id["d-staged"]["self_review"] is False
     assert by_id["d-staged"]["stages"][1]["depends_on"] == ["1"]
     assert summary["active_self_review_definitions"] == ["Stages without reviewers"]
+
+
+def test_with_stages_the_top_level_reviewers_are_ignored():
+    staged = _definition("d-top", "Reviewers only on the series", stages=[
+        ns(stage_id="1", depends_on=[], duration_in_days=7, reviewers=[], fallback_reviewers=[]),
+    ])
+    results, summary = ar.build([staged], {"d-top": []}, {}, [], NOW)
+    assert results["review_definitions"][0]["self_review"] is True
+    assert summary["active_self_review_definitions"] == ["Reviewers only on the series"]
 
 
 def test_the_last_cycle_is_the_latest_start_whose_runs_all_ended():
@@ -397,6 +407,22 @@ def test_a_full_page_without_a_next_link_is_followed_with_skip():
     assert collector.ok
     assert len(items) == 230
     assert builder.requests == [0, 100, 200]
+
+
+def test_the_real_request_builder_sends_top_and_skip():
+    from azure.core.credentials_async import AsyncTokenCredential
+    from msgraph import GraphServiceClient
+
+    class _Credential(AsyncTokenCredential):
+        async def get_token(self, *scopes, **kwargs):
+            raise AssertionError("building a URL fetches no token")
+
+        async def close(self):
+            pass
+
+    builder = GraphServiceClient(_Credential()).identity_governance.access_reviews.definitions
+    url = builder.to_get_request_information(REAL_QUERY(builder, top=ar.PAGE_SIZE, skip=0)).url
+    assert url.endswith("/identityGovernance/accessReviews/definitions?%24skip=0&%24top=100")
 
 
 def test_a_list_that_ignores_skip_stops_with_a_failure():

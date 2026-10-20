@@ -252,6 +252,7 @@ def definition_record(definition: Dict[str, Any], read_instances: Optional[List[
                       decisions: Dict[str, Optional[List[Dict[str, Any]]]], now: datetime) -> Dict[str, Any]:
     instances = read_instances or []
     settings = definition.get("settings") or {}
+    stages = definition.get("stages") or []
     recurrence = settings.get("recurrence")
     period = recurrence_period_days(recurrence)
     at_least_monthly = period is not None and period <= 31
@@ -273,8 +274,8 @@ def definition_record(definition: Dict[str, Any], read_instances: Optional[List[
         "default_decision_deny": default_deny,
         "auto_applies_decisions": auto_apply,
         "monthly_auto_removal": at_least_monthly and default_deny and auto_apply,
-        # A multi-stage series names its reviewers per stage, and Graph ignores the top-level list then.
-        "self_review": not definition.get("reviewers") and not any(st["reviewers"] for st in definition.get("stages") or []),
+        # Graph ignores the top-level reviewers once a series has stages; each stage names its own.
+        "self_review": not any(st["reviewers"] for st in stages) if stages else not definition.get("reviewers"),
         "instances_read": None if read_instances is None else len(instances),
         "instances_in_progress": sum(1 for i in instances if i.get("status") not in ENDED_INSTANCE),
         "last_completed_cycle_end": None if latest is None else latest["end_date_time"],
