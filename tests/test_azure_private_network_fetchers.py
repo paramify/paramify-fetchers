@@ -333,6 +333,18 @@ def test_stale_needs_every_nic_resource_group_in_the_subnet_readable():
     assert _classify(_record("acct", BLOB, "10.0.9.9"), BLOB, {}, vnets, scopes=None)["private_endpoint_status"] == "unknown"
 
 
+@pytest.fixture
+def fake_graph_models(monkeypatch):
+    """query_all's request models, so these tests run where the Azure SDK is not installed (as in CI)."""
+    import sys
+    from types import ModuleType, SimpleNamespace
+
+    models = ModuleType("azure.mgmt.resourcegraph.models")
+    models.QueryRequest = lambda **kw: SimpleNamespace(**kw)
+    models.QueryRequestOptions = lambda **kw: SimpleNamespace(**kw)
+    monkeypatch.setitem(sys.modules, "azure.mgmt.resourcegraph.models", models)
+
+
 class _FakeGraph:
     def __init__(self, pages):
         self.pages, self.requests = list(pages), []
@@ -348,13 +360,13 @@ def _page(rows, token=None, total=None):
 
 
 @pytest.mark.parametrize("scope,sent", [(None, None), ("s1", ["s1"]), (["s1", "s2"], ["s1", "s2"])])
-def test_query_all_accepts_unscoped_and_lists(scope, sent):
+def test_query_all_accepts_unscoped_and_lists(scope, sent, fake_graph_models):
     client = _FakeGraph([_page([{"id": "a"}], token="t", total=2), _page([{"id": "b"}], total=2)])
     assert [r["id"] for r in resource_graph.query_all(client, scope, "q")["rows"]] == ["a", "b"]
     assert client.requests[0].subscriptions == sent
 
 
-def test_query_all_raises_on_a_short_count():
+def test_query_all_raises_on_a_short_count(fake_graph_models):
     with pytest.raises(RuntimeError):
         resource_graph.query_all(_FakeGraph([_page([{"id": "a"}], total=5)]), None, "q")
 
