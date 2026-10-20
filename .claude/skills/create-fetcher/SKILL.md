@@ -120,7 +120,8 @@ Read these before building (skim, don't summarize back):
   (aws, az, kubectl, gcloud); **python** if it needs an SDK/REST client,
   pagination, or non-trivial parsing (okta, gitlab, rippling).
 - `description` and `evidence_set.instructions` — from the user's goal + the
-  exact API/CLI calls the fetcher will make.
+  exact API/CLI calls the fetcher will make. Instructions open with
+  `Script: <category>/<short_name>/<entry>.`, the entry's path under `fetchers/`.
 - `category` — from the tool name.
 
 **Ask the user (batch into ONE `AskUserQuestion`, ≤3 questions):**

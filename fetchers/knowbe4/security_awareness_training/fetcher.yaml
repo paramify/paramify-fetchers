@@ -38,4 +38,4 @@ ksis:
 evidence_set:
   reference_id: EVD-SECURITY-AWARENESS-TRAINING
   name: KnowBe4 Security Awareness Training
-  instructions: 'Script: security_awareness_training.sh. Commands executed: KnowBe4 API calls for user training data and enrollments'
+  instructions: 'Script: knowbe4/security_awareness_training/fetcher.sh. Commands executed: KnowBe4 API calls for user training data and enrollments'

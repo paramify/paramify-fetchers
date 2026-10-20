@@ -46,7 +46,7 @@ evidence_set:
   reference_id: EVD-AZURE-ALERT-RULES
   name: Azure Monitor Alert Rules
   instructions: >
-    Script: fetcher.py. Reader (or Monitoring Reader) at subscription scope. Raw ARM
+    Script: azure/alert_rules/fetcher.py. Reader (or Monitoring Reader) at subscription scope. Raw ARM
     GETs through azure-mgmt-core's ARMPipelineClient, following nextLink to the end
     (results.pages_read): Microsoft.Insights/metricAlerts (api 2018-03-01),
     Microsoft.Insights/scheduledQueryRules (2023-12-01),

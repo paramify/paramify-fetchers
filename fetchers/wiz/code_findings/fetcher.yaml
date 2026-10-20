@@ -76,7 +76,7 @@ evidence_set:
   reference_id: EVD-WIZ-CODE-FINDINGS
   name: Wiz Code Findings (SAST)
   instructions: >-
-    Script: fetcher.py. Read-only service account (read:sast_findings; Wiz
+    Script: wiz/code_findings/fetcher.py. Read-only service account (read:sast_findings; Wiz
     Code). Pages the sastFindings connection. Summarizes open findings by
     severity, repository and weakness, and open findings past the remediation
     window. Code snippets, descriptions and remediation text are not collected.

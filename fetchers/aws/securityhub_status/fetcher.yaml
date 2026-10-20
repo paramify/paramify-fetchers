@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-SECURITYHUB
   name: Security Hub Status
-  instructions: 'Script: securityhub_status.sh. Commands executed: aws securityhub describe-hub, aws securityhub get-enabled-standards, aws securityhub list-enabled-products-for-import.'
+  instructions: 'Script: aws/securityhub_status/fetcher.sh. Commands executed: aws securityhub describe-hub, aws securityhub get-enabled-standards, aws securityhub list-enabled-products-for-import.'

@@ -43,7 +43,7 @@ evidence_set:
   reference_id: EVD-<CATEGORY>-INVENTORY
   name: <Tool> <Asset> Inventory
   instructions: >-
-    Script: fetcher.py. <Which API calls, which scope, what each record holds.>
+    Script: <category>/<short_name>/fetcher.py. <Which API calls, which scope, what each record holds.>
     A run that could not collect every asset writes no records, and the
     uploader does not send it.
   description: >-

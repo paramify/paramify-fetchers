@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-IAM-MFA
   name: IAM MFA Status
-  instructions: 'Script: iam_mfa_status.sh. Commands executed: aws iam get-account-summary, aws iam list-virtual-mfa-devices, aws iam list-users, aws iam list-mfa-devices.'
+  instructions: 'Script: aws/iam_mfa_status/fetcher.sh. Commands executed: aws iam get-account-summary, aws iam list-virtual-mfa-devices, aws iam list-users, aws iam list-mfa-devices.'

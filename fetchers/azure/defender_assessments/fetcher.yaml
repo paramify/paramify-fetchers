@@ -48,7 +48,7 @@ evidence_set:
   reference_id: EVD-AZURE-DEFENDER-ASSESSMENTS
   name: Microsoft Defender for Cloud Security Assessments
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-security SecurityCenter):
+    Script: azure/defender_assessments/fetcher.py. Azure SDK calls (azure-mgmt-security SecurityCenter):
     assessments.list(scope="subscriptions/<subscription_id>") for every security
     assessment result on the subscription, and
     assessments_metadata.list_by_subscription() for each check's severity,

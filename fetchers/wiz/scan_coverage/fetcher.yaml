@@ -65,7 +65,7 @@ evidence_set:
   reference_id: EVD-WIZ-SCAN-COVERAGE
   name: Wiz Scan Coverage
   instructions: >-
-    Script: fetcher.py. Authenticates to the Wiz OAuth2 token URL with a read-
+    Script: wiz/scan_coverage/fetcher.py. Authenticates to the Wiz OAuth2 token URL with a read-
     only service account (scopes read:cloud_accounts, read:connectors) and pages
     the cloudAccounts and connectors GraphQL connections. Summarizes accounts by
     provider and status, accounts not CONNECTED, accounts not scanned within the

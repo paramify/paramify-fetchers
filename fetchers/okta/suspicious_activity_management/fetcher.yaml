@@ -25,4 +25,4 @@ ksis:
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-06
   name: Okta Suspicious Activity
-  instructions: 'Script: okta_suspicious_activity_management.py. Uses Okta APIs to collect security event monitoring and behavior detection evidence. Output: okta_suspicious_activity_management.json'
+  instructions: 'Script: okta/suspicious_activity_management/fetcher.py. Uses Okta APIs to collect security event monitoring and behavior detection evidence. Output: okta_suspicious_activity_management.json'

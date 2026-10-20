@@ -50,7 +50,7 @@ evidence_set:
   reference_id: EVD-JIRA-SITE-INVENTORY
   name: Jira Site Inventory and Issue Activity
   instructions: >-
-    Script: fetcher.py. Authenticates to the Jira Cloud REST API with an account
+    Script: jira/site_inventory/fetcher.py. Authenticates to the Jira Cloud REST API with an account
     email + API token (basic auth). Reads GET /rest/api/3/serverInfo,
     /rest/api/3/myself, /rest/api/3/project/search (expand=lead,insight,issueTypes),
     /rest/api/3/issuetype, /rest/api/3/priority/search and /rest/api/3/status;
