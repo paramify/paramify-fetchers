@@ -56,8 +56,8 @@ PHISHING_RESISTANT_MARKERS = ("fido2", "passkey", "windows hello", "platform cre
 CERTIFICATE_MARKERS = ("x.509", "certificate")
 # Step results that reuse an earlier authentication rather than naming a method.
 NOT_A_METHOD = frozenset({"previously satisfied", "satisfied by token"})
-# Microsoft's sign-in workbook rule: every clientAppUsed but these two is legacy authentication.
-MODERN_CLIENTS = frozenset({"browser", "mobile apps and desktop clients"})
+# Microsoft's sign-in workbook rule: every clientAppUsed but these is legacy authentication.
+MODERN_CLIENTS = frozenset({"browser", "mobile apps and desktop clients", "modern clients"})
 
 logger = logging.getLogger(NAME)
 
@@ -77,7 +77,11 @@ def sign_in_record(s: Dict[str, Any]) -> Dict[str, Any]:
     strong = [m for m in lowered if any(k in m for k in PHISHING_RESISTANT_MARKERS)]
     certificates = [m for m in lowered if any(k in m for k in CERTIFICATE_MARKERS)]
     weaker = [m for m in lowered if m not in strong and m not in certificates]
-    phishing_resistant = bool(strong) or (requirement == MULTI_FACTOR and bool(certificates) and not weaker)
+    # A reused earlier factor could be anything, so it rules a certificate out like a weaker method would.
+    reused = any((d.get("authenticationMethod") or "").lower() in NOT_A_METHOD for d in steps)
+    phishing_resistant = bool(strong) or (
+        requirement == MULTI_FACTOR and bool(certificates) and not weaker and not reused
+    )
     level = s.get("riskLevelDuringSignIn")
     state = s.get("riskState")
     client = s.get("clientAppUsed") or ""

@@ -125,9 +125,19 @@ def test_sign_ins_summarized_per_user_and_app(monkeypatch):
 
 
 def test_legacy_authentication_is_any_client_but_browser_and_modern_apps():
-    for client, legacy in (("Browser", False), ("Mobile Apps and Desktop clients", False), ("", False),
+    for client, legacy in (("Browser", False), ("Mobile Apps and Desktop clients", False), ("Modern clients", False),
+                           ("", False),
                            ("Reporting Web Services", True), ("Universal Outlook", True), ("Other clients", True)):
         assert sign_ins.sign_in_record(_sign_in("s", "u", client=client))["legacy_authentication"] is legacy, client
+
+
+def test_a_certificate_beside_a_reused_factor_is_not_phishing_resistant():
+    for reused in ("Previously satisfied", "Satisfied by token"):
+        record = sign_ins.sign_in_record(_sign_in("s", "u", steps=[_step("X.509 Certificate"), _step(reused)]))
+        assert record["methods"] == ["X.509 Certificate"]
+        assert record["phishing_resistant"] is False, reused
+    alone = sign_ins.sign_in_record(_sign_in("s", "u", steps=[_step("X.509 Certificate")]))
+    assert alone["phishing_resistant"] is True
 
 
 def test_unread_policies_are_null_not_none_applied():
