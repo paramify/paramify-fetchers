@@ -11,7 +11,8 @@ is enabled. Four tenant-level reads:
   state, who it targets, and its method-specific settings, plus the registration
   campaign and the policy's migration state. SMS and Voice enabled are flagged weak.
   FIDO2 (which also carries passkeys, including passkeys in Microsoft Authenticator)
-  and X.509 certificate enabled are flagged phishing-resistant. Windows Hello for
+  enabled is flagged phishing-resistant, and so is X.509 certificate enabled when its
+  default authentication mode is multi-factor. Windows Hello for
   Business is NOT in this policy (it is configured through device management), so it
   cannot be evidenced from here.
 - `GET /policies/identitySecurityDefaultsEnforcementPolicy`: security defaults, the
@@ -72,7 +73,14 @@ METHOD_X509 = "x509certificate"
 # phishable. NIST SP 800-63B restricts both.
 WEAK_METHODS = frozenset({METHOD_SMS, METHOD_VOICE})
 # Bound to the origin, so a look-alike site cannot relay them. FIDO2 includes passkeys.
+# X.509 is phishing-resistant only as a multi-factor method: see
+# `is_phishing_resistant_method()`.
 PHISHING_RESISTANT_METHODS = frozenset({METHOD_FIDO2, METHOD_X509})
+
+# Certificate-based authentication's default mode. Only multi-factor satisfies an MFA
+# requirement by itself; a single-factor certificate is a password substitute, still
+# needing a second factor. Compared case-insensitively.
+X509_MULTI_FACTOR = "x509certificatemultifactor"
 
 # Until the policy's migration is complete, the legacy per-user MFA and SSPR policies
 # still decide which methods work alongside this one, so an SMS method disabled HERE may
@@ -353,6 +361,35 @@ def password_protection(
     }
 
 
+def x509_multi_factor_default(method: dict | None):
+    """Whether X.509's default authentication mode is multi-factor; None when unknown.
+
+    None covers both a policy with no X.509 configuration and one whose mode was not
+    reported, so `false` always means the tenant chose single-factor.
+    """
+    mode = ((method or {}).get("settings") or {}).get("default_authentication_mode")
+    if not mode:
+        return None
+    return str(mode).lower() == X509_MULTI_FACTOR
+
+
+def is_phishing_resistant_method(method: dict) -> bool:
+    """FIDO2 always; X.509 only when its default mode is multi-factor.
+
+    A single-factor certificate does not satisfy MFA by itself, so counting it would let
+    a tenant read as phishing-resistant on a method that still leans on a second, possibly
+    phishable, factor. Authentication binding rules can raise specific certificates to
+    multi-factor; they are not evaluated, so a tenant relying on them alone is not
+    credited.
+    """
+    mid = str(method.get("id") or "").lower()
+    if mid not in PHISHING_RESISTANT_METHODS:
+        return False
+    if mid == METHOD_X509:
+        return x509_multi_factor_default(method) is True
+    return True
+
+
 def method_records(policy: dict | None) -> list[dict]:
     """Each method configuration, with the weak / phishing-resistant classification."""
     records = []
@@ -363,7 +400,7 @@ def method_records(policy: dict | None) -> list[dict]:
                 **m,
                 "enabled": str(m.get("state") or "").lower() == STATE_ENABLED,
                 "is_weak_method": mid in WEAK_METHODS,
-                "is_phishing_resistant_method": mid in PHISHING_RESISTANT_METHODS,
+                "is_phishing_resistant_method": is_phishing_resistant_method(m),
             }
         )
     return records
@@ -407,6 +444,10 @@ def summarize(
         # --- phishing-resistant ---
         "fido2_enabled": method_enabled(METHOD_FIDO2),
         "x509_certificate_enabled": method_enabled(METHOD_X509),
+        # Only a multi-factor default makes an enabled X.509 method count above.
+        "x509_certificate_multi_factor": x509_multi_factor_default(by_id.get(METHOD_X509))
+        if readable
+        else None,
         "phishing_resistant_methods_enabled": strong if readable else None,
         "phishing_resistant_method_enabled": bool(strong) if readable else None,
         # --- policy state ---

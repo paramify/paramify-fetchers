@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="276" viewBox="0 0 880 276" role="img" aria-label="How it runs: a container deployed in your environment runs on a schedule. Inside it, the fetchers read your tools read-only and write JSON evidence files to disk, then the uploader sends those files to Paramify. Fetchers never contact Paramify; only the uploader sends data out.">
+<rect width="880" height="276" fill="#0d1117"/>
+<rect x="12" y="12" width="656" height="252" rx="14" fill="#151b23" stroke="#30363d" stroke-dasharray="5 4"/>
+<text x="28" y="38" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="600" fill="#6e7681" text-anchor="start" letter-spacing="0.08em">YOUR ENVIRONMENT</text>
+<text x="688" y="38" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="600" fill="#6e7681" text-anchor="start" letter-spacing="0.08em">PARAMIFY</text>
+<rect x="28" y="104" width="160" height="112" rx="10" fill="#0d1117" stroke="#3d444d"/>
+<rect x="46" y="122" width="26" height="7" rx="2" fill="none" stroke="#9198a1" stroke-width="1.5"/><circle cx="51" cy="125.5" r="1.2" fill="#9198a1"/>
+<rect x="46" y="131" width="26" height="7" rx="2" fill="none" stroke="#9198a1" stroke-width="1.5"/><circle cx="51" cy="134.5" r="1.2" fill="#9198a1"/>
+<rect x="46" y="140" width="26" height="7" rx="2" fill="none" stroke="#9198a1" stroke-width="1.5"/><circle cx="51" cy="143.5" r="1.2" fill="#9198a1"/>
+<text x="82" y="142" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" font-weight="600" fill="#f0f6fc" text-anchor="start">Your tools</text>
+<text x="46" y="176" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#9198a1" text-anchor="start">AWS, Okta, Wiz, …</text>
+<text x="46" y="196" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#9198a1" text-anchor="start">queried read-only</text>
+<rect x="228" y="52" width="420" height="170" rx="10" fill="#0d1117" stroke="#3d444d"/>
+<rect x="244" y="68" width="26" height="20" rx="3" fill="none" stroke="#9198a1" stroke-width="1.5"/><line x1="251" y1="73" x2="251" y2="83" stroke="#9198a1" stroke-width="1.5"/><line x1="257" y1="73" x2="257" y2="83" stroke="#9198a1" stroke-width="1.5"/><line x1="263" y1="73" x2="263" y2="83" stroke="#9198a1" stroke-width="1.5"/>
+<text x="280" y="83" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" font-weight="600" fill="#f0f6fc" text-anchor="start">Fetcher container</text>
+<text x="280" y="102" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">Docker, ECS or Kubernetes, on a schedule</text>
+<rect x="244" y="126.0" width="112" height="68" rx="8" fill="#151b23" stroke="#3d444d"/>
+<text x="300.0" y="155.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13.5" font-weight="600" fill="#f0f6fc" text-anchor="middle">Fetchers</text>
+<text x="300.0" y="175.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" font-weight="400" fill="#9198a1" text-anchor="middle">read your tools</text>
+<rect x="382" y="126.0" width="112" height="68" rx="8" fill="#151b23" stroke="#3d444d"/>
+<text x="438.0" y="155.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13.5" font-weight="600" fill="#f0f6fc" text-anchor="middle">Evidence</text>
+<text x="438.0" y="175.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" font-weight="400" fill="#9198a1" text-anchor="middle">JSON on disk</text>
+<rect x="520" y="126.0" width="112" height="68" rx="8" fill="#151b23" stroke="#3d444d"/>
+<text x="576.0" y="155.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13.5" font-weight="600" fill="#f0f6fc" text-anchor="middle">Uploader</text>
+<text x="576.0" y="175.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" font-weight="400" fill="#9198a1" text-anchor="middle">sends it out</text>
+<line x1="192" y1="160" x2="236" y2="160" stroke="#6e7681" stroke-width="1.5"/>
+<path d="M235 155.5 L243 160 L235 164.5 Z" fill="#6e7681"/>
+<line x1="360" y1="160" x2="374" y2="160" stroke="#6e7681" stroke-width="1.5"/>
+<path d="M373 155.5 L381 160 L373 164.5 Z" fill="#6e7681"/>
+<line x1="498" y1="160" x2="512" y2="160" stroke="#6e7681" stroke-width="1.5"/>
+<path d="M511 155.5 L519 160 L511 164.5 Z" fill="#6e7681"/>
+<line x1="636" y1="160" x2="680" y2="160" stroke="#6e7681" stroke-width="1.5"/>
+<path d="M679 155.5 L687 160 L679 164.5 Z" fill="#6e7681"/>
+<rect x="688" y="104" width="164" height="112" rx="10" fill="#0f1a2e" stroke="#1f4fa8"/>
+<g transform="translate(706,122) scale(0.19)"><rect x="1" y="0.3" width="136" height="136" rx="22" fill="#4d8bff"/><path d="M98.8894 44.9585L61.5124 23.3887L49.0728 30.5738L47.2729 31.6189V33.7091L47.2148 48.0502L70.3668 61.4188L49.0293 73.7423L47.2148 74.7874V105.618L59.698 112.832L61.5124 113.877L63.3268 112.832L75.81 105.618V91.2769L100.704 76.9067V46.0181L98.8894 44.9585ZM61.5124 27.5836L95.246 47.0632L86.4498 52.1436L52.7161 32.664L61.527 27.5836H61.5124ZM50.8437 45.96L50.8872 35.8138L84.6208 55.2788V57.9932V65.4686L73.9811 59.3286L50.8291 45.96H50.8437ZM73.9956 63.5236L82.8209 68.6184L61.5124 80.942L52.6581 75.8325L73.9956 63.5236ZM59.698 108.637L50.8437 103.528V78.9824L59.698 84.0918V108.637ZM97.075 74.8165L72.1812 89.1867V103.528L63.3268 108.637V84.0918L86.4788 70.7232L88.2642 69.6926H88.2932V67.5733L88.2642 55.2934L97.075 50.1985V74.8165Z" fill="#ffffff"/></g>
+<text x="742" y="142" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" font-weight="600" fill="#f0f6fc" text-anchor="start">Paramify</text>
+<text x="706" y="176" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#9198a1" text-anchor="start">Evidence sets</text>
+<text x="706" y="196" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#9198a1" text-anchor="start">only what you upload</text>
+<text x="28" y="250" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" fill="#9198a1" text-anchor="start">Fetchers never contact Paramify. Only the uploader sends data out of your environment.</text>
+</svg>
