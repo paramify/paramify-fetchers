@@ -309,3 +309,13 @@ def test_collect_leaves_rule_fires_unknown_when_the_alerts_were_not_read(registr
     assert (alerts, summary_total, read, collector.ok) == ([], total, False, ok)
     assert [(r["name"], r["fire_count"]) for r in rules] == [("cpu-high", None)]
     assert fa.summarize(alerts, rules, summary_total, read)["enabled_rules_never_fired"] is None
+
+
+@pytest.mark.parametrize("summary_total", [None, 0])
+def test_alert_counts_are_unknown_when_the_alert_list_was_not_read(summary_total):
+    summary = fa.summarize([], [], summary_total, alerts_read=False)
+    assert {k: summary[k] for k in fa.ALERT_COUNTS} == dict.fromkeys(fa.ALERT_COUNTS, None)
+    assert (summary["window_days"], summary["alerts_summary_total"]) == (30, summary_total)
+    read = fa.summarize([], [], 0)
+    assert (read["alerts_fired"], read["all_alerts_listed"], read["alerts_by_state"], read["alerts_acknowledged"]) == (
+        0, True, {}, 0)

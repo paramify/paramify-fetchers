@@ -55,6 +55,14 @@ HISTORY_ERROR = "error"
 STATE_CLOSED = "closed"
 STATE_ACKNOWLEDGED = "acknowledged"
 SYSTEM_ACTOR = "system"
+# Unknown, not 0, when the alert list was not read.
+ALERT_COUNTS = (
+    "alerts_fired", "all_alerts_listed", "alerts_by_state", "alerts_by_monitor_condition", "alerts_by_severity",
+    "alerts_by_monitor_service", "alerts_by_rule_type", "alerts_open", "alerts_acknowledged", "alerts_closed",
+    "alerts_closed_by_person", "alerts_with_notifications", "alerts_with_failed_notifications",
+    "alerts_with_actions_suppressed", "median_hours_to_close", "max_hours_to_close", "oldest_open_alert_fired_at",
+    "alert_histories_read", "alert_histories_unread",
+)
 
 
 # --- pure transforms ---
@@ -185,7 +193,7 @@ def _fires(alerts: list[dict], read: bool = True) -> dict:
 
 
 def rule_activity(rules: list[dict], alerts: list[dict], alerts_read: bool = True) -> list[dict]:
-    """Every listed rule with its fires, plus rules that fired but are not in the subscription's lists; fires are unknown if the alerts were not read."""
+    """Every listed rule with its fires, plus rules that fired but are not in the subscription's lists."""
     fired: dict = {}
     for a in alerts:
         if a["alert_rule_id"]:
@@ -216,7 +224,7 @@ def summarize(alerts: list[dict], rules: list[dict], summary_total, alerts_read:
     open_alerts = [a for a in alerts if (a["alert_state"] or "").lower() != STATE_CLOSED]
     close_hours = [a["hours_to_close"] for a in closed if a["hours_to_close"] is not None]
     listed = [r for r in rules if r["listed"]]
-    return {
+    summary = {
         "window_days": WINDOW_DAYS,
         "alerts_fired": len(alerts),
         "alerts_summary_total": summary_total,
@@ -251,6 +259,7 @@ def summarize(alerts: list[dict], rules: list[dict], summary_total, alerts_read:
         ),
         "rules_fired_not_listed": sum(1 for r in rules if not r["listed"]) if alerts_read else None,
     }
+    return summary if alerts_read else {**summary, **dict.fromkeys(ALERT_COUNTS, None)}
 
 
 def history_status(exc: BaseException) -> str:
