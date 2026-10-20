@@ -191,7 +191,7 @@ manifest <sub>               build/edit a manifest file (-f/--file, default ./ma
 
 `manifest` subcommands: `init [--output-dir DIR]`, `add <fetcher>`, `remove <fetcher>`, `set-config <fetcher> key=value`, `set-secret <fetcher> <secret_name> <ENV_VAR>`, `add-target <fetcher> k=v ... [--secret name=ENV_VAR ...]`, `set-platform-config <category> key=value`, `set-passthrough <category> ENV_VAR ...`, `set-output-dir <dir>`, `show [--json]`. The builder reads each `fetcher.yaml` and warns which secrets/config are still missing until the fetcher is runnable.
 
-> **Note:** this list is illustrative of the surface's shape, not exhaustive — the live CLI also has `manifests`, `runs`, `evidence`, `upload`, and `manifest new` / `remove-target`. The authoritative, current surface is `CLAUDE.md` / [`fetcher_contract.md`](fetcher_contract.md) (and `paramify --help`).
+> **Note:** this list is illustrative of the surface's shape, not exhaustive — the live CLI also has `manifests`, `runs`, `evidence`, `upload`, and `manifest new` / `remove-target`. The authoritative, current surface is `CLAUDE.md` / [`fetcher_contract_guide.md`](fetcher_contract_guide.md) (and `paramify --help`).
 
 ### Execution and the run directory
 
@@ -283,7 +283,7 @@ Benefits of separation:
 - The Wiz-style case (writing issues back to Paramify, not just evidence) becomes a different uploader, not a hack inside the fetcher
 
 The evidence uploader is built (and exposed as `paramify upload`):
-`uploaders/paramify_evidence/` reads an enveloped run directory, gets-or-creates an evidence set by `reference_id` (Paramify REST v0), multipart-uploads the artifact through the set's channel where it has one (an artifact uploaded outside a configured channel does not count toward validation on the solution capability), and is idempotent within a run. It supports `--dry-run`, `--config`, an https-only token guard, customer `reference_id` overrides, and auth via `PARAMIFY_UPLOAD_API_TOKEN` (+ optional `PARAMIFY_API_BASE_URL` / `--config base_url`). A second uploader, `uploaders/paramify_scripts/` (exposed as `paramify scripts sync`), is also built — a provisioning step that pushes each fetcher's entry script to Paramify and CONNECTs it to that fetcher's evidence set, manifest-scoped by default (`--all` for the whole catalog). See [`uploader_design.md`](uploader_design.md) for both. A third uploader, `uploaders/paramify_issues/` (exposed as `paramify issues upload`), posts raw scan reports (CSV/XML/JSON/Nessus, never enveloped) to `POST /assessment/{id}/intake`. See [`issue_report_fetchers.md`](issue_report_fetchers.md).
+`uploaders/paramify_evidence/` reads an enveloped run directory, gets-or-creates an evidence set by `reference_id` (Paramify REST v0), multipart-uploads the artifact through the set's channel where it has one (an artifact uploaded outside a configured channel does not count toward validation on the solution capability), and is idempotent within a run. It supports `--dry-run`, `--config`, an https-only token guard, customer `reference_id` overrides, and auth via `PARAMIFY_UPLOAD_API_TOKEN` (+ optional `PARAMIFY_API_BASE_URL` / `--config base_url`). A second uploader, `uploaders/paramify_scripts/` (exposed as `paramify scripts sync`), is also built — a provisioning step that pushes each fetcher's entry script to Paramify and CONNECTs it to that fetcher's evidence set, manifest-scoped by default (`--all` for the whole catalog). See [`uploader_guide.md`](uploader_guide.md) for both. A third uploader, `uploaders/paramify_issues/` (exposed as `paramify issues upload`), posts raw scan reports (CSV/XML/JSON/Nessus, never enveloped) to `POST /assessment/{id}/intake`. See [`issue_report_fetchers_guide.md`](issue_report_fetchers_guide.md).
 
 Orchestration that chains collect → upload is customer-owned, not built into the runner. `run_and_upload.sh` at the repo root is example glue.
 
@@ -363,14 +363,14 @@ paramify-fetchers/
 │
 └── docs/
     ├── design.md                     # this file — design rationale + current state
-    ├── fetcher_contract.md           # the runner⇄fetcher contract
+    ├── fetcher_contract_guide.md     # the runner⇄fetcher contract
     ├── porting_playbook.md           # how to port an existing fetcher (the "why")
-    ├── authoring_a_fetcher.md        # how to write a new fetcher from scratch
-    ├── run_manifest_reference.md     # manifest format reference
-    ├── config_injection_design.md    # platform/config/auth injection model
-    ├── envelope_design.md            # evidence envelope format
-    ├── issue_report_fetchers.md      # the second kind: raw scan reports → assessment pipelines
-    ├── pipelines.md                  # sending scan reports from the TUI, with recordings
+    ├── authoring_fetcher_guide.md    # how to write a new fetcher from scratch
+    ├── run_manifest_guide.md         # building a run manifest
+    ├── config_injection_guide.md     # platform/config/auth injection model
+    ├── envelope_guide.md             # evidence envelope format
+    ├── issue_report_fetchers_guide.md # the second kind: raw scan reports → assessment pipelines
+    ├── pipelines_guide.md            # sending scan reports from the TUI, with recordings
     ├── packaging_design.md           # proposed `paramify package` (not built)
     └── onboarding/                   # hands-on guided tutorial (Lathe)
 ```
@@ -439,12 +439,12 @@ paramify, checkov, demo); the AWS port is complete (80/80). The pieces that make
 
 Done since the last revision:
 
-- ~~**Envelope schema**~~ — DONE (2026-05-28). The runner wraps each output file in the standard `metadata` + `payload` envelope (metadata carries fetcher/version/category/run_id/target/collected_at/status/exit_code, plus `evidence_set` when present and an `error` (stderr tail) on failure); fetchers still write raw payloads. See [`envelope_design.md`](envelope_design.md).
+- ~~**Envelope schema**~~ — DONE (2026-05-28). The runner wraps each output file in the standard `metadata` + `payload` envelope (metadata carries fetcher/version/category/run_id/target/collected_at/status/exit_code, plus `evidence_set` when present and an `error` (stderr tail) on failure); fetchers still write raw payloads. See [`envelope_guide.md`](envelope_guide.md).
 - ~~**Config injection**~~ — DONE. Category defaults ← platform config ← per-fetcher config, injected as env vars via `config_schema` `env` mappings; `auth.passthrough_env` opens the whitelist for ambient cloud vars.
 - ~~**Evidence-set identity**~~ — DONE. Every `fetcher.yaml` carries an `evidence_set` block (reference_id / name / instructions), backfilled from the upstream catalog; it flows into the envelope and drives uploader get-or-create.
 - ~~**Evidence uploader**~~ — DONE. `uploaders/paramify_evidence/` ships (get-or-create by reference_id, multipart upload, idempotent, `--dry-run`, https-only token guard).
-- ~~**Scripts uploader**~~ — DONE. `uploaders/paramify_scripts/` (`paramify scripts sync`) provisions each fetcher's entry script and associates it to the fetcher's evidence set — GitOps reconcile (marker identity, version signal, sha256 drift guard), manifest-scoped by default with `--all`. See [`uploader_design.md`](uploader_design.md).
-- ~~**Issue-report collection**~~ — DONE. `kind: issue_report` fetchers write the source tool's own file (CSV/XML/JSON/Nessus) unmodified to `<run>/issue-reports/`; the runner records identity in a sidecar instead of an envelope; `uploaders/paramify_issues/` (`paramify issues upload`) posts each file to `POST /assessment/{id}/intake`. Assessment chosen by name via `paramify assessments select`, mirroring `paramify programs target`. No vendor fetcher ships in this category yet — start from `fetchers/_template_issue_report/`. See [`issue_report_fetchers.md`](issue_report_fetchers.md).
+- ~~**Scripts uploader**~~ — DONE. `uploaders/paramify_scripts/` (`paramify scripts sync`) provisions each fetcher's entry script and associates it to the fetcher's evidence set — GitOps reconcile (marker identity, version signal, sha256 drift guard), manifest-scoped by default with `--all`. See [`uploader_guide.md`](uploader_guide.md).
+- ~~**Issue-report collection**~~ — DONE. `kind: issue_report` fetchers write the source tool's own file (CSV/XML/JSON/Nessus) unmodified to `<run>/issue-reports/`; the runner records identity in a sidecar instead of an envelope; `uploaders/paramify_issues/` (`paramify issues upload`) posts each file to `POST /assessment/{id}/intake`. Assessment chosen by name via `paramify assessments select`, mirroring `paramify programs target`. No vendor fetcher ships in this category yet — start from `fetchers/_template_issue_report/`. See [`issue_report_fetchers_guide.md`](issue_report_fetchers_guide.md).
 
 What's deferred:
 

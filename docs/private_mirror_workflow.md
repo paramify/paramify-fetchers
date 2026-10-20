@@ -184,7 +184,7 @@ there is no `upstream/v0.4.0-beta`. (That `remote/name` shorthand is for branche
 only.)
 
 **Merge our release tags, not `upstream/main`.** Releases here are curated rather
-than cut on every merge (see [`releasing.md`](releasing.md) if you're curious how),
+than cut on every merge (see [`releasing_guide.md`](releasing_guide.md) if you're curious how),
 so a tag is a reviewed, named, fixed point — which is what your change-control
 process wants to reference. `upstream/main` is a moving target.
 
@@ -239,7 +239,7 @@ nothing else in the repo should ever hold a secret. The framework resolves
 name* and never contains their values — that's what makes committing a manifest
 safe at all. Point those names at whatever your organization already uses: Azure
 Key Vault, AWS Secrets Manager, HashiCorp Vault, or environment variables injected
-by your runner. See [`config_injection_design.md`](config_injection_design.md).
+by your runner. See [`config_injection_guide.md`](config_injection_guide.md).
 
 In a private repo a leaked secret is recoverable. If you ever create the public
 fork described below, it isn't — so build the habit now.

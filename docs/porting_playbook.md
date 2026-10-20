@@ -3,7 +3,7 @@
 **Status:** Active procedure for v0.x ports from `paramify/evidence-fetchers`
 **Last updated:** 2026-06-01
 
-> **Internal note:** This is the Paramify team's guide for migrating fetchers from the original `paramify/evidence-fetchers` repository. The pre-flight commands in the first section require access to that private repo. External contributors writing a new fetcher from scratch should start with [`authoring_a_fetcher.md`](authoring_a_fetcher.md) instead — the exit-code conventions, code skeletons, and AWS fanout patterns in this guide are still useful reference for anyone porting any existing script into the new format.
+> **Internal note:** This is the Paramify team's guide for migrating fetchers from the original `paramify/evidence-fetchers` repository. The pre-flight commands in the first section require access to that private repo. External contributors writing a new fetcher from scratch should start with [`authoring_fetcher_guide.md`](authoring_fetcher_guide.md) instead — the exit-code conventions, code skeletons, and AWS fanout patterns in this guide are still useful reference for anyone porting any existing script into the new format.
 
 This is the step-by-step procedure for porting an existing fetcher from the old
 `paramify/evidence-fetchers` repo into this repo's new layout. The intent is
@@ -17,7 +17,7 @@ later, after the framework's runner and secret resolver land.
 For background and rationale, see [`design.md`](design.md). If the source is a
 scanner export (Nessus, Wiz, SentinelOne, …) rather than a JSON assertion of
 state, this is an **issue-report** fetcher, not an evidence port — start from
-[`issue_report_fetchers.md`](issue_report_fetchers.md) and
+[`issue_report_fetchers_guide.md`](issue_report_fetchers_guide.md) and
 `fetchers/_template_issue_report/` instead of this playbook.
 
 ---
@@ -437,8 +437,8 @@ authoritative.
 
 Codes: `auth_failed`, `not_authorized`, `target_unreachable`, `rate_limited`,
 `bad_config`, `partial_failure`, `internal_error`. Prefer one of these over a new
-exit code — see [`fetcher_contract.md`](fetcher_contract.md) § Output for the full
-rule, including where failure data goes *inside* your payload.
+exit code — see [`fetcher_contract_guide.md`](fetcher_contract_guide.md#5-check-the-payloads-failure-ledger)
+for where failure data goes *inside* your payload.
 
 ## Known interim violations
 
