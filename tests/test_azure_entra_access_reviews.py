@@ -338,3 +338,9 @@ def test_an_inactive_users_duration_renders_as_iso_days():
                                     inactive_duration=timedelta(days=30)))
     assert scope["inactive_duration"] == "P30D"
     assert scope["type"] == "accessReviewInactiveUsersQueryScope"
+
+
+def test_graph_unauthorized_text_classifies_by_its_status():
+    failures = [{"operation": "graph.op", "type": "ODataError",
+                 "message": "Attempted to perform an unauthorized operation. (status 403)"}]
+    assert ar.classify_failure_code(failures) == "not_authorized"
