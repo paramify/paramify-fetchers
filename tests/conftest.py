@@ -27,8 +27,10 @@ Everything here reaches a test as a FIXTURE. pyproject sets
 
 from __future__ import annotations
 
+import functools
+import importlib.util
 import json
-import re
+import os
 import shutil
 import socket
 from pathlib import Path
@@ -236,11 +238,19 @@ def build_fetcher_fn():
 
 DEMO_RUN_ID = "2026-01-01T00-00-00Z"
 
-_PINS = [
-    (re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z"), DEMO_RUN_ID),
-    (re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})"), "2026-01-01T00:00:00Z"),
-    (re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}"), "2026-01-01 00:00:00,000"),
-]
+
+@functools.cache
+def _cli():
+    spec = importlib.util.spec_from_file_location("cli_goldens", REPO_ROOT / "tools" / "cli_goldens.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="session")
+def cli_tools():
+    """tools/cli_goldens.py, for its paramify(), offline_env() and normalise()."""
+    return _cli()
 
 
 def _pin(value: Any, roots: list) -> Any:
@@ -250,21 +260,19 @@ def _pin(value: Any, roots: list) -> Any:
     if isinstance(value, list):
         return [_pin(v, roots) for v in value]
     if isinstance(value, str):
-        for root in roots:
-            value = value.replace(root + "/", "")
-        for pattern, fixed in _PINS:
-            value = pattern.sub(fixed, value)
+        return _cli().normalise(value, [r + "/" for r in roots], root="", run_id=DEMO_RUN_ID,
+                                timestamp="2026-01-01T00:00:00Z", asctime="2026-01-01 00:00:00,000")
     return value
 
 
 def _offline(mp: pytest.MonkeyPatch) -> None:
-    """Hide the host's .env and Paramify env: empty, not unset, as dotenv never overrides a set var."""
-    from framework.custom_tags import ENV_SWITCH
-    from framework.paramify_auth import BASE_URL_ENV, READ_TOKEN_ENV, UPLOAD_TOKEN_ENV
-
-    mp.setenv("PYTHON_DOTENV_DISABLED", "1")
-    for name in (UPLOAD_TOKEN_ENV, READ_TOKEN_ENV, BASE_URL_ENV, ENV_SWITCH):
-        mp.setenv(name, "")
+    """Make os.environ match offline_env(): no .env, and no PARAMIFY_* or AZURE_* values."""
+    env = _cli().offline_env()
+    for name in set(os.environ) - set(env):
+        mp.delenv(name)
+    for name, value in env.items():
+        if os.environ.get(name) != value:
+            mp.setenv(name, value)
 
 
 @pytest.fixture(scope="session")
@@ -273,7 +281,8 @@ def _demo_template(tmp_path_factory):
 
     root = tmp_path_factory.mktemp("demo-root")
     no_cache = shutil.ignore_patterns("__pycache__")
-    shutil.copytree(REPO_ROOT / "framework" / "schemas", root / "framework" / "schemas")
+    # The real package, so `python -m framework.tui` run from this root imports it, not a namespace.
+    (root / "framework").symlink_to(REPO_ROOT / "framework", target_is_directory=True)
     shutil.copytree(REPO_ROOT / "fetchers" / "demo", root / "fetchers" / "demo", ignore=no_cache)
     (root / "fetchers" / "_categories").mkdir()
     shutil.copy(REPO_ROOT / "fetchers" / "_categories" / "demo.yaml", root / "fetchers" / "_categories")

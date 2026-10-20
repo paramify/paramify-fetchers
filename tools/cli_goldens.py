@@ -12,48 +12,55 @@ import subprocess
 import sys
 from pathlib import Path
 
+from framework.custom_tags import ENV_SWITCH
+from framework.paramify_auth import BASE_URL_ENV, READ_TOKEN_ENV, UPLOAD_TOKEN_ENV
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GOLDENS = REPO_ROOT / "tests" / "goldens" / "cli"
 EVIDENCE = REPO_ROOT / "evidence"
 
-_NORMALISE = [
-    (re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z"), "<run-id>"),
-    (re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})"), "<timestamp>"),
-    (re.compile(r"duration=\d+(?:\.\d+)?s"), "duration=<n>s"),
-]
+# paramify(), offline_env() and normalise() are shared with the TUI tests via the cli_tools fixture.
+PARAMIFY_ENV = (UPLOAD_TOKEN_ENV, READ_TOKEN_ENV, BASE_URL_ENV, ENV_SWITCH)
+RUN_ID = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z")
+TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")
+ASCTIME = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}")
+_DURATION = re.compile(r"duration=\d+(?:\.\d+)?s")
 
 
-def _paramify() -> str:
+def paramify() -> str:
+    """The paramify script beside this interpreter, else the one on PATH."""
     beside = Path(sys.executable).with_name("paramify")
-    return str(beside) if beside.exists() else "paramify"
+    return str(beside) if beside.exists() else (shutil.which("paramify") or str(beside))
 
 
-def _env() -> dict:
-    env = {**os.environ, "PYTHON_DOTENV_DISABLED": "1", "NO_COLOR": "1"}
-    env.pop("FORCE_COLOR", None)
+def offline_env() -> dict:
+    """os.environ without PARAMIFY_*/AZURE_* or .env; the Paramify names stay set, empty."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PARAMIFY_", "AZURE_"))}
     # Empty, not unset: python-dotenv never overrides a variable that is set.
-    for name in ("PARAMIFY_UPLOAD_API_TOKEN", "PARAMIFY_API_TOKEN",
-                 "PARAMIFY_API_BASE_URL", "PARAMIFY_CUSTOM_TAGS"):
-        env[name] = ""
+    env.update(dict.fromkeys(PARAMIFY_ENV, ""), PYTHON_DOTENV_DISABLED="1")
     return env
 
 
-def _normalise(text: str) -> str:
-    for root in sorted({str(REPO_ROOT), str(REPO_ROOT.resolve())}, key=len, reverse=True):
-        text = text.replace(root, "<repo>")
-    for pattern, fixed in _NORMALISE:
+def normalise(text: str, roots, root: str = "<repo>", run_id: str = "<run-id>",
+              timestamp: str = "<timestamp>", asctime: str = "<asctime>") -> str:
+    """Replace the root paths, run ids and timestamps in text with fixed values."""
+    for path in sorted(roots, key=len, reverse=True):
+        text = text.replace(path, root)
+    for pattern, fixed in ((RUN_ID, run_id), (TIMESTAMP, timestamp), (ASCTIME, asctime)):
         text = pattern.sub(fixed, text)
     return text
 
 
 def _capture(args: list) -> tuple:
+    env = {**offline_env(), "NO_COLOR": "1"}
+    env.pop("FORCE_COLOR", None)
     proc = subprocess.run(
-        [_paramify(), *args], cwd=REPO_ROOT, env=_env(), capture_output=True, text=True,
-        timeout=120,
+        [paramify(), *args], cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=120,
     )
     shown = " ".join(["paramify", *args])
     text = f"$ {shown}\nexit {proc.returncode}\n--- stdout\n{proc.stdout}--- stderr\n{proc.stderr}"
-    return _normalise(text), proc.returncode
+    text = normalise(text, {str(REPO_ROOT), str(REPO_ROOT.resolve())})
+    return _DURATION.sub("duration=<n>s", text), proc.returncode
 
 
 def _outputs() -> dict:
