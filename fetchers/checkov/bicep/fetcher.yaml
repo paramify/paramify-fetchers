@@ -125,10 +125,14 @@ config_schema:
     type: string
     env: CHECKOV_SKIP_PATHS
     description: >-
-      Paths to skip during the scan, comma- or newline-separated, recorded in
-      metadata.skip_paths. Each entry is trimmed and passed whole, so it may contain spaces. Also how to
-      exclude a file checkov cannot parse, which otherwise fails the run. file_counts still
-      counts skipped files.
+      Python regular expressions for the paths to leave out of the scan, comma- or newline-separated
+      (each entry trimmed; it may contain spaces but not a comma). checkov searches each file's path
+      for every entry, so legacy skips any path containing legacy; escape . * ? + ( ) [ ] with a
+      backslash to match them literally, e.g. legacy \(old\). These are not globs: an entry that is
+      not a valid regular expression, such as *.json, fails the run with bad_config before anything
+      is fetched. Checking them needs python3 on PATH. Recorded in metadata.skip_paths. Also how to
+      exclude a file checkov cannot parse, which otherwise fails the run. file_counts still counts
+      skipped files.
   checks:
     type: string
     env: CHECKOV_BICEP_CHECKS

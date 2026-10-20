@@ -392,6 +392,16 @@ def test_values_starting_with_a_dash_are_not_read_as_options(tmp_path):
     assert payload["metadata"]["skip_paths"] == ["-legacy"]
 
 
+@pytest.mark.parametrize("raw,bad", [("*.json", "'*.json'"), ("legacy, (unclosed", "'(unclosed'")])
+def test_skip_path_that_is_not_a_regex_is_bad_config(tmp_path, raw, bad):
+    code, payload, status, tmp = run(tmp_path, {"main.bicep": BICEP}, CHECKOV_SKIP_PATHS=raw)
+    assert code == 1
+    assert status["code"] == "bad_config"
+    assert f"skip_paths entry {bad} is not a valid regular expression" in status["error"]
+    assert payload is None
+    assert not (tmp / "log" / "git.log").exists() and not (tmp / "log" / "checkov.args").exists()
+
+
 def test_skip_paths_are_recorded(tmp_path):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
                                 CHECKOV_SKIP_PATHS="modules/new-syntax.bicep, legacy")
@@ -713,6 +723,15 @@ def test_real_checkov_skips_a_path_with_spaces(tmp_path):
     assert code == 0, status
     assert scanned(payload) == {"/Templates/legacy/azuredeploy.json", "/Templates/legacy/main.bicep"}
     assert payload["metadata"]["skip_paths"] == ["My Templates/legacy"]
+
+
+@pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
+def test_real_checkov_reads_skip_paths_as_regular_expressions(tmp_path):
+    files = {"legacy (old)/azuredeploy.json": ARM, "legacy (old)/main.bicep": BICEP,
+             "new/azuredeploy.json": ARM, "new/main.bicep": BICEP}
+    code, payload, status, _ = run(tmp_path, files, real_checkov=True, CHECKOV_SKIP_PATHS=r"legacy \(old\)")
+    assert code == 0, status
+    assert scanned(payload) == {"/new/azuredeploy.json", "/new/main.bicep"}
 
 
 @pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")

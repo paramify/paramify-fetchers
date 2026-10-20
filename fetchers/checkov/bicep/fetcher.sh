@@ -15,7 +15,8 @@
 #                        CHECKOV_USE_DEFAULT_SKIP_CHECKS, CHECKOV_SKIP_RESOURCES,
 #                        CHECKOV_SKIP_PATHS, CHECKOV_BICEP_CHECKS,
 #                        CHECKOV_EXTERNAL_CHECKS_DIR, CHECKOV_REPO_ID, CHECKOV_GIT_USERNAME
-# Required tools:        checkov, jq, plus git (git source) or curl + unzip (tfvc source)
+# Required tools:        checkov, jq, plus git (git source) or curl + unzip (tfvc source),
+#                        and python3 when skip_paths is set
 #
 # Exit codes: 0 = at least one check ran and every Bicep/ARM file parsed (findings are evidence);
 #             1 = could not fetch the source / checkov failed / nothing to scan / zero checks ran /
@@ -122,6 +123,26 @@ CHECKS_JSON="$(json_list "${_SPLIT[@]}")"
 split_list "${CHECKOV_SKIP_PATHS:-}"
 SKIP_PATHS=("${_SPLIT[@]}")
 SKIP_PATHS_JSON="$(json_list "${SKIP_PATHS[@]}")"
+
+# checkov reads each skip path as a Python regular expression and its Bicep runner crashes on an
+# invalid one, so check them before fetching anything.
+if [ ${#SKIP_PATHS[@]} -gt 0 ]; then
+    BAD_SKIP_PATH="$(python3 -I -c '
+import re, sys
+for p in sys.argv[1:]:
+    try:
+        re.compile(p)
+    except re.error as e:
+        print("%r is not a valid regular expression (%s)" % (p, e))
+        sys.exit(3)' "${SKIP_PATHS[@]}" 2>&1)"
+    case $? in
+        0) ;;
+        3) report_failure "skip_paths entry $BAD_SKIP_PATH; skip_paths entries are regular expressions, not globs (\\.json\$ rather than *.json)" bad_config
+           exit 1 ;;
+        *) report_failure "could not check skip_paths with python3: $BAD_SKIP_PATH" internal_error
+           exit 1 ;;
+    esac
+fi
 
 # --- skip-checks: the shipped defaults (unless use_default_skip_checks is false) + CHECKOV_SKIP_CHECKS,
 # minus explicitly-requested checks. --skip-check leaves no trace in checkov's output, so it goes in metadata.
