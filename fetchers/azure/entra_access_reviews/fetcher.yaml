@@ -43,7 +43,9 @@ secrets: []          # DefaultAzureCredential only — see _categories/azure.yam
 # Microsoft Graph application permission (admin consent): AccessReview.Read.All. Organization.Read.All
 # is optional, for the tenant name. The tenant needs Entra ID P2 or ID Governance; without it access
 # reviews are reported unavailable and the run still succeeds. Reviews of Azure resource roles are kept
-# by Azure Resource Manager, not Graph, and are not read here.
+# by Azure Resource Manager, not Graph, and are not read here. The licence refusal is recognised by
+# "licens" in Graph's message, borrowed from PIM; no Microsoft page documents the access-review wording,
+# so it is unconfirmed (a miss reads as a failed read, not as no reviews).
 
 ksis:
   - KSI-IAM-AAM
@@ -62,9 +64,9 @@ evidence_set:
     - Microsoft Graph GET /organization — the tenant's name and domain
     - Microsoft Graph GET /identityGovernance/accessReviews/definitions — every review series and its settings
     - Microsoft Graph GET /identityGovernance/accessReviews/definitions/{id}/instances (per series) — each run of the series and its status
-    - Microsoft Graph GET /identityGovernance/accessReviews/definitions/{id}/instances/{id}/decisions (per instance in each active series' latest completed cycle) — what reviewers decided and whether it was applied
+    - Microsoft Graph GET /identityGovernance/accessReviews/definitions/{id}/instances/{id}/decisions (per run in each active series' latest completed cycle; active means the series' status is not Completed, AutoReviewed or Applied, and the latest completed cycle is the most recent set of runs that started on the same day and have all ended, one run per group for a series over many groups) — what reviewers decided and whether it was applied
 
-    Output: azure_entra_access_reviews_<tenant>.json — every access review series with what it reviews, its schedule, default decision, auto-apply setting and reviewers, and the decisions of its latest completed cycle.
+    Output: azure_entra_access_reviews_<tenant>.json — every access review series with what it reviews, its schedule, default decision, auto-apply setting and reviewers, and the decisions of its latest completed cycle. Reviews of Azure resource roles aren't read: Azure Resource Manager keeps them, not Graph.
 
     Summary fields:
 
@@ -72,27 +74,27 @@ evidence_set:
     - access_reviews_available — True if the tenant's access reviews were read; false if Graph refused a read because the tenant has no Entra ID P2 or ID Governance licence (the reads that succeeded stay in the results); null if a read failed
     - collection_complete — True if every review series, its instances and the decisions of each active series' latest completed cycle were read; false if any read failed or was refused for the licence, and every other field except access_reviews_available is left out
     - review_definitions — Number of access review series (definitions), active or ended
-    - active_review_definitions — Number of active review series (active means its status is not Completed, AutoReviewed or Applied, so it is still scheduled or running; a stopped or finished series reads Completed)
+    - active_review_definitions — Number of active review series
     - active_definitions_by_scope_type — Number of active review series for each kind of access reviewed, read from the series' scope:
-      - group_membership (members of one or more groups or Teams)
+      - group_membership (members of one or more groups or Teams, including membership managed by PIM for Groups)
       - application (users and groups assigned to an app)
       - entra_role (holders of an Entra directory role)
       - access_package (access package assignments)
       - other (any other scope, such as every user in the tenant)
 
     Is every active review monthly, deny-by-default and applied automatically?
-    - active_definitions_recurring_at_least_monthly — Number of active review series that recur every 31 days or more often (daily, weekly or monthly)
-    - active_definitions_default_deny — Number of active review series where a review left unanswered is denied (default decision enabled and set to Deny)
+    - active_definitions_recurring_at_least_monthly — Number of active review series that recur every 31 days or more often
+    - active_definitions_default_deny — Number of active review series where a review left unanswered is denied (default decision enabled and set to Deny; a Recommendation default doesn't count)
     - active_definitions_auto_applying — Number of active review series that apply their decisions automatically when a run ends, so denied access is removed without an admin
-    - active_definitions_monthly_auto_removal — Number of active review series with monthly auto-removal (monthly auto-removal means the series recurs at least monthly, denies unanswered reviews and applies decisions automatically)
+    - active_definitions_monthly_auto_removal — Number of active review series with monthly auto-removal (monthly auto-removal means the series recurs at least monthly, denies unanswered reviews and applies decisions automatically; an active one-time review counts as not monthly, by design)
     - monthly_auto_removal_percentage — Percentage of active review series with monthly auto-removal = active_definitions_monthly_auto_removal / active_review_definitions × 100 (a whole number, 0–100); 0 when active_review_definitions is 0
     - active_definitions_without_monthly_auto_removal — List of active review series names without monthly auto-removal
     - all_active_definitions_monthly_auto_removal — True if every active review series has monthly auto-removal; false if any doesn't, or none is active
-    - active_self_review_definitions — List of active review series names where users review their own access (no reviewers named)
+    - active_self_review_definitions — List of active review series names where users review their own access (no reviewers named on the series or on any of its stages)
 
     Are the reviews running on schedule?
     - active_recurring_definitions_without_completed_cycle — List of active recurring review series names with no completed run yet (a run is completed when its status is Completed, AutoReviewed, Applying or Applied)
-    - max_days_since_last_completed_cycle — Days: the longest time since any active recurring review series' latest completed cycle ended (a cycle is every run of the series that ended on the same day; a series over many groups has one run per group); null if none has completed a cycle
+    - max_days_since_last_completed_cycle — Days: the longest time since any active recurring review series' latest completed cycle ended; null if none has completed a cycle
 
     What did the last cycle decide, and was it applied?
     - last_cycle_decisions — Number of review decisions in each active review series' latest completed cycle
@@ -102,4 +104,4 @@ evidence_set:
       - NotReviewed (no one answered and no default decision was applied)
       - DontKnow (the reviewer answered that they don't know)
     - last_cycle_denied_decisions_applied — Number of latest-cycle Deny decisions whose removal was applied (apply result AppliedSuccessfully, or AppliedSuccessfullyButObjectNotFound when the access was already gone)
-    - last_cycle_denied_decisions_not_applied — Number of latest-cycle Deny decisions not applied, either not yet or because applying failed (any other apply result, such as New or AppliedWithUnknownFailure)
+    - last_cycle_denied_decisions_not_applied — Number of latest-cycle Deny decisions not applied, either not yet or because applying failed (any other apply result, such as New, ApplyNotSupported or AppliedWithUnknownFailure)

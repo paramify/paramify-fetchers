@@ -2747,10 +2747,19 @@ def test_graph_access_review_builders_present() -> None:
     for part in ("identity_governance", "access_reviews", "definitions"):
         builder = getattr(builder, part, None)
         assert builder is not None, "GraphServiceClient.identity_governance.access_reviews.definitions is gone (azure/entra_access_reviews)"
+    lists = [builder]
     for step in ("by_access_review_schedule_definition_id", "instances", "by_access_review_instance_id", "decisions"):
         attr = getattr(type(builder), step, None)
         assert attr is not None, f"{type(builder).__name__}.{step} is gone (azure/entra_access_reviews)"
         builder = attr(builder, "x") if callable(attr) and step.startswith("by_") else getattr(builder, step)
+        if not step.startswith("by_"):
+            lists.append(builder)
+    # Each list is paged with $top/$skip when Graph sends a full page without a nextLink.
+    for listed in lists:
+        query = getattr(type(listed), f"{type(listed).__name__}GetQueryParameters", None)
+        assert query is not None and {"top", "skip"} <= set(inspect.signature(query).parameters), (
+            f"{type(listed).__name__} lost $top/$skip (azure/entra_access_reviews)"
+        )
 
 
 def test_graph_access_review_models_present() -> None:

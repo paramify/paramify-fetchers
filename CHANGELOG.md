@@ -15,9 +15,12 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_entra_access_reviews`** (`EVD-AZURE-ENTRA-ACCESS-REVIEWS`) — Microsoft
   Entra ID access reviews over Microsoft Graph: every review series with what it
   reviews (group membership, app assignment, directory role, access package), its
-  recurrence, default decision, auto-apply setting and reviewers, each run's
-  status, and the decisions of each active series' latest completed cycle with
-  whether each denial was applied. The summary says whether every active series
+  recurrence, default decision, auto-apply setting and reviewers (per stage for a
+  multi-stage series), each run's status, and the decisions of each active
+  series' latest completed cycle with whether each denial was applied. A cycle is
+  the runs that started on the same day, taken once all have ended. Lists follow
+  `@odata.nextLink`, and ask for the next page with `$top`/`$skip` when Graph
+  sends a full page without one. The summary says whether every active series
   runs at least monthly, denies unanswered reviews and applies its decisions
   automatically, how long since each last finished a cycle, and how many denials
   were applied. A tenant without Entra ID P2 or ID Governance reads

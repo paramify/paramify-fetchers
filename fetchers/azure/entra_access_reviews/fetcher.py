@@ -42,9 +42,15 @@ PERIOD_DAYS = {"daily": 1, "weekly": 7, "absoluteMonthly": 30, "relativeMonthly"
 APPLIED = {"AppliedSuccessfully", "AppliedSuccessfullyButObjectNotFound"}
 DECISIONS = ("Approve", "Deny", "NotReviewed", "DontKnow")
 SCOPE_TYPES = ("group_membership", "application", "entra_role", "access_package", "other")
-DECISION_CONCURRENCY = 8
+READ_CONCURRENCY = 8
+# Graph pages these lists 100 at a time and documents $top/$skip; a full page with no nextLink means ask for more.
+PAGE_SIZE = 100
+PAGE_LIMIT = 1000
 
 logger = logging.getLogger(NAME)
+# The probe that sorts licence refusals from failures logs nothing itself; _read logs what it decides.
+_probe_log = logging.getLogger(f"{NAME}.probe")
+_probe_log.disabled = True
 
 
 # --- projections: the only code here that touches a Graph model ---
@@ -103,7 +109,16 @@ def project_definition(definition) -> Dict[str, Any]:
         "instance_enumeration_scope": project_query(getattr(definition, "instance_enumeration_scope", None)),
         "reviewers": [project_query(r) for r in getattr(definition, "reviewers", None) or []],
         "fallback_reviewers": [project_query(r) for r in getattr(definition, "fallback_reviewers", None) or []],
-        "multi_stage": bool(getattr(definition, "stage_settings", None)),
+        "stages": [
+            {
+                "stage_id": graph_attr(stage, "stage_id"),
+                "depends_on": graph_attr(stage, "depends_on") or [],
+                "duration_in_days": graph_attr(stage, "duration_in_days"),
+                "reviewers": [project_query(r) for r in getattr(stage, "reviewers", None) or []],
+                "fallback_reviewers": [project_query(r) for r in getattr(stage, "fallback_reviewers", None) or []],
+            }
+            for stage in getattr(definition, "stage_settings", None) or []
+        ],
         "settings": None if settings is None else {
             "recurrence": project_recurrence(getattr(settings, "recurrence", None)),
             "instance_duration_in_days": graph_attr(settings, "instance_duration_in_days"),
@@ -178,7 +193,9 @@ def scope_type(definition: Dict[str, Any]) -> str:
         return "entra_role"
     if "accesspackageassignments" in text or "entitlementmanagement" in text:
         return "access_package"
-    if "/serviceprincipals/" in text and "approleassignedto" in text:
+    if "/privilegedaccess/group/" in text:
+        return "group_membership"
+    if "/serviceprincipals/" in text:
         return "application"
     if "/groups" in text or "/teams" in text:
         return "group_membership"
@@ -202,12 +219,17 @@ def _parse(value: Optional[str]) -> Optional[datetime]:
 
 
 def last_cycle(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """The ended instances of the most recent cycle; a series over many groups has one instance per group per cycle."""
-    ended = [i for i in instances if i.get("status") in ENDED_INSTANCE and _parse(i.get("end_date_time"))]
-    if not ended:
-        return []
-    latest = max(_parse(i["end_date_time"]).date() for i in ended)
-    return sorted((i for i in ended if _parse(i["end_date_time"]).date() == latest), key=lambda i: i.get("id") or "")
+    """The latest cycle whose runs have all ended; a cycle is the runs that started the same day, one per group."""
+    cycles: Dict[Any, List[Dict[str, Any]]] = {}
+    for instance in instances:
+        start = _parse(instance.get("start_date_time"))
+        if start is not None:
+            cycles.setdefault(start.date(), []).append(instance)
+    for day in sorted(cycles, reverse=True):
+        runs = cycles[day]
+        if all(i.get("status") in ENDED_INSTANCE and _parse(i.get("end_date_time")) for i in runs):
+            return sorted(runs, key=lambda i: i.get("id") or "")
+    return []
 
 
 def decision_counts(decisions: Optional[List[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
@@ -251,7 +273,8 @@ def definition_record(definition: Dict[str, Any], read_instances: Optional[List[
         "default_decision_deny": default_deny,
         "auto_applies_decisions": auto_apply,
         "monthly_auto_removal": at_least_monthly and default_deny and auto_apply,
-        "self_review": not definition.get("reviewers"),
+        # A multi-stage series names its reviewers per stage, and Graph ignores the top-level list then.
+        "self_review": not definition.get("reviewers") and not any(st["reviewers"] for st in definition.get("stages") or []),
         "instances_read": None if read_instances is None else len(instances),
         "instances_in_progress": sum(1 for i in instances if i.get("status") not in ENDED_INSTANCE),
         "last_completed_cycle_end": None if latest is None else latest["end_date_time"],
@@ -323,15 +346,41 @@ def build(definitions, instances, decisions, unlicensed, now: datetime) -> tuple
 
 # --- collection (lazy msgraph imports) ---
 
+def _query(builder, **params):
+    from kiota_abstractions.base_request_configuration import RequestConfiguration
+
+    parameters = getattr(type(builder), f"{type(builder).__name__}GetQueryParameters")
+    return RequestConfiguration(query_parameters=parameters(**params))
+
+
+async def _page(probe: Collector, operation: str, builder) -> List[Any]:
+    """Every item: nextLinks are followed, and a full page without one asks for the next with $skip."""
+    items: List[Any] = []
+    seen: set = set()
+    for page in range(PAGE_LIMIT):
+        batch = await paginate(probe, operation, builder, _query(builder, top=PAGE_SIZE, skip=page * PAGE_SIZE))
+        ids = [getattr(i, "id", None) for i in batch]
+        if seen.intersection(i for i in ids if i):
+            probe.record(operation, RuntimeError("$skip returned items already read; refusing to keep paging"))
+            break
+        seen.update(i for i in ids if i)
+        items.extend(batch)
+        if probe.failures or len(batch) != PAGE_SIZE:
+            break
+    return items
+
+
 async def _read(collector: Collector, unlicensed: List[str], operation: str, builder) -> Optional[List[Any]]:
-    """`paginate`, with a licence refusal noted rather than recorded; None when the read failed or was refused."""
-    probe = Collector(logger)
-    items = await paginate(probe, operation, builder)
+    """`_page`, with a licence refusal noted rather than recorded; None when the read failed or was refused."""
+    probe = Collector(_probe_log)
+    items = await _page(probe, operation, builder)
     for failure in probe.failures:
         if any(m in (failure.get("message") or "").lower() for m in UNLICENSED_MARKERS):
             unlicensed.append(f"{operation}: {failure.get('message')}")
+            logger.info("Access reviews unavailable: %s (%s)", operation, failure.get("message"))
         else:
             collector.failures.append(failure)
+            logger.error("API call failed: %s (%s: %s)", operation, failure.get("type"), failure.get("message"))
     return None if probe.failures else items
 
 
@@ -347,14 +396,17 @@ async def _collect(collector: Collector, cred) -> tuple:
         if not definitions or unlicensed:
             return tenant, definitions, instances, decisions, unlicensed
 
-        for d in definitions:
-            items = await _read(
-                collector, unlicensed, f"graph.identityGovernance.accessReviews.definitions.instances.get ({d['id']})",
-                root.by_access_review_schedule_definition_id(d["id"]).instances,
-            )
-            instances[d["id"]] = None if items is None else [project_instance(i) for i in items]
+        gate = asyncio.Semaphore(READ_CONCURRENCY)
 
-        gate = asyncio.Semaphore(DECISION_CONCURRENCY)
+        async def read_instances(definition_id: str):
+            async with gate:
+                items = await _read(
+                    collector, unlicensed, f"graph.identityGovernance.accessReviews.definitions.instances.get ({definition_id})",
+                    root.by_access_review_schedule_definition_id(definition_id).instances,
+                )
+            instances[definition_id] = None if items is None else [project_instance(i) for i in items]
+
+        await asyncio.gather(*(read_instances(d["id"]) for d in definitions))
 
         async def read_decisions(definition_id: str, instance_id: str):
             async with gate:
@@ -390,7 +442,7 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
     if cred is None:
         tenant: Dict[str, Any] = {"tenant_source": "unresolved"}
-        results: Dict[str, Any] = {}
+        results: Dict[str, Any] = {"access_reviews_available": None, "review_definitions": None}
         summary: Dict[str, Any] = {"access_reviews_available": None, "collection_complete": False}
     else:
         tenant, definitions, instances, decisions, unlicensed = asyncio.run(_collect(collector, cred))

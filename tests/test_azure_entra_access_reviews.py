@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace as ns
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER = REPO_ROOT / "fetchers" / "azure" / "entra_access_reviews" / "fetcher.py"
 
@@ -18,6 +20,12 @@ ar = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ar)
 
 NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def plain_queries(monkeypatch):
+    """The fakes below take the $top/$skip a real request builder would."""
+    monkeypatch.setattr(ar, "_query", lambda builder, **params: ns(query_parameters=ns(**params)))
 GROUP_QUERY = "/groups/g-finance/transitiveMembers"
 
 
@@ -27,7 +35,7 @@ def _scope(query, odata="accessReviewQueryScope", **extra):
 
 def _definition(def_id, name, *, pattern="absoluteMonthly", interval=1, default_enabled=True, default="Deny",
                 auto_apply=True, reviewers=("/users/u-owner",), query=GROUP_QUERY, status="InProgress",
-                enumeration=None):
+                enumeration=None, scope=None, stages=None):
     recurrence = None if pattern is None else ns(
         pattern=ns(type=pattern, interval=interval),
         range=ns(type="noEnd", start_date="2026-01-01", end_date=None, number_of_occurrences=0),
@@ -39,11 +47,11 @@ def _definition(def_id, name, *, pattern="absoluteMonthly", interval=1, default_
         created_date_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
         last_modified_date_time=None,
         created_by=ns(user_principal_name="admin@contoso.test", display_name="Admin"),
-        scope=_scope(query),
+        scope=scope or _scope(query),
         instance_enumeration_scope=enumeration,
         reviewers=[_scope(r) for r in reviewers],
         fallback_reviewers=[],
-        stage_settings=None,
+        stage_settings=stages,
         settings=ns(
             recurrence=recurrence,
             instance_duration_in_days=7,
@@ -135,6 +143,11 @@ def test_what_is_reviewed_is_read_from_the_scope():
     assert ar.scope_type(_definition(
         "d", "m", query="./members", enumeration=_scope("/groups?$filter=(groupTypes/any(c:c+eq+'Unified'))"))) == "group_membership"
     assert ar.scope_type(_definition("d", "u", query="/users")) == "other"
+    app = _scope(None, "principalResourceMembershipsScope",
+                 principal_scopes=[_scope("/v1.0/users")], resource_scopes=[_scope("/v1.0/servicePrincipals/sp-1")])
+    assert ar.scope_type(_definition("d", "a2", scope=app)) == "application"
+    pim_groups = "/identityGovernance/privilegedAccess/group/assignmentScheduleInstances/?$filter=(groupId eq 'g1')"
+    assert ar.scope_type(_definition("d", "pg", query=pim_groups)) == "group_membership"
 
 
 def test_self_review_is_flagged():
@@ -142,7 +155,22 @@ def test_self_review_is_flagged():
     assert summary["active_self_review_definitions"] == ["Self review"]
 
 
-def test_the_last_cycle_is_every_instance_that_ended_on_the_latest_day():
+def test_a_multi_stage_series_takes_its_reviewers_from_the_stages():
+    staged = _definition("d-staged", "Two stages", reviewers=(), stages=[
+        ns(stage_id="1", depends_on=[], duration_in_days=3, reviewers=[_scope("./manager")], fallback_reviewers=[]),
+        ns(stage_id="2", depends_on=["1"], duration_in_days=4, reviewers=[_scope("/users/u-owner")], fallback_reviewers=[]),
+    ])
+    self_staged = _definition("d-self-staged", "Stages without reviewers", reviewers=(), stages=[
+        ns(stage_id="1", depends_on=[], duration_in_days=7, reviewers=[], fallback_reviewers=[]),
+    ])
+    results, summary = ar.build([staged, self_staged], {"d-staged": [], "d-self-staged": []}, {}, [], NOW)
+    by_id = {r["id"]: r for r in results["review_definitions"]}
+    assert by_id["d-staged"]["self_review"] is False
+    assert by_id["d-staged"]["stages"][1]["depends_on"] == ["1"]
+    assert summary["active_self_review_definitions"] == ["Stages without reviewers"]
+
+
+def test_the_last_cycle_is_the_latest_start_whose_runs_all_ended():
     instances = [
         _instance("i-aug", "Applied", AUG),
         _instance("i-sep-a", "Applied", SEPT),
@@ -151,6 +179,17 @@ def test_the_last_cycle_is_every_instance_that_ended_on_the_latest_day():
     ]
     assert [i["id"] for i in ar.last_cycle(instances)] == ["i-sep-a", "i-sep-b"]
     assert ar.last_cycle([_instance("i-oct", "InProgress", NOW + timedelta(days=5))]) == []
+
+
+def test_a_run_stopped_early_does_not_make_a_cycle_on_its_own():
+    october = NOW - timedelta(days=2)
+    instances = [
+        _instance("sep-a", "Applied", SEPT),
+        _instance("sep-b", "Applied", SEPT),
+        _instance("oct-a", "Completed", october, start=october - timedelta(days=1)),
+        _instance("oct-b", "InProgress", NOW + timedelta(days=5), start=october - timedelta(days=1)),
+    ]
+    assert [i["id"] for i in ar.last_cycle(instances)] == ["sep-a", "sep-b"]
 
 
 def test_last_cycle_decisions_and_whether_denials_were_applied():
@@ -214,13 +253,18 @@ def test_a_failed_read_gives_no_figures():
 
 
 class _Builder:
+    """A Graph list that pages by $top/$skip and never sends a nextLink."""
+
     def __init__(self, exc=None, items=()):
-        self.exc, self.items = exc, list(items)
+        self.exc, self.items, self.requests = exc, list(items), []
 
     async def get(self, request_configuration=None):
         if self.exc:
             raise self.exc
-        return ns(value=self.items, odata_next_link=None)
+        query = getattr(request_configuration, "query_parameters", None)
+        skip, top = getattr(query, "skip", 0) or 0, getattr(query, "top", None) or len(self.items)
+        self.requests.append(skip)
+        return ns(value=self.items[skip:skip + top], odata_next_link=None)
 
     def with_url(self, url):
         return self
@@ -330,6 +374,7 @@ def test_a_credential_failure_writes_null_figures_and_fails_the_run(tmp_path, mo
     assert ar.main() == 1
     evidence = json.loads((tmp_path / "azure_entra_access_reviews_t-1.json").read_text())
     assert evidence["summary"] == {"access_reviews_available": None, "collection_complete": False}
+    assert evidence["results"] == {"access_reviews_available": None, "review_definitions": None}
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "auth_failed"
 
 
@@ -344,3 +389,92 @@ def test_graph_unauthorized_text_classifies_by_its_status():
     failures = [{"operation": "graph.op", "type": "ODataError",
                  "message": "Attempted to perform an unauthorized operation. (status 403)"}]
     assert ar.classify_failure_code(failures) == "not_authorized"
+
+
+def test_a_full_page_without_a_next_link_is_followed_with_skip():
+    builder = _Builder(items=[ns(id=f"d{n}") for n in range(230)])
+    items, collector, _ = _read(builder)
+    assert collector.ok
+    assert len(items) == 230
+    assert builder.requests == [0, 100, 200]
+
+
+def test_a_list_that_ignores_skip_stops_with_a_failure():
+    class _Echo(_Builder):
+        async def get(self, request_configuration=None):
+            return ns(value=self.items, odata_next_link=None)
+
+    items, collector, _ = _read(_Echo(items=[ns(id=f"d{n}") for n in range(100)]))
+    assert items is None
+    assert "already read" in collector.failures[0]["message"]
+
+
+def _fake_graph(monkeypatch, definitions):
+    client = ns(identity_governance=ns(access_reviews=ns(definitions=definitions)))
+
+    async def fake_with_graph_client(collector, cred, work, default=None):
+        return await work(client)
+
+    async def fake_tenant(collector, client):
+        return {"tenant_id": "t-1", "tenant_source": "env"}
+
+    monkeypatch.setattr(ar, "with_graph_client", fake_with_graph_client)
+    monkeypatch.setattr(ar, "resolve_tenant", fake_tenant)
+
+
+def test_a_licence_refusal_of_the_definitions_stops_the_collection(monkeypatch):
+    graph = _Definitions([], {}, {})
+    graph.exc = _ODataError("The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license. (status 403)")
+    _fake_graph(monkeypatch, graph)
+    collector = ar.Collector(logging.getLogger("test"))
+    _, definitions, instances, decisions, unlicensed = asyncio.run(ar._collect(collector, object()))
+    assert collector.ok
+    assert definitions is None and instances == {} and decisions == {}
+    assert len(unlicensed) == 1
+
+
+def test_a_failed_decisions_read_gives_no_figures(monkeypatch):
+    graph = _Definitions(
+        [_raw_definition("d-active", "InProgress")],
+        {"d-active": [_raw_instance("i-sep", "Applied", SEPT)]},
+        {},
+    )
+    original = graph.by_access_review_schedule_definition_id
+
+    def denied_decisions(def_id):
+        instances = original(def_id).instances
+        instances.by_access_review_instance_id = lambda inst_id: ns(decisions=_Builder(_ODataError(
+            "Insufficient privileges to complete the operation. (status 403)")))
+        return ns(instances=instances)
+
+    graph.by_access_review_schedule_definition_id = denied_decisions
+    _fake_graph(monkeypatch, graph)
+    collector = ar.Collector(logging.getLogger("test"))
+    _, definitions, instances, decisions, unlicensed = asyncio.run(ar._collect(collector, object()))
+    assert decisions == {"i-sep": None}
+    assert ar.classify_failure_code(collector.failures) == "not_authorized"
+    _, summary = ar.build(definitions, instances, decisions, unlicensed, NOW)
+    assert summary == {"access_reviews_available": None, "collection_complete": False}
+
+
+def test_main_without_p2_succeeds_with_no_status_file(tmp_path, monkeypatch):
+    graph = _Definitions([], {}, {})
+    graph.exc = _ODataError("The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license. (status 403)")
+    _fake_graph(monkeypatch, graph)
+    monkeypatch.setattr(ar, "credential", lambda: object())
+    monkeypatch.setattr(ar, "load_dotenv", lambda: None)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("AZURE_TENANT_ID", "t-1")
+    monkeypatch.delenv("AZURE_SUBSCRIPTION_ID", raising=False)
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+
+    assert ar.main() == 0
+    assert not (tmp_path / "status.json").exists()
+    evidence = json.loads((tmp_path / "azure_entra_access_reviews_t-1.json").read_text())
+    assert evidence["summary"] == {"access_reviews_available": False, "collection_complete": False}
+
+
+@pytest.mark.parametrize("status, code", [(429, "rate_limited"), (503, "target_unreachable")])
+def test_graph_throttling_and_outages_classify_by_status(status, code):
+    failures = [{"operation": "graph.op", "type": "ODataError", "message": f"Service unavailable (status {status})"}]
+    assert ar.classify_failure_code(failures) == code
