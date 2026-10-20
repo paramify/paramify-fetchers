@@ -163,6 +163,12 @@ def run(tmp_path, files, checkov_report=None, real_checkov=False, tfvc=None, fet
     return proc.returncode, payload, status, tmp_path
 
 
+def flag_values(tmp, flag):
+    """The values checkov was given as flag=value, in order."""
+    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
+    return [a[len(flag) + 1:] for a in argv if a.startswith(flag + "=")]
+
+
 @pytest.fixture(autouse=True)
 def _require_tools():
     for tool in ("bash", "jq", "unzip"):
@@ -324,8 +330,7 @@ def test_effective_skip_list_is_recorded(tmp_path):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
                                 CHECKOV_SKIP_CHECKS="CKV_AZURE_35, CKV_AZURE_35,CKV_AZURE_33", CHECKOV_BICEP_CHECKS="CKV_AZURE_33")
     assert code == 0
-    args = (tmp / "log" / "checkov.args").read_text().split()
-    assert args[args.index("--skip-check") + 1] == "CKV_AZURE_35"
+    assert flag_values(tmp, "--skip-check") == ["CKV_AZURE_35"]
     assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_35"]
     assert payload["metadata"]["checks"] == ["CKV_AZURE_33"]
     assert payload["metadata"]["default_skip_checks_applied"] is True
@@ -336,8 +341,7 @@ def test_skip_path_with_spaces_is_one_argument(tmp_path):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
                                 CHECKOV_SKIP_PATHS=" My Templates/legacy , ,other ")
     assert code == 0
-    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
-    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--skip-path"] == ["My Templates/legacy", "other"]
+    assert flag_values(tmp, "--skip-path") == ["My Templates/legacy", "other"]
     assert payload["metadata"]["skip_paths"] == ["My Templates/legacy", "other"]
 
 
@@ -350,8 +354,7 @@ def test_skip_paths_split_on_newlines_too(tmp_path, raw, expected):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
                                 CHECKOV_SKIP_PATHS=raw)
     assert code == 0
-    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
-    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--skip-path"] == expected
+    assert flag_values(tmp, "--skip-path") == expected
     assert payload["metadata"]["skip_paths"] == expected
 
 
@@ -360,9 +363,8 @@ def test_check_allowlist_is_trimmed_and_still_overrides_skips(tmp_path):
                                 CHECKOV_BICEP_CHECKS="CKV_AZURE_3, CKV_AZURE_44,",
                                 CHECKOV_SKIP_CHECKS="CKV_AZURE_44,\n CKV_AZURE_35")
     assert code == 0
-    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
-    assert argv[argv.index("--check") + 1] == "CKV_AZURE_3,CKV_AZURE_44"
-    assert argv[argv.index("--skip-check") + 1] == "CKV_AZURE_35"
+    assert flag_values(tmp, "--check") == ["CKV_AZURE_3,CKV_AZURE_44"]
+    assert flag_values(tmp, "--skip-check") == ["CKV_AZURE_35"]
     assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_35"]
     assert payload["metadata"]["checks"] == ["CKV_AZURE_3", "CKV_AZURE_44"]
 
@@ -376,17 +378,25 @@ def test_check_allowlist_is_trimmed_and_still_overrides_skips(tmp_path):
 def test_check_ids_separated_by_whitespace(tmp_path, env, flag, expected):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]), **env)
     assert code == 0
-    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
-    assert argv[argv.index(flag) + 1] == expected
+    assert flag_values(tmp, flag) == [expected]
     assert payload["metadata"]["skip_checks" if flag == "--skip-check" else "checks"] == expected.split(",")
+
+
+def test_values_starting_with_a_dash_are_not_read_as_options(tmp_path):
+    code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
+                                CHECKOV_SKIP_PATHS="-legacy", CHECKOV_REPO_ID="-infra")
+    assert code == 0
+    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
+    assert "--skip-path=-legacy" in argv and "--repo-id=-infra" in argv
+    assert "-legacy" not in argv and "-infra" not in argv
+    assert payload["metadata"]["skip_paths"] == ["-legacy"]
 
 
 def test_skip_paths_are_recorded(tmp_path):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
                                 CHECKOV_SKIP_PATHS="modules/new-syntax.bicep, legacy")
     assert code == 0
-    args = (tmp / "log" / "checkov.args").read_text().split()
-    assert [args[i + 1] for i, a in enumerate(args) if a == "--skip-path"] == ["modules/new-syntax.bicep", "legacy"]
+    assert flag_values(tmp, "--skip-path") == ["modules/new-syntax.bicep", "legacy"]
     assert payload["metadata"]["skip_paths"] == ["modules/new-syntax.bicep", "legacy"]
 
 
@@ -405,9 +415,8 @@ def test_default_skip_checks_file_is_split_like_skip_checks(tmp_path):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
                                 fetcher=fetcher, CHECKOV_BICEP_CHECKS="CKV_AZURE_44", CHECKOV_SKIP_CHECKS="CKV_AZURE_36")
     assert code == 0
-    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
     expected = ["CKV_AZURE_3", "CKV_AZURE_35", "CKV_AZURE_33", "CKV_AZURE_59", "CKV_AZURE_36"]
-    assert argv[argv.index("--skip-check") + 1] == ",".join(expected)
+    assert flag_values(tmp, "--skip-check") == [",".join(expected)]
     assert payload["metadata"]["skip_checks"] == expected
 
 
@@ -415,8 +424,7 @@ def test_default_skip_checks_can_be_turned_off(tmp_path):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
                                 CHECKOV_USE_DEFAULT_SKIP_CHECKS="false")
     assert code == 0
-    assert "--skip-check" not in (tmp / "log" / "checkov.args").read_text().split()
-    assert "--check" not in (tmp / "log" / "checkov.args").read_text().split()
+    assert flag_values(tmp, "--skip-check") == flag_values(tmp, "--check") == []
     assert payload["metadata"]["skip_checks"] == []
     assert payload["metadata"]["checks"] == []
     assert payload["metadata"]["default_skip_checks_applied"] is False
@@ -452,8 +460,7 @@ def test_requested_branch_recorded(tmp_path):
     assert code == 0
     meta = payload["metadata"]
     assert (meta["branch"], meta["requested_branch"], meta["branch_fallback"]) == ("main", "main", False)
-    args = (tmp / "log" / "checkov.args").read_text().split()
-    assert args[args.index("--branch") + 1] == "main"
+    assert flag_values(tmp, "--branch") == ["main"]
 
 
 def test_branch_fallback_records_the_branch_that_was_scanned(tmp_path):
@@ -462,8 +469,7 @@ def test_branch_fallback_records_the_branch_that_was_scanned(tmp_path):
     assert code == 0
     meta = payload["metadata"]
     assert (meta["branch"], meta["requested_branch"], meta["branch_fallback"]) == ("trunk", "release-9", True)
-    args = (tmp / "log" / "checkov.args").read_text().split()
-    assert args[args.index("--branch") + 1] == "trunk"
+    assert flag_values(tmp, "--branch") == ["trunk"]
 
 
 def test_clone_failure(tmp_path):
@@ -567,7 +573,7 @@ def test_tfvc_latest_pins_the_newest_changeset_and_records_it(tmp_path):
     assert out.name == "checkov_bicep_dev.azure.com_contoso_Infra___Infra_ARM_Templates.json"
     assert PAT not in out.read_text()
     assert not (tmp / "log" / "git.log").exists()
-    assert "--branch" not in (tmp / "log" / "checkov.args").read_text().split()
+    assert not [a for a in (tmp / "log" / "checkov.argv").read_text().splitlines() if a.startswith("--branch")]
 
 
 def test_tfvc_named_changeset(tmp_path):
@@ -676,14 +682,23 @@ def test_real_checkov_scans_a_tfvc_download(tmp_path):
     assert payload["metadata"]["changeset"] == 4217
 
 
+def scanned(payload):
+    r = payload["results"]
+    return {c["file_path"] for k in ("passed_checks", "failed_checks", "skipped_checks") for c in r[k]}
+
+
+@pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
+def test_real_checkov_takes_values_starting_with_a_dash(tmp_path):
+    files = {"x-legacy/azuredeploy.json": ARM, "x-legacy/main.bicep": BICEP, "keep/azuredeploy.json": ARM, "keep/main.bicep": BICEP}
+    code, payload, status, _ = run(tmp_path, files, real_checkov=True, CHECKOV_SKIP_PATHS="-legacy", CHECKOV_REPO_ID="-infra")
+    assert code == 0, status
+    assert scanned(payload) == {"/keep/azuredeploy.json", "/keep/main.bicep"}
+
+
 @pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
 def test_real_checkov_skips_a_path_with_spaces(tmp_path):
     # Split on its space, the path would become "My" and "Templates/legacy", and the second skips both folders.
     files = {"My Templates/legacy/azuredeploy.json": ARM, "Templates/legacy/azuredeploy.json": ARM}
-
-    def scanned(payload):
-        r = payload["results"]
-        return {c["file_path"] for k in ("passed_checks", "failed_checks", "skipped_checks") for c in r[k]}
 
     (tmp_path / "all").mkdir()
     code, payload, status, _ = run(tmp_path / "all", files, real_checkov=True)

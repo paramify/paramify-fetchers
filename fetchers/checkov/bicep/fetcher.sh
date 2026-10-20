@@ -231,21 +231,22 @@ if [ "$BICEP_FILES" -eq 0 ] && [ "$ARM_FILES" -eq 0 ]; then
 fi
 
 # --- build checkov args ---
-# An array, so a value with spaces (a skip path, the checks dir) stays one argument.
+# An array, so a value with spaces (a skip path, the checks dir) stays one argument, and configured
+# values use --flag=value, so one starting with "-" is not read as an option.
 # No --quiet: it strips passed_checks, skipped_checks and parsing_errors from the JSON.
-CHECKOV_ARGS=(--framework "bicep,arm" --output json --repo-id "$REPO_ID")
-[ "$SOURCE_TYPE" = "git" ]                && CHECKOV_ARGS+=(--branch "$SCANNED_BRANCH")
+CHECKOV_ARGS=(--framework "bicep,arm" --output json "--repo-id=$REPO_ID")
+[ "$SOURCE_TYPE" = "git" ]                && CHECKOV_ARGS+=("--branch=$SCANNED_BRANCH")
 [ "${CHECKOV_SOFT_FAIL:-true}" = "true" ] && CHECKOV_ARGS+=(--soft-fail)
 [ "${CHECKOV_COMPACT:-true}" = "true" ]   && CHECKOV_ARGS+=(--compact)
-[ -n "$REQUESTED_CHECKS" ]               && CHECKOV_ARGS+=(--check "$REQUESTED_CHECKS")
+[ -n "$REQUESTED_CHECKS" ]               && CHECKOV_ARGS+=("--check=$REQUESTED_CHECKS")
 if [ -n "${CHECKOV_EXTERNAL_CHECKS_DIR:-}" ] && [ -d "$CHECKOV_EXTERNAL_CHECKS_DIR" ]; then
-    CHECKOV_ARGS+=(--external-checks-dir "$CHECKOV_EXTERNAL_CHECKS_DIR")
+    CHECKOV_ARGS+=("--external-checks-dir=$CHECKOV_EXTERNAL_CHECKS_DIR")
 fi
 
-[ -n "$SKIP_CHECKS_LIST" ] && CHECKOV_ARGS+=(--skip-check "$SKIP_CHECKS_LIST")
+[ -n "$SKIP_CHECKS_LIST" ] && CHECKOV_ARGS+=("--skip-check=$SKIP_CHECKS_LIST")
 
 # One --skip-path per split_list entry; metadata.skip_paths is the same list.
-for p in "${SKIP_PATHS[@]}"; do CHECKOV_ARGS+=(--skip-path "$p"); done
+for p in "${SKIP_PATHS[@]}"; do CHECKOV_ARGS+=("--skip-path=$p"); done
 
 # --- run checkov ---
 RAW="$(mktemp)"; ERR="$(mktemp)"; NORM="$(mktemp)"
