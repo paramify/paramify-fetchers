@@ -94,9 +94,12 @@ evidence_set:
     counts toward policy_non_compliant. Each query stops at 1,000 pages (1,000,000
     rows), a guard in the fetcher rather than a documented Resource Graph limit. A
     query past it is a collection failure, never a truncated result: the run exits
-    1, with that service's counts null and the error in metadata.api_failures.
-    PolicyResources, one state per resource, assignment and policy, is the query a
-    large subscription can push past it. A query that long will usually hit the
-    runner's default 600-second timeout first (exit 124, no evidence file).
-    KSI-CNA-EIS and KSI-SVC-EIS are supporting evidence: Defender's coverage and
-    unhealthy findings, not the enforcement or remediation itself.
+    1 with the error in metadata.api_failures. A failed SecurityResources or
+    PolicyResources query leaves that service's counts null; a failed Resources
+    query leaves the inventory empty, so its totals read 0 and both services'
+    counts are null. PolicyResources, one state per resource, assignment and
+    policy, is the query a large subscription can push past the guard. A query that
+    long will usually hit the runner's default 600-second timeout first (exit 124,
+    no evidence file). KSI-CNA-EIS and KSI-SVC-EIS are supporting evidence:
+    Defender's coverage and unhealthy findings, not the enforcement or remediation
+    itself.
