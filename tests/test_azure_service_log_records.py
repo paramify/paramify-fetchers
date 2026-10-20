@@ -256,3 +256,107 @@ def test_summary_counts():
         "managed_databases": 2, "managed_databases_with_audit_records": 1, "http_log_retention_days": 30,
         "audit_log_retention_days": 90, "dependency_retention_days": None, "log_workspaces_queried": 1,
     }
+
+
+@pytest.mark.parametrize("column", ["succeeded_s", "database_name_s", "action_name_s", "server_principal_name_s",
+                                    "client_ip_s"])
+def test_audit_columns_are_read_only_through_column_ifexists(column):
+    for kql in (slr.AUDIT_QUERY, slr.PRINCIPAL_QUERY):
+        assert kql.count(column) == kql.count(f"column_ifexists('{column}', '')") == 1
+
+
+class _MissingTable(_Client):
+    def query(self, customer_id, kql, timespan):
+        table = kql.split(" ")[0]
+        if table == "AppDependencies":
+            raise azure_rest.QueryError("(400) BadArgumentError",
+                                        "'where' operator: Failed to resolve table expression named 'AppDependencies'")
+        return super().query(customer_id, kql, timespan)
+
+
+def test_a_listed_table_without_records_reads_as_no_rows():
+    collector = Collector(slr.logger)
+    out = slr.read_workspace(_MissingTable({t: "Analytics" for t in ("AppServiceHTTPLogs", "AzureDiagnostics",
+                                                                     "AppDependencies")}), LAW, "s1", 7, 10, collector)
+    assert (out["status"], out["dependencies"], collector.ok) == (slr.WS_QUERIED, [], True)
+    assert "AppDependencies" in out["read_tables"]
+
+
+class _QueryFails(_Client):
+    def query(self, customer_id, kql, timespan):
+        raise azure_rest.QueryError("(500) InternalServerError", "boom")
+
+
+def test_a_query_failure_after_the_tables_were_read_fails_the_run_and_keeps_the_tables():
+    collector = Collector(slr.logger)
+    out = slr.read_workspace(_QueryFails({"AzureDiagnostics": "Analytics"}), LAW, "s1", 7, 10, collector)
+    assert (out["status"], out["read_tables"], collector.ok) == (slr.WS_ERROR, [], False)
+    assert [t["name"] for t in out["tables"] if t["exists"]] == ["AzureDiagnostics"]
+
+
+@pytest.mark.parametrize("error, status", [
+    (azure_rest.QueryError("(404) WorkspaceNotFoundError", "The workspace could not be found"), slr.WS_NOT_FOUND),
+    (azure_rest.ArmError(404, "SubscriptionNotFound", "The subscription 's2' could not be found."),
+     slr.WS_NOT_AUTHORIZED),
+    (azure_rest.QueryError("(400) BadArgumentError", "Failed to resolve scalar expression named 'x'"), slr.WS_ERROR),
+])
+def test_ws_status(error, status):
+    assert slr.ws_status(error) == status
+
+
+class _Subscription:
+    """ARM and query answers for one subscription: an app with a slot and a managed instance sharing one workspace."""
+
+    def __init__(self, failing_settings=()):
+        self.failing_settings, self.gets, self.queries = set(failing_settings), [], []
+
+    def list(self, path, api_version):
+        if path.endswith("/Microsoft.Web/sites"):
+            return [{"id": SITE, "name": "app1", "kind": "app"}]
+        if path == f"{SITE}/slots":
+            return [{"id": SLOT, "name": "app1/staging", "kind": "app"}]
+        if path.endswith("/Microsoft.Sql/managedInstances"):
+            return [{"id": MI, "name": "mi1"}]
+        if path == f"{MI}/databases":
+            return [{"name": "Orders"}]
+        resource = path.split("/providers/Microsoft.Insights/")[0]
+        if resource in self.failing_settings:
+            raise azure_rest.ArmError(500, "InternalServerError", "boom")
+        return [setting(group="allLogs")]
+
+    def get(self, path, api_version):
+        self.gets.append(path)
+        if "/tables/" in path:
+            return {"properties": {"plan": "Analytics", "retentionInDays": 30, "totalRetentionInDays": 365}}
+        return {"properties": {"customerId": "cust"}}
+
+    def query(self, customer_id, kql, timespan):
+        self.queries.append(kql)
+        if kql.startswith("AppServiceHTTPLogs") and "summarize Records" in kql:
+            return [http_row(SITE)]
+        if kql.startswith("AzureDiagnostics") and "by ResourceId = tolower(_ResourceId), Database" in kql:
+            return [audit_row("")]
+        return []
+
+
+def test_collect_reads_slots_and_a_shared_workspace_once():
+    client, collector = _Subscription(), Collector(slr.logger)
+    results, summary = slr.collect(client, "s1", collector)
+    assert collector.ok
+    assert [a["is_slot"] for a in results["apps"]] == [False, True]
+    assert [g for g in client.gets if "/tables/" not in g] == [LAW]
+    assert len(results["workspaces"]) == 1
+    assert {k: summary[k] for k in ("apps", "apps_with_http_log_records", "apps_without_http_log_records",
+                                    "instances_with_audit_records", "managed_databases",
+                                    "http_log_total_retention_days", "audit_log_total_retention_days")} == {
+        "apps": 2, "apps_with_http_log_records": 1, "apps_without_http_log_records": 1,
+        "instances_with_audit_records": 1, "managed_databases": 1,
+        "http_log_total_retention_days": 365, "audit_log_total_retention_days": 365}
+
+
+def test_collect_records_a_diagnostic_settings_failure():
+    collector = Collector(slr.logger)
+    results, summary = slr.collect(_Subscription(failing_settings={SLOT}), "s1", collector)
+    slot = next(a for a in results["apps"] if a["is_slot"])
+    assert (slot["diagnostic_settings_read"], slot["http_logs_exported"], collector.ok) == (False, None, False)
+    assert summary["apps_exporting_http_logs"] == 1

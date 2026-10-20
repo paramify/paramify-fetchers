@@ -14,11 +14,13 @@ from azure_rest import (  # noqa: E402
     DIAG_API,
     LAW_API,
     ArmError,
+    QueryError,
     dig,
     int_config,
     iso_duration_days,
     parse_time,
     run_subscription,
+    table_missing,
 )
 
 NAME = "azure_service_log_records"
@@ -54,15 +56,21 @@ HTTP_CLIENTS_QUERY = (
     + "| top-nested of ResourceId = tolower(_ResourceId) by Ignore = max(1), "
     "top-nested {sample} of CIp by Requests = count()"
 )
-AUDIT_QUERY = (
+# AzureDiagnostics gains the SQL audit columns only with the first audit event, so each is read through column_ifexists.
+_AUDIT = (
     f"{AUDIT_TABLE} " + _SCOPE + f"| where Category == '{AUDIT_CATEGORY}' "
-    "| summarize Records = count(), LastRecord = max(TimeGenerated), Failed = countif(succeeded_s =~ 'false') "
-    "by ResourceId = tolower(_ResourceId), Database = database_name_s, Action = action_name_s"
+    "| extend Succeeded = tostring(column_ifexists('succeeded_s', '')), "
+    "Database = tostring(column_ifexists('database_name_s', '')), Action = tostring(column_ifexists('action_name_s', '')), "
+    "Principal = tostring(column_ifexists('server_principal_name_s', '')), "
+    "ClientIp = tostring(column_ifexists('client_ip_s', '')) "
+)
+AUDIT_QUERY = (
+    _AUDIT + "| summarize Records = count(), LastRecord = max(TimeGenerated), Failed = countif(Succeeded =~ 'false') "
+    "by ResourceId = tolower(_ResourceId), Database, Action"
 )
 PRINCIPAL_QUERY = (
-    f"{AUDIT_TABLE} " + _SCOPE + f"| where Category == '{AUDIT_CATEGORY}' "
-    "| summarize Records = count(), Failed = countif(succeeded_s =~ 'false'), LastSeen = max(TimeGenerated), "
-    "ClientIps = make_set(client_ip_s, {sample}) by ResourceId = tolower(_ResourceId), Principal = server_principal_name_s"
+    _AUDIT + "| summarize Records = count(), Failed = countif(Succeeded =~ 'false'), LastSeen = max(TimeGenerated), "
+    "ClientIps = make_set(ClientIp, {sample}) by ResourceId = tolower(_ResourceId), Principal"
 )
 DEPENDENCY_QUERY = (
     f"{DEPENDENCY_TABLE} " + _SCOPE
@@ -75,6 +83,7 @@ WS_NOT_AUTHORIZED = "not_authorized"
 WS_NOT_FOUND = "not_found"
 WS_ERROR = "error"
 ANALYTICS = "analytics"
+TOTAL_RETENTION = "total_retention_in_days"
 ENTRA = "entra"
 SQL_LOGIN = "sql_login"
 
@@ -113,6 +122,9 @@ def principal_kind(name) -> str | None:
 def ws_status(exc: BaseException) -> str:
     message = str(exc).lower()
     status = getattr(exc, "status", None)
+    # ARM answers SubscriptionNotFound (404) for a subscription the caller holds no role in.
+    if "subscriptionnotfound" in message:
+        return WS_NOT_AUTHORIZED
     if status == 404 or "resourcenotfound" in message or "workspacenotfound" in message:
         return WS_NOT_FOUND
     if status in (401, 403) or any(
@@ -303,10 +315,10 @@ def dependency_records(workspaces: dict, sample: int) -> list[dict]:
     return out
 
 
-def _min_retention(workspaces: list[dict], table: str):
+def _min_retention(workspaces: list[dict], table: str, key: str = "retention_in_days"):
     days = [
-        t["retention_in_days"] for w in workspaces for t in w.get("tables") or []
-        if t["name"] == table and t["exists"] and isinstance(t["retention_in_days"], int)
+        t[key] for w in workspaces for t in w.get("tables") or []
+        if t["name"] == table and t["exists"] and isinstance(t.get(key), int)
     ]
     return min(days) if days else None
 
@@ -351,6 +363,9 @@ def summarize(apps: list[dict], instances: list[dict], dependencies: list[dict],
         "http_log_retention_days": _min_retention(workspaces, HTTP_TABLE),
         "audit_log_retention_days": _min_retention(workspaces, AUDIT_TABLE),
         "dependency_retention_days": _min_retention(workspaces, DEPENDENCY_TABLE),
+        "http_log_total_retention_days": _min_retention(workspaces, HTTP_TABLE, TOTAL_RETENTION),
+        "audit_log_total_retention_days": _min_retention(workspaces, AUDIT_TABLE, TOTAL_RETENTION),
+        "dependency_total_retention_days": _min_retention(workspaces, DEPENDENCY_TABLE, TOTAL_RETENTION),
     }
 
 
@@ -362,6 +377,16 @@ def _optional_table(client, workspace_id: str, table: str):
     except ArmError as exc:
         if exc.status == 404:
             return None
+        raise
+
+
+def _query(client, customer_id: str, table: str, kql: str, timespan: str) -> list:
+    """A table the tables API lists but no record ever reached answers 'Failed to resolve table': no rows."""
+    try:
+        return client.query(customer_id, kql, timespan)
+    except QueryError as exc:
+        if table_missing(exc, table):
+            return []
         raise
 
 
@@ -384,7 +409,7 @@ def read_workspace(client, workspace_id: str, subscription_id: str, days: int, s
             (AUDIT_TABLE, "principals", PRINCIPAL_QUERY), (DEPENDENCY_TABLE, "dependencies", DEPENDENCY_QUERY),
         )
         for table, key, kql in queries:
-            out[key] = client.query(customer_id, kql.format(**scope), timespan) if table in ready else []
+            out[key] = _query(client, customer_id, table, kql.format(**scope), timespan) if table in ready else []
         out["read_tables"] = sorted(t["name"] for t in out["tables"] if readable(t))
     except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
         status = ws_status(exc)

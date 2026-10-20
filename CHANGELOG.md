@@ -18,7 +18,8 @@ schemas and the `paramify` CLI — not the internal code.
   over the lookback, the last one, status classes, hosts and top client IPs; per
   managed instance, the SQLSecurityAuditEvents that arrived, actions, events per
   database, and the connecting principals split into Entra principals and SQL
-  logins; per app role, its AppDependencies targets; and each table's retention.
+  logins; per app role, its AppDependencies targets; and each table's interactive and
+  total retention.
   Basic and Auxiliary tables are not queried, and a refused or deleted workspace
   reads unknown or false without failing the run.
 - **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
