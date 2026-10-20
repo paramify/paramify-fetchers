@@ -237,6 +237,14 @@ def build_fetcher_fn():
 # --------------------------------------------------------------------------- #
 
 DEMO_RUN_ID = "2026-01-01T00-00-00Z"
+# Smallest (cols, rows) with nothing cut: 242 fits the missing-token error, 58 the scripts preview.
+TUI_SIZE = (242, 58)
+
+
+@pytest.fixture(scope="session")
+def tui_size() -> tuple:
+    """The terminal size every TUI snapshot, pilot and pty test runs at."""
+    return TUI_SIZE
 
 
 @functools.cache

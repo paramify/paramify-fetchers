@@ -25,7 +25,6 @@ from framework.tui.screens.welcome import WelcomeScreen  # noqa: E402
 from framework.tui.screens.workspace import WorkspaceScreen  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SIZE = (160, 50)
 
 
 def _text(widget) -> str:
@@ -65,7 +64,7 @@ async def _tab(pilot, key: str, page_type):
     return page
 
 
-def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch):
+def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_size):
     root = demo_workspace.root
     shutil.rmtree(root / "evidence")
     manifest = root / "manifests" / "demo.yaml"
@@ -73,7 +72,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch):
 
     async def drive() -> None:
         app = FetcherApp(root_override=str(root))
-        async with app.run_test(size=SIZE) as pilot:
+        async with app.run_test(size=tui_size) as pilot:
             await pilot.pause()
 
             # Welcome: the demo manifest is listed, empty and never run.

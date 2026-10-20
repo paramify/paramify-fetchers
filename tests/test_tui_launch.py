@@ -19,7 +19,6 @@ pty = pytest.importorskip("pty", reason="needs a POSIX pseudo-terminal")
 import fcntl  # noqa: E402
 import termios  # noqa: E402
 
-ROWS, COLS = 50, 160
 TIMEOUT = 60.0
 _ESCAPES = re.compile(rb"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|.)")
 
@@ -27,10 +26,10 @@ WORKSPACE = "paramify fetcher"
 WELCOME = "collect compliance evidence"
 
 
-def _launch(argv: list, ready: str, cwd: Path, env: dict) -> tuple:
+def _launch(argv: list, ready: str, cwd: Path, env: dict, size: tuple) -> tuple:
     """Run argv on a pty until `ready` is drawn, press q; return (exit code or None, seen, text)."""
     master, slave = pty.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", size[1], size[0], 0, 0))
     env = {**env, "TERM": "xterm-256color"}
     proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=slave, stdout=slave, stderr=slave)
     os.close(slave)
@@ -72,9 +71,9 @@ def _launch(argv: list, ready: str, cwd: Path, env: dict) -> tuple:
     ],
     ids=["paramify-tui", "module-manifest", "module-welcome"],
 )
-def test_launch_and_quit(argv, ready, demo_workspace, cli_tools):
+def test_launch_and_quit(argv, ready, demo_workspace, cli_tools, tui_size):
     exe = {"paramify": cli_tools.paramify(), "python": sys.executable}[argv[0]]
-    code, seen, screen = _launch([exe, *argv[1:]], ready, demo_workspace.root, cli_tools.offline_env())
+    code, seen, screen = _launch([exe, *argv[1:]], ready, demo_workspace.root, cli_tools.offline_env(), tui_size)
     tail = screen[-2000:]
     assert seen, f"{ready!r} never appeared within {TIMEOUT:.0f}s:\n{tail}"
     assert code == 0, f"exit code {code}:\n{tail}"

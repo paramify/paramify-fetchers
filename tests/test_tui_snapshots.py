@@ -18,7 +18,6 @@ from framework.tui.app import FetcherApp  # noqa: E402
 from framework.tui.components import chrome  # noqa: E402
 from framework.tui.screens import welcome  # noqa: E402
 
-SIZE = (160, 50)
 MANIFEST = "manifests/demo.yaml"
 
 
@@ -31,7 +30,7 @@ class _Frozen(datetime):
 
 
 @pytest.fixture
-def shot(snap_compare, demo_workspace, no_network, monkeypatch):
+def shot(snap_compare, demo_workspace, no_network, monkeypatch, tui_size):
     """Open the app on MANIFEST (or the welcome screen for None), press keys, compare."""
     monkeypatch.setattr(chrome, "datetime", _Frozen)
     monkeypatch.setattr(welcome, "datetime", _Frozen)
@@ -60,7 +59,7 @@ def shot(snap_compare, demo_workspace, no_network, monkeypatch):
                 await pilot.press(key)
                 await settle(pilot)
 
-        return snap_compare(app, terminal_size=SIZE, run_before=run_before)
+        return snap_compare(app, terminal_size=tui_size, run_before=run_before)
 
     return compare
 
