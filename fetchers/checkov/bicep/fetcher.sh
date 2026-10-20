@@ -67,9 +67,9 @@ if [ -z "$REPO_URL" ]; then
 fi
 case "$SOURCE_TYPE" in
     git)
-        TOOLS="git checkov jq" ;;
+        TOOLS=(git checkov jq) ;;
     tfvc)
-        TOOLS="curl unzip checkov jq"
+        TOOLS=(curl unzip checkov jq)
         REPO_URL="${REPO_URL%/}"
         case "$REPO_URL" in https://*|http://*) ;; *)
             report_failure "source_type tfvc needs repo_url to be the Azure DevOps project URL (https://dev.azure.com/<org>/<project>), got $REPO_URL" bad_config
@@ -89,9 +89,9 @@ case "$SOURCE_TYPE" in
         report_failure "source_type must be git or tfvc (got '$SOURCE_TYPE')" bad_config
         exit 1 ;;
 esac
-# shellcheck disable=SC2086
-checkov_require_tools "$COMPONENT" $TOOLS || {
-    report_failure "required tool missing from PATH (a $SOURCE_TYPE source needs ${TOOLS// /, })" internal_error
+checkov_require_tools "$COMPONENT" "${TOOLS[@]}" || {
+    TOOLS_TEXT="$(printf '%s, ' "${TOOLS[@]}")"
+    report_failure "required tool missing from PATH (a $SOURCE_TYPE source needs ${TOOLS_TEXT%, })" internal_error
     exit 1
 }
 
@@ -111,6 +111,8 @@ split_list() {
     done
     return 0
 }
+# A JSON array of the arguments, for metadata.
+json_list() { jq -cn '$ARGS.positional' --args -- "$@"; }
 
 # checkov splits --check on commas without trimming, so it gets the cleaned CSV. Check ids never
 # contain whitespace, so spaces and tabs separate them too; skip paths may contain spaces.
@@ -118,6 +120,7 @@ split_list "${CHECKOV_BICEP_CHECKS:-}" $' \t'
 REQUESTED_CHECKS="$(IFS=,; printf '%s' "${_SPLIT[*]}")"
 split_list "${CHECKOV_SKIP_PATHS:-}"
 SKIP_PATHS=("${_SPLIT[@]}")
+SKIP_PATHS_JSON="$(json_list "${SKIP_PATHS[@]}")"
 
 # --- skip-checks: the shipped defaults (unless use_default_skip_checks is false) + CHECKOV_SKIP_CHECKS,
 # minus explicitly-requested checks. --skip-check leaves no trace in checkov's output, so it goes in metadata.
@@ -164,7 +167,7 @@ metadata_json() {
           --arg path "$TFVC_PATH" --arg version "$TFVC_VERSION" \
           --argjson changeset "${CHANGESET:-null}" --arg csdate "$CHANGESET_DATE" \
           --arg skips "$SKIP_CHECKS_LIST" --argjson defaults "$DEFAULT_SKIPS_APPLIED" \
-          --arg skipres "$SKIP_RESOURCES_LIST" --arg skippaths "$(printf '%s\n' "${SKIP_PATHS[@]}")" \
+          --arg skipres "$SKIP_RESOURCES_LIST" --argjson skippaths "$SKIP_PATHS_JSON" \
        '{source_type: $type, repo_url: $repo}
         + (if $type == "tfvc" then
              {tfvc_path: $path, requested_version: $version, changeset: $changeset,
@@ -176,7 +179,7 @@ metadata_json() {
          skip_checks: ($skips | split(",") | map(select(. != ""))),
          default_skip_checks_applied: $defaults,
          skip_resources: ($skipres | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))),
-         skip_paths: ($skippaths | split("\n") | map(select(. != "")))}'
+         skip_paths: $skippaths}'
 }
 
 # A result with nothing scanned: counts are null, not 0, so no reader can take it for a clean scan.
