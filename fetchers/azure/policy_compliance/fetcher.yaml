@@ -4,12 +4,11 @@ description: >
   Reads what Azure Policy found on the subscription: the service's counts of
   non-compliant resources and policies, overall and per assignment, and a bounded
   list of non-compliant (resource, policy) records with the expressions Azure
-  evaluated; a resource whose read Azure refuses twice is marked not_authorized
-  rather than failing the run. It also lists remediation tasks with their
-  per-resource deployments, each checked against the resource's latest state, and
-  counts from 30 days of history which pairs were non-compliant throughout or only
-  some of the time. A
-  subscription that never registered Microsoft.PolicyInsights reports
+  evaluated; a resource whose read Azure refuses is marked not_authorized rather
+  than failing the run. It also lists remediation tasks with their per-resource
+  deployments, each checked against the resource's latest state, and counts from
+  30 days of history which pairs were non-compliant throughout or only some of the
+  time. A subscription that never registered Microsoft.PolicyInsights reports
   provider_registration_status: not_registered, which is valid evidence rather than
   a collection failure.
 category: azure
@@ -48,9 +47,9 @@ config_schema:
       for, one query each (the service refuses them at subscription scope); the
       resources with the most listed states go first. evaluation_details_truncated
       says when there were more. 0 skips them. A refused read (403 or
-      AuthorizationFailed) is retried once; refused again, it marks that
-      resource's states not_authorized and does not fail the run. Any other error
-      does.
+      AuthorizationFailed) is retried once, at most 3 times a run and not after a
+      retry is refused again; still refused, it marks that resource's states
+      not_authorized and does not fail the run. Any other error does.
   max_recurrence_pairs:
     type: integer
     required: false
@@ -116,5 +115,5 @@ evidence_set:
     _at_management_group / _at_resource, then latest-state queries (resource, state,
     time) for the task's policy, filtered to its remediated resources 20 at a time.
     Reader on the subscription. A per-resource details read refused with a 403 or an
-    AuthorizationFailed error code is retried once, then marks that resource's states
-    not_authorized instead of failing the run.
+    AuthorizationFailed error code is retried once (at most 3 retries a run), then
+    marks that resource's states not_authorized instead of failing the run.

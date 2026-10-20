@@ -591,8 +591,10 @@ schemas and the `paramify` CLI — not the internal code.
     mode policies (`Microsoft.KeyVault.Data` and the like) always are. A state the
     resource's query did not return at all is `not_in_detail_result`. A
     per-resource read that Azure refuses (a 403, or an AuthorizationFailed error
-    code, which Policy Insights has returned with a 409) is retried once. Refused
-    again, that resource's states are `not_authorized`, with the error code and
+    code, which Policy Insights has returned with a 409) is retried once, 5 s
+    later. A run makes at most 3 retries, and none after a retry is refused again,
+    since the refusal is then systematic. Still refused, that resource's states
+    are `not_authorized`, with the error code and
     refused action (never the principal) in `evaluation_details_reason`, and it is
     counted in `evaluation_details_not_authorized_resources`. It does not fail the
     run, since the details only enrich the states; any other error on that read,

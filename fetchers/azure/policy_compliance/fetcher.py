@@ -123,6 +123,8 @@ DETAILS_NOT_AUTHORIZED = "not_authorized"
 # AuthorizationFailed as a 409, and refusals have cleared on a later read.
 REFUSAL_CODES = {"authorizationfailed", "linkedauthorizationfailed"}
 REFUSAL_RETRY_SECONDS = 5
+# Retries per run; none once a retry is refused again, which makes the refusal systematic.
+MAX_REFUSAL_RETRIES = 3
 
 
 # --- projections: the only code here that touches an azure-mgmt model ---
@@ -433,8 +435,17 @@ def refusal_reason(exc: BaseException) -> str:
     """What was refused: the error code and the action Azure names; never the principal or a scope."""
     code = _error_code(exc)
     code = code if re.fullmatch(r"[A-Za-z]+", code) else f"HTTP {getattr(exc, 'status_code', None)}"
-    action = re.search(r"\baction '([A-Za-z][\w.-]*(?:/[\w.-]+)+)'", " ".join(str(exc).split()))
+    # Provider-namespace shape (Microsoft.Web/sites/read), so a scope is never copied in.
+    action = re.search(r"\baction '([A-Za-z]+(?:\.[A-Za-z]+)+(?:/[A-Za-z*]+)+)'", " ".join(str(exc).split()))
     return f"Policy Insights refused the read ({code})" + (f" on {action.group(1)}" if action else "")
+
+
+def _attempt(read) -> tuple:
+    """(result, None), or (None, the exception it raised)."""
+    try:
+        return read(), None
+    except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
+        return None, exc
 
 
 def attach_evaluation_details(
@@ -768,6 +779,7 @@ def collect_evaluation_details(client, states: list[dict], limit: int, collector
     selected = eligible[:limit]
     results: dict[str, list[dict] | None] = {}
     refused: dict[str, str] = {}
+    retries_left = MAX_REFUSAL_RETRIES
     for resource_id in selected:
         def _read(resource_id=resource_id):
             options = QueryOptions(filter="ComplianceState eq 'NonCompliant'", expand=EVALUATION_DETAILS)
@@ -780,22 +792,22 @@ def collect_evaluation_details(client, states: list[dict], limit: int, collector
 
         operation = f"policyinsights.policy_states.list_query_results_for_resource({basename(resource_id)})"
         key = arm_id_key(resource_id)
-        try:
-            try:
-                results[key] = _read()
-            except Exception as exc:  # noqa: BLE001 — a refusal is retried once, anything else is not
-                if not is_not_authorized(exc):
-                    raise
-                logger.info("%s: %s; retrying once", operation, refusal_reason(exc))
-                time.sleep(REFUSAL_RETRY_SECONDS)
-                results[key] = _read()
-        except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
-            if not is_not_authorized(exc):
-                collector.record(operation, exc)
-                results[key] = None
-                continue
-            refused[key] = refusal_reason(exc)
+        rows, failure = _attempt(_read)
+        if failure is not None and is_not_authorized(failure) and retries_left > 0:
+            retries_left -= 1
+            logger.info("%s: %s; retrying once", operation, refusal_reason(failure))
+            time.sleep(REFUSAL_RETRY_SECONDS)
+            rows, failure = _attempt(_read)
+            if failure is not None and is_not_authorized(failure):
+                retries_left = 0
+        if failure is None:
+            results[key] = rows
+        elif is_not_authorized(failure):
+            refused[key] = refusal_reason(failure)
             logger.warning("%s: %s; recorded on its states", operation, refused[key])
+        else:
+            collector.record(operation, failure)
+            results[key] = None
     attach_evaluation_details(states, results, refused)
     # A limit of 0 skips them, which is not truncation.
     return {"eligible": len(eligible), "requested": len(selected),

@@ -237,6 +237,9 @@ REFUSALS = {
     "no_action_403": (403, "AuthorizationFailed",
                       f"The client 'jane.doe@contoso.com' with object id '{GUID}' is not authorized."),
     "unparsed_403": (403, None, f"Forbidden: client 'jane.doe@contoso.com' object id '{GUID}' /subscriptions/{GUID}"),
+    "scope_in_action_slot": (403, "AuthorizationFailed",
+                             f"The client 'jane.doe@contoso.com' does not have authorization to perform action "
+                             f"'subscriptions/{GUID}/resourceGroups/rg/read'."),
 }
 
 
@@ -246,6 +249,7 @@ REFUSALS = {
     ("policy_insights_409", "Policy Insights refused the read (AuthorizationFailed) on Microsoft.Web/sites/config/read"),
     ("no_action_403", "Policy Insights refused the read (AuthorizationFailed)"),
     ("unparsed_403", "Policy Insights refused the read (HTTP 403)"),
+    ("scope_in_action_slot", "Policy Insights refused the read (AuthorizationFailed)"),
 ])
 def test_refusal_reason_names_the_code_and_action_never_the_principal(kind, reason):
     exc = _ArmError(*REFUSALS[kind])
@@ -323,12 +327,85 @@ def test_refusal_that_clears_on_the_retry_is_collected(monkeypatch):
     assert (states[0]["evaluation_details_status"], out["not_authorized"], collector.ok) == ("collected", 0, True)
 
 
+class _Arm409:
+    """Just enough of an HTTP response for azure-core to parse an ARM error body."""
+    status_code, reason, headers, request = 409, "Conflict", {}, None
+
+    def __init__(self, body):
+        self._body = json.dumps(body)
+
+    def text(self, encoding=None):
+        return self._body
+
+    def body(self):
+        return self._body.encode()
+
+
 @needs_sdk
-@pytest.mark.parametrize("error, exit_code", [
-    (lambda: _ArmError(*REFUSALS["standard_403"]), 0),
-    (lambda: _ArmError(503, "ServiceUnavailable", "Try again."), 1),
-], ids=["refusal_alone", "server_error"])
-def test_main_exit_code_for_a_refused_or_failed_detail_read(monkeypatch, tmp_path, error, exit_code):
+def test_azure_core_parses_the_refusal_code_the_classifier_reads():
+    from azure.core.exceptions import ResourceExistsError
+
+    status, code, message = REFUSALS["policy_insights_409"]
+    exc = ResourceExistsError(response=_Arm409({"error": {"code": code, "message": message}}))
+    assert (exc.status_code, exc.error.code) == (409, "AuthorizationFailed")
+    assert fx.is_not_authorized(exc)
+    assert fx.refusal_reason(exc) == (
+        "Policy Insights refused the read (AuthorizationFailed) on Microsoft.Web/sites/config/read")
+
+
+def _refused_reads(answers, calls):
+    def per_resource(resource, resource_id, query_options):
+        calls.append(resource_id.rsplit("/", 1)[-1])
+        answer = answers[resource_id.rsplit("/", 1)[-1]].pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    return per_resource
+
+
+@needs_sdk
+def test_systematic_refusal_stops_the_retries(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(fx.time, "sleep", sleeps.append)
+    refusal = REFUSALS["standard_403"]
+    apps = [f"{RG}/providers/Microsoft.Web/sites/app{i}" for i in range(4)]
+    # app0 is refused on its retry too, so app1..app3 are marked without a retry or a sleep.
+    answers = {f"app{i}": [_ArmError(*refusal), _ArmError(*refusal)] for i in range(4)}
+    calls = []
+    client = fake_client(policy_states={"list_query_results_for_resource": _refused_reads(answers, calls)})
+    states = [state(app) for app in apps]
+    out = fx.collect_evaluation_details(client, states, 10, fx.Collector(logging.getLogger("t")))
+    assert sorted(calls) == ["app0", "app0", "app1", "app2", "app3"]
+    assert sleeps == [fx.REFUSAL_RETRY_SECONDS]
+    assert out["not_authorized"] == 4
+
+
+@needs_sdk
+def test_refusal_retries_are_capped_per_run(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(fx.time, "sleep", sleeps.append)
+    refusal = REFUSALS["policy_insights_409"]
+    apps = [f"{RG}/providers/Microsoft.Web/sites/app{i}" for i in range(5)]
+    # Every first read is refused and every retry succeeds: after the cap, a refusal is not retried.
+    answers = {f"app{i}": [_ArmError(*refusal), _detail_rows(app)] for i, app in enumerate(apps)}
+    calls = []
+    client = fake_client(policy_states={"list_query_results_for_resource": _refused_reads(answers, calls)})
+    states = [state(app) for app in apps]
+    out = fx.collect_evaluation_details(client, states, 10, fx.Collector(logging.getLogger("t")))
+    assert len(sleeps) == fx.MAX_REFUSAL_RETRIES == 3
+    assert [s["evaluation_details_status"] for s in states] == [
+        "collected", "collected", "collected", "not_authorized", "not_authorized"]
+    assert out["not_authorized"] == 2
+
+
+@needs_sdk
+@pytest.mark.parametrize("answers, exit_code, expected", [
+    (lambda: [_ArmError(*REFUSALS["standard_403"]), _ArmError(*REFUSALS["standard_403"])], 0, "not_authorized"),
+    (lambda: [_ArmError(503, "ServiceUnavailable", "Try again.")], 1, "failed"),
+    (lambda: [_ArmError(*REFUSALS["standard_403"]), _ArmError(503, "ServiceUnavailable", "Try again.")], 1,
+     "failed"),
+], ids=["refusal_alone", "server_error", "refusal_then_server_error"])
+def test_main_exit_code_for_a_refused_or_failed_detail_read(monkeypatch, tmp_path, answers, exit_code, expected):
     monkeypatch.setattr(fx, "load_dotenv", lambda: None)
     monkeypatch.setattr(fx, "REFUSAL_RETRY_SECONDS", 0)
     for env in (fx.MAX_NON_COMPLIANT_ENV, fx.MAX_DETAIL_RESOURCES_ENV, fx.MAX_RECURRENCE_PAIRS_ENV,
@@ -340,8 +417,10 @@ def test_main_exit_code_for_a_refused_or_failed_detail_read(monkeypatch, tmp_pat
     monkeypatch.setattr(fx, "credential", lambda: object())
     monkeypatch.setattr(fx, "provider_registration_status", lambda *a: "registered")
 
+    queued = answers()
+
     def refused_read(resource, resource_id, query_options):
-        raise error()
+        raise queued.pop(0)
 
     def collect(subscription_id, cred, collector, limits):
         collected = fx.empty_collection()
@@ -356,8 +435,8 @@ def test_main_exit_code_for_a_refused_or_failed_detail_read(monkeypatch, tmp_pat
     payload = json.loads((tmp_path / "azure_policy_compliance_s1.json").read_text())
     assert payload["metadata"]["partial_failure"] is bool(exit_code)
     assert (tmp_path / "status.json").exists() is bool(exit_code)
-    expected = "not_authorized" if exit_code == 0 else "failed"
     assert payload["results"]["non_compliant_states"][0]["evaluation_details_status"] == expected
+    assert queued == []
 
 
 # --- recurrence ---
