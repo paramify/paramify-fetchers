@@ -1,13 +1,8 @@
 name: azure_alert_rules
 version: 0.1.0
-description: >
-  Every Azure Monitor metric alert, log search (scheduled query) alert and smart
-  detector alert rule in the subscription — enabled state, severity, scopes, the
-  metric criteria or KQL query it fires on — resolved through its action groups to
-  the receivers it actually notifies, and checked against alert processing rules that
-  suppress notifications or add action groups. Per rule: whether it routes to an
-  enabled receiver, whether a processing rule suppresses it, and whether it reaches a
-  person. Activity log alerts are a separate evidence set (azure_activity_log_alerts).
+description: >-
+  Shows every metric, log search and smart detector alert rule and whether
+  each one actually reaches a person.
 category: azure
 
 supports_targets: true
@@ -45,44 +40,52 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-ALERT-RULES
   name: Azure Monitor Alert Rules
-  instructions: >
-    Script: azure/alert_rules/fetcher.py. Reader (or Monitoring Reader) at subscription scope. Raw ARM
-    GETs through azure-mgmt-core's ARMPipelineClient, following nextLink to the end
-    (results.pages_read): Microsoft.Insights/metricAlerts (api 2018-03-01),
-    Microsoft.Insights/scheduledQueryRules (2023-12-01),
-    microsoft.alertsManagement/smartDetectorAlertRules (2021-04-01),
-    Microsoft.Insights/actionGroups (2023-01-01) and
-    Microsoft.AlertsManagement/actionRules — alert processing rules (2021-08-08).
-    REST rather than azure-mgmt-monitor 6.x, which drops nextLink on metric alerts and
-    action groups and reads log alerts in the 2018 schema. A provider that is not
-    registered is skipped and reported in provider_registration_status. Per rule:
-    enabled (smart detector state == Enabled); is_alerting_rule is false only for
-    LogToMetric log rules. action_group_ids come from actions[].actionGroupId (metric),
-    actions.actionGroups[] (log search) or actionGroups.groupIds[] (smart detector),
-    and are resolved in resolved_action_groups; groups in another subscription are fetched by id, and stay unresolved
-    (unresolved_action_group_ids) on 403/404; an id that is not an ARM action group
-    path is never fetched and stays unresolved. A group is deliverable when enabled and
-    holding at least one enabled receiver — email and SMS receivers count only with
-    status Enabled (Disabled and NotSpecified send nothing); other receiver types carry
-    no status. notifies_people: deliverable through an email, SMS, voice, app push,
-    ARM role or ITSM receiver; webhook, Logic App, Function, runbook and Event Hub
-    receivers hand off to code that may or may not notify anyone. Receiver targets omit
-    URL paths and query strings (webhook host only; Logic App / Function resource ids,
-    not callback URLs) and mask phone numbers to the last four digits. A processing
-    rule matches when enabled, its schedule is not known to be inactive, and its scopes
-    overlap the alert rule's: scope_match "full" when they contain every alert scope,
-    "partial" when they cover only some of what the alert fires on (a narrower scope, or
-    some of several alert scopes). It applies_to_every_fire when full, with no
-    conditions and a schedule known to be active (or none). Such a
-    RemoveAllActionGroups rule sets suppressed true; any other matching one sets
-    suppressed null. AddActionGroups rules add their groups (added_by_processing_rule,
-    applies_to_every_fire as for the rule). Verdicts are true, false or null, and null
-    means unknown, never "no". routes_to_enabled_receiver / routes_to_person: true when
-    a resolved group on every notification is deliverable / notifies people; null when
-    only an unresolved group or a sometimes-added group might; false otherwise (and for
-    a disabled rule). reaches_human: false when the rule is disabled, routes nowhere or
-    is suppressed; true when it routes to a person and is not suppressed; otherwise
-    null. The summary counts null verdicts apart (*_unknown, *_possibly_*);
-    all_enabled_rules_reach_human is null when none is false but some are unknown.
-    muteActionsDuration (log) and throttling.duration (smart detector) are reported as
-    mute_actions_duration, not evaluated.
+  instructions: |
+    Script: azure/alert_rules/fetcher.py
+
+    Access: Reader or Monitoring Reader on the subscription. Optional: Reader on other subscriptions whose action groups the rules use; without it, those rules' verdicts read unknown.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.Insights and Microsoft.AlertsManagement — skips an unregistered provider
+    - GET Microsoft.Insights/metricAlerts — metric alert rules
+    - GET Microsoft.Insights/scheduledQueryRules — log search alert rules
+    - GET Microsoft.AlertsManagement/smartDetectorAlertRules — smart detector rules
+    - GET Microsoft.Insights/actionGroups — action groups and their receivers
+    - GET Microsoft.AlertsManagement/actionRules — processing rules that suppress or add action groups
+    - GET {action group id} (groups in other subscriptions) — their receivers
+
+    Output: azure_alert_rules_<subscription>.json — each alert rule with its condition, the action groups and people it notifies, any processing rules that suppress it, and whether it reaches a person.
+
+    Summary fields:
+
+    What alert rules exist?
+    - total_alert_rules — Number of alert rules of all types
+    - rules_by_type — Number of alert rules of each type (metric, log_search, smart_detector)
+    - alerting_rules — Number of alert rules that can send a notification (all except log rules that only produce metrics)
+    - enabled_alerting_rules — Number of alerting rules that are enabled
+    - disabled_alerting_rules — Number of alerting rules that are disabled
+    - log_search_rules_enabled — Number of enabled log search (KQL query) alert rules
+    - provider_registration_status — Whether Microsoft.Insights and Microsoft.AlertsManagement are registered on the subscription: registered, not_registered or unknown for each
+
+    Do enabled rules notify anyone?
+    - enabled_rules_without_action_groups — Number of enabled rules with no action group to notify, either their own or one added by a processing rule
+    - enabled_rules_routing_to_enabled_receiver — Number of enabled rules that always notify an action group with at least one enabled receiver
+    - enabled_rules_routing_unknown — Number of enabled rules where it's unknown whether they notify anyone (the only possible action group couldn't be read, or is added only some of the time)
+    - enabled_rules_routing_to_person — Number of enabled rules that always notify a person (email, SMS, voice call, app push, Azure role or ITSM ticket)
+    - action_groups — Number of action groups in the subscription
+    - deliverable_action_groups — Number of action groups that are enabled and have at least one enabled receiver
+    - action_groups_notifying_people — Number of deliverable action groups that notify a person
+
+    Are notifications being suppressed?
+    - enabled_rules_suppressed — Number of enabled rules whose notifications an active suppression rule always switches off
+    - enabled_rules_possibly_suppressed — Number of enabled rules whose notifications a suppression rule might switch off (it covers only part of the scope, has conditions, or has a schedule that can't be evaluated)
+    - processing_rules — Number of alert processing rules in the subscription
+    - suppressing_processing_rules_active — Number of enabled suppression rules that are active now, or whose schedule can't rule it out
+
+    Does every enabled rule reach a person?
+    - enabled_rules_reaching_human — Number of enabled rules that notify a person and aren't suppressed
+    - enabled_rules_reaching_human_unknown — Number of enabled rules where it's unknown whether they reach a person
+    - enabled_rules_not_reaching_human — Number of enabled rules that don't reach a person
+    - reaching_human_percentage — Percentage of enabled alerting rules that reach a person = enabled_rules_reaching_human / enabled_alerting_rules × 100 (a whole number, 0–100); 0 when enabled_alerting_rules is 0. Rules where reaching a person is unknown (enabled_rules_reaching_human_unknown) count in the total but not as reaching, so they lower it
+    - all_enabled_rules_reach_human — True if every enabled alerting rule reaches a person; false if any doesn't, or none is enabled; null if none fails but some are unknown

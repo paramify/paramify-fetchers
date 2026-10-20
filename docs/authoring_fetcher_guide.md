@@ -73,7 +73,15 @@ secrets:
 evidence_set:
   reference_id: EVD-OKTA-PASSWORD-POLICY
   name: Okta Password Policy
-  instructions: 'Script: okta/password_policy/fetcher.py. GET /api/v1/policies?type=PASSWORD; records length, complexity, age, and lockout.'
+  instructions: |                         # plain text; layout in authoring_a_fetcher.md
+    Script: okta/password_policy/fetcher.py
+
+    Access: An Okta API token with read access to policies.
+
+    Commands Executed:
+    - GET /api/v1/policies (type PASSWORD) — every password policy
+
+    Output: okta_password_policy.json — each password policy with its length, complexity, age and lockout settings.
 ```
 
 Check that it parses. `describe` shows the secrets the runner will ask for:

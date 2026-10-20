@@ -20,6 +20,7 @@ Run: ``pytest tests/test_contracts.py`` (needs an editable install:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -166,16 +167,93 @@ def test_every_evidence_fetcher_has_a_frequency() -> None:
     assert not bad, "\n".join(bad)
 
 
+def _script_line(yaml_path: Path, spec: dict) -> str:
+    return f"Script: {yaml_path.parent.parent.name}/{yaml_path.parent.name}/{spec['runtime']['entry']}"
+
+
 def test_instructions_open_with_the_entry_path() -> None:
-    """Instructions open with `Script: <category>/<short_name>/<entry>.` so a reader can find the code."""
+    """Instructions open with `Script: <category>/<short_name>/<entry>`, ended by a period or
+    the end of the line, so a reader can find the code."""
     bad: list[str] = []
     for yaml_path in FETCHER_YAMLS:
         spec = yaml.safe_load(yaml_path.read_text())
         text = (spec.get("evidence_set") or {}).get("instructions") or ""
-        expected = f"Script: {yaml_path.parent.parent.name}/{yaml_path.parent.name}/{spec['runtime']['entry']}."
-        if text and not text.startswith(expected):
+        expected = _script_line(yaml_path, spec)
+        if text and not (text.startswith(expected + ".") or text.split("\n", 1)[0] == expected):
             bad.append(f"{yaml_path.parent.relative_to(FETCHERS_ROOT)}: want instructions to open with {expected!r}")
     assert not bad, "\n".join(bad)
+
+
+# --------------------------------------------------------------------------- #
+# Description and instructions text (docs/authoring_a_fetcher.md). Paramify shows
+# both as plain text, so the layout is checked here for each converted fetcher;
+# add a category (or category/short_name) once its fetchers are converted.
+# --------------------------------------------------------------------------- #
+
+TEXT_FORMAT_FETCHERS = ("azure/alert_rules",)
+MAX_DESCRIPTION_WORDS = 30
+
+
+def _converted(yaml_path: Path) -> bool:
+    rel = yaml_path.parent.relative_to(FETCHERS_ROOT).as_posix()
+    return any(rel == p or rel.startswith(p + "/") for p in TEXT_FORMAT_FETCHERS)
+
+
+CONVERTED_YAMLS = [p for p in FETCHER_YAMLS if _converted(p)]
+
+
+def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
+    problems: list[str] = []
+    desc = " ".join((spec.get("description") or "").split())
+    if len(desc.split()) > MAX_DESCRIPTION_WORDS:
+        problems.append(f"description has {len(desc.split())} words; at most {MAX_DESCRIPTION_WORDS}")
+    if not desc.endswith(".") or re.search(r"[.!?]\s", desc):
+        problems.append("description is not one sentence ending in a period")
+    if spec["name"] in desc:
+        problems.append("description repeats the fetcher's name")
+
+    text = (spec.get("evidence_set") or {}).get("instructions") or ""
+    if "`" in text or "**" in text:
+        problems.append("instructions use markdown (backticks or **); Paramify shows them as typed")
+    blocks = [b.split("\n") for b in text.strip("\n").split("\n\n")]
+    labels = [b[0] for b in blocks]
+    if not labels or labels[0] != _script_line(yaml_path, spec):
+        problems.append(f"instructions do not open with {_script_line(yaml_path, spec)!r} on a line of its own")
+    want = ["Access: ", "Commands Executed:", "Output: "]
+    got = [next((w for w in want if lab.startswith(w)), None) for lab in labels[1:4]]
+    if got != want:
+        problems.append(f"sections after Script must be Access, Commands Executed, Output in that order; got {[lab[:20] for lab in labels[1:4]]}")
+    for b in blocks:
+        if b[0] == "Commands Executed:":
+            if len(b) < 2 or any(not (ln.startswith("- ") and " — " in ln) for ln in b[1:]):
+                problems.append("each Commands Executed line must read '- <call> — <why>'")
+        elif b[0].startswith("Output: ") and (len(b) > 1 or " — " not in b[0]):
+            problems.append("Output must be one line: '<file> — <what it holds>'")
+    rest = blocks[4:]
+    if rest:
+        if rest[0] != ["Summary fields:"]:
+            problems.append("after Output comes 'Summary fields:' on its own")
+        for group in rest[1:]:
+            if not group[0].endswith("?"):
+                problems.append(f"summary group must start with a question: {group[0]!r}")
+            if len(group) < 2 or any(not (ln.startswith("- ") and " — " in ln) for ln in group[1:]):
+                problems.append(f"each summary field line must read '- <field> — <meaning>' under {group[0]!r}")
+    return problems
+
+
+def test_text_format_fetchers_exist() -> None:
+    """Every TEXT_FORMAT_FETCHERS entry names real fetchers, so a typo can't switch the check off."""
+    missing = [p for p in TEXT_FORMAT_FETCHERS if not any(
+        y.parent.relative_to(FETCHERS_ROOT).as_posix() == p
+        or y.parent.relative_to(FETCHERS_ROOT).as_posix().startswith(p + "/") for y in FETCHER_YAMLS)]
+    assert not missing, f"no fetcher matches {missing}"
+
+
+@pytest.mark.parametrize("yaml_path", CONVERTED_YAMLS, ids=_rel_ids(CONVERTED_YAMLS))
+def test_converted_fetcher_text_follows_the_format(yaml_path: Path) -> None:
+    spec = yaml.safe_load(yaml_path.read_text())
+    problems = _text_format_problems(yaml_path, spec)
+    assert not problems, f"{yaml_path.parent.relative_to(FETCHERS_ROOT)}:\n  " + "\n  ".join(problems)
 
 
 def test_frequency_enum_matches_the_contract() -> None:

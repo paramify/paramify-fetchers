@@ -109,7 +109,7 @@ Required fields (validated against `framework/schemas/fetcher_schema.json`):
 
 - `name` — globally unique, `<category>_<short_name>` convention
 - `version` — `0.1.0` for new ports
-- `description` — one or two sentences
+- `description` — one sentence of at most 30 words on what the evidence shows (see [`description` and `instructions`](authoring_a_fetcher.md#description-and-instructions))
 - `runtime` — `{type: python|bash, entry: fetcher.py|fetcher.sh}`
 - `output` — `{type: json|csv|html, path: <filename>.json}` (relative filename inside `EVIDENCE_DIR`)
 - `secrets` — list of `{name, env}` pairs covering every env var read
@@ -125,7 +125,9 @@ evidence set so the uploader can get-or-create it by `reference_id`:
 evidence_set:
   reference_id: <stable id, e.g. EVD-OKTA-PHISHING-RESISTANT-MFA>
   name: <human-readable evidence set name>
-  instructions: <"Script: <category>/<short_name>/<entry>.", then what reviewers should look for>   # optional
+  instructions: |   # optional; plain text, laid out as in authoring_a_fetcher.md
+    Script: <category>/<short_name>/<entry>
+    ...
 ```
 
 `reference_id` is the immutable key the uploader get-or-creates on — changing it
