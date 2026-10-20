@@ -694,6 +694,7 @@ def test_main_wires_inventory_settings_and_ingestion_into_the_evidence(monkeypat
               log_analytics_destination_type=None, logs=[NS(category=None, category_group="allLogs", enabled=True)])
     monitor = NS(diagnostic_settings_category=NS(list=lambda resource_uri: [category]),
                  diagnostic_settings=NS(list=lambda resource_uri: [diag]))
+    monkeypatch.setattr(rds, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(rds, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "target"})
     monkeypatch.setattr(rds, "credential", lambda: object())
     monkeypatch.setattr(rds, "provider_registration_status", lambda *a: "registered")

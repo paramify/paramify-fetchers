@@ -592,8 +592,9 @@ schemas and the `paramify` CLI — not the internal code.
   per destination, `last_ingested` and `ingested_in_window`: null when a
   destination refused the read or has an unqueried table that could hold the
   resource's logs (a storage service's own Storage*Logs table, or a
-  resource-specific table unless the setting is in AzureDiagnostics mode); false
-  when every destination was read in full or was deleted. With
+  resource-specific table unless every setting sending there is explicitly in
+  AzureDiagnostics mode); false when every destination was read in full or was
+  deleted. With
   `APPROVED_LOG_WORKSPACES` set, each setting carries `workspace_approved` and each
   resource `sends_to_approved_workspace`. `results.log_analytics_destinations` and
   new summary keys (`resources_with_recent_ingestion`,

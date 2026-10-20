@@ -105,6 +105,7 @@ STORAGE_LOG_TABLES = {
     "storagetablelogs": f"{STORAGE_ACCOUNT_TYPE}/tableservices",
 }
 AZURE_DIAGNOSTICS_MODE = "azurediagnostics"
+_NOT_RESOURCE_LOG_KEYS = frozenset(t.lower() for t in NOT_RESOURCE_LOG_TABLES)
 # union * skips Basic and Auxiliary tables; querying them bills per GB scanned, so it is off unless hours are set.
 BASIC_LOOKBACK_ENV = "BASIC_LOGS_LOOKBACK_HOURS"
 DEFAULT_BASIC_LOOKBACK_HOURS = 0
@@ -292,7 +293,7 @@ def basic_lookback_hours() -> int:
 
 def resource_log_table(name: str) -> bool:
     """Custom (_CL) and agent or platform tables never hold what a diagnostic setting exports."""
-    return not name.lower().endswith("_cl") and name.lower() not in {t.lower() for t in NOT_RESOURCE_LOG_TABLES}
+    return not name.lower().endswith("_cl") and name.lower() not in _NOT_RESOURCE_LOG_KEYS
 
 
 def could_hold_logs(table: str, record: dict, settings: list[dict]) -> bool:
@@ -307,7 +308,7 @@ def could_hold_logs(table: str, record: dict, settings: list[dict]) -> bool:
     # Most settings leave the mode unset, and many types write resource-specific tables anyway; only an explicit
     # AzureDiagnostics mode rules a resource-specific table out.
     modes = {(s.get("log_analytics_destination_type") or "").lower() for s in settings}
-    return name == "azurediagnostics" or modes != {AZURE_DIAGNOSTICS_MODE}
+    return name == AZURE_DIAGNOSTICS_MODE or modes != {AZURE_DIAGNOSTICS_MODE}
 
 
 def non_analytics_tables(tables: list[dict]) -> list[dict]:
@@ -542,7 +543,7 @@ def assess(monitor, collector: Collector, base: dict, unsupported_types: set) ->
 def read_workspace_ingestion(
     client, workspace_id: str, subscription_id: str, days: int, hours: int, collector: Collector
 ) -> dict:
-    """A refused or deleted destination is evidence; any other failure fails the run."""
+    """A refused or deleted destination is evidence, any other destination failure fails the run; a failing Basic table only stays unqueried."""
     out = {"workspace_id": workspace_id, "name": basename(workspace_id), "customer_id": None,
            "status": INGESTION_QUERIED, "error": None, "non_analytics_tables": [], "unqueried_tables": [],
            "table_errors": [], "all_tables_queried": False, "resources": {}}
