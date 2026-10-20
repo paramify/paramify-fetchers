@@ -17,34 +17,26 @@ from azure_rest import (  # noqa: E402
     iso_duration_days,
     run_workspaces,
 )
+from sentinel_ingestion import (  # noqa: E402
+    ALERT_PRODUCTS_QUERY,
+    ALERTS_TABLE,
+    DEFAULT_WINDOW_DAYS,
+    INGESTION_QUERY,
+    NON_SOURCE_TABLES,
+    WINDOW_ENV,
+)
 
 NAME = "azure_sentinel_analytics_rules"
 FUSION_TEMPLATE = "f71aba3d-28fb-450b-b192-4e76a83015c8"
 INCIDENT_CREATION = "MicrosoftSecurityIncidentCreation"
-ALERTS_TABLE = "SecurityAlert"
-WINDOW_ENV = "SENTINEL_INGESTION_WINDOW_DAYS"
-DEFAULT_WINDOW_DAYS = 14
+# Kinds with no query of their own: their template's connectors are optional signals, not tables the rule needs.
+NO_QUERY_KINDS = frozenset({"Fusion", "MLBehaviorAnalytics", "ThreatIntelligence"})
 
-# Workspace and Sentinel telemetry, UEBA output and agent liveness: not sources a detection is expected to read.
-NON_SOURCE_TABLES = frozenset({
-    "Usage", "Operation", "LAQueryLogs", "SentinelHealth", "SentinelAudit",
-    "SecurityIncident", "Watchlist", "ConfidentialWatchlist",
-    "Anomalies", "BehaviorAnalytics", "UserPeerAnalytics", "UserAccessAnalytics", "IdentityInfo",
-    "Heartbeat",
-})
-
-INGESTION_QUERY = (
-    "union withsource=ParamifySourceTable * "
-    "| where TimeGenerated > ago({days}d) "
-    "| summarize LastIngested = max(TimeGenerated), Records = count() by ParamifySourceTable"
+# Verbatim strings (@"…") escape only a doubled quote, so a trailing backslash still closes them.
+_KQL_TOKEN = re.compile(
+    r"//[^\n]*|```.*?```|@\"[^\"\n]*(?:\"\"[^\"\n]*)*\"|@'[^'\n]*(?:''[^'\n]*)*'|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|[A-Za-z_]\w*|\S",
+    re.S,
 )
-ALERT_PRODUCTS_QUERY = (
-    "SecurityAlert "
-    "| where TimeGenerated > ago({days}d) "
-    "| summarize LastIngested = max(TimeGenerated), Records = count() by ProductName"
-)
-
-_KQL_TOKEN = re.compile(r"//[^\n]*|```.*?```|@?\"(?:\\.|[^\"\\\n])*\"|@?'(?:\\.|[^'\\\n])*'|[A-Za-z_]\w*|\S", re.S)
 _CUSTOM_TABLE = re.compile(r"\w+_CL$")
 _SOURCE_AFTER = {None, "|", ";", ")", ",", "}", "on"}
 _SOURCE_BEFORE = {None, ";", "{", "union", "join", "lookup"}
@@ -113,17 +105,31 @@ def _is_source(toks: List[str], i: int) -> bool:
     return False
 
 
+def _call_name(toks: List[str], i: int) -> Optional[str]:
+    """The name called with toks[i] among its arguments, if any."""
+    depth = 0
+    for j in range(i - 1, -1, -1):
+        if toks[j] == ")":
+            depth += 1
+        elif toks[j] == "(":
+            if depth == 0:
+                return toks[j - 1] if j > 0 else None
+            depth -= 1
+    return None
+
+
 def query_tables(query: Optional[str], tables: Set[str], columns: Set[str]) -> List[str]:
-    """Workspace tables a KQL query names, in code or as a whole string argument (`table("X")`, `f("X")`)."""
+    """Local workspace tables a KQL query names, in code or as a string passed to table() or a function it defines."""
     toks = [t for t in _KQL_TOKEN.findall(query or "") if not t.startswith("//")]
+    functions = {toks[k + 1] for k in range(len(toks) - 3) if toks[k] == "let" and toks[k + 2] == "=" and toks[k + 3] == "("}
     found = set()
     for i, tok in enumerate(toks):
         if tok[0] in "\"'@`":
             literal = tok.lstrip("@").strip("\"'`")
             argument = i > 0 and toks[i - 1] in {"(", ","} and i + 1 < len(toks) and toks[i + 1] in {")", ","}
-            if argument and literal in tables and literal not in columns:
+            if argument and literal in tables and literal not in columns and _call_name(toks, i) in functions | {"table"}:
                 found.add(literal)
-        elif tok in tables or _CUSTOM_TABLE.match(tok):
+        elif (tok in tables or _CUSTOM_TABLE.match(tok)) and (i == 0 or toks[i - 1] != "."):
             if tok not in columns or _is_source(toks, i):
                 found.add(tok)
     return sorted(found)
@@ -145,6 +151,8 @@ def rule_tables(
     found = query_tables(rule.get("query"), tables, columns)
     if found:
         return found, "query"
+    if rule.get("kind") in NO_QUERY_KINDS:
+        return None, None
     found = template_tables(templates.get(rule.get("alert_rule_template_name") or ""), tables)
     if found:
         return found, "template"
@@ -154,7 +162,7 @@ def rule_tables(
 def tables_without_data(
     rule: Dict[str, Any], ingested: Optional[Dict[str, Any]], products: Optional[Dict[str, Any]]
 ) -> Optional[List[str]]:
-    """Tables read that got nothing in the window; an incident-creation rule needs an alert from its own product."""
+    """Tables read that got nothing in the window; an incident-creation rule needs its product's alerts, a template rule any one source."""
     read = rule.get("tables_read")
     if read is None or ingested is None:
         return None
@@ -162,6 +170,8 @@ def tables_without_data(
         if products is None:
             return None
         return [] if (rule.get("product_filter") or "").lower() in products else [ALERTS_TABLE]
+    if rule.get("tables_from") == "template":
+        return read if not any(t in ingested for t in read) else []
     return [t for t in read if t not in ingested]
 
 
@@ -201,7 +211,7 @@ def coverage(rules: List[Dict[str, Any]], ingested: Optional[Dict[str, Any]]) ->
             for t, n in sorted(readers.items(), key=lambda kv: kv[0].lower())
         ],
         "ingesting_tables_not_read": (
-            sorted((t for t in ingested if t not in NON_SOURCE_TABLES and t not in readers), key=str.lower)
+            sorted((t for t in ingested if t not in NON_SOURCE_TABLES | {ALERTS_TABLE} and t not in readers), key=str.lower)
             if ingested is not None else None
         ),
         "enabled_rules_missing_data": (
@@ -237,6 +247,14 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     templates = collector.guard(
         f"securityinsights.alertRuleTemplates.list({ws['name']})", lambda: client.list(f"{path}/alertRuleTemplates", SI_API)
     )
+    try:
+        preview_templates = client.list(f"{path}/alertRuleTemplates", SI_PREVIEW_API)
+    except Exception as exc:  # noqa: BLE001 — as with rules, the preview listing only adds kinds the stable one omits
+        preview_templates = []
+        notes.append(f"preview template listing at {SI_PREVIEW_API} failed, so NRT rules may have no template to fall back on: {exc}")
+    if templates is not None:
+        stable_names = {t.get("name") for t in templates}
+        templates = templates + [t for t in preview_templates if t.get("name") not in stable_names]
     listed_tables = collector.guard(
         f"operationalinsights.tables.list({ws['name']})", lambda: client.list(f"{ws['id']}/tables", LAW_API)
     )
@@ -257,7 +275,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         for r in rules:
             r["tables_read"], r["tables_from"] = rule_tables(r, names, columns, by_template) if names is not None else (None, None)
         products: Optional[Dict[str, Any]] = {}
-        if ingested and ALERTS_TABLE in ingested and any(r["kind"] == INCIDENT_CREATION and r["enabled"] for r in rules):
+        if ingested and ALERTS_TABLE in ingested and any(r["kind"] == INCIDENT_CREATION for r in rules):
             alert_rows = collector.guard(
                 f"loganalytics.query(SecurityAlert products, {ws['name']})",
                 lambda: client.query(ws["customer_id"], ALERT_PRODUCTS_QUERY.format(days=days), iso_duration_days(days)),
@@ -281,6 +299,12 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     }
 
 
+def _total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]:
+    """Sum over the workspaces that have the field; None when none does, so a failed query never reads as zero."""
+    values = [w[field] for w in workspaces if w.get(field) is not None]
+    return sum(len(v) if isinstance(v, list) else v for v in values) if values else None
+
+
 def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
     collected = [w for w in workspaces if w.get("rules") is not None]
     enabled = [w.get("enabled_rules") or 0 for w in collected]
@@ -289,9 +313,9 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
         "min_enabled_rules": min(enabled) if enabled else None,
         "workspaces_with_no_enabled_rules": sum(1 for e in enabled if e == 0),
         "workspaces_with_fusion_enabled": sum(1 for w in collected if w.get("fusion_enabled") is True),
-        "enabled_rules_missing_data": sum(len(w.get("enabled_rules_missing_data") or []) for w in collected),
-        "ingesting_tables_not_read": sum(len(w.get("ingesting_tables_not_read") or []) for w in collected),
-        "enabled_rules_tables_unknown": sum(w.get("enabled_rules_tables_unknown") or 0 for w in collected),
+        "enabled_rules_missing_data": _total(collected, "enabled_rules_missing_data"),
+        "ingesting_tables_not_read": _total(collected, "ingesting_tables_not_read"),
+        "enabled_rules_tables_unknown": _total(collected, "enabled_rules_tables_unknown"),
     }
 
 
