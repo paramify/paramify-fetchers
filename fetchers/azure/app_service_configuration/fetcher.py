@@ -118,7 +118,7 @@ SCAN_OFF, SCAN_DONE, SCAN_NOT_AUTHORIZED, SCAN_NOT_READ, SCAN_ERROR = (
 SETTING_REFERENCE_PREFIXES = ("@microsoft.keyvault(", "@microsoft.appconfiguration(")
 CREDENTIAL_IN_VALUE = re.compile(
     r"(?:^|[;,\s])\w*(?:password|pwd|accountkey|sharedaccesskey|sharedaccesssignature|accesskey|secret|apikey|"
-    r"subscriptionkey)\s*=\s*[^;,\s]"
+    r"subscriptionkey)\s*=\s*(?!(?:true|false)\s*(?:[;,]|$))[^;,\s]"
     r"|[?&]sig=[^&\s]"
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
     r"|://[^/\s:@]*:[^/\s@]+@",
@@ -150,8 +150,8 @@ LIMITATIONS = [
     "app reads not_read, not a collection failure.",
     "A setting holds a literal secret when it is not a Key Vault or App Configuration reference and either "
     "its value carries a credential (a key ending in Password, Pwd, AccountKey, SharedAccessKey, "
-    "SharedAccessSignature, AccessKey, Secret, ApiKey or SubscriptionKey followed by =, such as ClientSecret= "
-    "or DbPassword=; a SAS sig= parameter; a private key; or a password in a URL), or it is an app "
+    "SharedAccessSignature, AccessKey, Secret, ApiKey or SubscriptionKey followed by = and a value other "
+    "than true or false, such as ClientSecret= or DbPassword=; a SAS sig= parameter; a private key; or a password in a URL), or it is an app "
     "setting whose name contains password, passwd, secret, API key, access key, account key, private key or "
     "credential, or has the word key, token, pwd or sas, unless the name also has id, name, uri, url, "
     "endpoint, vault, version, header, enabled, path, file, lifetime, expiry, expiration or type, and whose "
@@ -308,7 +308,7 @@ def project_key_vault_reference(ref) -> dict:
 
 
 def project_literal_secrets(app_settings, connection_strings) -> dict:
-    """Read config/list results into setting NAMES and reasons only; every value is dropped here."""
+    """Read config/list results into setting NAMES and reasons only; the Node version is the one value kept."""
     settings = model_attr(app_settings, "properties") or {}
     strings = model_attr(connection_strings, "properties") or {}
     node_version = next(
