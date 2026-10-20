@@ -427,7 +427,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-235 of 243 fetchers carry a mapping.
+236 of 244 fetchers carry a mapping.
 
 ### aws  (80)
 
