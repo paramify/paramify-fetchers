@@ -102,7 +102,7 @@ evidence_set:
       - private_link_target (the resource its private link points at)
       - host_name (the App Service app or storage account owning its host name)
       - None (region not found)
-    - origin_api_version — The Front Door API version origins and origin groups are read with
+    - origin_api_version — What the fetcher reads origins and origin groups with: the Front Door API version
     - provider_registration_status — Whether Microsoft.Cdn is registered on the subscription: registered, not_registered or unknown
 
     Does more than one region serve traffic?
@@ -117,8 +117,8 @@ evidence_set:
 
     Are the regions healthy and serving, and when did traffic move?
     - metrics_lookback_days — Days of hourly metrics read (the configured lookback, 1 to 30)
-    - metrics_window_start — Time the metrics window starts (UTC)
-    - metrics_window_end — Time the metrics window ends, the last whole hour (UTC)
+    - metrics_window_start — Time of the start of the metrics window (UTC)
+    - metrics_window_end — Time of the end of the metrics window, the last whole hour (UTC)
     - serving_groups_with_health_data — Number of serving groups with health-probe results in the window (a group without a health probe has none)
     - serving_groups_with_traffic — Number of serving groups whose origins received requests in the window
     - serving_groups_without_traffic — Number of serving groups whose origins received no requests in the window
@@ -157,7 +157,7 @@ evidence_set:
     - serving_app_service_origins_site_not_visible — Number of serving App Service origins pointing at an app in another subscription the credential can't read
 
     Does each production app have a regional twin with enough capacity?
-    - production_tag — The tag set on the target that marks production apps; null when every app in the subscription counts as production
+    - production_tag — The configured tag that marks production apps, set per target; null when every app in the subscription counts as production
     - production_web_apps — Number of production web apps (apps, not slots, whose kind isn't a function app)
     - production_web_apps_behind_front_door — Number of production web apps reached by an enabled origin in a serving group
     - production_web_apps_not_behind_front_door — Number of production web apps that no enabled origin in a serving group reaches
