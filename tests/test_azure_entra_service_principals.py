@@ -255,7 +255,7 @@ def test_owners_and_privileged_permissions(monkeypatch, tmp_path):
     assert summary["application_permissions_readable"] is True
     assert summary["service_principals_with_application_permissions"] == 3
     assert summary["application_permission_assignments"] == 4
-    assert summary["application_permissions_unnamed"] == 0
+    assert summary["unnamed_graph_application_permissions"] == summary["unnamed_other_application_permissions"] == 0
     assert summary["service_principals_with_privileged_application_permissions"] == 2
     assert summary["managed_identities_with_privileged_application_permissions"] == 1
     # The managed identity holds a privileged role too, but cannot have an owner.
@@ -289,8 +289,8 @@ def test_owners_and_privileged_permissions(monkeypatch, tmp_path):
     (unused,) = evidence["results"]["applications_without_service_principal"]
     assert unused["has_owner"] is False
     checked = evidence["results"]
-    assert "RoleManagement.ReadWrite.Directory" in checked["privileged_graph_permissions_checked"]
-    assert "Mail.Read" in checked["privileged_graph_permissions_checked"]
+    assert "RoleManagement.ReadWrite.Directory" in checked["privileged_application_graph_permissions_checked"]
+    assert "Mail.Read" in checked["privileged_application_graph_permissions_checked"]
     assert "RoleManagement.ReadWrite.Directory" in checked["privileged_delegated_graph_permissions_checked"]
     assert "Mail.Read" not in checked["privileged_delegated_graph_permissions_checked"]
     # Role names are read once per resource that an assignment points at.
@@ -335,10 +335,13 @@ def test_an_unnamed_permission_is_unknown_on_graph_and_not_privileged_elsewhere(
 def test_unnamed_graph_permission_is_counted_and_leaves_the_flag_unknown(monkeypatch, tmp_path):
     tenant = _tenant()
     tenant["assignments"]["sp-owned"].append(_assignment(ROLE_UNKNOWN))
+    # An unnamed role on an API other than Graph is not privileged either way.
+    tenant["assignments"]["sp-orphan"].append(_assignment(ROLE_UNKNOWN, "sp-owned", "Owned app"))
     code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
 
     assert code == 0
-    assert evidence["summary"]["application_permissions_unnamed"] == 1
+    assert evidence["summary"]["unnamed_graph_application_permissions"] == 1
+    assert evidence["summary"]["unnamed_other_application_permissions"] == 1
     by_id = {r["id"]: r for r in evidence["results"]["service_principals"]}
     assert by_id["sp-owned"]["has_privileged_permission"] is None
 
@@ -458,7 +461,7 @@ def test_a_failed_app_role_name_read_leaves_permissions_unreadable(monkeypatch, 
     summary = evidence["summary"]
     assert summary["application_permissions_readable"] is False
     assert summary["application_permission_assignments"] is None
-    assert summary["application_permissions_unnamed"] is None
+    assert summary["unnamed_graph_application_permissions"] is None
     assert summary["service_principals_with_privileged_application_permissions"] is None
 
 

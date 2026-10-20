@@ -789,6 +789,10 @@ def access_summary(records: list[dict], unmatched_apps: list[dict], readable: di
         return value if ok else None
 
     with_priv_app = [r for r in non_microsoft if r.get("privileged_application_permissions")]
+    unnamed = [
+        p for r in non_microsoft for p in r.get("application_permissions") or []
+        if p["permission"] is None and not p["default_access"]
+    ]
     return {
         # --- who owns each app and service principal ---
         "owners_readable": owners_ok,
@@ -816,15 +820,8 @@ def access_summary(records: list[dict], unmatched_apps: list[dict], readable: di
         "application_permission_assignments": when(
             perms_ok, sum(len(r.get("application_permissions") or []) for r in non_microsoft)
         ),
-        "application_permissions_unnamed": when(
-            perms_ok,
-            sum(
-                1
-                for r in non_microsoft
-                for p in r.get("application_permissions") or []
-                if p["permission"] is None and not p["default_access"]
-            ),
-        ),
+        "unnamed_graph_application_permissions": when(perms_ok, len([p for p in unnamed if p["privileged"] is None])),
+        "unnamed_other_application_permissions": when(perms_ok, len([p for p in unnamed if p["privileged"] is False])),
         "service_principals_with_delegated_grants": when(
             grants_ok, sum(1 for r in non_microsoft if r.get("delegated_permission_grants"))
         ),
@@ -1146,7 +1143,7 @@ def main() -> int:
             "service_principals": records,
             "applications_without_service_principal": unmatched,
             "evaluated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "privileged_graph_permissions_checked": sorted(PRIVILEGED_APPLICATION_GRAPH_PERMISSIONS),
+            "privileged_application_graph_permissions_checked": sorted(PRIVILEGED_APPLICATION_GRAPH_PERMISSIONS),
             "privileged_delegated_graph_permissions_checked": sorted(PRIVILEGED_GRAPH_PERMISSIONS),
         },
         summary=summarize(records, unmatched, readable),

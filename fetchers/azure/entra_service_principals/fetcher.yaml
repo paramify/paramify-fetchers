@@ -54,6 +54,9 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 #   DelegatedPermissionGrant.Read.All — optional; /oauth2PermissionGrants (delegated
 #                            grants). Directory.Read.All also covers it. Without either the
 #                            delegated figures read null.
+#   User.Read.All          — optional; user owners' names and account state. With
+#                            Application.Read.All alone Graph returns user owners as an id
+#                            only, and the disabled-owner figure reads null.
 #   Organization.Read.All  — optional; the tenant name/domain recorded as provenance.
 # The Directory Readers role covers all of them. Any other denied read is recorded as
 # an API failure and the run exits non-zero.
@@ -68,7 +71,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_service_principals/fetcher.py
 
-    Access: Microsoft Graph Application.Read.All, or the Directory Readers role. Optional: DelegatedPermissionGrant.Read.All (or Directory.Read.All; the Directory Readers role covers both); without it, the delegated grant fields read null.
+    Access: Microsoft Graph Application.Read.All, or the Directory Readers role. Optional: DelegatedPermissionGrant.Read.All (or Directory.Read.All; the Directory Readers role covers both); without it, the delegated grant fields read null. Optional: User.Read.All (or Directory.Read.All; the Directory Readers role covers it); without it, user owners come back as an id only, so their names and account state read null and service_principals_with_only_disabled_owners reads null.
 
     Commands Executed:
     - Microsoft Graph GET /organization — the tenant's name and domain
@@ -88,7 +91,7 @@ evidence_set:
     - total_service_principals — Number of service principals (apps, managed identities and other non-user accounts) in the tenant
     - disabled_service_principals — Number of service principals that are disabled
     - owners_readable — True if the owners (the users or service principals listed as able to manage an app registration or service principal) of every app registration and service principal were read; false if any owner read failed, and every count that needs owners reads null
-    - owner_details_readable — True if owners were read and every owner of a service principal that can have one, or of an app registration with no service principal, came back with its account state (enabled or disabled); false if not, and service_principals_with_only_disabled_owners reads null
+    - owner_details_readable — True if owners were read and every owner of a service principal that can have one (any service principal except Microsoft's own apps and managed identities), or of an app registration with no service principal, came back with its account state (enabled or disabled); false if not, and service_principals_with_only_disabled_owners reads null
     - application_permissions_readable — True if every service principal's application permissions (app roles on an API, used with no user signed in) and their names were read; false if any read failed, and the application permission fields read null
     - delegated_grants_readable — True if the delegated grants (permissions to call an API on behalf of a signed-in user) were read; false if they couldn't be (usually DelegatedPermissionGrant.Read.All isn't granted), and the delegated grant fields read null
 
@@ -142,15 +145,16 @@ evidence_set:
     What API permissions do non-Microsoft accounts hold?
     - service_principals_with_application_permissions — Number of service principals, other than Microsoft's own apps, holding at least one application permission; null if application permissions couldn't be read
     - application_permission_assignments — Number of application permissions held by service principals other than Microsoft's own apps; null if application permissions couldn't be read
-    - application_permissions_unnamed — Number of application permissions, held by service principals other than Microsoft's own apps and other than default access (no named role), whose name couldn't be found in the API's app roles; on Microsoft Graph whether each is privileged is unknown; null if application permissions couldn't be read
+    - unnamed_graph_application_permissions — Number of Microsoft Graph application permissions (or ones whose API is unknown), held by service principals other than Microsoft's own apps, whose name couldn't be found in the API's app roles, so whether each is privileged is unknown; null if application permissions couldn't be read
+    - unnamed_other_application_permissions — Number of application permissions on APIs other than Microsoft Graph, held by service principals other than Microsoft's own apps and other than default access (no named role), whose name couldn't be found in the API's app roles; an unnamed permission on another API never counts as privileged; null if application permissions couldn't be read
     - service_principals_with_delegated_grants — Number of service principals, other than Microsoft's own apps, holding at least one delegated grant; null if delegated grants couldn't be read
     - delegated_permission_grants — Number of delegated grants held by service principals other than Microsoft's own apps; null if delegated grants couldn't be read
     - admin_consented_delegated_grants — Number of delegated grants, held by service principals other than Microsoft's own apps, that an admin consented to for every user; null if delegated grants couldn't be read
 
     Which accounts hold privileged Microsoft Graph permissions?
-    - service_principals_with_privileged_application_permissions — Number of service principals, other than Microsoft's own apps, holding a privileged Microsoft Graph application permission: one on the list in privileged_graph_permissions_checked that lets the holder grant itself more access, take over users' sign-in, change the tenant's security controls, or read or write tenant-wide data such as mail, files, sites and chats; null if application permissions couldn't be read
-    - managed_identities_with_privileged_application_permissions — Number of managed identities holding a privileged Microsoft Graph application permission; null if application permissions couldn't be read
-    - ownerless_service_principals_with_privileged_application_permissions — Number of service principals that can have an owner, have no owner, and hold a privileged Microsoft Graph application permission; null if owners or application permissions couldn't be read
-    - privileged_application_permissions_held — List of the privileged Microsoft Graph application permissions held by service principals other than Microsoft's own apps; null if application permissions couldn't be read
+    - service_principals_with_privileged_application_permissions — Number of service principals, other than Microsoft's own apps, holding a privileged Microsoft Graph application permission: one on the list in privileged_application_graph_permissions_checked that lets the holder grant itself more access, take over users' sign-in, change the tenant's security controls, or read or write tenant-wide data such as mail, files, sites and chats; permissions that couldn't be named aren't included (see unnamed_graph_application_permissions); null if application permissions couldn't be read
+    - managed_identities_with_privileged_application_permissions — Number of managed identities holding a privileged Microsoft Graph application permission; permissions that couldn't be named aren't included (see unnamed_graph_application_permissions); null if application permissions couldn't be read
+    - ownerless_service_principals_with_privileged_application_permissions — Number of service principals that can have an owner, have no owner, and hold a privileged Microsoft Graph application permission; permissions that couldn't be named aren't included (see unnamed_graph_application_permissions); null if owners or application permissions couldn't be read
+    - privileged_application_permissions_held — List of the privileged Microsoft Graph application permissions held by service principals other than Microsoft's own apps; permissions that couldn't be named aren't included (see unnamed_graph_application_permissions); null if application permissions couldn't be read
     - service_principals_with_privileged_delegated_grants — Number of service principals, other than Microsoft's own apps, with a delegated grant that includes a privileged Microsoft Graph permission: one on the list in privileged_delegated_graph_permissions_checked, which leaves out the tenant-wide data permissions because, delegated, they reach only what the signed-in user can already open; null if delegated grants couldn't be read
     - privileged_delegated_permissions_granted — List of the privileged Microsoft Graph permissions in delegated grants to service principals other than Microsoft's own apps; null if delegated grants couldn't be read
