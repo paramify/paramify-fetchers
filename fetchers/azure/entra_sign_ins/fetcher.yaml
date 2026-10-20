@@ -58,9 +58,10 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 # Microsoft Graph permissions (application permission, admin consent):
 #   AuditLog.Read.All      — /auditLogs/signIns; also needs Entra ID P1 or P2.
-#   Policy.Read.All        — optional; the Conditional Access policies applied to each
-#                            sign-in. Without it the policy names are left out;
-#                            conditionalAccessStatus is still read.
+#   Policy.Read.ConditionalAccess (or Policy.Read.All) — optional; the Conditional
+#                            Access policies applied to each sign-in. Without it Graph
+#                            leaves them out and they read null; conditionalAccessStatus
+#                            is still read.
 #   Organization.Read.All  — optional; the tenant name/domain recorded as provenance.
 # Risk levels need Entra ID P2; without it Graph reports them as hidden.
 # A denied read is recorded as an API failure and the run exits non-zero.
@@ -75,7 +76,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_sign_ins/fetcher.py
 
-    Access: Microsoft Graph AuditLog.Read.All and an Entra ID P1 or P2 licence. Optional: Policy.Read.All; without it, the names of the Conditional Access policies applied to each sign-in are left out. Risk levels need Entra ID P2; without it they read hidden.
+    Access: Microsoft Graph AuditLog.Read.All and an Entra ID P1 or P2 licence. Optional: Policy.Read.ConditionalAccess (or Policy.Read.All); without it, Graph leaves out which Conditional Access policies applied to each sign-in and they read null. Optional: Organization.Read.All; without it, no tenant name or domain is recorded. Risk levels need Entra ID P2; without it they read hidden.
 
     Commands Executed:
     - Microsoft Graph GET /organization — the tenant's name and domain
@@ -90,26 +91,26 @@ evidence_set:
     - lookback_days — Days of sign-ins read, ending at the run (7 unless ENTRA_SIGN_IN_LOOKBACK_DAYS sets it, at most 30)
     - window_start — Time of the lookback's start, in UTC
     - window_end — Time of the lookback's end (the run), in UTC
-    - sign_ins_complete — True if every sign-in in the lookback was read; false if a read failed part-way or stopped at the 200,000 limit, and the counts cover only the sign-ins read
-    - sign_ins_truncated — True if reading stopped at 200,000 sign-ins; false otherwise
-    - total_sign_ins — Number of interactive sign-ins in the lookback; null if the logs weren't read
+    - sign_ins_complete — True if every sign-in in the lookback was read; false if a read failed part-way or stopped at the limit of about 200,000, and the counts cover only the newest sign-ins read (window_start still shows the configured start)
+    - sign_ins_truncated — True if reading stopped at about 200,000 sign-ins (checked after each page of 1000); false otherwise
+    - total_sign_ins — Number of interactive sign-ins in the lookback: a user signing in themselves. Non-interactive sign-ins (a client refreshing a token for a user), service principal and managed identity sign-ins aren't read; null if the logs weren't read
     - successful_sign_ins — Number of sign-ins that succeeded (error code 0); null if the logs weren't read
-    - failed_sign_ins — Number of sign-ins that failed; null if the logs weren't read
+    - failed_sign_ins — Number of sign-ins with a non-zero error code. That includes interrupted steps that are a normal part of a successful sign-in, such as the MFA prompt (50074) or keep me signed in (50140), so it isn't a count of failed attempts; null if the logs weren't read
     - users_signing_in — Number of distinct users with at least one sign-in; null if the logs weren't read
     - apps_signed_in_to — Number of distinct apps signed in to; null if the logs weren't read
 
     Did each sign-in require and pass MFA?
     - successful_single_factor_sign_ins — Number of successful sign-ins that required only one factor (a password alone, for example); null if the logs weren't read
     - successful_multi_factor_sign_ins — Number of successful sign-ins that required and passed MFA; null if the logs weren't read
-    - multi_factor_percentage — Percentage of successful sign-ins that passed MFA = successful_multi_factor_sign_ins / successful_sign_ins × 100 (a whole number, 0–100); 0 when successful_sign_ins is 0; null if the logs weren't read
+    - multi_factor_percentage — Percentage of successful sign-ins that passed MFA = successful_multi_factor_sign_ins / successful_sign_ins × 100 (a whole number, 0–100); null when successful_sign_ins is 0 or the logs weren't read
     - users_with_single_factor_sign_ins — Number of users with at least one successful single-factor sign-in; null if the logs weren't read
     - apps_with_single_factor_sign_ins — Number of apps with at least one successful single-factor sign-in; null if the logs weren't read
-    - successful_legacy_authentication_sign_ins — Number of successful sign-ins from legacy clients that can't do MFA (IMAP, POP, SMTP, Exchange ActiveSync and similar); null if the logs weren't read
+    - successful_legacy_authentication_sign_ins — Number of successful sign-ins from legacy clients that can't do MFA: any client other than a browser or modern mobile and desktop apps (Microsoft's own rule), such as IMAP, POP, SMTP or Exchange ActiveSync; null if the logs weren't read
 
     Which methods were used?
     - methods_used — Number of successful sign-ins that used each authentication method (Password, Authenticator App, SMS, FIDO2 security key and so on); a sign-in using two methods counts under both; null if the logs weren't read
-    - successful_phishing_resistant_sign_ins — Number of successful sign-ins that used a phishing-resistant method: a FIDO2 security key, a passkey, Windows Hello for Business, a platform credential, or a certificate on a sign-in that required MFA; null if the logs weren't read
-    - users_using_phishing_resistant_methods — Number of users with at least one successful phishing-resistant sign-in; null if the logs weren't read
+    - successful_phishing_resistant_sign_ins — Number of successful sign-ins that used a phishing-resistant method: a FIDO2 security key, a passkey, Windows Hello for Business, a platform credential, or a certificate that alone satisfied MFA (any other method beside it must be phishing-resistant too). A step that reused an earlier authentication (Previously satisfied, Satisfied by token) never counts, so this is a floor when the earlier factor was phishing-resistant; null if the logs weren't read
+    - users_using_phishing_resistant_methods — Number of users with at least one successful phishing-resistant sign-in, a floor since a step that reused an earlier authentication never counts; null if the logs weren't read
 
     Did Conditional Access apply?
     - successful_sign_ins_without_conditional_access — Number of successful sign-ins that no Conditional Access policy applied to; null if the logs weren't read

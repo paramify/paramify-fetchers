@@ -52,28 +52,12 @@ HIDDEN = "hidden"
 
 # authenticationMethod strings that are phishing-resistant whenever they satisfy a step.
 PHISHING_RESISTANT_MARKERS = ("fido2", "passkey", "windows hello", "platform credential")
-# A certificate counts only when the sign-in required, and so passed, MFA.
+# A certificate counts only as multifactor CBA: MFA required and no weaker method beside it.
 CERTIFICATE_MARKERS = ("x.509", "certificate")
 # Step results that reuse an earlier authentication rather than naming a method.
 NOT_A_METHOD = frozenset({"previously satisfied", "satisfied by token"})
-LEGACY_CLIENTS = frozenset(
-    {
-        "exchange activesync",
-        "imap4",
-        "imap",
-        "mapi over http",
-        "pop3",
-        "pop",
-        "smtp",
-        "authenticated smtp",
-        "autodiscover",
-        "exchange online powershell",
-        "exchange web services",
-        "offline address book",
-        "outlook anywhere (rpc over http)",
-        "other clients",
-    }
-)
+# Microsoft's sign-in workbook rule: every clientAppUsed but these two is legacy authentication.
+MODERN_CLIENTS = frozenset({"browser", "mobile apps and desktop clients"})
 
 logger = logging.getLogger(NAME)
 
@@ -90,11 +74,14 @@ def sign_in_record(s: Dict[str, Any]) -> Dict[str, Any]:
         if d.get("authenticationMethod") and d["authenticationMethod"].lower() not in NOT_A_METHOD
     })
     lowered = [m.lower() for m in methods]
-    phishing_resistant = any(k in m for m in lowered for k in PHISHING_RESISTANT_MARKERS) or (
-        requirement == MULTI_FACTOR and any(k in m for m in lowered for k in CERTIFICATE_MARKERS)
-    )
+    strong = [m for m in lowered if any(k in m for k in PHISHING_RESISTANT_MARKERS)]
+    certificates = [m for m in lowered if any(k in m for k in CERTIFICATE_MARKERS)]
+    weaker = [m for m in lowered if m not in strong and m not in certificates]
+    phishing_resistant = bool(strong) or (requirement == MULTI_FACTOR and bool(certificates) and not weaker)
     level = s.get("riskLevelDuringSignIn")
     state = s.get("riskState")
+    client = s.get("clientAppUsed") or ""
+    policies = s.get("appliedConditionalAccessPolicies")
     reasons = []
     if succeeded and requirement == SINGLE_FACTOR:
         reasons.append("single_factor")
@@ -116,11 +103,12 @@ def sign_in_record(s: Dict[str, Any]) -> Dict[str, Any]:
         "authentication_requirement": requirement,
         "methods": methods,
         "phishing_resistant": succeeded and phishing_resistant,
-        "legacy_authentication": (s.get("clientAppUsed") or "").lower() in LEGACY_CLIENTS,
+        "legacy_authentication": bool(client) and client.lower() not in MODERN_CLIENTS,
         "conditional_access_status": s.get("conditionalAccessStatus"),
-        "applied_conditional_access_policies": sorted(
+        # Graph leaves the property out without Policy.Read.ConditionalAccess; absent isn't "none applied".
+        "applied_conditional_access_policies": None if policies is None else sorted(
             p.get("displayName") or p.get("id") or ""
-            for p in s.get("appliedConditionalAccessPolicies") or []
+            for p in policies
             if p.get("result") in ("success", "failure")
         ),
         "risk_level_during_sign_in": level,
@@ -229,7 +217,9 @@ def results_and_summary(tally: Tally, window: Dict[str, Any], status: str, compl
         # --- did each sign-in require and pass MFA ---
         "successful_single_factor_sign_ins": when(c["successful_single_factor"]),
         "successful_multi_factor_sign_ins": when(c["successful_multi_factor"]),
-        "multi_factor_percentage": when(coverage_percentage(c["successful_multi_factor"], c["successful"])),
+        "multi_factor_percentage": when(
+            coverage_percentage(c["successful_multi_factor"], c["successful"]) if c["successful"] else None
+        ),
         "users_with_single_factor_sign_ins": when(sum(1 for u in users if u["successful_single_factor"])),
         "apps_with_single_factor_sign_ins": when(sum(1 for a in apps if a["successful_single_factor"])),
         "successful_legacy_authentication_sign_ins": when(c["successful_legacy_authentication"]),

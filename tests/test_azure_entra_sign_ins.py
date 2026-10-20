@@ -54,6 +54,8 @@ SIGN_INS = [
     _sign_in("s6", "u-3", level="high", state="atRisk", steps=[_step("Password"), _step("SMS")]),
     _sign_in("s7", "u-4", steps=[_step("X.509 Certificate")]),
     _sign_in("s8", "u-4", steps=[_step("Previously satisfied")]),
+    # A certificate beside a push isn't phishing-resistant: Microsoft counts only multifactor CBA.
+    _sign_in("s9", "u-5", steps=[_step("X.509 Certificate"), _step("Mobile app notification")]),
 ]
 
 
@@ -95,16 +97,16 @@ def test_sign_ins_summarized_per_user_and_app(monkeypatch):
     (version, path), = client.paths
     assert version == "beta" and path.startswith("/auditLogs/signIns?$filter=createdDateTime ge 2026-10-12T12:00:00Z")
     assert s["sign_in_logs"] == "read" and s["sign_ins_complete"] is True
-    assert (s["total_sign_ins"], s["successful_sign_ins"], s["failed_sign_ins"]) == (8, 7, 1)
+    assert (s["total_sign_ins"], s["successful_sign_ins"], s["failed_sign_ins"]) == (9, 8, 1)
     assert s["successful_single_factor_sign_ins"] == 2
-    assert s["successful_multi_factor_sign_ins"] == 5
-    assert s["multi_factor_percentage"] == 71
+    assert s["successful_multi_factor_sign_ins"] == 6
+    assert s["multi_factor_percentage"] == 75
     assert s["users_with_single_factor_sign_ins"] == 1
     assert s["apps_with_single_factor_sign_ins"] == 2
     assert s["successful_legacy_authentication_sign_ins"] == 1
-    assert s["methods_used"] == {"Authenticator App": 1, "FIDO2 security key": 1, "Password": 4, "SMS": 1,
-                                 "X.509 Certificate": 1}
-    assert s["successful_phishing_resistant_sign_ins"] == 2  # FIDO2, and the certificate that passed MFA
+    assert s["methods_used"] == {"Authenticator App": 1, "FIDO2 security key": 1, "Mobile app notification": 1,
+                                 "Password": 4, "SMS": 1, "X.509 Certificate": 2}
+    assert s["successful_phishing_resistant_sign_ins"] == 2  # FIDO2, and the certificate that alone passed MFA
     assert s["users_using_phishing_resistant_methods"] == 2
     assert s["successful_sign_ins_without_conditional_access"] == 1
     assert s["risky_sign_ins"] == 1
@@ -120,6 +122,29 @@ def test_sign_ins_summarized_per_user_and_app(monkeypatch):
     assert users["u-1"]["methods"] == {"Authenticator App": 1, "FIDO2 security key": 1, "Password": 1}
     apps = {a["app_id"]: a for a in results["apps"]}
     assert apps["app-mail"]["successful_legacy_authentication"] == 1
+
+
+def test_legacy_authentication_is_any_client_but_browser_and_modern_apps():
+    for client, legacy in (("Browser", False), ("Mobile Apps and Desktop clients", False), ("", False),
+                           ("Reporting Web Services", True), ("Universal Outlook", True), ("Other clients", True)):
+        assert sign_ins.sign_in_record(_sign_in("s", "u", client=client))["legacy_authentication"] is legacy, client
+
+
+def test_unread_policies_are_null_not_none_applied():
+    record = _sign_in("s", "u")
+    del record["appliedConditionalAccessPolicies"]
+    assert sign_ins.sign_in_record(record)["applied_conditional_access_policies"] is None
+    record["appliedConditionalAccessPolicies"] = [{"displayName": "Require MFA", "result": "success"},
+                                                  {"displayName": "Off", "result": "notEnabled"}]
+    assert sign_ins.sign_in_record(record)["applied_conditional_access_policies"] == ["Require MFA"]
+
+
+def test_a_risk_state_alone_marks_a_sign_in_risky(monkeypatch):
+    flagged = [_sign_in("r1", "u-1", state="atRisk", steps=[_step("Password"), _step("SMS")])]
+    _, s = sign_ins.collect(FakeClient([flagged]), _collector(), _window(monkeypatch))
+    assert s["risky_sign_ins"] == 1
+    assert s["risky_sign_ins_by_level"] == {"none": 1}
+    assert s["risky_sign_ins_by_state"] == {"atRisk": 1}
 
 
 def test_lookback_is_configurable_and_capped_at_retention(monkeypatch):
@@ -170,21 +195,59 @@ def test_hidden_risk_levels_mean_no_p2(monkeypatch):
     assert s["risky_sign_ins"] == 0
 
 
+def test_an_empty_lookback_leaves_ratios_and_risk_unknown(monkeypatch):
     _, s = sign_ins.collect(FakeClient([[]]), _collector(), _window(monkeypatch))
     assert s["total_sign_ins"] == 0
     assert s["risk_levels_available"] is None
+    assert s["multi_factor_percentage"] is None
 
 
-def test_main_writes_tenant_evidence(monkeypatch, tmp_path):
-    monkeypatch.setattr(sign_ins, "credential", lambda: object())
-    monkeypatch.setattr(sign_ins, "AzureRestClient", lambda cred: FakeClient([SIGN_INS]))
+def test_only_failed_sign_ins_leave_the_mfa_percentage_null(monkeypatch):
+    failed = [_sign_in("f1", "u-1", error=50126, steps=[_step("Password", ok=False)])]
+    _, s = sign_ins.collect(FakeClient([failed]), _collector(), _window(monkeypatch))
+    assert s["successful_sign_ins"] == 0
+    assert s["multi_factor_percentage"] is None
+
+
+def _main(monkeypatch, tmp_path, client, cred=lambda: object()):
+    monkeypatch.setattr(sign_ins, "credential", cred)
+    monkeypatch.setattr(sign_ins, "AzureRestClient", lambda cred: client)
     monkeypatch.setattr(sign_ins, "load_dotenv", lambda: None)
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
     monkeypatch.setenv("AZURE_TENANT_ID", TENANT)
     monkeypatch.delenv("AZURE_SUBSCRIPTION_ID", raising=False)
-    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
-
-    assert sign_ins.main() == 0
+    monkeypatch.delenv("ENTRA_SIGN_IN_LOOKBACK_DAYS", raising=False)
+    status = tmp_path / "status.json"
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(status))
+    code = sign_ins.main()
     evidence = json.loads((tmp_path / f"azure_entra_sign_ins_{TENANT}.json").read_text())
+    return code, evidence, (json.loads(status.read_text()) if status.exists() else None)
+
+
+def test_main_writes_tenant_evidence(monkeypatch, tmp_path):
+    code, evidence, _ = _main(monkeypatch, tmp_path, FakeClient([SIGN_INS]))
+    assert code == 0
     assert evidence["metadata"]["tenant_id"] == TENANT
-    assert evidence["summary"]["total_sign_ins"] == 8
+    assert evidence["summary"]["total_sign_ins"] == 9
+
+
+def test_reading_stops_at_the_limit_and_fails_the_run(monkeypatch, tmp_path):
+    monkeypatch.setattr(sign_ins, "SIGN_IN_LIMIT", 3)
+    code, evidence, status = _main(monkeypatch, tmp_path, FakeClient([SIGN_INS[:4], SIGN_INS[4:]]))
+
+    assert code == 1
+    assert status["code"] == "partial_failure"
+    s = evidence["summary"]
+    assert s["sign_ins_truncated"] is True and s["sign_ins_complete"] is False
+    assert s["total_sign_ins"] == 4  # the first page, newest first
+
+
+def test_no_credential_writes_evidence_and_fails(monkeypatch, tmp_path):
+    def no_credential():
+        raise RuntimeError("DefaultAzureCredential failed to retrieve a token from the included credentials.")
+
+    code, evidence, status = _main(monkeypatch, tmp_path, FakeClient([SIGN_INS]), cred=no_credential)
+    assert code == 1
+    assert status["code"] == "auth_failed"
+    assert evidence["summary"]["sign_in_logs"] == "not_read"
+    assert evidence["summary"]["total_sign_ins"] is None
