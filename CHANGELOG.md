@@ -579,16 +579,22 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`azure_rbac_role_assignments` 0.3.0: PIM eligibility, standing and activation
   rules.** Every active grant, at every scope, now carries `standing`:
-  `permanent`, `time_bound` or `pim_activated`. The value is read from its PIM
-  schedule instance; a grant made outside PIM has no schedule and is permanent.
-  PIM-eligible assignments are listed in `eligible_role_assignments`. The
-  over-broad roles' subscription-scope PIM settings are in `pim_role_policies`:
-  MFA or authentication context, justification, approval, maximum activation
-  hours, and whether permanent eligible or active assignments are allowed. The
-  summary adds the standing, eligibility and policy keys; each reads null when
-  the PIM read it depends on fails. Without Entra ID P2, `pim_available` is false
-  and the run succeeds. Every existing field and summary key is unchanged. Needs
-  only Reader.
+  `permanent`, `time_bound` or `pim_activated`, read from its PIM schedule
+  instance. PIM lists most grants, including ones made outside it, as assigned
+  with no end date; a grant it lists no schedule for also reads permanent and is
+  counted in `assignments_without_pim_schedule`. PIM-eligible assignments are
+  listed in `eligible_role_assignments`. The over-broad roles' subscription-scope
+  PIM settings are in `pim_role_policies`: MFA or authentication context,
+  justification, approval, maximum activation hours, and whether permanent
+  eligible or active assignments are allowed; `over_broad_role_policies_read`
+  names the roles read, and the policy lists read null unless all four were.
+  The summary adds the standing, eligibility and policy keys; each reads null
+  when the PIM read it depends on fails. Without Entra ID P2 or ID Governance,
+  `pim_available` is false, the PIM reads that succeeded are kept, and the run
+  succeeds. Any other PIM refusal now fails the run with `not_authorized` where
+  0.2.0 succeeded; the role-assignment evidence is still written. Every existing
+  field and summary key is unchanged. Reader is enough; a custom role also needs
+  the three `Microsoft.Authorization` PIM read actions.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`

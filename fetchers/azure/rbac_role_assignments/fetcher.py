@@ -25,6 +25,7 @@ prowler/providers/azure/config.py.
 import logging
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -44,11 +45,11 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
 
 logger = logging.getLogger("azure_rbac_role_assignments")
@@ -428,7 +429,7 @@ def provisioned(instance: dict) -> bool:
 
 
 def standing(schedule: dict | None) -> str:
-    """An active grant with no PIM schedule was made outside PIM and has no end date, so it is permanent."""
+    """PIM lists most grants, including ones made outside it, as Assigned; a grant it lists no schedule for reads permanent."""
     if schedule is None:
         return STANDING_PERMANENT
     if (schedule.get("assignment_type") or "").lower() == "activated":
@@ -482,19 +483,19 @@ def eligibility_record(instance: dict, role_names: dict[str, dict]) -> dict:
 
 
 def duration_hours(value: str | None) -> float | None:
-    """Hours in an ISO-8601 duration such as PT8H or P1DT12H; None when there is none."""
-    if not value or not value.startswith("P"):
+    """Hours in an ISO-8601 duration such as PT8H, P1DT12H or P1W; None when absent or unparseable."""
+    import isodate
+
+    if not value:
         return None
-    date, _, time = value[1:].partition("T")
-    total = float(date[:-1]) * 24 if date.endswith("D") else 0.0
-    number = ""
-    for ch in time:
-        if ch.isdigit() or ch == ".":
-            number += ch
-            continue
-        total += float(number or 0) * {"H": 1, "M": 1 / 60, "S": 1 / 3600}.get(ch, 0)
-        number = ""
-    return round(total, 2)
+    try:
+        parsed = isodate.parse_duration(value)
+    except (isodate.ISO8601Error, ValueError, TypeError):
+        return None
+    if isinstance(parsed, isodate.Duration):
+        # Years and months have no fixed length; counted from a non-leap January.
+        parsed = parsed.totimedelta(start=datetime(2001, 1, 1))
+    return round(parsed.total_seconds() / 3600, 2)
 
 
 def policy_record(assignment: dict) -> dict:
@@ -524,7 +525,8 @@ def policy_record(assignment: dict) -> dict:
         "activation_requires_justification": enabled("Enablement_EndUser_Assignment", JUSTIFICATION),
         "activation_requires_ticket": enabled("Enablement_EndUser_Assignment", TICKETING),
         "activation_requires_approval": approval.get("is_approval_required"),
-        "activation_approver_count": approval.get("primary_approver_count"),
+        # Users and groups named as approvers: a group counts once, however many members it has.
+        "activation_approver_sets": approval.get("primary_approver_count"),
         "activation_authentication_context": context.get("claim_value") if context.get("is_enabled") else None,
         "permanent_eligible_assignment_allowed": allows_permanent("Expiration_Admin_Eligibility"),
         "eligible_assignment_maximum_duration": (rules.get("Expiration_Admin_Eligibility") or {}).get("maximum_duration"),
@@ -547,8 +549,12 @@ def summarize_pim(
     permanent = [a for a in over_broad if a.get("standing") == STANDING_PERMANENT]
     eligible_over_broad = [e for e in eligible or [] if e["is_over_broad_builtin"]]
 
+    read_roles = None if policies is None else sorted({p["role_name"] for p in policies if p["role_name"]})
+    # A role whose settings weren't read would read as compliant, so the lists need all four.
+    all_read = read_roles is not None and set(read_roles) == set(OVER_BROAD_BUILTIN_ROLES.values())
+
     def roles(pred) -> list[str] | None:
-        return None if policies is None else sorted({p["role_name"] for p in policies if pred(p)})
+        return sorted({p["role_name"] for p in policies or [] if pred(p)}) if all_read else None
 
     def standing_figure(value):
         return value if schedules_read else None
@@ -583,8 +589,9 @@ def summarize_pim(
         "over_broad_roles_allowing_permanent_eligible_assignment": roles(
             lambda p: p["permanent_eligible_assignment_allowed"] is True
         ),
-        "max_over_broad_activation_hours": None if policies is None else max(
-            (p["activation_maximum_hours"] for p in policies if p["activation_maximum_hours"] is not None), default=None
+        "over_broad_role_policies_read": read_roles,
+        "max_over_broad_activation_hours": None if not all_read else max(
+            (p["activation_maximum_hours"] for p in policies or [] if p["activation_maximum_hours"] is not None), default=None
         ),
     }
 
@@ -688,7 +695,7 @@ def pim_unavailable(exc: BaseException) -> bool:
 
 
 def collect_pim(subscription_id, cred, collector: Collector, role_names: dict[str, dict]) -> dict:
-    """PIM schedule instances, eligibilities and the over-broad roles' policies, unfiltered: at, above and below the subscription."""
+    """PIM schedule instances and eligibilities at, above and below the subscription; the over-broad roles' policies at it."""
     from azure.mgmt.authorization import AuthorizationManagementClient
 
     out: dict = {"available": None, "schedules": None, "eligible": None, "policies": None, "notes": []}
@@ -717,21 +724,21 @@ def collect_pim(subscription_id, cred, collector: Collector, role_names: dict[st
             ],
         ),
     }
-    unavailable = failed = False
+    refused, failed = [], False
     for key, (operation, read) in reads.items():
         try:
             out[key] = read()
         except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
             if pim_unavailable(exc):
-                unavailable = True
+                refused.append(key)
                 out["notes"].append(f"{operation}: {' '.join(str(exc).split())[:300]}")
             else:
                 collector.record(operation, exc)
                 failed = True
-    if unavailable:
-        # No PIM in the tenant: nothing is eligible and every active grant is permanent.
-        return {**out, "available": False, "schedules": [], "eligible": [], "policies": None}
-    out["available"] = None if failed else True
+    # No PIM in the tenant: a refused list means nothing eligible and no schedule; reads that succeeded are kept.
+    for key in refused:
+        out[key] = {"schedules": [], "eligible": [], "policies": None}[key]
+    out["available"] = False if refused else (None if failed else True)
     out["schedules"] = None if out["schedules"] is None else [s for s in out["schedules"] if provisioned(s)]
     if out["eligible"] is not None:
         out["eligible"] = sorted(
