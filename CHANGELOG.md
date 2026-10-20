@@ -596,7 +596,8 @@ schemas and the `paramify` CLI — not the internal code.
   sources. Fusion, ML Behavior Analytics and Threat Intelligence rules have no
   query and read as `tables_read: null`, counted in
   `enabled_rules_tables_unknown`. The summary's counts are null, not 0, when no
-  workspace could be checked. Existing fields are unchanged. The ingestion query
+  workspace could be checked. `templates_available` and `templates_in_use` now
+  count templates that only the preview api-version lists. The ingestion query
   needs Log Analytics Reader as well as Microsoft Sentinel Reader.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port

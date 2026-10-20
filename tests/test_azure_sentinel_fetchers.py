@@ -246,7 +246,7 @@ def test_every_fetcher_follows_the_shape(name):
         assert spec["target_schema"]["workspaces"]["env"] == azure_rest.WORKSPACES_ENV
     assert spec["evidence_set"]["reference_id"].startswith("EVD-AZURE-")
     instructions = spec["evidence_set"]["instructions"]
-    if not instructions.startswith(f"Script: azure/{name}/fetcher.py\n"):  # the plain-text layout is checked in test_contracts
+    if not instructions.startswith(f"Script: azure/{name}/fetcher.py\n"):  # the plain-text layout has no word limit
         assert len(instructions.split()) <= 80
     declared = {f["env"] for f in (spec.get("config_schema") or {}).values()}
     used = {getattr(MODS[name], a) for a in ("WINDOW_ENV", "LOOKBACK_ENV") if hasattr(MODS[name], a)}
