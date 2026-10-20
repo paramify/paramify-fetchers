@@ -64,7 +64,7 @@ permissions:
   [onboarding reference](platform_onboarding.md)
 - [Write an issue-report fetcher](issue_report_fetchers_guide.md), the
   [issue-report reference](issue_report_fetchers.md), and the
-  [Wiz pipeline fetchers](wiz_pipeline_fetchers.md)
+  [Wiz pipeline guide](wiz_pipeline_guide.md)
 
 ## FedRAMP KSI coverage
 
