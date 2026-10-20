@@ -1,17 +1,9 @@
 name: azure_sentinel_data_sources
 version: 0.2.0
-description: >
-  For every Microsoft Sentinel workspace in the subscription: its data connectors
-  and their enabled data types, and every Log Analytics table that received data
-  in the ingestion window, with its last ingestion time and record count. The
-  per-workspace count of ingesting source tables is what shows which sources feed
-  the SIEM. It is measured from the data itself, because the data connectors list
-  omits sources wired up through diagnostic settings or data collection rules
-  (Azure Activity, Entra ID logs, AMA). Each installed connector also shows, per
-  data type, its last data received in the window, measured as the Sentinel
-  portal does, and whether it is connected (received anything). Where Sentinel
-  health monitoring is on, each connector's latest SentinelHealth status is
-  included.
+description: >-
+  Shows which log sources and data connectors actually sent data to each
+  Sentinel workspace in the last 14 days, with each connector's last data
+  received.
 category: azure
 
 supports_targets: true
@@ -68,13 +60,37 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-SENTINEL-DATA-SOURCES
   name: Azure Sentinel Data Sources
-  instructions: >
-    Script: fetcher.py. ARM REST per Sentinel workspace: dataConnectors at
-    2025-09-01 and 2025-10-01-preview, and dataConnectorDefinitions. Log
-    Analytics: max(TimeGenerated) and count() per table and per SecurityAlert
-    product, each connector data type's lastDataReceivedQuery (built-in
-    queries where no definition is installed), and SentinelHealth. Connected
-    means any data in the window. sources_ingesting excludes workspace and
-    Sentinel telemetry (Usage, Operation, LAQueryLogs, SentinelHealth/Audit,
-    SecurityIncident, Watchlist, UEBA, Heartbeat). Roles: Microsoft Sentinel
-    Reader and Log Analytics Reader.
+  instructions: |
+    Script: azure/sentinel_data_sources/fetcher.py
+
+    Access: Microsoft Sentinel Reader and Log Analytics Reader.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.OperationalInsights/workspaces and onboardingStates (per workspace) — finds the Sentinel workspaces
+    - GET Microsoft.SecurityInsights/dataConnectors (stable and preview APIs) — connections and their states, and the connector definitions installed from Content Hub
+    - GET Microsoft.SecurityInsights/dataConnectorDefinitions — codeless connector definitions
+    - KQL union * summarized by table — each table's last ingestion time and record count
+    - KQL on SecurityAlert by product — which alert products feed the workspace
+    - KQL union of each connector data type's lastDataReceivedQuery — last data received per connector data type, as the Sentinel portal measures it
+    - KQL on SentinelHealth — each connector's latest health status (only when health monitoring sends data)
+
+    Output: azure_sentinel_data_sources_<subscription>.json — for each Sentinel workspace, its connectors with when each last received data, and every table with when it last received data.
+
+    Summary fields:
+
+    Which workspaces were checked?
+    - workspaces_collected — Number of Sentinel workspaces read
+    - workspaces_without_sentinel — Number of workspaces skipped because Sentinel isn't turned on
+
+    Is Sentinel receiving data from enough sources?
+    - min_sources_ingesting — Number of data sources sending data to the Sentinel workspace with the fewest, in the window (default 14 days); null if no workspace's ingestion could be read. A source is a table that received data, other than workspace and Sentinel telemetry (Usage, Operation, LAQueryLogs, SentinelHealth, SentinelAudit, SecurityIncident, watchlists, UEBA tables and Heartbeat), or a product other than Sentinel sending alerts to SecurityAlert
+    - workspaces_with_2plus_sources — Number of Sentinel workspaces receiving data from at least two sources
+    - workspaces_with_no_sources — Number of Sentinel workspaces receiving data from no source
+    - data_connectors_total — Number of configured data connections across all Sentinel workspaces, including kinds only the preview API lists, such as Defender XDR
+
+    Is each connector actually delivering data?
+    - connectors_connected — Number of connectors, across all Sentinel workspaces, that are connected. A connector is every connector definition installed in the workspace plus each built-in connection with no installed definition; it is connected when at least one of its data types received data in the window, measured with the definition's own last-data query
+    - connectors_not_connected — Number of connectors, across all Sentinel workspaces, none of whose data types received data in the window; connectors whose data couldn't be measured, or that define no data types, aren't counted
+    - workspaces_with_health_monitoring — Number of Sentinel workspaces where Sentinel health monitoring sent data to the SentinelHealth table in the window
+    - connectors_unhealthy — Number of connectors, across all Sentinel workspaces, whose latest SentinelHealth status isn't Success

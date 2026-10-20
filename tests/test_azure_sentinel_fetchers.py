@@ -240,7 +240,9 @@ def test_every_fetcher_follows_the_shape(name):
     if name != "log_storage_immutability":
         assert spec["target_schema"]["workspaces"]["env"] == azure_rest.WORKSPACES_ENV
     assert spec["evidence_set"]["reference_id"].startswith("EVD-AZURE-")
-    assert len(spec["evidence_set"]["instructions"].split()) <= 80
+    instructions = spec["evidence_set"]["instructions"]
+    if not instructions.startswith(f"Script: azure/{name}/fetcher.py\n"):  # the plain-text layout is checked in test_contracts
+        assert len(instructions.split()) <= 80
     declared = {f["env"] for f in (spec.get("config_schema") or {}).values()}
     used = {getattr(MODS[name], a) for a in ("WINDOW_ENV", "LOOKBACK_ENV") if hasattr(MODS[name], a)}
     assert used <= declared
