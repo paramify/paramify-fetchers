@@ -364,7 +364,7 @@ paramify-fetchers/
 └── docs/
     ├── design.md                     # this file — design rationale + current state
     ├── fetcher_contract.md           # the runner⇄fetcher contract
-    ├── porting_playbook.md           # how to port an existing fetcher (the "why")
+    ├── porting_guide.md              # how to port an existing fetcher
     ├── authoring_a_fetcher.md        # how to write a new fetcher from scratch
     ├── run_manifest_reference.md     # manifest format reference
     ├── config_injection_design.md    # platform/config/auth injection model

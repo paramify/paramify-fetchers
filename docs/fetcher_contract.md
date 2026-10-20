@@ -2,7 +2,7 @@
 
 **Status:** v0.x — binding for ported fetchers; some clauses are interim and noted as such.
 
-**See also:** [`design.md`](design.md) for rationale, [`porting_playbook.md`](porting_playbook.md) for the v0.x port procedure, [`framework/schemas/fetcher_schema.json`](../framework/schemas/fetcher_schema.json) for the enforced subset.
+**See also:** [`design.md`](design.md) for rationale, [`porting_guide.md`](porting_guide.md) for the v0.x port procedure, [`framework/schemas/fetcher_schema.json`](../framework/schemas/fetcher_schema.json) for the enforced subset.
 
 This is the interface between the framework's runner and a fetcher. A fetcher's `fetcher.yaml` is validated against the schema at discovery time; its runtime behavior must match the clauses below.
 
@@ -114,8 +114,8 @@ The runner does NOT pass the customer's full environment through. If your fetche
   - `124` = reserved: the runner killed the invocation for exceeding its timeout (don't return this yourself)
 
 **Detecting** that collection failed is fetcher-defined — it depends on the shared
-module and the collection style, and [`porting_playbook.md`](porting_playbook.md)
-§ "Exit code convention" lists the patterns in use. **Reporting** it is not
+module and the collection style; [`porting_guide.md`](porting_guide.md)
+shows the pattern for a ported script. **Reporting** it is not
 fetcher-defined. Error data goes in exactly these three places and nowhere else:
 
 | Where | Who reads it | Required |

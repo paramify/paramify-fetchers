@@ -1,6 +1,6 @@
 # Authoring a Fetcher
 
-**Status:** v0.x — this doc covers writing a *new* fetcher from scratch. If you already have a working script you want to port into this repo's contract, see [`porting_playbook.md`](porting_playbook.md) instead.
+**Status:** v0.x — this doc covers writing a *new* fetcher from scratch. If you already have a working script you want to port into this repo's contract, see [`porting_guide.md`](porting_guide.md) instead.
 
 **See also:** [`design.md`](design.md) for rationale, [`fetcher_contract.md`](fetcher_contract.md) for the contract this fetcher must satisfy, [`framework/schemas/fetcher_schema.json`](../framework/schemas/fetcher_schema.json) for the enforced schema.
 
@@ -8,7 +8,7 @@
 
 ## When to write new vs. port
 
-- **Port** if you already have a working script that collects this evidence (see [`porting_playbook.md`](porting_playbook.md)).
+- **Port** if you already have a working script that collects this evidence (see [`porting_guide.md`](porting_guide.md)).
 - **Write new** if you're building an integration from scratch, or if an existing script is fundamentally the wrong shape.
 
 A "new" fetcher follows the same contract as a ported one, but you don't carry forward as-is plumbing — you build to the v0.x pattern from day one.
@@ -175,7 +175,7 @@ Run `describe` on your new fetcher to confirm the runner parsed its config, secr
 
 ## `fetcher.py` (Python)
 
-Use the playbook skeleton — see [`porting_playbook.md`](porting_playbook.md) § 5 for the canonical shape. Key requirements:
+Use the porting guide's skeleton — see [`porting_guide.md`](porting_guide.md#5-write-the-entry-script) for the canonical shape. Key requirements:
 
 - **Call `load_dotenv()`** at the start of `main()` — v0.x dev-loop convenience; harmless when no `.env` exists.
 - **Read `EVIDENCE_DIR`** from `os.environ`, default to `./evidence`.
@@ -187,7 +187,7 @@ Use the playbook skeleton — see [`porting_playbook.md`](porting_playbook.md) �
 
 ### Detecting collection failures
 
-You decide how to detect "did this run actually succeed." See [`porting_playbook.md`](porting_playbook.md) § "Exit code convention" for the three patterns in use today. For a fresh fetcher, the simplest pattern is:
+You decide how to detect "did this run actually succeed." See [`porting_guide.md`](porting_guide.md) for how a ported script reports it. For a fresh fetcher, the simplest pattern is:
 
 ```python
 failures: list[dict] = []
@@ -215,7 +215,7 @@ and puts in the envelope's `metadata.error`, the field Paramify shows to whoever
 is triaging. Import it from `fetchers/_lib/` — Python
 `from fetcher_status import report_failure`, bash
 `source "$(dirname "$0")/../../_lib/status.sh"`. Don't hand-roll your own; see
-[`porting_playbook.md`](porting_playbook.md) § "Say why you failed" for the
+[`porting_guide.md`](porting_guide.md#5-write-the-entry-script) for the
 import lines, and [`fetcher_contract.md`](fetcher_contract.md) § Output for the
 rule about where error data is allowed to go.
 
@@ -239,7 +239,7 @@ Catch transient errors at the API-call boundary, track them, exit non-zero if no
 
 ## `fetcher.sh` (Bash)
 
-Same shape as Python; see the bash skeleton in [`porting_playbook.md`](porting_playbook.md) § 5. Key differences:
+Same shape as Python; see the entry script in [`porting_guide.md`](porting_guide.md#5-write-the-entry-script). Key differences:
 
 - **`set -o pipefail`** so curl failures propagate through `curl | jq` pipelines.
 - **`chmod +x fetcher.sh`** so the runner can exec it.
