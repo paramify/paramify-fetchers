@@ -53,6 +53,7 @@ Each fetcher is a small, read-only script that writes JSON to disk. A separate u
   </tr>
   <tr>
     <td align="center" width="128"><a href="fetchers/web/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/web-dark.svg"><img src="fetchers/logos/web.svg" alt="Web" width="48" height="48"></picture></a><br><sub>Web</sub></td>
+    <td align="center" width="128"><a href="fetchers/zendesk/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/zendesk-dark.svg"><img src="fetchers/logos/zendesk.svg" alt="Zendesk" width="48" height="48"></picture></a><br><sub>Zendesk</sub></td>
   </tr>
 </table>
 
