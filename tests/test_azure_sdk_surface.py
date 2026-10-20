@@ -574,7 +574,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "SecurityCenter",
         "assessments_metadata",
         ["list_by_subscription"],
-        "azure/defender_assessments — the only source of severity; "
+        "azure/defender_assessments — categories, type and fallback severity; "
         "assessments.list returns no metadata",
     ),
     (
@@ -899,7 +899,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         None,
         ["resources"],
         "azure/resource_inventory, azure/front_door_origins (origin regions), "
-        "azure/resource_diagnostic_settings, azure/change_provenance, azure/residual_resources",
+        "azure/resource_diagnostic_settings, azure/change_provenance, azure/residual_resources, "
+        "azure/defender_assessments (each assessment's own severity)",
     ),
     # --- deployment history: left azure-mgmt-resource for its own distribution -
     (

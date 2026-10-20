@@ -1,9 +1,13 @@
 name: azure_defender_assessments
-version: 0.1.1
+version: 0.2.0
 description: >
   Every Microsoft Defender for Cloud security assessment result on the
   subscription — one record per (resource, check) pair, each with its
-  Healthy/Unhealthy/NotApplicable status and severity. This is the per-resource
+  Healthy/Unhealthy/NotApplicable status and the assessment's own severity, read
+  from Resource Graph because the subscription's metadata catalogue can rate a
+  check lower than the assessment does. The catalogue's severity is only the
+  fallback: severity_source says which one a record carries, and the summary
+  counts the records on the fallback or with no severity. This is the per-resource
   pass/fail detail behind the secure score, not the score itself: it shows
   exactly which resources fail which checks. A subscription that never
   registered the Microsoft.Security resource provider reports
@@ -51,5 +55,15 @@ evidence_set:
     Script: fetcher.py. Azure SDK calls (azure-mgmt-security SecurityCenter):
     assessments.list(scope="subscriptions/<subscription_id>") for every security
     assessment result on the subscription, and
-    assessments_metadata.list_by_subscription() for each check's severity,
-    categories and type (the list call does not return metadata).
+    assessments_metadata.list_by_subscription() for each check's categories and
+    type (the list call does not return metadata). Each assessment's own severity
+    comes from azure-mgmt-resourcegraph ResourceGraphClient
+    resources(QueryRequest(subscriptions=[<subscription_id>], query="SecurityResources
+    | where type =~ 'microsoft.security/assessments' | project id, severity =
+    tostring(properties.metadata.severity) | order by id asc",
+    options=QueryRequestOptions(top=1000, skip_token=<previous page's $skipToken>,
+    result_format="objectArray"))), repeated until no $skipToken is returned and
+    joined on the assessment id. The catalogue's severity, which can be lower than
+    the assessment's, is used only where Resource Graph has none: severity_source
+    is "assessment" or "catalogue" (null when neither has one), and the summary
+    gives severity_from_catalogue_count and severity_unknown_count.
