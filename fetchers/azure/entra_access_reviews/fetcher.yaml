@@ -73,7 +73,12 @@ evidence_set:
     - collection_complete — True if every review series, its instances and the decisions of each active series' latest completed cycle were read; false if any read failed or was refused for the licence, and every other field except access_reviews_available is left out
     - review_definitions — Number of access review series (definitions), active or ended
     - active_review_definitions — Number of active review series (active means its status is not Completed, AutoReviewed or Applied, so it is still scheduled or running; a stopped or finished series reads Completed)
-    - active_definitions_by_scope_type — Number of active review series for each kind of access reviewed, read from the series' scope: group_membership (members of one or more groups or Teams), application (users and groups assigned to an app), entra_role (holders of an Entra directory role), access_package (access package assignments) and other
+    - active_definitions_by_scope_type — Number of active review series for each kind of access reviewed, read from the series' scope:
+      - group_membership (members of one or more groups or Teams)
+      - application (users and groups assigned to an app)
+      - entra_role (holders of an Entra directory role)
+      - access_package (access package assignments)
+      - other (any other scope, such as every user in the tenant)
 
     Is every active review monthly, deny-by-default and applied automatically?
     - active_definitions_recurring_at_least_monthly — Number of active review series that recur every 31 days or more often (daily, weekly or monthly)
@@ -91,6 +96,10 @@ evidence_set:
 
     What did the last cycle decide, and was it applied?
     - last_cycle_decisions — Number of review decisions in each active review series' latest completed cycle
-    - last_cycle_decisions_by_result — Number of latest-cycle review decisions of each result: Approve, Deny, NotReviewed (no one answered and no default decision was applied) and DontKnow
+    - last_cycle_decisions_by_result — Number of latest-cycle review decisions of each result:
+      - Approve (the reviewer kept the access)
+      - Deny (the reviewer, or the default decision, chose to remove the access)
+      - NotReviewed (no one answered and no default decision was applied)
+      - DontKnow (the reviewer answered that they don't know)
     - last_cycle_denied_decisions_applied — Number of latest-cycle Deny decisions whose removal was applied (apply result AppliedSuccessfully, or AppliedSuccessfullyButObjectNotFound when the access was already gone)
     - last_cycle_denied_decisions_not_applied — Number of latest-cycle Deny decisions not applied, either not yet or because applying failed (any other apply result, such as New or AppliedWithUnknownFailure)
