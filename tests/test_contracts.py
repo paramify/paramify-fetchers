@@ -193,6 +193,7 @@ def test_instructions_open_with_the_entry_path() -> None:
 TEXT_FORMAT_FETCHERS = ("azure/alert_rules",)
 MAX_DESCRIPTION_WORDS = 30
 FIELD_LINE = re.compile(r"^- (\S+) — \S")
+BREAKDOWN_LINE = re.compile(r"^  - \S+ \(\S.*\)$")
 COMMAND_LINE = re.compile(r"^- \S.* — \S")
 
 
@@ -252,8 +253,16 @@ def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
         for group in rest[1:]:
             if not group[0].endswith("?"):
                 problems.append(f"summary group must start with a question: {group[0]!r}")
-            if len(group) < 2 or any(not FIELD_LINE.match(ln) for ln in group[1:]):
-                problems.append(f"each summary field line must read '- <field> — <meaning>' under {group[0]!r}")
+            lines = group[1:]
+            # a breakdown's values sit on indented lines under a field line ending in ':'
+            in_breakdown = [i > 0 and (lines[i - 1].endswith(":") or bool(BREAKDOWN_LINE.match(lines[i - 1])))
+                            for i in range(len(lines))]
+            if not lines or any(
+                not (FIELD_LINE.match(ln) or (in_breakdown[i] and BREAKDOWN_LINE.match(ln)))
+                for i, ln in enumerate(lines)
+            ):
+                problems.append(f"each summary field line must read '- <field> — <meaning>', with any breakdown "
+                                f"values under a line ending in ':' as '  - <value> (<meaning>)', under {group[0]!r}")
             for ln in group[1:]:
                 m = FIELD_LINE.match(ln)
                 if m and m.group(1) in seen:

@@ -579,7 +579,7 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **Fetcher text: one-sentence descriptions and laid-out instructions.**
   - Every fetcher's `evidence_set.instructions` now opens with its entry script's path under `fetchers/` (`Script: azure/alert_rules/fetcher.py`). Before, it said `Script: fetcher.py`, and 37 named a file that doesn't exist.
-  - `docs/authoring_a_fetcher.md` sets the layout Paramify shows as plain text: a one-sentence `description`, then instructions in a `|` block with Script, Access, Commands Executed, Output and Summary fields.
+  - `docs/authoring_a_fetcher.md` sets the layout Paramify shows as plain text: a one-sentence `description`, then instructions in a `|` block with Script, Access, Commands Executed, Output and Summary fields. A breakdown's values go on indented lines under its field.
   - `azure_alert_rules` is the first fetcher converted.
   - `tests/test_contracts.py` checks the path on every fetcher with instructions, and the full layout on the fetchers listed in `TEXT_FORMAT_FETCHERS`.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
