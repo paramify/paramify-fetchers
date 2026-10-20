@@ -698,17 +698,20 @@ def test_real_checkov_takes_values_starting_with_a_dash(tmp_path):
 @pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
 def test_real_checkov_skips_a_path_with_spaces(tmp_path):
     # Split on its space, the path would become "My" and "Templates/legacy", and the second skips both folders.
-    files = {"My Templates/legacy/azuredeploy.json": ARM, "Templates/legacy/azuredeploy.json": ARM}
+    # Both kinds of file, because checkov's Bicep and ARM runners apply --skip-path differently.
+    files = {"My Templates/legacy/azuredeploy.json": ARM, "My Templates/legacy/main.bicep": BICEP,
+             "Templates/legacy/azuredeploy.json": ARM, "Templates/legacy/main.bicep": BICEP}
 
     (tmp_path / "all").mkdir()
     code, payload, status, _ = run(tmp_path / "all", files, real_checkov=True)
     assert code == 0, status
-    assert scanned(payload) == {"/My Templates/legacy/azuredeploy.json", "/Templates/legacy/azuredeploy.json"}
+    assert scanned(payload) == {"/My Templates/legacy/azuredeploy.json", "/My Templates/legacy/main.bicep",
+                                "/Templates/legacy/azuredeploy.json", "/Templates/legacy/main.bicep"}
 
     (tmp_path / "skip").mkdir()
     code, payload, status, _ = run(tmp_path / "skip", files, real_checkov=True, CHECKOV_SKIP_PATHS="My Templates/legacy")
     assert code == 0, status
-    assert scanned(payload) == {"/Templates/legacy/azuredeploy.json"}
+    assert scanned(payload) == {"/Templates/legacy/azuredeploy.json", "/Templates/legacy/main.bicep"}
     assert payload["metadata"]["skip_paths"] == ["My Templates/legacy"]
 
 
