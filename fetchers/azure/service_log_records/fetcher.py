@@ -318,7 +318,7 @@ def dependency_records(workspaces: dict, sample: int) -> list[dict]:
 def _min_retention(workspaces: list[dict], table: str, key: str = "retention_in_days"):
     days = [
         t[key] for w in workspaces for t in w.get("tables") or []
-        if t["name"] == table and t["exists"] and isinstance(t.get(key), int)
+        if t["name"] == table and t["exists"] and isinstance(t.get(key), int) and t[key] > 0
     ]
     return min(days) if days else None
 

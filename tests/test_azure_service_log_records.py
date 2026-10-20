@@ -360,3 +360,10 @@ def test_collect_records_a_diagnostic_settings_failure():
     slot = next(a for a in results["apps"] if a["is_slot"])
     assert (slot["diagnostic_settings_read"], slot["http_logs_exported"], collector.ok) == (False, None, False)
     assert summary["apps_exporting_http_logs"] == 1
+
+
+def test_retention_ignores_missing_and_non_positive_values():
+    tables = [{"name": "AppServiceHTTPLogs", "exists": True, "retention_in_days": d, "total_retention_in_days": d}
+              for d in (0, -1, None, 45)]
+    assert slr._min_retention([{"tables": tables}], "AppServiceHTTPLogs") == 45
+    assert slr._min_retention([{"tables": tables[:2]}], "AppServiceHTTPLogs", slr.TOTAL_RETENTION) is None

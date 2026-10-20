@@ -88,7 +88,7 @@ evidence_set:
     - managed_databases — Number of databases listed on the managed instances
     - log_workspaces — Number of destination workspaces: Log Analytics workspaces that a diagnostic setting sends App Service HTTP logs or managed instance audit events to
     - log_workspaces_queried — Number of destination workspaces read without a refusal or error: each table's plan was read and every Analytics table among them was queried (a workspace whose tables are all Basic, Auxiliary or missing counts too)
-    - log_workspaces_not_authorized — Number of destination workspaces that refused the read
+    - log_workspaces_not_authorized — Number of destination workspaces that refused the read (401 or 403, or in a subscription the caller can't see)
     - log_workspaces_not_found — Number of destination workspaces that no longer exist
 
     Do App Service HTTP logs arrive?
