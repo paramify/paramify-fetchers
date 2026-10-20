@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # One implementation per runtime lives in fetchers/_lib; a category-shared module
-# may RE-EXPORT it and must not reimplement it (docs/fetcher_contract.md § Output).
+# may RE-EXPORT it and must not reimplement it (docs/fetcher_contract_guide.md, step 6).
 # Same mechanism a fetcher uses, one directory further up: this file is
 # fetchers/gcp/_shared/, so fetchers/_lib is parents[2] / "_lib".
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))

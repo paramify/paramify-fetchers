@@ -47,5 +47,4 @@ cases:
       so FAIL is the best reachable answer today. What matters is that it does
       not PASS. Caught by validators/common/collection_succeeded.yaml — the
       availability validator's own regex reads nothing here.
-      See docs/validators_design.md.
     artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"GET https://status.example.com/index.json failed at the network layer"},"payload":{}}'

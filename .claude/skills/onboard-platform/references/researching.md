@@ -226,7 +226,7 @@ time, because retrofitting fanout means rewriting the entry script.
 **Evidence or issue report.** Does the platform *compute findings* — a
 vulnerability scan, a CSPM export — or does the fetcher assert a state? The
 first is an issue report with its own contract
-(`docs/issue_report_fetchers.md`); the second is evidence. Getting this wrong
+(`docs/issue_report_fetchers_guide.md`); the second is evidence. Getting this wrong
 is a rebuild, not an edit.
 
 **What the sandbox needs.** What has to exist in a tenant for each of these

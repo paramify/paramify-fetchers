@@ -130,7 +130,7 @@ config_schema:
     env: RIPPLING_PAGE_SIZE
 ```
 
-The runner injects these as env vars for any fetcher with `category: rippling`; a manifest's `platforms:` block can override them per run. Config flows one way — category defaults, then platform values from the manifest, then per-fetcher config, later values winning (`docs/config_injection_design.md`).
+The runner injects these as env vars for any fetcher with `category: rippling`; a manifest's `platforms:` block can override them per run. Config flows one way — category defaults, then platform values from the manifest, then per-fetcher config, later values winning (`docs/config_injection_guide.md`, step 2).
 
 Now the script. Here's the tempting way to write a fetcher's error handling, and the reason this repo's README devotes its sternest paragraph to forbidding it:
 
@@ -343,7 +343,7 @@ This part was researched directly from the repository working tree (branch `main
 **Repository docs**
 
 1. `README.md` — the four-piece architecture, the strictness rationale, and the smoke-test pattern.
-2. `docs/design.md` / `docs/config_injection_design.md` — design rationale and the config/auth flow (referenced; read the originals for depth).
+2. `docs/design.md` / [`docs/config_injection_design.md`](https://github.com/paramify/paramify-fetchers/blob/1f690ac/docs/config_injection_design.md) — design rationale and the config/auth flow (referenced; read the originals for depth).
 
 **Code read directly**
 

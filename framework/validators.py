@@ -6,7 +6,7 @@ starts with `_` (e.g. `_template`), and validates each against
 
 A validator owns its fetcher link via `evidence_sets` (reference_ids), so a
 fetcher's validators are a reverse lookup: registry entries whose `evidence_sets`
-intersect that fetcher's `evidence_set.reference_id`. See docs/validators_design.md.
+intersect that fetcher's `evidence_set.reference_id`. See docs/validators_guide.md.
 """
 
 import json

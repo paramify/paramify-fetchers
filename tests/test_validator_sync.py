@@ -277,3 +277,98 @@ def test_missing_tag_permission_keeps_the_sync_ok(tmp_path):
     s = _run([_alb(), {**_alb(), "key": "second", "name": "Second"}], c, tmp_path)
     assert s["ok"] and s["errors"] == 0 and len(c.created) == 2
     assert len(c.session.posts) == 1 and s["tags"]["disabled"]
+
+
+# --------------------------------------------------------------------------- #
+# ValidatorClient — the HTTP boundary for CONNECT and find (GitHub #83)
+# --------------------------------------------------------------------------- #
+
+import pytest  # noqa: E402
+
+
+class _Resp:
+    def __init__(self, status_code, json_data=None, text=""):
+        self.status_code = status_code
+        self._json = {} if json_data is None else json_data
+        self.text = text
+
+    def json(self):
+        return self._json
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+class _Session:
+    def __init__(self, get=None, post=None):
+        self.headers = {}
+        self._get, self._post = get, post
+
+    def get(self, url, params=None, timeout=None):
+        return self._get(url, params)
+
+    def post(self, url, json=None, timeout=None):
+        return self._post(url, json)
+
+
+def _client(get=None, post=None):
+    c = syncer.ValidatorClient("tok", BASE)
+    c.session = _Session(get, post)
+    return c
+
+
+@pytest.mark.parametrize("status, text", [
+    (400, "Validator already connected to evidence"),   # as observed live
+    (409, "Validator already connected to evidence"),   # same refusal on the code 0.9.2 permits
+])
+def test_associate_tolerates_already_connected(status, text):
+    # The scripts uploader always tolerated this; the syncer raised on it
+    # against the same endpoint. They now share one rule.
+    c = _client(post=lambda url, body: _Resp(status, text=text))
+    c.associate_validator("ev-1", "v-1")  # no raise
+
+
+@pytest.mark.parametrize("status, text", [
+    (400, "subjectId must be a uuid"),
+    (409, '{"statusMessage":"Conflict","error":{"message":"Conflict"}}'),
+    (403, "forbidden"),
+])
+def test_associate_other_refusals_raise(status, text):
+    c = _client(post=lambda url, body: _Resp(status, text=text))
+    with pytest.raises(syncer.ParamifyError):
+        c.associate_validator("ev-1", "v-1")
+
+
+def test_find_evidence_set_failure_is_a_paramify_error():
+    # Not a bare requests.HTTPError: callers reason about this module's own errors.
+    c = _client(get=lambda url, params: _Resp(500, text="boom"))
+    with pytest.raises(syncer.ParamifyError):
+        c.find_evidence_set("EVD-A")
+
+
+def test_token_falls_back_to_read_token_like_the_other_uploaders(monkeypatch, tmp_path):
+    # The syncer used to read PARAMIFY_UPLOAD_API_TOKEN only; a single-token setup
+    # that worked for every other stage failed here. Resolution is shared now.
+    monkeypatch.setattr(syncer, "load_dotenv", lambda *a, **k: None)  # never read a .env from cwd
+    monkeypatch.delenv("PARAMIFY_UPLOAD_API_TOKEN", raising=False)
+    monkeypatch.setenv("PARAMIFY_API_TOKEN", "read-tok")
+    seen = {}
+
+    class Capture(FakeClient):
+        def __init__(self, token, base_url, timeout=30):
+            super().__init__()
+            seen["token"] = token
+            seen["base_url"] = base_url
+
+    monkeypatch.setattr(syncer, "ValidatorClient", Capture)
+    syncer.sync_validators([], base_url=BASE, dry_run=True, lock_path=str(tmp_path / "lock.json"))
+    assert seen == {"token": "read-tok", "base_url": BASE}
+
+
+def test_missing_token_names_both_variables(monkeypatch, tmp_path):
+    monkeypatch.setattr(syncer, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.delenv("PARAMIFY_UPLOAD_API_TOKEN", raising=False)
+    monkeypatch.delenv("PARAMIFY_API_TOKEN", raising=False)
+    with pytest.raises(ValueError, match="PARAMIFY_UPLOAD_API_TOKEN.*PARAMIFY_API_TOKEN"):
+        syncer.sync_validators([], base_url=BASE, lock_path=str(tmp_path / "lock.json"))

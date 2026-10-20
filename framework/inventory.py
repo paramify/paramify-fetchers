@@ -9,7 +9,7 @@ when it envelopes it, records the verdict in `metadata.inventory`, and the
 evidence uploader sends only one marked complete.
 
 Only the outer shape is fixed (framework/schemas/inventory_schema.json). Each
-fetcher chooses its own record fields. See docs/inventory_fetchers.md.
+fetcher chooses its own record fields. See docs/inventory_fetchers_guide.md.
 """
 
 from __future__ import annotations

@@ -33,7 +33,7 @@ cannot remove it. PATCH, which could, would clobber user tags; it is never used.
 
 Tagging can never fail an upload. A key without the custom-tags permission gets
 one warning and the rest of the run proceeds untagged; any other error is logged
-per entity and counted. See docs/uploader_design.md.
+per entity and counted. See the `tags` option in uploaders/paramify_evidence/README.md.
 """
 
 from __future__ import annotations

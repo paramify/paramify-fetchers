@@ -23,7 +23,7 @@ Two things follow from the sidecar being the only channel:
 - The `_` prefix keeps it out of the uploader's own file set, the same convention
   `_run_metadata.json` uses.
 
-See docs/issue_report_fetchers.md.
+See docs/issue_report_fetchers_guide.md, step 5.
 """
 
 import hashlib
@@ -71,7 +71,7 @@ RESERVED_NAMES = frozenset({SIDECAR_NAME, INTAKE_LOG_NAME})
 # `required: False` is deliberate. A required config field raises before the
 # fetcher runs, which would make "collect now, decide where it goes later"
 # impossible — and collecting with no Paramify connection at all is a property
-# the framework is supposed to have (docs/design.md). A missing assessment is
+# the framework is supposed to have (docs/architecture_guide.md, step 3). A missing assessment is
 # instead reported by `paramify validate` and refused by the uploader, at the
 # points where it actually matters.
 ASSESSMENT_ID_FIELD = "assessment_id"
