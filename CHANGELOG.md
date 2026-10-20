@@ -590,8 +590,12 @@ schemas and the `paramify` CLI — not the internal code.
   (never values) and its immutability and legal-hold flags. The account's tags
   are recorded with `owner_tag` and `classification_tag`, taken from tag keys set
   by the new `owner_tag_keys` and `classification_tag_keys` config. Summary adds
-  geo-replication, key-age, container and tag counts. Also maps to `KSI-CNA-OFA`,
-  `KSI-RPL-ABO` and `KSI-PIY-GIV`. Existing fields are unchanged.
+  geo-replication, key-age, container and tag counts. Any other error reading geo
+  stats or listing containers fails the run. Also maps to `KSI-CNA-OFA`,
+  `KSI-RPL-ABO` and `KSI-PIY-GIV`. Existing fields are unchanged. A read-only
+  production run with Reader exercised geo stats, key ages and container listing;
+  `LastSyncTimeUnavailable`, key expiry policies, immutability policies, legal holds
+  and container metadata are proven by synthetic tests only.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`
