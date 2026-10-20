@@ -117,7 +117,7 @@ def make_repo(root: Path, files: dict) -> Path:
     return root
 
 
-def run(tmp_path, files, checkov_report=None, real_checkov=False, tfvc=None, **env_over):
+def run(tmp_path, files, checkov_report=None, real_checkov=False, tfvc=None, fetcher=FETCHER, **env_over):
     """Run the fetcher; returns (exit code, payload or None, status-file dict or None, tmp_path).
 
     tfvc maps a curl route (changesets, changeset, items) to (HTTP status, body bytes or JSON).
@@ -155,7 +155,7 @@ def run(tmp_path, files, checkov_report=None, real_checkov=False, tfvc=None, **e
         "STUB_TFVC": str(tfvc_dir),
         **env_over,
     }
-    proc = subprocess.run(["bash", str(FETCHER)], cwd=tmp_path, env=env,
+    proc = subprocess.run(["bash", str(fetcher)], cwd=tmp_path, env=env,
                           capture_output=True, text=True, timeout=600)
     outputs = list(evidence.glob("checkov_bicep_*.json")) if evidence.exists() else []
     payload = json.loads(outputs[0].read_text()) if outputs else None
@@ -378,6 +378,27 @@ def test_skip_paths_are_recorded(tmp_path):
     args = (tmp / "log" / "checkov.args").read_text().split()
     assert [args[i + 1] for i, a in enumerate(args) if a == "--skip-path"] == ["modules/new-syntax.bicep", "legacy"]
     assert payload["metadata"]["skip_paths"] == ["modules/new-syntax.bicep", "legacy"]
+
+
+def fetcher_with_default_skips(tmp_path, text):
+    """A copy of the fetcher tree whose shipped skip-checks file is text."""
+    root = tmp_path / "fetchers"
+    for d in ("checkov", "_lib"):
+        shutil.copytree(REPO_ROOT / "fetchers" / d, root / d, ignore=shutil.ignore_patterns("__pycache__"))
+    (root / "checkov" / "_shared" / "skip-checks.default.txt").write_text(text)
+    return root / "checkov" / "bicep" / "fetcher.sh"
+
+
+def test_default_skip_checks_file_is_split_like_skip_checks(tmp_path):
+    fetcher = fetcher_with_default_skips(tmp_path, "# header\nCKV_AZURE_3, CKV_AZURE_44\nCKV_AZURE_35  # noisy\n"
+                                                   "CKV_AZURE_33\tCKV_AZURE_59\n\n#CKV_AZURE_1\n")
+    code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
+                                fetcher=fetcher, CHECKOV_BICEP_CHECKS="CKV_AZURE_44", CHECKOV_SKIP_CHECKS="CKV_AZURE_36")
+    assert code == 0
+    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
+    expected = ["CKV_AZURE_3", "CKV_AZURE_35", "CKV_AZURE_33", "CKV_AZURE_59", "CKV_AZURE_36"]
+    assert argv[argv.index("--skip-check") + 1] == ",".join(expected)
+    assert payload["metadata"]["skip_checks"] == expected
 
 
 def test_default_skip_checks_can_be_turned_off(tmp_path):

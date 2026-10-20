@@ -135,11 +135,9 @@ DEFAULT_SKIPS_APPLIED=true
 [ "${CHECKOV_USE_DEFAULT_SKIP_CHECKS:-true}" = "false" ] && DEFAULT_SKIPS_APPLIED=false
 DEFAULT_SKIP_CHECKS_FILE="$SCRIPT_DIR/../_shared/skip-checks.default.txt"
 if [ "$DEFAULT_SKIPS_APPLIED" = "true" ] && [ -f "$DEFAULT_SKIP_CHECKS_FILE" ]; then
-    while IFS= read -r c || [ -n "$c" ]; do
-        c="$(printf '%s' "$c" | xargs)"; [ -z "$c" ] && continue
-        case "$c" in \#*) continue ;; esac
-        add_skip "$c"
-    done < "$DEFAULT_SKIP_CHECKS_FILE"
+    # Split like skip_checks once # comments are dropped.
+    split_list "$(sed 's/#.*//' "$DEFAULT_SKIP_CHECKS_FILE")" $' \t'
+    for c in "${_SPLIT[@]}"; do add_skip "$c"; done
 fi
 split_list "${CHECKOV_SKIP_CHECKS:-}" $' \t'
 for c in "${_SPLIT[@]}"; do add_skip "$c"; done
