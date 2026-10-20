@@ -21,7 +21,9 @@ groups = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(groups)
 
 TENANT = "00000000-0000-0000-0000-0000000000aa"
-DENIED = Exception("Insufficient privileges to complete the operation. (403)")
+# The form kiota's APIError takes: "<message> (status <code>)".
+DENIED = Exception("Insufficient privileges to complete the operation. (status 403)")
+SERVER_ERROR = Exception("Service unavailable (status 500)")
 
 
 def _group(gid, name, types=(), security=True, mail=False, role=False, rule=None, state=None,
@@ -33,12 +35,13 @@ def _group(gid, name, types=(), security=True, mail=False, role=False, rule=None
               created_date_time="2026-01-01T00:00:00Z")
 
 
-def _user(uid, guest=False, enabled=True, limited=False):
+def _user(uid, guest=False, enabled=True, limited=False, user_type="unset"):
     if limited:
         return ns(id=uid, odata_type="#microsoft.graph.user")
+    if user_type == "unset":
+        user_type = "Guest" if guest else "Member"
     return ns(id=uid, odata_type="#microsoft.graph.user", display_name=f"User {uid}",
-              user_principal_name=f"{uid}@contoso.test", account_enabled=enabled,
-              user_type="Guest" if guest else "Member")
+              user_principal_name=f"{uid}@contoso.test", account_enabled=enabled, user_type=user_type)
 
 
 def _sp(sid):
@@ -52,14 +55,20 @@ def _nested(gid):
 
 
 class Builder:
-    def __init__(self, items=None, error=None):
+    """One Graph collection, served `page_size` items a page; `error` raises on `fail_on_page` (or every call)."""
+
+    def __init__(self, items=None, error=None, page_size=None, fail_on_page=None):
         self.items, self.error, self.calls, self.urls = list(items or []), error, 0, []
+        self.page_size, self.fail_on_page, self.page = page_size, fail_on_page, 0
 
     async def get(self, request_configuration=None):
         self.calls += 1
-        if self.error is not None:
+        if self.error is not None and self.fail_on_page in (None, self.page):
             raise self.error
-        return ns(value=self.items, odata_next_link=None)
+        size = self.page_size or max(len(self.items), 1)
+        start, self.page = self.page * size, self.page + 1
+        more = start + size < len(self.items)
+        return ns(value=self.items[start:start + size], odata_next_link="next-page" if more else None)
 
     def with_url(self, url):
         self.urls.append(url)
@@ -78,12 +87,16 @@ class FakeGraph:
         self.owner_items = {gid: Builder(items) for gid, items in owners.items()}
 
         graph = self
+        self.last = None
 
         class Groups:
             async def get(self, request_configuration=None):
                 expand = request_configuration.query_parameters.expand[0]
-                builder = graph.member_expansion if expand.startswith("members") else graph.owner_expansion
-                return await builder.get(request_configuration)
+                graph.last = graph.member_expansion if expand.startswith("members") else graph.owner_expansion
+                return await graph.last.get(request_configuration)
+
+            def with_url(self, url):
+                return graph.last
 
             def by_group_id(self, gid):
                 return ns(members=graph.member_items.get(gid, Builder()),
@@ -100,7 +113,6 @@ class Query:
 def _stub_msgraph(monkeypatch):
     for module_name, cls in {
         "msgraph.generated.groups.groups_request_builder": "GroupsRequestBuilder",
-        "msgraph.generated.groups.item.owners.owners_request_builder": "OwnersRequestBuilder",
     }.items():
         module = ModuleType(module_name)
         setattr(module, cls, type(cls, (), {f"{cls}GetQueryParameters": Query}))
@@ -161,7 +173,8 @@ def test_groups_members_owners_and_membership_kinds(monkeypatch, tmp_path):
     assert code == 0
     s = evidence["summary"]
     assert s["total_groups"] == 6
-    assert s["members_readable"] is s["member_details_readable"] is s["owners_readable"] is True
+    assert s["groups_readable"] is s["members_readable"] is s["member_details_readable"] is True
+    assert s["owners_readable"] is s["owner_details_readable"] is True
     assert (s["security_groups"], s["microsoft_365_groups"], s["distribution_groups"]) == (4, 1, 1)
     assert s["role_assignable_groups"] == 1
     assert s["role_assignable_groups_without_owner"] == 1
@@ -169,8 +182,11 @@ def test_groups_members_owners_and_membership_kinds(monkeypatch, tmp_path):
     assert s["users_in_role_assignable_groups"] == 2
     assert (s["dynamic_groups"], s["dynamic_groups_paused"], s["assigned_groups"]) == (1, 1, 5)
     assert (s["synced_groups"], s["cloud_groups"]) == (1, 5)
-    assert s["groups_without_owner"] == 4
-    assert s["cloud_groups_without_owner"] == 3
+    assert s["hidden_membership_groups_unread"] == 0
+    # Graph returns no owners for the synced group or the distribution list, so neither counts.
+    assert s["groups_with_owners_not_in_graph"] == 2
+    assert s["groups_without_owner"] == 2
+    assert s["cloud_groups_without_owner"] == 2
     assert s["groups_with_only_disabled_owners"] == 1
     assert s["empty_groups"] == 1
     assert s["total_direct_memberships"] == 9
@@ -187,6 +203,112 @@ def test_groups_members_owners_and_membership_kinds(monkeypatch, tmp_path):
     assert by_id["g-mixed"]["service_principal_member_count"] == 1
     assert by_id["g-mixed"]["has_owner"] is True and by_id["g-mixed"]["has_enabled_owner"] is False
     assert by_id["g-admins"]["guest_member_count"] == 1
+    assert by_id["g-sync"]["owners_in_graph"] is False and by_id["g-sync"]["has_owner"] is None
+    assert by_id["g-dl"]["owners"] is None
+
+
+def test_every_page_of_the_group_list_is_read(monkeypatch, tmp_path):
+    graph = FakeGraph(**_tenant())
+    graph.member_expansion.page_size = graph.owner_expansion.page_size = 2
+    code, evidence, _ = _run(monkeypatch, tmp_path, graph)
+
+    assert code == 0
+    assert graph.member_expansion.calls == 3 and graph.owner_expansion.calls == 3
+    assert evidence["summary"]["total_groups"] == 6
+    assert evidence["summary"]["groups_with_only_disabled_owners"] == 1
+
+
+def test_a_group_list_failing_part_way_nulls_every_count(monkeypatch, tmp_path):
+    graph = FakeGraph(**_tenant())
+    graph.member_expansion.page_size = 2
+    graph.member_expansion.error, graph.member_expansion.fail_on_page = DENIED, 1
+    code, evidence, status = _run(monkeypatch, tmp_path, graph)
+
+    assert code == 1
+    assert status["code"] == "not_authorized"
+    s = evidence["summary"]
+    assert s["groups_readable"] is False and s["members_readable"] is False
+    assert s["total_groups"] is None and s["security_groups"] is None and s["dynamic_groups"] is None
+    assert s["groups_without_owner"] is None
+    assert len(evidence["results"]["groups"]) == 2
+
+
+def test_a_failed_member_reread_nulls_the_member_figures(monkeypatch, tmp_path):
+    tenant = _tenant()
+    tenant["members"]["g-dyn"] = [_user(f"u-{i}") for i in range(25)]
+    graph = FakeGraph(**tenant)
+    graph.member_items["g-dyn"].error = SERVER_ERROR
+    code, evidence, status = _run(monkeypatch, tmp_path, graph)
+
+    assert code == 1
+    assert status["code"] == "partial_failure"
+    s = evidence["summary"]
+    assert s["groups_readable"] is True and s["total_groups"] == 6
+    assert s["members_readable"] is False
+    assert s["empty_groups"] is None and s["groups_with_guest_members"] is None
+
+
+def test_owners_past_the_expand_limit_are_reread_from_beta(monkeypatch, tmp_path):
+    tenant = _tenant()
+    tenant["owners"]["g-m365"] = [_user(f"o-{i}") for i in range(24)] + [_sp("sp-owner")]
+    graph = FakeGraph(**tenant)
+    code, evidence, _ = _run(monkeypatch, tmp_path, graph)
+
+    assert code == 0
+    builder = graph.owner_items["g-m365"]
+    assert builder.calls == 1
+    assert builder.urls[0].startswith("https://graph.microsoft.com/beta/groups/g-m365/owners?")
+    owners = {g["id"]: g for g in evidence["results"]["groups"]}["g-m365"]["owners"]
+    assert len(owners) == 25 and any(o["principal_type"] == "ServicePrincipal" for o in owners)
+
+
+def test_hidden_membership_without_visible_members_reads_unknown(monkeypatch, tmp_path):
+    tenant = _tenant()
+    tenant["group_models"].append(
+        _group("g-hidden", "Board", types=["Unified"], mail=True, visibility="HiddenMembership")
+    )
+    code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
+
+    assert code == 0
+    s = evidence["summary"]
+    assert s["hidden_membership_groups"] == 1 and s["hidden_membership_groups_unread"] == 1
+    assert s["empty_groups"] == 1
+    assert s["member_details_readable"] is True
+    hidden = {g["id"]: g for g in evidence["results"]["groups"]}["g-hidden"]
+    assert hidden["members"] is None and hidden["member_count"] is None and hidden["hidden_members_unread"] is True
+
+
+def test_owners_read_without_user_read_all_leave_the_disabled_owner_figure_null(monkeypatch, tmp_path):
+    tenant = _tenant()
+    tenant["owners"]["g-mixed"] = [_user("u-off", limited=True)]
+    code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
+
+    assert code == 0
+    s = evidence["summary"]
+    assert s["owner_details_readable"] is False
+    assert s["groups_with_only_disabled_owners"] is None
+    assert s["groups_without_owner"] == 2
+    assert {g["id"]: g for g in evidence["results"]["groups"]}["g-mixed"]["has_enabled_owner"] is None
+
+
+def test_a_user_missing_its_type_or_state_counts_as_limited(monkeypatch, tmp_path):
+    tenant = _tenant()
+    tenant["members"]["g-admins"] = [_user("u-1", user_type=None)]
+    _, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
+    assert evidence["summary"]["member_details_readable"] is False
+    assert evidence["summary"]["groups_with_disabled_user_members"] is None
+
+
+def test_a_group_missing_from_the_owner_pass_is_unknown_not_ownerless(monkeypatch, tmp_path):
+    graph = FakeGraph(**_tenant())
+    graph.owner_expansion.items = [g for g in graph.owner_expansion.items if g.id != "g-admins"]
+    code, evidence, _ = _run(monkeypatch, tmp_path, graph)
+
+    assert code == 0
+    s = evidence["summary"]
+    assert s["role_assignable_groups_without_owner"] == 0
+    assert s["groups_without_owner"] == 1
+    assert {g["id"]: g for g in evidence["results"]["groups"]}["g-admins"]["has_owner"] is None
 
 
 def test_members_past_the_expand_limit_are_reread_from_beta(monkeypatch, tmp_path):
@@ -239,7 +361,9 @@ def test_denied_group_read_fails_the_run(monkeypatch, tmp_path):
 
     assert code == 1
     assert status["code"] == "not_authorized"
-    assert evidence["summary"]["total_groups"] == 0
+    assert evidence["summary"]["groups_readable"] is False
+    assert evidence["summary"]["total_groups"] is None
+    assert evidence["summary"]["security_groups"] is None
     assert evidence["summary"]["members_readable"] is False
     assert evidence["summary"]["owners_readable"] is False
     assert evidence["summary"]["groups_without_owner"] is None

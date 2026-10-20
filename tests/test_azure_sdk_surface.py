@@ -1931,10 +1931,11 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/entra_groups — members and owners arrive via $expand",
     ),
     (
-        "msgraph.generated.groups.item.owners.owners_request_builder",
-        "OwnersRequestBuilder.OwnersRequestBuilderGetQueryParameters",
-        ["select"],
-        "azure/entra_groups — owners past the 20-item $expand limit",
+        "msgraph.generated.models.user",
+        "User",
+        ["user_principal_name", "user_type", "account_enabled"],
+        "azure/entra_groups — a missing field reads as None, so guest and disabled-user "
+        "figures read unknown",
     ),
     (
         "msgraph.generated.models.authentication_methods_policy",
@@ -2775,8 +2776,9 @@ def test_graph_group_member_builders_present() -> None:
     """The per-group builders azure/entra_groups reads past the $expand limit."""
     client = _build("msgraph", "GraphServiceClient")
     group = client.groups.by_group_id("00000000-0000-0000-0000-000000000000")
-    assert getattr(group, "owners", None) is not None, (
-        "groups.by_group_id(...).owners is gone.\n  affected fetchers: azure/entra_groups"
+    assert callable(getattr(group.owners, "with_url", None)), (
+        "groups.by_group_id(...).owners.with_url is gone; the beta owner read needs it.\n"
+        "  affected fetchers: azure/entra_groups"
     )
     assert callable(getattr(group.members, "with_url", None)), (
         "groups.by_group_id(...).members.with_url is gone; the beta member read needs it.\n"

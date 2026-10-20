@@ -17,9 +17,12 @@ schemas and the `paramify` CLI — not the internal code.
   whether membership is set by a rule (dynamic, with paused rules flagged), by hand
   or synced from on-premises. Summarizes role-assignable groups without an owner or
   with guests, groups without an owner or with only disabled owners, and groups
-  holding guests, disabled users, nested groups or service principals. Members past
-  `$expand`'s 20-item limit are read from the beta `/members`, since v1.0 leaves out
-  service principals.
+  holding guests, disabled users, nested groups or service principals. Members and
+  owners past `$expand`'s 20-item limit are read from beta, since v1.0 leaves out
+  service principals. Groups whose owners Graph doesn't return (synced,
+  distribution, mail-enabled security) are left out of the owner figures, a
+  hidden-membership group with no visible members reads unknown, and a partial
+  group list nulls every count.
 - **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
   over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
   Code (Read). It records Bicep and ARM checks together, each tagged with its
