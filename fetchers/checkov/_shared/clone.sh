@@ -14,8 +14,12 @@
 # Verify the external tools the scanner needs are on PATH. Returns 1 if any missing.
 checkov_require_tools() {
     local component="$1" missing=0 t
+    local -a tools
     shift
-    for t in ${*:-git checkov jq}; do
+    tools=()
+    for t in "$@"; do [ -n "$t" ] && tools+=("$t"); done
+    [ ${#tools[@]} -eq 0 ] && tools=(git checkov jq)
+    for t in "${tools[@]}"; do
         if ! command -v "$t" >/dev/null 2>&1; then
             printf '%s ERROR %s required tool not found on PATH: %s\n' \
                 "$(date -u +'%Y-%m-%d %H:%M:%S')" "$component" "$t" >&2

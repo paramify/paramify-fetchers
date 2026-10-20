@@ -907,6 +907,48 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`checkov_bicep` passes its list settings to checkov intact** (0.2.0 →
+  0.2.1). `checks`, `skip_checks`, `skip_paths` and `skip_resources` take
+  entries separated by commas or newlines, each trimmed. `checks` and
+  `skip_checks` also take spaces and tabs, since check ids never contain them,
+  and `_shared/skip-checks.default.txt` is read the same way, with `#`
+  starting a comment anywhere on a line. Configured values reach checkov as
+  `--flag=value`. Before:
+  - a `skip_paths` entry with a space (`My Templates/legacy`) became two skip
+    paths, and each piece could skip folders it was not meant to;
+  - a `skip_paths` entry with `*` or `?` was expanded against the files in the
+    fetcher's working directory, so `*.json` could reach checkov as
+    `--skip-path report.json`;
+  - `checks` failed the run if it had a space after a comma
+    (`CKV_AZURE_3, CKV_AZURE_44`), ids separated only by spaces, or one id
+    per line;
+  - `skip_checks` failed the run if its ids were separated only by spaces,
+    and read only its first line, so checks listed below it still ran;
+  - a line of `_shared/skip-checks.default.txt` holding several ids or a
+    trailing `#` comment failed the run;
+  - `skip_resources` patterns on separate lines became one pattern that
+    matched nothing;
+  - a `skip_paths` or `repo_id` value starting with `-` was read as an option,
+    and the run failed.
+
+  `skip_paths` entries are Python regular expressions, which is how checkov
+  reads them: it searches each file's path for every entry, so `.`, `*`, `?`,
+  `+`, `(`, `)`, `[` and `]` need a backslash to match literally. They are
+  not globs. An entry that is not a valid regular expression, such as
+  `*.json`, now fails the run with `bad_config` naming it, before anything
+  is fetched; checkov's Bicep scan crashed on one. The check needs `python3`
+  on PATH, which the checkov category now declares.
+
+  `metadata.skip_paths` now holds the entries checkov was given as
+  `--skip-path` values. It used to disagree in three cases:
+  - a path with a space was one entry, while checkov got two;
+  - a `*` pattern was listed as written, while checkov got the files it
+    matched;
+  - entries on separate lines with no comma between them were one entry,
+    while checkov got one per line.
+
+  New `metadata.checks` lists the `checks` allowlist, so a restricted scan no
+  longer reads as a full one. It is empty when every check ran.
 - **`azure_defender_assessments` reports each assessment's own severity**
   (0.1.1 → 0.2.0). Severity came from the subscription's assessment metadata
   catalogue, which can rate a check lower than the assessment itself does (App
