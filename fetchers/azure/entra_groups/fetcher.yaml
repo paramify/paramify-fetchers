@@ -1,13 +1,7 @@
 name: azure_entra_groups
 version: 0.1.0
-description: >
-  Every Microsoft Entra ID group with its members and owners, its kind (security,
-  Microsoft 365, mail-enabled security, distribution), whether it can hold
-  directory roles, whether its membership is set by a rule (dynamic) or by hand
-  (assigned), and whether it is synced from on-premises Active Directory.
-  Summarizes role-assignable groups, paused membership rules, groups with no
-  owner, and groups holding guests, disabled users, nested groups or service
-  principals.
+description: >-
+  Shows every Entra ID group's members and owners, which groups can hold directory roles, and whether membership is set by a rule, by hand or synced from on-premises.
 category: azure
 
 supports_targets: true
@@ -68,14 +62,56 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-ENTRA-GROUPS
   name: Microsoft Entra ID Groups, Members and Owners
-  instructions: >
-    Script: fetcher.py. Microsoft Graph calls (permissions: GroupMember.Read.All and
-    User.Read.All, or Directory.Read.All): GET /groups with
-    $select=id,displayName,description,groupTypes,securityEnabled,mailEnabled,isAssignableToRole,membershipRule,membershipRuleProcessingState,onPremisesSyncEnabled,visibility,createdDateTime
-    and $expand=members; GET /groups with $expand=owners (Graph allows one $expand
-    per request); GET /organization. $expand returns at most 20 members or owners,
-    so a group at 20 is re-read via /groups/{id}/owners, or for members via the beta
-    /groups/{id}/members, because v1.0 /members leaves out service principals. All
-    collections paged via @odata.nextLink. A group's kind comes from groupTypes
-    (Unified is Microsoft 365) and the securityEnabled and mailEnabled flags;
-    DynamicMembership in groupTypes means membership is set by membershipRule.
+  instructions: |
+    Script: azure/entra_groups/fetcher.py
+
+    Access: Microsoft Graph GroupMember.Read.All and User.Read.All, or the Directory Readers role. Optional: Member.Read.Hidden; without it, members of groups with hidden membership may be missing.
+
+    Commands Executed:
+    - Microsoft Graph GET /organization — the tenant's name and domain
+    - Microsoft Graph GET /groups, expanding members — every group, how its membership is managed, and its members
+    - Microsoft Graph GET /groups, expanding owners — who owns each group (Graph allows one expansion per request)
+    - Microsoft Graph GET /groups/{id}/members on the beta endpoint and GET /groups/{id}/owners (only for a group whose expansion returned 20, its limit) — the whole list; beta because v1.0 leaves out service principals
+
+    Output: azure_entra_groups_<tenant>.json — each group with its kind, whether it can hold directory roles, how its membership is managed, and its members and owners.
+
+    Summary fields:
+
+    What was checked?
+    - total_groups — Number of groups in the tenant
+    - members_readable — True if every group's members were read; false if any member read failed, and the member fields read null
+    - member_details_readable — True if every user member came back with a sign-in name, account state and guest status; false if members couldn't be read or Graph returned some users as an id only (User.Read.All isn't granted), and the guest and disabled-user fields read null
+    - owners_readable — True if every group's owners were read; false if any owner read failed, and the owner fields read null
+
+    What kinds of groups exist?
+    - security_groups — Number of security groups that aren't mail-enabled (used to grant access)
+    - mail_enabled_security_groups — Number of security groups that also have an email address
+    - microsoft_365_groups — Number of Microsoft 365 groups (shared mailbox, files and Teams)
+    - distribution_groups — Number of email distribution lists that aren't security groups
+
+    Which groups can hold directory roles?
+    - role_assignable_groups — Number of groups that can be assigned an Entra directory role (only Privileged Role Administrators and Global Administrators can change their membership)
+    - role_assignable_groups_without_owner — Number of role-assignable groups with no owner; null if owners couldn't be read
+    - role_assignable_groups_with_guest_members — Number of role-assignable groups with at least one guest user as a member; null if member details couldn't be read
+    - users_in_role_assignable_groups — Number of distinct users who are direct members of a role-assignable group; null if members couldn't be read
+
+    How is membership managed?
+    - dynamic_groups — Number of groups whose membership is set by a rule on user or device attributes
+    - dynamic_groups_paused — Number of dynamic groups whose rule processing is paused, so membership no longer follows the rule
+    - assigned_groups — Number of groups whose members are added and removed by hand
+    - synced_groups — Number of groups synced from on-premises Active Directory, and managed there
+    - cloud_groups — Number of groups created in Entra ID rather than synced
+    - hidden_membership_groups — Number of Microsoft 365 groups whose membership is hidden; their members are listed only with Member.Read.Hidden
+
+    Who owns each group?
+    - groups_without_owner — Number of groups with no owner (a user or service principal who can manage the group); null if owners couldn't be read
+    - cloud_groups_without_owner — Number of groups created in Entra ID with no owner; null if owners couldn't be read
+    - groups_with_only_disabled_owners — Number of groups whose every owner is a disabled account; null if owners couldn't be read
+
+    Who is in them?
+    - total_direct_memberships — Number of direct member entries across all groups (a user in three groups counts three times); null if members couldn't be read
+    - empty_groups — Number of groups with no members; null if members couldn't be read
+    - groups_with_guest_members — Number of groups with at least one guest user as a member; null if member details couldn't be read
+    - groups_with_disabled_user_members — Number of groups with at least one disabled user as a member; null if member details couldn't be read
+    - groups_with_nested_groups — Number of groups with another group as a direct member; null if members couldn't be read
+    - groups_with_service_principal_members — Number of groups with an app or managed identity as a direct member; null if members couldn't be read
