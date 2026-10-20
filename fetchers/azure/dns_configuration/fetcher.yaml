@@ -1,12 +1,7 @@
 name: azure_dns_configuration
-version: 0.1.0
-description: >
-  Inventories Azure DNS in the subscription. For every public zone (Microsoft.Network/dnszones):
-  its name servers, record-set count and whether DNSSEC signing is enabled, with the signing
-  keys' flags, key tags and algorithms and the number of DS (delegation signer) records Azure
-  publishes for the parent zone. For every private zone (Microsoft.Network/privateDnsZones): its
-  record-set count and each virtual network link, with auto-registration and the link's
-  resolution policy.
+version: 0.2.0
+description: >-
+  Shows each public DNS record's target, TTL and failover method, whether each public zone is signed with DNSSEC, and which virtual networks each private zone is linked to.
 category: azure
 
 supports_targets: true
@@ -41,19 +36,58 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 ksis:
   - KSI-SVC-SIN   # DNSSEC signing of public zones (sc-20, sc-21, sc-22)
+  - KSI-CNA-MAT   # every public record and what it points at, so stray or empty records show
+  - KSI-RPL-ABO   # each production endpoint's targets, TTL and failover method
+  - KSI-RPL-TRC   # the recovery target each record or alias sends traffic to, and how long a change takes to reach clients
 
 evidence_set:
   reference_id: EVD-AZURE-DNS-CONFIG
   name: Azure DNS Zone Configuration and DNSSEC
-  instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-dns DnsManagementClient zones.list() for public
-    zones; for each, ARM GET {zone id}/dnssecConfigs/default?api-version=2023-07-01-preview (the SDK has
-    no DNSSEC operation; this preview is the only API version that exposes DNSSEC). An HTTP 404 "DNSSEC
-    is not enabled" is recorded as dnssec_enabled false, not as a collection failure; any other failed
-    DNSSEC read leaves dnssec_enabled null (unknown), counted in summary.dnssec_unknown_public_zones, and
-    fails the run. dnssec_enabled is true only when the config exists, its provisioningState is
-    Succeeded and it carries at least one signing key. azure-mgmt-privatedns PrivateDnsManagementClient
-    private_zones.list() and virtual_network_links.list(resource_group, zone) for private zones.
-    summary.dnssec_enabled_public_zones over summary.total_public_zones is the DNSSEC coverage.
-    provider_registration_status (Microsoft.Network) tells "zero zones because the provider is not
-    registered" apart from "registered but no zones".
+  instructions: |
+    Script: azure/dns_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.Network — tells "no zones because the provider isn't registered" apart from "no zones"
+    - zones.list() — every public DNS zone
+    - GET {zone id}/dnssecConfigs/default (per public zone) — the zone's DNSSEC state and signing keys
+    - record_sets.list_all_by_dns_zone() (per public zone) — every record set with its type, TTL, values and alias target
+    - private_zones.list() — every private DNS zone
+    - virtual_network_links.list() (per private zone) — the virtual networks linked to the zone and whether they auto-register records
+
+    Output: azure_dns_configuration_<subscription>.json — each public zone with its DNSSEC state, signing keys and record sets (type, TTL, values, alias target and failover method), and each private zone with its virtual network links.
+
+    Summary fields:
+
+    What was checked?
+    - total_public_zones — Number of public DNS zones in the subscription
+    - total_private_zones — Number of private DNS zones in the subscription
+    - provider_registration_status — Whether Microsoft.Network is registered on the subscription: registered, not_registered or unknown
+
+    Are public zones signed with DNSSEC?
+    - dnssec_enabled_public_zones — Number of public zones with DNSSEC enabled: a DNSSEC configuration exists, its provisioning state is Succeeded and it has at least one signing key
+    - dnssec_disabled_public_zones — Number of public zones without DNSSEC enabled (no DNSSEC configuration, or one that hasn't succeeded or has no signing key)
+    - dnssec_unknown_public_zones — Number of public zones whose DNSSEC configuration couldn't be read; the run fails when this is above 0
+    - dnssec_percentage — Percentage of public zones with DNSSEC enabled = dnssec_enabled_public_zones / total_public_zones × 100 (a whole number, 0–100); 0 when total_public_zones is 0. Zones with unknown DNSSEC (dnssec_unknown_public_zones) count in the total but not as enabled, so they lower it
+
+    What records do the public zones publish?
+    - total_public_record_sets — Number of record sets across all public zones (a record set is every record of one type at one name)
+    - public_zones_record_sets_unread — Number of public zones whose record sets couldn't be read; the run fails when this is above 0
+    - public_record_sets_by_type — Number of public record sets of each type (A, AAAA, CNAME, MX, TXT, NS, SOA, SRV, CAA, PTR)
+    - public_alias_record_sets — Number of public record sets that are aliases: they point at an Azure resource, such as a Front Door endpoint, Traffic Manager profile or public IP, and follow its address
+
+    How does each public endpoint fail over?
+    - public_endpoint_record_sets — Number of public endpoint record sets (A, AAAA and CNAME, the records that send clients to a server)
+    - public_endpoint_record_sets_empty — Number of public endpoint record sets with no value and no alias target, so they answer nothing
+    - public_endpoint_record_sets_by_failover_method — Number of public endpoint record sets for each way traffic moves to another region (empty record sets are left out):
+      - front_door (an alias to a Front Door endpoint or a CNAME to an azurefd.net host; Front Door moves traffic between its origins)
+      - traffic_manager (an alias to a Traffic Manager profile or a CNAME to a trafficmanager.net host; Traffic Manager answers with a healthy endpoint)
+      - cdn (an alias to an Azure CDN endpoint or a CNAME to an azureedge.net host; the CDN endpoint's origins decide)
+      - record_update (a fixed address or host name, or an alias to another resource such as a public IP; moving traffic means changing the record, and resolvers can keep the old answer for up to its TTL)
+
+    Which networks resolve the private zones?
+    - total_private_zone_virtual_network_links — Number of virtual network links across all private zones
+    - private_zones_without_links — Number of private zones linked to no virtual network (a zone whose links couldn't be read also counts here, and the run fails)
+    - auto_registration_links — Number of virtual network links with auto-registration on, so virtual machines in the network get DNS records in the zone automatically

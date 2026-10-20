@@ -577,6 +577,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_dns_configuration` 0.2.0: public record sets.** Each public zone now
+  lists `record_sets` (`record_sets.list_all_by_dns_zone`): name, FQDN, type, TTL,
+  `targets` (the A, AAAA, CNAME, MX, TXT, NS, PTR, SRV, CAA or SOA values) and
+  the alias target resource with its type. Each A, AAAA or CNAME record gets a
+  `failover_method`: `front_door` or `traffic_manager` (an alias to one, or a CNAME
+  to its `azurefd.net` / `trafficmanager.net` host), `cdn`, or `record_update` (a
+  fixed target, so failing over means changing the record within its TTL). New
+  summary fields count record sets by type, aliases, empty endpoint records and
+  endpoints by failover method; zones whose record sets can't be read are null and
+  fail the run. Adds KSI-CNA-MAT, KSI-RPL-ABO and KSI-RPL-TRC. Existing fields and
+  keys are unchanged.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`
