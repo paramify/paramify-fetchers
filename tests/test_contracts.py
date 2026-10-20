@@ -221,6 +221,8 @@ def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
     problems = _description_problems("description", spec.get("description") or "", spec["name"])
     if es.get("description"):
         problems += _description_problems("evidence_set.description", es["description"], spec["name"])
+    if not es:
+        return problems  # discovery fetchers and issue reports carry no evidence set
 
     text = es.get("instructions") or ""
     if "`" in text or "**" in text:
@@ -245,6 +247,7 @@ def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
     if rest:
         if rest[0] != ["Summary fields:"] or len(rest) < 2:
             problems.append("after Output comes 'Summary fields:' on its own, then at least one question group")
+            return problems
         seen: set[str] = set()
         for group in rest[1:]:
             if not group[0].endswith("?"):
