@@ -55,13 +55,13 @@ evidence_set:
     - GET Microsoft.AlertsManagement/actionRules — processing rules that suppress or add action groups
     - GET {action group id} (groups in other subscriptions) — their receivers
 
-    Output: azure_alert_rules_<subscription>.json — each alert rule with its condition, the action groups and people it notifies, any processing rules that suppress it, and whether it reaches a person.
+    Output: azure_alert_rules_<subscription>.json — each alert rule with its condition, the receivers it notifies (phone numbers cut to the last 4 digits, webhooks to their host, Logic Apps and Functions to their resource id), any processing rules that suppress or add groups to it, and whether it reaches a person; mute durations are recorded but not evaluated, and activity log alerts are in azure_activity_log_alerts.
 
     Summary fields:
 
     What alert rules exist?
     - total_alert_rules — Number of alert rules of all types
-    - rules_by_type — Number of alert rules of each type (metric, log_search, smart_detector)
+    - rules_by_type — Number of alert rules of each type (metric, log_search, smart_detector); a type with no rules is left out
     - alerting_rules — Number of alert rules that can send a notification (all except log rules that only produce metrics)
     - enabled_alerting_rules — Number of alerting rules that are enabled
     - disabled_alerting_rules — Number of alerting rules that are disabled
@@ -70,11 +70,11 @@ evidence_set:
 
     Do enabled rules notify anyone?
     - enabled_rules_without_action_groups — Number of enabled rules with no action group to notify, either their own or one added by a processing rule
-    - enabled_rules_routing_to_enabled_receiver — Number of enabled rules that always notify an action group with at least one enabled receiver
-    - enabled_rules_routing_unknown — Number of enabled rules where it's unknown whether they notify anyone (the only possible action group couldn't be read, or is added only some of the time)
+    - enabled_rules_routing_to_enabled_receiver — Number of enabled rules that always notify a deliverable action group: one that is enabled and has at least one enabled receiver (email and SMS receivers count only when their status is Enabled; other receiver types always count)
+    - enabled_rules_routing_unknown — Number of enabled rules where it's unknown whether they notify anyone: no action group is known to deliver on every notification, and one couldn't be read or is added only some of the time
     - enabled_rules_routing_to_person — Number of enabled rules that always notify a person (email, SMS, voice call, app push, Azure role or ITSM ticket)
     - action_groups — Number of action groups in the subscription
-    - deliverable_action_groups — Number of action groups that are enabled and have at least one enabled receiver
+    - deliverable_action_groups — Number of deliverable action groups in the subscription
     - action_groups_notifying_people — Number of deliverable action groups that notify a person
 
     Are notifications being suppressed?
@@ -85,7 +85,7 @@ evidence_set:
 
     Does every enabled rule reach a person?
     - enabled_rules_reaching_human — Number of enabled rules that notify a person and aren't suppressed
-    - enabled_rules_reaching_human_unknown — Number of enabled rules where it's unknown whether they reach a person
-    - enabled_rules_not_reaching_human — Number of enabled rules that don't reach a person
+    - enabled_rules_reaching_human_unknown — Number of enabled rules where it's unknown whether they reach a person: they notify only webhooks, Logic Apps, Functions, runbooks or Event Hubs (code that may or may not tell anyone), an action group couldn't be read or is added only some of the time, or a suppression rule might apply
+    - enabled_rules_not_reaching_human — Number of enabled rules that notify no deliverable action group, or that a suppression rule always switches off
     - reaching_human_percentage — Percentage of enabled alerting rules that reach a person = enabled_rules_reaching_human / enabled_alerting_rules × 100 (a whole number, 0–100); 0 when enabled_alerting_rules is 0. Rules where reaching a person is unknown (enabled_rules_reaching_human_unknown) count in the total but not as reaching, so they lower it
     - all_enabled_rules_reach_human — True if every enabled alerting rule reaches a person; false if any doesn't, or none is enabled; null if none fails but some are unknown

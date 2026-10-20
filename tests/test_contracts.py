@@ -192,60 +192,78 @@ def test_instructions_open_with_the_entry_path() -> None:
 
 TEXT_FORMAT_FETCHERS = ("azure/alert_rules",)
 MAX_DESCRIPTION_WORDS = 30
+FIELD_LINE = re.compile(r"^- (\S+) — \S")
+COMMAND_LINE = re.compile(r"^- \S.* — \S")
 
 
-def _converted(yaml_path: Path) -> bool:
+def _matches(yaml_path: Path, prefix: str) -> bool:
     rel = yaml_path.parent.relative_to(FETCHERS_ROOT).as_posix()
-    return any(rel == p or rel.startswith(p + "/") for p in TEXT_FORMAT_FETCHERS)
+    return rel == prefix or rel.startswith(prefix + "/")
 
 
-CONVERTED_YAMLS = [p for p in FETCHER_YAMLS if _converted(p)]
+CONVERTED_YAMLS = [y for y in FETCHER_YAMLS if any(_matches(y, p) for p in TEXT_FORMAT_FETCHERS)]
+
+
+def _description_problems(label: str, desc: str, name: str) -> list[str]:
+    desc = " ".join(desc.split())
+    problems = []
+    if len(desc.split()) > MAX_DESCRIPTION_WORDS:
+        problems.append(f"{label} has {len(desc.split())} words; at most {MAX_DESCRIPTION_WORDS}")
+    if not desc.endswith(".") or re.search(r"(?<!e\.g)(?<!i\.e)[.!?]\s", desc):
+        problems.append(f"{label} is not one sentence ending in a period")
+    if name in desc:
+        problems.append(f"{label} repeats the fetcher's name")
+    return problems
 
 
 def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
-    problems: list[str] = []
-    desc = " ".join((spec.get("description") or "").split())
-    if len(desc.split()) > MAX_DESCRIPTION_WORDS:
-        problems.append(f"description has {len(desc.split())} words; at most {MAX_DESCRIPTION_WORDS}")
-    if not desc.endswith(".") or re.search(r"[.!?]\s", desc):
-        problems.append("description is not one sentence ending in a period")
-    if spec["name"] in desc:
-        problems.append("description repeats the fetcher's name")
+    es = spec.get("evidence_set") or {}
+    problems = _description_problems("description", spec.get("description") or "", spec["name"])
+    if es.get("description"):
+        problems += _description_problems("evidence_set.description", es["description"], spec["name"])
 
-    text = (spec.get("evidence_set") or {}).get("instructions") or ""
+    text = es.get("instructions") or ""
     if "`" in text or "**" in text:
         problems.append("instructions use markdown (backticks or **); Paramify shows them as typed")
     blocks = [b.split("\n") for b in text.strip("\n").split("\n\n")]
     labels = [b[0] for b in blocks]
-    if not labels or labels[0] != _script_line(yaml_path, spec):
+    if labels[0] != _script_line(yaml_path, spec):
         problems.append(f"instructions do not open with {_script_line(yaml_path, spec)!r} on a line of its own")
-    want = ["Access: ", "Commands Executed:", "Output: "]
-    got = [next((w for w in want if lab.startswith(w)), None) for lab in labels[1:4]]
-    if got != want:
-        problems.append(f"sections after Script must be Access, Commands Executed, Output in that order; got {[lab[:20] for lab in labels[1:4]]}")
-    for b in blocks:
-        if b[0] == "Commands Executed:":
-            if len(b) < 2 or any(not (ln.startswith("- ") and " — " in ln) for ln in b[1:]):
-                problems.append("each Commands Executed line must read '- <call> — <why>'")
-        elif b[0].startswith("Output: ") and (len(b) > 1 or " — " not in b[0]):
-            problems.append("Output must be one line: '<file> — <what it holds>'")
+    order_ok = (
+        len(labels) >= 4 and labels[1].startswith("Access: ")
+        and labels[2] == "Commands Executed:" and labels[3].startswith("Output: ")
+    )
+    if not order_ok:
+        problems.append("after Script come Access, then 'Commands Executed:' on its own line, then Output, "
+                        f"each a blank line apart; got {[lab[:20] for lab in labels[1:4]]}")
+        return problems
+    if len(blocks[2]) < 2 or any(not COMMAND_LINE.match(ln) for ln in blocks[2][1:]):
+        problems.append("each Commands Executed line must read '- <call> — <why>'")
+    if len(blocks[3]) > 1 or " — " not in labels[3]:
+        problems.append("Output must be one line: '<file> — <what it holds>'")
     rest = blocks[4:]
     if rest:
-        if rest[0] != ["Summary fields:"]:
-            problems.append("after Output comes 'Summary fields:' on its own")
+        if rest[0] != ["Summary fields:"] or len(rest) < 2:
+            problems.append("after Output comes 'Summary fields:' on its own, then at least one question group")
+        seen: set[str] = set()
         for group in rest[1:]:
             if not group[0].endswith("?"):
                 problems.append(f"summary group must start with a question: {group[0]!r}")
-            if len(group) < 2 or any(not (ln.startswith("- ") and " — " in ln) for ln in group[1:]):
+            if len(group) < 2 or any(not FIELD_LINE.match(ln) for ln in group[1:]):
                 problems.append(f"each summary field line must read '- <field> — <meaning>' under {group[0]!r}")
+            for ln in group[1:]:
+                m = FIELD_LINE.match(ln)
+                if m and m.group(1) in seen:
+                    problems.append(f"summary field {m.group(1)} is listed twice")
+                if m:
+                    seen.add(m.group(1))
     return problems
 
 
 def test_text_format_fetchers_exist() -> None:
     """Every TEXT_FORMAT_FETCHERS entry names real fetchers, so a typo can't switch the check off."""
-    missing = [p for p in TEXT_FORMAT_FETCHERS if not any(
-        y.parent.relative_to(FETCHERS_ROOT).as_posix() == p
-        or y.parent.relative_to(FETCHERS_ROOT).as_posix().startswith(p + "/") for y in FETCHER_YAMLS)]
+    assert TEXT_FORMAT_FETCHERS
+    missing = [p for p in TEXT_FORMAT_FETCHERS if not any(_matches(y, p) for y in FETCHER_YAMLS)]
     assert not missing, f"no fetcher matches {missing}"
 
 

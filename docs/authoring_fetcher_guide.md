@@ -76,7 +76,7 @@ evidence_set:
   instructions: |                         # plain text; layout in authoring_a_fetcher.md
     Script: okta/password_policy/fetcher.py
 
-    Access: An Okta API token with read access to policies.
+    Access: An API token from an Okta read-only administrator.
 
     Commands Executed:
     - GET /api/v1/policies (type PASSWORD) — every password policy

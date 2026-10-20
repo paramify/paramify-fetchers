@@ -51,7 +51,7 @@ evidence_set:
     Commands Executed:
     - <actual call> — <why>
 
-    Output: <category>_<short_name>.json — one record per asset with <what each record holds>; a run that could not collect every asset writes no records.
+    Output: <category>_<short_name>.json — one record per asset with <what each record holds>; a run that could not collect every asset writes no records, and the uploader does not send it.
   description: >-
     <What this inventory covers, e.g. every cloud resource in the authorization
     boundary as discovered by Tool.>

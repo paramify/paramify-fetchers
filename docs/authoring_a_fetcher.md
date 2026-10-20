@@ -99,7 +99,7 @@ evidence_set:
 
 Paramify shows both as plain text. `description` becomes the evidence set's description (unless `evidence_set.description` overrides it) and `instructions` fills its Instructions tab. Line breaks come through as written, but markdown and HTML don't render, so leave out backticks, `**bold**` and tags. The uploader sends both only when it creates the evidence set; a set that already exists keeps its text.
 
-**`description`** is one sentence of at most 30 words on what the evidence shows, not how it's collected. Start with what it shows ("Shows whether…", "Lists…", "Labels each…") and don't repeat the fetcher's name.
+**`description`** is one sentence of at most 30 words on what the evidence shows, not how it's collected. Start with what it shows ("Shows whether…", "Lists…", "Labels each…") and don't repeat the fetcher's name. An `evidence_set.description`, when set, replaces it in Paramify and follows the same rule.
 
 **`instructions`** is a `|` block, so its line breaks survive, with these sections in this order and a blank line between them:
 
@@ -107,7 +107,7 @@ Paramify shows both as plain text. `description` becomes the evidence set's desc
 - **Access:** the role or permission it needs. Then any optional access and what reads as unknown without it ("Optional: …; without it, …"). Leave out how it signs in.
 - **Commands Executed:** one `- ` line per call: the actual call (SDK method, REST path, CLI command or queried table), ` — `, and a few words on why. Add "(per project)" when it repeats. No API versions, query strings or paging details.
 - **Output:** the output file's name, with a placeholder like `<subscription>` for the part that varies, ` — `, then one sentence on what it holds.
-- **Summary fields:** every field the summary writes, once, in groups. Each group starts with the question it answers ("Is every web app backed up?"), ordered from what exists to how it's configured to whether it works. Each field line opens with its value type: "Number of …", "Percentage of …", "True if …; false if …; null if …", "List of …". It stands on its own, so never "of those". Define the fetcher's own judgement words ("deliverable", "in use") where they first appear. Give each percentage's formula using the summary's own field names, and what it reads when the denominator is 0.
+- **Summary fields:** every field the summary writes, once, in groups. Each group starts with the question it answers ("Is every web app backed up?"), ordered from what exists to how it's configured to whether it works. Each field line opens with its value type: "Number of …", "Number of … for each …", "Percentage of …", "True if …; false if …; null if …", "List of …", "Whether …: <the values it takes>", or a unit ("Hours since …"). It stands on its own, so never "of those". Define the fetcher's own judgement words ("deliverable", "in use") where they first appear. Give each percentage's formula using the summary's own field names, and what it reads when the denominator is 0.
 
 From [`azure/alert_rules`](../fetchers/azure/alert_rules/fetcher.yaml), shortened:
 
@@ -126,7 +126,7 @@ evidence_set:
     - GET Microsoft.Insights/metricAlerts — metric alert rules
     - GET Microsoft.Insights/actionGroups — action groups and their receivers
 
-    Output: azure_alert_rules_<subscription>.json — each alert rule with its condition, the action groups and people it notifies, any processing rules that suppress it, and whether it reaches a person.
+    Output: azure_alert_rules_<subscription>.json — each alert rule with its condition, the receivers it notifies (phone numbers cut to the last 4 digits, webhooks to their host, Logic Apps and Functions to their resource id), any processing rules that suppress or add groups to it, and whether it reaches a person; mute durations are recorded but not evaluated, and activity log alerts are in azure_activity_log_alerts.
 
     Summary fields:
 
