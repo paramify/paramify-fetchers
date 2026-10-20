@@ -557,9 +557,9 @@ schemas and the `paramify` CLI — not the internal code.
   `INGESTION_LOOKBACK_DAYS` (default 7) gives every resource in the subscription
   its newest record time and record count. AzureActivity and AzureMetrics are left
   out, because their rows name a resource without being its logs. `union *` skips
-  Basic and Auxiliary plan tables, so each of those is queried on its own over
-  `BASIC_LOGS_LOOKBACK_HOURS` (default 24; 0 skips them, since they bill per GB
-  scanned). Each resource gains `log_analytics_ingestion` per destination,
+  Basic and Auxiliary plan tables, and querying them bills per GB scanned, so they
+  are skipped unless `BASIC_LOGS_LOOKBACK_HOURS` is set above 0 (default 0); then
+  each is queried on its own over that many hours. Each resource gains `log_analytics_ingestion` per destination,
   `last_ingested` and `ingested_in_window` (null when a destination refused the
   read or was not queried in full; a deleted destination reads false). With
   `APPROVED_LOG_WORKSPACES` set, each setting carries `workspace_approved` and each

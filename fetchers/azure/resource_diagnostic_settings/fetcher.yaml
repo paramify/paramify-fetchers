@@ -1,19 +1,7 @@
 name: azure_resource_diagnostic_settings
 version: 0.2.0
-description: >
-  Resource-level logging across a whole subscription: every resource Azure Resource
-  Graph lists, plus each storage account's blob, file, queue and table services, with
-  the log categories its type emits and the diagnostic settings that export them. For
-  each resource that emits resource logs: whether any setting sends an enabled log
-  category or category group to a destination, which destinations (Log Analytics,
-  storage, event hub, partner), and which log and audit categories no setting
-  captures. For each Log Analytics workspace those settings export to, one query
-  (plus one per Basic or Auxiliary plan table) gives every exporting resource its
-  last record time and record count over the lookback, so a resource whose logs
-  never arrive, or go to a deleted workspace, stands out; settings exporting to a
-  workspace outside an optional approved list are flagged. Summarized as log-setting, Log Analytics and
-  recent-ingestion coverage of the log-emitting resources, with the uncovered
-  resources counted by type.
+description: >-
+  Shows which resources export their logs through a diagnostic setting, where those logs go, whether they actually arrive in Log Analytics, and which log categories nothing captures.
 category: azure
 
 supports_targets: true
@@ -66,13 +54,13 @@ config_schema:
   basic_logs_lookback_hours:
     type: integer
     required: false
-    default: 24
+    default: 0
     env: BASIC_LOGS_LOOKBACK_HOURS
     description: >
-      Hours of Basic and Auxiliary plan tables to query, one table at a time. Log
-      Analytics bills these queries per GB scanned, so the window is short; 0
-      skips them, and a resource with no record in a workspace's other tables
-      then reads ingested_in_window null rather than false.
+      Hours of Basic and Auxiliary plan tables to query, one table at a time. Off
+      (0) by default, because Log Analytics bills these queries per GB scanned; a
+      resource with no record in a workspace's other tables then reads
+      ingested_in_window null rather than false. Set a short window to query them.
 
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
@@ -83,63 +71,73 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-RESOURCE-DIAG-SETTINGS
   name: Azure Resource Diagnostic Settings
-  instructions: >
-    Script: fetcher.py. Reader (or Monitoring Reader) at subscription scope, plus
-    Reader or Log Analytics Reader on each destination workspace outside it.
-    (1) Azure Resource Graph query "Resources | project id, name, type, kind,
-    location, resourceGroup | order by id asc", paged by skip token to the end; the run
-    fails if the rows collected differ from Resource Graph's total_records
-    (summary.resources_enumerated vs summary.resource_graph_total_records). Storage
-    accounts carry no resource logs themselves, so each one's
-    {id}/blobServices/default, fileServices/default, queueServices/default and
-    tableServices/default are added (synthesized_child: true) unless Resource Graph
-    already listed them: only blobServices for kind BlobStorage and BlockBlobStorage,
-    only fileServices for FileStorage, all four for any other kind. (2) Per resource, azure-mgmt-monitor<7
-    diagnostic_settings_category.list(resource_uri) (api 2021-05-01-preview): its
-    "Logs" categories set emits_resource_logs, and log categories whose
-    category_groups include "audit" are audit_log_categories. A type ARM refuses
-    diagnostics for (400 ResourceTypeNotSupported, "The resource type '<type>' does not
-    support diagnostic settings.") is status "unsupported", and the rest of that type
-    is marked unsupported without another call; a resource deleted since enumeration
-    is "not_found"; any other error is status "error" and fails the run. (3) For each
-    resource that emits logs, diagnostic_settings.list(resource_uri). A setting
-    exports_logs when it has at least one destination (an empty-string id counts as
-    none) and at least one enabled log category or category group.
-    has_enabled_log_setting is true when any setting exports logs;
-    destination_types and sends_to_log_analytics come from the exporting settings
-    only. A category is captured when an exporting setting enables it by name, enables
-    a group it belongs to, or enables allLogs; uncaptured_log_categories and
-    captures_all_audit_categories follow from that. Metrics-only resources keep
-    has_enabled_log_setting null and are outside the coverage denominator. A SQL
-    server's master database is listed and counted like any database: its setting is
-    where server-level auditing (SQLSecurityAuditEvents, DevOpsOperationsAudit) is
-    exported, while the server resource itself has metrics only. (4) Each distinct
-    Log Analytics workspace an exporting setting names: ARM GET {workspace_id}
-    (api 2023-09-01) for its customerId and GET {workspace_id}/tables for each
-    table's plan, then one Log Analytics query (POST
-    /v1/workspaces/{customerId}/query, timespan the lookback): "union
-    withsource=ParamifySourceTable * | where TimeGenerated > ago({days}d) | where
-    _ResourceId startswith '/subscriptions/{subscription_id}/' | where
-    ParamifySourceTable !in ('AzureActivity', 'AzureMetrics') | summarize
-    LastIngested = max(TimeGenerated), Records = count() by ResourceId =
-    tolower(_ResourceId), Table = ParamifySourceTable". AzureActivity is left out
-    because its rows name the resource an operation touched, and AzureMetrics
-    because metrics are not logs. union * leaves out Basic and Auxiliary plan
-    tables, so each of those is queried on its own over BASIC_LOGS_LOOKBACK_HOURS
-    (timespan PT{hours}H): "['{table}'] | where TimeGenerated > ago({hours}h) |
-    where _ResourceId startswith '/subscriptions/{subscription_id}/' | summarize
-    LastIngested = max(TimeGenerated), Records = count() by ResourceId =
-    tolower(_ResourceId)"; these queries are billed per GB scanned. Per resource,
-    log_analytics_ingestion lists each destination's status, all_tables_queried,
-    last_ingested (the newest TimeGenerated), records and tables;
-    ingested_in_window is true when any destination holds a record, false when
-    every destination was queried in full or no longer exists (404, status
-    not_found), and null when a destination refused the read (403, status
-    not_authorized, which does not fail the run), has Basic or Auxiliary tables
-    left unqueried (BASIC_LOGS_LOOKBACK_HOURS 0), or the resource sends no logs to
-    Log Analytics. Any other query failure fails the run. With
-    APPROVED_LOG_WORKSPACES set, each setting carries workspace_approved and each
-    log-emitting resource sends_to_approved_workspace. Run time:
-    about 14 resources per second with 4 workers (measured on ~1,000 resources), so
-    roughly 25 minutes per 20,000, plus one query per destination workspace; the
-    timeout is 3600 seconds.
+  instructions: |
+    Script: azure/resource_diagnostic_settings/fetcher.py
+
+    Access: Reader or Monitoring Reader on the subscription. Optional: Reader or Log Analytics Reader on destination workspaces in other subscriptions; without it, log arrival for resources sending there reads unknown.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Insights") — tells "not registered" from "no settings"
+    - Resource Graph Resources query — every resource, checked against Resource Graph's total
+    - diagnostic_settings_category.list() (per resource) — which log, audit and metric categories it emits
+    - diagnostic_settings.list() (per log-emitting resource) — its settings and destinations
+    - GET {workspace id} and GET {workspace id}/tables (per destination workspace) — its query id, and which tables are on the Basic or Auxiliary plan
+    - KQL union * on each destination workspace, without AzureActivity and AzureMetrics — newest record and record count for each resource in the lookback
+    - KQL on each Basic or Auxiliary table, only when basic_logs_lookback_hours is above 0 — newest record and record count for the tables union * skips; off by default because these queries bill per GB scanned
+
+    Output: azure_resource_diagnostic_settings_<subscription>.json — each resource with its diagnostic settings, where its logs go, when its logs last arrived, and which log and audit categories aren't exported.
+
+    Summary fields:
+
+    Was every resource found and checked?
+    - resources_enumerated — Number of resources Resource Graph returned
+    - resource_graph_total_records — Number of resources Resource Graph reported in total; must equal resources_enumerated, which proves no resource was missed; null if Resource Graph gave no total
+    - resource_graph_pages — Number of Resource Graph result pages read
+    - child_services_synthesized — Number of storage blob, file, queue and table services added to the inventory (Resource Graph doesn't list them)
+    - resources_evaluated — Number of resources checked, including the added storage services
+    - resources_assessed — Number of resources whose diagnostic log categories were read
+    - resources_unsupported — Number of resources whose type doesn't support diagnostic settings
+    - resources_not_found — Number of resources deleted between being listed and being checked
+    - resources_errored — Number of resources that couldn't be read (any makes the run fail)
+    - provider_registration_status — Whether the Azure Monitor provider (Microsoft.Insights) is registered on the subscription: registered, not_registered or unknown
+
+    Do resources export their logs?
+    - resources_emitting_logs — Number of log-producing resources: those whose type produces resource logs
+    - resources_with_enabled_log_setting — Number of log-producing resources with a diagnostic setting that exports at least one log category
+    - resources_emitting_logs_without_setting — Number of log-producing resources with no diagnostic setting exporting any log category
+    - log_setting_coverage_percentage — Percentage of log-producing resources that export their logs = resources_with_enabled_log_setting / resources_emitting_logs × 100 (a whole number, 0–100); 0 when resources_emitting_logs is 0
+    - uncovered_by_type — Number of log-producing resources that don't export logs, for each resource type
+    - all_log_emitting_resources_covered — True if every log-producing resource exports its logs and no resource read failed, including when there are none; false otherwise
+
+    Do the logs reach Log Analytics?
+    - resources_sending_to_log_analytics — Number of log-producing resources that export logs to a Log Analytics workspace
+    - log_analytics_coverage_percentage — Percentage of log-producing resources that export logs to Log Analytics = resources_sending_to_log_analytics / resources_emitting_logs × 100 (a whole number, 0–100); 0 when resources_emitting_logs is 0
+
+    Were the destination workspaces read?
+    - ingestion_lookback_days — Number of days of records the workspace query looks back over
+    - basic_logs_lookback_hours — Number of hours of records read from Basic and Auxiliary plan tables; 0, the default, when those tables were skipped
+    - log_analytics_destinations — Number of destination workspaces: distinct Log Analytics workspaces that diagnostic settings export logs to
+    - log_analytics_destinations_queried — Number of destination workspaces whose records were read
+    - log_analytics_destinations_not_authorized — Number of destination workspaces that refused the read
+    - log_analytics_destinations_not_found — Number of destination workspaces that no longer exist, so logs sent there go nowhere
+    - log_analytics_destinations_errored — Number of destination workspaces whose read failed for another reason (any makes the run fail)
+    - log_analytics_destinations_with_unqueried_tables — Number of read destination workspaces with Basic or Auxiliary tables that were not queried
+
+    Are the logs actually arriving?
+    - resources_with_recent_ingestion — Number of log-producing resources exporting to Log Analytics with recent ingestion: at least one record, in any table except AzureActivity and AzureMetrics, whose time falls in the lookback in a destination workspace
+    - resources_without_recent_ingestion — Number of log-producing resources exporting to Log Analytics with no record in the lookback, where every destination workspace was read in full or no longer exists
+    - resources_ingestion_unknown — Number of log-producing resources exporting to Log Analytics with no record found, where a destination workspace refused the read, failed, or has Basic or Auxiliary tables that were not queried
+    - recent_ingestion_percentage — Percentage of resources exporting to Log Analytics with recent ingestion = resources_with_recent_ingestion / resources_sending_to_log_analytics × 100 (a whole number, 0–100); 0 when resources_sending_to_log_analytics is 0. Resources counted in resources_ingestion_unknown are in the total but not the numerator
+    - no_recent_ingestion_by_type — Number of resources without recent ingestion, for each resource type
+    - all_log_analytics_resources_ingesting — True if every log-producing resource exporting to Log Analytics has recent ingestion; false if any has none or is unknown; true when none exports to Log Analytics
+
+    Do logs go to an approved workspace?
+    - approved_workspaces_configured — True if an approved workspace list (approved_log_workspaces) was set; false if not
+    - settings_exporting_to_unapproved_workspace — Number of diagnostic settings exporting logs to a workspace not on the approved list; null when no list is set
+    - resources_sending_to_approved_workspace — Number of log-producing resources with a diagnostic setting exporting logs to an approved workspace; null when no list is set
+    - resources_exporting_to_unapproved_workspace — Number of resources with a diagnostic setting exporting logs to a workspace not on the approved list; null when no list is set
+
+    Are all audit logs captured?
+    - resources_with_audit_categories — Number of log-producing resources whose type has audit log categories
+    - resources_capturing_all_audit_categories — Number of resources that export every audit log category their type has

@@ -539,7 +539,7 @@ def test_basic_tables_left_unqueried_make_an_empty_resource_unknown():
     assert rds.with_ingestion(exporting(LAW_A), {rds.workspace_key(LAW_A): out}, [])["ingested_in_window"] is True
 
 
-@pytest.mark.parametrize("raw, hours", [(None, 24), ("0", 0), ("6", 6), ("-3", 0), ("x", 24)])
+@pytest.mark.parametrize("raw, hours", [(None, 0), ("", 0), ("0", 0), ("6", 6), ("-3", 0), ("x", 0)])
 def test_basic_lookback_hours(monkeypatch, raw, hours):
     if raw is None:
         monkeypatch.delenv(rds.BASIC_LOOKBACK_ENV, raising=False)

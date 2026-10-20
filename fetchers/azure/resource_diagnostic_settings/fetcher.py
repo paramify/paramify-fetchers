@@ -90,9 +90,9 @@ INGESTION_QUERY = (
     "| summarize LastIngested = max(TimeGenerated), Records = count() "
     "by ResourceId = tolower(_ResourceId), Table = ParamifySourceTable"
 )
-# union * skips Basic and Auxiliary tables, and querying them bills per GB scanned, so they get a short window.
+# union * skips Basic and Auxiliary tables; querying them bills per GB scanned, so it is off unless hours are set.
 BASIC_LOOKBACK_ENV = "BASIC_LOGS_LOOKBACK_HOURS"
-DEFAULT_BASIC_LOOKBACK_HOURS = 24
+DEFAULT_BASIC_LOOKBACK_HOURS = 0
 BASIC_TABLE_QUERY = (
     "['{table}'] "
     "| where TimeGenerated > ago({hours}h) "
@@ -265,7 +265,7 @@ def workspace_approved(workspace_id, approved: list[str]):
 
 
 def basic_lookback_hours() -> int:
-    """0 turns the Basic and Auxiliary table queries off."""
+    """0, the default, leaves the Basic and Auxiliary tables unqueried."""
     raw = (os.environ.get(BASIC_LOOKBACK_ENV) or "").strip()
     try:
         hours = int(raw) if raw else DEFAULT_BASIC_LOOKBACK_HOURS
