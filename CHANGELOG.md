@@ -591,6 +591,9 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **python-dotenv 1.2.0 or later is required.** It is the first release that
+  honours `PYTHON_DOTENV_DISABLED=1`, which the TUI and CLI regression tests set
+  so a developer's `.env` cannot reach the commands they run.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import re
 import select
-import shutil
 import struct
 import subprocess
 import sys
@@ -20,7 +19,6 @@ pty = pytest.importorskip("pty", reason="needs a POSIX pseudo-terminal")
 import fcntl  # noqa: E402
 import termios  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 ROWS, COLS = 50, 160
 TIMEOUT = 60.0
 _ESCAPES = re.compile(rb"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|.)")
@@ -29,17 +27,12 @@ WORKSPACE = "paramify fetcher"
 WELCOME = "collect compliance evidence"
 
 
-def _paramify() -> str:
-    beside = Path(sys.executable).with_name("paramify")
-    return str(beside) if beside.exists() else (shutil.which("paramify") or str(beside))
-
-
-def _launch(argv: list, ready: str) -> tuple:
+def _launch(argv: list, ready: str, cwd: Path, env: dict) -> tuple:
     """Run argv on a pty until `ready` is drawn, press q; return (exit code or None, seen, text)."""
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
-    env = {**os.environ, "TERM": "xterm-256color", "PYTHON_DOTENV_DISABLED": "1"}
-    proc = subprocess.Popen(argv, cwd=REPO_ROOT, env=env, stdin=slave, stdout=slave, stderr=slave)
+    env = {**env, "TERM": "xterm-256color"}
+    proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=slave, stdout=slave, stderr=slave)
     os.close(slave)
     raw = bytearray()
     deadline = time.monotonic() + TIMEOUT
@@ -73,14 +66,15 @@ def _launch(argv: list, ready: str) -> tuple:
 @pytest.mark.parametrize(
     "argv, ready",
     [
-        ([_paramify(), "tui", "--manifest", "examples/demo.yaml"], WORKSPACE),
-        ([sys.executable, "-m", "framework.tui", "--manifest", "examples/demo.yaml"], WORKSPACE),
-        ([sys.executable, "-m", "framework.tui"], WELCOME),
+        (["paramify", "tui", "--manifest", "manifests/demo.yaml"], WORKSPACE),
+        (["python", "-m", "framework.tui", "--manifest", "manifests/demo.yaml"], WORKSPACE),
+        (["python", "-m", "framework.tui"], WELCOME),
     ],
     ids=["paramify-tui", "module-manifest", "module-welcome"],
 )
-def test_launch_and_quit(argv, ready):
-    code, seen, screen = _launch(argv, ready)
+def test_launch_and_quit(argv, ready, demo_workspace, cli_tools):
+    exe = {"paramify": cli_tools.paramify(), "python": sys.executable}[argv[0]]
+    code, seen, screen = _launch([exe, *argv[1:]], ready, demo_workspace.root, cli_tools.offline_env())
     tail = screen[-2000:]
     assert seen, f"{ready!r} never appeared within {TIMEOUT:.0f}s:\n{tail}"
     assert code == 0, f"exit code {code}:\n{tail}"

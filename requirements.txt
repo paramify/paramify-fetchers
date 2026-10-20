@@ -1,5 +1,5 @@
 # Runtime deps for fetchers + framework runner
-python-dotenv
+python-dotenv>=1.2.0
 requests
 pyyaml
 jsonschema

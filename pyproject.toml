@@ -16,7 +16,7 @@ classifiers = [
 # Base runtime: everything the headless `paramify` CLI and the runner need.
 # The TUI is an optional front-end — install its extra to use `paramify tui`.
 dependencies = [
-    "python-dotenv",
+    "python-dotenv>=1.2.0",  # the first to honour PYTHON_DOTENV_DISABLED, which the tests set
     "requests",
     "pyyaml",
     "jsonschema",
