@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import logging
+import sys
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace as ns
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER = REPO_ROOT / "fetchers" / "azure" / "entra_pim_assignments" / "fetcher.py"
@@ -30,7 +35,8 @@ DEFINITIONS = [
 ]
 
 
-def _instance(role, principal_id, odata="#microsoft.graph.user", upn=None, assignment_type=None, end=None, scope="/"):
+def _instance(role, principal_id, odata="#microsoft.graph.user", upn=None, assignment_type=None, end=None, scope="/",
+              member_type="Direct"):
     return pim.project_instance(ns(
         id=f"{role}-{principal_id}",
         principal_id=principal_id,
@@ -38,7 +44,7 @@ def _instance(role, principal_id, odata="#microsoft.graph.user", upn=None, assig
         role_definition_id=role,
         directory_scope_id=scope,
         app_scope_id=None,
-        member_type="Direct",
+        member_type=member_type,
         assignment_type=assignment_type,
         start_date_time=NOW,
         end_date_time=end,
@@ -140,7 +146,7 @@ def test_activation_rules_are_read_per_role():
     ga = by_role["Global Administrator"]
     assert ga["activation_requires_mfa"] is True
     assert ga["activation_requires_approval"] is True
-    assert ga["activation_approver_count"] == 2
+    assert ga["activation_approver_sets"] == 2
     assert ga["activation_authentication_context"] == "c1"
     assert ga["activation_maximum_duration"] == "PT8H"
     assert ga["activation_maximum_hours"] == 8
@@ -176,14 +182,39 @@ def test_a_missing_rule_reads_as_unknown_not_false():
     assert record["activation_requires_approval"] is None
 
 
+def test_privileged_counts_take_only_tenant_wide_direct_grants():
+    active = [
+        _instance(GA, "u-ga"),
+        _instance(PRA, "u-au-admin", scope="/administrativeUnits/au-1"),
+        _instance(PRA, "g-admins", odata="#microsoft.graph.group"),
+        _instance(PRA, "u-in-group", member_type="Group"),
+    ]
+    eligible = [_instance(PRA, "u-au-eligible", scope="/administrativeUnits/au-1")]
+    results, summary = pim.build(DEFINITIONS, eligible, active, [_policy(GA), _policy(PRA)], [])
+
+    assert len(results["active_assignments"]) == 4
+    assert summary["active_assignments"] == 3
+    assert summary["active_privileged_assignments"] == 2
+    assert summary["permanent_active_privileged_assignments"] == 2
+    assert summary["principals_with_permanent_privileged_access"] == 2
+    assert summary["eligible_assignments"] == 1
+    assert summary["eligible_privileged_assignments"] == 0
+    assert summary["privileged_roles_with_eligible_holders"] == []
+
+
 class _Builder:
-    def __init__(self, exc=None, items=()):
-        self.exc, self.items = exc, list(items)
+    def __init__(self, exc=None, items=(), pages=None):
+        self.exc, self.items, self.pages = exc, list(items), pages
 
     async def get(self, request_configuration=None):
         if self.exc:
             raise self.exc
+        if self.pages:
+            return self.pages.pop(0)
         return ns(value=self.items, odata_next_link=None)
+
+    def with_url(self, url):
+        return self
 
 
 class _ODataError(Exception):
@@ -201,12 +232,47 @@ def test_a_licence_refusal_is_a_state_not_a_failure():
         "The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license. (status 400)"
     )))
     assert collector.ok
-    assert items == []
+    assert items is None
     assert len(unlicensed) == 1
 
-    results, summary = pim.build(DEFINITIONS, [], [], [], unlicensed)
-    assert summary == {"pim_available": False}
+    active = [_instance(GA, "u-ga")]
+    results, summary = pim.build(DEFINITIONS, None, active, None, unlicensed)
+    assert summary == {"pim_available": False, "collection_complete": False}
     assert results["pim_available"] is False
+    assert results["eligible_assignments"] is None
+    assert results["active_assignments"][0]["standing"] == "permanent"
+    assert results["notes"][1].startswith("graph.op:")
+
+
+def test_a_licence_refusal_and_a_403_elsewhere_keep_both_outcomes():
+    collector, unlicensed = pim.Collector(logging.getLogger("test")), []
+    licence = _Builder(_ODataError("The tenant has not onboarded to PIM. (status 400)"))
+    denied = _Builder(_ODataError("Insufficient privileges to complete the operation. (status 403)"))
+    assert asyncio.run(pim._read(collector, unlicensed, "graph.eligible", licence)) is None
+    assert asyncio.run(pim._read(collector, unlicensed, "graph.policies", denied)) is None
+    assert len(unlicensed) == 1
+    assert pim.classify_failure_code(collector.failures) == "not_authorized"
+
+    _, summary = pim.build(DEFINITIONS, None, [], None, unlicensed)
+    assert summary == {"pim_available": False, "collection_complete": False}
+
+
+def test_a_failure_on_a_later_page_fails_the_read():
+    first = ns(value=[ns(id="d1")], odata_next_link="https://graph.microsoft.com/next")
+    builder = _Builder(pages=[first])
+    builder.with_url = lambda url: _Builder(_ODataError("Too many requests (status 429)"))
+    items, collector, unlicensed = _read(builder)
+    assert items is None
+    assert unlicensed == []
+    assert pim.classify_failure_code(collector.failures) == "rate_limited"
+
+
+@pytest.mark.parametrize("status, code", [
+    (403, "not_authorized"), (429, "rate_limited"), (503, "target_unreachable"), (504, "target_unreachable"),
+])
+def test_graph_status_text_is_classified_like_arm(status, code):
+    failures = [{"operation": "graph.op", "type": "ODataError", "message": f"Something went wrong (status {status})"}]
+    assert pim.classify_failure_code(failures) == code
 
 
 def test_a_graph_403_is_recorded_and_classified_not_authorized():
@@ -226,3 +292,59 @@ def test_a_failed_read_gives_no_figures():
     assert results["pim_available"] is None
     assert results["eligible_assignments"] is None
     assert results["active_assignments"][0]["standing"] == "permanent"
+
+
+def test_empty_role_definitions_are_a_failed_read(monkeypatch):
+    roles = ns(
+        role_definitions=_Builder(items=[]),
+        role_eligibility_schedule_instances=_Builder(items=[]),
+        role_assignment_schedule_instances=_Builder(items=[]),
+    )
+    client = ns(role_management=ns(directory=roles), policies=ns(role_management_policy_assignments=_Builder(items=[])))
+
+    async def fake_with_graph_client(collector, cred, work, default=None):
+        return await work(client)
+
+    async def fake_tenant(collector, client):
+        return {"tenant_id": "t-1", "tenant_source": "env"}
+
+    monkeypatch.setattr(pim, "with_graph_client", fake_with_graph_client)
+    monkeypatch.setattr(pim, "resolve_tenant", fake_tenant)
+    monkeypatch.setattr(pim, "_query", lambda builder, **params: None)
+    collector = pim.Collector(logging.getLogger("test"))
+    _, definitions, *_ = asyncio.run(pim._collect(collector, object()))
+    assert definitions is None
+    assert not collector.ok
+
+
+def test_a_failed_graph_client_gives_no_figures(monkeypatch):
+    @asynccontextmanager
+    async def broken(cred):
+        raise RuntimeError("could not build the Graph client")
+        yield
+
+    monkeypatch.setattr(sys.modules["entra_graph"], "graph_service_client", broken)
+    collector = pim.Collector(logging.getLogger("test"))
+    tenant, *reads, unlicensed = asyncio.run(pim._collect(collector, object()))
+    assert tenant == {"tenant_source": "unresolved"}
+    assert not collector.ok
+
+    _, summary = pim.build(*reads, unlicensed)
+    assert summary == {"pim_available": None, "collection_complete": False}
+
+
+def test_a_credential_failure_writes_null_figures_and_fails_the_run(tmp_path, monkeypatch):
+    def no_credential():
+        raise RuntimeError("DefaultAzureCredential failed to retrieve a token")
+
+    monkeypatch.setattr(pim, "credential", no_credential)
+    monkeypatch.setattr(pim, "load_dotenv", lambda: None)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("AZURE_TENANT_ID", "t-1")
+    monkeypatch.delenv("AZURE_SUBSCRIPTION_ID", raising=False)
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+
+    assert pim.main() == 1
+    evidence = json.loads((tmp_path / "azure_entra_pim_assignments_t-1.json").read_text())
+    assert evidence["summary"] == {"pim_available": None, "collection_complete": False}
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "auth_failed"

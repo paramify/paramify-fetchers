@@ -2773,6 +2773,8 @@ def test_graph_pim_rule_models_present() -> None:
         ("unified_role_management_policy_authentication_context_rule",
          "UnifiedRoleManagementPolicyAuthenticationContextRule", ["is_enabled", "claim_value"]),
         ("approval_settings", "ApprovalSettings", ["is_approval_required", "approval_stages"]),
+        ("unified_approval_stage", "UnifiedApprovalStage",
+         ["primary_approvers", "is_escalation_enabled", "approval_stage_time_out_in_days"]),
         ("unified_role_assignment_schedule_instance", "UnifiedRoleAssignmentScheduleInstance",
          ["assignment_type", "member_type", "start_date_time", "end_date_time", "principal", "directory_scope_id"]),
         ("unified_role_eligibility_schedule_instance", "UnifiedRoleEligibilityScheduleInstance",

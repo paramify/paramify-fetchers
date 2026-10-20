@@ -18,8 +18,10 @@ schemas and the `paramify` CLI — not the internal code.
   `pim_activated`, and each privileged role's activation rules (MFA or an
   authentication context, justification, approval and approver count, maximum
   activation hours) and whether it allows permanent eligible or active
-  assignments. A tenant without Entra ID P2 reads `pim_available: false` and the
-  run succeeds; when any read fails the summary gives no figures, so a denied read
+  assignments. Privileged counts take direct grants of privileged roles held
+  tenant-wide, as `azure_entra_privileged_roles` does. A tenant without Entra ID
+  P2 reads `pim_available: false`, keeps the reads that succeeded, and the run
+  succeeds; when any read fails the summary gives no figures, so a denied read
   never reads as zero standing admins. Needs `RoleManagement.Read.Directory`.
 - **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
   over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
@@ -864,9 +866,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
-- **Azure: a Microsoft Graph 403 is reported as `not_authorized`.** msgraph
-  renders a denied call as `<message> (status 403)`, which matched none of the
-  markers, so a Graph fetcher refused a permission failed as `partial_failure`.
+- **Azure: Microsoft Graph failures get the same status codes as ARM's.** msgraph
+  renders an HTTP status as `<message> (status 403)`, which matched none of the
+  `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
+  refused, throttled or unreachable failed as `partial_failure`. These now read
+  `not_authorized`, `rate_limited` and `target_unreachable`.
 - **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →
   0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
   counterpart of `DenyAction`, was reported as `unresolved` with no reason and

@@ -39,8 +39,8 @@ from entra_graph import (  # noqa: E402
 
 NAME = "azure_entra_pim_assignments"
 POLICY_FILTER = "scopeId eq '/' and scopeType eq 'DirectoryRole'"
-# Without Entra ID P2 (or ID Governance) the PIM endpoints refuse with a licence error, which is a state, not a failure.
-UNLICENSED_MARKERS = ("aadpremiumlicenserequired", "licens", "tenantnotonboarded", "not onboarded to pim")
+# Without Entra ID P2 (or ID Governance) PIM refuses with a licence error, a state not a failure; the recorded text is the message only.
+UNLICENSED_MARKERS = ("licens", "not onboarded to pim")
 MFA, JUSTIFICATION, TICKETING = "MultiFactorAuthentication", "Justification", "Ticketing"
 
 logger = logging.getLogger(NAME)
@@ -215,7 +215,8 @@ def policy_record(assignment: Dict[str, Any], index: Dict[str, Dict[str, Any]]) 
         "activation_requires_justification": _enabled(rules, "Enablement_EndUser_Assignment", JUSTIFICATION),
         "activation_requires_ticket": _enabled(rules, "Enablement_EndUser_Assignment", TICKETING),
         "activation_requires_approval": approval.get("is_approval_required"),
-        "activation_approver_count": sum(s["primary_approver_count"] for s in approval.get("stages") or []) if approval else None,
+        # Users and groups named as approvers: a group counts once, however many members it has.
+        "activation_approver_sets": sum(s["primary_approver_count"] for s in approval.get("stages") or []) if approval else None,
         "activation_authentication_context": context.get("claim_value") if context.get("is_enabled") else None,
         "permanent_eligible_assignment_allowed": _allows_permanent(rules, "Expiration_Admin_Eligibility"),
         "eligible_assignment_maximum_duration": (rules.get("Expiration_Admin_Eligibility") or {}).get("maximum_duration"),
@@ -239,9 +240,21 @@ def _sort_key(record: Dict[str, Any]) -> tuple:
     )
 
 
+def counted(record: Dict[str, Any]) -> bool:
+    """Direct grants only, so a role held through a group counts once, as the group's."""
+    return (record.get("member_type") or "Direct") == "Direct"
+
+
+def privileged(record: Dict[str, Any]) -> bool:
+    """A privileged role held tenant-wide, as azure_entra_privileged_roles counts it; an administrative unit scope is not."""
+    return record["is_privileged"] and record["tenant_wide"]
+
+
 def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], policies: List[Dict[str, Any]]) -> Dict[str, Any]:
-    priv_eligible = [e for e in eligible if e["is_privileged"]]
-    priv_active = [a for a in active if a["is_privileged"]]
+    eligible = [e for e in eligible if counted(e)]
+    active = [a for a in active if counted(a)]
+    priv_eligible = [e for e in eligible if privileged(e)]
+    priv_active = [a for a in active if privileged(a)]
     priv_permanent = [a for a in priv_active if a["standing"] == "permanent"]
     priv_policies = [p for p in policies if p["is_privileged"]]
 
@@ -300,17 +313,15 @@ def _each(project, items: Optional[List[Any]]) -> Optional[List[Dict[str, Any]]]
 
 
 async def _read(collector: Collector, unlicensed: List[str], operation: str, builder, config=None) -> Optional[List[Any]]:
-    """`paginate`, with a licence refusal noted rather than recorded; None when the read failed."""
+    """`paginate`, with a licence refusal noted rather than recorded; None when the read failed or was refused."""
     probe = Collector(logger)
     items = await paginate(probe, operation, builder, config)
-    failed = False
     for failure in probe.failures:
         if any(m in (failure.get("message") or "").lower() for m in UNLICENSED_MARKERS):
             unlicensed.append(f"{operation}: {failure.get('message')}")
         else:
             collector.failures.append(failure)
-            failed = True
-    return None if failed else items
+    return None if probe.failures else items
 
 
 async def _collect(collector: Collector, cred) -> tuple:
@@ -326,6 +337,10 @@ async def _collect(collector: Collector, cred) -> tuple:
         definitions = await read(
             "roleManagement.directory.roleDefinitions", directory.role_definitions, project_role_definition
         )
+        if definitions == []:
+            # Every tenant has built-in directory roles, so an empty list is a bad read, not a fact.
+            collector.record("graph.roleManagement.directory.roleDefinitions.get", RuntimeError("no role definitions returned"))
+            definitions = None
         eligible = await read(
             "roleManagement.directory.roleEligibilityScheduleInstances",
             directory.role_eligibility_schedule_instances,
@@ -352,9 +367,6 @@ async def _collect(collector: Collector, cred) -> tuple:
 
 
 def build(definitions, eligible, active, policies, unlicensed) -> tuple:
-    if unlicensed:
-        notes = ["PIM is not available in this tenant (Entra ID P2 or ID Governance is required)", *unlicensed]
-        return {"pim_available": False, "notes": notes}, {"pim_available": False}
     index = role_index(definitions or [])
     eligible_records = None if eligible is None else sorted((assignment_record(i, index, False) for i in eligible), key=_sort_key)
     active_records = None if active is None else sorted((assignment_record(i, index, True) for i in active), key=_sort_key)
@@ -363,18 +375,22 @@ def build(definitions, eligible, active, policies, unlicensed) -> tuple:
         (p for p in (policy_record(a, index) for a in policies) if p["is_privileged"] or p["role_definition_id"] in assigned),
         key=lambda p: (p["role_name"] or "", p["role_definition_id"] or ""),
     )
-    complete = None not in (definitions, eligible_records, active_records, policy_records)
+    # A licence refusal keeps the reads that succeeded; the refused ones read None.
+    complete = not unlicensed and None not in (definitions, eligible_records, active_records, policy_records)
+    available = False if unlicensed else (True if complete else None)
     results = {
-        "pim_available": True if complete else None,
+        "pim_available": available,
         "eligible_assignments": eligible_records,
         "active_assignments": active_records,
         "role_policies": policy_records,
         "role_definitions_read": None if definitions is None else len(definitions),
         "privileged_role_names_checked": sorted(PRIVILEGED_ROLE_NAMES),
     }
+    if unlicensed:
+        results["notes"] = ["PIM is not available in this tenant (Entra ID P2 or ID Governance is required)", *unlicensed]
     # A failed read would turn into zero standing admins, so no figures are given unless every read succeeded.
     if not complete:
-        return results, {"pim_available": None, "collection_complete": False}
+        return results, {"pim_available": available, "collection_complete": False}
     return results, {"collection_complete": True, **summarize(eligible_records, active_records, policy_records)}
 
 
@@ -390,7 +406,7 @@ def main() -> int:
     if cred is None:
         tenant: Dict[str, Any] = {"tenant_source": "unresolved"}
         results: Dict[str, Any] = {}
-        summary: Dict[str, Any] = {}
+        summary: Dict[str, Any] = {"pim_available": None, "collection_complete": False}
     else:
         tenant, definitions, eligible, active, policies, unlicensed = asyncio.run(_collect(collector, cred))
         results, summary = build(definitions, eligible, active, policies, unlicensed)
