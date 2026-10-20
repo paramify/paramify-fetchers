@@ -218,7 +218,7 @@ EVIDENCE_DIR=/tmp/paramify-verify python fetchers/<category>/<short_name>/fetche
 ## 7. Run it end to end
 
 Export the real credentials in the shell you run from, or have your secret
-manager set them. Then [build a manifest](../README.md#building-a-manifest) for
+manager set them. Then [build a manifest](cli_guide.md#building-a-manifest) for
 the fetcher:
 
 ![paramify manifest init, add, and two set-secret calls, each reporting what's still missing, then paramify validate reporting the manifest valid](img/porting/07-manifest.png)
@@ -249,7 +249,7 @@ paramify evidence evidence/run-<timestamp>/<category>_<short_name>.json
 ```
 </details>
 
-Next, [upload the run](../README.md#collect-then-upload) and
+Next, [upload the run](cli_guide.md#collect-then-upload) and
 [write validators](suggest_validator_guide.md) for it.
 
 ---
