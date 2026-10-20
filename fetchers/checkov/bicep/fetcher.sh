@@ -142,17 +142,16 @@ fi
 split_list "${CHECKOV_SKIP_CHECKS:-}" $' \t'
 for c in "${_SPLIT[@]}"; do add_skip "$c"; done
 
-# --- skip-resources (defaults file + config), applied post-scan ---
-SKIP_RESOURCES_LIST=""
+# --- skip-resources (defaults file + config, split on commas and newlines), applied post-scan ---
+SKIP_RESOURCES=()
 DEFAULT_SKIP_RES_FILE="$SCRIPT_DIR/../_shared/skip-resources.default.txt"
 if [ -f "$DEFAULT_SKIP_RES_FILE" ]; then
-    while IFS= read -r r || [ -n "$r" ]; do
-        r="$(printf '%s' "$r" | xargs)"; [ -z "$r" ] && continue
-        case "$r" in \#*) continue ;; esac
-        SKIP_RESOURCES_LIST="${SKIP_RESOURCES_LIST:+$SKIP_RESOURCES_LIST,}$r"
-    done < "$DEFAULT_SKIP_RES_FILE"
+    split_list "$(sed 's/#.*//' "$DEFAULT_SKIP_RES_FILE")"
+    SKIP_RESOURCES=("${_SPLIT[@]}")
 fi
-[ -n "${CHECKOV_SKIP_RESOURCES:-}" ] && SKIP_RESOURCES_LIST="${SKIP_RESOURCES_LIST:+$SKIP_RESOURCES_LIST,}$CHECKOV_SKIP_RESOURCES"
+split_list "${CHECKOV_SKIP_RESOURCES:-}"
+SKIP_RESOURCES+=("${_SPLIT[@]}")
+SKIP_RESOURCES_JSON="$(json_list "${SKIP_RESOURCES[@]}")"
 
 # What was actually fetched; checkov_clone_repo / checkov_fetch_tfvc overwrite these.
 SCANNED_BRANCH="$BRANCH"; BRANCH_FALLBACK=false; COMMIT_SHA=unknown; CHANGESET=""; CHANGESET_DATE=""
@@ -165,7 +164,7 @@ metadata_json() {
           --arg path "$TFVC_PATH" --arg version "$TFVC_VERSION" \
           --argjson changeset "${CHANGESET:-null}" --arg csdate "$CHANGESET_DATE" \
           --arg skips "$SKIP_CHECKS_LIST" --argjson defaults "$DEFAULT_SKIPS_APPLIED" \
-          --arg skipres "$SKIP_RESOURCES_LIST" --argjson skippaths "$SKIP_PATHS_JSON" \
+          --argjson skipres "$SKIP_RESOURCES_JSON" --argjson skippaths "$SKIP_PATHS_JSON" \
        '{source_type: $type, repo_url: $repo}
         + (if $type == "tfvc" then
              {tfvc_path: $path, requested_version: $version, changeset: $changeset,
@@ -176,7 +175,7 @@ metadata_json() {
         + {scan_timestamp: $ts, partial_failure: false, api_failures: [],
          skip_checks: ($skips | split(",") | map(select(. != ""))),
          default_skip_checks_applied: $defaults,
-         skip_resources: ($skipres | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))),
+         skip_resources: $skipres,
          skip_paths: $skippaths}'
 }
 
@@ -283,10 +282,9 @@ jq --arg root "$CLONE_DIR/" '
 # A failed check on a matching resource moves to skipped_checks (SKIPPED, naming the pattern), so it
 # stays in total_checks; deleting it would raise the pass rate. Each pattern is a whole-name glob, * the only wildcard.
 RESOURCE_SKIPPED=0
-if [ -n "$SKIP_RESOURCES_LIST" ]; then
-    if ! jq --arg list "$SKIP_RESOURCES_LIST" '
-        ($list | split(",") | map(gsub("^\\s+|\\s+$"; "") | select(length > 0)
-            | {pattern: ., regex: ("^" + (gsub("(?<c>[.+?^${}()|\\[\\]\\\\])"; "\\\(.c)") | gsub("\\*"; ".*")) + "$")})) as $pats
+if [ ${#SKIP_RESOURCES[@]} -gt 0 ]; then
+    if ! jq --argjson list "$SKIP_RESOURCES_JSON" '
+        ($list | map({pattern: ., regex: ("^" + (gsub("(?<c>[.+?^${}()|\\[\\]\\\\])"; "\\\(.c)") | gsub("\\*"; ".*")) + "$")})) as $pats
         | def matched($r): first($pats[] | select(. as $p | $r | test($p.regex)) | .pattern) // null;
         (.results.failed_checks | map(. + {_skip: ((.resource // "") as $r | if $r == "" then null else matched($r) end)})) as $failed
         | .results.failed_checks = ($failed | map(select(._skip == null) | del(._skip)))
@@ -294,7 +292,7 @@ if [ -n "$SKIP_RESOURCES_LIST" ]; then
             | .check_result = ((.check_result // {}) + {result: "SKIPPED",
                                 suppress_comment: ("resource matches skip_resources pattern " + $p)})))
     ' "$NORM" > "$NORM.f"; then
-        MSG="skip_resources filter failed for patterns: $SKIP_RESOURCES_LIST"
+        MSG="skip_resources filter failed for patterns: $(IFS=,; printf '%s' "${SKIP_RESOURCES[*]}")"
         write_status_json error "$MSG" "$BICEP_FILES" "$ARM_FILES"
         report_failure "$MSG" bad_config
         exit 1

@@ -115,8 +115,8 @@ config_schema:
     type: string
     env: CHECKOV_SKIP_RESOURCES
     description: >-
-      CSV of whole-name resource globs (* is the only wildcard, e.g.
-      Microsoft.Storage/storageAccounts.dev*); merged with _shared/skip-resources.default.txt.
+      Whole-name resource globs, comma- or newline-separated (each entry trimmed; * is the only
+      wildcard, e.g. Microsoft.Storage/storageAccounts.dev*); merged with _shared/skip-resources.default.txt.
       Applied post-scan: a failed check on a matching resource is moved to skipped_checks
       (check_result.result SKIPPED, suppress_comment naming the pattern), so it still counts
       in total_checks. summary.skipped_by_resource_filter counts them; metadata.skip_resources

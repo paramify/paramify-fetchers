@@ -283,6 +283,15 @@ def test_skip_resource_glob_matches_whole_name_only(tmp_path):
                                                      "Microsoft.Storage/storageAccounts.[format(*"]
 
 
+def test_skip_resources_split_on_newlines_too(tmp_path):
+    code, payload, _, _ = run(tmp_path, {"main.bicep": BICEP}, FAILED_MIX,
+                              CHECKOV_SKIP_RESOURCES="Microsoft.Storage/storageAccounts.dev*\n Microsoft.Storage/storageAccounts.prodsa\n")
+    assert code == 0
+    assert payload["summary"]["skipped_by_resource_filter"] == 2
+    assert payload["metadata"]["skip_resources"] == ["Microsoft.Storage/storageAccounts.dev*",
+                                                     "Microsoft.Storage/storageAccounts.prodsa"]
+
+
 def test_skip_resources_moves_failures_to_skipped(tmp_path):
     code, payload, _, _ = run(tmp_path, {"main.bicep": BICEP}, FAILED_MIX,
                               CHECKOV_SKIP_RESOURCES="Microsoft.Storage/storageAccounts.dev*")
