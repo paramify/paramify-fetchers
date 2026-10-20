@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """App Service HTTP logs, SQL Managed Instance audit events and app dependencies as they arrive in Log Analytics."""
 
+import json
 import logging
 import sys
 from collections import Counter
@@ -121,6 +122,16 @@ def ws_status(exc: BaseException) -> str:
     return WS_ERROR
 
 
+def dynamic_list(value) -> list:
+    """make_set columns arrive as JSON text from the query API."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return [value]
+    return [v for v in value if v] if isinstance(value, list) else []
+
+
 def table_record(name: str, raw) -> dict:
     """raw None: the table does not exist in the workspace yet."""
     props = (raw or {}).get("properties") or {}
@@ -188,7 +199,7 @@ def app_record(site: dict, settings, workspaces: dict, sample: int) -> dict:
         "last_http_log": _latest(r.get("LastRecord") for r in summary),
         "distinct_client_ips": max((r.get("ClientIps") or 0 for r in summary), default=0),
         "status_classes": {k: sum(r.get(f"Status{k}") or 0 for r in summary) for k in ("2xx", "3xx", "4xx", "5xx")},
-        "hosts": sorted({h for r in summary for h in (r.get("Hosts") or [])})[:sample],
+        "hosts": sorted({h for r in summary for h in dynamic_list(r.get("Hosts"))})[:sample],
         "top_clients": sorted(
             ({"client_ip": c.get("CIp"), "requests": c.get("Requests")} for c in clients),
             key=lambda c: (-(c["requests"] or 0), c["client_ip"] or ""),
@@ -231,7 +242,7 @@ def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int
         p["records"] += r.get("Records") or 0
         p["failed"] += r.get("Failed") or 0
         p["times"].append(r.get("LastSeen"))
-        p["ips"].update(ip for ip in r.get("ClientIps") or [] if ip)
+        p["ips"].update(dynamic_list(r.get("ClientIps")))
     principal_records = sorted(
         (
             {"principal": name or None, "kind": principal_kind(name), "events": p["records"], "failed_events": p["failed"],
@@ -255,8 +266,9 @@ def instance_record(mi: dict, settings, databases, workspaces: dict, sample: int
         "last_audit_record": _latest(r.get("LastRecord") for r in rows),
         "audit_actions": sorted_counts(actions),
         "databases": db_records,
+        "audit_records_without_database": sum(r.get("Records") or 0 for r in rows if not r.get("Database")),
         "principals": principal_records[:sample],
-        "principals_total": len(principal_records),
+        "principals_total": sum(1 for p in principal_records if p["kind"]),
         "entra_principals": kinds[ENTRA],
         "sql_login_principals": kinds[SQL_LOGIN],
         "unnamed_principal_events": sum(p["events"] for p in principal_records if p["kind"] is None),

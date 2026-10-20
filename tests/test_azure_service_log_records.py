@@ -75,6 +75,17 @@ def test_basic_tables_are_not_read_and_missing_ones_count_as_empty(table, readab
     assert slr.readable(table) is readable
 
 
+@pytest.mark.parametrize("value, expected", [
+    ('["10.0.0.4","10.0.0.5"]', ["10.0.0.4", "10.0.0.5"]),
+    (["a.example.net", ""], ["a.example.net"]),
+    ("not json", ["not json"]),
+    ('"one"', []),
+    (None, []),
+])
+def test_dynamic_list_reads_make_set_columns_sent_as_json_text(value, expected):
+    assert slr.dynamic_list(value) == expected
+
+
 def http_row(rid=SITE, records=10, last="2026-10-12T10:00:00Z", **extra):
     return {"ResourceId": rid.lower(), "Records": records, "LastRecord": last, "ClientIps": 3, "Status2xx": 7,
             "Status3xx": 0, "Status4xx": 2, "Status5xx": 1, "Hosts": ["app1.example.net"], **extra}
@@ -82,7 +93,7 @@ def http_row(rid=SITE, records=10, last="2026-10-12T10:00:00Z", **extra):
 
 def test_app_with_records_is_arriving_and_carries_its_sample():
     workspaces = {slr.id_key(LAW): ws(
-        http=[http_row()],
+        http=[http_row(Hosts='["app1.example.net","www.example.net"]')],
         http_latest=[{"ResourceId": SITE.lower(), "TimeGenerated": "2026-10-12T10:00:00Z", "CIp": "203.0.113.5",
                       "CsHost": "app1.example.net", "CsMethod": "GET", "CsUriStem": "/", "ScStatus": 200}],
         http_clients=[{"ResourceId": SITE.lower(), "CIp": "203.0.113.5", "Requests": 6},
@@ -96,6 +107,7 @@ def test_app_with_records_is_arriving_and_carries_its_sample():
         "distinct_client_ips": 3, "status_classes": {"2xx": 7, "3xx": 0, "4xx": 2, "5xx": 1},
         "top_clients": [{"client_ip": "203.0.113.5", "requests": 6}], "http_logs_arriving": True, "is_slot": False}
     assert record["latest_request"]["uri_stem"] == "/"
+    assert record["hosts"] == ["app1.example.net"]
 
 
 @pytest.mark.parametrize("workspace, arriving", [
@@ -140,23 +152,26 @@ def test_instance_audit_folds_databases_actions_and_principals():
         audit=[audit_row(""), audit_row("Orders", action="SCHEMA_OBJECT_ACCESS_GROUP", records=3, failed=0,
                                         last="2026-10-12T11:00:00Z"),
                audit_row("master", action="LOGIN SUCCEEDED", records=2, failed=0)],
-        principals=[principal_row("ops@example.com", 3, 0), principal_row("app_login", 2, 0, ips=("10.0.0.5", "10.0.0.6")),
+        principals=[principal_row("ops@example.com", 3, 0), principal_row("app_login", 2, 0, ips=("10.0.0.5", "10.0.0.6")) | {"ClientIps": '["10.0.0.5","10.0.0.6"]'},
                     principal_row("", 5, 5)],
     )}
     databases = [{"name": "Orders"}, {"name": "Reports"}]
     record = slr.instance_record({"id": MI, "name": "mi1"}, [setting(group="audit")], databases, workspaces, 1)
     assert {k: record[k] for k in ("audit_exported", "audit_records", "failed_audit_events", "last_audit_record",
                                    "audit_actions", "principals_total", "entra_principals", "sql_login_principals",
-                                   "unnamed_principal_events", "audit_arriving")} == {
+                                   "unnamed_principal_events", "audit_records_without_database",
+                                   "audit_arriving")} == {
         "audit_exported": True, "audit_records": 10, "failed_audit_events": 5,
         "last_audit_record": "2026-10-12T11:00:00Z",
         "audit_actions": {"LOGIN FAILED": 5, "LOGIN SUCCEEDED": 2, "SCHEMA_OBJECT_ACCESS_GROUP": 3},
-        "principals_total": 3, "entra_principals": 1, "sql_login_principals": 1, "unnamed_principal_events": 5,
-        "audit_arriving": True}
+        "principals_total": 2, "entra_principals": 1, "sql_login_principals": 1, "unnamed_principal_events": 5,
+        "audit_records_without_database": 5, "audit_arriving": True}
     assert [(d["name"], d["listed"], d["audit_records"]) for d in record["databases"]] == [
         ("master", False, 2), ("Orders", True, 3), ("Reports", True, 0)]
     assert record["principals"] == [{"principal": None, "kind": None, "events": 5, "failed_events": 5,
                                      "last_seen": "2026-10-12T09:00:00Z", "client_ips": ["10.0.0.4"]}]
+    wide = slr.instance_record({"id": MI}, [setting(group="audit")], databases, workspaces, 10)
+    assert [p["client_ips"] for p in wide["principals"] if p["principal"] == "app_login"] == [["10.0.0.5", "10.0.0.6"]]
 
 
 def test_instance_whose_workspace_lacks_the_table_reads_not_arriving():

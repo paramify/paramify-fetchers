@@ -1,16 +1,7 @@
 name: azure_service_log_records
 version: 0.1.0
-description: >
-  Whether App Service HTTP logs and SQL Managed Instance audit events actually reach
-  Log Analytics, read from the records themselves. For every App Service app and slot:
-  whether a diagnostic setting sends AppServiceHTTPLogs to a workspace, the records
-  that arrived over the lookback, the last one, status classes, hosts and top client
-  IPs. For every SQL managed instance: whether SQLSecurityAuditEvents is exported,
-  the audit events that arrived, the last one, actions, events per database, and the
-  principals that connect, split into Entra principals and SQL logins. Records
-  arriving is what shows a T-SQL server audit is running, which no ARM call can show.
-  Also each app role's dependencies (the data stores and services it calls) from
-  AppDependencies, and each table's retention.
+description: >-
+  Shows whether App Service HTTP logs and SQL Managed Instance audit events actually reach Log Analytics, with their retention, the principals that connect and the services each app calls.
 category: azure
 
 supports_targets: true
@@ -70,33 +61,64 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-SERVICE-LOG-RECORDS
   name: Azure Service Log Records
-  instructions: >
-    Script: fetcher.py. Reader at subscription scope, plus Reader or Log Analytics
-    Reader on destination workspaces in other subscriptions. ARM REST, nextLink
-    followed to the end: Microsoft.Web/sites (api 2023-12-01) and each site's slots;
-    Microsoft.Sql/managedInstances (2023-08-01) and each instance's databases; each
-    app's, slot's and instance's diagnosticSettings (2021-05-01-preview). An app
-    exports HTTP logs when a setting with a workspaceId enables category
-    AppServiceHTTPLogs or group allLogs; an instance exports audit when one enables
-    SQLSecurityAuditEvents or group audit or allLogs. Each of those workspaces: GET
-    the workspace (2023-09-01) for its customerId and GET tables/{name} for
-    AppServiceHTTPLogs, AzureDiagnostics and AppDependencies (plan, retentionInDays,
-    totalRetentionInDays; 404 means the table has never received a record). Analytics
-    tables are queried (POST /v1/workspaces/{customerId}/query, timespan the
-    lookback), each query filtered to TimeGenerated > ago({days}d) and _ResourceId in
-    this subscription: AppServiceHTTPLogs summarized per resource (count, last
-    record, dcount(CIp), ScStatus classes, hosts), arg_max(TimeGenerated) for the
-    latest request, and top-nested client IPs; AzureDiagnostics where Category ==
-    'SQLSecurityAuditEvents' summarized per instance, database_name_s and
-    action_name_s, and per server_principal_name_s (events, failed events where
-    succeeded_s is false, last seen, client_ip_s); AppDependencies summed by
-    ItemCount per component, AppRoleName, Target and DependencyType. A principal is
-    entra when its name contains @ (Entra users sign in by UPN, apps and managed
-    identities as client id@tenant id), sql_login otherwise, and unnamed when the
-    event has no principal name. Basic and Auxiliary tables are not queried (they
-    bill per GB scanned). http_logs_arriving and audit_arriving are true when
-    records arrived, false when every destination's table was read (or the table or
-    destination does not exist) and none did, and null when a destination refused
-    the read (403, not_authorized), its table is Basic or Auxiliary, or nothing is
-    exported. A refused or deleted destination does not fail the run; any other
-    failure does.
+  instructions: |
+    Script: azure/service_log_records/fetcher.py
+
+    Access: Reader on the subscription. Optional: Reader or Log Analytics Reader on destination workspaces in other subscriptions; without it, arrival reads unknown for the apps and instances that send logs there.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.Web/sites and GET {site id}/slots (per app) — every App Service app and deployment slot
+    - GET Microsoft.Sql/managedInstances and GET {instance id}/databases (per instance) — every SQL managed instance and its databases
+    - GET {resource id}/providers/Microsoft.Insights/diagnosticSettings (per app, slot and instance) — which workspaces receive AppServiceHTTPLogs or SQLSecurityAuditEvents
+    - GET {workspace id} (per destination workspace) — the workspace's query id
+    - GET {workspace id}/tables/{table} for AppServiceHTTPLogs, AzureDiagnostics and AppDependencies — each table's plan and retention; a missing table has never received a record
+    - POST /v1/workspaces/{workspace}/query, KQL on AppServiceHTTPLogs — records, last record, status classes, hosts, latest request and top client IPs per app
+    - POST /v1/workspaces/{workspace}/query, KQL on AzureDiagnostics where Category is SQLSecurityAuditEvents — audit events per instance, database and action, and per principal
+    - POST /v1/workspaces/{workspace}/query, KQL on AppDependencies — calls per app role, target and type
+
+    Output: azure_service_log_records_<subscription>.json — each app and slot with its HTTP log export and arrival, each managed instance with its audit events, databases and principals, each app role's dependencies, and each destination workspace's tables and retention.
+
+    Summary fields:
+
+    What was checked?
+    - lookback_days — Number of days of records summarized (service_logs_lookback_days, 7 by default)
+    - apps — Number of App Service apps and deployment slots in the subscription
+    - managed_instances — Number of SQL managed instances in the subscription
+    - managed_databases — Number of databases listed on the managed instances
+    - log_workspaces — Number of destination workspaces: Log Analytics workspaces that a diagnostic setting sends App Service HTTP logs or managed instance audit events to
+    - log_workspaces_queried — Number of destination workspaces whose tables were read and queried
+    - log_workspaces_not_authorized — Number of destination workspaces that refused the read
+    - log_workspaces_not_found — Number of destination workspaces that no longer exist
+
+    Do App Service HTTP logs arrive?
+    - apps_exporting_http_logs — Number of exporting apps and slots: those with a diagnostic setting that sends AppServiceHTTPLogs, by name or through the allLogs group, to a Log Analytics workspace
+    - apps_with_http_log_records — Number of exporting apps and slots whose HTTP logs are arriving: at least one record reached a destination workspace in the lookback
+    - apps_without_http_log_records — Number of exporting apps and slots with no HTTP log record in the lookback, where every destination workspace was queried, lacks the table, or no longer exists
+    - apps_http_logs_unknown — Number of exporting apps and slots whose arrival is unknown: a destination workspace refused or failed the read, or keeps the table on a Basic or Auxiliary plan, which is not queried because it bills per GB scanned
+    - http_log_arrival_percentage — Percentage of exporting apps and slots whose HTTP logs are arriving = apps_with_http_log_records / apps_exporting_http_logs × 100 (a whole number, 0–100); 0 when apps_exporting_http_logs is 0. Apps whose arrival is unknown count in the total but not as arriving
+    - http_log_records — Number of HTTP log records that arrived for the subscription's apps and slots in the lookback
+    - http_log_retention_days — Number of days the AppServiceHTTPLogs table keeps records for queries, the shortest across destination workspaces that have the table; null if none has it
+
+    Do SQL Managed Instance audit events arrive?
+    - instances_exporting_audit — Number of exporting managed instances: those with a diagnostic setting that sends SQLSecurityAuditEvents, by name or through the audit or allLogs group, to a Log Analytics workspace
+    - instances_with_audit_records — Number of exporting managed instances whose audit events are arriving: at least one event reached a destination workspace in the lookback, which shows a T-SQL server audit is running
+    - instances_without_audit_records — Number of exporting managed instances with no audit event in the lookback, where every destination workspace was queried, lacks the table, or no longer exists
+    - instances_audit_unknown — Number of exporting managed instances whose arrival is unknown: a destination workspace refused or failed the read, or keeps the table on a Basic or Auxiliary plan
+    - audit_records — Number of audit events that arrived for the subscription's managed instances in the lookback
+    - failed_audit_events — Number of audit events recording an action that failed, such as a failed login
+    - audit_actions — Number of audit events for each action, such as LOGIN SUCCEEDED or LOGIN FAILED
+    - managed_databases_with_audit_records — Number of listed databases named in at least one audit event; events that name no database, such as server logins, don't count
+    - audit_log_retention_days — Number of days the AzureDiagnostics table keeps audit events for queries, the shortest across destination workspaces that have the table; null if none has it
+
+    Who connects to the managed instances?
+    - audit_principals — Number of named principals (users, apps, managed identities and SQL logins) in audit events, counted once per instance
+    - entra_principals — Number of Entra principals in audit events, counted once per instance: names containing @, since Entra users sign in by user principal name and apps and managed identities as client id@tenant id
+    - sql_login_principals — Number of SQL logins in audit events, counted once per instance: principal names without @
+    - unnamed_principal_events — Number of audit events with no principal name, such as failed logins that never identified a login
+
+    What does each app call?
+    - app_roles_with_dependencies — Number of Application Insights app roles (cloud role names) in the subscription that recorded dependency calls in a destination workspace in the lookback
+    - dependency_targets — Number of distinct targets (data stores and services) the app roles called, counted once per app role
+    - dependency_types — List of the kinds of dependency called, such as SQL, HTTP or Azure blob
+    - dependency_retention_days — Number of days the AppDependencies table keeps records for queries, the shortest across destination workspaces that have the table; null if none has it
