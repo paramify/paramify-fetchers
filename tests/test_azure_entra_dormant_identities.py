@@ -53,10 +53,14 @@ def _user(uid, last=None, created=400, guest=False, enabled=True, attempts=None,
             "createdDateTime": _ago(created), "signInActivity": activity}
 
 
-def _sp(sid, app_id, sp_type="Application", owner=TENANT, created=400, enabled=True):
-    return {"@odata.type": "#microsoft.graph.servicePrincipal", "id": sid, "appId": app_id,
-            "displayName": f"App {sid}", "servicePrincipalType": sp_type, "accountEnabled": enabled,
-            "appOwnerOrganizationId": owner, "createdDateTime": _ago(created)}
+def _sp(sid, app_id, sp_type="Application", owner=TENANT, enabled=True, created=None):
+    """Learn documents no createdDateTime on a service principal, so it's left out unless asked for."""
+    sp = {"@odata.type": "#microsoft.graph.servicePrincipal", "id": sid, "appId": app_id,
+          "displayName": f"App {sid}", "servicePrincipalType": sp_type, "accountEnabled": enabled,
+          "appOwnerOrganizationId": owner}
+    if created is not None:
+        sp["createdDateTime"] = _ago(created)
+    return sp
 
 
 def _assignment(aid, principal, ptype="User", role=OWNER_ROLE, scope=f"/subscriptions/{SUB}"):
@@ -108,6 +112,12 @@ def _tenant():
     ]
     graph = {
         "/users": users,
+        # This tenant's app registrations: where a service principal's creation date comes from.
+        "/applications": [
+            {"appId": "app-busy", "createdDateTime": _ago(400)},
+            {"appId": "app-unused", "createdDateTime": _ago(400)},
+            {"appId": "app-new", "createdDateTime": _ago(5)},
+        ],
         "/reports/servicePrincipalSignInActivities": [
             {"appId": "app-busy", "applicationAuthenticationClientSignInActivity": {"lastSignInDateTime": _ago(1)},
              "lastSignInActivity": {"lastSignInDateTime": _ago(1)}},
@@ -154,7 +164,7 @@ def _tenant():
         "sp-mi-new": _sp("sp-mi-new", "app-mi-new", sp_type="ManagedIdentity", owner=None),
         "sp-ms": _sp("sp-ms", "app-ms", owner=MICROSOFT_TENANT),
         "sp-unused": _sp("sp-unused", "app-unused"),
-        "sp-new": _sp("sp-new", "app-new", created=5),
+        "sp-new": _sp("sp-new", "app-new"),
         "sp-vendor": _sp("sp-vendor", "app-vendor", owner=VENDOR_TENANT, enabled=False),
         "g-ops": {"@odata.type": "#microsoft.graph.group", "id": "g-ops"},
     }
@@ -227,8 +237,44 @@ def test_inactive_guest_and_deleted_role_holders(monkeypatch):
     assert sps["sp-ms"]["dormant"] is None and sps["sp-vendor"]["dormant"] is None
     assert sps["sp-unused"]["dormant"] is True and sps["sp-unused"]["registered_in_this_tenant"] is True
     assert sps["sp-new"]["dormant"] is False and sps["sp-new"]["no_recorded_client_sign_in"] is True
+    assert sps["sp-new"]["days_since_created"] == 5  # from its app registration
+    assert s["tenant_readable"] is True
     (gone,) = results["deleted_principals"]
     assert gone["id"] == "gone-1" and gone["principal_types_recorded"] == ["User"]
+
+
+def test_a_service_principals_own_creation_date_wins_and_none_means_no_grace(monkeypatch):
+    graph, arm, objects = _tenant()
+    objects["sp-new"] = _sp("sp-new", "app-new", created=3)
+    graph["/applications"] = []
+    results, _, _ = _collect(monkeypatch, FakeClient(graph, arm, objects))
+    sps = {r["id"]: r for r in results["service_principals"]}
+    assert sps["sp-new"]["days_since_created"] == 3 and sps["sp-new"]["dormant"] is False
+    # No creation date from either source: an app not yet signed in reads dormant.
+    assert sps["sp-unused"]["days_since_created"] is None and sps["sp-unused"]["dormant"] is True
+
+
+def test_an_app_with_no_owner_organization_is_unknown(monkeypatch):
+    graph, arm, objects = _tenant()
+    objects["sp-unused"] = _sp("sp-unused", "app-unused", owner=None)
+    results, _, _ = _collect(monkeypatch, FakeClient(graph, arm, objects))
+    sp = {r["id"]: r for r in results["service_principals"]}["sp-unused"]
+    assert sp["registered_in_this_tenant"] is False and sp["dormant"] is None
+
+
+def test_a_refused_subscription_read_leaves_every_missing_principal_unknown(monkeypatch):
+    graph, arm, objects = _tenant()
+    graph["/directoryRoles/r-ga/members"] = []
+    graph["/directoryRoles/r-dr/members"] = []
+    arm["roleAssignments"] = [_assignment("a1", "u-active"), _assignment("a10", "sp-unused", ptype="ServicePrincipal")]
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm, objects, errors={f"/subscriptions/{SUB}": DENIED}))
+
+    assert [f["operation"] for f in collector.failures] == ["subscriptions.get"]
+    assert s["tenant_readable"] is False
+    (sp,) = results["service_principals"]
+    assert sp["registered_in_this_tenant"] is None and sp["dormant"] is None
+    assert s["service_principals_holding_roles_dormancy_unknown"] == 1
+    assert s["no_inactive_identity_holds_a_role"] is None
 
 
 def test_dormancy_threshold_is_configurable(monkeypatch):
@@ -368,6 +414,7 @@ def test_reads_page_sizes_and_beta_endpoints(monkeypatch):
     assert ("v1.0", f"{SIGN_IN_PATH}&$top=500") in client.calls
     assert ("beta", "/groups/g-admins/transitiveMembers?$select=id") in client.calls
     assert ("beta", "/reports/servicePrincipalSignInActivities") in client.calls
+    assert ("v1.0", "/applications?$select=appId,createdDateTime&$top=999") in client.calls
 
 
 def test_evidence_is_json_serialisable(monkeypatch):
