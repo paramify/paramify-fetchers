@@ -574,7 +574,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "SecurityCenter",
         "assessments_metadata",
         ["list_by_subscription"],
-        "azure/defender_assessments — the only source of severity; "
+        "azure/defender_assessments — categories, type and fallback severity; "
         "assessments.list returns no metadata",
     ),
     (
@@ -899,7 +899,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         None,
         ["resources"],
         "azure/resource_inventory, azure/front_door_origins (origin regions), "
-        "azure/resource_diagnostic_settings, azure/change_provenance, azure/residual_resources",
+        "azure/resource_diagnostic_settings, azure/change_provenance, azure/residual_resources, "
+        "azure/defender_assessments (each assessment's own severity)",
     ),
     # --- deployment history: left azure-mgmt-resource for its own distribution -
     (
@@ -967,15 +968,18 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure.mgmt.policyinsights",
         "PolicyInsightsClient",
         "policy_states",
-        ["summarize_for_subscription", "list_query_results_for_subscription"],
-        "azure/policy_compliance",
+        ["summarize_for_subscription", "list_query_results_for_subscription",
+         "list_query_results_for_resource"],
+        "azure/policy_compliance — evaluation details need the per-resource query",
     ),
     (
         "azure.mgmt.policyinsights",
         "PolicyInsightsClient",
         "remediations",
-        ["list_for_subscription"],
-        "azure/policy_compliance",
+        ["list_for_subscription", "list_deployments_at_subscription",
+         "list_deployments_at_resource_group", "list_deployments_at_resource",
+         "list_deployments_at_management_group"],
+        "azure/policy_compliance — per-resource remediation deployments",
     ),
     # --- Front Door WAF ------------------------------------------------------
     (
@@ -1804,6 +1808,15 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["default_value"],
         "azure/policy_assignments — the default an unset effect parameter falls back to",
     ),
+    # --- Defender plans: a renamed field reads as "no sub-plan" or "not inherited" ---
+    (
+        "azure.mgmt.security.models",
+        "Pricing",
+        ["pricing_tier", "sub_plan", "free_trial_remaining_time", "enablement_time",
+         "enforce", "inherited", "inherited_from", "resources_coverage_status",
+         "deprecated", "replaced_by", "extensions"],
+        "azure/defender_plans",
+    ),
     # --- Defender regulatory compliance: a renamed count reads as 0 failed ---
     (
         "azure.mgmt.security.models",
@@ -1872,6 +1885,44 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/policy_compliance",
     ),
     (
+        "azure.mgmt.policyinsights.models",
+        "QueryOptions",
+        ["filter", "top", "expand", "apply", "from_property", "to", "select", "order_by"],
+        "azure/policy_compliance — a dropped option silently widens or empties a query",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyState",
+        ["policy_evaluation_details", "policy_definition_reference_id", "additional_properties"],
+        "azure/policy_compliance — evaluation details, and the grouped history count",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyEvaluationDetails",
+        ["evaluated_expressions", "if_not_exists_details"],
+        "azure/policy_compliance — expected vs actual values",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "ExpressionEvaluationDetails",
+        ["expression", "expression_kind", "path", "operator", "expression_value",
+         "target_value", "result"],
+        "azure/policy_compliance — expected vs actual values",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "IfNotExistsEvaluationDetails",
+        ["resource_id", "total_resources"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "RemediationDeployment",
+        ["remediated_resource_id", "deployment_id", "status", "resource_location", "error",
+         "created_on", "last_updated_on"],
+        "azure/policy_compliance — per-resource remediation deployments",
+    ),
+    (
         "msgraph.generated.models.service_principal",
         "ServicePrincipal",
         [
@@ -1909,6 +1960,13 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "AuthenticationMethodConfiguration",
         ["state", "exclude_targets"],
         "azure/entra_authentication_policy — `state` is the enabled/disabled fact",
+    ),
+    (
+        "msgraph.generated.models.x509_certificate_authentication_mode_configuration",
+        "X509CertificateAuthenticationModeConfiguration",
+        ["x509_certificate_authentication_default_mode"],
+        "azure/entra_authentication_policy — without the default mode no X.509 "
+        "method is counted as phishing-resistant",
     ),
     (
         "msgraph.generated.models.identity_security_defaults_enforcement_policy",
@@ -2685,7 +2743,8 @@ GRAPH_BUILDERS = [
     ("organization", "_shared/entra_graph — tenant name resolution; azure/residual_resources — tenant check"),
     ("applications", "azure/entra_app_registrations"),
     ("users", "azure/entra_mfa_status"),
-    ("directory_roles", "azure/entra_privileged_roles"),
+    ("directory_roles", "azure/entra_privileged_roles, azure/entra_mfa_status — admins"),
+    ("groups", "azure/entra_mfa_status — users holding an admin role through a group"),
     ("identity", "azure/entra_conditional_access_policies"),
     ("service_principals", "azure/entra_service_principals"),
     ("policies", "azure/entra_authentication_policy"),
@@ -2706,6 +2765,21 @@ def test_graph_request_builders_present(builder: str, affects: str) -> None:
         f"GraphServiceClient.{builder} is gone.\n"
         f"  affected fetchers: {affects}\n"
         f"  msgraph-sdk is pinned <2; a major bump restructures the builders."
+    )
+
+
+def test_graph_admin_membership_builders_present() -> None:
+    """The per-item builders azure/entra_mfa_status walks to find every admin."""
+    client = _build("msgraph", "GraphServiceClient")
+    role = client.directory_roles.by_directory_role_id("00000000-0000-0000-0000-000000000000")
+    group = client.groups.by_group_id("00000000-0000-0000-0000-000000000000")
+    assert getattr(role, "members", None) is not None, (
+        "directory_roles.by_directory_role_id(...).members is gone.\n"
+        "  affected fetchers: azure/entra_privileged_roles, azure/entra_mfa_status"
+    )
+    assert getattr(group, "transitive_members", None) is not None, (
+        "groups.by_group_id(...).transitive_members is gone.\n"
+        "  affected fetchers: azure/entra_mfa_status — admins via a group would be missed"
     )
 
 
