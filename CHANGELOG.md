@@ -12,6 +12,32 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
+  over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
+  Code (Read). It records Bicep and ARM checks together, each tagged with its
+  framework, with per-framework counts.
+
+  A scan that checked nothing never reads as clean. These cases exit non-zero:
+  - no `.bicep` files and no ARM `deploymentTemplate` JSON (`no_files`; counts
+    are null, not 0)
+  - files present but checkov ran zero checks (`no_checks`), e.g. resources
+    declared only through `br/public:avm` registry modules
+  - files checkov could not parse (`partial`; each is listed, and can be
+    excluded with `skip_paths` once reviewed)
+
+  The `org@` prefix of an Azure DevOps clone URL is dropped, and `clone_token`
+  is optional, so public repos can be scanned.
+
+  `source_type: tfvc` reads Azure DevOps TFVC, which `git clone` cannot fetch.
+  It looks up the project's newest changeset (or the one named in
+  `tfvc_version`), then downloads `tfvc_path` at that changeset as one zip
+  through the TFVC items API, using a `tfvc_token` PAT with Code (Read). The
+  evidence records `source_type` and, in `metadata`, the path, `changeset` and
+  `changeset_date`, where a git source records its branch and commit. Git stays
+  the default. As in `checkov_terraform` 0.2.0, failed checks on
+  `skip_resources` matches move to `skipped_checks`, the effective skip lists
+  are recorded in `metadata`, `use_default_skip_checks` can drop the shipped
+  defaults, and `metadata.branch` names the branch actually scanned.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
@@ -712,6 +738,66 @@ schemas and the `paramify` CLI — not the internal code.
   `monitored_operation_coverage_reaching_human` does the same for the existing
   map. `action_groups` and `monitored_operation_coverage` are
   unchanged.
+- **`azure_resource_inventory` 0.2.0 shows each resource's Defender and Policy
+  coverage.** Two more Resource Graph queries read Defender for Cloud assessments
+  (`SecurityResources`) and Azure Policy states (`PolicyResources`). They are joined
+  to the inventory by resource id in the fetcher, because Resource Graph allows one
+  cross-table join per query and pages `summarize` only to its first page. Each
+  resource gains `defender_assessments`, `defender_unhealthy`,
+  `defender_unhealthy_high_severity` (High or Critical), `policy_evaluations` and
+  `policy_non_compliant`; a result on a child resource, such as a subnet, counts for
+  the inventoried parent. Only Healthy and Unhealthy assessments count:
+  NotApplicable ones did not happen (off by policy, for instance) and are counted
+  apart, in `defender_not_applicable` and `defender_not_applicable_total`; an
+  assessment with a missing or unexpected status counts in neither, but in
+  `defender_unknown_status_total`. The
+  summary lists `resources_without_defender_assessment`
+  and `resources_without_policy_evaluation`. A resource counts there only when the
+  service covers another resource of its type in the subscription. Types it covers
+  on no resource are listed apart, with counts, in `types_without_defender_assessment`
+  and `types_without_policy_evaluation`, so a type Defender has no recommendations
+  for is not a gap. `all_assessable_resources_assessed_by_defender` and
+  `all_evaluable_resources_evaluated_by_policy` are false when the service covers
+  nothing at all, and on an empty inventory, which is what Resource Graph returns
+  to a caller without Reader. `defender_coverage_collected` and
+  `policy_coverage_collected` say whether each coverage query was read to the end. Also new: coverage percentages, unhealthy High/Critical and
+  non-compliant counts on inventoried resources, and
+  `resources_covered_by_neither_by_type` (uncovered resources of every type, gaps
+  and never-covered types alike). Assessments and policy states about anything not
+  inventoried (the subscription, resource groups, deleted resources) are counted
+  apart, with `defender_unhealthy_outside_inventory`,
+  `defender_unhealthy_high_severity_outside_inventory`,
+  `defender_unhealthy_without_severity_outside_inventory` and
+  `policy_non_compliant_outside_inventory`, so the inventoried counts plus these add
+  up to the totals; many High recommendations (owner MFA, Defender plans) are about
+  the subscription itself. Assessments of AWS, GCP or on-premises machines (a
+  `resourceDetails` source other than Azure) always count outside, by source.
+  `results.coverage_queries` gives each query's page count, reported total and
+  `outside_inventory_by_target`, the same counts for those results by the type of
+  what they target (never its name). Every
+  query is paged to the end; a coverage query that fails or comes back truncated
+  is a collection failure, and that service's counts stay null rather than reading
+  as uncovered. Also mapped to `KSI-MLA-EVC`, `KSI-CNA-EIS` and `KSI-SVC-EIS`.
+  Existing fields and summary keys are unchanged.
+- **`azure_defender_plans` 0.2.0 records each plan's sub-plan, enablement time
+  and inheritance.** Each plan now carries `sub_plan` (Servers `P1` / `P2`,
+  `DefenderForStorageV2`, `PerKeyVault`, …), `enablement_time` (the last time it
+  was set to Standard; `null` when Azure does not report it, which can be the case
+  for every plan, so `enabled_plan_enablement_times` can be all `null` and is not a
+  reliable signal for a validator), `resources_coverage_status`, `enforce`,
+  `deprecated` and `replaced_by`, and `inherited` / `inherited_from` with
+  `inherited_from_scope` (`management_group`, `subscription`, `resource_group` or
+  `resource`), all from the same `pricings.list` call. Azure documents inheritance as reported for
+  resource-level pricing only, so at subscription scope it reads `null` and
+  `plans_reporting_inheritance` says whether any plan reported it. New summary
+  keys: `enabled_plans`, `enabled_plan_sub_plans`, `enabled_plan_enablement_times`,
+  `enabled_plans_not_fully_covered` (an enabled plan with no coverage status is
+  listed as `unknown`, so it never reads as covered), `plans_not_enabled`
+  (deprecated plans left out), `deprecated_plans`, `deprecated_plans_enabled`,
+  `enforced_plans`, `inherited_plans` and `plans_inherited_from_management_group`.
+  The summary does
+  not judge which plans a system needs. Existing fields and summary keys are
+  unchanged.
 - **`azure_diagnostic_settings` also maps to `KSI-MLA-OSM`**, which its
   subscription activity-log export already evidenced.
 - **`KSI-SVC-PRR` counts as config-evidenceable.** Its residual elements are a
@@ -783,6 +869,26 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →
+  0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
+  counterpart of `DenyAction`, was reported as `unresolved` with no reason and
+  raised `unresolved_effect_assignments`. It now resolves to `auditAction`, an
+  audit-only effect. `mutate` and `addToNetworkGroup` (both in Microsoft's
+  effects reference) and `enforceSetting` (used by built-in definitions) now
+  resolve as enforcing effects. Every assignment's `policy_effects.effect_counts`
+  and the summary's `member_policy_effect_counts` therefore gain four keys,
+  zero unless used: `auditAction`, `mutate`, `addToNetworkGroup` and
+  `enforceSetting`. Any other unrecognised value is still unresolved, but its
+  `reason` now names the value (`unknown effect value 'X'`). Two new summary
+  keys count unresolved member policies: `unresolved_member_policies`, and
+  `unresolved_member_policies_not_enforced` for those in any assignment whose
+  enforcementMode is not Default. Members of an initiative whose definition
+  can't be read aren't counted; that assignment shows only in
+  `unresolved_effect_assignments`. The per-assignment fields are unchanged: a
+  partly resolved DoNotEnforce initiative is still classed by its resolved
+  members, so its `effect_class` can read `audit_only` and
+  `enforcing_effects_not_enforced` false. The new summary keys are where that
+  gap shows.
 - **`azure_entra_authentication_policy` counts X.509 as phishing-resistant only
   when it is multi-factor** (0.1.0 → 0.2.0). An enabled X.509 certificate method
   was always listed in `phishing_resistant_methods_enabled`, even with its default
