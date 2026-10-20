@@ -229,9 +229,15 @@ def per_app(values, default=None):
     return fn
 
 
-def web_client(scm=None, ftp=None, app_refs=None, conn_refs=None, stacks=None):
+def never_called(resource_group_name, name):
+    raise AssertionError("config/list called with the scan off")
+
+
+def web_client(scm=None, ftp=None, app_refs=None, conn_refs=None, stacks=None, settings=None, strings=None):
     return ns(
         web_apps=ns(
+            list_application_settings=never_called if settings is None else per_app(settings, ns(properties={})),
+            list_connection_strings=never_called if strings is None else per_app(strings, ns(properties={})),
             list=lambda: [site("web-a"), site("web-b"), site("func", kind="functionapp")],
             get_configuration=per_app({
                 "web-a": config(min_tls_cipher_suite="TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"),
@@ -247,12 +253,12 @@ def web_client(scm=None, ftp=None, app_refs=None, conn_refs=None, stacks=None):
     )
 
 
-def collect(monkeypatch, client):
+def collect(monkeypatch, client, scan=False):
     fake_web = ns(WebSiteManagementClient=lambda **kwargs: client)
     monkeypatch.setitem(sys.modules, "azure.mgmt.web", fake_web)
     monkeypatch.setattr(appsvc, "_attach_diagnostic_settings", lambda *a: None)
     collector = appsvc.Collector(logging.getLogger("test"))
-    apps = appsvc.collect_web_apps(SUB, object(), collector)
+    apps = appsvc.collect_web_apps(SUB, object(), collector, scan)
     return {a["name"]: a for a in apps}, collector
 
 
@@ -322,3 +328,120 @@ def test_failed_stack_read_leaves_runtime_support_uncollected(monkeypatch):
 def test_evidence_never_carries_a_setting_value(monkeypatch):
     apps, _ = collect(monkeypatch, web_client(app_refs={"web-a": [kv_ref("DB_PASSWORD")]}))
     assert "SecretUri" not in json.dumps(list(apps.values()), default=str)
+
+
+# --- opt-in literal-secret scan (fake values are low-entropy on purpose) ---
+
+KV_SETTING = "@Microsoft.KeyVault(SecretUri=https://kv-app.vault.azure.net/secrets/db/)"
+PEM_HEADER = "-----BEGIN " + "PRIVATE KEY-----"
+
+
+@pytest.mark.parametrize("name, value, reason", [
+    ("DB_PASSWORD", "xxxxxxxxxx", "secret_like_name"),
+    ("SendGridKey", "xxxxxxxxxxxx", "secret_like_name"),
+    ("MICROSOFT_PROVIDER_AUTHENTICATION_SECRET", "xxxxxxxxxx", "secret_like_name"),
+    ("DB_PASSWORD", KV_SETTING, None),
+    ("DB_PASSWORD", " @microsoft.appconfiguration(Endpoint=https://x.azconfig.io; Key=db)", None),
+    ("AzureWebJobsStorage", "DefaultEndpointsProtocol=https;AccountName=st;AccountKey=xxxx", "credential_in_value"),
+    ("WEBSITE_RUN_FROM_PACKAGE", "https://st.blob.core.windows.net/pkg/app.zip?sv=2022&sig=xxxx", "credential_in_value"),
+    ("REDIS", "cache.example.net:6380,password=xxxx,ssl=True", "credential_in_value"),
+    ("MONGO_URL", "mongodb://app:xxxxxxxx@db.example.net/app", "credential_in_value"),
+    ("SIGNING", PEM_HEADER + "xxxx", "credential_in_value"),
+    ("KEY_VAULT_URI", "https://kv-app.vault.azure.net/", None),
+    ("ClientSecretName", "db-password-name", None),
+    ("APPINSIGHTS_INSTRUMENTATIONKEY", "00000000-0000-0000-0000-000000000000", None),
+    ("APPLICATIONINSIGHTS_CONNECTION_STRING", "InstrumentationKey=0000;IngestionEndpoint=https://x.example/", None),
+    ("JWT_TOKEN", "short", None),
+    ("API_TOKEN_ENABLED", "true", None),
+    ("WEBSITE_TIME_ZONE", "Mountain Standard Time", None),
+    ("DB_PASSWORD", "", None),
+])
+def test_literal_secret_reason(name, value, reason):
+    assert appsvc.literal_secret_reason(name, value) == reason
+
+
+def test_connection_strings_are_judged_by_their_value_only():
+    managed = "Server=tcp:db.example.net;Database=app;Authentication=Active Directory Managed Identity"
+    assert appsvc.literal_secret_reason("DbPassword", managed, by_name=False) is None
+    assert appsvc.literal_secret_reason("Default", "Server=tcp:db;User ID=app;Password=xxxx", by_name=False) == (
+        "credential_in_value"
+    )
+
+
+def scan_client(**kwargs):
+    return web_client(
+        settings={"web-a": ns(properties={"DB_PASSWORD": "xxxxxxxxxx", "API_KEY": KV_SETTING,
+                                          "WEBSITE_TIME_ZONE": "Mountain Standard Time"}),
+                  "web-b": DENIED},
+        strings={"web-a": ns(properties={
+            "Default": ns(value="Server=tcp:db;User ID=app;Password=xxxx", type="SQLAzure"),
+            "Reports": ns(value=KV_SETTING, type="SQLAzure"),
+        })},
+        **kwargs,
+    )
+
+
+def test_scan_writes_names_and_reasons_never_values(monkeypatch):
+    apps, collector = collect(monkeypatch, scan_client(), scan=True)
+    assert collector.ok
+    a, b = apps["web-a"]["literal_secret_scan"], apps["web-b"]["literal_secret_scan"]
+    assert a == {
+        "status": "scanned", "app_settings_read": 3, "connection_strings_read": 2, "has_literal_secrets": True,
+        "literal_secrets": [{"name": "DB_PASSWORD", "kind": "app_setting", "reason": "secret_like_name"},
+                            {"name": "Default", "kind": "connection_string", "reason": "credential_in_value"}],
+    }
+    assert b == {"status": "not_authorized", "app_settings_read": None, "connection_strings_read": None,
+                 "literal_secrets": None, "has_literal_secrets": None}
+    dumped = json.dumps(list(apps.values()), default=str)
+    assert "xxxx" not in dumped and "SecretUri" not in dumped and "Mountain" not in dumped
+
+    summary = appsvc.summarize(list(apps.values()), scan_enabled=True)
+    assert summary["literal_secret_scan_enabled"] is True
+    assert summary["apps_scanned_for_literal_secrets"] == 1
+    assert summary["apps_literal_secret_scan_not_authorized"] == 1
+    assert summary["apps_with_literal_secrets"] == 1
+    assert summary["literal_secret_settings"] == 2
+
+
+def test_scan_is_off_by_default_and_reads_no_values(monkeypatch):
+    monkeypatch.delenv(appsvc.SCAN_ENV, raising=False)
+    assert appsvc.scan_enabled() is False
+    apps, collector = collect(monkeypatch, web_client())
+    assert collector.ok
+    assert all(a["literal_secret_scan"]["status"] == "off" for a in apps.values())
+    summary = appsvc.summarize(list(apps.values()))
+    assert summary["literal_secret_scan_enabled"] is False
+    assert summary["apps_with_literal_secrets"] is None and summary["literal_secret_settings"] is None
+
+
+def test_scan_failure_other_than_403_is_recorded(monkeypatch):
+    client = web_client(settings={"web-a": RuntimeError("(InternalServerError) boom")}, strings={})
+    apps, collector = collect(monkeypatch, client, scan=True)
+    assert not collector.ok
+    assert apps["web-a"]["literal_secret_scan"]["status"] == "error"
+    assert apps["web-b"]["literal_secret_scan"]["status"] == "scanned"
+
+
+@pytest.mark.parametrize("raw, enabled", [("true", True), ("1", True), ("false", False), ("", False)])
+def test_scan_enabled_reads_the_env(monkeypatch, raw, enabled):
+    monkeypatch.setenv(appsvc.SCAN_ENV, raw)
+    assert appsvc.scan_enabled() is enabled
+
+
+def test_main_writes_the_scan_block_and_limitations(monkeypatch, tmp_path):
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv(appsvc.SCAN_ENV, "true")
+    monkeypatch.setattr(appsvc, "resolve_subscription", lambda c: {"subscription_id": SUB, "subscription_source": "env"})
+    monkeypatch.setattr(appsvc, "credential", lambda: object())
+    monkeypatch.setattr(appsvc, "provider_registration_status", lambda *a: "registered")
+    monkeypatch.setattr(appsvc, "web_client", lambda *a: scan_client())
+    monkeypatch.setattr(appsvc, "_attach_diagnostic_settings", lambda *a: None)
+    assert appsvc.main() == 0
+    [path] = tmp_path.glob("azure_app_service_configuration_*.json")
+    evidence = json.loads(path.read_text())
+    assert evidence["results"]["literal_secret_scan"] == {
+        "enabled": True, "permission": "Microsoft.Web/sites/config/list/action", "apps_not_authorized": 1,
+    }
+    assert evidence["results"]["limitations"] == appsvc.SCAN_LIMITATIONS
+    assert evidence["summary"]["literal_secret_settings"] == 2
+    assert "xxxx" not in path.read_text()

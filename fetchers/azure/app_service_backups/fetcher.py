@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
-from app_service import is_web_app, web_client  # noqa: E402
+from app_service import is_not_authorized, is_web_app, web_client  # noqa: E402
 from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
@@ -138,11 +138,6 @@ def storage_destination(url) -> dict:
         "storage_container": segments[0] if segments else None,
         "storage_url": f"{parts.scheme}://{parts.hostname}{parts.path}" if parts.hostname else None,
     }
-
-
-def is_not_authorized(exc: BaseException) -> bool:
-    message = str(exc).lower()
-    return getattr(exc, "status_code", None) == 403 or "authorizationfailed" in message
 
 
 def read_settings() -> dict:

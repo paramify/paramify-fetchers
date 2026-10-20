@@ -950,8 +950,10 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
             "get_ftp_allowed",
             "get_app_settings_key_vault_references",
             "get_site_connection_string_key_vault_references",
+            "list_connection_strings",
         ],
-        "azure/app_service_configuration — basic-auth publishing and Key Vault references",
+        "azure/app_service_configuration — basic-auth publishing, Key Vault references and the "
+        "opt-in literal-secret scan",
     ),
     (
         "azure.mgmt.web",

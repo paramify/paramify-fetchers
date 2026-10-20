@@ -12,7 +12,8 @@ every per-app GET. Function apps are a separate evidence set.
 
 Beyond Prowler: the access restrictions (main and SCM site) that `config/web` already
 returns, and each app's diagnostic settings from azure-mgmt-monitor. Also cipher suites,
-basic-auth publishing, Key Vault references and runtime end of support (webAppStacks).
+basic-auth publishing, Key Vault references and runtime end of support (webAppStacks),
+and an opt-in scan for app settings and connection strings that hold a literal secret.
 """
 
 import logging
@@ -27,7 +28,7 @@ from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
-from app_service import is_web_app, web_client  # noqa: E402
+from app_service import is_not_authorized, is_web_app, web_client  # noqa: E402
 from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
@@ -96,6 +97,42 @@ WINDOWS_RUNTIME_SETTINGS = (
 )
 CUSTOM_CONTAINER_PREFIXES = ("docker|", "compose|", "kube|")
 JAVA_RUNTIME_KEY = re.compile(r"java\d+Runtime")
+
+# Opt-in literal-secret scan: config/list returns setting values, which are classified here and never kept.
+SCAN_ENV = "AZURE_APP_SERVICE_SCAN_LITERAL_SECRETS"
+CONFIG_LIST_PERMISSION = "Microsoft.Web/sites/config/list/action"
+SCAN_OFF, SCAN_DONE, SCAN_NOT_AUTHORIZED, SCAN_ERROR = "off", "scanned", "not_authorized", "error"
+SETTING_REFERENCE_PREFIXES = ("@microsoft.keyvault(", "@microsoft.appconfiguration(")
+CREDENTIAL_IN_VALUE = re.compile(
+    r"(?:^|[;,\s])(?:password|pwd|accountkey|sharedaccesskey|sharedaccesssignature)\s*=\s*[^;,\s]"
+    r"|[?&]sig=[^&\s]"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    r"|://[^/\s:@]+:[^/\s@]+@",
+    re.IGNORECASE,
+)
+SECRET_NAME_PARTS = (
+    "password", "passwd", "secret", "apikey", "accesskey", "accountkey", "privatekey", "credential",
+    "connectionstring",
+)
+SECRET_NAME_WORDS = frozenset({"key", "token", "pwd", "sas"})
+# A name that points at or describes a secret rather than holding one.
+NOT_SECRET_NAME_WORDS = frozenset({
+    "id", "name", "uri", "url", "endpoint", "vault", "version", "header", "enabled", "path", "file",
+    "lifetime", "expiry", "expiration", "type",
+})
+# Named like secrets, documented as not secret.
+NOT_SECRET_SETTINGS = frozenset({"appinsights_instrumentationkey", "applicationinsights_connection_string"})
+SCAN_LIMITATIONS = [
+    f"The literal-secret scan is off unless {SCAN_ENV} is true, and needs {CONFIG_LIST_PERMISSION}, which "
+    "returns setting values. Values are classified in memory and never written; only setting names and "
+    "the reason each was flagged are.",
+    "A setting holds a literal secret when it is not a Key Vault or App Configuration reference and either "
+    "its value carries a credential (a password, account or shared access key, SAS signature, private key, "
+    "or user name and password in a URL), or it is an app setting named like a secret (password, secret, "
+    "key, token, API key, credential) whose value is a single word of at least 8 characters that is not a "
+    "URL or boolean. It is a heuristic: a secret with an ordinary name and no credential syntax is missed, "
+    "and a long non-secret value under a secret-like name is flagged.",
+]
 
 
 # --- projection: the only azure-mgmt model access ---
@@ -242,6 +279,26 @@ def project_key_vault_reference(ref) -> dict:
     }
 
 
+def project_literal_secrets(app_settings, connection_strings) -> dict:
+    """Read config/list results into setting NAMES and reasons only; every value is dropped here."""
+    settings = model_attr(app_settings, "properties") or {}
+    strings = model_attr(connection_strings, "properties") or {}
+    found = [
+        {"name": str(name), "kind": "app_setting", "reason": reason}
+        for name, value in settings.items()
+        if (reason := literal_secret_reason(name, value))
+    ] + [
+        {"name": str(name), "kind": "connection_string", "reason": reason}
+        for name, pair in strings.items()
+        if (reason := literal_secret_reason(name, model_attr(pair, "value"), by_name=False))
+    ]
+    return {
+        "app_settings_read": len(settings),
+        "connection_strings_read": len(strings),
+        "literal_secrets": sorted(found, key=lambda r: (r["kind"], r["name"])),
+    }
+
+
 def _support_dates(settings) -> dict:
     eol = model_attr(settings, "end_of_life_date")
     return {
@@ -342,6 +399,7 @@ def web_app_record(site: dict) -> dict:
         "basic_auth_publishing": None,
         "key_vault_references": None,
         "runtime_support": None,
+        "literal_secret_scan": literal_secret_scan_record(SCAN_OFF),
     }
 
 
@@ -415,6 +473,58 @@ def key_vault_reference_record(ref: dict) -> dict:
         "secret_version_pinned": bool(ref.get("secret_version")),
         "identity_type": ref.get("identity_type"),
         "details": ref.get("details"),
+    }
+
+
+def is_setting_reference(value) -> bool:
+    return str(value or "").strip().lower().startswith(SETTING_REFERENCE_PREFIXES)
+
+
+def name_words(name) -> list[str]:
+    return re.findall(r"[a-z0-9]+", re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", str(name or "")).lower())
+
+
+def secret_like_name(name) -> bool:
+    if str(name or "").lower() in NOT_SECRET_SETTINGS:
+        return False
+    words = name_words(name)
+    if NOT_SECRET_NAME_WORDS.intersection(words):
+        return False
+    joined = "".join(words)
+    return any(part in joined for part in SECRET_NAME_PARTS) or bool(SECRET_NAME_WORDS.intersection(words))
+
+
+def could_be_secret(text: str) -> bool:
+    return (
+        len(text) >= 8
+        and not any(c.isspace() for c in text)
+        and text.lower() not in ("true", "false")
+        and not re.match(r"^[a-z][a-z0-9+.-]*://", text, re.IGNORECASE)
+    )
+
+
+def literal_secret_reason(name, value, by_name: bool = True):
+    """Why a setting looks like it holds a literal secret (credential_in_value, secret_like_name), or None."""
+    text = str(value or "").strip()
+    if not text or is_setting_reference(text):
+        return None
+    if CREDENTIAL_IN_VALUE.search(text):
+        return "credential_in_value"
+    if by_name and secret_like_name(name) and could_be_secret(text):
+        return "secret_like_name"
+    return None
+
+
+def literal_secret_scan_record(status: str, found: dict | None = None) -> dict:
+    """`literal_secrets` and `has_literal_secrets` are null unless the scan ran: off or refused is unknown."""
+    found = found or {}
+    secrets = found.get("literal_secrets")
+    return {
+        "status": status,
+        "app_settings_read": found.get("app_settings_read"),
+        "connection_strings_read": found.get("connection_strings_read"),
+        "literal_secrets": secrets,
+        "has_literal_secrets": None if secrets is None else bool(secrets),
     }
 
 
@@ -619,9 +729,11 @@ def authentication_record(settings: dict) -> dict:
     }
 
 
-def summarize(apps: list[dict]) -> dict:
+def summarize(apps: list[dict], scan_enabled: bool = False) -> dict:
     """Transport, identity and runtime coverage across the subscription's web apps."""
     total = len(apps)
+    scans = [a.get("literal_secret_scan") or {} for a in apps]
+    scanned = [s for s in scans if s.get("status") == SCAN_DONE]
     https_only = sum(1 for a in apps if a["https_only"])
     managed_identity = sum(1 for a in apps if a["managed_identity_enabled"])
     return {
@@ -745,14 +857,22 @@ def summarize(apps: list[dict]) -> dict:
         "apps_with_runtime_support_unknown": sum(
             1 for a in apps if dig(a, "runtime_support", "past_end_of_support") is None
         ),
+        # --- opt-in literal-secret scan (null counts when off) ---
+        "literal_secret_scan_enabled": scan_enabled,
+        "apps_scanned_for_literal_secrets": len(scanned) if scan_enabled else None,
+        "apps_literal_secret_scan_not_authorized": (
+            sum(1 for s in scans if s.get("status") == SCAN_NOT_AUTHORIZED) if scan_enabled else None
+        ),
+        "apps_with_literal_secrets": sum(1 for s in scanned if s["has_literal_secrets"]) if scan_enabled else None,
+        "literal_secret_settings": sum(len(s["literal_secrets"]) for s in scanned) if scan_enabled else None,
     }
 
 
 # --- collection (lazy azure imports) ---
 
-def collect_web_apps(subscription_id, cred, collector: Collector) -> list[dict]:
-    """One web_apps.list(), then two Reader-permitted GETs per app: `config/web` for the
-    runtime versions and protocol settings, `config/authsettingsV2` for Easy Auth.
+def collect_web_apps(subscription_id, cred, collector: Collector, scan_secrets: bool = False) -> list[dict]:
+    """One web_apps.list(), then Reader GETs per app (`config/web`, `config/authsettingsV2`, publishing
+    policies, Key Vault references); with `scan_secrets`, the config/list POSTs for the literal-secret scan.
     """
     client = web_client(subscription_id, cred, collector)
     if client is None:
@@ -795,6 +915,8 @@ def collect_web_apps(subscription_id, cred, collector: Collector) -> list[dict]:
         if settings is not None:
             app["authentication"] = authentication_record(settings)
         _attach_publishing_and_references(client, collector, app, group, name)
+        if scan_secrets:
+            app["literal_secret_scan"] = _scan_literal_secrets(client, collector, group, name)
 
     if apps:
         _attach_runtime_support(client, collector, apps, datetime.now(timezone.utc))
@@ -828,6 +950,25 @@ def _attach_publishing_and_references(client, collector: Collector, app, group, 
             ),
         )
     app["key_vault_references"] = references
+
+
+def _scan_literal_secrets(client, collector: Collector, group, name) -> dict:
+    """config/list for app settings and connection strings; a 403 is the opt-in permission not granted."""
+    try:
+        found = project_literal_secrets(
+            client.web_apps.list_application_settings(resource_group_name=group, name=name),
+            client.web_apps.list_connection_strings(resource_group_name=group, name=name),
+        )
+    except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
+        if is_not_authorized(exc):
+            return literal_secret_scan_record(SCAN_NOT_AUTHORIZED)
+        collector.record(f"web.web_apps.list_application_settings/list_connection_strings ({name})", exc)
+        return literal_secret_scan_record(SCAN_ERROR)
+    return literal_secret_scan_record(SCAN_DONE, found)
+
+
+def scan_enabled() -> bool:
+    return os.environ.get(SCAN_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _attach_runtime_support(client, collector: Collector, apps, now: datetime) -> None:
@@ -905,6 +1046,7 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     apps: list[dict] = []
+    scan_secrets = scan_enabled()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list call, so a zero-app result is legible: Azure returns
@@ -918,7 +1060,7 @@ def main() -> int:
                 "in use; reporting status not_registered",
                 subscription_id,
             )
-        apps = collect_web_apps(subscription_id, cred, collector)
+        apps = collect_web_apps(subscription_id, cred, collector, scan_secrets)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -934,9 +1076,17 @@ def main() -> int:
         collector=collector,
         results={
             "web_apps": apps,
+            "literal_secret_scan": {
+                "enabled": scan_secrets,
+                "permission": CONFIG_LIST_PERMISSION,
+                "apps_not_authorized": sum(
+                    1 for a in apps if dig(a, "literal_secret_scan", "status") == SCAN_NOT_AUTHORIZED
+                ),
+            },
+            "limitations": SCAN_LIMITATIONS,
             "provider_registration_status": registration,
         },
-        summary={**summarize(apps), "provider_registration_status": registration},
+        summary={**summarize(apps, scan_secrets), "provider_registration_status": registration},
     )
 
     filename = (
