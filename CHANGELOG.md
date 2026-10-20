@@ -38,6 +38,17 @@ schemas and the `paramify` CLI — not the internal code.
     tokens and database connection strings are never written.
   - **Shared module.** `_shared/app_service.py` now holds the web-app client and
     kind filter that `azure_app_service_configuration` also uses.
+- **`azure_app_service_deployments`** (`EVD-AZURE-APPSVC-DEPLOYMENTS`) — how each App
+  Service web app and slot is deployed. Kudu's deployment records (id or commit, status,
+  author, deployer, message, times, the active deployment), counted separately so an empty
+  Kudu history is not read as "no deployments". From the Activity Log (Microsoft.Web, last
+  90 days, explicit start and end, paged to the end, with the window and whether it was
+  cut written into the evidence): slot swaps, publish-profile downloads and package
+  deployments through Resource Manager, each with who requested it and when. Also where
+  each app deploys from (credentials in the URL removed) and each slot's configuration
+  compared with production field by field. `results.limitations` says what it cannot
+  attribute: the content or commit a Web Deploy or FTP push shipped, who used shared
+  publishing credentials, and anything older than 90 days. Reader only.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default

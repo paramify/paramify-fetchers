@@ -262,7 +262,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `au-2`, `cm-3`, `cm-3.2`, `cm-4.2`, `cm-6`, `cm-8.3`, `ma-2`
 
-*10 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`crowdstrike_filevantage`](../fetchers/crowdstrike/filevantage), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration), [`gitlab_merge_request_summary`](../fetchers/gitlab/merge_request_summary), [`gitlab_significant_change_notifications`](../fetchers/gitlab/significant_change_notifications), [`jira_site_inventory`](../fetchers/jira/site_inventory)
+*11 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`crowdstrike_filevantage`](../fetchers/crowdstrike/filevantage), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration), [`gitlab_merge_request_summary`](../fetchers/gitlab/merge_request_summary), [`gitlab_significant_change_notifications`](../fetchers/gitlab/significant_change_notifications), [`jira_site_inventory`](../fetchers/jira/site_inventory)
 
 #### ✅ `KSI-CMT-RMV` — Redeploying vs Modifying
 
@@ -270,7 +270,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2`, `cm-3`, `cm-5`, `cm-6`, `cm-7`, `cm-8.1`, `si-3`
 
-*4 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`azure_change_provenance`](../fetchers/azure/change_provenance), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config)
+*5 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments), [`azure_change_provenance`](../fetchers/azure/change_provenance), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config)
 
 #### ⬜ `KSI-CMT-RVP` — Reviewing Change Procedures
 
@@ -296,15 +296,15 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2.3`, `cp-6`, `cp-9`, `cp-10`, `cp-10.2`, `si-12`
 
-*13 fetchers:* [`aws_backup_recovery_high_availability`](../fetchers/aws/backup_recovery_high_availability), [`aws_backup_validation`](../fetchers/aws/backup_validation), [`aws_dlm_lifecycle_policies`](../fetchers/aws/dlm_lifecycle_policies), [`aws_dynamodb_pitr_status`](../fetchers/aws/dynamodb_pitr_status), [`aws_ebs_snapshot_status`](../fetchers/aws/ebs_snapshot_status), [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups), [`gcp_cloud_sql_backup_configuration`](../fetchers/gcp/cloud_sql_backup_configuration), [`gcp_cloud_sql_encryption_status`](../fetchers/gcp/cloud_sql_encryption_status), [`gcp_cloud_storage_encryption_status`](../fetchers/gcp/cloud_storage_encryption_status)
+*14 fetchers:* [`aws_backup_recovery_high_availability`](../fetchers/aws/backup_recovery_high_availability), [`aws_backup_validation`](../fetchers/aws/backup_validation), [`aws_dlm_lifecycle_policies`](../fetchers/aws/dlm_lifecycle_policies), [`aws_dynamodb_pitr_status`](../fetchers/aws/dynamodb_pitr_status), [`aws_ebs_snapshot_status`](../fetchers/aws/ebs_snapshot_status), [`azure_app_service_backups`](../fetchers/azure/app_service_backups), [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups), [`gcp_cloud_sql_backup_configuration`](../fetchers/gcp/cloud_sql_backup_configuration), [`gcp_cloud_sql_encryption_status`](../fetchers/gcp/cloud_sql_encryption_status), [`gcp_cloud_storage_encryption_status`](../fetchers/gcp/cloud_storage_encryption_status)
 
-#### ⬜ `KSI-RPL-ARP` — Aligning Recovery Plan
+#### ✅ `KSI-RPL-ARP` — Aligning Recovery Plan
 
 > The alignment of recovery plans with defined recovery objectives is persistently reviewed.
 
 *Controls:* `cp-2`, `cp-2.1`, `cp-2.3`, `cp-4.1`, `cp-6`, `cp-6.1`, `cp-6.3`, `cp-7`, `cp-7.1`, `cp-7.2`, `cp-7.3`, `cp-8`, `cp-8.1`, `cp-8.2`, `cp-10`, `cp-10.2`
 
-*Organizational — evidenced by HR, training or process, not cloud config.*
+*1 fetcher:* [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments)
 
 #### ⬜ `KSI-RPL-RRO` — Reviewing Recovery Objectives
 
@@ -427,7 +427,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-234 of 242 fetchers carry a mapping.
+236 of 244 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -514,7 +514,7 @@ python tools/gen_ksi_mapping.py
 | [`aws_waf_all_rules`](../fetchers/aws/waf_all_rules) | `KSI-CNA-RVP` |
 | [`aws_waf_dos_rules`](../fetchers/aws/waf_dos_rules) | `KSI-CNA-RVP` |
 
-### azure  (63)
+### azure  (65)
 
 | Fetcher | Indicators |
 |---|---|
@@ -524,7 +524,9 @@ python tools/gen_ksi_mapping.py
 | [`azure_app_gateway_backend_tls`](../fetchers/azure/app_gateway_backend_tls) | `KSI-SVC-SIN`, `KSI-SVC-VCM` |
 | [`azure_app_gateway_tls_listeners`](../fetchers/azure/app_gateway_tls_listeners) | `KSI-CNA-MAT`, `KSI-SVC-SIN` |
 | [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-RVP` |
+| [`azure_app_service_backups`](../fetchers/azure/app_service_backups) | `KSI-RPL-ABO` |
 | [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-ULN`, `KSI-IAM-SNU`, `KSI-MLA-LET`, `KSI-SVC-EIS`, `KSI-SVC-SIN` |
+| [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments) | `KSI-CMT-LMC`, `KSI-CMT-RMV`, `KSI-RPL-ARP` |
 | [`azure_app_service_plans`](../fetchers/azure/app_service_plans) | `KSI-CNA-OFA` |
 | [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status) | `KSI-RPL-ABO` |
 | [`azure_change_provenance`](../fetchers/azure/change_provenance) | `KSI-CMT-RMV` |

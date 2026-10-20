@@ -235,6 +235,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
     (
         "azure.mgmt.monitor",
         "MonitorManagementClient",
+        "activity_logs",
+        ["list"],
+        "azure/app_service_deployments — without it no slot swap or publish-profile download is seen",
+    ),
+    (
+        "azure.mgmt.monitor",
+        "MonitorManagementClient",
         "activity_log_alerts",
         ["list_by_subscription_id"],
         "azure/activity_log_alerts",
@@ -917,6 +924,20 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "WebSiteManagementClient",
         "web_apps",
         [
+            "list_deployments",
+            "list_deployments_slot",
+            "get_source_control",
+            "get_source_control_slot",
+            "list_slots",
+            "get_configuration_slot",
+        ],
+        "azure/app_service_deployments — without these every app reads as having no deployment history",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "web_apps",
+        [
             "list",
             "get_configuration",
             "get_auth_settings_v2_without_secrets",
@@ -1466,6 +1487,18 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "VpnServerConfigurationProperties",
         ["vpn_protocols", "vpn_authentication_types"],
         "azure/virtual_wan_configuration",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "DeploymentProperties",
+        ["status", "active", "author", "deployer", "message", "start_time", "end_time"],
+        "azure/app_service_deployments — a renamed field reads as an unattributed deployment",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteSourceControlProperties",
+        ["repo_url", "branch", "is_manual_integration", "is_git_hub_action", "deployment_rollback_enabled"],
+        "azure/app_service_deployments — a renamed repo_url reads as 'no source control'",
     ),
     # SiteConfigResource (get_configuration) nests these under `properties`,
     # a SiteConfig; the resource flattens it for attribute access.
@@ -2033,6 +2066,13 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
             "total_retention_in_days_as_default",
         ],
         "azure/log_analytics_workspaces — per-table retention",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "EventData",
+        ["claims", "caller", "correlation_id", "event_data_id", "resource_id", "operation_name", "status",
+         "event_timestamp"],
+        "azure/app_service_deployments — a renamed caller reads as an unattributed swap or download",
     ),
     (
         "azure.mgmt.monitor.models",
