@@ -45,9 +45,11 @@ ALIAS_TARGET_TYPES = {
     "microsoft.cdn/profiles/endpoints": "cdn_endpoint",
     "microsoft.network/publicipaddresses": "public_ip",
 }
+RECORD_SET_TYPE_PREFIX = "microsoft.network/dnszones/"
 CNAME_SUFFIXES = (
     (".azurefd.net", "front_door"),
     (".trafficmanager.net", "traffic_manager"),
+    (".usgovtrafficmanager.net", "traffic_manager"),
     (".azureedge.net", "cdn"),
 )
 
@@ -94,6 +96,10 @@ def arm_resource_type(resource_id: str | None) -> str | None:
     return "/".join([rest[0], *rest[1::2]]).lower()
 
 
+def joined(*parts) -> str:
+    return " ".join(str(p) for p in parts if p is not None and p != "")
+
+
 def record_targets(rs, record_type: str) -> list[str]:
     """Each value the record set answers with, as one string per record."""
     if record_type == "A":
@@ -104,7 +110,7 @@ def record_targets(rs, record_type: str) -> list[str]:
         cname = model_attr(model_attr(rs, "cname_record"), "cname")
         return [cname] if cname else []
     if record_type == "MX":
-        return [f"{model_attr(r, 'preference')} {model_attr(r, 'exchange')}" for r in model_attr(rs, "mx_records") or []]
+        return [joined(model_attr(r, "preference"), model_attr(r, "exchange")) for r in model_attr(rs, "mx_records") or []]
     if record_type == "NS":
         return [model_attr(r, "nsdname") for r in model_attr(rs, "ns_records") or []]
     if record_type == "PTR":
@@ -113,14 +119,15 @@ def record_targets(rs, record_type: str) -> list[str]:
         # A TXT record over 255 characters arrives as several strings.
         return ["".join(model_attr(r, "value") or []) for r in model_attr(rs, "txt_records") or []]
     if record_type == "SRV":
-        return [" ".join(str(model_attr(r, k)) for k in ("priority", "weight", "port", "target"))
+        return [joined(*(model_attr(r, k) for k in ("priority", "weight", "port", "target")))
                 for r in model_attr(rs, "srv_records") or []]
     if record_type == "CAA":
-        return [f"{model_attr(r, 'flags')} {model_attr(r, 'tag')} \"{model_attr(r, 'value')}\""
+        return [joined(model_attr(r, "flags"), model_attr(r, "tag"),
+                       None if model_attr(r, "value") is None else f'"{model_attr(r, "value")}"')
                 for r in model_attr(rs, "caa_records") or []]
     if record_type == "SOA":
         soa = model_attr(rs, "soa_record")
-        return [f"{model_attr(soa, 'host')} {model_attr(soa, 'email')}"] if soa else []
+        return [joined(model_attr(soa, "host"), model_attr(soa, "email"))] if soa else []
     return []
 
 
@@ -140,10 +147,17 @@ def failover_method(record_type: str, alias_type: str | None, targets: list[str]
     return "record_update"
 
 
+def alias_target_type(alias_id: str | None) -> str | None:
+    if not alias_id:
+        return None
+    arm_type = arm_resource_type(alias_id) or ""
+    return "record_set" if arm_type.startswith(RECORD_SET_TYPE_PREFIX) else ALIAS_TARGET_TYPES.get(arm_type, "other")
+
+
 def project_record_set(rs) -> dict:
     record_type = str(model_attr(rs, "type") or "").rsplit("/", 1)[-1].upper()
     alias_id = model_attr(model_attr(rs, "target_resource"), "id")
-    alias_type = (ALIAS_TARGET_TYPES.get(arm_resource_type(alias_id) or "", "other") if alias_id else None)
+    alias_type = alias_target_type(alias_id)
     targets = [t for t in record_targets(rs, record_type) if t]
     return {
         "name": model_attr(rs, "name"),
@@ -154,8 +168,40 @@ def project_record_set(rs) -> dict:
         "alias_target_resource_id": alias_id,
         "alias_target_type": alias_type,
         "failover_method": failover_method(record_type, alias_type, targets),
+        "same_zone_target": None,
         "provisioning_state": model_attr(rs, "provisioning_state"),
     }
+
+
+def same_zone_link(record: dict, zone_name: str) -> tuple[str, tuple[str, ...]] | None:
+    """(name, types) of the record set in this zone an alias or CNAME points at."""
+    zone = (zone_name or "").rstrip(".").lower()
+    if record["alias_target_type"] == "record_set":
+        # .../dnszones/<zone>/<TYPE>/<name>
+        parts = record["alias_target_resource_id"].rstrip("/").split("/")
+        return (parts[-1], (parts[-2].upper(),)) if len(parts) >= 3 and parts[-3].lower() == zone else None
+    if record["type"] == "CNAME" and record["targets"] and not record["alias_target_resource_id"]:
+        host = record["targets"][0].rstrip(".").lower()
+        if host == zone:
+            return "@", ENDPOINT_TYPES
+        if zone and host.endswith("." + zone):
+            return host[:-len(zone) - 1], ENDPOINT_TYPES
+    return None
+
+
+def resolve_zone_links(record_sets: list[dict], zone_name: str) -> list[dict]:
+    """One hop: a record pointing at another record set in the zone takes that record set's own failover method."""
+    direct = {(str(r["name"]).lower(), r["type"]): r["failover_method"] for r in record_sets}
+    for record in record_sets:
+        link = same_zone_link(record, zone_name) if record["type"] in ENDPOINT_TYPES else None
+        if not link:
+            continue
+        name, types = link
+        record["same_zone_target"] = name
+        methods = {direct.get((name.lower(), t)) for t in types} - {None}
+        if record["failover_method"] == "record_update" and len(methods) == 1:
+            record["failover_method"] = methods.pop()
+    return record_sets
 
 
 DNSSEC_READ_FAILED = object()
@@ -289,10 +335,10 @@ def collect_public_zones(subscription_id, cred, collector: Collector) -> list[di
         rg = resource_group_from_id(zone.get("id"))
         record_sets = collector.guard(
             f"dns.record_sets.list_all_by_dns_zone({rg}/{zone.get('name')})",
-            lambda: sorted(
+            lambda: resolve_zone_links(sorted(
                 (project_record_set(r) for r in dns.record_sets.list_all_by_dns_zone(rg, zone["name"])),
                 key=lambda r: (r["name"] or "", r["type"]),
-            ),
+            ), zone["name"]),
         )
         records.append(public_zone_record(zone, dnssec, record_sets))
     return sorted(records, key=lambda r: r.get("id") or "")

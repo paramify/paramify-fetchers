@@ -1,7 +1,7 @@
 name: azure_dns_configuration
 version: 0.2.0
 description: >-
-  Shows each public DNS record's target, TTL and failover method, whether each public zone is signed with DNSSEC, and which virtual networks each private zone is linked to.
+  Shows the targets, TTL and failover method of each public DNS record, whether each public zone is signed with DNSSEC, and which virtual networks each private zone is linked to.
 category: azure
 
 supports_targets: true
@@ -36,9 +36,9 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 ksis:
   - KSI-SVC-SIN   # DNSSEC signing of public zones (sc-20, sc-21, sc-22)
-  - KSI-CNA-MAT   # every public record and what it points at, so stray or empty records show
+  - KSI-CNA-MAT   # every public record and what it points at
   - KSI-RPL-ABO   # each production endpoint's targets, TTL and failover method
-  - KSI-RPL-TRC   # the recovery target each record or alias sends traffic to, and how long a change takes to reach clients
+  - KSI-RPL-TRC   # the configured failover path and TTL of each endpoint (configuration, not a recovery test)
 
 evidence_set:
   reference_id: EVD-AZURE-DNS-CONFIG
@@ -52,12 +52,12 @@ evidence_set:
     - subscriptions.list() — picks a subscription when none is set
     - providers.get() for Microsoft.Network — tells "no zones because the provider isn't registered" apart from "no zones"
     - zones.list() — every public DNS zone
-    - GET {zone id}/dnssecConfigs/default (per public zone) — the zone's DNSSEC state and signing keys
-    - record_sets.list_all_by_dns_zone() (per public zone) — every record set with its type, TTL, values and alias target
+    - GET {zone id}/dnssecConfigs/default (per public zone) — the zone's DNSSEC state and signing keys, through the DNSSEC preview API because the SDK has no DNSSEC call
+    - record_sets.list_all_by_dns_zone() (per public zone) — every record set with its type, TTL and values, and for an alias record its alias target (the Azure resource or record set in the zone it follows)
     - private_zones.list() — every private DNS zone
     - virtual_network_links.list() (per private zone) — the virtual networks linked to the zone and whether they auto-register records
 
-    Output: azure_dns_configuration_<subscription>.json — each public zone with its DNSSEC state, signing keys and record sets (type, TTL, values, alias target and failover method), and each private zone with its virtual network links.
+    Output: azure_dns_configuration_<subscription>.json — each public zone with its DNSSEC state, signing keys and record sets, and each private zone with its virtual network links.
 
     Summary fields:
 
@@ -75,15 +75,15 @@ evidence_set:
     What records do the public zones publish?
     - total_public_record_sets — Number of record sets across all public zones (a record set is every record of one type at one name)
     - public_zones_record_sets_unread — Number of public zones whose record sets couldn't be read; the run fails when this is above 0
-    - public_record_sets_by_type — Number of public record sets of each type (A, AAAA, CNAME, MX, TXT, NS, SOA, SRV, CAA, PTR)
-    - public_alias_record_sets — Number of public record sets that are aliases: they point at an Azure resource, such as a Front Door endpoint, Traffic Manager profile or public IP, and follow its address
+    - public_record_sets_by_type — Number of public record sets of each type, such as A, AAAA, CNAME, MX, TXT, NS, SOA, SRV, CAA and PTR; DS, TLSA and NAPTR record sets are counted, but the SDK has no fields for their values, so their targets are empty
+    - public_alias_record_sets — Number of public record sets that are aliases: instead of a fixed value they follow an Azure resource or another record set in the zone. Each record set's alias_target_type says which: front_door (a Front Door endpoint), traffic_manager (a Traffic Manager profile), cdn_endpoint (an Azure CDN endpoint, whose failover method reads cdn), public_ip (a public IP address), record_set (another record set in the zone) or other
 
     How does each public endpoint fail over?
     - public_endpoint_record_sets — Number of public endpoint record sets (A, AAAA and CNAME, the records that send clients to a server)
-    - public_endpoint_record_sets_empty — Number of public endpoint record sets with no value and no alias target, so they answer nothing
-    - public_endpoint_record_sets_by_failover_method — Number of public endpoint record sets for each way traffic moves to another region (empty record sets are left out):
-      - front_door (an alias to a Front Door endpoint or a CNAME to an azurefd.net host; Front Door moves traffic between its origins)
-      - traffic_manager (an alias to a Traffic Manager profile or a CNAME to a trafficmanager.net host; Traffic Manager answers with a healthy endpoint)
+    - public_endpoint_record_sets_empty — Number of public endpoint record sets with no value and no alias target, so they answer nothing. Dangling records aren't detected: an alias whose target resource was deleted, or a CNAME to a host that no longer exists, isn't counted here
+    - public_endpoint_record_sets_by_failover_method — Number of public endpoint record sets for each failover method, the way traffic moves to another region (each record set's failover_method; it is null for other record types and for empty record sets, which are left out here). A record that points at another record set in the zone, through an alias or a CNAME to a name in the zone, takes that record set's own method; only one link is followed:
+      - front_door (an alias to a Front Door endpoint or a CNAME to an azurefd.net host; Front Door moves traffic between its origins. Only azurefd.net host names are recognised)
+      - traffic_manager (an alias to a Traffic Manager profile or a CNAME to a trafficmanager.net or usgovtrafficmanager.net host; Traffic Manager answers with a healthy endpoint)
       - cdn (an alias to an Azure CDN endpoint or a CNAME to an azureedge.net host; the CDN endpoint's origins decide)
       - record_update (a fixed address or host name, or an alias to another resource such as a public IP; moving traffic means changing the record, and resolvers can keep the old answer for up to its TTL)
 
