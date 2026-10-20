@@ -1,11 +1,13 @@
 name: azure_entra_authentication_policy
-version: 0.1.0
+version: 0.2.0
 description: >
   Which sign-in methods the Microsoft Entra ID tenant allows: every method in the
   authentication methods policy with its state, targets and settings, with SMS and
-  Voice flagged weak and FIDO2 (including passkeys) and X.509 certificates flagged
-  phishing-resistant, plus the registration campaign and the policy's migration
-  state. Also security defaults, and Entra password protection (custom
+  Voice flagged weak and FIDO2 (including passkeys) flagged phishing-resistant.
+  X.509 certificates are flagged phishing-resistant only when their default
+  authentication mode is multi-factor, since a single-factor certificate does not
+  satisfy MFA by itself. Also the registration campaign, the policy's migration
+  state, security defaults, and Entra password protection (custom
   banned-password list and smart lockout) with the tenant's Entra ID licence tier,
   since enforcing a custom banned-password list needs P1. Windows Hello for
   Business is configured through device management, not this policy, and is not
