@@ -8,7 +8,7 @@ check the evidence in the app.
 ![Flow: an API key and a completed run, then preview, upload, and the optional syncs, then check the evidence set and its JSON in Paramify](img/uploader/flow.svg)
 
 **You need:** [the repo installed](../README.md#install) ·
-[a completed run](../README.md#collect-then-upload) · a Paramify account that
+[a completed run](cli_guide.md#collect-then-upload) · a Paramify account that
 can create API keys. The TUI's **Paramify** tab does the same upload and script
 sync ([TUI walkthrough](https://support.paramify.com/hc/en-us/articles/55867428958355-Setup-Fetchers)).
 

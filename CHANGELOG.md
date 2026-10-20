@@ -12,6 +12,32 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
+  over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
+  Code (Read). It records Bicep and ARM checks together, each tagged with its
+  framework, with per-framework counts.
+
+  A scan that checked nothing never reads as clean. These cases exit non-zero:
+  - no `.bicep` files and no ARM `deploymentTemplate` JSON (`no_files`; counts
+    are null, not 0)
+  - files present but checkov ran zero checks (`no_checks`), e.g. resources
+    declared only through `br/public:avm` registry modules
+  - files checkov could not parse (`partial`; each is listed, and can be
+    excluded with `skip_paths` once reviewed)
+
+  The `org@` prefix of an Azure DevOps clone URL is dropped, and `clone_token`
+  is optional, so public repos can be scanned.
+
+  `source_type: tfvc` reads Azure DevOps TFVC, which `git clone` cannot fetch.
+  It looks up the project's newest changeset (or the one named in
+  `tfvc_version`), then downloads `tfvc_path` at that changeset as one zip
+  through the TFVC items API, using a `tfvc_token` PAT with Code (Read). The
+  evidence records `source_type` and, in `metadata`, the path, `changeset` and
+  `changeset_date`, where a git source records its branch and commit. Git stays
+  the default. As in `checkov_terraform` 0.2.0, failed checks on
+  `skip_resources` matches move to `skipped_checks`, the effective skip lists
+  are recorded in `metadata`, `use_default_skip_checks` can drop the shipped
+  defaults, and `metadata.branch` names the branch actually scanned.
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
@@ -553,6 +579,36 @@ schemas and the `paramify` CLI — not the internal code.
   fails rather than guess when Microsoft Graph is signed in to a tenant other than
   the subscription's. Needs Reader, plus Microsoft Graph `Directory.Read.All`
   (admin-consented) when it runs as a service principal. Maps to `KSI-SVC-PRR`.
+- **Three Azure Application Gateway fetchers.** All three are Reader-only and
+  fan out per subscription. They share `_shared/app_gateway.py`, which fails
+  the run when `list_all` returns a different number of gateways than Resource
+  Graph counts. Resource Graph can lag behind `list_all`, so a mismatch is
+  counted once more after 30 seconds before the run fails.
+  - `azure_app_gateway_tls_listeners` (`EVD-AZURE-APPGW-TLS-LISTENERS`): every
+    L7 and L4 listener, with its protocol, a public or private frontend,
+    whether a plain-HTTP listener only redirects to HTTPS, and the effective
+    minimum TLS version along with where it comes from. The source is the SSL
+    profile, then the gateway's `sslPolicy`, then the default predefined policy.
+    An L4 Tcp listener always counts as plaintext, even when TLS passes through
+    it to the backend.
+  - `azure_app_gateway_backend_tls` (`EVD-AZURE-APPGW-BACKEND-TLS`): every
+    backend setting, with its protocol, whether the certificate chain and SNI
+    are validated, its trusted roots and its probe protocol, plus which rules
+    use it. Only settings that are in use count towards the totals.
+  - `azure_app_gateway_waf` (`EVD-AZURE-APPGW-WAF`): the WAF that applies to
+    each HTTP(S) listener. A path rule's policy overrides the listener's, which
+    overrides the gateway's, which overrides the legacy configuration. The
+    fetcher reports whether that WAF is enabled in Prevention mode, and each
+    policy's disabled managed rules, exclusions and rate-limit rules. A policy
+    in another subscription is read with a direct GET. If the identity is
+    refused (401 or 403) or the policy no longer exists (404), the policy is
+    recorded as unreadable, the listener's result is null rather than
+    "enforcing", and the run does not fail. Any other error does fail it.
+
+  These fetchers were run against a live subscription with one gateway. SSL
+  profiles, attached WAF policies and L4 listeners have not yet been
+  exercised against live data. `tests/test_azure_app_gateway_verdicts.py`
+  covers those paths against modelled gateways.
 
 ### Changed
 
@@ -703,6 +759,66 @@ schemas and the `paramify` CLI — not the internal code.
   `monitored_operation_coverage_reaching_human` does the same for the existing
   map. `action_groups` and `monitored_operation_coverage` are
   unchanged.
+- **`azure_resource_inventory` 0.2.0 shows each resource's Defender and Policy
+  coverage.** Two more Resource Graph queries read Defender for Cloud assessments
+  (`SecurityResources`) and Azure Policy states (`PolicyResources`). They are joined
+  to the inventory by resource id in the fetcher, because Resource Graph allows one
+  cross-table join per query and pages `summarize` only to its first page. Each
+  resource gains `defender_assessments`, `defender_unhealthy`,
+  `defender_unhealthy_high_severity` (High or Critical), `policy_evaluations` and
+  `policy_non_compliant`; a result on a child resource, such as a subnet, counts for
+  the inventoried parent. Only Healthy and Unhealthy assessments count:
+  NotApplicable ones did not happen (off by policy, for instance) and are counted
+  apart, in `defender_not_applicable` and `defender_not_applicable_total`; an
+  assessment with a missing or unexpected status counts in neither, but in
+  `defender_unknown_status_total`. The
+  summary lists `resources_without_defender_assessment`
+  and `resources_without_policy_evaluation`. A resource counts there only when the
+  service covers another resource of its type in the subscription. Types it covers
+  on no resource are listed apart, with counts, in `types_without_defender_assessment`
+  and `types_without_policy_evaluation`, so a type Defender has no recommendations
+  for is not a gap. `all_assessable_resources_assessed_by_defender` and
+  `all_evaluable_resources_evaluated_by_policy` are false when the service covers
+  nothing at all, and on an empty inventory, which is what Resource Graph returns
+  to a caller without Reader. `defender_coverage_collected` and
+  `policy_coverage_collected` say whether each coverage query was read to the end. Also new: coverage percentages, unhealthy High/Critical and
+  non-compliant counts on inventoried resources, and
+  `resources_covered_by_neither_by_type` (uncovered resources of every type, gaps
+  and never-covered types alike). Assessments and policy states about anything not
+  inventoried (the subscription, resource groups, deleted resources) are counted
+  apart, with `defender_unhealthy_outside_inventory`,
+  `defender_unhealthy_high_severity_outside_inventory`,
+  `defender_unhealthy_without_severity_outside_inventory` and
+  `policy_non_compliant_outside_inventory`, so the inventoried counts plus these add
+  up to the totals; many High recommendations (owner MFA, Defender plans) are about
+  the subscription itself. Assessments of AWS, GCP or on-premises machines (a
+  `resourceDetails` source other than Azure) always count outside, by source.
+  `results.coverage_queries` gives each query's page count, reported total and
+  `outside_inventory_by_target`, the same counts for those results by the type of
+  what they target (never its name). Every
+  query is paged to the end; a coverage query that fails or comes back truncated
+  is a collection failure, and that service's counts stay null rather than reading
+  as uncovered. Also mapped to `KSI-MLA-EVC`, `KSI-CNA-EIS` and `KSI-SVC-EIS`.
+  Existing fields and summary keys are unchanged.
+- **`azure_defender_plans` 0.2.0 records each plan's sub-plan, enablement time
+  and inheritance.** Each plan now carries `sub_plan` (Servers `P1` / `P2`,
+  `DefenderForStorageV2`, `PerKeyVault`, …), `enablement_time` (the last time it
+  was set to Standard; `null` when Azure does not report it, which can be the case
+  for every plan, so `enabled_plan_enablement_times` can be all `null` and is not a
+  reliable signal for a validator), `resources_coverage_status`, `enforce`,
+  `deprecated` and `replaced_by`, and `inherited` / `inherited_from` with
+  `inherited_from_scope` (`management_group`, `subscription`, `resource_group` or
+  `resource`), all from the same `pricings.list` call. Azure documents inheritance as reported for
+  resource-level pricing only, so at subscription scope it reads `null` and
+  `plans_reporting_inheritance` says whether any plan reported it. New summary
+  keys: `enabled_plans`, `enabled_plan_sub_plans`, `enabled_plan_enablement_times`,
+  `enabled_plans_not_fully_covered` (an enabled plan with no coverage status is
+  listed as `unknown`, so it never reads as covered), `plans_not_enabled`
+  (deprecated plans left out), `deprecated_plans`, `deprecated_plans_enabled`,
+  `enforced_plans`, `inherited_plans` and `plans_inherited_from_management_group`.
+  The summary does
+  not judge which plans a system needs. Existing fields and summary keys are
+  unchanged.
 - **`azure_diagnostic_settings` also maps to `KSI-MLA-OSM`**, which its
   subscription activity-log export already evidenced.
 - **`KSI-SVC-PRR` counts as config-evidenceable.** Its residual elements are a
@@ -774,6 +890,86 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →
+  0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
+  counterpart of `DenyAction`, was reported as `unresolved` with no reason and
+  raised `unresolved_effect_assignments`. It now resolves to `auditAction`, an
+  audit-only effect. `mutate` and `addToNetworkGroup` (both in Microsoft's
+  effects reference) and `enforceSetting` (used by built-in definitions) now
+  resolve as enforcing effects. Every assignment's `policy_effects.effect_counts`
+  and the summary's `member_policy_effect_counts` therefore gain four keys,
+  zero unless used: `auditAction`, `mutate`, `addToNetworkGroup` and
+  `enforceSetting`. Any other unrecognised value is still unresolved, but its
+  `reason` now names the value (`unknown effect value 'X'`). Two new summary
+  keys count unresolved member policies: `unresolved_member_policies`, and
+  `unresolved_member_policies_not_enforced` for those in any assignment whose
+  enforcementMode is not Default. Members of an initiative whose definition
+  can't be read aren't counted; that assignment shows only in
+  `unresolved_effect_assignments`. The per-assignment fields are unchanged: a
+  partly resolved DoNotEnforce initiative is still classed by its resolved
+  members, so its `effect_class` can read `audit_only` and
+  `enforcing_effects_not_enforced` false. The new summary keys are where that
+  gap shows.
+- **`azure_entra_authentication_policy` counts X.509 as phishing-resistant only
+  when it is multi-factor** (0.1.0 → 0.2.0). An enabled X.509 certificate method
+  was always listed in `phishing_resistant_methods_enabled`, even with its default
+  authentication mode set to `x509CertificateSingleFactor`, which does not satisfy
+  MFA by itself. It now counts only when the default mode is
+  `x509CertificateMultiFactor`; a new summary field,
+  `x509_certificate_multi_factor`, reports the mode (`null` when it is not
+  reported).
+- **`azure_entra_mfa_status` finds every admin** (0.1.0 → 0.2.0). Admin status
+  came only from the registration report's `isAdmin` flag, which exists only on
+  users with a registration row, so an admin who had registered nothing was
+  counted as a non-admin and `admin_mfa_coverage_percentage` was overstated.
+  Admins are now the holders of privileged directory roles (the same list
+  `azure_entra_privileged_roles` uses), directly or through a role-assignable
+  group, plus anyone the report flags. Each user carries
+  `privileged_directory_roles` and `is_admin_in_registration_report`; the summary
+  adds `admin_users_without_mfa`, `admin_users_without_registration_details` and
+  `admin_role_membership_readable`. The fetcher now reads `GET /directoryRoles`,
+  the members of each privileged role and the transitive members of any group
+  holding one: covered by `Directory.Read.All`, which the Entra fetchers already
+  document (or `RoleManagement.Read.Directory` + `GroupMember.Read.All`). If that
+  read is denied the run fails and the admin figures read `null`.
+- **Checkov evidence no longer overstates pass rates** (`checkov_terraform` and
+  `checkov_kubernetes` 0.1.0 → 0.2.0). `skip_resources` deleted failed checks on
+  matching resources, so they left `total_checks` and raised
+  `aggregate_percentage`; they are now moved to `skipped_checks` (marked
+  `SKIPPED`, with the matching pattern in `suppress_comment`) and counted in
+  `summary.skipped_by_resource_filter`. An empty pattern from a trailing comma
+  no longer matches every resource. The 17 checks in
+  `skip-checks-k8s.default.txt`, among them `CKV_K8S_20` and `CKV_K8S_31`, were
+  always skipped and left no trace in the evidence. The effective skip list is
+  now recorded in `metadata.skip_checks`, and the new `use_default_skip_checks`
+  knob (default `true`, so results are unchanged) set to `false` lets
+  `skip_checks` replace the defaults. When the requested branch could not be
+  cloned, the scan fell back to the default branch but `metadata.branch` still
+  named the requested one. `metadata.branch` now names the branch actually
+  scanned, with `requested_branch` and `branch_fallback` beside it.
+- **`gcp_cloud_sql_encryption_status` reads point-in-time recovery per engine**
+  (0.1.0 → 0.1.1). The fetcher took the first non-null of
+  `pointInTimeRecoveryEnabled` and `binaryLogEnabled`, so a MySQL instance with
+  the binary log on (MySQL's PITR switch) and the generic toggle at `false`
+  read as having no PITR. MySQL now reads `binaryLogEnabled` and PostgreSQL /
+  SQL Server read `pointInTimeRecoveryEnabled`, the same rule
+  `gcp_cloud_sql_backup_configuration` uses. Each record adds the two raw flags
+  (`pitr_toggle_enabled`, `binary_log_enabled`) and the summary adds
+  `point_in_time_recovery_instances`.
+- **`gcp_compute_instance_configuration` counts OS Login 2FA only where OS
+  Login is on** (0.1.0 → 0.1.1). `enable-oslogin-2fa` does nothing without
+  `enable-oslogin`, but `os_login_2fa_enabled` (per instance and per project)
+  and the `os_login_2fa_instances` / `project_os_login_2fa_enabled` summary
+  fields reported the flag alone. They now report effective 2FA (OS Login on
+  and the 2FA flag on, each resolved instance-first). The raw flag is kept as
+  `os_login_2fa_configured`.
+- **`gcp_gke_cluster_configuration` recognises Binary Authorization set by
+  evaluation mode** (0.1.0 → 0.1.1). `binary_authorization_enabled` read only
+  the deprecated `enabled` flag, so a cluster enforcing with
+  `PROJECT_SINGLETON_POLICY_ENFORCE` read as off and was left out of
+  `binary_authorization_clusters`. Any mode other than `DISABLED` now counts as
+  enabled. The legacy flag decides only when no mode is set, since the API
+  ignores it otherwise. It is kept as `binary_authorization_legacy_enabled`.
 - **Every uploader reads "already exists" / "already connected" the same way.**
   The API refuses a repeat evidence-set create or a repeat CONNECT instead of
   ignoring it, and each uploader held its own test for that refusal: the scripts
@@ -795,6 +991,37 @@ schemas and the `paramify` CLI — not the internal code.
   open only to `::/0` looked closed; each rule now carries `IPv6CIDRs` (IPv6
   ranges joined with `", "`) after `CIDRs`. Existing keys and their order are
   unchanged.
+
+- **`aws_iam_mfa_status` reports FIDO security keys as `fido`** (0.1.0 →
+  0.2.0). Every device whose serial is an ARN was typed `virtual`, so a FIDO/U2F
+  security key (`arn:aws:iam::<account>:u2f/...`), the phishing-resistant
+  factor, read as an authenticator app. `Type` is now `fido` for a `:u2f/`
+  serial, `virtual` for a `:mfa/` serial, `hardware` for a bare serial (a
+  hardware TOTP token) and `unknown` for any other shape.
+
+- **`aws_iam_policies` lists permissions-boundary use apart from attachments**
+  (0.2.0 → 0.3.0). `AttachedUsers` and `AttachedRoles` also named the users and
+  roles that use the policy only as their permissions boundary, which grants
+  nothing. They now hold attachments only, and two new keys after
+  `AttachedRoles`, `BoundaryUsers` and `BoundaryRoles`, name the users and roles
+  that use it as their boundary. Existing keys and their order are unchanged.
+
+- **`aws_security_groups` shows rules that reference security groups and
+  prefix lists** (0.3.0 → 0.4.0). Only IP ranges were read, so a rule whose
+  source (outbound: destination) is another security group or a managed prefix
+  list came out with empty CIDRs and no source, as if it allowed nothing. Each
+  rule now ends with `SecurityGroupIds` and `PrefixListIds`, joined with `", "`
+  like `CIDRs`; a group owned by another account is written
+  `<account-id>/<group-id>`. Each group record also gains `GroupName` and
+  `VpcId` after `Rules`. Keys are only appended.
+
+- **`aws_network_firewall_rules` counts Suricata and domain-list rules**
+  (0.1.0 → 0.2.0). `StatefulRuleCount` read only `StatefulRules`, so a stateful
+  rule group written as a Suricata rules string or a domain list reported 0.
+  A rules string now counts its lines that are not blank or `#` comments
+  (backslash-continued lines count once); a domain list counts its domains
+  (`Targets`), not the rules AWS generates per target type. A new
+  `StatefulRuleSource` key names which of the three was counted.
 
 - **`aws_auto_scaling_high_availability` lists each group's instances.** A
   query error left `Instances` empty for every Auto Scaling group.
