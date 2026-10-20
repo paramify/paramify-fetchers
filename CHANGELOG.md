@@ -559,7 +559,9 @@ schemas and the `paramify` CLI — not the internal code.
   healthy hours (measured against the share of probes the group's load-balancing
   settings require), requests and request share, whether every region was healthy
   and serving in the last hour, and `traffic_shifts`, each hour the set of serving
-  regions changed. Adds KSI-RPL-TRC. Existing fields are unchanged.
+  regions changed. Adds KSI-RPL-TRC. `production_tag` moves from `config_schema`
+  to `target_schema`, so each subscription target sets its own tag (same
+  `AZURE_PRODUCTION_APP_TAG` variable). Existing fields are unchanged.
 - **`azure_front_door_origins` 0.2.0: App Service origin lockdown and regional
   twins.** Each origin that is an App Service app or slot (by its azureOrigin, its
   private-link target, or the app whose host name it uses) is listed in
