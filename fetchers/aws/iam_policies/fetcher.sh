@@ -3,7 +3,8 @@
 # AWS — IAM Policies
 #
 # Lists customer-managed IAM policies and per-policy default version document
-# + attached entities.
+# + attached entities, and the users and roles that use it as their permissions
+# boundary.
 #
 # Output: $EVIDENCE_DIR/aws_iam_policies.json
 # Optional env (else the AWS CLI ambient identity/region): AWS_PROFILE, AWS_DEFAULT_REGION
@@ -73,12 +74,15 @@ elif ! aws iam get-account-authorization-details --filter LocalManagedPolicy Use
     # Without it no policy can be described -- as when get-policy failed for each.
     echo "aws iam get-account-authorization-details (policies) failed" >> "$_FAILURE_LOG"
 else
-    # list-entities-for-policy, with no usage filter, named entities that attach
-    # the policy OR use it as their permissions boundary; both are kept.
+    # Attached* name the entities that attach the policy and nothing else. A
+    # permissions boundary only caps what an entity may do and grants nothing,
+    # so the users and roles that use the policy as their boundary are listed
+    # apart, in BoundaryUsers and BoundaryRoles. Groups cannot have one.
     jq --slurpfile arns "$_POLICIES_JSON" --slurpfile gaad "$_GAAD_JSON" '
         $gaad[0] as $g
         | (reduce $g.Policies[]? as $p ({}; .[$p.Arn] = $p)) as $by_arn
-        | def using($entities; $arn): [$entities[]? | select(any((.Attached // [])[]; . == $arn) or .Boundary == $arn) | .Name];
+        | def attaching($entities; $arn): [$entities[]? | select(any((.Attached // [])[]; . == $arn)) | .Name];
+          def bounded_by($entities; $arn): [$entities[]? | select(.Boundary == $arn) | .Name];
           .results += [$arns[0][]? | . as $arn | $by_arn[$arn] | select(. != null)
             | {
                 "PolicyName": .PolicyName,
@@ -88,9 +92,11 @@ else
                 "UpdateDate": .UpdateDate,
                 "Description": .Description,
                 "PolicyDocument": (first(.PolicyVersionList[]? | select(.IsDefaultVersion) | .Document) // {}),
-                "AttachedGroups": using($g.Groups; $arn),
-                "AttachedUsers": using($g.Users; $arn),
-                "AttachedRoles": using($g.Roles; $arn)
+                "AttachedGroups": attaching($g.Groups; $arn),
+                "AttachedUsers": attaching($g.Users; $arn),
+                "AttachedRoles": attaching($g.Roles; $arn),
+                "BoundaryUsers": bounded_by($g.Users; $arn),
+                "BoundaryRoles": bounded_by($g.Roles; $arn)
             }]
     ' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi

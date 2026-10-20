@@ -17,7 +17,7 @@ Fanout (one invocation per repo) happens in the runner.
 | Field | Env | Required | Notes |
 |---|---|---|---|
 | `repo_url` | `CHECKOV_REPO_URL` | yes | `https://host/group/project.git` |
-| `branch` | `CHECKOV_CLONE_BRANCH` | no | defaults to `main`, falls back to repo default |
+| `branch` | `CHECKOV_CLONE_BRANCH` | no | defaults to `main`, falls back to repo default (recorded as `branch_fallback`) |
 | secret `clone_token` | `GIT_CLONE_TOKEN` | per-target | omit for public repos |
 
 The token is injected as `https://<git_username>:<token>@…` (`git_username`
@@ -27,9 +27,15 @@ never logged.
 ## Config knobs
 Two-tier skip model: shipped defaults in `../_shared/skip-checks.default.txt` and
 `skip-resources.default.txt` are **merged** with the config values below.
+`use_default_skip_checks: false` drops the default skip-check file so that
+`skip_checks` replaces it. `skip_resources` is applied after the scan: a failed
+check on a matching resource is moved to `skipped_checks` (marked `SKIPPED`, with
+a `suppress_comment` naming the pattern), so it still counts in `total_checks`
+and `aggregate_percentage`; `summary.skipped_by_resource_filter` counts them.
 
 `soft_fail` (default true), `compact` (true), `download_external_modules` (true),
-`evaluate_variables` (true), `repo_id`, `skip_checks`, `skip_resources`,
+`evaluate_variables` (true), `repo_id`, `skip_checks`, `use_default_skip_checks`
+(true), `skip_resources`,
 `skip_paths`, `checks` (allowlist), `external_checks_dir`, `external_modules_path`,
 `git_username`, `terraform_plan_file`, `deep_analysis`. See `fetcher.yaml` for the
 full descriptions and env mappings.
@@ -44,8 +50,12 @@ contains `tfplan.json`), checkov scans the plan instead of the directory, with
 in plan mode. A fresh clone has no plan file unless the repo commits one.
 
 ## Output & exit codes
-Writes `checkov_terraform_<repo>.json` into `EVIDENCE_DIR` with `metadata`
-(`repo_url`, `branch`, `commit_sha`, `scan_timestamp`), `summary`, and `results`.
+Writes `checkov_terraform_<repo>.json` into `EVIDENCE_DIR` with `metadata`,
+`summary`, and `results`. `metadata` carries `repo_url`, `branch` (the branch
+actually scanned), `requested_branch`, `branch_fallback` (true when the requested
+branch could not be cloned and the default branch was scanned instead),
+`commit_sha`, `scan_timestamp`, `skip_checks`, `default_skip_checks_applied` and
+`skip_resources`.
 
 - **exit 0** — scan completed, *including when it found failed checks* (findings
   are evidence). Also 0 when the repo has no Terraform files (`status: no_files`).

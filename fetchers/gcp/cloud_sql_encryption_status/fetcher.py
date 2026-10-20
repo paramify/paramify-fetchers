@@ -36,6 +36,25 @@ logger = logging.getLogger("gcp_cloud_sql_encryption_status")
 
 # --- pure transforms ---
 
+def is_mysql(database_version) -> bool:
+    """MySQL is the engine whose PITR signal is binaryLogEnabled, not the toggle."""
+    return "MYSQL" in str(database_version or "").upper()
+
+
+def point_in_time_recovery(backup: dict, database_version) -> bool:
+    """Whether the instance can be restored to an arbitrary moment.
+
+    PostgreSQL and SQL Server record it in pointInTimeRecoveryEnabled; MySQL
+    recovers from its binary log, so its signal is binaryLogEnabled and the toggle
+    can read false on a MySQL instance that has PITR. Per engine, not OR-ed: a
+    MySQL instance must not look protected by an unused field. Same rule as
+    gcp_cloud_sql_backup_configuration, so the two fetchers agree.
+    """
+    if is_mysql(database_version):
+        return bool(first(backup, "binaryLogEnabled"))
+    return bool(first(backup, "pointInTimeRecoveryEnabled"))
+
+
 def instance_record(inst: dict) -> dict:
     """Normalize one Cloud SQL instance resource dict into an evidence record.
 
@@ -49,11 +68,12 @@ def instance_record(inst: dict) -> dict:
     )
     kms_version = dig(inst, "diskEncryptionStatus", "kmsKeyVersionName")
     backup = dig(inst, "settings", "backupConfiguration") or {}
+    database_version = first(inst, "databaseVersion", "database_version")
 
     return {
         "name": first(inst, "name"),
         "region": first(inst, "region"),
-        "database_version": first(inst, "databaseVersion", "database_version"),
+        "database_version": database_version,
         "state": first(inst, "state"),
         "cmek": kms is not None,
         "kms_key_name": kms,
@@ -62,9 +82,10 @@ def instance_record(inst: dict) -> dict:
         "backup_enabled": bool(first(backup, "enabled")),
         "backup_start_time": first(backup, "startTime", "start_time"),
         "backup_retained_count": dig(backup, "backupRetentionSettings", "retainedBackups"),
-        "point_in_time_recovery_enabled": bool(
-            first(backup, "pointInTimeRecoveryEnabled", "binaryLogEnabled")
-        ),
+        "point_in_time_recovery_enabled": point_in_time_recovery(backup, database_version),
+        # Both raw fields kept so the engine-specific derivation above is auditable.
+        "pitr_toggle_enabled": bool(first(backup, "pointInTimeRecoveryEnabled")),
+        "binary_log_enabled": bool(first(backup, "binaryLogEnabled")),
     }
 
 
@@ -76,6 +97,9 @@ def summarize(instances: list[dict]) -> dict:
         "google_managed_instances": len(instances) - cmek,
         "cmek_percentage": coverage_percentage(cmek, len(instances)),
         "backup_enabled_instances": sum(1 for i in instances if i["backup_enabled"]),
+        "point_in_time_recovery_instances": sum(
+            1 for i in instances if i["point_in_time_recovery_enabled"]
+        ),
     }
 
 
