@@ -2530,7 +2530,7 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure.mgmt.resourcegraph.models",
         "QueryRequest",
         ["subscriptions", "query", "options"],
-        "_shared/azure_common resource_graph_rows — an unscoped request "
+        "_shared/resource_graph query_all — an unscoped request "
         "(subscriptions=None) is how cross-subscription lookups resolve",
     ),
 ]

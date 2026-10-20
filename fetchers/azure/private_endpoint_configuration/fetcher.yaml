@@ -51,8 +51,11 @@ evidence_set:
   instructions: >
     Script: fetcher.py. Azure SDK calls: azure-mgmt-network NetworkManagementClient
     private_endpoints.list_by_subscription(), and private_dns_zone_groups.list(endpoint, resource_group)
-    for each endpoint. Target resources and the endpoints' network interfaces are then read in one
-    azure-mgmt-resourcegraph ResourceGraphClient query (Resources | where id in~ (...)), not scoped to a
+    for each endpoint (a failed zone-group list leaves has_private_dns_zone_group null, counted in
+    endpoints_private_dns_zone_group_unknown and in endpoints_without_private_dns_zone_group, never
+    read as published). Target resources and the endpoints' network interfaces are then read in one
+    azure-mgmt-resourcegraph ResourceGraphClient query (Resources | where id in~ (...), ids as KQL
+    verbatim @'...' literals), paged by _shared/resource_graph.query_all and not scoped to a
     subscription so targets in other subscriptions the credential can read still resolve.
     connections[] holds both auto-approved and manual (manual: true) private link connections;
     connection_status is their shared status, or "Mixed" when they differ, and approved is true only
@@ -66,7 +69,10 @@ evidence_set:
     returns to this credential; a deleted resource group also lands here) or unknown (the lookup
     failed; also sets metadata.partial_failure). target_public_network_access is
     the checked resource's raw properties.publicNetworkAccess; target_public_network_access_state is
-    disabled, enabled or unset (no value) when the resource was read, else its lookup status, and target_public_network_access_disabled is true only for "Disabled".
+    disabled, enabled or unset (no value) when the resource was read, else its lookup status, and
+    target_public_network_access_disabled is true for "Disabled" and for "SecuredByPerimeter" (behind a
+    Network Security Perimeter, which cosmosdb_configuration and sql_server_configuration also read as
+    private).
     unset is reported apart from enabled because its meaning is service-specific: a storage account
     without the property allows public traffic subject to its networkAcls, while Azure Managed Redis
     returns null only for clusters created on an old API version and the property cannot be read
@@ -76,7 +82,8 @@ evidence_set:
     whose public access is not disabled but whose firewall defaults to Deny (reachable only from
     allow-listed networks). connections_by_target_type keys are lowercased because ARM ids keep the
     creator's casing. Each endpoint's subnet is read from its virtual network in the same Resource
-    Graph lookup: subnet_private_endpoint_network_policies is the subnet's
+    Graph lookup (mv-expand limit 2000 over the VNet's subnets; a VNet that returns fewer subnet rows
+    than it has reads its subnets as unknown rather than dropping them): subnet_private_endpoint_network_policies is the subnet's
     privateEndpointNetworkPolicies. Azure applies a subnet's NSG to private endpoint traffic only when
     it is Enabled or NetworkSecurityGroupEnabled (subnet_nsg_applies_to_endpoint), and its route table
     only when Enabled or RouteTableEnabled; endpoint_nsg_enforced is true when the NSG applies and

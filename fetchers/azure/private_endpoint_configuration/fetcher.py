@@ -25,19 +25,27 @@ from azure_common import (  # noqa: E402
     lookup_status,
     model_attr,
     provider_registration_status,
-    readable_scopes,
     report_failure,
     resolve_subscription,
-    resource_graph_rows,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
+)
+from resource_graph import (  # noqa: E402
+    query_all,
+    readable_scopes,
+    resource_graph_client,
 )
 
 logger = logging.getLogger("azure_private_endpoint_configuration")
 
 STATUSES = ("Approved", "Pending", "Rejected", "Disconnected")
 LOOKUP_CHUNK = 200
+# mv-expand defaults to 128 rows per input row; a VNet can hold far more subnets.
+MV_EXPAND_LIMIT = 2000
+# publicNetworkAccess values that close the public path. SecuredByPerimeter puts the resource behind a
+# Network Security Perimeter, which cosmosdb_configuration and sql_server_configuration also read as private.
+PRIVATE_PUBLIC_ACCESS = ("disabled", "securedbyperimeter")
 # privateEndpointNetworkPolicies values under which the subnet's NSG / route table apply to endpoint traffic.
 NSG_POLICIES = ("enabled", "networksecuritygroupenabled")
 ROUTE_TABLE_POLICIES = ("enabled", "routetableenabled")
@@ -167,7 +175,7 @@ def public_access_state(row, status: str) -> str:
     if row is None:
         return status
     pna = str(row.get("public_network_access") or "").lower()
-    if pna == "disabled":
+    if pna in PRIVATE_PUBLIC_ACCESS:
         return "disabled"
     if pna:
         return "enabled"
@@ -186,7 +194,7 @@ def target_record(conn: dict, lookups: dict, failed: set, scopes) -> dict:
         "target_lookup_status": status,
         "target_public_network_access": pna,
         "target_public_network_access_state": public_access_state(row, status),
-        "target_public_network_access_disabled": str(pna or "").lower() == "disabled",
+        "target_public_network_access_disabled": str(pna or "").lower() in PRIVATE_PUBLIC_ACCESS,
         "target_network_acls_default_action": (row or {}).get("network_acls_default_action"),
     }
 
@@ -217,7 +225,8 @@ def endpoint_record(
     ips = []
     for nic_id in pe["network_interface_ids"]:
         ips.extend(nic_private_ips(lookups.get((nic_id or "").lower())))
-    zones = sorted(
+    # zone_groups is None when the endpoint's zone groups could not be listed: unknown, never "none".
+    zones = None if zone_groups is None else sorted(
         {cfg["private_dns_zone_name"] for g in zone_groups for cfg in g["private_dns_zone_configs"] if cfg["private_dns_zone_name"]}
     )
     return {
@@ -230,7 +239,7 @@ def endpoint_record(
         "private_ip_addresses": sorted(set(ips)),
         "private_dns_zone_groups": zone_groups,
         "private_dns_zone_names": zones,
-        "has_private_dns_zone_group": bool(zones),
+        "has_private_dns_zone_group": None if zones is None else bool(zones),
     }
 
 
@@ -246,7 +255,8 @@ def summarize(endpoints: list[dict]) -> dict:
             key = (c["target_resource_type"] or "unknown").lower()
             by_target_type[key] = by_target_type.get(key, 0) + 1
     approved = sum(1 for e in endpoints if e["approved"])
-    with_dns = sum(1 for e in endpoints if e["has_private_dns_zone_group"])
+    with_dns = sum(1 for e in endpoints if e["has_private_dns_zone_group"] is True)
+    dns_unknown = sum(1 for e in endpoints if e["has_private_dns_zone_group"] is None)
 
     targets = {}
     for e in endpoints:
@@ -279,7 +289,9 @@ def summarize(endpoints: list[dict]) -> dict:
         "approved_percentage": coverage_percentage(approved, total),
         "endpoints_by_connection_status": by_status,
         "endpoints_with_private_dns_zone_group": with_dns,
+        # Unknown counts as without, so an unread zone group is never read as published.
         "endpoints_without_private_dns_zone_group": total - with_dns,
+        "endpoints_private_dns_zone_group_unknown": dns_unknown,
         "connections_by_target_type": dict(sorted(by_target_type.items())),
         "total_target_resources": len(targets),
         "target_resources_found": len(found),
@@ -312,7 +324,8 @@ def summarize(endpoints: list[dict]) -> dict:
 
 
 def quoted_ids(ids: list[str]) -> str:
-    return ", ".join("'" + i.replace("'", "''") + "'" for i in ids)
+    """KQL verbatim string literals: inside @'...' a doubled quote is the escape and a backslash is literal."""
+    return ", ".join("@'" + i.replace("'", "''") + "'" for i in ids)
 
 
 def lookup_query(ids: list[str]) -> str:
@@ -321,22 +334,37 @@ def lookup_query(ids: list[str]) -> str:
         "| project id, type, "
         "public_network_access = tostring(properties.publicNetworkAccess), "
         "network_acls_default_action = tostring(properties.networkAcls.defaultAction), "
-        "ip_configurations = properties.ipConfigurations"
+        "ip_configurations = properties.ipConfigurations "
+        "| order by id asc"
     )
 
 
 def subnet_query(vnet_ids: list[str]) -> str:
+    """One row per subnet, each carrying its VNet's subnet count so a capped expansion can be detected."""
     return (
         f"Resources | where id in~ ({quoted_ids(vnet_ids)}) "
-        "| mv-expand s = properties.subnets "
-        "| project id = tostring(s.id), "
+        "| extend vnet_id = tolower(id), subnet_count = array_length(properties.subnets) "
+        f"| mv-expand limit {MV_EXPAND_LIMIT} s = properties.subnets "
+        "| project id = tostring(s.id), vnet_id, subnet_count, "
         "policies = tostring(s.properties.privateEndpointNetworkPolicies), "
         "nsg_id = tostring(s.properties.networkSecurityGroup.id), "
-        "route_table_id = tostring(s.properties.routeTable.id)"
+        "route_table_id = tostring(s.properties.routeTable.id) "
+        "| order by id asc"
     )
 
 
-def lookup_by_ids(cred, ids: list[str], build_query, label: str, collector: Collector):
+def truncated_vnets(subnet_rows: dict) -> set:
+    """VNets whose subnet expansion came back short of their subnet count: their subnets are unknown."""
+    seen: dict = {}
+    expected: dict = {}
+    for row in subnet_rows.values():
+        vnet = row.get("vnet_id")
+        seen[vnet] = seen.get(vnet, 0) + 1
+        expected[vnet] = row.get("subnet_count")
+    return {v for v, n in seen.items() if isinstance(expected[v], int) and n < expected[v]}
+
+
+def lookup_by_ids(client, ids: list[str], build_query, label: str, collector: Collector):
     """Resource Graph rows keyed by lowercased id, plus the ids whose chunk failed.
 
     Unscoped so resources in other readable subscriptions resolve.
@@ -347,7 +375,7 @@ def lookup_by_ids(cred, ids: list[str], build_query, label: str, collector: Coll
         chunk = unique[start : start + LOOKUP_CHUNK]
         rows = collector.guard(
             f"resourcegraph.resources ({label} {start + 1}-{start + len(chunk)})",
-            lambda: resource_graph_rows(cred, build_query(chunk)),
+            lambda: query_all(client, None, build_query(chunk))["rows"],
         )
         if rows is None:
             failed.update(chunk)
@@ -375,17 +403,23 @@ def collect_endpoints(subscription_id, cred, collector: Collector) -> list[dict]
     zone_groups = {}
     for pe in endpoints:
         rg = resource_group_from_id(pe.get("id"))
+        # No default: a failed list is None (unknown), never an endpoint without a zone group.
         zone_groups[pe["id"]] = collector.guard(
             f"network.private_dns_zone_groups.list({rg}/{pe.get('name')})",
             lambda: [project_zone_group(g) for g in client.private_dns_zone_groups.list(pe["name"], rg)],
-            default=[],
         )
 
+    graph = collector.guard("resourcegraph.ResourceGraphClient (init)", lambda: resource_graph_client(cred))
     ids = [c["checked_resource_id"] for pe in endpoints for c in pe["connections"]]
     ids += [n for pe in endpoints for n in pe["network_interface_ids"]]
-    lookups, failed = lookup_by_ids(cred, ids, lookup_query, "lookup", collector)
     vnet_ids = [virtual_network_id(pe["subnet_id"]) for pe in endpoints]
-    subnets, failed_vnets = lookup_by_ids(cred, vnet_ids, subnet_query, "subnet lookup", collector)
+    if graph is None:
+        lookups, failed = {}, {i.lower() for i in ids if i}
+        subnets, failed_vnets = {}, {v.lower() for v in vnet_ids if v}
+    else:
+        lookups, failed = lookup_by_ids(graph, ids, lookup_query, "lookup", collector)
+        subnets, failed_vnets = lookup_by_ids(graph, vnet_ids, subnet_query, "subnet lookup", collector)
+        failed_vnets |= truncated_vnets(subnets)
     scopes = readable_scopes(cred, collector) if endpoints else None
 
     records = [
