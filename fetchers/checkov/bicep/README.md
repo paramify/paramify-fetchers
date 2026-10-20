@@ -53,7 +53,8 @@ not exist with `bad_config`.
 See `fetcher.yaml`.
 Skip lists merge with `../_shared/skip-*.default.txt`; set `use_default_skip_checks: false`
 to drop the shipped check defaults. The effective lists are recorded in
-`metadata.skip_checks` and `metadata.skip_resources`.
+`metadata.skip_checks` and `metadata.skip_resources`. A `checks` allowlist is
+recorded in `metadata.checks`, which is empty when the scan was not restricted.
 
 `skip_resources` entries are globs over the whole resource name, e.g.
 `Microsoft.Storage/storageAccounts.dev*`. A failed check on a matching resource is

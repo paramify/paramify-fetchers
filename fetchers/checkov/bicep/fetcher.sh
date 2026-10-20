@@ -118,6 +118,7 @@ json_list() { jq -cn '$ARGS.positional' --args -- "$@"; }
 # contain whitespace, so spaces and tabs separate them too; skip paths may contain spaces.
 split_list "${CHECKOV_BICEP_CHECKS:-}" $' \t'
 REQUESTED_CHECKS="$(IFS=,; printf '%s' "${_SPLIT[*]}")"
+CHECKS_JSON="$(json_list "${_SPLIT[@]}")"
 split_list "${CHECKOV_SKIP_PATHS:-}"
 SKIP_PATHS=("${_SPLIT[@]}")
 SKIP_PATHS_JSON="$(json_list "${SKIP_PATHS[@]}")"
@@ -163,7 +164,7 @@ metadata_json() {
           --argjson fallback "$BRANCH_FALLBACK" --arg sha "$COMMIT_SHA" --arg ts "$TIMESTAMP" \
           --arg path "$TFVC_PATH" --arg version "$TFVC_VERSION" \
           --argjson changeset "${CHANGESET:-null}" --arg csdate "$CHANGESET_DATE" \
-          --arg skips "$SKIP_CHECKS_LIST" --argjson defaults "$DEFAULT_SKIPS_APPLIED" \
+          --argjson checks "$CHECKS_JSON" --arg skips "$SKIP_CHECKS_LIST" --argjson defaults "$DEFAULT_SKIPS_APPLIED" \
           --argjson skipres "$SKIP_RESOURCES_JSON" --argjson skippaths "$SKIP_PATHS_JSON" \
        '{source_type: $type, repo_url: $repo}
         + (if $type == "tfvc" then
@@ -173,6 +174,7 @@ metadata_json() {
              {branch: $branch, requested_branch: $requested, branch_fallback: $fallback, commit_sha: $sha}
            end)
         + {scan_timestamp: $ts, partial_failure: false, api_failures: [],
+         checks: $checks,
          skip_checks: ($skips | split(",") | map(select(. != ""))),
          default_skip_checks_applied: $defaults,
          skip_resources: $skipres,

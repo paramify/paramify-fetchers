@@ -327,6 +327,7 @@ def test_effective_skip_list_is_recorded(tmp_path):
     args = (tmp / "log" / "checkov.args").read_text().split()
     assert args[args.index("--skip-check") + 1] == "CKV_AZURE_35"
     assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_35"]
+    assert payload["metadata"]["checks"] == ["CKV_AZURE_33"]
     assert payload["metadata"]["default_skip_checks_applied"] is True
     assert payload["metadata"]["skip_paths"] == []
 
@@ -363,6 +364,7 @@ def test_check_allowlist_is_trimmed_and_still_overrides_skips(tmp_path):
     assert argv[argv.index("--check") + 1] == "CKV_AZURE_3,CKV_AZURE_44"
     assert argv[argv.index("--skip-check") + 1] == "CKV_AZURE_35"
     assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_35"]
+    assert payload["metadata"]["checks"] == ["CKV_AZURE_3", "CKV_AZURE_44"]
 
 
 @pytest.mark.parametrize("env,flag,expected", [
@@ -376,8 +378,7 @@ def test_check_ids_separated_by_whitespace(tmp_path, env, flag, expected):
     assert code == 0
     argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
     assert argv[argv.index(flag) + 1] == expected
-    if flag == "--skip-check":
-        assert payload["metadata"]["skip_checks"] == expected.split(",")
+    assert payload["metadata"]["skip_checks" if flag == "--skip-check" else "checks"] == expected.split(",")
 
 
 def test_skip_paths_are_recorded(tmp_path):
@@ -415,14 +416,18 @@ def test_default_skip_checks_can_be_turned_off(tmp_path):
                                 CHECKOV_USE_DEFAULT_SKIP_CHECKS="false")
     assert code == 0
     assert "--skip-check" not in (tmp / "log" / "checkov.args").read_text().split()
+    assert "--check" not in (tmp / "log" / "checkov.args").read_text().split()
     assert payload["metadata"]["skip_checks"] == []
+    assert payload["metadata"]["checks"] == []
     assert payload["metadata"]["default_skip_checks_applied"] is False
 
 
 def test_no_files_result_still_records_scan_config(tmp_path):
-    _, payload, _, _ = run(tmp_path, {"README.md": "# infra\n"}, CHECKOV_SKIP_CHECKS="CKV_AZURE_35")
+    _, payload, _, _ = run(tmp_path, {"README.md": "# infra\n"}, CHECKOV_SKIP_CHECKS="CKV_AZURE_35",
+                           CHECKOV_BICEP_CHECKS="CKV_AZURE_3")
     assert payload["status"] == "no_files"
     assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_35"]
+    assert payload["metadata"]["checks"] == ["CKV_AZURE_3"]
     assert payload["summary"]["skipped_by_resource_filter"] is None
 
 
