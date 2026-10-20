@@ -1,16 +1,9 @@
 name: azure_devops_permissions
 version: 0.1.0
-description: >
-  For one Azure DevOps organization: every explicit permission entry in the
-  security namespaces that govern the organization, projects, Git and TFVC
-  repositories, build and release pipelines, environments, service
-  connections, the library and audit streams. Each entry gives the identity or
-  group, the scope it applies at, and the actions allowed and denied, with the
-  inherited and effective rights Azure DevOps reports. High-impact rights
-  (managing permissions, deleting a project, editing or bypassing policies,
-  administering builds, releases, service connections and audit streams) set
-  on anyone other than the built-in admin groups are flagged. This is evidence
-  of least privilege in the delivery platform.
+description: >-
+  Shows which identities and groups hold which Azure DevOps permissions at each
+  scope, allowed or denied, and flags high-impact rights held outside the admin
+  groups.
 category: azure
 
 supports_targets: true
@@ -64,38 +57,42 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-DEVOPS-PERMISSIONS
   name: Azure DevOps Permissions
-  instructions: >
-    Script: fetcher.py. Azure DevOps REST 7.1. Namespaces: _apis/securitynamespaces,
-    keeping Collection, Project, Git Repositories, VersionControlItems and
-    VersionControlPrivileges (TFVC), Build, ReleaseManagement,
-    ServiceEndpoints, Environment, Library and AuditLog; a namespace the
-    organization does not have is listed in namespaces_not_found. Each one's
-    access control lists come from _apis/accesscontrollists/{namespace} with
-    recurse and includeExtendedInfo, every token. An entry is one access
-    control entry with an allow or deny bit set: its token, the `scope` the
-    token denotes (organization, project, repository, branch, path, folder,
-    pipeline, release_stage, environment, service_connection, variable_group,
-    secure_file), the project, the resource id, whether the token inherits
-    from its parent, and the allowed, denied, inherited and effective actions
-    decoded with the namespace's action names (results.namespaces maps each
-    name to its display name). Identities are resolved with _apis/identities
-    by descriptor; `kind` is user, group, entra_group, service_principal or
-    service_identity, and `admin_group` marks Project Collection
-    Administrators, Project Collection Service Accounts, Project Collection
-    Build Administrators and the Project, Build, Release and Endpoint
-    Administrators groups. `high_impact_allowed` lists the explicitly allowed
-    (and not denied) high-impact actions: Collection GENERIC_WRITE and
-    MANAGE_ENTERPRISE_POLICIES; Project GENERIC_WRITE, DELETE,
-    UPDATE_VISIBILITY and ADMINISTER_BUILD; Git ManagePermissions,
-    EditPolicies, PolicyExempt, PullRequestBypassPolicy, DeleteRepository and
-    ForcePush; TFVC AdminProjectRights, CheckinOther and AdminConfiguration;
-    Build AdministerBuildPermissions, EditBuildDefinition,
-    DeleteBuildDefinition and OverrideBuildCheckInValidation; Release
-    AdministerReleasePermissions, EditReleaseDefinition,
-    DeleteReleaseDefinition and ManageReleaseApprovers; ServiceEndpoints,
-    Environment and Library Administer (Environment also Manage); AuditLog
-    Manage_Streams and Delete_Streams. `high_impact_outside_admin_groups`
-    flags such an entry on an identity that is not an admin group.
-    branch_policy_bypass_holders lists who may bypass Git branch policies.
-    Signs in with the PAT, else the ambient Entra identity (metadata.auth_mode).
-    A refused call names the PAT scope it needs.
+  instructions: |
+    Script: azure/devops_permissions/fetcher.py
+
+    Access: A personal access token for the organization with Security (Manage), Identity (Read) and Project and Team (Read), since Azure DevOps has no read-only scope for permissions and the fetcher only reads; or an Entra identity in the organization that can view permissions in each namespace.
+
+    Commands Executed:
+    - GET _apis/connectionData — identifies the signed-in user
+    - GET _apis/projects — lists projects, to name them in each entry
+    - GET _apis/securitynamespaces — the security namespaces and the name of each permission bit
+    - GET _apis/accesscontrollists/{namespace} (per namespace) — every permission entry, with inherited and effective rights
+    - GET _apis/identities (in batches) — the user, group or service account behind each entry
+
+    Output: azure_devops_permissions_<organization>.json — every explicit permission entry in the organization's delivery-related namespaces (organization, project, Git and TFVC, build, release, environments, service connections, library and audit streams), with who it applies to, the scope it applies at, and the actions it allows, denies and inherits, plus the high-impact rights held outside the admin groups.
+
+    Summary fields:
+
+    What was read?
+    - namespaces_collected — Number of security namespaces whose permission entries were read
+    - namespaces_not_found — List of expected namespaces the organization doesn't have (for example VersionControlPrivileges when TFVC isn't used)
+    - acls_total — Number of permission lists, one per secured object such as a project, repository, pipeline or service connection
+    - acls_with_inheritance_off — Number of permission lists that don't inherit from their parent object
+    - entries_total — Number of permission entries that allow or deny at least one action
+    - entries_by_scope — Number of permission entries at each scope: organization, project, repository, branch (Git), path (TFVC), folder, pipeline (build), release_stage (classic release), environment, service_connection, variable_group or secure_file
+    - entries_with_deny — Number of permission entries that deny at least one action
+
+    Who holds permissions?
+    - identities_with_explicit_entries — Number of users, groups and service accounts named in at least one permission entry
+    - unresolved_identities — Number of identities in permission entries that couldn't be looked up, so their name and type are unknown
+    - users_with_direct_entries — List of people granted or denied permissions directly rather than through a group
+
+    Are high-impact rights limited to the admin groups?
+    - high_impact_grants — Number of permission entries that allow, and don't also deny, a high-impact action, meaning managing permissions or enterprise policies, deleting a project or changing its visibility, editing or bypassing branch policies, deleting a repository or force-pushing, administering TFVC or checking in other users' changes, editing, deleting or administering build and release pipelines, overriding check-in validation, managing release approvers, administering service connections, environments or the library, and managing or deleting audit streams
+    - high_impact_grants_outside_admin_groups — Number of permission entries that allow a high-impact action to anyone other than the admin groups, meaning the built-in Project Collection Administrators, Project Collection Service Accounts, Project Collection Build Administrators, and each project's Project Administrators, Build Administrators, Release Administrators and Endpoint Administrators
+    - identities_with_high_impact_rights_outside_admin_groups — List of users, groups and service accounts outside the admin groups that hold a high-impact action
+    - high_impact_rights_outside_admin_groups_by_right — Number of permission entries outside the admin groups for each high-impact action, as namespace: action
+    - branch_policy_bypass_holders — List of identities allowed to bypass Git branch policies (exempt from policy enforcement, or bypass policies when completing a pull request)
+
+    What isn't collected?
+    - not_collected — What the fetcher deliberately doesn't collect, by area: who is in each group (see the identities evidence); resource names (repositories, pipelines, environments and connections appear by id); namespaces outside the delivery platform (work items, boards, wiki, dashboards, analytics, agent pools); and rights only inherited from a parent object, which are flagged on that parent
