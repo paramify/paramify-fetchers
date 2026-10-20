@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import sys
 from pathlib import Path
@@ -92,29 +93,59 @@ def test_summary_counts_unhealthy_by_own_severity_and_the_fallbacks():
             "healthy_percentage", "provider_registration_status"} < set(s)
 
 
+def test_unhealthy_records_on_the_fallback_or_unknown_are_counted_apart():
+    unknown_unhealthy = da.project_assessment(assessment(CUSTOM), CATALOGUE, {})
+    unknown_healthy = da.project_assessment(assessment(CUSTOM, "Healthy", f"{APP}-two"), CATALOGUE, {})
+    catalogue_unhealthy = da.project_assessment(assessment(TLS), CATALOGUE, {})
+    s = da.summarize([unknown_unhealthy, unknown_healthy, catalogue_unhealthy], da.REGISTERED)
+    assert (s["unhealthy_severity_unknown_count"], s["unhealthy_severity_from_catalogue_count"]) == (1, 1)
+    assert (s["severity_unknown_count"], s["severity_from_catalogue_count"]) == (2, 1)
+    healthy_only = da.summarize([unknown_healthy], da.REGISTERED)
+    assert (healthy_only["severity_unknown_count"], healthy_only["unhealthy_severity_unknown_count"]) == (1, 0)
+
+
 class FakeGraph:
-    def __init__(self, rows=None, fail=False):
-        self.rows, self.fail, self.queries = rows or [], fail, []
+    """Serves `rows` `page_size` at a time by skip token; `fail`, `truncate` or `overcount` break the result."""
+
+    def __init__(self, rows=None, fail=False, truncate=False, overcount=False, page_size=1000):
+        self.rows, self.fail, self.truncate, self.overcount = rows or [], fail, truncate, overcount
+        self.page_size, self.requests = page_size, []
+
+    @property
+    def queries(self):
+        return [r.query for r in self.requests]
 
     def resources(self, request):
-        self.queries.append(request.query)
+        self.requests.append(request)
         if self.fail:
             raise RuntimeError("AuthorizationFailed")
-        return SimpleNamespace(total_records=len(self.rows), result_truncated="false", data=self.rows,
-                               skip_token=None)
+        start = int(request.options.skip_token or 0)
+        end = start + self.page_size
+        return SimpleNamespace(total_records=len(self.rows) + int(self.overcount),
+                               result_truncated="true" if self.truncate else "false",
+                               data=self.rows[start:end], skip_token=str(end) if end < len(self.rows) else None)
 
 
-def _collect(monkeypatch, graph, assessments=None, list_error=None):
+def _security_module(monkeypatch, assessments=None, list_error=None, catalogue_error=None):
     def listing(scope):
+        yield from assessments or []
         if list_error:
             raise list_error
-        return iter(assessments or [])
+
+    def catalogue():
+        if catalogue_error:
+            raise catalogue_error
+        return CATALOGUE.values()
 
     client = SimpleNamespace(assessments=SimpleNamespace(list=listing),
-                             assessments_metadata=SimpleNamespace(list_by_subscription=lambda: CATALOGUE.values()))
+                             assessments_metadata=SimpleNamespace(list_by_subscription=catalogue))
     security = ModuleType("azure.mgmt.security")
     security.SecurityCenter = lambda **kw: client
     monkeypatch.setitem(sys.modules, "azure.mgmt.security", security)
+
+
+def _collect(monkeypatch, graph, assessments=None, list_error=None, catalogue_error=None):
+    _security_module(monkeypatch, assessments, list_error, catalogue_error)
     monkeypatch.setattr(da, "resource_graph_client", lambda cred: graph)
     collector = Collector(logging.getLogger("test"))
     return da.collect_assessments(SUB_ID, object(), collector), collector
@@ -142,3 +173,83 @@ def test_an_unregistered_provider_runs_no_severity_query(monkeypatch):
         monkeypatch, graph, list_error=RuntimeError("The subscription not registered to use Microsoft.Security"))
     assert (records, status, collector.ok) == ([], da.NOT_REGISTERED, True)
     assert graph.queries == []
+
+
+def test_the_severity_query_is_scoped_to_the_subscription(monkeypatch):
+    graph = FakeGraph([{"id": assessment(AUTH).id, "severity": "High"}])
+    _collect(monkeypatch, graph, [assessment(AUTH)])
+    assert [r.subscriptions for r in graph.requests] == [[SUB_ID]]
+
+
+@pytest.mark.parametrize("graph", [FakeGraph([{"id": "x", "severity": "High"}], truncate=True),
+                                   FakeGraph([{"id": "x", "severity": "High"}], overcount=True)],
+                         ids=["truncated", "short_count"])
+def test_a_truncated_or_short_severity_query_is_a_failure_that_falls_back(monkeypatch, graph):
+    (records, _), collector = _collect(monkeypatch, graph, [assessment(AUTH)])
+    assert [f["operation"] for f in collector.failures] == ["resourcegraph.resources (SecurityResources)"]
+    assert (records[0]["severity"], records[0]["severity_source"]) == ("Low", "catalogue")
+
+
+def test_main_exits_1_with_catalogue_severities_when_the_severity_query_is_truncated(monkeypatch, tmp_path):
+    _security_module(monkeypatch, [assessment(AUTH)])
+    graph = FakeGraph([{"id": assessment(AUTH).id, "severity": "High"}], truncate=True)
+    failures = []
+    monkeypatch.setattr(da, "resource_graph_client", lambda cred: graph)
+    monkeypatch.setattr(da, "credential", lambda: object())
+    monkeypatch.setattr(da, "load_dotenv", lambda: None)
+    monkeypatch.setattr(da, "report_failure", lambda reason, code: failures.append(reason))
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", SUB_ID)
+
+    assert da.main() == 1
+
+    assert len(failures) == 1
+    evidence = json.loads((tmp_path / f"azure_defender_assessments_{SUB_ID}.json").read_text())
+    assert evidence["summary"]["unhealthy_severity_from_catalogue_count"] == 1
+    assert evidence["metadata"]["api_failures"][0]["operation"] == "resourcegraph.resources (SecurityResources)"
+
+
+def test_severities_on_every_page_are_joined(monkeypatch):
+    graph = FakeGraph([{"id": assessment(AUTH).id, "severity": "High"},
+                       {"id": assessment(TLS).id, "severity": "High"}], page_size=1)
+    (records, _), collector = _collect(monkeypatch, graph, [assessment(AUTH), assessment(TLS)])
+    assert collector.ok and len(graph.requests) == 2
+    assert {r["name"]: r["severity_source"] for r in records} == {AUTH: "assessment", TLS: "assessment"}
+
+
+SUB = f"/subscriptions/{SUB_ID}"
+
+
+@pytest.mark.parametrize("graph_id", [
+    f"{assessment(AUTH).id}/",
+    f"  {assessment(AUTH).id.upper()}  ",
+])
+def test_resource_graph_ids_are_normalised_before_the_join(monkeypatch, graph_id):
+    (records, _), _ = _collect(monkeypatch, FakeGraph([{"id": graph_id, "severity": "High"}]), [assessment(AUTH)])
+    assert (records[0]["severity"], records[0]["severity_source"]) == ("High", "assessment")
+
+
+def test_a_subscription_scoped_assessment_is_joined(monkeypatch):
+    graph = FakeGraph([{"id": assessment(AUTH, resource=SUB).id, "severity": "High"}])
+    (records, _), _ = _collect(monkeypatch, graph, [assessment(AUTH, resource=SUB)])
+    assert (records[0]["resource_id"], records[0]["severity"], records[0]["severity_source"]) == (
+        SUB, "High", "assessment")
+
+
+def test_a_failed_catalogue_keeps_resource_graph_severities(monkeypatch):
+    graph = FakeGraph([{"id": assessment(AUTH).id, "severity": "High"}])
+    (records, _), collector = _collect(monkeypatch, graph, [assessment(AUTH)],
+                                       catalogue_error=RuntimeError("throttled"))
+    assert [f["operation"] for f in collector.failures] == ["security.assessments_metadata.list_by_subscription"]
+    assert (records[0]["severity"], records[0]["severity_source"], records[0]["categories"]) == (
+        "High", "assessment", [])
+
+
+def test_a_list_that_fails_mid_page_keeps_earlier_records(monkeypatch):
+    graph = FakeGraph()
+    (records, status), collector = _collect(monkeypatch, graph, [assessment(AUTH)],
+                                            list_error=RuntimeError("connection reset"))
+    assert [f["operation"] for f in collector.failures] == ["security.assessments.list"]
+    assert (status, [r["name"] for r in records]) == (da.UNKNOWN, [AUTH])
+    assert (records[0]["severity"], records[0]["severity_source"]) == (None, None)
+    assert graph.requests == []

@@ -213,6 +213,7 @@ def summarize(assessments: list[dict], registration_status: str) -> dict:
         a["severity"] for a in assessments if a["status_code"] == "Unhealthy" and a["severity"]
     )
     by_source = Counter(a.get("severity_source") for a in assessments)
+    unhealthy_by_source = Counter(a.get("severity_source") for a in assessments if a["status_code"] == "Unhealthy")
     return {
         "provider_registration_status": registration_status,
         "total_assessments": total,
@@ -224,6 +225,9 @@ def summarize(assessments: list[dict], registration_status: str) -> dict:
         # Records whose own severity was not found, so the catalogue's (possibly lower) one or none is used.
         "severity_from_catalogue_count": by_source.get(FROM_CATALOGUE, 0),
         "severity_unknown_count": by_source.get(None, 0),
+        # The same for Unhealthy records only: an unknown one is missing from unhealthy_by_severity.
+        "unhealthy_severity_from_catalogue_count": unhealthy_by_source.get(FROM_CATALOGUE, 0),
+        "unhealthy_severity_unknown_count": unhealthy_by_source.get(None, 0),
     }
 
 

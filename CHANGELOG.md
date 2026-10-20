@@ -864,7 +864,12 @@ schemas and the `paramify` CLI — not the internal code.
   Graph (`SecurityResources`, one query paged to the end), with the catalogue
   only as a fallback. Each record gains `severity_source` (`assessment`,
   `catalogue`, or `null` when neither has one), and the summary gains
-  `severity_from_catalogue_count` and `severity_unknown_count`. A failed
+  `severity_from_catalogue_count` and `severity_unknown_count`, and
+  `unhealthy_severity_from_catalogue_count` and
+  `unhealthy_severity_unknown_count` for Unhealthy records only, since an
+  Unhealthy record with no severity is missing from `unhealthy_by_severity`.
+  The catalogue still supplies categories, threats, type, user impact,
+  implementation effort and policy definition id. A failed
   Resource Graph query is a collection failure (exit 1), and every record falls
   back to the catalogue. Other fields are unchanged.
 
