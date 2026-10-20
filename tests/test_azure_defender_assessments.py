@@ -126,6 +126,14 @@ class FakeGraph:
                                data=self.rows[start:end], skip_token=str(end) if end < len(self.rows) else None)
 
 
+@pytest.fixture
+def fake_models(monkeypatch):
+    models = ModuleType("azure.mgmt.resourcegraph.models")
+    models.QueryRequest = lambda **kw: SimpleNamespace(**kw)
+    models.QueryRequestOptions = lambda **kw: SimpleNamespace(**kw)
+    monkeypatch.setitem(sys.modules, "azure.mgmt.resourcegraph.models", models)
+
+
 def _security_module(monkeypatch, assessments=None, list_error=None, catalogue_error=None):
     def listing(scope):
         yield from assessments or []
@@ -151,7 +159,7 @@ def _collect(monkeypatch, graph, assessments=None, list_error=None, catalogue_er
     return da.collect_assessments(SUB_ID, object(), collector), collector
 
 
-def test_collect_reads_each_assessments_severity_from_resource_graph(monkeypatch):
+def test_collect_reads_each_assessments_severity_from_resource_graph(monkeypatch, fake_models):
     graph = FakeGraph([{"id": assessment(AUTH).id.lower(), "severity": "High"}])
     (records, status), collector = _collect(monkeypatch, graph, [assessment(AUTH), assessment(TLS)])
     assert collector.ok and status == da.REGISTERED
@@ -160,14 +168,15 @@ def test_collect_reads_each_assessments_severity_from_resource_graph(monkeypatch
     assert by_check == {AUTH: ("High", "assessment"), TLS: ("Medium", "catalogue")}
 
 
-def test_a_failed_severity_query_is_recorded_and_falls_back(monkeypatch):
+def test_a_failed_severity_query_is_recorded_and_falls_back(monkeypatch, fake_models):
     (records, status), collector = _collect(monkeypatch, FakeGraph(fail=True), [assessment(AUTH)])
-    assert [f["operation"] for f in collector.failures] == ["resourcegraph.resources (SecurityResources)"]
+    assert [(f["operation"], f["message"]) for f in collector.failures] == [
+        ("resourcegraph.resources (SecurityResources)", "AuthorizationFailed")]
     assert status == da.REGISTERED
     assert (records[0]["severity"], records[0]["severity_source"]) == ("Low", "catalogue")
 
 
-def test_an_unregistered_provider_runs_no_severity_query(monkeypatch):
+def test_an_unregistered_provider_runs_no_severity_query(monkeypatch, fake_models):
     graph = FakeGraph()
     (records, status), collector = _collect(
         monkeypatch, graph, list_error=RuntimeError("The subscription not registered to use Microsoft.Security"))
@@ -175,22 +184,24 @@ def test_an_unregistered_provider_runs_no_severity_query(monkeypatch):
     assert graph.queries == []
 
 
-def test_the_severity_query_is_scoped_to_the_subscription(monkeypatch):
+def test_the_severity_query_is_scoped_to_the_subscription(monkeypatch, fake_models):
     graph = FakeGraph([{"id": assessment(AUTH).id, "severity": "High"}])
     _collect(monkeypatch, graph, [assessment(AUTH)])
     assert [r.subscriptions for r in graph.requests] == [[SUB_ID]]
 
 
-@pytest.mark.parametrize("graph", [FakeGraph([{"id": "x", "severity": "High"}], truncate=True),
-                                   FakeGraph([{"id": "x", "severity": "High"}], overcount=True)],
-                         ids=["truncated", "short_count"])
-def test_a_truncated_or_short_severity_query_is_a_failure_that_falls_back(monkeypatch, graph):
+@pytest.mark.parametrize("graph,message", [
+    (FakeGraph([{"id": "x", "severity": "High"}], truncate=True), "reported the result as truncated"),
+    (FakeGraph([{"id": "x", "severity": "High"}], overcount=True), "reported 2 rows but paging returned 1"),
+], ids=["truncated", "short_count"])
+def test_a_truncated_or_short_severity_query_is_a_failure_that_falls_back(monkeypatch, fake_models, graph, message):
     (records, _), collector = _collect(monkeypatch, graph, [assessment(AUTH)])
     assert [f["operation"] for f in collector.failures] == ["resourcegraph.resources (SecurityResources)"]
+    assert message in collector.failures[0]["message"]
     assert (records[0]["severity"], records[0]["severity_source"]) == ("Low", "catalogue")
 
 
-def test_main_exits_1_with_catalogue_severities_when_the_severity_query_is_truncated(monkeypatch, tmp_path):
+def test_main_exits_1_with_catalogue_severities_when_the_severity_query_is_truncated(monkeypatch, fake_models, tmp_path):
     _security_module(monkeypatch, [assessment(AUTH)])
     graph = FakeGraph([{"id": assessment(AUTH).id, "severity": "High"}], truncate=True)
     failures = []
@@ -206,10 +217,12 @@ def test_main_exits_1_with_catalogue_severities_when_the_severity_query_is_trunc
     assert len(failures) == 1
     evidence = json.loads((tmp_path / f"azure_defender_assessments_{SUB_ID}.json").read_text())
     assert evidence["summary"]["unhealthy_severity_from_catalogue_count"] == 1
-    assert evidence["metadata"]["api_failures"][0]["operation"] == "resourcegraph.resources (SecurityResources)"
+    (failure,) = evidence["metadata"]["api_failures"]
+    assert failure["operation"] == "resourcegraph.resources (SecurityResources)"
+    assert "truncated" in failure["message"]
 
 
-def test_severities_on_every_page_are_joined(monkeypatch):
+def test_severities_on_every_page_are_joined(monkeypatch, fake_models):
     graph = FakeGraph([{"id": assessment(AUTH).id, "severity": "High"},
                        {"id": assessment(TLS).id, "severity": "High"}], page_size=1)
     (records, _), collector = _collect(monkeypatch, graph, [assessment(AUTH), assessment(TLS)])
@@ -224,19 +237,19 @@ SUB = f"/subscriptions/{SUB_ID}"
     f"{assessment(AUTH).id}/",
     f"  {assessment(AUTH).id.upper()}  ",
 ])
-def test_resource_graph_ids_are_normalised_before_the_join(monkeypatch, graph_id):
+def test_resource_graph_ids_are_normalised_before_the_join(monkeypatch, fake_models, graph_id):
     (records, _), _ = _collect(monkeypatch, FakeGraph([{"id": graph_id, "severity": "High"}]), [assessment(AUTH)])
     assert (records[0]["severity"], records[0]["severity_source"]) == ("High", "assessment")
 
 
-def test_a_subscription_scoped_assessment_is_joined(monkeypatch):
+def test_a_subscription_scoped_assessment_is_joined(monkeypatch, fake_models):
     graph = FakeGraph([{"id": assessment(AUTH, resource=SUB).id, "severity": "High"}])
     (records, _), _ = _collect(monkeypatch, graph, [assessment(AUTH, resource=SUB)])
     assert (records[0]["resource_id"], records[0]["severity"], records[0]["severity_source"]) == (
         SUB, "High", "assessment")
 
 
-def test_a_failed_catalogue_keeps_resource_graph_severities(monkeypatch):
+def test_a_failed_catalogue_keeps_resource_graph_severities(monkeypatch, fake_models):
     graph = FakeGraph([{"id": assessment(AUTH).id, "severity": "High"}])
     (records, _), collector = _collect(monkeypatch, graph, [assessment(AUTH)],
                                        catalogue_error=RuntimeError("throttled"))
@@ -245,7 +258,7 @@ def test_a_failed_catalogue_keeps_resource_graph_severities(monkeypatch):
         "High", "assessment", [])
 
 
-def test_a_list_that_fails_mid_page_keeps_earlier_records(monkeypatch):
+def test_a_list_that_fails_mid_page_keeps_earlier_records(monkeypatch, fake_models):
     graph = FakeGraph()
     (records, status), collector = _collect(monkeypatch, graph, [assessment(AUTH)],
                                             list_error=RuntimeError("connection reset"))
