@@ -90,16 +90,24 @@ CANONICAL_EFFECTS = {
     "modify": "modify",
     "deployifnotexists": "deployIfNotExists",
     "append": "append",
+    "mutate": "mutate",
+    "addtonetworkgroup": "addToNetworkGroup",
+    "enforcesetting": "enforceSetting",
     "audit": "audit",
+    "auditaction": "auditAction",
     "auditifnotexists": "auditIfNotExists",
     "manual": "manual",
     "disabled": "disabled",
 }
 # The effects that change or block a request, or remediate a resource. `append` and
 # `denyAction` are included: they alter or refuse the request just as deny/modify do.
-ENFORCING_EFFECTS = frozenset({"deny", "denyAction", "modify", "deployIfNotExists", "append"})
+# mutate, addToNetworkGroup and enforceSetting change the resource's configuration.
+ENFORCING_EFFECTS = frozenset(
+    {"deny", "denyAction", "modify", "deployIfNotExists", "append", "mutate",
+     "addToNetworkGroup", "enforceSetting"}
+)
 # The effects that only report. `manual` is attestation, which enforces nothing.
-AUDIT_EFFECTS = frozenset({"audit", "auditIfNotExists", "manual"})
+AUDIT_EFFECTS = frozenset({"audit", "auditAction", "auditIfNotExists", "manual"})
 DISABLED_EFFECT = "disabled"
 UNRESOLVED_EFFECT = "unresolved"
 
@@ -314,10 +322,14 @@ def _has_ci(mapping: dict, key: str) -> bool:
     return any(str(name).lower() == str(key).lower() for name in (mapping or {}))
 
 
+def _is_expression(value) -> bool:
+    return isinstance(value, str) and value.strip().startswith("[")
+
+
 def _resolved(value, source):
     effect = canonical_effect(value)
     if effect is None:
-        return UNRESOLVED_EFFECT, None
+        return UNRESOLVED_EFFECT, None, f"unknown effect value {value!r}"[:200]
     return effect, source
 
 
@@ -347,7 +359,7 @@ def resolve_definition_effect(
         return {**record, "effect": effect, "effect_source": source,
                 "reason": reason if effect == UNRESOLVED_EFFECT else None}
 
-    if canonical_effect(expression):
+    if expression is not None and not _is_expression(expression):
         return _done(*_resolved(expression, SOURCE_LITERAL))
     name = parameter_reference(expression)
     if name is None:
@@ -368,7 +380,7 @@ def resolve_definition_effect(
             return _done(*_resolved(_get_ci(defaults, name), SOURCE_DEFINITION_DEFAULT))
         return _done(UNRESOLVED_EFFECT, None, f"parameter '{name}' has no value or default")
     passed = _get_ci(reference_parameters, name)
-    if canonical_effect(passed):
+    if not _is_expression(passed):
         return _done(*_resolved(passed, SOURCE_INITIATIVE_REFERENCE))
     outer = parameter_reference(passed)
     if outer is None:
@@ -584,10 +596,13 @@ def summarize_effects(assignments: list[dict]) -> dict:
         )
     }
     member_counts: dict[str, int] = {}
+    unresolved_not_enforced = 0
     for assignment in assignments:
         by_class[assignment["effect_class"]] = by_class.get(assignment["effect_class"], 0) + 1
         for effect, count in ((assignment.get("policy_effects") or {}).get("effect_counts") or {}).items():
             member_counts[effect] = member_counts.get(effect, 0) + count
+            if effect == UNRESOLVED_EFFECT and not assignment["enforced"]:
+                unresolved_not_enforced += count
     actually = by_class[EFFECT_CLASS_ENFORCING]
     return {
         "actually_enforcing_assignments": actually,
@@ -601,6 +616,9 @@ def summarize_effects(assignments: list[dict]) -> dict:
         ),
         # Across every assignment's members; an initiative assigned twice counts twice.
         "member_policy_effect_counts": dict(sorted(member_counts.items())),
+        # Unresolved members, which effect_class and enforcing_effects_not_enforced ignore.
+        "unresolved_member_policies": member_counts.get(UNRESOLVED_EFFECT, 0),
+        "unresolved_member_policies_not_enforced": unresolved_not_enforced,
     }
 
 
