@@ -1,0 +1,82 @@
+name: azure_resource_diagnostic_settings
+version: 0.1.0
+description: >
+  Resource-level logging across a whole subscription: every resource Azure Resource
+  Graph lists, plus each storage account's blob, file, queue and table services, with
+  the log categories its type emits and the diagnostic settings that export them. For
+  each resource that emits resource logs: whether any setting sends an enabled log
+  category or category group to a destination, which destinations (Log Analytics,
+  storage, event hub, partner), and which log and audit categories no setting
+  captures. Summarized as log-setting and Log Analytics coverage of the log-emitting
+  resources, with the uncovered resources counted by type.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 3600
+
+output:
+  type: json
+  path: azure_resource_diagnostic_settings.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-MLA-LET
+  - KSI-MLA-OSM
+
+evidence_set:
+  reference_id: EVD-AZURE-RESOURCE-DIAG-SETTINGS
+  name: Azure Resource Diagnostic Settings
+  instructions: >
+    Script: fetcher.py. Reader (or Monitoring Reader) at subscription scope.
+    (1) Azure Resource Graph query "Resources | project id, name, type, kind,
+    location, resourceGroup | order by id asc", paged by skip token to the end; the run
+    fails if the rows collected differ from Resource Graph's total_records
+    (summary.resources_enumerated vs summary.resource_graph_total_records). Storage
+    accounts carry no resource logs themselves, so each one's
+    {id}/blobServices/default, fileServices/default, queueServices/default and
+    tableServices/default are added (synthesized_child: true) unless Resource Graph
+    already listed them: only blobServices for kind BlobStorage and BlockBlobStorage,
+    only fileServices for FileStorage, all four for any other kind. (2) Per resource, azure-mgmt-monitor<7
+    diagnostic_settings_category.list(resource_uri) (api 2021-05-01-preview): its
+    "Logs" categories set emits_resource_logs, and log categories whose
+    category_groups include "audit" are audit_log_categories. A type ARM refuses
+    diagnostics for (400 ResourceTypeNotSupported, "The resource type '<type>' does not
+    support diagnostic settings.") is status "unsupported", and the rest of that type
+    is marked unsupported without another call; a resource deleted since enumeration
+    is "not_found"; any other error is status "error" and fails the run. (3) For each
+    resource that emits logs, diagnostic_settings.list(resource_uri). A setting
+    exports_logs when it has at least one destination (an empty-string id counts as
+    none) and at least one enabled log category or category group.
+    has_enabled_log_setting is true when any setting exports logs;
+    destination_types and sends_to_log_analytics come from the exporting settings
+    only. A category is captured when an exporting setting enables it by name, enables
+    a group it belongs to, or enables allLogs; uncaptured_log_categories and
+    captures_all_audit_categories follow from that. Metrics-only resources keep
+    has_enabled_log_setting null and are outside the coverage denominator. A SQL
+    server's master database is listed and counted like any database: its setting is
+    where server-level auditing (SQLSecurityAuditEvents, DevOpsOperationsAudit) is
+    exported, while the server resource itself has metrics only. Run time:
+    about 14 resources per second with 4 workers (measured on ~1,000 resources), so
+    roughly 25 minutes per 20,000; the timeout is 3600 seconds.

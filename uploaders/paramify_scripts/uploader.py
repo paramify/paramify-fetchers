@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
 
-A provisioning stage, separate from evidence upload (see docs/uploader_design.md):
+A provisioning stage, separate from evidence upload (see docs/uploader_guide.md, step 5):
 evidence upload runs every collection; this runs only when `fetchers/**` changes.
 It reconciles the tenant to the repo — GitOps style — because the Paramify
 `/scripts` API has no stable external key and no server-side versioning:
@@ -57,6 +57,7 @@ from framework.paramify_auth import (  # noqa: E402
     resolve_base_url,
     resolve_upload_token,
 )
+from framework.paramify_responses import already_present  # noqa: E402
 
 logger = logging.getLogger("paramify_scripts_uploader")
 
@@ -122,7 +123,7 @@ class ParamifyScriptsClient:
         r = self.session.post(f"{self.base_url}/evidence", json=body, timeout=self.timeout)
         if r.status_code in (200, 201):
             return r.json().get("id")
-        if r.status_code == 400 and "already exists" in r.text.lower():
+        if already_present(r.status_code, r.text):
             return self.find_evidence_set(reference_id)
         raise ParamifyError(
             f"create evidence set {reference_id} failed (HTTP {r.status_code}): {r.text[:300]}"
@@ -136,7 +137,9 @@ class ParamifyScriptsClient:
     # -- association ------------------------------------------------------ #
     def associate_script(self, evidence_id: str, script_id: str) -> None:
         """CONNECT a script to an evidence set. Tolerant of an already-connected
-        state (the API has no pre-check endpoint), so re-runs are idempotent."""
+        state (the API has no pre-check endpoint), so re-runs are idempotent.
+        What counts as "already connected" is framework.paramify_responses'
+        rule, shared with the other uploaders."""
         body = {"associationType": "CONNECT", "subjectType": "SCRIPT", "subjectId": script_id}
         r = self.session.post(
             f"{self.base_url}/evidence/{evidence_id}/associate",
@@ -145,8 +148,8 @@ class ParamifyScriptsClient:
         )
         if r.status_code in (200, 201, 204):
             return
-        if r.status_code in (400, 409) and any(t in r.text.lower() for t in ("already", "exists", "connected")):
-            return  # already associated — treat as success
+        if already_present(r.status_code, r.text):
+            return  # already associated — the state we wanted holds
         raise ParamifyError(
             f"associate script {script_id} -> evidence {evidence_id} failed "
             f"(HTTP {r.status_code}): {r.text[:300]}"

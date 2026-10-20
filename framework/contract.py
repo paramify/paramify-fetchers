@@ -102,7 +102,7 @@ class Validator:
     it applies to via `evidence_sets` (reference_ids). `key` is the stable
     repo-side identity; the Paramify id is resolved per instance at sync time and
     never stored here. See framework/schemas/validator_schema.json and
-    docs/validators_design.md.
+    docs/validators_guide.md.
     """
     key: str
     name: str
@@ -184,6 +184,16 @@ class Fetcher:
         only sends one the run collected completely. See framework/inventory.py.
         """
         return self.kind == "inventory"
+
+    @property
+    def is_discovery(self) -> bool:
+        """True when this fetcher enumerates a platform rather than collecting evidence.
+
+        Decides where the runner points EVIDENCE_DIR (<run>/discovery/), which is
+        also what keeps the output away from both uploaders: they read the run
+        dir's top level and issue-reports/, never discovery/.
+        """
+        return self.kind == "discovery"
 
 
 @dataclass
@@ -280,6 +290,6 @@ class InvocationResult:
     # What the fetcher reported via $FETCHER_STATUS_FILE, already secret-redacted
     # by the executor (the only place the injected values are still in scope).
     # None when the fetcher wrote nothing readable, which is not an error — the
-    # envelope then falls back to the stderr tail. See docs/fetcher_contract.md.
+    # envelope then falls back to the stderr tail. See docs/fetcher_contract_guide.md, step 4.
     error: Optional[str] = None
     error_code: Optional[str] = None

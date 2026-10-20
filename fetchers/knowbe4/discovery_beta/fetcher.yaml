@@ -1,0 +1,21 @@
+name: knowbe4_discovery_beta
+version: 0.1.0
+description: Lists what this API key can see in the KnowBe4 tenant — account and subscription, groups, training campaigns, purchased modules, policies, phishing campaigns and tests, plus user and enrollment counts — and whether each could be read. A discovery document, not evidence; it is never uploaded. Users and enrollments are counted, never listed.
+category: knowbe4
+kind: discovery
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: knowbe4_discovery_beta.json
+
+secrets:
+- name: api_key
+  env: KNOWBE4_API_KEY
+- name: region
+  env: KNOWBE4_REGION

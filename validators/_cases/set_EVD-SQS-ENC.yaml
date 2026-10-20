@@ -28,5 +28,5 @@ cases:
     note: >
       ERROR is the semantically right verdict, but the API discards disposition,
       so FAIL is the best reachable answer today. What matters is that it does
-      not PASS. See docs/validators_design.md.
+      not PASS.
     artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"ExpiredToken"},"payload":{}}'

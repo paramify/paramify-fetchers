@@ -10,7 +10,8 @@
 # Target env (per repo): CHECKOV_REPO_URL (required), CHECKOV_CLONE_BRANCH
 # Secret (per repo):     GIT_CLONE_TOKEN (omit for public repos)
 # Config env:            CHECKOV_SOFT_FAIL, CHECKOV_COMPACT, CHECKOV_SKIP_CHECKS,
-#                        CHECKOV_SKIP_RESOURCES, CHECKOV_SKIP_PATHS, CHECKOV_TERRAFORM_CHECKS,
+#                        CHECKOV_USE_DEFAULT_SKIP_CHECKS, CHECKOV_SKIP_RESOURCES,
+#                        CHECKOV_SKIP_PATHS, CHECKOV_TERRAFORM_CHECKS,
 #                        CHECKOV_DOWNLOAD_EXTERNAL_MODULES, CHECKOV_EVALUATE_VARIABLES,
 #                        CHECKOV_EXTERNAL_CHECKS_DIR, CHECKOV_EXTERNAL_MODULES_PATH,
 #                        CHECKOV_REPO_ID, CHECKOV_GIT_USERNAME, CHECKOV_TERRAFORM_PLAN_FILE,
@@ -29,7 +30,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 [ -f .env ] && { set -a; . .env; set +a; }
 
 . "$SCRIPT_DIR/../_shared/clone.sh"
-# The one place a fetcher reports WHY it failed (docs/fetcher_contract.md § Output).
+# The one place a fetcher reports WHY it failed (docs/fetcher_contract_guide.md, step 6).
 source "$(dirname "$0")/../../_lib/status.sh"
 FETCHER="$COMPONENT"   # attributes report_failure's log line to this fetcher
 
@@ -70,13 +71,68 @@ checkov_require_tools "$COMPONENT" || {
 _TARGET_ID="$(printf '%s' "$REPO_URL" | sed -e 's#^https\{0,1\}://##' -e 's#\.git$##' | tr -c 'A-Za-z0-9._-' '_')"
 OUTPUT_JSON="$OUTPUT_DIR/${COMPONENT}_${_TARGET_ID}.json"
 
+# --- skip-checks: the shipped defaults file (unless use_default_skip_checks is
+# false) + CHECKOV_SKIP_CHECKS, minus any explicitly-requested checks. A check
+# passed to --skip-check is absent from checkov's output (not even under
+# skipped_checks), so the effective list is recorded in metadata.
+SKIP_CHECKS_LIST=""
+REQUESTED_CHECKS="${CHECKOV_TERRAFORM_CHECKS:-}"
+add_skip() {
+    local c="$1"; [ -z "$c" ] && return
+    case ",$REQUESTED_CHECKS," in *",$c,"*) return ;; esac
+    case ",$SKIP_CHECKS_LIST," in *",$c,"*) return ;; esac
+    SKIP_CHECKS_LIST="${SKIP_CHECKS_LIST:+$SKIP_CHECKS_LIST,}$c"
+}
+DEFAULT_SKIPS_APPLIED=true
+[ "${CHECKOV_USE_DEFAULT_SKIP_CHECKS:-true}" = "false" ] && DEFAULT_SKIPS_APPLIED=false
+DEFAULT_SKIP_CHECKS_FILE="$SCRIPT_DIR/../_shared/skip-checks.default.txt"
+if [ "$DEFAULT_SKIPS_APPLIED" = "true" ] && [ -f "$DEFAULT_SKIP_CHECKS_FILE" ]; then
+    while IFS= read -r c || [ -n "$c" ]; do
+        c="$(printf '%s' "$c" | xargs)"; [ -z "$c" ] && continue
+        case "$c" in \#*) continue ;; esac
+        add_skip "$c"
+    done < "$DEFAULT_SKIP_CHECKS_FILE"
+fi
+if [ -n "${CHECKOV_SKIP_CHECKS:-}" ]; then
+    IFS=',' read -ra _U <<< "$CHECKOV_SKIP_CHECKS"
+    for c in "${_U[@]}"; do add_skip "$(printf '%s' "$c" | xargs)"; done
+fi
+
+# --- skip-resources (defaults file + config), applied post-scan ---
+SKIP_RESOURCES_LIST=""
+DEFAULT_SKIP_RES_FILE="$SCRIPT_DIR/../_shared/skip-resources.default.txt"
+if [ -f "$DEFAULT_SKIP_RES_FILE" ]; then
+    while IFS= read -r r || [ -n "$r" ]; do
+        r="$(printf '%s' "$r" | xargs)"; [ -z "$r" ] && continue
+        case "$r" in \#*) continue ;; esac
+        SKIP_RESOURCES_LIST="${SKIP_RESOURCES_LIST:+$SKIP_RESOURCES_LIST,}$r"
+    done < "$DEFAULT_SKIP_RES_FILE"
+fi
+[ -n "${CHECKOV_SKIP_RESOURCES:-}" ] && SKIP_RESOURCES_LIST="${SKIP_RESOURCES_LIST:+$SKIP_RESOURCES_LIST,}$CHECKOV_SKIP_RESOURCES"
+
+# What was actually checked out; checkov_clone_repo overwrites these.
+SCANNED_BRANCH="$BRANCH"; BRANCH_FALLBACK=false
+
+# Provenance + scan configuration, shared by every result this fetcher writes.
+metadata_json() {
+    jq -n --arg repo "$REPO_URL" --arg branch "$SCANNED_BRANCH" --arg requested "$BRANCH" \
+          --argjson fallback "$BRANCH_FALLBACK" --arg sha "${1:-unknown}" --arg ts "$TIMESTAMP" \
+          --arg skips "$SKIP_CHECKS_LIST" --argjson defaults "$DEFAULT_SKIPS_APPLIED" \
+          --arg skipres "$SKIP_RESOURCES_LIST" \
+       '{repo_url: $repo, branch: $branch, requested_branch: $requested, branch_fallback: $fallback,
+         commit_sha: $sha, scan_timestamp: $ts,
+         skip_checks: ($skips | split(",") | map(select(. != ""))),
+         default_skip_checks_applied: $defaults,
+         skip_resources: ($skipres | split(",") | map(select(. != "")))}'
+}
+
 # Emit a minimal (no-findings / error) result. The runner wraps payloads in the envelope.
 write_status_json() {
     local status="$1" message="$2" sha="${3:-unknown}"
-    jq -n --arg repo "$REPO_URL" --arg branch "$BRANCH" --arg sha "$sha" --arg ts "$TIMESTAMP" \
+    jq -n --argjson meta "$(metadata_json "$sha")" --arg ts "$TIMESTAMP" \
           --arg status "$status" --arg msg "$message" --arg src "$REPO_URL" \
        '{
-          metadata: {repo_url: $repo, branch: $branch, commit_sha: $sha, scan_timestamp: $ts},
+          metadata: $meta,
           framework: "terraform", scan_timestamp: $ts, source_type: "git", source: $src,
           status: $status, message: $msg,
           summary: {passed_checks: 0, failed_checks: 0, skipped_checks: 0, total_checks: 0, aggregate_percentage: 0},
@@ -92,7 +148,7 @@ if ! checkov_clone_repo "$REPO_URL" "$BRANCH" "$TOKEN" "$GIT_USER" "$COMPONENT";
     report_failure "git clone of $REPO_URL (branch $BRANCH, then default branch) failed - check the repo URL, the branch and GIT_CLONE_TOKEN"
     exit 1
 fi
-log_info "Cloned $REPO_URL @ ${COMMIT_SHA:0:12} (branch $BRANCH)"
+log_info "Cloned $REPO_URL @ ${COMMIT_SHA:0:12} (branch $SCANNED_BRANCH)"
 
 # --- scan mode: plan file vs directory ---
 SCAN_MODE="directory"
@@ -112,7 +168,7 @@ if [ "$SCAN_MODE" = "directory" ] && \
 fi
 
 # --- build checkov args ---
-CHECKOV_ARGS="--framework terraform --output json --quiet --repo-id $REPO_ID --branch $BRANCH"
+CHECKOV_ARGS="--framework terraform --output json --quiet --repo-id $REPO_ID --branch $SCANNED_BRANCH"
 [ "${CHECKOV_SOFT_FAIL:-true}" = "true" ] && CHECKOV_ARGS="$CHECKOV_ARGS --soft-fail"
 [ "${CHECKOV_COMPACT:-true}" = "true" ]   && CHECKOV_ARGS="$CHECKOV_ARGS --compact"
 [ "${CHECKOV_DOWNLOAD_EXTERNAL_MODULES:-true}" = "true" ] && export DOWNLOAD_EXTERNAL_MODULES=True
@@ -123,26 +179,6 @@ if [ -n "${CHECKOV_EXTERNAL_CHECKS_DIR:-}" ] && [ -d "$CHECKOV_EXTERNAL_CHECKS_D
     CHECKOV_ARGS="$CHECKOV_ARGS --external-checks-dir $CHECKOV_EXTERNAL_CHECKS_DIR"
 fi
 
-# Merge skip-checks: defaults file + CHECKOV_SKIP_CHECKS, minus any explicitly-requested checks.
-SKIP_CHECKS_LIST=""
-REQUESTED_CHECKS="${CHECKOV_TERRAFORM_CHECKS:-}"
-add_skip() {
-    local c="$1"; [ -z "$c" ] && return
-    case ",$REQUESTED_CHECKS," in *",$c,"*) return ;; esac
-    SKIP_CHECKS_LIST="${SKIP_CHECKS_LIST:+$SKIP_CHECKS_LIST,}$c"
-}
-DEFAULT_SKIP_CHECKS_FILE="$SCRIPT_DIR/../_shared/skip-checks.default.txt"
-if [ -f "$DEFAULT_SKIP_CHECKS_FILE" ]; then
-    while IFS= read -r c || [ -n "$c" ]; do
-        c="$(printf '%s' "$c" | xargs)"; [ -z "$c" ] && continue
-        case "$c" in \#*) continue ;; esac
-        add_skip "$c"
-    done < "$DEFAULT_SKIP_CHECKS_FILE"
-fi
-if [ -n "${CHECKOV_SKIP_CHECKS:-}" ]; then
-    IFS=',' read -ra _U <<< "$CHECKOV_SKIP_CHECKS"
-    for c in "${_U[@]}"; do add_skip "$(printf '%s' "$c" | xargs)"; done
-fi
 [ -n "$SKIP_CHECKS_LIST" ] && CHECKOV_ARGS="$CHECKOV_ARGS --skip-check $SKIP_CHECKS_LIST"
 
 if [ -n "${CHECKOV_SKIP_PATHS:-}" ]; then
@@ -174,28 +210,30 @@ if ! jq -e '(if type=="array" then (.[0] // {}) else . end) | has("summary")' "$
 fi
 jq 'if type=="array" then .[0] else . end' "$RAW" > "$NORM"
 
-# --- post-scan skip-resources filter (defaults file + config), recompute summary ---
-SKIP_RESOURCES_LIST=""
-DEFAULT_SKIP_RES_FILE="$SCRIPT_DIR/../_shared/skip-resources.default.txt"
-if [ -f "$DEFAULT_SKIP_RES_FILE" ]; then
-    while IFS= read -r r || [ -n "$r" ]; do
-        r="$(printf '%s' "$r" | xargs)"; [ -z "$r" ] && continue
-        case "$r" in \#*) continue ;; esac
-        SKIP_RESOURCES_LIST="${SKIP_RESOURCES_LIST:+$SKIP_RESOURCES_LIST,}$r"
-    done < "$DEFAULT_SKIP_RES_FILE"
-fi
-[ -n "${CHECKOV_SKIP_RESOURCES:-}" ] && SKIP_RESOURCES_LIST="${SKIP_RESOURCES_LIST:+$SKIP_RESOURCES_LIST,}$CHECKOV_SKIP_RESOURCES"
-
+# --- post-scan skip-resources filter, recompute summary ---
+# A failed check on a matching resource is moved to skipped_checks, marked
+# SKIPPED with the pattern that matched, so it stays in total_checks and the
+# aggregate percentage. Deleting it would raise the pass rate.
+RESOURCE_SKIPPED=0
 if [ -n "$SKIP_RESOURCES_LIST" ]; then
     PAT="$(mktemp)"
-    echo "$SKIP_RESOURCES_LIST" | tr ',' '\n' | sed 's/\*/.*/g' | jq -R . | jq -s . > "$PAT"
+    FAILED_BEFORE=$(jq '(.results.failed_checks // []) | length' "$NORM")
+    # Empty entries (a trailing comma) are dropped: an empty pattern matches everything.
+    echo "$SKIP_RESOURCES_LIST" | tr ',' '\n' | jq -R 'select(length > 0) | {pattern: ., regex: gsub("\\*"; ".*")}' | jq -s . > "$PAT"
     jq --slurpfile pats "$PAT" '
-        .results.failed_checks = ((.results.failed_checks // []) | map(
-            (.resource // "") as $r
-            | if $r == "" then .
-              elif (any($pats[0][]; $r | test(.))) then empty
-              else . end))
+        def match_pattern($r): first($pats[0][] | select(. as $p | $r | test($p.regex)) | .pattern) // null;
+        ((.results.failed_checks // []) | map(. + {_skip_pattern: (
+            (.resource // "") as $r | if $r == "" then null else match_pattern($r) end)})) as $failed
+        | .results.failed_checks = ($failed | map(select(._skip_pattern == null) | del(._skip_pattern)))
+        | .results.skipped_checks = ((.results.skipped_checks // []) + ($failed
+            | map(select(._skip_pattern != null)
+                  | ._skip_pattern as $p
+                  | del(._skip_pattern)
+                  | .check_result = ((.check_result // {}) + {
+                        result: "SKIPPED",
+                        suppress_comment: ("resource matches skip_resources pattern " + $p)}))))
     ' "$NORM" > "$NORM.f" && mv "$NORM.f" "$NORM"
+    RESOURCE_SKIPPED=$(( FAILED_BEFORE - $(jq '(.results.failed_checks // []) | length' "$NORM") ))
 fi
 
 PASSED=$(jq '(.results.passed_checks // []) | length' "$NORM")
@@ -204,19 +242,20 @@ SKIPPED=$(jq '(.results.skipped_checks // []) | length' "$NORM")
 TOTAL=$((PASSED + FAILED + SKIPPED))
 PCT=$(awk "BEGIN { if ($TOTAL > 0) printf \"%.2f\", ($PASSED / $TOTAL) * 100; else print 0 }")
 
-jq --arg repo "$REPO_URL" --arg branch "$BRANCH" --arg sha "$COMMIT_SHA" --arg ts "$TIMESTAMP" \
+jq --argjson meta "$(metadata_json "$COMMIT_SHA")" --arg ts "$TIMESTAMP" \
    --arg src "$REPO_URL" --arg mode "$SCAN_MODE" \
    --argjson passed "$PASSED" --argjson failed "$FAILED" --argjson skipped "$SKIPPED" \
-   --argjson total "$TOTAL" --argjson pct "$PCT" \
+   --argjson total "$TOTAL" --argjson pct "$PCT" --argjson resskipped "$RESOURCE_SKIPPED" \
    '. + {
-       metadata: {repo_url: $repo, branch: $branch, commit_sha: $sha, scan_timestamp: $ts},
+       metadata: $meta,
        framework: "terraform", scan_timestamp: $ts, source_type: "git", source: $src, scan_mode: $mode,
        status: "success",
        summary: ((.summary // {}) + {
            passed_checks: $passed, failed_checks: $failed, skipped_checks: $skipped,
-           total_checks: $total, aggregate_percentage: $pct
+           total_checks: $total, aggregate_percentage: $pct,
+           skipped_by_resource_filter: $resskipped
        })
    }' "$NORM" > "$OUTPUT_JSON"
 
-log_info "Evidence saved to $OUTPUT_JSON (passed=$PASSED failed=$FAILED skipped=$SKIPPED)"
+log_info "Evidence saved to $OUTPUT_JSON (passed=$PASSED failed=$FAILED skipped=$SKIPPED, $RESOURCE_SKIPPED of them by skip_resources)"
 exit 0

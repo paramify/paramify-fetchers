@@ -5,7 +5,7 @@
 This is an **inventory** fetcher (`kind: inventory`): one record per asset,
 uploaded to an evidence set where a Paramify inventory pipeline turns each
 record into an Inventory item. See
-[docs/inventory_fetchers.md](../../docs/inventory_fetchers.md).
+[docs/inventory_fetchers_guide.md](../../docs/inventory_fetchers_guide.md).
 
 ## Records
 

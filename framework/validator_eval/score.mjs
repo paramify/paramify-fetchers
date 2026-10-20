@@ -109,7 +109,7 @@ function compare(lhs, criteria, rhs) {
     case "DOES_NOT_END_WITH":        return !L.endsWith(R);
     // NOTE: numeric-vs-lexicographic for the ordering operators is NOT verified
     // against Paramify. Encode numeric thresholds in the regex instead of
-    // relying on these -- see docs/validators_design.md.
+    // relying on these.
     case "GREATER_THAN":             return n ? n[0] >  n[1] : L >  R;
     case "GREATER_THAN_OR_EQUAL_TO": return n ? n[0] >= n[1] : L >= R;
     case "LESS_THAN":                return n ? n[0] <  n[1] : L <  R;

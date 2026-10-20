@@ -13,8 +13,8 @@
 #   source "$(dirname "$0")/../_shared/aws.sh"
 #   _TARGET_ID="$(aws_target_id)"
 
-# Failure reporting. Re-exported, NOT reimplemented (docs/fetcher_contract.md
-# § Output): every AWS fetcher already sources this file, so sourcing the shared
+# Failure reporting. Re-exported, NOT reimplemented (docs/fetcher_contract_guide.md,
+# step 6): every AWS fetcher already sources this file, so sourcing the shared
 # helper here gives all 80 `report_failure` without a per-fetcher source line.
 # BASH_SOURCE[0] is this file, so the path holds whatever the caller's cwd is.
 source "$(dirname "${BASH_SOURCE[0]}")/../../_lib/status.sh"

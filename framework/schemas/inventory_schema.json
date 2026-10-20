@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Inventory payload",
-  "description": "The payload a `kind: inventory` fetcher writes (the envelope's `payload`). Only the outer shape is fixed: each fetcher chooses its own record fields, and a Paramify inventory pipeline maps them to Inventory fields. Checked by framework/inventory.py when the output is enveloped. See docs/inventory_fetchers.md.",
+  "description": "The payload a `kind: inventory` fetcher writes (the envelope's `payload`). Only the outer shape is fixed: each fetcher chooses its own record fields, and a Paramify inventory pipeline maps them to Inventory fields. Checked by framework/inventory.py when the output is enveloped. See docs/inventory_fetchers_guide.md.",
   "type": "object",
   "required": ["data", "records_included"],
   "properties": {

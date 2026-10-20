@@ -21,7 +21,7 @@ nothing.
 
 The `write_status` alias is gone: azure_common and gcp_common re-export
 `report_failure`, and all 46 of their fetchers call it by that name. There is
-one spelling now. See docs/fetcher_contract.md § Output.
+one spelling now. See docs/fetcher_contract_guide.md, step 6.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from typing import Optional
 
 __all__ = ["report_failure", "STATUS_CODES"]
 
-# The contract's closed set for `code` (docs/fetcher_contract.md § Output).
+# The contract's closed set for `code`.
 # Exit codes stay binary (0 / non-zero); the category goes here, so the
 # exit-code space — shared with the shell and with signals — stays uncarved.
 STATUS_CODES = frozenset(

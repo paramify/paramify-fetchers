@@ -4,7 +4,7 @@ Pulls recent merge requests for a GitLab project with approval, discussion, and 
 
 ## Fanout-capable
 
-Single-target per invocation; runner fans out across multiple projects via `supports_targets: true`. See [`docs/run_manifest_reference.md`](../../../docs/run_manifest_reference.md) for the manifest shape.
+Single-target per invocation; runner fans out across multiple projects via `supports_targets: true`. See [`docs/run_manifest_guide.md`](../../../docs/run_manifest_guide.md#3-fan-out-with-targets) for the manifest shape.
 
 ## Required env vars
 

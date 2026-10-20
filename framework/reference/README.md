@@ -90,8 +90,7 @@ Two things did change:
 The error body is unchanged — 0.9.2 only hoisted the inline error object into
 `components/schemas/ErrorResponseObject`, so `_error_message` still parses it.
 
-The `v0.8.0` citations in [`docs/validators_design.md`](../../docs/validators_design.md)
-and `framework/schemas/validator_schema.json` are left as they are on purpose:
+The `v0.8.0` citations in `framework/schemas/validator_schema.json` are left as they are on purpose:
 they date empirical checks made against a live tenant on 2026-09-03, not the
 spec-shape review above, and the validator endpoints did not change shape
 between 0.6.0 and 0.9.2.
