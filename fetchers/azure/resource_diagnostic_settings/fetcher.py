@@ -81,15 +81,30 @@ WORKERS = 4
 INGESTION_LOOKBACK_ENV = "INGESTION_LOOKBACK_DAYS"
 DEFAULT_INGESTION_LOOKBACK_DAYS = 7
 APPROVED_WORKSPACES_ENV = "APPROVED_LOG_WORKSPACES"
-# AzureActivity rows carry the resource an operation touched, and metrics are not logs: neither shows logs arriving.
+# Written whatever a diagnostic setting says (the activity log, metrics, monitoring agents, Container Insights), so a
+# row there does not show a resource's logs arriving. Application Insights tables stay: their rows are the component's own.
+NOT_RESOURCE_LOG_TABLES = (
+    "AzureActivity", "AzureMetrics", "InsightsMetrics", "Perf", "Heartbeat", "Syslog", "Event",
+    "ContainerLog", "ContainerLogV2", "ContainerInventory", "ContainerNodeInventory", "ContainerImageInventory",
+    "ContainerServiceLog", "KubePodInventory", "KubeNodeInventory", "KubeEvents", "KubeServices", "KubePVInventory",
+    "KubeMonAgentEvents", "KubeHealth",
+)
 INGESTION_QUERY = (
     "union withsource=ParamifySourceTable * "
     "| where TimeGenerated > ago({days}d) "
     "| where _ResourceId startswith '/subscriptions/{subscription_id}/' "
-    "| where ParamifySourceTable !in ('AzureActivity', 'AzureMetrics') "
+    "| where ParamifySourceTable !in (" + ", ".join(f"'{t}'" for t in NOT_RESOURCE_LOG_TABLES) + ") "
     "| summarize LastIngested = max(TimeGenerated), Records = count() "
     "by ResourceId = tolower(_ResourceId), Table = ParamifySourceTable"
 )
+# Each storage service writes only its own resource-specific table.
+STORAGE_LOG_TABLES = {
+    "storagebloblogs": f"{STORAGE_ACCOUNT_TYPE}/blobservices",
+    "storagefilelogs": f"{STORAGE_ACCOUNT_TYPE}/fileservices",
+    "storagequeuelogs": f"{STORAGE_ACCOUNT_TYPE}/queueservices",
+    "storagetablelogs": f"{STORAGE_ACCOUNT_TYPE}/tableservices",
+}
+AZURE_DIAGNOSTICS_MODE = "azurediagnostics"
 # union * skips Basic and Auxiliary tables; querying them bills per GB scanned, so it is off unless hours are set.
 BASIC_LOOKBACK_ENV = "BASIC_LOGS_LOOKBACK_HOURS"
 DEFAULT_BASIC_LOOKBACK_HOURS = 0
@@ -275,6 +290,26 @@ def basic_lookback_hours() -> int:
     return max(hours, 0)
 
 
+def resource_log_table(name: str) -> bool:
+    """Custom (_CL) and agent or platform tables never hold what a diagnostic setting exports."""
+    return not name.lower().endswith("_cl") and name.lower() not in {t.lower() for t in NOT_RESOURCE_LOG_TABLES}
+
+
+def could_hold_logs(table: str, record: dict, settings: list[dict]) -> bool:
+    """Whether an unqueried Basic or Auxiliary table could hold this resource's logs from these settings."""
+    name, rtype = table.lower(), record["type"] or ""
+    if not resource_log_table(table):
+        return False
+    if name in STORAGE_LOG_TABLES:
+        return STORAGE_LOG_TABLES[name] == rtype
+    if rtype in STORAGE_LOG_TABLES.values():
+        return False
+    # Most settings leave the mode unset, and many types write resource-specific tables anyway; only an explicit
+    # AzureDiagnostics mode rules a resource-specific table out.
+    modes = {(s.get("log_analytics_destination_type") or "").lower() for s in settings}
+    return name == "azurediagnostics" or modes != {AZURE_DIAGNOSTICS_MODE}
+
+
 def non_analytics_tables(tables: list[dict]) -> list[dict]:
     """Basic and Auxiliary plan tables, which union * leaves out."""
     out = []
@@ -297,6 +332,9 @@ def exporting_workspaces(record: dict) -> list[str]:
 def ingestion_status(exc: BaseException) -> str:
     message = str(exc).lower()
     status = getattr(exc, "status", None)
+    # ARM answers SubscriptionNotFound (404) for a subscription the caller holds no role in.
+    if "subscriptionnotfound" in message:
+        return INGESTION_NOT_AUTHORIZED
     if status == 404 or "resourcenotfound" in message or "workspacenotfound" in message:
         return INGESTION_NOT_FOUND
     if status in (401, 403) or any(
@@ -330,7 +368,7 @@ def ingestion_by_resource(rows: list[dict]) -> dict:
 
 
 def with_ingestion(record: dict, workspaces: dict, approved: list[str]) -> dict:
-    """ingested_in_window: True once any destination holds records; False only when every destination was fully read or is gone."""
+    """ingested_in_window: True once any destination holds records; False only when every destination was read in full or is gone."""
     settings = [
         {**s, "workspace_approved": workspace_approved(s.get("workspace_id"), approved)}
         for s in record["diagnostic_settings"]
@@ -341,10 +379,14 @@ def with_ingestion(record: dict, workspaces: dict, approved: list[str]) -> dict:
         ws = workspaces.get(workspace_key(workspace_id)) or {}
         status = ws.get("status")
         seen = (ws.get("resources") or {}).get(rid) or {}
+        to_ws = [s for s in record["diagnostic_settings"]
+                 if s["exports_logs"] and workspace_key(s.get("workspace_id")) == workspace_key(workspace_id)]
+        skipped = [t for t in ws.get("unqueried_tables") or [] if could_hold_logs(t, record, to_ws)]
         destinations.append({
             "workspace_id": workspace_id,
             "status": status,
-            "all_tables_queried": ws.get("all_tables_queried", False) if status == INGESTION_QUERIED else None,
+            "read_in_full": not skipped if status == INGESTION_QUERIED else None,
+            "unqueried_tables": skipped if status == INGESTION_QUERIED else None,
             "last_ingested": seen.get("last_ingested"),
             "records": seen.get("records", 0) if status == INGESTION_QUERIED else None,
             "tables": seen.get("tables", []),
@@ -353,7 +395,7 @@ def with_ingestion(record: dict, workspaces: dict, approved: list[str]) -> dict:
         ingested = None
     elif any(d["records"] for d in destinations):
         ingested = True
-    elif all(d["status"] == INGESTION_NOT_FOUND or d["all_tables_queried"] for d in destinations):
+    elif all(d["status"] == INGESTION_NOT_FOUND or d["read_in_full"] for d in destinations):
         ingested = False
     else:
         ingested = None
@@ -385,6 +427,8 @@ def destination_records(workspaces: dict, records: list[dict], approved: list[st
             "status": ws["status"],
             "error": ws["error"],
             "non_analytics_tables": ws["non_analytics_tables"],
+            "unqueried_tables": ws.get("unqueried_tables", []) if ws["status"] == INGESTION_QUERIED else None,
+            "table_errors": ws.get("table_errors", []),
             "all_tables_queried": ws["all_tables_queried"] if ws["status"] == INGESTION_QUERIED else None,
             "approved": workspace_approved(ws["workspace_id"], approved),
             "resources_exporting": len(reads),
@@ -500,8 +544,8 @@ def read_workspace_ingestion(
 ) -> dict:
     """A refused or deleted destination is evidence; any other failure fails the run."""
     out = {"workspace_id": workspace_id, "name": basename(workspace_id), "customer_id": None,
-           "status": INGESTION_QUERIED, "error": None, "non_analytics_tables": [], "all_tables_queried": False,
-           "resources": {}}
+           "status": INGESTION_QUERIED, "error": None, "non_analytics_tables": [], "unqueried_tables": [],
+           "table_errors": [], "all_tables_queried": False, "resources": {}}
     try:
         out["customer_id"] = ((client.get(workspace_id, LAW_API) or {}).get("properties") or {}).get("customerId")
         if not out["customer_id"]:
@@ -509,9 +553,6 @@ def read_workspace_ingestion(
         out["non_analytics_tables"] = non_analytics_tables(client.list(f"{workspace_id}/tables", LAW_API))
         query = INGESTION_QUERY.format(days=days, subscription_id=subscription_id)
         rows = client.query(out["customer_id"], query, iso_duration_days(days))
-        for table in out["non_analytics_tables"] if hours else []:
-            query = BASIC_TABLE_QUERY.format(table=table["name"], hours=hours, subscription_id=subscription_id)
-            rows += client.query(out["customer_id"], query, f"PT{hours}H")
     except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
         status = ingestion_status(exc)
         if status == INGESTION_ERROR:
@@ -519,7 +560,16 @@ def read_workspace_ingestion(
         else:
             logger.warning("Log Analytics destination %s: %s (%s)", workspace_id, status, exc)
         return {**out, "status": status, "error": " ".join(str(exc).split())[:300]}
-    return {**out, "all_tables_queried": bool(hours) or not out["non_analytics_tables"],
+    unqueried = [t["name"] for t in out["non_analytics_tables"] if resource_log_table(t["name"])]
+    for name in list(unqueried) if hours else []:
+        query = BASIC_TABLE_QUERY.format(table=name, hours=hours, subscription_id=subscription_id)
+        try:
+            rows += client.query(out["customer_id"], query, f"PT{hours}H")
+            unqueried.remove(name)
+        except Exception as exc:  # noqa: BLE001 — one table's failure leaves it unqueried, not the run failed
+            logger.warning("Basic table %s in %s not queried: %s", name, workspace_id, exc)
+            out["table_errors"].append({"table": name, "error": " ".join(str(exc).split())[:300]})
+    return {**out, "unqueried_tables": unqueried, "all_tables_queried": not unqueried,
             "resources": ingestion_by_resource(rows)}
 
 
