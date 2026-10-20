@@ -12,6 +12,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_sign_ins`** (`EVD-AZURE-ENTRA-SIGN-INS`) — how users actually
+  sign in over a lookback (`ENTRA_SIGN_IN_LOOKBACK_DAYS`, 7 by default, at most
+  the 30 days Entra keeps): whether each interactive sign-in required and passed
+  MFA, which methods were used and whether any was phishing-resistant, whether
+  Conditional Access applied, and which sign-ins Entra rated risky. Summarized for
+  the tenant, per user and per app; only the exceptions (successful single-factor,
+  no Conditional Access, risky) are listed one by one, at most 1000. Reads the beta
+  `/auditLogs/signIns`, since v1.0 has no `authenticationRequirement` or
+  `authenticationDetails`. Refused or unlicensed logs leave every count null.
+  `_shared/azure_rest.py` gains `graph_pages` and `graph_list` for paged Graph
+  reads on v1.0 or beta.
 - **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
   over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
   Code (Read). It records Bicep and ARM checks together, each tagged with its

@@ -7,7 +7,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from azure_common import (
     Collector,
@@ -156,6 +156,17 @@ class AzureRestClient:
             body = self._get(body["nextLink"])
             items.extend(body.get("value") or [])
         return items
+
+    def graph_pages(self, path: str, version: str = "v1.0") -> Iterator[List[Dict[str, Any]]]:
+        """Each page of a Microsoft Graph collection in turn, following @odata.nextLink."""
+        body = self._get(f"{self.graph}/{version}{path}", resource=self.graph)
+        yield list(body.get("value") or [])
+        while body.get("@odata.nextLink"):
+            body = self._get(body["@odata.nextLink"], resource=self.graph)
+            yield list(body.get("value") or [])
+
+    def graph_list(self, path: str, version: str = "v1.0") -> List[Dict[str, Any]]:
+        return [item for page in self.graph_pages(path, version) for item in page]
 
     def graph_post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         response = self._send("post", f"{self.graph}/v1.0{path}", self.graph, json=body, timeout=HTTP_TIMEOUT)
