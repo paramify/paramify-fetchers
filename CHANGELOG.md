@@ -616,7 +616,7 @@ schemas and the `paramify` CLI — not the internal code.
     `classification_comment` and `related_analytic_rule_ids`.
   - the `entities` on its alerts, as kind and identifier, from SecurityAlert
     joined on the incident's alert ids: up to 25 of each kind, processes as image
-    name and process id, URLs without query string or credentials. Entities read
+    name and process id, URLs as scheme and host only. Entities read
     as `null` when the alerts can't be read.
   - `provider_incident_id` and `provider_incident_url`: for an incident synced
     from Defender XDR, its id and link there; Microsoft Graph alerts give the same

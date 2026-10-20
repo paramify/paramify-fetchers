@@ -3,6 +3,7 @@
 
 import json
 import logging
+import re
 import statistics
 import sys
 from datetime import datetime, timedelta, timezone
@@ -65,7 +66,7 @@ ENTITY_ID_FIELDS = {
     "filehash": ("Value",),
     "mailbox": ("MailboxPrimaryAddress", "Upn"),
     "mailMessage": ("NetworkMessageId", "InternetMessageId"),
-    "mailCluster": ("ClusterByValue", "Query"),
+    "mailCluster": ("ClusterSourceIdentifier",),
     "cloud-application": ("Name", "AppId"),
     "azure-resource": ("ResourceId",),
     "dns": ("DomainName",),
@@ -74,7 +75,7 @@ ENTITY_ID_FIELDS = {
     "malware": ("Name",),
     "security-group": ("DistinguishedName", "ObjectGuid"),
 }
-GENERIC_ID_FIELDS = ("Name", "DisplayName", "Address", "Value", "Id")
+GENERIC_ID_FIELDS = ("Name", "DisplayName")
 
 logger = logging.getLogger(NAME)
 
@@ -126,7 +127,7 @@ def project_incident(incident: Dict[str, Any], closed: Dict[str, Any]) -> Dict[s
         "provider_name": props.get("providerName"),
         # Defender XDR's own incident id and link for incidents synced from it; Graph alerts carry the same id.
         "provider_incident_id": props.get("providerIncidentId"),
-        "provider_incident_url": strip_url(extra["providerIncidentUrl"]) if extra.get("providerIncidentUrl") else None,
+        "provider_incident_url": extra.get("providerIncidentUrl"),
         "related_analytic_rules": len(props.get("relatedAnalyticRuleIds") or []),
         "related_analytic_rule_ids": props.get("relatedAnalyticRuleIds") or [],
         "alerts_count": extra.get("alertsCount"),
@@ -209,13 +210,16 @@ def timeline(incident: Dict[str, Any], rows: Optional[List[Dict[str, Any]]], his
     }
 
 
-def strip_url(url: str) -> str:
-    """Scheme, host and path only, so query strings (SAS tokens) and user:password@ never reach the evidence."""
-    parts = urlsplit(url)
-    host = parts.netloc.rsplit("@", 1)[-1]
-    if parts.scheme and host:
-        return f"{parts.scheme}://{host}{parts.path}"
-    return url.split("#", 1)[0].split("?", 1)[0].rsplit("@", 1)[-1]
+def url_host(url: str) -> Optional[str]:
+    """Scheme and host only, as alert receivers show them: paths and queries can carry tokens; a malformed URL gives None."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return None
+    if parts.scheme and host and parts.netloc:
+        return f"{parts.scheme}://{host}"
+    return re.split(r"[/?#;]", url, maxsplit=1)[0].rsplit("@", 1)[-1] or None
 
 
 def entity_id(entity: Dict[str, Any], by_ref: Optional[Dict[str, Dict[str, Any]]] = None) -> Optional[str]:
@@ -225,11 +229,11 @@ def entity_id(entity: Dict[str, Any], by_ref: Optional[Dict[str, Dict[str, Any]]
         return f"{entity['Name']}@{entity['UPNSuffix']}"
     if kind == "process":
         image = entity.get("ImageFile") or {}
-        image = (by_ref or {}).get(image.get("$ref"), image) if isinstance(image, dict) else {}
+        image = (by_ref or {}).get(str(image.get("$ref")), image) if isinstance(image, dict) else {}
         name, pid = image.get("Name"), entity.get("ProcessId")
         return f"{name} ({pid})" if name and pid else (name or (f"process {pid}" if pid else None))
     if kind == "url":
-        return strip_url(str(entity["Url"])) if entity.get("Url") else None
+        return url_host(str(entity["Url"])) if entity.get("Url") else None
     for field in ENTITY_ID_FIELDS.get(kind or "", GENERIC_ID_FIELDS):
         if entity.get(field) not in (None, ""):
             return str(entity[field])

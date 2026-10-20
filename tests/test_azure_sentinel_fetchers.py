@@ -361,7 +361,7 @@ def test_incidents(azure, tmp_path):
     assert names == ["i-closed", "i-new"]  # the old closed one is outside the lookback
     assert {k: ws["incidents"][1][k] for k in ("provider_name", "provider_incident_id", "provider_incident_url")} == {
         "provider_name": "Microsoft XDR", "provider_incident_id": "4521",
-        "provider_incident_url": "https://security.microsoft.com/incidents/4521"}  # no tenant query string
+        "provider_incident_url": "https://security.microsoft.com/incidents/4521?tid=t-1"}  # Microsoft's own link, kept whole
     assert ws["incidents"][0]["provider_incident_id"] is None
     closed = ws["incidents"][0]
     assert closed["closed_time_utc"] and closed["hours_to_close"] == pytest.approx(24, abs=0.1)
@@ -452,7 +452,7 @@ def test_incidents_response_timeline_and_entities(azure, tmp_path):
         {"kind": "account", "id": "john@contoso.com"}, {"kind": "file", "id": "powershell.exe"},
         {"kind": "filehash", "id": "abc123"}, {"kind": "host", "id": "vm1.contoso.com"},
         {"kind": "ip", "id": "203.0.113.7"}, {"kind": "process", "id": "powershell.exe (4242)"},
-        {"kind": "url", "id": "https://files.example.com/share/a.zip"}]
+        {"kind": "url", "id": "https://files.example.com"}]
     old = by_name["i-new"]
     # Its alerts are older than the lookback, so its entities are unknown, not empty.
     assert old["history_complete"] is False and old["acknowledged_time_utc"] is None and old["entities"] is None
@@ -564,12 +564,32 @@ def test_incident_with_no_alerts_has_no_entities(azure, tmp_path):
 
 
 @pytest.mark.parametrize("url, expected", [
-    ("https://security.microsoft.com/incidents/4521?tid=t-1", "https://security.microsoft.com/incidents/4521"),
-    ("https://user:pw@host.example.com/a?b=c#d", "https://host.example.com/a"),
-    ("host.example.com/path?sig=abc", "host.example.com/path"),
+    ("https://user:pw@host.example.com/a?b=c#d", "https://host.example.com"),
+    ("https://hooks.slack.com/services/T0/B0/SECRETTOKEN", "https://hooks.slack.com"),
+    ("https://app.example.com/login;jsessionid=abc", "https://app.example.com"),
+    ("host.example.com/users/@john/x?sig=abc", "host.example.com"),
+    ("http://[evil.example/x", None),
 ])
-def test_incident_urls_lose_queries_and_credentials(url, expected):
-    assert MODS["sentinel_incidents"].strip_url(url) == expected
+def test_incident_url_entities_keep_scheme_and_host_only(url, expected):
+    assert MODS["sentinel_incidents"].url_host(url) == expected
+
+
+def test_incidents_malformed_alert_url_keeps_the_workspace(azure, tmp_path):
+    azure.queries.insert(0, ("SystemAlertId", table(["IncidentName", "AlertId", "Entities"], [["i-closed", "a-1", json.dumps([
+        {"$id": "1", "Type": "url", "Url": "http://[evil.example/x"}, {"$id": "2", "Type": "ip", "Address": "203.0.113.7"}])]])))
+    code, ev = run("sentinel_incidents", tmp_path)
+    closed = next(i for i in ws_a(ev)["incidents"] if i["name"] == "i-closed")
+    assert code == 0 and closed["entities"] == [{"kind": "ip", "id": "203.0.113.7"}]
+
+
+@pytest.mark.parametrize("entity, expected", [
+    ({"Type": "mailCluster", "ClusterSourceIdentifier": "c-1", "Query": "from:ceo subject:payroll"}, "c-1"),
+    ({"Type": "mailCluster", "Query": "from:ceo subject:payroll"}, None),
+    ({"Type": "something-new", "Value": "secret-token"}, None),
+    ({"Type": "process", "ProcessId": "7", "ImageFile": {"$ref": 3}}, "cmd.exe (7)"),
+])
+def test_incident_entity_fields_are_allowlisted(entity, expected):
+    assert MODS["sentinel_incidents"].entity_id(entity, {"3": {"Type": "file", "Name": "cmd.exe"}}) == expected
 
 
 def test_incident_state_at_a_past_time():
