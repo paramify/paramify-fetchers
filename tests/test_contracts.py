@@ -167,7 +167,7 @@ def test_every_evidence_fetcher_has_a_frequency() -> None:
 
 
 def test_instructions_open_with_the_entry_path() -> None:
-    """Instructions open with `Script: <category>/<dir>/<entry>.` so a reader can find the code."""
+    """Instructions open with `Script: <category>/<short_name>/<entry>.` so a reader can find the code."""
     bad: list[str] = []
     for yaml_path in FETCHER_YAMLS:
         spec = yaml.safe_load(yaml_path.read_text())
