@@ -16,10 +16,12 @@ schemas and the `paramify` CLI — not the internal code.
   Identity Management for Entra ID directory roles: who is eligible to activate
   each role, every active assignment marked `permanent`, `time_bound` or
   `pim_activated`, and each privileged role's activation rules (MFA or an
-  authentication context, justification, approval and approver count, maximum
-  activation hours) and whether it allows permanent eligible or active
-  assignments. Privileged counts take direct grants of privileged roles held
-  tenant-wide, as `azure_entra_privileged_roles` does. A tenant without Entra ID
+  authentication context, justification, approval and `activation_approver_sets`,
+  the users and groups named as approvers, maximum activation hours) and whether
+  it allows permanent eligible or active assignments. Privileged counts take
+  direct grants of privileged roles held tenant-wide, as
+  `azure_entra_privileged_roles` does; grants scoped below the tenant are counted
+  apart in `privileged_assignments_scoped_below_tenant`. A tenant without Entra ID
   P2 reads `pim_available: false`, keeps the reads that succeeded, and the run
   succeeds; when any read fails the summary gives no figures, so a denied read
   never reads as zero standing admins. Needs `RoleManagement.Read.Directory`.
@@ -866,9 +868,9 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
-- **Azure: Microsoft Graph failures get the same status codes as ARM's.** msgraph
-  renders an HTTP status as `<message> (status 403)`, which matched none of the
-  `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
+- **Azure: Microsoft Graph 403, 429, 503 and 504 failures get ARM's status codes.**
+  msgraph renders an HTTP status as `<message> (status 403)`, which matched none
+  of the `(403)`, `(429)`, `(503)` or `(504)` markers, so a Graph fetcher that was
   refused, throttled or unreachable failed as `partial_failure`. These now read
   `not_authorized`, `rate_limited` and `target_unreachable`.
 - **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →

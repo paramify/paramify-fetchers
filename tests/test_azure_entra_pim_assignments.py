@@ -6,8 +6,6 @@ import asyncio
 import importlib.util
 import json
 import logging
-import sys
-from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace as ns
@@ -200,6 +198,20 @@ def test_privileged_counts_take_only_tenant_wide_direct_grants():
     assert summary["eligible_assignments"] == 1
     assert summary["eligible_privileged_assignments"] == 0
     assert summary["privileged_roles_with_eligible_holders"] == []
+    assert summary["privileged_assignments_scoped_below_tenant"] == 2
+
+
+def test_member_type_is_compared_without_case():
+    assert pim.counted({"member_type": "direct"}) and pim.counted({"member_type": None})
+    assert not pim.counted({"member_type": "group"})
+
+
+def test_a_licence_worded_refusal_of_role_definitions_is_a_failure():
+    collector, unlicensed = pim.Collector(logging.getLogger("test")), []
+    refused = _Builder(_ODataError("The tenant has not onboarded to PIM. (status 400)"))
+    assert asyncio.run(pim._read(collector, unlicensed, "graph.roleDefinitions", refused, pim=False)) is None
+    assert unlicensed == []
+    assert not collector.ok
 
 
 class _Builder:
@@ -318,12 +330,11 @@ def test_empty_role_definitions_are_a_failed_read(monkeypatch):
 
 
 def test_a_failed_graph_client_gives_no_figures(monkeypatch):
-    @asynccontextmanager
-    async def broken(cred):
-        raise RuntimeError("could not build the Graph client")
-        yield
+    async def failed_client(collector, cred, work, default=None):
+        collector.record("msgraph.GraphServiceClient (init)", RuntimeError("could not build the Graph client"))
+        return default
 
-    monkeypatch.setattr(sys.modules["entra_graph"], "graph_service_client", broken)
+    monkeypatch.setattr(pim, "with_graph_client", failed_client)
     collector = pim.Collector(logging.getLogger("test"))
     tenant, *reads, unlicensed = asyncio.run(pim._collect(collector, object()))
     assert tenant == {"tenant_source": "unresolved"}

@@ -60,7 +60,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_pim_assignments/fetcher.py
 
-    Access: Microsoft Graph RoleManagement.Read.Directory, in a tenant with Entra ID P2 or ID Governance. Optional: Organization.Read.All; without it, the tenant name reads null. Not yet verified: whether the user, group and app names come back without Directory.Read.All; the ids always do.
+    Access: Microsoft Graph RoleManagement.Read.Directory, in a tenant with Entra ID P2 or ID Governance. Optional: Organization.Read.All; without it, the tenant name reads null.
 
     Commands Executed:
     - Microsoft Graph GET /organization — the tenant's name and domain
@@ -69,17 +69,17 @@ evidence_set:
     - Microsoft Graph GET /roleManagement/directory/roleAssignmentScheduleInstances, expanding the principal — who holds each role now, and whether it was assigned or activated
     - Microsoft Graph GET /policies/roleManagementPolicyAssignments, filtered to directory roles at tenant scope and expanding each policy's rules — each role's activation and assignment rules
 
-    Output: azure_entra_pim_assignments_<tenant>.json — every eligible and active directory role assignment with its user, group or app, how long it lasts, and each privileged or assigned role's activation rules.
+    Output: azure_entra_pim_assignments_<tenant>.json — every eligible and active directory role assignment with its user, group or app and how long it lasts, and the activation rules of each privileged role (one of the admin roles azure_entra_privileged_roles flags, such as Global Administrator or Privileged Role Administrator) and of each role with an assignment.
 
     Summary fields:
 
     What was checked?
-    - pim_available — True if the tenant has Privileged Identity Management; false if Graph refused a read because the tenant has no Entra ID P2 or ID Governance licence (the reads that succeeded stay in the results); null if a read failed
+    - pim_available — True if the tenant has Privileged Identity Management; false if Graph refused a read because the tenant has no Entra ID P2 or ID Governance licence (the reads that succeeded stay in the results); null if a read failed (false wins when both happen)
     - collection_complete — True if role names, eligible and active assignments and role policies were all read; false if any read failed or was refused for the licence, and every other field except pim_available is left out
-    - privileged_role_policies — Number of privileged roles whose PIM policy was read (privileged means one of the admin roles azure_entra_privileged_roles flags, such as Global Administrator or Privileged Role Administrator, held tenant-wide; the same role scoped to an administrative unit is not counted as privileged)
+    - privileged_role_policies — Number of privileged roles whose tenant-wide PIM policy was read
 
     Who can activate a privileged role on demand?
-    - eligible_assignments — Number of eligible assignments (a user, group or app that can activate a role when needed) across all directory roles. This and every count below takes direct assignments only (memberType Direct), so a role held through a group counts once, as the group's
+    - eligible_assignments — Number of eligible assignments (a user, group or app that can activate a role when needed) across all directory roles. This and every assignment count below takes direct assignments only (memberType Direct), so a role held through a group counts once, as the group's; an assignment counts as privileged only when the privileged role is held tenant-wide, not scoped to an administrative unit or a single object
     - eligible_privileged_assignments — Number of eligible assignments to privileged roles
     - permanently_eligible_privileged_assignments — Number of eligible assignments to privileged roles with no end date
     - principals_eligible_for_privileged_roles — Number of distinct users, groups and apps eligible for at least one privileged role
@@ -89,12 +89,16 @@ evidence_set:
     Who holds a privileged role right now, and for how long?
     - active_assignments — Number of active assignments (a role held now) across all directory roles, including activations of an eligible assignment
     - active_privileged_assignments — Number of active assignments to privileged roles
-    - active_privileged_by_standing — Number of active privileged-role assignments of each kind: permanent (assigned with no end date, so standing access; a group whose membership PIM for Groups manages also reads permanent when its role has no end date), pim_activated (an eligible holder activated it, so it ends after the activation time) and time_bound (assigned directly with an end date)
+    - active_privileged_by_standing — Number of active privileged-role assignments of each kind:
+      - permanent (assigned with no end date, so standing access; a group whose membership PIM for Groups manages also reads permanent when its role has no end date)
+      - pim_activated (an eligible holder activated it, so it ends after the activation time)
+      - time_bound (assigned directly with an end date)
     - permanent_active_privileged_assignments — Number of active privileged-role assignments with no end date that were not activated through PIM
     - permanent_active_privileged_user_assignments — Number of permanent active privileged-role assignments held by users (not groups or apps)
     - principals_with_permanent_privileged_access — Number of distinct users, groups and apps holding a privileged role permanently
     - privileged_roles_with_permanent_active_holders — List of privileged role names held permanently by at least one user, group or app
     - global_administrator_permanent_active — Number of permanent active Global Administrator assignments
+    - privileged_assignments_scoped_below_tenant — Number of eligible and active assignments of privileged roles scoped to an administrative unit or a single object, which the privileged counts leave out
 
     Does activating a privileged role require MFA, a reason, approval and a time limit?
     - privileged_roles_activation_without_mfa_or_auth_context — List of privileged role names whose activation needs neither MFA nor a Conditional Access authentication context

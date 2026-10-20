@@ -40,7 +40,7 @@ from entra_graph import (  # noqa: E402
 NAME = "azure_entra_pim_assignments"
 POLICY_FILTER = "scopeId eq '/' and scopeType eq 'DirectoryRole'"
 # Without Entra ID P2 (or ID Governance) PIM refuses with a licence error, a state not a failure; the recorded text is the message only.
-UNLICENSED_MARKERS = ("licens", "not onboarded to pim")
+UNLICENSED_MARKERS = ("licens", "not onboarded")
 MFA, JUSTIFICATION, TICKETING = "MultiFactorAuthentication", "Justification", "Ticketing"
 
 logger = logging.getLogger(NAME)
@@ -242,7 +242,7 @@ def _sort_key(record: Dict[str, Any]) -> tuple:
 
 def counted(record: Dict[str, Any]) -> bool:
     """Direct grants only, so a role held through a group counts once, as the group's."""
-    return (record.get("member_type") or "Direct") == "Direct"
+    return (record.get("member_type") or "Direct").lower() == "direct"
 
 
 def privileged(record: Dict[str, Any]) -> bool:
@@ -256,6 +256,7 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
     priv_eligible = [e for e in eligible if privileged(e)]
     priv_active = [a for a in active if privileged(a)]
     priv_permanent = [a for a in priv_active if a["standing"] == "permanent"]
+    below_tenant = [r for r in eligible + active if r["is_privileged"] and not r["tenant_wide"]]
     priv_policies = [p for p in policies if p["is_privileged"]]
 
     def names(records, pred=lambda r: True):
@@ -279,6 +280,7 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
         "privileged_roles_with_permanent_active_holders": names(priv_permanent),
         "global_administrator_eligible": sum(1 for e in eligible if e["is_global_administrator"]),
         "global_administrator_permanent_active": sum(1 for a in priv_permanent if a["is_global_administrator"]),
+        "privileged_assignments_scoped_below_tenant": len(below_tenant),
         "privileged_role_policies": len(priv_policies),
         "privileged_roles_activation_without_mfa_or_auth_context": names(
             priv_policies, lambda p: p["activation_requires_mfa"] is False and not p["activation_authentication_context"]
@@ -312,12 +314,13 @@ def _each(project, items: Optional[List[Any]]) -> Optional[List[Dict[str, Any]]]
     return None if items is None else [project(i) for i in items]
 
 
-async def _read(collector: Collector, unlicensed: List[str], operation: str, builder, config=None) -> Optional[List[Any]]:
-    """`paginate`, with a licence refusal noted rather than recorded; None when the read failed or was refused."""
+async def _read(collector: Collector, unlicensed: List[str], operation: str, builder, config=None,
+                pim: bool = True) -> Optional[List[Any]]:
+    """`paginate`, with a PIM read's licence refusal noted rather than recorded; None when the read failed or was refused."""
     probe = Collector(logger)
     items = await paginate(probe, operation, builder, config)
     for failure in probe.failures:
-        if any(m in (failure.get("message") or "").lower() for m in UNLICENSED_MARKERS):
+        if pim and any(m in (failure.get("message") or "").lower() for m in UNLICENSED_MARKERS):
             unlicensed.append(f"{operation}: {failure.get('message')}")
         else:
             collector.failures.append(failure)
@@ -330,12 +333,13 @@ async def _collect(collector: Collector, cred) -> tuple:
         directory = client.role_management.directory
         unlicensed: List[str] = []
 
-        async def read(operation: str, builder, project, **params):
+        async def read(operation: str, builder, project, pim: bool = True, **params):
             config = _query(builder, **params) if params else None
-            return _each(project, await _read(collector, unlicensed, f"graph.{operation}.get", builder, config))
+            return _each(project, await _read(collector, unlicensed, f"graph.{operation}.get", builder, config, pim))
 
+        # Role definitions need no P2, so a licence-worded refusal there is a failure like any other.
         definitions = await read(
-            "roleManagement.directory.roleDefinitions", directory.role_definitions, project_role_definition
+            "roleManagement.directory.roleDefinitions", directory.role_definitions, project_role_definition, pim=False
         )
         if definitions == []:
             # Every tenant has built-in directory roles, so an empty list is a bad read, not a fact.
