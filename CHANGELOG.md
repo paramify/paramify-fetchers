@@ -12,6 +12,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_access_reviews`** (`EVD-AZURE-ENTRA-ACCESS-REVIEWS`) — Microsoft
+  Entra ID access reviews over Microsoft Graph: every review series with what it
+  reviews (group membership, app assignment, directory role, access package), its
+  recurrence, default decision, auto-apply setting and reviewers, each run's
+  status, and the decisions of each active series' latest completed cycle with
+  whether each denial was applied. The summary says whether every active series
+  runs at least monthly, denies unanswered reviews and applies its decisions
+  automatically, how long since each last finished a cycle, and how many denials
+  were applied. A tenant without Entra ID P2 or ID Governance reads
+  `access_reviews_available: false` and the run succeeds; when any read fails the
+  summary gives no figures, so a denied read never reads as no reviews. Needs
+  `AccessReview.Read.All`. Reviews of Azure resource roles are kept by Azure
+  Resource Manager, not Graph, and are not read.
 - **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
   over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
   Code (Read). It records Bicep and ARM checks together, each tagged with its
