@@ -51,7 +51,7 @@ evidence_set:
   reference_id: EVD-SPLUNK-INDEX-RETENTION
   name: Splunk Index Retention and Integrity
   instructions: >-
-    Every index, event and metric, with `retention_days` (frozenTimePeriodInSecs
+    Script: splunk/index_retention/fetcher.py. Every index, event and metric, with `retention_days` (frozenTimePeriodInSecs
     in days; 0 freezes immediately), whether frozen data is archived rather than
     deleted (`archives_on_freeze`), and whether data integrity control is on
     (`data_integrity_control`: Splunk hashes each bucket, verifiable with

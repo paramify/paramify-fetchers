@@ -88,7 +88,7 @@ An **evidence** fetcher carries an `evidence_set` block — the Paramify evidenc
 evidence_set:
   reference_id: EVD-<CATEGORY>-<SHORT>   # stable idempotency key, e.g. EVD-OKTA-PHISHING-MFA
   name: <Human-readable display name>
-  instructions: <optional — what the fetcher runs / how the evidence is produced>
+  instructions: <optional — "Script: <category>/<short_name>/<entry>.", then what the fetcher runs / how the evidence is produced>
 ```
 
 `reference_id` and `name` are required; `instructions` is optional. Customers override `reference_id` per compliance program in the uploader config — they never edit this block. Do **not** add `controls`/`solution_capabilities` here; that linkage stays Paramify-side.

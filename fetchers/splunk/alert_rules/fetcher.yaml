@@ -61,7 +61,7 @@ evidence_set:
   reference_id: EVD-SPLUNK-ALERT-RULES
   name: Splunk Alert Rules
   instructions: >-
-    Every scheduled search Splunk classes as an alert (`alerts[]`), plus the
+    Script: splunk/alert_rules/fetcher.py. Every scheduled search Splunk classes as an alert (`alerts[]`), plus the
     other scheduled searches, read from every app. The rule is Splunk Web's own
     (`metadata.alert_definition`), and Splunk's server-side answer must agree.
     `has_notification_action` is true when any action other than a

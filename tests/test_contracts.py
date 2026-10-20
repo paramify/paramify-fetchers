@@ -20,7 +20,6 @@ Run: ``pytest tests/test_contracts.py`` (needs an editable install:
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -167,16 +166,15 @@ def test_every_evidence_fetcher_has_a_frequency() -> None:
     assert not bad, "\n".join(bad)
 
 
-def test_instructions_script_is_the_entry_path() -> None:
-    """A `Script:` in the instructions names the entry by its path under fetchers/."""
-    bad = []
+def test_instructions_open_with_the_entry_path() -> None:
+    """Instructions open with `Script: <category>/<dir>/<entry>.` so a reader can find the code."""
+    bad: list[str] = []
     for yaml_path in FETCHER_YAMLS:
         spec = yaml.safe_load(yaml_path.read_text())
         text = (spec.get("evidence_set") or {}).get("instructions") or ""
-        expected = f"{yaml_path.parent.parent.name}/{yaml_path.parent.name}/{spec['runtime']['entry']}"
-        for named in re.findall(r"Script:\s+`?([\w./-]+)", text):
-            if named.rstrip(".") != expected:
-                bad.append(f"{yaml_path.parent.relative_to(FETCHERS_ROOT)}: Script: {named} (want {expected})")
+        expected = f"Script: {yaml_path.parent.parent.name}/{yaml_path.parent.name}/{spec['runtime']['entry']}."
+        if text and not text.startswith(expected):
+            bad.append(f"{yaml_path.parent.relative_to(FETCHERS_ROOT)}: want instructions to open with {expected!r}")
     assert not bad, "\n".join(bad)
 
 

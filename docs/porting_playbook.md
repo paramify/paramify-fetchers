@@ -125,7 +125,7 @@ evidence set so the uploader can get-or-create it by `reference_id`:
 evidence_set:
   reference_id: <stable id, e.g. EVD-OKTA-PHISHING-RESISTANT-MFA>
   name: <human-readable evidence set name>
-  instructions: <what reviewers should look for>   # optional
+  instructions: <"Script: <category>/<short_name>/<entry>.", then what reviewers should look for>   # optional
 ```
 
 `reference_id` is the immutable key the uploader get-or-creates on — changing it

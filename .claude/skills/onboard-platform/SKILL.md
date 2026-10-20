@@ -99,7 +99,8 @@ person. The conventions it reads are in `references/state.md`.
 - **Comments are rare and one line, in every script this flow writes** —
   fetchers, `_shared/`, category files, `provision.sh`, `seed.sh`,
   `teardown.sh`. The derivation of each field goes in the fetcher's
-  `evidence_set.instructions`, where an assessor reads it; the build story goes
+  `evidence_set.instructions` (which opens with `Script:
+  <category>/<short_name>/<entry>.`), where an assessor reads it; the build story goes
   in `notes/`. The third run wrote 45–74-line module docstrings restating both.
   Committed code never cites `.onboarding/`, which is gitignored.
 - **In the public repo, the branch carries fetchers, never new validators.**
