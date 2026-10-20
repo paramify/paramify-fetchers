@@ -253,6 +253,49 @@ def test_caller_types_count_every_request_not_just_the_kept_records(monkeypatch)
     assert summary_of(apps)["deployment_activity_by_caller_type"] == {"app": 55, "user": 55}
 
 
+def test_swap_requested_on_production_counts_on_the_app(monkeypatch):
+    prod = [event("Microsoft.Web/sites/slotsSwap/action", "web-a", status, correlation="p1", when=at(15))
+            for status in ("Started", "Accepted", "Succeeded")]
+    prod.append(event("Microsoft.Web/sites/slotsSwap/action", "web-a", caller="Microsoft.Web", idtyp=None,
+                      correlation="p1", when=at(15, 1)))
+    apps, _, _ = collect(monkeypatch, web_client(), events=prod)
+    swaps = apps["web-a"]["activity"]["slot_swaps"]
+    assert swaps["count"] == 1 and swaps["latest"]["caller"] == "releaser@example.com"
+    assert all(s["activity"]["slot_swaps"]["count"] == 0 for s in apps["web-a"]["slots"])
+    assert summary_of(apps)["slot_swaps"] == 1
+
+
+def test_only_the_publishing_credentials_config_list_is_a_credentials_read(monkeypatch):
+    listing = "Microsoft.Web/sites/config/list/action"
+    events = [
+        event(listing, "web-a/config/publishingcredentials", "Started", correlation="c1"),
+        event(listing, "web-a/config/publishingcredentials", "Succeeded", correlation="c1"),
+        event(listing, "web-a/config/appsettings", correlation="c2"),
+        event("Microsoft.Web/sites/slots/config/list/action", "web-a/slots/qa/config/publishingcredentials",
+              correlation="c3"),
+    ]
+    apps, _, _ = collect(monkeypatch, web_client(), events=events)
+    assert apps["web-a"]["activity"]["publishing_credential_reads"]["count"] == 1
+    qa = next(s for s in apps["web-a"]["slots"] if s["name"] == "qa")
+    assert qa["activity"]["publishing_credential_reads"]["count"] == 1
+    summary = summary_of(apps)
+    assert summary["publishing_credential_reads"] == 2 and summary["apps_with_publishing_credential_reads"] == 1
+
+
+def test_requests_on_unlisted_sites_are_counted_not_dropped(monkeypatch):
+    monkeypatch.setattr(deploys, "web_client", lambda *a: web_client())
+    collector = deploys.Collector(logging.getLogger("test"))
+    apps, _ = deploys.collect_web_apps(SUB, object(), collector)
+    events = DEFAULT_EVENTS + [event(SWAP, "func/slots/staging", correlation="f1"),
+                               event(PUBLISH, "deleted-app", correlation="d1")]
+    unlisted = deploys.attach_activity(apps, [deploys.project_event(e) for e in events])
+    assert unlisted == {"slot_swaps": 1, "publish_profile_downloads": 1, "publishing_credential_reads": 0,
+                        "package_deployments": 0}
+    summary = deploys.summarize(apps, 1, {**COMPLETE, "requests_on_unlisted_sites": unlisted})
+    assert summary["deployment_activity_on_unlisted_sites"] == 2
+    assert summary["slot_swaps"] == 2
+
+
 def test_diagnostics_and_config_writes_are_not_deployment_events(monkeypatch):
     apps, _, _ = collect(monkeypatch, web_client())
     counts = [c["count"] for s in [apps["web-a"], *apps["web-a"]["slots"]] for c in s["activity"].values()]
@@ -268,12 +311,13 @@ def test_unread_activity_log_leaves_activity_null_and_evidence_unknown(monkeypat
     monkeypatch.setattr(deploys, "web_client", lambda *a: web_client(deployments={}))
     collector = deploys.Collector(logging.getLogger("test"))
     apps, _ = deploys.collect_web_apps(SUB, object(), collector)
-    deploys.attach_activity(apps, None)
+    assert deploys.attach_activity(apps, None) is None
     assert all(a["activity"] is None for a in apps)
-    summary = deploys.summarize(apps, 1, {"days": 90, "complete": False})
+    summary = deploys.summarize(apps, 1, {"days": 90, "complete": False, "cut_reason": "read_failed"})
     assert summary["apps_without_kudu_deployment_records"] == 2
     assert summary["apps_without_deployment_evidence"] == 0
     assert summary["activity_log_complete"] is False
+    assert summary["slot_swaps"] is None and summary["deployment_activity_by_caller_type"] is None
 
 
 def test_read_activity_log_sends_both_bounds_and_pages_to_the_end(monkeypatch):
@@ -283,20 +327,27 @@ def test_read_activity_log_sends_both_bounds_and_pages_to_the_end(monkeypatch):
     events, window = deploys.read_activity_log(SUB, object(), collector, 90, NOW)
     assert collector.ok and window["complete"] is True and window["cut_reason"] is None
     assert window["events_read"] == len(DEFAULT_EVENTS)
-    assert "eventTimestamp ge '2026-08-01T12:00:00Z'" in seen["filter"]
+    assert "eventTimestamp ge '2026-08-01T12:05:00Z'" in seen["filter"]
     assert "eventTimestamp le '2026-10-30T12:00:00Z'" in seen["filter"]
     assert "resourceProvider eq 'Microsoft.Web'" in seen["filter"]
     assert len(events) == len(DEFAULT_EVENTS) - 2
 
 
-def test_activity_log_read_failing_partway_is_marked_cut(monkeypatch):
+def test_activity_log_read_failing_partway_is_unknown_not_partial(monkeypatch):
     client, _ = activity_client(fail_after=3)
     monkeypatch.setattr(deploys, "monitor_client", lambda *a: client)
     collector = deploys.Collector(logging.getLogger("test"))
     events, window = deploys.read_activity_log(SUB, object(), collector, 90, NOW)
     assert not collector.ok
     assert window["complete"] is False and window["cut_reason"] == "read_failed"
-    assert window["events_read"] == 3 and len(events) == 3
+    assert window["events_read"] == 3 and events is None
+
+
+def test_a_shorter_window_starts_exactly_that_many_days_back(monkeypatch):
+    client, seen = activity_client(events=[])
+    monkeypatch.setattr(deploys, "monitor_client", lambda *a: client)
+    _, window = deploys.read_activity_log(SUB, object(), deploys.Collector(logging.getLogger("t")), 14, NOW)
+    assert "eventTimestamp ge '2026-10-16T12:00:00Z'" in seen["filter"] and window["days"] == 14
 
 
 def test_activity_log_cut_at_the_event_cap(monkeypatch):
@@ -312,6 +363,23 @@ def test_activity_log_days_is_clamped(monkeypatch):
     assert deploys.activity_log_days() == 90
     monkeypatch.setenv("AZURE_APP_SERVICE_ACTIVITY_LOG_DAYS", "14")
     assert deploys.activity_log_days() == 14
+    monkeypatch.setenv("AZURE_APP_SERVICE_ACTIVITY_LOG_DAYS", "0")
+    assert deploys.activity_log_days() == 1
+
+
+def test_non_integer_activity_log_days_falls_back_to_90(monkeypatch, caplog):
+    monkeypatch.setenv("AZURE_APP_SERVICE_ACTIVITY_LOG_DAYS", "ninety")
+    assert deploys.activity_log_days() == 90
+    assert "not a whole number" in caplog.text
+
+
+def test_window_cut_at_the_cap_keeps_counts_but_no_app_reads_as_without_evidence(monkeypatch):
+    apps, _, _ = collect(monkeypatch, web_client(deployments={}), events=[])
+    summary = summary_of(apps, {"days": 90, "complete": False, "cut_reason": "max_events",
+                                "requests_on_unlisted_sites": {c: 0 for c in deploys.ACTIVITY_CATEGORIES}})
+    assert summary["slot_swaps"] == 0 and summary["deployment_activity_on_unlisted_sites"] == 0
+    assert summary["activity_log_complete"] is False
+    assert summary["apps_without_deployment_evidence"] == 0
 
 
 # --- deployment source and slot drift ---
@@ -391,3 +459,34 @@ def test_main_writes_window_and_limitations_and_exits_zero(monkeypatch, tmp_path
     assert evidence["results"]["limitations"] == deploys.LIMITATIONS
     assert evidence["results"]["activity_log"]["complete"] is True
     assert evidence["summary"]["slot_swaps"] == 2
+
+
+def test_source_control_read_failure_is_unknown_in_the_summary(monkeypatch):
+    apps, _, collector = collect(monkeypatch, web_client(sources={"web-a": DENIED}), events=[])
+    assert not collector.ok and apps["web-a"]["source_control"] is None
+    summary = summary_of(apps)
+    assert summary["apps_source_control_unknown"] == 1 and summary["apps_with_source_control"] == 0
+    assert summary["slots_source_control_unknown"] == 0
+
+
+def test_main_with_the_activity_log_denied_leaves_activity_unknown(monkeypatch, tmp_path):
+    client, _ = activity_client(fail_after=0)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.delenv("AZURE_APP_SERVICE_ACTIVITY_LOG_DAYS", raising=False)
+    monkeypatch.setattr(deploys, "resolve_subscription", lambda c: {"subscription_id": SUB, "subscription_source": "env"})
+    monkeypatch.setattr(deploys, "credential", lambda: object())
+    monkeypatch.setattr(deploys, "provider_registration_status", lambda *a: "registered")
+    monkeypatch.setattr(deploys, "web_client", lambda *a: web_client(deployments={}))
+    monkeypatch.setattr(deploys, "monitor_client", lambda *a: client)
+    monkeypatch.setattr(deploys, "report_failure", lambda *a: None)
+    assert deploys.main() == 1
+    [path] = tmp_path.glob("azure_app_service_deployments_*.json")
+    evidence = json.loads(path.read_text())
+    window = evidence["results"]["activity_log"]
+    assert window["cut_reason"] == "read_failed" and window["requests_on_unlisted_sites"] is None
+    apps = evidence["results"]["web_apps"]
+    assert all(s["activity"] is None for a in apps for s in [a, *a["slots"]])
+    summary = evidence["summary"]
+    assert summary["slot_swaps"] is None and summary["publish_profile_downloads"] is None
+    assert summary["apps_without_deployment_evidence"] == 0
+    assert summary["apps_with_deployment_evidence"] == 0

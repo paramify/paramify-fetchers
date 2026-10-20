@@ -46,6 +46,8 @@ ACTIVITY_LIMIT = 100
 
 # The Activity Log keeps 90 days; a read past this many events is cut and says so.
 ACTIVITY_LOG_MAX_DAYS = 90
+# The window starts this far inside retention, so its oldest edge is still served.
+ACTIVITY_LOG_RETENTION_MARGIN = timedelta(minutes=5)
 ACTIVITY_LOG_MAX_EVENTS = 200_000
 ACTIVITY_LOG_SELECT = "eventTimestamp,operationName,status,caller,resourceId,correlationId,eventDataId,claims"
 
@@ -54,11 +56,15 @@ ACTIVITY_OPERATIONS = {
     "microsoft.web/sites/slots/slotsswap/action": "slot_swaps",
     "microsoft.web/sites/publishxml/action": "publish_profile_downloads",
     "microsoft.web/sites/slots/publishxml/action": "publish_profile_downloads",
+    "microsoft.web/sites/config/list/action": "publishing_credential_reads",
+    "microsoft.web/sites/slots/config/list/action": "publishing_credential_reads",
     "microsoft.web/sites/extensions/write": "package_deployments",
     "microsoft.web/sites/slots/extensions/write": "package_deployments",
 }
-ACTIVITY_CATEGORIES = ("slot_swaps", "publish_profile_downloads", "package_deployments")
+ACTIVITY_CATEGORIES = ("slot_swaps", "publish_profile_downloads", "publishing_credential_reads", "package_deployments")
 PACKAGE_EXTENSIONS = ("msdeploy", "onedeploy", "zipdeploy")
+# config/list also reads app settings and connection strings; only this resource is a credentials read.
+PUBLISHING_CREDENTIALS_RESOURCE = "/config/publishingcredentials"
 SITE_RESOURCE = re.compile(
     r"^(/subscriptions/[^/]+/resourcegroups/[^/]+/providers/microsoft\.web/sites/[^/]+)(?:/slots/([^/]+))?(/.*)?$"
 )
@@ -102,12 +108,19 @@ LIMITATIONS = [
     "pipeline often names the tool, not a person. Kudu keeps a bounded history; the newest "
     f"{HISTORY_LIMIT} records per app or slot are kept, with the full count.",
     "Activity Log events are control-plane requests, kept 90 days. A slot swap names who requested it, "
-    "when and on which slot; the slot it swapped with is not logged. A publish-profile download names who "
-    "obtained the Web Deploy and FTP credentials, not whether or when they were used.",
-    "Web Deploy and FTP uploads go to the app's deployment endpoints, not Azure Resource Manager, so "
-    "they leave no Activity Log entry: what content they shipped, which commit it was, and who uploaded "
-    "it with shared publishing credentials are not visible here. Nothing older than the Activity Log "
-    "window is seen.",
+    "when and on which slot; the slot it swapped with is not logged. A publish-profile download (publishxml) "
+    "or a publishing-credentials read (config/publishingcredentials/list) names who obtained the shared Web "
+    "Deploy, FTP and Kudu credentials, not whether or when they were used. ListPublishingCredentials events "
+    "the platform logs with no caller are not counted.",
+    "Web Deploy, FTP and Kudu uploads made with those credentials go to the app's deployment endpoints, not "
+    "Azure Resource Manager, so they leave no Activity Log entry: what content they shipped, which commit "
+    "it was, and who uploaded it are not visible here. Whether basic-auth publishing is switched off, which "
+    "removes those shared credentials, is reported by azure_app_service_configuration "
+    "(basic_auth_publishing). Nothing older than the Activity Log window is seen.",
+    "Runtime versions travel with a slot swap; TLS version and cipher suite, FTPS, HTTP/2, remote debugging, "
+    "HTTPS-only, client certificates, public network access and access restrictions stay with the slot. "
+    "matches_production is posture parity between a slot and production, not what production runs after a "
+    "swap.",
 ]
 
 
@@ -271,10 +284,11 @@ def site_of(resource_id):
 
 def activity_category(event: dict):
     category = ACTIVITY_OPERATIONS.get(str(event.get("operation") or "").lower())
-    if category == "package_deployments":
-        _, _, below = site_of(event.get("resource_id"))
-        if below.rsplit("/", 1)[-1] not in PACKAGE_EXTENSIONS:
-            return None
+    _, _, below = site_of(event.get("resource_id"))
+    if category == "package_deployments" and below.rsplit("/", 1)[-1] not in PACKAGE_EXTENSIONS:
+        return None
+    if category == "publishing_credential_reads" and below != PUBLISHING_CREDENTIALS_RESOURCE:
+        return None
     return category
 
 
@@ -324,16 +338,20 @@ def activity_summary(records_by_category: dict) -> dict:
     return out
 
 
-def attach_activity(apps: list[dict], events: list[dict] | None) -> None:
-    """Fill each app's and slot's `activity`; left None when the Activity Log could not be read."""
+def attach_activity(apps: list[dict], events: list[dict] | None) -> dict | None:
+    """Fill each app's and slot's `activity` (None when the Activity Log could not be read).
+
+    Returns the requests on sites not listed (deleted apps or slots, function apps), by category.
+    """
     if events is None:
-        return
+        return None
     by_site = activity_records(events)
     for app in apps:
         key = arm_id_key(app["id"])
-        app["activity"] = activity_summary(by_site.get((key, None), {}))
+        app["activity"] = activity_summary(by_site.pop((key, None), {}))
         for slot in app.get("slots") or []:
-            slot["activity"] = activity_summary(by_site.get((key, str(slot["name"]).lower()), {}))
+            slot["activity"] = activity_summary(by_site.pop((key, str(slot["name"]).lower()), {}))
+    return {c: sum(len(records.get(c, [])) for records in by_site.values()) for c in ACTIVITY_CATEGORIES}
 
 
 def slot_name(site: dict):
@@ -361,6 +379,11 @@ def dig_count(site: dict, category: str) -> int:
     return ((site.get("activity") or {}).get(category) or {}).get("count", 0)
 
 
+def activity_read(window: dict) -> bool:
+    """Events were read: the whole window, or the newest events up to the cap."""
+    return window.get("complete") is True or window.get("cut_reason") == "max_events"
+
+
 def has_deployment_evidence(app: dict) -> bool:
     return any(h["count"] for h in all_histories(app)) or any(
         activity_count(app, c) for c in ACTIVITY_CATEGORIES
@@ -380,8 +403,14 @@ def summarize(apps: list[dict], excluded_function_apps: int, window: dict) -> di
             caller_types.update(((site.get("activity") or {}).get(category) or {}).get("by_caller_type", {}))
     swaps = [s["activity"]["slot_swaps"]["latest"] for a in apps for s in _sites(a)
              if s.get("activity") and s["activity"]["slot_swaps"]["latest"]]
-    activity_read = window.get("complete") is True
+    complete = window.get("complete") is True
+    read = activity_read(window)
+    unlisted = window.get("requests_on_unlisted_sites")
     no_kudu = [a for a in apps if not any(h["count"] for h in all_histories(a))]
+
+    def if_read(value):
+        return value if read else None
+
     return {
         "total_web_apps": len(apps),
         "total_deployment_slots": len(slots),
@@ -393,6 +422,8 @@ def summarize(apps: list[dict], excluded_function_apps: int, window: dict) -> di
             1 for a in apps if (a.get("source_control") or {}).get("is_git_hub_action")
         ),
         "slots_with_source_control": sum(1 for s in slots if (s.get("source_control") or {}).get("configured")),
+        "apps_source_control_unknown": sum(1 for a in apps if a.get("source_control") is None),
+        "slots_source_control_unknown": sum(1 for s in slots if s.get("source_control") is None),
         # --- Kudu deployment records ---
         "apps_with_kudu_deployment_records": len(apps) - len(no_kudu),
         "apps_without_kudu_deployment_records": sum(1 for a in no_kudu if history_read(a)),
@@ -405,24 +436,29 @@ def summarize(apps: list[dict], excluded_function_apps: int, window: dict) -> di
         ),
         # --- Activity Log ---
         "activity_log_days": window.get("days"),
-        "activity_log_complete": activity_read,
-        "slot_swaps": sum(activity_count(a, "slot_swaps") for a in apps),
-        "failed_slot_swaps": sum(
+        "activity_log_complete": complete,
+        "slot_swaps": if_read(sum(activity_count(a, "slot_swaps") for a in apps)),
+        "failed_slot_swaps": if_read(sum(
             ((s.get("activity") or {}).get("slot_swaps") or {}).get("failed", 0) for a in apps for s in _sites(a)
-        ),
-        "apps_with_slot_swaps": sum(1 for a in apps if activity_count(a, "slot_swaps")),
+        )),
+        "apps_with_slot_swaps": if_read(sum(1 for a in apps if activity_count(a, "slot_swaps"))),
         "latest_slot_swap_time": max((r["time"] for r in swaps if r["time"]), default=None),
-        "publish_profile_downloads": sum(activity_count(a, "publish_profile_downloads") for a in apps),
-        "apps_with_publish_profile_downloads": sum(
+        "publish_profile_downloads": if_read(sum(activity_count(a, "publish_profile_downloads") for a in apps)),
+        "apps_with_publish_profile_downloads": if_read(sum(
             1 for a in apps if activity_count(a, "publish_profile_downloads")
-        ),
-        "package_deployments": sum(activity_count(a, "package_deployments") for a in apps),
-        "apps_with_package_deployments": sum(1 for a in apps if activity_count(a, "package_deployments")),
-        "deployment_activity_by_caller_type": sorted_counts(caller_types),
+        )),
+        "publishing_credential_reads": if_read(sum(activity_count(a, "publishing_credential_reads") for a in apps)),
+        "apps_with_publishing_credential_reads": if_read(sum(
+            1 for a in apps if activity_count(a, "publishing_credential_reads")
+        )),
+        "package_deployments": if_read(sum(activity_count(a, "package_deployments") for a in apps)),
+        "apps_with_package_deployments": if_read(sum(1 for a in apps if activity_count(a, "package_deployments"))),
+        "deployment_activity_by_caller_type": if_read(sorted_counts(caller_types)),
+        "deployment_activity_on_unlisted_sites": sum(unlisted.values()) if read and unlisted is not None else None,
         # --- any deployment evidence ---
         "apps_with_deployment_evidence": sum(1 for a in apps if has_deployment_evidence(a)),
         "apps_without_deployment_evidence": sum(
-            1 for a in apps if not has_deployment_evidence(a) and history_read(a) and activity_read
+            1 for a in apps if not has_deployment_evidence(a) and history_read(a) and complete
         ),
         # --- slots vs production ---
         "slots_matching_production": sum(1 for s in slots if s.get("matches_production") is True),
@@ -535,8 +571,11 @@ def activity_log_days() -> int:
 
 
 def read_activity_log(subscription_id, cred, collector: Collector, days: int, now: datetime):
-    """Microsoft.Web Activity Log events in [now - days, now], paged to the end; (events, window)."""
-    start = now - timedelta(days=days)
+    """Microsoft.Web Activity Log events in [now - days, now], paged to the end; (events, window).
+
+    events is None when any page fails: a partial read would count as fewer deployments, not unknown ones.
+    """
+    start = now - min(timedelta(days=days), timedelta(days=ACTIVITY_LOG_MAX_DAYS) - ACTIVITY_LOG_RETENTION_MARGIN)
     window = {
         "start_time": start.isoformat(),
         "end_time": now.isoformat(),
@@ -545,6 +584,7 @@ def read_activity_log(subscription_id, cred, collector: Collector, days: int, no
         "cut_reason": None,
         "events_read": 0,
         "oldest_event_time": None,
+        "requests_on_unlisted_sites": None,
     }
     monitor = collector.guard("monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred))
     if monitor is None:
@@ -569,9 +609,10 @@ def read_activity_log(subscription_id, cred, collector: Collector, days: int, no
                 events.append(projected)
         else:
             window["complete"] = True
-    except Exception as exc:  # noqa: BLE001 — keep what was read and say the window was cut
+    except Exception as exc:  # noqa: BLE001 — record it; the counts are unknown, not zero
         collector.record("monitor.activity_logs.list", exc)
         window["cut_reason"] = "read_failed"
+        return None, window
     return events, window
 
 
@@ -600,7 +641,7 @@ def main() -> int:
             logger.warning("Microsoft.Web is not registered on subscription %s — no App Service in use", subscription_id)
         apps, excluded = collect_web_apps(subscription_id, cred, collector)
         events, window = read_activity_log(subscription_id, cred, collector, window["days"], datetime.now(timezone.utc))
-        attach_activity(apps, events)
+        window["requests_on_unlisted_sites"] = attach_activity(apps, events)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",

@@ -1,7 +1,7 @@
 name: azure_app_service_deployments
 version: 0.1.0
 description: >-
-  Shows how each App Service web app and slot is deployed: recorded deployments, slot swaps and publish-profile downloads with who and when, deployment source, and slot drift from production.
+  Shows how each App Service web app and slot is deployed: recorded deployments, slot swaps and publishing-credential retrievals with who and when, deployment source, and slot drift from production.
 category: azure
 
 supports_targets: true
@@ -46,9 +46,8 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-CMT-RMV   # how each app is deployed: Kudu records, swaps, publish-profile use, source control
-  - KSI-CMT-LMC   # each deployment event logged with who requested it and when
-  - KSI-RPL-ARP   # slots that match production, ready to swap back to
+  - KSI-CMT-RMV   # how each app is deployed: Kudu records, swaps, publishing-credential use, source control
+  - KSI-RPL-ARP   # slots and production compared setting by setting before a swap or a swap back
 
 evidence_set:
   reference_id: EVD-AZURE-APPSVC-DEPLOYMENTS
@@ -66,9 +65,9 @@ evidence_set:
     - web_apps.get_source_control() and get_source_control_slot() (per app and slot) — the repository and branch it deploys from
     - web_apps.list_slots() (per app) — its deployment slots
     - web_apps.get_configuration() and get_configuration_slot() (per app with slots, and per slot) — the settings compared between each slot and production
-    - activity_logs.list() (Microsoft.Web events, last 90 days) — slot swaps, publish-profile downloads and package deployments, with who requested each
+    - activity_logs.list() (Microsoft.Web events over the last activity_log_days, 90 by default) — slot swaps, publishing-credential retrievals and package deployments, with who requested each
 
-    Output: azure_app_service_deployments_<subscription>.json — each web app's and slot's recorded deployments and deployment events with who and when, its deployment source, how each slot differs from production, and what the evidence cannot attribute.
+    Output: azure_app_service_deployments_<subscription>.json — each web app's and slot's recorded deployments and deployment events with who and when, its deployment source, how each slot differs from production, and what the evidence cannot attribute. All times are ISO 8601 UTC.
 
     Summary fields:
 
@@ -78,13 +77,15 @@ evidence_set:
     - apps_with_slots — Number of web apps with at least one deployment slot
     - excluded_function_apps — Number of function apps left out
     - provider_registration_status — Whether the App Service provider (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown
-    - activity_log_days — Days of Activity Log read (at most 90, which is all the Activity Log keeps)
-    - activity_log_complete — True if every page of the Activity Log window was read; false if the read failed or stopped at 200,000 events
+    - activity_log_days — Days of Activity Log requested (activity_log_days, 1 to 90; 90 is all the Activity Log keeps). The window is that many days back from the run, starting 5 minutes inside the 90-day limit; the Activity Log counts below cover the window only
+    - activity_log_complete — True if every page of the window was read; false if the read failed (the Activity Log counts below are then null) or stopped at 200,000 events (the newest events were kept, so the counts are a lower bound; results.activity_log.oldest_event_time shows how far back the read reached)
 
     Where do the apps deploy from?
     - apps_with_source_control — Number of web apps with a source repository set up for deployment
     - apps_deploying_from_github_actions — Number of web apps whose source is set up to deploy through GitHub Actions
     - slots_with_source_control — Number of deployment slots with a source repository set up for deployment
+    - apps_source_control_unknown — Number of web apps whose deployment source couldn't be read
+    - slots_source_control_unknown — Number of deployment slots whose deployment source couldn't be read
 
     What does App Service's own deployment record (Kudu) show?
     - apps_with_kudu_deployment_records — Number of web apps with at least one Kudu deployment record on the app or one of its slots
@@ -96,21 +97,27 @@ evidence_set:
     - latest_kudu_deployment_time — Time of the newest Kudu deployment record across all web apps and slots; null if there is none
 
     Who released what, and when (Activity Log)?
-    - slot_swaps — Number of slot swaps requested in the window, counting each request (one correlation id) once
-    - failed_slot_swaps — Number of slot swaps in the window that failed
-    - apps_with_slot_swaps — Number of web apps with at least one slot swap in the window
-    - latest_slot_swap_time — Time of the newest slot swap request in the window; null if there is none
-    - publish_profile_downloads — Number of times someone downloaded a web app's or slot's publishing credentials (the publish profile Visual Studio and FTP use) in the window
-    - apps_with_publish_profile_downloads — Number of web apps whose publish profile was downloaded in the window
-    - package_deployments — Number of MSDeploy, OneDeploy or ZipDeploy deployments made through Azure Resource Manager in the window
+    - slot_swaps — Number of slot swap requests in the window on a listed web app or slot. A request is the events sharing one correlation id, counted once; this and every Activity Log count below is null if the Activity Log couldn't be read and a lower bound if activity_log_complete is false
+    - failed_slot_swaps — Number of slot swaps in the window that failed: any event under the request's correlation id has status Failed
+    - apps_with_slot_swaps — Number of web apps with at least one slot swap in the window, on the app or a slot
+    - latest_slot_swap_time — Time of the newest slot swap request in the window (ISO 8601 UTC); null if there is none or the Activity Log couldn't be read
+    - publish_profile_downloads — Number of publish profile download requests (publishxml, the Web Deploy and FTP credentials Visual Studio uses) in the window
+    - apps_with_publish_profile_downloads — Number of web apps whose publish profile was downloaded in the window, for the app or a slot
+    - publishing_credential_reads — Number of requests reading a web app's or slot's publishing credentials through config/publishingcredentials/list (the Kudu and FTP user name and password pipelines and the portal fetch) in the window
+    - apps_with_publishing_credential_reads — Number of web apps whose publishing credentials were read in the window, for the app or a slot
+    - package_deployments — Number of MSDeploy, OneDeploy or ZipDeploy deployment requests made through Azure Resource Manager in the window
     - apps_with_package_deployments — Number of web apps with at least one package deployment through Azure Resource Manager in the window
-    - deployment_activity_by_caller_type — Number of slot swaps, publish-profile downloads and package deployments for each kind of requester (user, app, or unknown when the log doesn't say)
+    - deployment_activity_by_caller_type — Number of slot swaps, publish profile downloads, publishing credential reads and package deployments for each kind of requester:
+      - user (a person: the token's identity type is user, or the caller is a user name containing @)
+      - app (a service principal or managed identity: the token's identity type is app)
+      - unknown (the log names neither)
+    - deployment_activity_on_unlisted_sites — Number of the same requests on a site this run didn't list (a deleted app or slot, or a function app), counted here instead of on an app
 
     Is there any trace of how each app is deployed?
-    - apps_with_deployment_evidence — Number of web apps with deployment evidence: a Kudu deployment record, slot swap, publish-profile download or package deployment on the app or a slot
-    - apps_without_deployment_evidence — Number of web apps with no Kudu deployment record, slot swap, publish-profile download or package deployment on the app or any slot, counted only when every read succeeded and the whole Activity Log window was read
+    - apps_with_deployment_evidence — Number of web apps with deployment evidence: a Kudu deployment record, slot swap, publish profile download, publishing credential read or package deployment on the app or a slot
+    - apps_without_deployment_evidence — Number of web apps with none of that deployment evidence on the app or any slot, counted only when every Kudu read succeeded and the whole Activity Log window was read
 
     Do the slots match production?
-    - slots_matching_production — Number of deployment slots whose compared settings (TLS, cipher suite, FTPS, HTTPS-only, runtime versions, access restrictions, client certificates, public network access) all match production
+    - slots_matching_production — Number of deployment slots whose compared settings all match production. Compared: minimum TLS version and cipher suite, the SCM (deployment) site's minimum TLS version, FTPS state, HTTP/2, remote debugging, runtime versions, the main and SCM sites' access restrictions (rules in priority order, names ignored, and default actions), whether SCM uses the main site's rules, HTTPS-only, client certificates and public network access. Only the runtime versions travel with a swap; the rest stay with the slot, so a match is posture parity between slot and production, and a slot locked down differently on purpose reads as differing
     - slots_differing_from_production — Number of deployment slots with at least one compared setting that differs from production
     - slots_comparison_unknown — Number of deployment slots not compared because the slot's or production's settings couldn't be read

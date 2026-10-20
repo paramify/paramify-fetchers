@@ -41,14 +41,17 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_app_service_deployments`** (`EVD-AZURE-APPSVC-DEPLOYMENTS`) — how each App
   Service web app and slot is deployed. Kudu's deployment records (id or commit, status,
   author, deployer, message, times, the active deployment), counted separately so an empty
-  Kudu history is not read as "no deployments". From the Activity Log (Microsoft.Web, last
-  90 days, explicit start and end, paged to the end, with the window and whether it was
-  cut written into the evidence): slot swaps, publish-profile downloads and package
-  deployments through Resource Manager, each with who requested it and when. Also where
-  each app deploys from (credentials in the URL removed) and each slot's configuration
-  compared with production field by field. `results.limitations` says what it cannot
-  attribute: the content or commit a Web Deploy or FTP push shipped, who used shared
-  publishing credentials, and anything older than 90 days. Reader only.
+  Kudu history is not read as "no deployments". From the Activity Log (Microsoft.Web over
+  `activity_log_days`, 90 by default, explicit start and end, paged to the end): slot
+  swaps, publish-profile downloads, publishing-credential reads and package deployments
+  through Resource Manager, one per request with who asked and when. A failed read leaves
+  those counts null rather than zero; a read cut at 200,000 events keeps the newest and
+  says so. Requests on sites not listed (deleted apps, function apps) are counted apart.
+  Also where each app deploys from (credentials in the URL removed, a failed read counted
+  as unknown) and each slot's configuration compared with production field by field.
+  `results.limitations` says what it cannot attribute: the content or commit a Web Deploy
+  or FTP push shipped, who used shared publishing credentials, and anything older than the
+  window. Reader only.
 - **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
   over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
   Code (Read). It records Bicep and ARM checks together, each tagged with its
