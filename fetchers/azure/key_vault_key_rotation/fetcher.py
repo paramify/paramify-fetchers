@@ -82,6 +82,7 @@ EXPIRY_WARNING_DAYS = 30
 APP_SERVICE_SOURCE_KEY_VAULT = "key_vault"
 APP_SERVICE_SOURCE_MANAGED = "managed"
 APP_SERVICE_SOURCE_UPLOADED = "uploaded"
+APP_SERVICE_SOURCES = (APP_SERVICE_SOURCE_KEY_VAULT, APP_SERVICE_SOURCE_MANAGED, APP_SERVICE_SOURCE_UPLOADED)
 # keyVaultSecretStatus: Succeeded syncs; these are still pending or unknown; every other value is a failure.
 KEY_VAULT_SYNC_SUCCEEDED = "succeeded"
 KEY_VAULT_SYNC_UNDECIDED = {"unknown", "initialized", "waitingoncertificateorder"}
@@ -607,6 +608,13 @@ def _expiring_soon(records: list[dict]) -> int:
     )
 
 
+def source_counts(app_service_certificates: list[dict]) -> dict:
+    """Every source listed, 0 when it has none, so a validator can match "uploaded": 0."""
+    counts = Counter({source: 0 for source in APP_SERVICE_SOURCES})
+    counts.update(c["source"] for c in app_service_certificates)
+    return sorted_counts(counts)
+
+
 def summarize_certificates(vaults: list[dict], app_service_certificates: list[dict]) -> dict:
     """Auto-renew coverage is measured over certificates whose policy was readable."""
     certificates = [cert for vault in vaults for cert in vault.get("certificates") or []]
@@ -629,9 +637,7 @@ def summarize_certificates(vaults: list[dict], app_service_certificates: list[di
         "expired_certificates": sum(1 for cert in certificates if cert["expired"]),
         "certificates_expiring_within_30_days": _expiring_soon(certificates),
         "total_app_service_certificates": len(app_service_certificates),
-        "app_service_certificates_by_source": sorted_counts(
-            Counter(c["source"] for c in app_service_certificates)
-        ),
+        "app_service_certificates_by_source": source_counts(app_service_certificates),
         "expired_app_service_certificates": sum(1 for c in app_service_certificates if c["expired"]),
         "app_service_certificates_expiring_within_30_days": _expiring_soon(app_service_certificates),
         "app_service_certificates_key_vault_sync_failing": sum(

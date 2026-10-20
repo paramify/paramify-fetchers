@@ -140,14 +140,15 @@ def test_vault_without_uri_or_name_is_not_attempted(monkeypatch):
     assert kv.vault_record(v)["certificates_status"] == "not_attempted"
 
 
-def test_readable_vault_lists_certificates_with_auto_renew(monkeypatch):
+@pytest.mark.parametrize("policy_status", [401, 403, 404])
+def test_readable_vault_lists_certificates_with_auto_renew(monkeypatch, policy_status):
     fake_certificates(
         monkeypatch,
         listed=[cert_props("web"), cert_props("api"), cert_props("old")],
         policies={
             "web": policy(Action.AUTO_RENEW),
             "api": policy(Action.EMAIL_CONTACTS, issuer="Unknown"),
-            "old": HttpResponseError(403, "no get permission"),
+            "old": HttpResponseError(policy_status, "no get permission or no policy"),
         },
     )
     v, c = vault(), collector()
@@ -266,7 +267,9 @@ def test_key_vault_sync_status_and_auto_renew_link():
     assert (uploaded["key_vault_sync_succeeded"], uploaded["key_vault_certificate_auto_renew"]) == (None, None)
 
     summary = kv.summarize_certificates([], [linked, broken, uploaded])
-    assert summary["app_service_certificates_by_source"] == {"key_vault": 2, "uploaded": 1}
+    assert summary["app_service_certificates_by_source"] == {"key_vault": 2, "managed": 0, "uploaded": 1}
+    assert kv.summarize_certificates([], [])["app_service_certificates_by_source"] == {
+        "key_vault": 0, "managed": 0, "uploaded": 0}
     assert summary["app_service_certificates_key_vault_sync_failing"] == 1
 
 

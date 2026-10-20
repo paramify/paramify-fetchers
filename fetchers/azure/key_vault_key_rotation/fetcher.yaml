@@ -1,7 +1,7 @@
 name: azure_key_vault_key_rotation
 version: 0.2.0
 description: >-
-  Shows whether Key Vault keys rotate, whether keys, secrets and certificates expire, whether certificates renew themselves, and where each App Service certificate comes from.
+  Shows whether Key Vault keys rotate, whether keys and secrets have an expiry and when certificates expire, whether certificates renew themselves, and where each App Service certificate comes from.
 category: azure
 
 supports_targets: true
@@ -42,7 +42,7 @@ evidence_set:
   instructions: |
     Script: azure/key_vault_key_rotation/fetcher.py
 
-    Access: Reader on the subscription. Optional: Key Vault Reader on each vault (RBAC vaults) or an access policy with key and certificate list and get (access-policy vaults); without it, that vault's certificates read not_authorized and key rotation comes from the management plane only.
+    Access: Reader on the subscription. Optional: Key Vault Reader on each vault (RBAC vaults) or an access policy with key and certificate list and get (access-policy vaults); without it, that vault's certificates read not_authorized and key rotation comes from the management plane only. An access policy with certificate list but not get lists the certificates with their auto-renew unknown. A vault firewall or private endpoint that blocks the collector also answers 403, so that vault reads not_authorized and inaccessible even with the role in place.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
@@ -51,7 +51,7 @@ evidence_set:
     - keys.list() and keys.get() (per key) — keys, their dates and rotation policy
     - secrets.list() (per vault) — secret names and expiry dates, never values
     - KeyClient.list_properties_of_keys() and get_key_rotation_policy() (per vault, per key) — rotation policies on the data plane
-    - CertificateClient.list_properties_of_certificates() and get_certificate_policy() (per vault, per certificate) — certificate expiry and renewal policy; a 401 or 403 is that vault's not_authorized answer, any other error fails the run
+    - CertificateClient.list_properties_of_certificates() and get_certificate_policy() (per vault, per certificate) — certificate expiry and renewal policy; on the list, a 401 or 403 is that vault's not_authorized answer and any other error fails the run; on a policy read, a 401, 403 or 404 leaves that one certificate with policy_readable false and auto_renew_enabled null, and any other error fails the run
     - certificates.list() (App Service) — App Service certificates, their expiry and source; a failure fails the run
 
     Output: azure_key_vault_key_rotation_<subscription>.json — every key vault's keys with their rotation policies, secrets with their expiry, and certificates with their expiry and renewal policy, plus every App Service certificate with its expiry and where it comes from; no key material, secret value, certificate body or PFX password is read.
@@ -61,10 +61,10 @@ evidence_set:
     What was checked?
     - total_key_vaults — Number of key vaults in the subscription
     - data_plane_accessible_vaults — Number of key vaults whose keys this credential could list on the data plane
-    - data_plane_inaccessible_vaults — Number of key vaults that refused this credential on the data plane (no data-plane role or access policy); a permission gap, not a failed run
+    - data_plane_inaccessible_vaults — Number of key vaults whose data-plane key list answered this credential with an HTTP error (most often no role or access policy, or a vault firewall); a permission or network gap, not a failed run
     - rbac_authorization_vaults — Number of key vaults that use Azure RBAC rather than access policies for data-plane permissions
     - certificate_accessible_vaults — Number of key vaults whose certificates this credential could list
-    - certificate_not_authorized_vaults — Number of key vaults that refused to list their certificates (HTTP 401 or 403, read as not_authorized); their certificates are unknown, not zero
+    - certificate_not_authorized_vaults — Number of key vaults that refused to list their certificates (HTTP 401 or 403, read as not_authorized); their certificates are unknown, not zero. Vaults whose certificate list failed, or that had no data-plane address, are in neither this count nor certificate_accessible_vaults
     - provider_registration_status — Whether Key Vault (Microsoft.KeyVault) is registered on the subscription: registered, not_registered or unknown
     - web_provider_registration_status — Whether App Service (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown; not_registered means no App Service in use rather than zero certificates
 
@@ -92,13 +92,13 @@ evidence_set:
 
     Are certificates expired or about to expire?
     - expired_certificates — Number of Key Vault certificates past their expiry date when the fetcher ran
-    - certificates_expiring_within_30_days — Number of Key Vault certificates not yet expired that expire within 30 days
+    - certificates_expiring_within_30_days — Number of Key Vault certificates not yet expired that expire within 30 days (0 to 30 whole days left, with part days dropped, so 30 days 23 hours counts)
     - expired_app_service_certificates — Number of App Service certificates past their expiry date when the fetcher ran
     - app_service_certificates_expiring_within_30_days — Number of App Service certificates not yet expired that expire within 30 days
 
     Where do App Service certificates come from?
     - total_app_service_certificates — Number of App Service certificates in the subscription
-    - app_service_certificates_by_source — Number of App Service certificates from each source:
+    - app_service_certificates_by_source — Number of App Service certificates from each source, with every source listed and 0 when it has none:
       - key_vault (synced from a Key Vault secret; the record's key_vault_certificate_auto_renew is that vault certificate's auto-renew, or null when the vault's certificates couldn't be read or it holds no certificate of that name, as for an App Service Certificate order)
       - managed (an App Service managed certificate, recognised by its canonical name or domain validation method; App Service renews it)
       - uploaded (an uploaded PFX file that nobody renews)
