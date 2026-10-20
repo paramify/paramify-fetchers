@@ -24,8 +24,8 @@ prowler/providers/azure/config.py.
 
 import logging
 import os
+import re
 import sys
-from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -482,20 +482,20 @@ def eligibility_record(instance: dict, role_names: dict[str, dict]) -> dict:
     }
 
 
+_NUMBER = r"(\d+(?:\.\d+)?)"
+ISO_DURATION = re.compile(
+    rf"^P(?:{_NUMBER}Y)?(?:{_NUMBER}M)?(?:{_NUMBER}W)?(?:{_NUMBER}D)?(?:T(?:{_NUMBER}H)?(?:{_NUMBER}M)?(?:{_NUMBER}S)?)?$"
+)
+# Hours per unit; a year and a month have no fixed length, so they count as 365 and 30 days.
+DURATION_HOURS = (365 * 24, 30 * 24, 7 * 24, 24, 1, 1 / 60, 1 / 3600)
+
+
 def duration_hours(value: str | None) -> float | None:
     """Hours in an ISO-8601 duration such as PT8H, P1DT12H or P1W; None when absent or unparseable."""
-    import isodate
-
-    if not value:
+    match = ISO_DURATION.match(value or "")
+    if not match or not any(match.groups()):
         return None
-    try:
-        parsed = isodate.parse_duration(value)
-    except (isodate.ISO8601Error, ValueError, TypeError):
-        return None
-    if isinstance(parsed, isodate.Duration):
-        # Years and months have no fixed length; counted from a non-leap January.
-        parsed = parsed.totimedelta(start=datetime(2001, 1, 1))
-    return round(parsed.total_seconds() / 3600, 2)
+    return round(sum(float(n) * h for n, h in zip(match.groups(), DURATION_HOURS) if n), 2)
 
 
 def policy_record(assignment: dict) -> dict:
