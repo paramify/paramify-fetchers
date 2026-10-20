@@ -62,9 +62,8 @@ permissions:
   the gaps
 - [Find the fetchers for a KSI](ksi_mapping_guide.md)
 
-## Design and project
+## Releases and project
 
-- [Framework design notes](design.md)
 - [Pin a release and upgrade safely](versioning_guide.md)
 - [Cut a release](releasing_guide.md)
 - [Work in a private copy of this repo](private_mirror_workflow.md)

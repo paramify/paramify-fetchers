@@ -855,12 +855,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Removed
 
-- **The docs the illustrated guides replaced.** `docs/authoring_a_fetcher.md`,
-  `config_injection_design.md`, `envelope_design.md`, `fetcher_contract.md`,
-  `inventory_fetchers.md`, `issue_report_fetchers.md`, `pipelines.md`,
-  `platform_onboarding.md`, `releasing.md`, `run_manifest_reference.md`,
-  `uploader_design.md`, `validators_design.md` and `versioning.md` are gone;
-  every link to them now points at the matching `*_guide.md`.
+- **The docs the illustrated guides replaced.** `docs/design.md`,
+  `authoring_a_fetcher.md`, `config_injection_design.md`, `envelope_design.md`,
+  `fetcher_contract.md`, `inventory_fetchers.md`, `issue_report_fetchers.md`,
+  `pipelines.md`, `platform_onboarding.md`, `releasing.md`,
+  `run_manifest_reference.md`, `uploader_design.md`, `validators_design.md` and
+  `versioning.md` are gone; every link to them now points at the matching
+  `*_guide.md` (`design.md`'s at `architecture_guide.md`).
 
 ### Fixed
 

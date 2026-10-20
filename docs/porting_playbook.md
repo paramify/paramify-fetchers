@@ -14,7 +14,7 @@ The contract is not fully enforced yet. Ports are versioned `0.x.y` and carry
 known interim violations (documented at the end of this file). Cleanup happens
 later, after the framework's runner and secret resolver land.
 
-For background and rationale, see [`design.md`](design.md). If the source is a
+For how one run works end to end, see [`architecture_guide.md`](architecture_guide.md). If the source is a
 scanner export (Nessus, Wiz, SentinelOne, …) rather than a JSON assertion of
 state, this is an **issue-report** fetcher, not an evidence port — start from
 [`issue_report_fetchers_guide.md`](issue_report_fetchers_guide.md) and
@@ -342,7 +342,7 @@ the design we're trying to leave behind.
   170KB. `CLAUDE.md` explicitly defers this.
 - **Don't add `controls`, `solution_capabilities`, or `validation_rules`** to
   `fetcher.yaml`. These were in the old `catalog.json` and were intentionally
-  cut. See `design.md` § "Two concerns to revisit later".
+  cut. See [`architecture_guide.md`](architecture_guide.md).
 - **Don't add schema fields the schema doesn't define** (no `envelope_version`,
   no `payload_schema`, no `controls`). The schema is deliberately minimal;
   fields return when their absence causes real friction. (`target_schema` *is*
