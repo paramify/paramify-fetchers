@@ -116,7 +116,7 @@ evidence_set:
 
     Were the destination workspaces read?
     - ingestion_lookback_days — Number of days of records the workspace query looks back over
-    - basic_logs_lookback_hours — Number of hours of records read from Basic and Auxiliary plan tables; 0, the default, when those tables were skipped
+    - basic_logs_lookback_hours — Number of hours of records read from Basic and Auxiliary plan tables; 0, the default, when Basic and Auxiliary tables were skipped
     - log_analytics_destinations — Number of destination workspaces: distinct Log Analytics workspaces that diagnostic settings export logs to
     - log_analytics_destinations_queried — Number of destination workspaces whose records were read
     - log_analytics_destinations_not_authorized — Number of destination workspaces that refused the read
