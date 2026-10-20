@@ -226,8 +226,9 @@ def decision_counts(decisions: Optional[List[Dict[str, Any]]]) -> Optional[Dict[
     }
 
 
-def definition_record(definition: Dict[str, Any], instances: List[Dict[str, Any]],
+def definition_record(definition: Dict[str, Any], read_instances: Optional[List[Dict[str, Any]]],
                       decisions: Dict[str, Optional[List[Dict[str, Any]]]], now: datetime) -> Dict[str, Any]:
+    instances = read_instances or []
     settings = definition.get("settings") or {}
     recurrence = settings.get("recurrence")
     period = recurrence_period_days(recurrence)
@@ -251,7 +252,7 @@ def definition_record(definition: Dict[str, Any], instances: List[Dict[str, Any]
         "auto_applies_decisions": auto_apply,
         "monthly_auto_removal": at_least_monthly and default_deny and auto_apply,
         "self_review": not definition.get("reviewers"),
-        "instances_read": len(instances),
+        "instances_read": None if read_instances is None else len(instances),
         "instances_in_progress": sum(1 for i in instances if i.get("status") not in ENDED_INSTANCE),
         "last_completed_cycle_end": None if latest is None else latest["end_date_time"],
         "days_since_last_completed_cycle": None if cycle_end is None else max(0, (now - cycle_end).days),
@@ -308,7 +309,7 @@ def build(definitions, instances, decisions, unlicensed, now: datetime) -> tuple
     )
     available = False if unlicensed else (True if complete else None)
     records = None if definitions is None else sorted(
-        (definition_record(d, instances.get(d["id"]) or [], decisions, now) for d in definitions),
+        (definition_record(d, instances.get(d["id"]), decisions, now) for d in definitions),
         key=lambda r: ((r["display_name"] or "").lower(), r["id"] or ""),
     )
     results: Dict[str, Any] = {"access_reviews_available": available, "review_definitions": records}

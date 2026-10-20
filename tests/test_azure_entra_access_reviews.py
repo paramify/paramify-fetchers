@@ -203,7 +203,7 @@ def test_a_failed_read_gives_no_figures():
     results, summary = ar.build([definition], {"d-good": None}, {}, [], NOW)
     assert summary == {"access_reviews_available": None, "collection_complete": False}
     assert results["access_reviews_available"] is None
-    assert results["review_definitions"][0]["instances_read"] == 0
+    assert results["review_definitions"][0]["instances_read"] is None
 
     _, summary = ar.build([definition], {"d-good": [_instance("i-1", "Applied", SEPT)]}, {"i-1": None}, [], NOW)
     assert summary == {"access_reviews_available": None, "collection_complete": False}
