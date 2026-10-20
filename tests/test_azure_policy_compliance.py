@@ -124,7 +124,8 @@ def test_attach_evaluation_details_says_why_a_state_has_none():
     assert [s["evaluation_details_status"] for s in states] == [
         "collected", "not_in_detail_result", "failed", "unsupported_scope", "not_requested"]
     assert states[0]["evaluation_details"] is details
-    summary = fx.summarize_evaluation_details(states, {"eligible": 3, "requested": 2, "truncated": True})
+    summary = fx.summarize_evaluation_details(
+        states, {"eligible": 3, "requested": 2, "truncated": True, "not_authorized": 0})
     assert summary["non_compliant_states_with_evaluation_details"] == 1
     assert summary["evaluation_details_truncated"] is True
 
@@ -156,7 +157,8 @@ def test_state_returned_without_details_is_not_returned(raw):
     ]})
     assert [s["evaluation_details_status"] for s in states] == ["collected", "not_returned"]
     assert states[1]["evaluation_details"] is None
-    summary = fx.summarize_evaluation_details(states, {"eligible": 1, "requested": 1, "truncated": False})
+    summary = fx.summarize_evaluation_details(
+        states, {"eligible": 1, "requested": 1, "truncated": False, "not_authorized": 0})
     assert summary["non_compliant_states_with_evaluation_details"] == 1
     assert summary["non_compliant_states_by_evaluation_details_status"] == {"collected": 1, "not_returned": 1}
 
@@ -189,7 +191,7 @@ def test_collect_evaluation_details_queries_each_resource_up_to_the_limit():
     collector = fx.Collector(logging.getLogger("test"))
     states = [state(VM), state(VM, ref="r2"), state(NSG), state(f"{RG}/providers/Microsoft.Web/sites/app")]
     out = fx.collect_evaluation_details(client, states, 2, collector)
-    assert out == {"eligible": 3, "requested": 2, "truncated": True}
+    assert out == {"eligible": 3, "requested": 2, "truncated": True, "not_authorized": 0}
     assert calls[0] == ("latest", VM.lstrip("/"), "PolicyEvaluationDetails", "ComplianceState eq 'NonCompliant'")
     assert [s["evaluation_details_status"] for s in states] == [
         "collected", "not_in_detail_result", "failed", "not_requested"]
@@ -199,8 +201,66 @@ def test_collect_evaluation_details_queries_each_resource_up_to_the_limit():
     # 0 skips them: nothing is queried and nothing reads as truncated.
     calls.clear()
     assert fx.collect_evaluation_details(client, states, 0, collector) == {
-        "eligible": 3, "requested": 0, "truncated": False}
+        "eligible": 3, "requested": 0, "truncated": False, "not_authorized": 0}
     assert calls == []
+
+
+class _RefusedAs409(Exception):
+    """How Policy Insights answered a resource the identity may not read: AuthorizationFailed, HTTP 409."""
+    status_code = 409
+
+
+def _status(code, message):
+    exc = Exception(message)
+    exc.status_code = code
+    return exc
+
+
+@pytest.mark.parametrize("exc, refused", [
+    (_RefusedAs409("(AuthorizationFailed) Encountered an error while authorizing the client 'someone' with "
+                   "object id 'x' on action 'Microsoft.Web/sites/read' over scope '/subscriptions/s1/...'"), True),
+    (_status(403, "Forbidden"), True),
+    (_status(503, "(503) Service Unavailable"), False),
+    (_status(429, "(429) TooManyRequests"), False),
+], ids=["authorization_failed_409", "forbidden_403", "unavailable_503", "throttled_429"])
+def test_only_a_refusal_is_not_authorized(exc, refused):
+    assert fx.is_not_authorized(exc) is refused
+
+
+@needs_sdk
+def test_refused_detail_read_marks_its_states_and_does_not_fail_the_run():
+    app = f"{RG}/providers/Microsoft.Web/sites/app"
+
+    def per_resource(resource, resource_id, query_options):
+        if resource_id.endswith("/app"):
+            raise _RefusedAs409("(AuthorizationFailed) Encountered an error while authorizing the client "
+                                "'someone@example.com' with object id 'x' on action 'microsoft.web/sites/read' "
+                                f"over scope '{app}'.")
+        if "nsg1" in resource_id:
+            raise RuntimeError("(503) Service Unavailable")
+        return [NS(resource_id=VM, policy_assignment_id=ASSIGN, policy_definition_id=DEF,
+                   policy_definition_reference_id="r1",
+                   policy_evaluation_details=NS(evaluated_expressions=[expression()], if_not_exists_details=None))]
+
+    client = fake_client(policy_states={"list_query_results_for_resource": per_resource})
+    collector = fx.Collector(logging.getLogger("test"))
+    states = [state(app), state(app, ref="r2"), state(VM), state(NSG)]
+    out = fx.collect_evaluation_details(client, states, 10, collector)
+    assert out["not_authorized"] == 1
+    assert [(s["evaluation_details_status"], s["evaluation_details_reason"]) for s in states] == [
+        ("not_authorized", "not authorized to microsoft.web/sites/read"),
+        ("not_authorized", "not authorized to microsoft.web/sites/read"),
+        ("collected", None),
+        ("failed", None),
+    ]
+    # Only the 503 is a collection failure; the refusal names no principal in the evidence.
+    assert [f["operation"] for f in collector.failures] == [
+        "policyinsights.policy_states.list_query_results_for_resource(nsg1)"]
+    assert "someone" not in json.dumps(states)
+    summary = fx.summarize_evaluation_details(states, out)
+    assert summary["evaluation_details_not_authorized_resources"] == 1
+    assert summary["non_compliant_states_by_evaluation_details_status"] == {
+        "collected": 1, "failed": 1, "not_authorized": 2}
 
 
 # --- recurrence ---
@@ -545,7 +605,7 @@ def test_main_writes_the_new_results_and_summary(monkeypatch, tmp_path):
         assert key in results
     for key in ("evaluation_details_truncated", "recurring_non_compliant_pairs", "history_truncated",
                 "remediation_deployments_truncated", "succeeded_remediations_now_non_compliant",
-                "remediated_resources_listed"):
+                "remediated_resources_listed", "evaluation_details_not_authorized_resources"):
         assert key in summary
     # Nothing was read, so the history counts are unknown rather than 0.
     assert summary["history_collected"] is False and summary["history_non_compliant_pairs"] is None

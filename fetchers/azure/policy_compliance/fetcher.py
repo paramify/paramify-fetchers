@@ -11,7 +11,8 @@ do; this is the result of evaluating them. Reads from azure-mgmt-policyinsights:
                                              records themselves, bounded
   policy_states.list_query_results_for_resource
                                              each listed resource's evaluated
-                                             expressions (actual vs target), bounded
+                                             expressions (actual vs target), bounded;
+                                             a refused read is a status, not a failure
   policy_states ("default", grouped)         30 days of history, for recurrence
   remediations.list_for_subscription         remediation tasks and their deployments
   remediations.list_deployments_at_...       each task's per-resource deployments
@@ -27,6 +28,7 @@ subscription with Microsoft.PolicyInsights unregistered reports
 import json
 import logging
 import os
+import re
 import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -113,6 +115,11 @@ DETAILS_NOT_IN_RESULT = "not_in_detail_result"
 DETAILS_NOT_REQUESTED = "not_requested"
 DETAILS_UNSUPPORTED_SCOPE = "unsupported_scope"
 DETAILS_FAILED = "failed"
+# The identity may not read the resource (e.g. a deny assignment); enrichment only, so it
+# is recorded on the states and does not fail the run. Any other error still does.
+DETAILS_NOT_AUTHORIZED = "not_authorized"
+# Matched on the message: Policy Insights has answered AuthorizationFailed as a 409.
+NOT_AUTHORIZED_MARKERS = ("authorizationfailed", "does not have authorization", "forbidden", "(403)")
 
 
 # --- projections: the only code here that touches an azure-mgmt model ---
@@ -410,17 +417,37 @@ def has_evaluation_details(details) -> bool:
     )
 
 
-def attach_evaluation_details(states: list[dict], results: dict[str, list[dict] | None]) -> None:
+def is_not_authorized(exc: BaseException) -> bool:
+    """The identity may not read this resource, as opposed to a broken or throttled call."""
+    if getattr(exc, "status_code", None) == 403:
+        return True
+    message = f"{getattr(exc, 'message', '') or ''} {exc}".lower()
+    return any(marker in message for marker in NOT_AUTHORIZED_MARKERS)
+
+
+def refusal_reason(exc: BaseException) -> str:
+    """The action Azure refused when it names one, else the error's start; never the principal."""
+    text = " ".join(str(exc).split())
+    action = re.search(r"on action '([^']+)'", text)
+    return f"not authorized to {action.group(1)}" if action else text[:200]
+
+
+def attach_evaluation_details(
+    states: list[dict], results: dict[str, list[dict] | None], refused: dict[str, str] | None = None
+) -> None:
     """Give each listed state its evaluation details, or the reason it has none.
 
     `results` maps each queried resource id (lower-cased) to its detail states, or to
-    None when the query failed.
+    None when the query failed; `refused` maps each one the identity may not read to why.
     """
+    refused = refused or {}
     for state in states:
         resource_id = arm_id_key(state.get("resource_id"))
-        details, status = None, DETAILS_NOT_REQUESTED
+        details, status, reason = None, DETAILS_NOT_REQUESTED, None
         if not is_resource_scope(resource_id):
             status = DETAILS_UNSUPPORTED_SCOPE
+        elif resource_id in refused:
+            status, reason = DETAILS_NOT_AUTHORIZED, refused[resource_id]
         elif resource_id in results:
             found = results[resource_id]
             if found is None:
@@ -439,6 +466,7 @@ def attach_evaluation_details(states: list[dict], results: dict[str, list[dict] 
                     status = DETAILS_COLLECTED if details else DETAILS_NOT_RETURNED
         state["evaluation_details"] = details
         state["evaluation_details_status"] = status
+        state["evaluation_details_reason"] = reason
 
 
 def _odata(value) -> str:
@@ -634,6 +662,7 @@ def summarize_evaluation_details(states: list[dict], details: dict) -> dict:
         "evaluation_details_eligible_resources": details["eligible"],
         "evaluation_details_resources_queried": details["requested"],
         "evaluation_details_truncated": details["truncated"],
+        "evaluation_details_not_authorized_resources": details["not_authorized"],
         "non_compliant_states_with_evaluation_details": by_status[DETAILS_COLLECTED],
         "non_compliant_states_by_evaluation_details_status": sorted_counts(by_status),
     }
@@ -718,7 +747,7 @@ def empty_collection() -> dict:
         "states": [],
         "states_truncated": False,
         "remediations": [],
-        "details": {"eligible": 0, "requested": 0, "truncated": False},
+        "details": {"eligible": 0, "requested": 0, "truncated": False, "not_authorized": 0},
         "recurrence": {"window": None, "pairs": {}, "records": [], "history_collected": False,
                        "history_truncated": False, "pairs_truncated": False},
         "deployments": [],
@@ -733,6 +762,7 @@ def collect_evaluation_details(client, states: list[dict], limit: int, collector
     eligible = detail_resources(states)
     selected = eligible[:limit]
     results: dict[str, list[dict] | None] = {}
+    refused: dict[str, str] = {}
     for resource_id in selected:
         def _read(resource_id=resource_id):
             options = QueryOptions(filter="ComplianceState eq 'NonCompliant'", expand=EVALUATION_DETAILS)
@@ -743,13 +773,20 @@ def collect_evaluation_details(client, states: list[dict], limit: int, collector
                 )
             ]
 
-        results[arm_id_key(resource_id)] = collector.guard(
-            f"policyinsights.policy_states.list_query_results_for_resource({basename(resource_id)})", _read
-        )
-    attach_evaluation_details(states, results)
+        operation = f"policyinsights.policy_states.list_query_results_for_resource({basename(resource_id)})"
+        try:
+            results[arm_id_key(resource_id)] = _read()
+        except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
+            if not is_not_authorized(exc):
+                collector.record(operation, exc)
+                results[arm_id_key(resource_id)] = None
+                continue
+            refused[arm_id_key(resource_id)] = refusal_reason(exc)
+            logger.warning("%s: %s; recorded on its states", operation, refused[arm_id_key(resource_id)])
+    attach_evaluation_details(states, results, refused)
     # A limit of 0 skips them, which is not truncation.
     return {"eligible": len(eligible), "requested": len(selected),
-            "truncated": limit > 0 and len(eligible) > limit}
+            "truncated": limit > 0 and len(eligible) > limit, "not_authorized": len(refused)}
 
 
 def collect_recurrence(client, subscription_id, limit: int, collector: Collector, now=None) -> dict:

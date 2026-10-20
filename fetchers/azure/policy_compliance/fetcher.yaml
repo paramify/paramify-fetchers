@@ -4,7 +4,8 @@ description: >
   Reads what Azure Policy found on the subscription: the service's counts of
   non-compliant resources and policies, overall and per assignment, and a bounded
   list of non-compliant (resource, policy) records with the expressions Azure
-  evaluated. It also lists remediation tasks with their per-resource deployments,
+  evaluated; a resource the identity may not read is marked not_authorized rather
+  than failing the run. It also lists remediation tasks with their per-resource deployments,
   each checked against the resource's latest state, and counts from 30 days of
   history which pairs were non-compliant throughout or only some of the time. A
   subscription that never registered Microsoft.PolicyInsights reports
@@ -44,7 +45,8 @@ config_schema:
       How many of the listed non-compliant resources to read evaluation details
       for, one query each (the service refuses them at subscription scope); the
       resources with the most listed states go first. evaluation_details_truncated
-      says when there were more. 0 skips them.
+      says when there were more. 0 skips them. A refused read marks that resource's
+      states not_authorized and does not fail the run; any other error does.
   max_recurrence_pairs:
     type: integer
     required: false
@@ -101,7 +103,8 @@ evidence_set:
     query_options=QueryOptions(filter="complianceState eq 'NonCompliant'", top=N+1)),
     per listed resource policy_states.list_query_results_for_resource("latest",
     <resource_id>, query_options=QueryOptions(filter="ComplianceState eq
-    'NonCompliant'", expand="PolicyEvaluationDetails")),
+    'NonCompliant'", expand="PolicyEvaluationDetails")), where an AuthorizationFailed
+    answer marks that resource's states not_authorized instead of failing the run,
     policy_states.list_query_results_for_subscription("default", ...) over the last 30
     days grouped per (resource, policy, compliance state) and a count of those groups,
     and per intermittent pair the same query filtered to that pair and ordered by

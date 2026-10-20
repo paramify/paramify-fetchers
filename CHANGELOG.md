@@ -589,7 +589,12 @@ schemas and the `paramify` CLI — not the internal code.
     `collected` only when Azure returned an evaluated expression or an ifNotExists
     lookup; a state returned without either is `not_returned`, as Resource Provider
     mode policies (`Microsoft.KeyVault.Data` and the like) always are. A state the
-    resource's query did not return at all is `not_in_detail_result`.
+    resource's query did not return at all is `not_in_detail_result`. A resource
+    the identity may not read (AuthorizationFailed, for example under a deny
+    assignment) is `not_authorized`, with the refused action in
+    `evaluation_details_reason`, and is counted in
+    `evaluation_details_not_authorized_resources`. It does not fail the run, since
+    the details only enrich the states; any other error on that read still does.
     `evaluation_details_truncated` says when not every listed resource was read.
   - Each remediation task's per-resource deployments (status, error, times) are
     listed in `remediation_deployments`, up to `max_remediation_deployments`
