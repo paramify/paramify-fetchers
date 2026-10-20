@@ -14,9 +14,13 @@ from entra_graph import is_privileged_role  # noqa: E402
 
 NAME = "azure_entra_dormant_identities"
 AUTHZ_API = "2022-04-01"
+SUBSCRIPTION_API = "2022-12-01"
 DORMANT_DAYS_ENV = "ENTRA_DORMANT_DAYS"
 DEFAULT_DORMANT_DAYS = 90
 GRAPH_BATCH = 1000
+# Graph pages /users at up to 500 with signInActivity selected, 999 without.
+SIGN_IN_PAGE = 500
+USER_PAGE = 999
 
 USER_SELECT = (
     "id,displayName,userPrincipalName,accountEnabled,userType,createdDateTime,externalUserState"
@@ -24,12 +28,13 @@ USER_SELECT = (
 ODATA_USER = "#microsoft.graph.user"
 ODATA_GROUP = "#microsoft.graph.group"
 ODATA_SP = "#microsoft.graph.servicePrincipal"
+SP_TYPE_MANAGED_IDENTITY = "ManagedIdentity"
 # Groups from another tenant (CSP/GDAP partners); this tenant's directory can never return them.
 FOREIGN_PRINCIPAL_TYPES = frozenset({"foreigngroup"})
 # The 403 Graph sends a tenant with no Entra ID P1/P2 for sign-in activity.
 NOT_LICENSED_MARKER = "nonpremiumtenant"
-# appOwnerOrganizationId of Microsoft's first-party apps.
-MICROSOFT_OWNER_TENANTS = frozenset({"f8cdef31-a31e-4b4a-93e4-5f571e91255a", "72f988bf-86f1-41af-91ab-2d7cd011db47"})
+# Graph's empty sign-in time is 0001-01-01T00:00:00Z.
+EARLIEST_REAL_YEAR = 2000
 
 READ = "read"
 NOT_LICENSED = "not_licensed"
@@ -42,6 +47,12 @@ def _guid(resource_id) -> str:
     return (resource_id or "").rstrip("/").rsplit("/", 1)[-1].lower()
 
 
+def _signed_in_at(value) -> Optional[str]:
+    """The timestamp, or None for Graph's empty 0001-01-01 value."""
+    parsed = parse_time(value)
+    return value if parsed is not None and parsed.year >= EARLIEST_REAL_YEAR else None
+
+
 def _days_since(value, now: datetime) -> Optional[int]:
     parsed = parse_time(value)
     return None if parsed is None else (now - parsed).days
@@ -50,6 +61,11 @@ def _days_since(value, now: datetime) -> Optional[int]:
 def _latest(*values) -> Optional[str]:
     parsed = [(parse_time(v), v) for v in values if parse_time(v) is not None]
     return max(parsed)[1] if parsed else None
+
+
+def _past_grace(created_days: Optional[int], days: int) -> bool:
+    """Created more than `days` ago, or with no creation date."""
+    return created_days is None or created_days > days
 
 
 def read_status(collector, before: int) -> str:
@@ -104,19 +120,21 @@ def azure_role_holdings(assignments: List[dict], role_names: Dict[str, str],
 
 # --- identity records ---
 
-def user_record(user: dict, activity_ok: bool, directory: list, azure: list, days: int, now: datetime) -> dict:
+def user_record(user: dict, activity_ok: bool, directory: list, azure: list, readable: tuple,
+                days: int, now: datetime) -> dict:
     activity = user.get("signInActivity") or {}
     enabled = user.get("accountEnabled")
     enabled = True if enabled is None else bool(enabled)
-    last_success = activity.get("lastSuccessfulSignInDateTime")
-    attempts = [activity.get("lastSignInDateTime"), activity.get("lastNonInteractiveSignInDateTime")]
+    last_success = _signed_in_at(activity.get("lastSuccessfulSignInDateTime"))
+    attempts = [_signed_in_at(activity.get("lastSignInDateTime")),
+                _signed_in_at(activity.get("lastNonInteractiveSignInDateTime"))]
     since = _days_since(last_success, now)
     created = _days_since(user.get("createdDateTime"), now)
     if not activity_ok:
         never = dormant = None
     else:
         never = not last_success and not any(attempts)
-        stale = since > days if since is not None else (created is None or created > days)
+        stale = since > days if since is not None else _past_grace(created, days)
         dormant = enabled and stale
     return {
         "id": user.get("id"),
@@ -128,37 +146,43 @@ def user_record(user: dict, activity_ok: bool, directory: list, azure: list, day
         "external_user_state": user.get("externalUserState"),
         "account_enabled": enabled,
         "created_date_time": user.get("createdDateTime"),
+        "days_since_created": created,
         "last_successful_sign_in_date_time": last_success if activity_ok else None,
         "last_interactive_sign_in_attempt": attempts[0] if activity_ok else None,
         "last_non_interactive_sign_in_attempt": attempts[1] if activity_ok else None,
         "days_since_last_successful_sign_in": since if activity_ok else None,
         "never_signed_in": never,
         "dormant": dormant,
-        **_roles(directory, azure),
+        **_roles(directory, azure, *readable),
     }
 
 
-def service_principal_record(sp: dict, activity: Optional[dict], activity_ok: bool,
-                             directory: list, azure: list, days: int, now: datetime) -> dict:
+def service_principal_record(sp: dict, activity: Optional[dict], activity_ok: bool, tenant_id: Optional[str],
+                             directory: list, azure: list, readable: tuple, days: int, now: datetime) -> dict:
     """A principal holding a role; dormancy is judged on its sign-ins as a client, the way it uses a role."""
     enabled = sp.get("accountEnabled")
     enabled = True if enabled is None else bool(enabled)
     in_report = activity is not None
     activity = activity or {}
     last_client = _latest(
-        (activity.get("applicationAuthenticationClientSignInActivity") or {}).get("lastSignInDateTime"),
-        (activity.get("delegatedClientSignInActivity") or {}).get("lastSignInDateTime"),
+        _signed_in_at((activity.get("applicationAuthenticationClientSignInActivity") or {}).get("lastSignInDateTime")),
+        _signed_in_at((activity.get("delegatedClientSignInActivity") or {}).get("lastSignInDateTime")),
     )
     since = _days_since(last_client, now)
-    # Microsoft doesn't document the report covering managed identities or its own apps, so no entry is no evidence.
-    unknown = not in_report and (
-        sp.get("servicePrincipalType") == "ManagedIdentity"
-        or (sp.get("appOwnerOrganizationId") or "").lower() in MICROSOFT_OWNER_TENANTS
+    created = _days_since(sp.get("createdDateTime"), now)
+    own_app = (
+        bool(tenant_id)
+        and sp.get("servicePrincipalType") != SP_TYPE_MANAGED_IDENTITY
+        and (sp.get("appOwnerOrganizationId") or "").lower() == (tenant_id or "").lower()
     )
-    if not activity_ok or unknown:
+    # The report isn't documented to cover managed identities or other tenants' apps (Microsoft's
+    # included), so only this tenant's own apps read dormant when it has no entry for them.
+    if not activity_ok or (not in_report and not own_app):
         dormant = None
+    elif since is not None:
+        dormant = enabled and since > days
     else:
-        dormant = enabled and (since is None or since > days)
+        dormant = enabled and _past_grace(created, days)
     return {
         "id": sp.get("id"),
         "kind": "service_principal",
@@ -166,35 +190,43 @@ def service_principal_record(sp: dict, activity: Optional[dict], activity_ok: bo
         "display_name": sp.get("displayName"),
         "service_principal_type": sp.get("servicePrincipalType"),
         "app_owner_organization_id": sp.get("appOwnerOrganizationId"),
+        "registered_in_this_tenant": own_app,
         "account_enabled": enabled,
+        "created_date_time": sp.get("createdDateTime"),
+        "days_since_created": created,
         "in_sign_in_activity_report": in_report if activity_ok else None,
         "last_client_sign_in_date_time": last_client if activity_ok else None,
         "last_sign_in_date_time": (
-            (activity.get("lastSignInActivity") or {}).get("lastSignInDateTime") if activity_ok else None
+            _signed_in_at((activity.get("lastSignInActivity") or {}).get("lastSignInDateTime")) if activity_ok else None
         ),
         "days_since_last_client_sign_in": since if activity_ok else None,
         "no_recorded_client_sign_in": (last_client is None) if activity_ok else None,
         "dormant": dormant,
-        **_roles(directory, azure),
+        **_roles(directory, azure, *readable),
     }
 
 
-def _roles(directory: list, azure: list) -> dict:
+def _held(found: bool, ok: bool) -> Optional[bool]:
+    """A holding found is certain; none found is only certain when the read succeeded."""
+    return True if found else (False if ok else None)
+
+
+def _roles(directory: list, azure: list, directory_ok: bool, azure_ok: bool) -> dict:
     directory = sorted(directory, key=lambda r: (r["role"] or "", r["via_group_id"] or ""))
     azure = sorted(azure, key=lambda r: (r["scope"] or "", r["role"] or "", r["via_group_id"] or ""))
     return {
         "directory_roles": directory,
         "azure_roles": azure,
-        "holds_directory_role": bool(directory),
-        "holds_privileged_directory_role": any(r["privileged"] for r in directory),
-        "holds_azure_role": bool(azure),
-        "holds_role": bool(directory or azure),
+        "holds_directory_role": _held(bool(directory), directory_ok),
+        "holds_privileged_directory_role": _held(any(r["privileged"] for r in directory), directory_ok),
+        "holds_azure_role": _held(bool(azure), azure_ok),
+        "holds_role": _held(bool(directory or azure), directory_ok and azure_ok),
     }
 
 
 def deleted_principal_record(pid: str, assignments: List[dict], azure: list) -> dict:
     types = sorted({(a.get("properties") or {}).get("principalType") or "Unknown" for a in assignments})
-    return {"id": pid, "kind": "deleted", "principal_types_recorded": types, **_roles([], azure)}
+    return {"id": pid, "kind": "deleted", "principal_types_recorded": types, **_roles([], azure, True, True)}
 
 
 # --- summary ---
@@ -206,51 +238,64 @@ def summarize(users: List[dict], sps: List[dict], deleted: List[dict], status: D
     def when(ok, value):
         return value if ok else None
 
+    listed = status["users"] == READ
     users_ok = status["user_sign_in_activity"] == READ
     sps_ok = status["service_principal_sign_in_activity"] == READ
-    roles_ok = status["directory_roles"] == READ and status["azure_roles"] == READ
+    directory_ok = status["directory_roles"] == READ
+    azure_ok = status["azure_roles"] == READ
+    roles_ok = directory_ok and azure_ok
     lookup_ok = status["principal_lookup"] == READ
     holders = [u for u in users if u["holds_role"]]
     sp_holders = [s for s in sps if s["holds_role"]]
+    sp_roles_ok = roles_ok and lookup_ok
     figures = {
         # --- what was checked ---
         "dormant_after_days": days,
+        "users_readable": listed,
         "user_sign_in_activity": status["user_sign_in_activity"],
         "service_principal_sign_in_activity": status["service_principal_sign_in_activity"],
-        "directory_roles_readable": status["directory_roles"] == READ,
-        "azure_roles_readable": status["azure_roles"] == READ,
+        "directory_roles_readable": directory_ok,
+        "azure_roles_readable": azure_ok,
         "principal_lookup_readable": lookup_ok,
-        "users_checked": len(users),
-        "service_principals_holding_roles": len(sp_holders),
+        "users_checked": when(listed, len(users)),
+        "service_principals_holding_roles": when(sp_roles_ok, len(sp_holders)),
         # --- who holds a role ---
-        "users_holding_roles": len(holders),
-        "users_holding_directory_roles": n(users, lambda u: u["holds_directory_role"]),
-        "users_holding_privileged_directory_roles": n(users, lambda u: u["holds_privileged_directory_role"]),
-        "users_holding_azure_roles": n(users, lambda u: u["holds_azure_role"]),
-        "service_principals_holding_directory_roles": n(sps, lambda s: s["holds_directory_role"]),
-        "service_principals_holding_azure_roles": n(sps, lambda s: s["holds_azure_role"]),
+        "users_holding_roles": when(listed and roles_ok, len(holders)),
+        "users_holding_directory_roles": when(listed and directory_ok, n(users, lambda u: u["holds_directory_role"])),
+        "users_holding_privileged_directory_roles": when(
+            listed and directory_ok, n(users, lambda u: u["holds_privileged_directory_role"])
+        ),
+        "users_holding_azure_roles": when(listed and azure_ok, n(users, lambda u: u["holds_azure_role"])),
+        "service_principals_holding_directory_roles": when(
+            directory_ok and lookup_ok, n(sps, lambda s: s["holds_directory_role"])
+        ),
+        "service_principals_holding_azure_roles": when(azure_ok and lookup_ok, n(sps, lambda s: s["holds_azure_role"])),
         # --- are enabled accounts in use ---
-        "enabled_users": n(users, lambda u: u["account_enabled"]),
-        "guest_users": n(users, lambda u: u["is_guest"]),
+        "enabled_users": when(listed, n(users, lambda u: u["account_enabled"])),
+        "guest_users": when(listed, n(users, lambda u: u["is_guest"])),
         "dormant_users": when(users_ok, n(users, lambda u: u["dormant"])),
         "users_never_signed_in": when(users_ok, n(users, lambda u: u["never_signed_in"])),
-        "dormant_service_principals_holding_roles": when(sps_ok, n(sp_holders, lambda s: s["dormant"])),
+        "dormant_service_principals_holding_roles": when(sps_ok and sp_roles_ok, n(sp_holders, lambda s: s["dormant"])),
         "service_principals_holding_roles_without_recorded_sign_in": when(
-            sps_ok, n(sp_holders, lambda s: s["no_recorded_client_sign_in"])
+            sps_ok and sp_roles_ok, n(sp_holders, lambda s: s["no_recorded_client_sign_in"])
         ),
         "service_principals_holding_roles_dormancy_unknown": when(
-            sps_ok, n(sp_holders, lambda s: s["dormant"] is None)
+            sps_ok and sp_roles_ok, n(sp_holders, lambda s: s["dormant"] is None)
         ),
         # --- does any dormant, unused, guest or deleted identity hold a role ---
         "dormant_users_holding_roles": when(users_ok and roles_ok, n(holders, lambda u: u["dormant"])),
+        # Enabled, past the creation grace: a new hire not yet signed in, or a disabled account, isn't flagged here.
         "never_signed_in_users_holding_roles": when(
-            users_ok and roles_ok, n(holders, lambda u: u["never_signed_in"])
+            users_ok and roles_ok,
+            n(holders, lambda u: u["never_signed_in"] and u["account_enabled"]
+              and _past_grace(u["days_since_created"], days)),
         ),
-        "guest_users_holding_roles": when(roles_ok, n(holders, lambda u: u["is_guest"])),
-        "disabled_users_holding_roles": when(roles_ok, n(holders, lambda u: not u["account_enabled"])),
-        "deleted_principals_holding_azure_roles": when(roles_ok and lookup_ok, len(deleted)),
+        "guest_users_holding_roles": when(listed and roles_ok, n(holders, lambda u: u["is_guest"])),
+        "disabled_users_holding_roles": when(listed and roles_ok, n(holders, lambda u: not u["account_enabled"])),
+        "disabled_service_principals_holding_roles": when(sp_roles_ok, n(sp_holders, lambda s: not s["account_enabled"])),
+        "deleted_principals_holding_azure_roles": when(azure_ok and lookup_ok, len(deleted)),
         "azure_role_assignments_to_deleted_principals": when(
-            roles_ok and lookup_ok, sum(len(d["azure_roles"]) for d in deleted)
+            azure_ok and lookup_ok, sum(len(d["azure_roles"]) for d in deleted)
         ),
     }
     flagged = [
@@ -277,7 +322,7 @@ def _graph_list(client, collector, operation: str, path: str, version: str = "v1
 
 
 def _group_members(client, collector, group_ids) -> Dict[str, List[dict]]:
-    # v1.0 /members leaves out service principals; beta includes them.
+    # Beta lists service principals among members; v1.0 /members is known to leave them out.
     out = {}
     for gid in sorted(group_ids):
         members = _graph_list(
@@ -307,13 +352,19 @@ def collect(client, subscription_id: str, collector) -> tuple:
     days = int_config(DORMANT_DAYS_ENV, DEFAULT_DORMANT_DAYS)
     status: Dict[str, Any] = {}
 
+    subscription = collector.guard("subscriptions.get", lambda: client.get(
+        f"/subscriptions/{subscription_id}", SUBSCRIPTION_API), default=None) or {}
+    tenant_id = subscription.get("tenantId")
+
     before = len(collector.failures)
     users = _graph_list(client, collector, "graph.users.get(signInActivity)",
-                        f"/users?$select={USER_SELECT},signInActivity")
+                        f"/users?$select={USER_SELECT},signInActivity&$top={SIGN_IN_PAGE}")
     status["user_sign_in_activity"] = read_status(collector, before)
     if users is None:
         # Sign-in activity needs AuditLog.Read.All and P1; still list the users and their roles.
-        users = _graph_list(client, collector, "graph.users.get", f"/users?$select={USER_SELECT}") or []
+        users = _graph_list(client, collector, "graph.users.get", f"/users?$select={USER_SELECT}&$top={USER_PAGE}")
+    status["users"] = READ if users is not None else NOT_READ
+    users = users or []
 
     before = len(collector.failures)
     activities = _graph_list(client, collector, "graph.reports.servicePrincipalSignInActivities.get(beta)",
@@ -369,9 +420,10 @@ def collect(client, subscription_id: str, collector) -> tuple:
     found = _lookup(client, collector, lookup_ids) if lookup_ids else {}
     status["principal_lookup"] = READ if len(collector.failures) == before else NOT_READ
 
+    readable = (status["directory_roles"] == READ, status["azure_roles"] == READ)
     user_records = sorted(
         (user_record(u, status["user_sign_in_activity"] == READ, directory.get((u.get("id") or "").lower(), []),
-                     azure.get((u.get("id") or "").lower(), []), days, now) for u in users),
+                     azure.get((u.get("id") or "").lower(), []), readable, days, now) for u in users),
         key=lambda r: ((r["user_principal_name"] or "").lower(), r["id"] or ""),
     )
     sp_records, deleted = [], []
@@ -380,8 +432,8 @@ def collect(client, subscription_id: str, collector) -> tuple:
         if obj is not None and obj.get("@odata.type") == ODATA_SP:
             sp_records.append(service_principal_record(
                 obj, by_app.get((obj.get("appId") or "").lower()),
-                status["service_principal_sign_in_activity"] == READ,
-                directory.get(pid, []), azure.get(pid, []), days, now,
+                status["service_principal_sign_in_activity"] == READ, tenant_id,
+                directory.get(pid, []), azure.get(pid, []), readable, days, now,
             ))
         elif found is not None and obj is None and pid in rbac_ids:
             deleted.append(deleted_principal_record(
@@ -392,6 +444,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
     logger.info("Collected %d user(s), %d role-holding service principal(s), %d deleted principal(s)",
                 len(user_records), len(sp_records), len(deleted))
     results = {
+        "tenant_id": tenant_id,
         "users": user_records,
         "service_principals": sp_records,
         "deleted_principals": deleted,

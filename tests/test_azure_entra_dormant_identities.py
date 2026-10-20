@@ -8,8 +8,11 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from collections import namedtuple
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER = REPO_ROOT / "fetchers" / "azure" / "entra_dormant_identities" / "fetcher.py"
@@ -20,12 +23,17 @@ dormant = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(dormant)
 
 SUB = "00000000-0000-0000-0000-0000000000cc"
+TENANT = "00000000-0000-0000-0000-0000000000aa"
+VENDOR_TENANT = "00000000-0000-0000-0000-0000000000bb"
+MICROSOFT_TENANT = "f8cdef31-a31e-4b4a-93e4-5f571e91255a"
 NOW = datetime.now(timezone.utc)
 OWNER_ROLE = f"/subscriptions/{SUB}/providers/Microsoft.Authorization/roleDefinitions/8e3af657-a8ff-443c-a75c-2fe8c4bcb635"
+# The form these REST reads raise: "(<status>) <code>: <message>".
 DENIED = Exception("(403) Authorization_RequestDenied: Insufficient privileges to complete the operation.")
 NOT_LICENSED = Exception(
     "(403) Authentication_RequestFromNonPremiumTenantOrB2CTenant: Neither tenant is B2C or tenant doesn't have premium license"
 )
+EMPTY_TIME = "0001-01-01T00:00:00Z"
 
 
 SIGN_IN_PATH = f"/users?$select={dormant.USER_SELECT},signInActivity"
@@ -35,15 +43,20 @@ def _ago(days):
     return (NOW - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _user(uid, last=None, created=400, guest=False, enabled=True, attempts=None):
-    activity = None
-    if last is not None or attempts is not None:
+def _user(uid, last=None, created=400, guest=False, enabled=True, attempts=None, activity=None):
+    if activity is None and (last is not None or attempts is not None):
         activity = {"lastSuccessfulSignInDateTime": _ago(last) if last is not None else None,
                     "lastSignInDateTime": _ago(attempts) if attempts is not None else None,
                     "lastNonInteractiveSignInDateTime": None}
     return {"id": uid, "displayName": f"User {uid}", "userPrincipalName": f"{uid}@contoso.test",
             "accountEnabled": enabled, "userType": "Guest" if guest else "Member",
             "createdDateTime": _ago(created), "signInActivity": activity}
+
+
+def _sp(sid, app_id, sp_type="Application", owner=TENANT, created=400, enabled=True):
+    return {"@odata.type": "#microsoft.graph.servicePrincipal", "id": sid, "appId": app_id,
+            "displayName": f"App {sid}", "servicePrincipalType": sp_type, "accountEnabled": enabled,
+            "appOwnerOrganizationId": owner, "createdDateTime": _ago(created)}
 
 
 def _assignment(aid, principal, ptype="User", role=OWNER_ROLE, scope=f"/subscriptions/{SUB}"):
@@ -53,7 +66,7 @@ def _assignment(aid, principal, ptype="User", role=OWNER_ROLE, scope=f"/subscrip
 
 
 class FakeClient:
-    """AzureRestClient's graph_list / graph_post / list, answered from a dict; errors per path prefix."""
+    """AzureRestClient's get / graph_list / graph_post / list, answered from a dict; errors per path prefix."""
 
     def __init__(self, graph, arm, objects, errors=None):
         self.graph, self.arm, self.objects, self.errors = graph, arm, objects, errors or {}
@@ -63,6 +76,10 @@ class FakeClient:
         for prefix, error in self.errors.items():
             if path.startswith(prefix):
                 raise error
+
+    def get(self, path, api_version):
+        self._raise(path)
+        return {"id": path, "tenantId": TENANT}
 
     def graph_list(self, path, version="v1.0"):
         self.calls.append((version, path))
@@ -87,6 +104,7 @@ def _tenant():
         _user("u-guest", last=10, guest=True),
         _user("u-off", last=500, enabled=False),
         _user("u-group-member", last=150),
+        _user("u-off-never", enabled=False),
     ]
     graph = {
         "/users": users,
@@ -124,42 +142,41 @@ def _tenant():
             _assignment("a8", "sp-mi-new", ptype="ServicePrincipal"),
             _assignment("a9", "sp-ms", ptype="ServicePrincipal"),
             _assignment("a10", "sp-unused", ptype="ServicePrincipal"),
+            _assignment("a11", "u-new"),
+            _assignment("a12", "u-off-never"),
+            _assignment("a13", "sp-new", ptype="ServicePrincipal"),
+            _assignment("a14", "sp-vendor", ptype="ServicePrincipal"),
         ],
     }
     objects = {
-        "sp-busy": {"@odata.type": "#microsoft.graph.servicePrincipal", "id": "sp-busy", "appId": "app-busy",
-                    "displayName": "Busy app", "servicePrincipalType": "Application", "accountEnabled": True},
-        "sp-idle": {"@odata.type": "#microsoft.graph.servicePrincipal", "id": "sp-idle", "appId": "app-idle",
-                    "displayName": "Idle identity", "servicePrincipalType": "ManagedIdentity", "accountEnabled": True},
-        "sp-mi-new": {"@odata.type": "#microsoft.graph.servicePrincipal", "id": "sp-mi-new", "appId": "app-mi-new",
-                      "displayName": "Unreported identity", "servicePrincipalType": "ManagedIdentity",
-                      "accountEnabled": True},
-        "sp-ms": {"@odata.type": "#microsoft.graph.servicePrincipal", "id": "sp-ms", "appId": "app-ms",
-                  "displayName": "First-party app", "servicePrincipalType": "Application", "accountEnabled": True,
-                  "appOwnerOrganizationId": "f8cdef31-a31e-4b4a-93e4-5f571e91255a"},
-        "sp-unused": {"@odata.type": "#microsoft.graph.servicePrincipal", "id": "sp-unused", "appId": "app-unused",
-                      "displayName": "Unused app", "servicePrincipalType": "Application", "accountEnabled": True,
-                      "appOwnerOrganizationId": "00000000-0000-0000-0000-0000000000aa"},
+        "sp-busy": _sp("sp-busy", "app-busy"),
+        "sp-idle": _sp("sp-idle", "app-idle", sp_type="ManagedIdentity", owner=None),
+        "sp-mi-new": _sp("sp-mi-new", "app-mi-new", sp_type="ManagedIdentity", owner=None),
+        "sp-ms": _sp("sp-ms", "app-ms", owner=MICROSOFT_TENANT),
+        "sp-unused": _sp("sp-unused", "app-unused"),
+        "sp-new": _sp("sp-new", "app-new", created=5),
+        "sp-vendor": _sp("sp-vendor", "app-vendor", owner=VENDOR_TENANT, enabled=False),
         "g-ops": {"@odata.type": "#microsoft.graph.group", "id": "g-ops"},
     }
     return graph, arm, objects
 
 
+class Collector:
+    def __init__(self):
+        self.failures = []
+
+    def record(self, operation, exc):
+        self.failures.append({"operation": operation, "type": type(exc).__name__, "message": str(exc)})
+
+    def guard(self, operation, fn, default=None):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            self.record(operation, exc)
+            return default
+
+
 def _collect(monkeypatch, client):
-    class Collector:
-        def __init__(self):
-            self.failures = []
-
-        def record(self, operation, exc):
-            self.failures.append({"operation": operation, "type": type(exc).__name__, "message": str(exc)})
-
-        def guard(self, operation, fn, default=None):
-            try:
-                return fn()
-            except Exception as exc:  # noqa: BLE001
-                self.record(operation, exc)
-                return default
-
     monkeypatch.delenv("ENTRA_DORMANT_DAYS", raising=False)
     collector = Collector()
     results, summary = dormant.collect(client, SUB, collector)
@@ -170,29 +187,33 @@ def test_inactive_guest_and_deleted_role_holders(monkeypatch):
     results, s, collector = _collect(monkeypatch, FakeClient(*_tenant()))
 
     assert collector.failures == []
+    assert s["users_readable"] is True
     assert s["user_sign_in_activity"] == s["service_principal_sign_in_activity"] == "read"
     assert s["dormant_after_days"] == 90
-    assert s["users_checked"] == 7
+    assert s["users_checked"] == 8
     # The stale admin, the old account that never signed in, and the stale group member;
-    # the disabled account and the new account are not dormant.
+    # the disabled accounts and the new account are not dormant.
     assert s["dormant_users"] == 3
-    assert s["users_never_signed_in"] == 2
-    assert s["users_holding_roles"] == 6
+    assert s["users_never_signed_in"] == 3
+    assert s["users_holding_roles"] == 8
     assert s["users_holding_privileged_directory_roles"] == 2
     assert s["dormant_users_holding_roles"] == 3
+    # Only the enabled, old account: not the new one or the disabled one.
     assert s["never_signed_in_users_holding_roles"] == 1
     assert s["guest_users_holding_roles"] == 1
-    assert s["disabled_users_holding_roles"] == 1
-    assert s["service_principals_holding_roles"] == 5
-    # The idle identity and the app this tenant registered with no sign-in on record; a managed
-    # identity or Microsoft app missing from the report is unknown, not dormant.
+    assert s["disabled_users_holding_roles"] == 2
+    assert s["service_principals_holding_roles"] == 7
+    # The idle identity and this tenant's unused app; the new app is within the grace period,
+    # and a managed identity, Microsoft app or vendor app missing from the report is unknown.
     assert s["dormant_service_principals_holding_roles"] == 2
-    assert s["service_principals_holding_roles_without_recorded_sign_in"] == 3
-    assert s["service_principals_holding_roles_dormancy_unknown"] == 2
+    assert s["service_principals_holding_roles_without_recorded_sign_in"] == 5
+    assert s["service_principals_holding_roles_dormancy_unknown"] == 3
+    assert s["disabled_service_principals_holding_roles"] == 1
     assert s["deleted_principals_holding_azure_roles"] == 1
     assert s["azure_role_assignments_to_deleted_principals"] == 2
     assert s["no_inactive_identity_holds_a_role"] is False
 
+    assert results["tenant_id"] == TENANT
     users = {u["id"]: u for u in results["users"]}
     assert users["u-new"]["never_signed_in"] is True and users["u-new"]["dormant"] is False
     member = users["u-group-member"]
@@ -203,25 +224,35 @@ def test_inactive_guest_and_deleted_role_holders(monkeypatch):
     assert sps["sp-idle"]["dormant"] is True and sps["sp-idle"]["days_since_last_client_sign_in"] == 120
     assert sps["sp-busy"]["holds_directory_role"] is True and sps["sp-busy"]["dormant"] is False
     assert sps["sp-mi-new"]["dormant"] is None and sps["sp-mi-new"]["in_sign_in_activity_report"] is False
-    assert sps["sp-ms"]["dormant"] is None
-    assert sps["sp-unused"]["dormant"] is True and sps["sp-unused"]["no_recorded_client_sign_in"] is True
+    assert sps["sp-ms"]["dormant"] is None and sps["sp-vendor"]["dormant"] is None
+    assert sps["sp-unused"]["dormant"] is True and sps["sp-unused"]["registered_in_this_tenant"] is True
+    assert sps["sp-new"]["dormant"] is False and sps["sp-new"]["no_recorded_client_sign_in"] is True
     (gone,) = results["deleted_principals"]
     assert gone["id"] == "gone-1" and gone["principal_types_recorded"] == ["User"]
 
 
 def test_dormancy_threshold_is_configurable(monkeypatch):
-    client = FakeClient(*_tenant())
     monkeypatch.setenv("ENTRA_DORMANT_DAYS", "180")
-
-    class Collector:
-        failures: list = []
-
-        def guard(self, operation, fn, default=None):
-            return fn()
-
-    _, s = dormant.collect(client, SUB, Collector())
+    _, s = dormant.collect(FakeClient(*_tenant()), SUB, Collector())
     assert s["dormant_after_days"] == 180
     assert s["dormant_users"] == 2  # stale admin (200) and never signed in (created 300)
+
+
+def test_graphs_empty_sign_in_time_reads_as_none(monkeypatch):
+    graph, arm, objects = _tenant()
+    empty = {"lastSuccessfulSignInDateTime": EMPTY_TIME, "lastSignInDateTime": EMPTY_TIME,
+             "lastNonInteractiveSignInDateTime": EMPTY_TIME}
+    graph["/users"] = [_user("u-active", created=300, activity=empty)]
+    graph["/reports/servicePrincipalSignInActivities"] = [
+        {"appId": "app-unused", "applicationAuthenticationClientSignInActivity": {"lastSignInDateTime": EMPTY_TIME}},
+    ]
+    results, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects))
+
+    (user,) = results["users"]
+    assert user["never_signed_in"] is True and user["dormant"] is True
+    assert user["last_successful_sign_in_date_time"] is None
+    sp = {r["id"]: r for r in results["service_principals"]}["sp-unused"]
+    assert sp["no_recorded_client_sign_in"] is True and sp["days_since_last_client_sign_in"] is None
 
 
 def test_denied_sign_in_activity_still_lists_users_and_roles(monkeypatch):
@@ -235,9 +266,10 @@ def test_denied_sign_in_activity_still_lists_users_and_roles(monkeypatch):
     assert {f["operation"] for f in collector.failures} == {
         "graph.users.get(signInActivity)", "graph.reports.servicePrincipalSignInActivities.get(beta)",
     }
+    assert s["users_readable"] is True
     assert s["user_sign_in_activity"] == "not_read"
     assert s["service_principal_sign_in_activity"] == "not_read"
-    assert s["users_checked"] == 7
+    assert s["users_checked"] == 8
     assert s["dormant_users"] is None
     assert s["dormant_users_holding_roles"] is None
     assert s["dormant_service_principals_holding_roles"] is None
@@ -245,6 +277,59 @@ def test_denied_sign_in_activity_still_lists_users_and_roles(monkeypatch):
     assert s["deleted_principals_holding_azure_roles"] == 1
     assert s["no_inactive_identity_holds_a_role"] is False
     assert all(u["dormant"] is None and u["last_successful_sign_in_date_time"] is None for u in results["users"])
+
+
+def test_a_refused_user_list_nulls_every_user_count(monkeypatch):
+    graph, arm, objects = _tenant()
+    _, s, collector = _collect(monkeypatch, FakeClient(graph, arm, objects, errors={"/users?": DENIED}))
+
+    assert {f["operation"] for f in collector.failures} == {"graph.users.get(signInActivity)", "graph.users.get"}
+    assert s["users_readable"] is False
+    for key in ("users_checked", "users_holding_roles", "users_holding_directory_roles",
+                "users_holding_privileged_directory_roles", "users_holding_azure_roles", "enabled_users",
+                "guest_users", "dormant_users", "guest_users_holding_roles", "disabled_users_holding_roles"):
+        assert s[key] is None, key
+    assert s["service_principals_holding_roles"] == 7
+    assert s["no_inactive_identity_holds_a_role"] is False  # the dormant service principals still show
+
+
+def test_refused_directory_roles_null_the_directory_counts(monkeypatch):
+    graph, arm, objects = _tenant()
+    results, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects, errors={"/directoryRoles": DENIED}))
+
+    assert s["directory_roles_readable"] is False
+    for key in ("users_holding_roles", "users_holding_directory_roles", "users_holding_privileged_directory_roles",
+                "service_principals_holding_directory_roles", "service_principals_holding_roles",
+                "dormant_users_holding_roles", "dormant_service_principals_holding_roles"):
+        assert s[key] is None, key
+    assert s["users_holding_azure_roles"] == 6
+    users = {u["id"]: u for u in results["users"]}
+    assert users["u-active"]["holds_directory_role"] is None and users["u-active"]["holds_role"] is True
+    assert users["u-stale-admin"]["holds_role"] is None
+
+
+def test_a_refused_lookup_nulls_the_service_principal_and_deleted_counts(monkeypatch):
+    graph, arm, objects = _tenant()
+    _, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects, errors={"/directoryObjects/getByIds": DENIED}))
+
+    assert s["principal_lookup_readable"] is False
+    for key in ("service_principals_holding_roles", "service_principals_holding_directory_roles",
+                "service_principals_holding_azure_roles", "dormant_service_principals_holding_roles",
+                "service_principals_holding_roles_without_recorded_sign_in",
+                "service_principals_holding_roles_dormancy_unknown", "disabled_service_principals_holding_roles",
+                "deleted_principals_holding_azure_roles", "azure_role_assignments_to_deleted_principals"):
+        assert s[key] is None, key
+    assert s["users_holding_roles"] == 8
+
+
+def test_a_failed_group_member_read_leaves_both_role_reads_unreadable(monkeypatch):
+    graph, arm, objects = _tenant()
+    client = FakeClient(graph, arm, objects, errors={"/groups/g-ops/transitiveMembers": DENIED})
+    _, s, _ = _collect(monkeypatch, client)
+
+    assert s["directory_roles_readable"] is False and s["azure_roles_readable"] is False
+    assert s["users_holding_roles"] is None
+    assert s["guest_users_holding_roles"] is None
 
 
 def test_unlicensed_tenant_reads_not_licensed(monkeypatch):
@@ -277,9 +362,10 @@ def test_no_flag_is_true_only_when_everything_was_read(monkeypatch):
     assert s["no_inactive_identity_holds_a_role"] is None
 
 
-def test_members_of_role_groups_are_read_from_beta(monkeypatch):
+def test_reads_page_sizes_and_beta_endpoints(monkeypatch):
     client = FakeClient(*_tenant())
     _collect(monkeypatch, client)
+    assert ("v1.0", f"{SIGN_IN_PATH}&$top=500") in client.calls
     assert ("beta", "/groups/g-admins/transitiveMembers?$select=id") in client.calls
     assert ("beta", "/reports/servicePrincipalSignInActivities") in client.calls
 
@@ -306,5 +392,55 @@ def test_main_writes_evidence_and_fails_not_authorized(monkeypatch, tmp_path):
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
     evidence = json.loads((tmp_path / f"azure_entra_dormant_identities_{SUB}.json").read_text())
     assert evidence["summary"]["user_sign_in_activity"] == "not_read"
-    assert evidence["summary"]["users_checked"] == 7
+    assert evidence["summary"]["users_checked"] == 8
     assert evidence["summary"]["dormant_users"] is None
+
+
+# --- the shared REST client's Graph paging ---
+
+class Resp:
+    def __init__(self, status, body):
+        self.status_code, self._body, self.reason, self.text = status, body, "", json.dumps(body)
+
+    def json(self):
+        return self._body
+
+
+class Session:
+    """Answers GETs by URL; records each."""
+
+    def __init__(self, answers):
+        self.answers, self.urls = answers, []
+
+    def get(self, url, headers=None, params=None, timeout=None):
+        self.urls.append(url)
+        return self.answers[url]
+
+
+def _rest(answers):
+    azure_rest = sys.modules["azure_rest"]
+    cred = namedtuple("Cred", "get_token")(lambda scope: namedtuple("T", "token expires_on")("tok", 9_999_999_999))
+    return azure_rest.AzureRestClient(cred, Session(answers)), azure_rest
+
+
+def test_graph_pages_follow_next_links_on_the_requested_version(monkeypatch):
+    monkeypatch.delenv("AZURE_AUTHORITY_HOST", raising=False)
+    base = "https://graph.microsoft.com"
+    client, _ = _rest({
+        f"{base}/beta/things?$top=2": Resp(200, {"value": [1, 2], "@odata.nextLink": f"{base}/beta/things?page=2"}),
+        f"{base}/beta/things?page=2": Resp(200, {"value": [3]}),
+    })
+    assert list(client.graph_pages("/things?$top=2", "beta")) == [[1, 2], [3]]
+    assert client.graph_list("/things?$top=2", "beta") == [1, 2, 3]
+    assert client.session.urls[0] == f"{base}/beta/things?$top=2"
+
+
+def test_graph_list_raises_on_a_failed_later_page(monkeypatch):
+    monkeypatch.delenv("AZURE_AUTHORITY_HOST", raising=False)
+    base = "https://graph.microsoft.com"
+    client, azure_rest = _rest({
+        f"{base}/v1.0/things": Resp(200, {"value": [1], "@odata.nextLink": f"{base}/v1.0/things?page=2"}),
+        f"{base}/v1.0/things?page=2": Resp(403, {"error": {"code": "Authorization_RequestDenied", "message": "no"}}),
+    })
+    with pytest.raises(azure_rest.ArmError, match="403"):
+        client.graph_list("/things")

@@ -18,10 +18,12 @@ schemas and the `paramify` CLI — not the internal code.
   user with its creation date, last successful sign-in and roles (direct or through
   a group), every role-holding service principal with its last sign-in as a client,
   and every deleted principal an Azure role assignment still names. Dormant is no
-  successful sign-in in `ENTRA_DORMANT_DAYS` days (90 by default). A managed
-  identity or Microsoft app missing from the sign-in report reads unknown, not
-  dormant. Without sign-in activity the users and roles are still listed and the
-  dormancy figures read null. `_shared/azure_rest.py` gains `graph_pages` and
+  successful sign-in in `ENTRA_DORMANT_DAYS` days (90 by default), with the same
+  grace for accounts and apps created more recently. Only this tenant's own apps
+  read dormant when missing from the service principal sign-in report; managed
+  identities and other tenants' apps read unknown. Without sign-in activity the
+  users and roles are still listed and the dormancy figures read null, and every
+  count reads null when a read it needs was refused. `_shared/azure_rest.py` gains `graph_pages` and
   `graph_list` for paged Graph reads on v1.0 or beta.
 - **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
   over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
