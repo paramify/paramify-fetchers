@@ -26,8 +26,9 @@ schemas and the `paramify` CLI — not the internal code.
   content type and broken linked pages are recorded as findings. The run fails
   only when security.txt itself cannot be collected or parsed. Tested with the
   security.txt and key Paramify publishes, served locally; the key's facts match
-  `gpg --show-keys`. Not run live against paramify.com (blocked from the test
-  environment). No KSI mapping.
+  `gpg --show-keys`. Also run live against paramify.com. Linked URLs and their
+  redirects may only reach public addresses; a link to a private, loopback or
+  link-local address is recorded as `blocked_address`. No KSI mapping.
 - **A `web` category and its first fetcher, `web_page_text`**
   (`EVD-WEB-PAGE-TEXT`). It fetches one public URL per target, with no
   credential, and records the text the page served. For HTML that is the

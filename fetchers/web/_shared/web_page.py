@@ -1,10 +1,12 @@
 """Shared by the web fetchers: one bounded GET, content-type handling and the run wrapper (HTML to text is in _lib)."""
 
 import codecs
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +26,7 @@ MAX_BODY_BYTES = 5 * 1024 * 1024
 ACCEPT = "text/html, application/json;q=0.9, text/plain;q=0.8"
 HTML_TYPES = {"text/html", "application/xhtml+xml"}
 HTTP_CODES = {401: "auth_failed", 403: "not_authorized", 429: "rate_limited"}
+LINKED_URLS_PUBLIC_ONLY = True
 
 META_CHARSET = re.compile(rb"""<meta[^>]+charset\s*=\s*["']?([A-Za-z0-9_.:-]+)""", re.IGNORECASE)
 
@@ -95,11 +98,38 @@ def decode_body(body: bytes, charset: Optional[str], is_html: bool) -> str:
     return body.decode("utf-8", errors="replace")
 
 
+def resolves_public(host: str) -> bool:
+    """True unless the host resolves to a loopback, private, link-local or other non-global address."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return True  # the request itself then fails as a network error
+    return all(ipaddress.ip_address(str(info[4][0]).split("%", 1)[0]).is_global for info in infos)
+
+
+class PublicOnlySession(requests.Session):
+    """Refuses each request, redirect hops included, to a host that does not resolve to a public address."""
+
+    def send(self, request: requests.PreparedRequest, **kwargs: Any) -> requests.Response:
+        url = str(request.url)
+        host = urlparse(url).hostname or ""
+        if not resolves_public(host):
+            raise CollectionError(
+                f"GET {url} refused: {host} resolves to a non-public address", "blocked_address", "bad_config"
+            )
+        return super().send(request, **kwargs)
+
+
 def fetch(
-    url: str, verify_ssl: bool, record: Dict[str, Any], user_agent: str, accept: str = ACCEPT
+    url: str,
+    verify_ssl: bool,
+    record: Dict[str, Any],
+    user_agent: str,
+    accept: str = ACCEPT,
+    public_only: bool = False,
 ) -> Tuple[bytes, str]:
     """GET the page; fills `record` with what the response said, even when it fails."""
-    session = requests.Session()
+    session = PublicOnlySession() if public_only else requests.Session()
     session.max_redirects = MAX_REDIRECTS
     try:
         response = session.get(
@@ -162,13 +192,17 @@ def fetch(
 def fetch_recorded(
     url: str, verify_ssl: bool, user_agent: str, accept: str = ACCEPT
 ) -> Tuple[Dict[str, Any], Optional[bytes], str]:
-    """fetch() for a linked URL: a failure is recorded in `error`, not raised."""
+    """fetch() for a linked URL: a failure is recorded in `error`, not raised.
+
+    The URL comes from fetched content, not the operator, so unless LINKED_URLS_PUBLIC_ONLY is
+    off it may only reach public addresses: no cloud metadata endpoint or internal host.
+    """
     record: Dict[str, Any] = {
         "url": url, "final_url": None, "redirects": [], "http_status": 0, "content_type": None, "error": None,
     }
     try:
         check_url(url, "linked URL")
-        body, content_type = fetch(url, verify_ssl, record, user_agent, accept)
+        body, content_type = fetch(url, verify_ssl, record, user_agent, accept, LINKED_URLS_PUBLIC_ONLY)
     except CollectionError as exc:
         record["error"] = {"type": exc.kind, "message": str(exc)}
         return record, None, record["content_type"] or ""
