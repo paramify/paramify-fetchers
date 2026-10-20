@@ -100,11 +100,13 @@ evidence_set:
     policy_states.list_query_results_for_subscription("latest", <subscription_id>,
     query_options=QueryOptions(filter="complianceState eq 'NonCompliant'", top=N+1)),
     per listed resource policy_states.list_query_results_for_resource("latest",
-    <resource_id>, query_options=QueryOptions(expand="PolicyEvaluationDetails")),
+    <resource_id>, query_options=QueryOptions(filter="ComplianceState eq
+    'NonCompliant'", expand="PolicyEvaluationDetails")),
     policy_states.list_query_results_for_subscription("default", ...) over the last 30
     days grouped per (resource, policy, compliance state) and a count of those groups,
     and per intermittent pair the same query filtered to that pair and ordered by
     time, remediations.list_for_subscription(), and per task
     remediations.list_deployments_at_subscription / _at_resource_group /
-    _at_management_group / _at_resource with one latest-state query (resource, state,
-    time) for the task's policy. Reader on the subscription.
+    _at_management_group / _at_resource, then latest-state queries (resource, state,
+    time) for the task's policy, filtered to its remediated resources 20 at a time.
+    Reader on the subscription.

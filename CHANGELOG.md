@@ -588,14 +588,18 @@ schemas and the `paramify` CLI — not the internal code.
   - `evaluation_details_status` gives the reason a state has no details. It is
     `collected` only when Azure returned an evaluated expression or an ifNotExists
     lookup; a state returned without either is `not_returned`, as Resource Provider
-    mode policies (`Microsoft.KeyVault.Data` and the like) always are.
+    mode policies (`Microsoft.KeyVault.Data` and the like) always are. A state the
+    resource's query did not return at all is `not_in_detail_result`.
     `evaluation_details_truncated` says when not every listed resource was read.
   - Each remediation task's per-resource deployments (status, error, times) are
     listed in `remediation_deployments`, up to `max_remediation_deployments`
     (default 1000), and each is checked against its resource's latest compliance
     state, with `current_state_evaluated_at` and `reevaluated_since_deployment`.
-    New summary keys count resources now compliant, now non-compliant, and
-    succeeded deployments now non-compliant. The non-compliant counts include
+    The states are read only for the remediated resources. New summary keys count
+    remediated resources (`remediated_resources_listed`) and those now compliant,
+    now non-compliant, and whose succeeded remediation is now non-compliant. These
+    count each resource once, and its latest deployment decides; tasks re-run on
+    one resource add deployments, not resources. The non-compliant counts include
     resources that were fixed and later drifted back; `non_compliance_recurrence`
     shows the drift when that pair was read. `now_compliant` is null when the state
     was evaluated before the deployment last changed, and that deployment counts as
@@ -605,13 +609,15 @@ schemas and the `paramify` CLI — not the internal code.
   - From 30 days of history, the summary counts (resource, policy) pairs
     non-compliant throughout and pairs non-compliant only some of the time.
     `history_truncated` is also set when fewer groups come back than the service
-    counts.
+    counts. When the history read fails, `history_collected` is false and these
+    counts are null rather than 0.
   - For up to `max_recurrence_pairs` (default 100) of the part-time ones,
     `non_compliance_recurrence` counts the separate non-compliant episodes and how
     many times the pair fell back out of compliance. `recurring_non_compliant_pairs`
     counts pairs with more than one episode.
-  - Every bounded list has a truncation flag. Existing fields are unchanged. Still
-    Reader-only. Also mapped to `KSI-SVC-EIS`.
+  - Every bounded list has a truncation flag; a limit of 0 skips that list and
+    leaves its flag false. Existing fields are unchanged. Still Reader-only. Also
+    mapped to `KSI-SVC-EIS`.
   - `runtime.timeout` is 3600 seconds: the added queries run serially, and a
     production run took about 8 minutes, near the runner's 600-second default.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload

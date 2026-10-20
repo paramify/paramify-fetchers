@@ -122,11 +122,24 @@ def test_attach_evaluation_details_says_why_a_state_has_none():
         NSG.lower(): None,
     })
     assert [s["evaluation_details_status"] for s in states] == [
-        "collected", "not_returned", "failed", "unsupported_scope", "not_requested"]
+        "collected", "not_in_detail_result", "failed", "unsupported_scope", "not_requested"]
     assert states[0]["evaluation_details"] is details
-    summary = fx.summarize_evaluation_details(states, eligible=3, requested=2)
+    summary = fx.summarize_evaluation_details(states, {"eligible": 3, "requested": 2, "truncated": True})
     assert summary["non_compliant_states_with_evaluation_details"] == 1
     assert summary["evaluation_details_truncated"] is True
+
+
+def test_nested_resource_rows_keep_their_own_resource_id():
+    ext = f"{VM}/extensions/ext1"
+    mine = fx.project_evaluation_details(NS(evaluated_expressions=[expression(actual="vm")], if_not_exists_details=None))
+    nested = fx.project_evaluation_details(NS(evaluated_expressions=[expression(actual="ext")],
+                                              if_not_exists_details=None))
+    states = [state(VM)]
+    fx.attach_evaluation_details(states, {VM.lower(): [
+        {**state(VM), "evaluation_details": mine},
+        {**state(ext), "evaluation_details": nested},
+    ]})
+    assert states[0]["evaluation_details"] is mine
 
 
 # A state the per-resource query returns with no details, or with an empty details object.
@@ -143,7 +156,7 @@ def test_state_returned_without_details_is_not_returned(raw):
     ]})
     assert [s["evaluation_details_status"] for s in states] == ["collected", "not_returned"]
     assert states[1]["evaluation_details"] is None
-    summary = fx.summarize_evaluation_details(states, eligible=1, requested=1)
+    summary = fx.summarize_evaluation_details(states, {"eligible": 1, "requested": 1, "truncated": False})
     assert summary["non_compliant_states_with_evaluation_details"] == 1
     assert summary["non_compliant_states_by_evaluation_details_status"] == {"collected": 1, "not_returned": 1}
 
@@ -176,11 +189,18 @@ def test_collect_evaluation_details_queries_each_resource_up_to_the_limit():
     collector = fx.Collector(logging.getLogger("test"))
     states = [state(VM), state(VM, ref="r2"), state(NSG), state(f"{RG}/providers/Microsoft.Web/sites/app")]
     out = fx.collect_evaluation_details(client, states, 2, collector)
-    assert out == {"eligible": 3, "requested": 2}
+    assert out == {"eligible": 3, "requested": 2, "truncated": True}
     assert calls[0] == ("latest", VM.lstrip("/"), "PolicyEvaluationDetails", "ComplianceState eq 'NonCompliant'")
-    assert [s["evaluation_details_status"] for s in states] == ["collected", "not_returned", "failed", "not_requested"]
+    assert [s["evaluation_details_status"] for s in states] == [
+        "collected", "not_in_detail_result", "failed", "not_requested"]
     assert states[0]["evaluation_details"]["evaluated_expressions"][0]["actual_value"] == "Allow"
     assert len(collector.failures) == 1
+
+    # 0 skips them: nothing is queried and nothing reads as truncated.
+    calls.clear()
+    assert fx.collect_evaluation_details(client, states, 0, collector) == {
+        "eligible": 3, "requested": 0, "truncated": False}
+    assert calls == []
 
 
 # --- recurrence ---
@@ -268,8 +288,30 @@ def test_collect_recurrence_reads_history_once_then_each_flipping_pair(monkeypat
         "history_truncated"] is True
 
     monkeypatch.setattr(fx, "MAX_HISTORY_ROWS", 2)
-    assert fx.collect_recurrence(client, "s1", 0, fx.Collector(logging.getLogger("t")), now=NOW)[
-        "history_truncated"] is True
+    out = fx.collect_recurrence(client, "s1", 0, fx.Collector(logging.getLogger("t")), now=NOW)
+    # 0 reads no pair, which is not truncation.
+    assert out["history_truncated"] is True and out["pairs_truncated"] is False
+
+
+@needs_sdk
+def test_failed_history_read_is_null_not_zero():
+    def query(resource, subscription_id, query_options):
+        if (query_options.apply or "").endswith("/aggregate($count as n)"):
+            return [NS(additional_properties={"n": 3})]
+        raise RuntimeError("throttled")
+
+    client = fake_client(policy_states={"list_query_results_for_subscription": query})
+    collector = fx.Collector(logging.getLogger("t"))
+    out = fx.collect_recurrence(client, "s1", 5, collector, now=NOW)
+    assert out["history_collected"] is False and len(collector.failures) == 1
+    summary = fx.summarize_recurrence(out["pairs"], out["records"], out["history_truncated"],
+                                      out["pairs_truncated"], out["history_collected"])
+    assert summary["history_collected"] is False
+    for key in ("history_non_compliant_pairs", "history_persistently_non_compliant_pairs",
+                "history_intermittently_non_compliant_pairs", "history_truncated", "recurrence_pairs_read",
+                "recurrence_pairs_truncated", "recurring_non_compliant_pairs", "max_non_compliant_episodes"):
+        assert summary[key] is None, key
+    assert summary["recurrence_window_days"] == 30
 
 
 @needs_sdk
@@ -351,8 +393,29 @@ def test_state_evaluated_before_the_deployment_is_not_yet_reevaluated():
         1, 1, 1, 1)
 
 
+def test_remediated_counts_are_per_resource_and_the_latest_deployment_decides():
+    current = fx.latest_states_by_resource([
+        {"resource_id": VM, "compliance_state": "NonCompliant", "timestamp": "2026-10-19T09:00:00Z"},
+        {"resource_id": NSG, "compliance_state": "NonCompliant", "timestamp": "2026-10-19T09:00:00Z"},
+    ])
+    task = {"id": "t", "policy_assignment_id": ASSIGN}
+    deployed = [
+        (VM, "Failed", "2026-10-01T00:00:00Z"), (VM.upper(), "Succeeded", "2026-10-05T00:00:00Z"),
+        (VM, "Succeeded", "2026-10-10T00:00:00Z"),
+        (NSG, "Succeeded", "2026-10-02T00:00:00Z"), (NSG, "Failed", "2026-10-12T00:00:00Z"),
+    ]
+    rows = [fx.deployment_record({"remediated_resource_id": rid, "status": status, "last_updated_on": at},
+                                 task, current) for rid, status, at in deployed]
+    summary = fx.summarize_remediation_deployments(rows, truncated=False)
+    assert (summary["remediation_deployments_listed"], summary["remediated_resources_listed"]) == (5, 2)
+    assert summary["remediation_deployments_by_status"] == {"Failed": 2, "Succeeded": 3}
+    # Both resources are non-compliant now; only the VM's latest deployment succeeded.
+    assert (summary["remediated_resources_now_non_compliant"],
+            summary["succeeded_remediations_now_non_compliant"]) == (2, 1)
+
+
 @needs_sdk
-def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit():
+def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit(monkeypatch):
     listed = []
 
     def deployment(rid):
@@ -365,7 +428,7 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit():
 
     def at_resource_group(rg, name):
         listed.append(("resource_group", rg, name))
-        return [deployment(f"{RG}/providers/x/y/z")]
+        return [deployment(VM.upper())]
 
     filters = []
 
@@ -388,18 +451,35 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit():
         {"id": f"{SUB}/providers/Microsoft.PolicyInsights/remediations/t3", "name": "t3",
          "policy_assignment_id": ASSIGN, "policy_definition_reference_id": "r2", "total_deployments": 2},
     ]
+    monkeypatch.setattr(fx, "RESOURCE_FILTER_BATCH", 1)
     rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 10, fx.Collector(logging.getLogger("t")))
     assert listed == [("subscription", "t1"), ("resource_group", "rg1", "t2"), ("subscription", "t3")]
-    # t1 and t2 remediate one policy (their reference ids differ only in case): one state query.
-    assert filters == [f"PolicyAssignmentId eq '{ASSIGN.lower()}' and PolicyDefinitionReferenceId eq '{ref}'"
-                       for ref in ("r1", "r2")]
+
+    def query(ref, *resources):
+        return (f"PolicyAssignmentId eq '{ASSIGN.lower()}' and PolicyDefinitionReferenceId eq '{ref}' and ("
+                + " or ".join(f"ResourceId eq '{r.lower()}'" for r in resources) + ")")
+
+    # One batch per resource here. t2 re-remediates t1's VM on the same policy (its reference id
+    # differs only in case), so it reads nothing new; t3's policy is read again.
+    assert filters == [query("r1", VM), query("r1", NSG), query("r2", VM), query("r2", NSG)]
     assert [(r["remediated_resource_id"], r["now_compliant"]) for r in rows][:2] == [(VM, True), (NSG, None)]
     assert truncated is False
+
+    filters.clear()
+    monkeypatch.setattr(fx, "RESOURCE_FILTER_BATCH", 20)
+    fx.collect_remediation_deployments(client, "s1", tasks[:1], 10, fx.Collector(logging.getLogger("t")))
+    assert filters == [query("r1", VM, NSG)]
 
     listed.clear()
     rows, truncated = fx.collect_remediation_deployments(client, "s1", tasks, 1, fx.Collector(logging.getLogger("t")))
     assert len(rows) == 1 and truncated is True
     assert listed == [("subscription", "t1")]
+
+    # 0 skips them: nothing is listed and nothing reads as truncated.
+    listed.clear()
+    assert fx.collect_remediation_deployments(client, "s1", tasks, 0, fx.Collector(logging.getLogger("t"))) == (
+        [], False)
+    assert listed == []
 
 
 @needs_sdk
@@ -440,8 +520,11 @@ def test_collect_remediation_deployments_at_management_group_and_resource():
 # --- wiring ---
 
 def test_main_writes_the_new_results_and_summary(monkeypatch, tmp_path):
+    monkeypatch.setattr(fx, "load_dotenv", lambda: None)
+    for env in (fx.MAX_NON_COMPLIANT_ENV, fx.MAX_DETAIL_RESOURCES_ENV, fx.MAX_REMEDIATION_DEPLOYMENTS_ENV):
+        monkeypatch.delenv(env, raising=False)
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
-    monkeypatch.setenv("AZURE_POLICY_MAX_RECURRENCE_PAIRS", "7")
+    monkeypatch.setenv(fx.MAX_RECURRENCE_PAIRS_ENV, "7")
     monkeypatch.setattr(fx, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
     monkeypatch.setattr(fx, "credential", lambda: object())
     monkeypatch.setattr(fx, "provider_registration_status", lambda *a: "registered")
@@ -461,5 +544,8 @@ def test_main_writes_the_new_results_and_summary(monkeypatch, tmp_path):
                 "evaluation_details_resource_limit", "recurrence_pair_limit", "remediation_deployment_limit"):
         assert key in results
     for key in ("evaluation_details_truncated", "recurring_non_compliant_pairs", "history_truncated",
-                "remediation_deployments_truncated", "succeeded_remediations_now_non_compliant"):
+                "remediation_deployments_truncated", "succeeded_remediations_now_non_compliant",
+                "remediated_resources_listed"):
         assert key in summary
+    # Nothing was read, so the history counts are unknown rather than 0.
+    assert summary["history_collected"] is False and summary["history_non_compliant_pairs"] is None
