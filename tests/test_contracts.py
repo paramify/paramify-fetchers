@@ -263,6 +263,9 @@ def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
             ):
                 problems.append(f"each summary field line must read '- <field> — <meaning>', with any breakdown "
                                 f"values under a line ending in ':' as '  - <value> (<meaning>)', under {group[0]!r}")
+            if any(ln.endswith(":") and not (i + 1 < len(lines) and BREAKDOWN_LINE.match(lines[i + 1]))
+                   for i, ln in enumerate(lines)):
+                problems.append(f"a summary field line ending in ':' needs its values below it, under {group[0]!r}")
             for ln in group[1:]:
                 m = FIELD_LINE.match(ln)
                 if m and m.group(1) in seen:
