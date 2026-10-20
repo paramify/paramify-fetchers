@@ -900,6 +900,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["resources"],
         "azure/resource_inventory, azure/front_door_origins (origin regions), "
         "azure/resource_diagnostic_settings, azure/change_provenance, azure/residual_resources, "
+        "azure/app_service_backups, "
         "azure/defender_assessments (each assessment's own severity)",
     ),
     # --- deployment history: left azure-mgmt-resource for its own distribution -
@@ -925,6 +926,14 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ],
         "azure/app_service_configuration, azure/function_app_configuration, "
         "azure/app_service_plans",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "web_apps",
+        ["get", "list_snapshots", "list_backups", "get_backup_configuration"],
+        "azure/app_service_backups — automatic backups, custom backup history and "
+        "schedule, and apps Resource Graph lists that web_apps.list() did not",
     ),
     (
         "azure.mgmt.web",
@@ -1501,6 +1510,37 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "SiteProperties",
         ["server_farm_id", "redundancy_mode"],
         "azure/app_service_plans — server_farm_id is how sites join their plan",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteProperties",
+        ["sku"],
+        "azure/app_service_backups — a renamed sku reads as an unknown plan tier",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SnapshotProperties",
+        ["time"],
+        "azure/app_service_backups — automatic backup times",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "BackupItemProperties",
+        ["name", "status", "scheduled", "created", "finished_time_stamp", "last_restore_time_stamp",
+         "storage_account_url", "log"],
+        "azure/app_service_backups — custom backup history; a renamed created reads as 'no restore point'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "BackupRequestProperties",
+        ["enabled", "storage_account_url", "backup_schedule", "databases"],
+        "azure/app_service_backups — a renamed field reads as 'no custom backup configured'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "BackupSchedule",
+        ["frequency_interval", "frequency_unit", "retention_period_in_days", "keep_at_least_one_backup"],
+        "azure/app_service_backups — custom backup interval and retention",
     ),
     (
         "azure.mgmt.network.models",
