@@ -1,5 +1,5 @@
 name: checkov_kubernetes
-version: 0.1.0
+version: 0.2.0
 description: >
   Runs Checkov IaC security scanning over the Kubernetes manifests in a repo.
   Clones the repo (generic git, any host) and scans its .yaml/.yml files with the
@@ -30,7 +30,10 @@ target_schema:
     required: false
     default: main
     env: CHECKOV_CLONE_BRANCH
-    description: Branch/ref to clone (falls back to the repo default if absent).
+    description: >-
+      Branch/ref to clone. If it cannot be cloned the repo's default branch is scanned
+      instead; metadata.branch then names the default branch, metadata.requested_branch
+      this value, and metadata.branch_fallback is true.
 
 secrets:
   - name: clone_token
@@ -56,7 +59,18 @@ config_schema:
   skip_checks:
     type: string
     env: CHECKOV_SKIP_CHECKS
-    description: CSV of CKV_K8S_/CKV2_K8S_ check IDs to skip; merged with _shared/skip-checks-k8s.default.txt.
+    description: >-
+      CSV of CKV_K8S_/CKV2_K8S_ check IDs to skip; added to _shared/skip-checks-k8s.default.txt
+      unless use_default_skip_checks is false. Skipped checks do not appear in
+      checkov's results; the effective list is recorded in metadata.skip_checks.
+  use_default_skip_checks:
+    type: boolean
+    default: true
+    env: CHECKOV_USE_DEFAULT_SKIP_CHECKS
+    description: >-
+      Include the shipped _shared/skip-checks-k8s.default.txt in the skip list. Set false
+      to replace the defaults with skip_checks alone (or skip nothing if skip_checks is
+      empty). metadata.default_skip_checks_applied records the choice.
   skip_paths:
     type: string
     env: CHECKOV_SKIP_PATHS
@@ -64,7 +78,7 @@ config_schema:
   checks:
     type: string
     env: CHECKOV_K8S_CHECKS
-    description: CSV allowlist of check IDs to run (skip list still takes priority).
+    description: CSV allowlist of check IDs to run (these are removed from the skip list).
   external_checks_dir:
     type: string
     env: CHECKOV_EXTERNAL_CHECKS_DIR
@@ -81,4 +95,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CHECKOV-KUBERNETES
   name: Checkov Kubernetes IaC Scan
-  instructions: 'Script: checkov_kubernetes/fetcher.sh. Shallow-clones the target repo and runs the checkov CLI (--framework kubernetes) over its .yaml/.yml manifests, merging default + configured skip-checks, and records passed/failed/skipped checks with repo+commit provenance.'
+  instructions: 'Script: checkov_kubernetes/fetcher.sh. Shallow-clones the target repo and runs the checkov CLI (--framework kubernetes) over its .yaml/.yml manifests, merging default + configured skip-checks, and records passed/failed/skipped checks with repo+commit provenance. metadata records the branch actually scanned (branch_fallback when the requested branch could not be cloned) and the effective skip-check list, since checks passed to --skip-check do not appear in the results.'
