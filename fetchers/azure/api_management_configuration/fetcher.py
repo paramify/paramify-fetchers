@@ -23,7 +23,6 @@ from azure_common import (  # noqa: E402
     failure_reason,
     is_not_found,
     list_diagnostic_settings,
-    logs_exported,
     model_attr,
     monitor_client,
     provider_registration_status,
@@ -33,6 +32,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from diagnostics import audit_logging_summary  # noqa: E402
 
 logger = logging.getLogger("azure_api_management_configuration")
 
@@ -133,10 +133,29 @@ def cipher_settings(custom_properties, created_at) -> dict:
     return out
 
 
-def policy_elements(xml) -> list:
-    """Security-relevant elements present in a policy document."""
-    text = xml or ""
-    return [e for e in POLICY_ELEMENTS if re.search(rf"<{re.escape(e)}[\s/>]", text)]
+XML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+FRAGMENT_REF = re.compile(r"""<include-fragment\b[^>]*?\bfragment-id\s*=\s*["']([^"']+)["']""", re.S)
+# Marks a policy that keeps <base />, so its parent scope's policy still runs.
+INHERITS = "base"
+
+
+def policy_elements(xml, fragments=None):
+    """Security-relevant elements in a policy document, with included fragments expanded.
+
+    "base" is added when the policy keeps <base />. Commented-out elements do not count. `fragments`
+    maps a lower-cased fragment id to its elements; null when the document includes a fragment that
+    is missing from the map or could not be read, since its contents are then unknown.
+    """
+    text = XML_COMMENT.sub("", xml or "")
+    found = {e for e in POLICY_ELEMENTS if re.search(rf"<{re.escape(e)}[\s/>]", text)}
+    if re.search(r"<base[\s/>]", text):
+        found.add(INHERITS)
+    for fragment_id in FRAGMENT_REF.findall(text):
+        included = (fragments or {}).get(fragment_id.strip().lower())
+        if included is None:
+            return None
+        found.update(e for e in included if e != INHERITS)
+    return [e for e in (*POLICY_ELEMENTS, INHERITS) if e in found]
 
 
 def days_until(expiry, now: datetime):
@@ -328,32 +347,67 @@ def sign_up_status(client, rg, name, collector: Collector):
         return None
 
 
-def optional_policy(fn):
-    """Elements of a policy that may not exist; [] on 404, raises otherwise for the caller's guard."""
+def optional_policy(fn, fragments=None):
+    """Elements of a policy that may not exist, raising otherwise for the caller's guard.
+
+    A scope with no policy runs Azure's default, which is <base /> in every section, so it inherits.
+    """
     try:
-        return policy_elements(model_attr(fn(), "value"))
+        return policy_elements(model_attr(fn(), "value"), fragments)
     except Exception as exc:  # noqa: BLE001
         if is_not_found(exc):
-            return []
+            return [INHERITS]
         raise
 
 
-def api_access_control(api: dict, global_elements, product_elements: list) -> object:
-    """How an API is protected: subscription key, OAuth, or a token-validation policy at any level.
+def _or(a, b):
+    """Three-valued OR: null (unknown) only when neither side is True and one is unknown."""
+    return True if a is True or b is True else None if a is None or b is None else False
 
-    Null when a policy that could protect it could not be read and nothing else does.
+
+def _and(a, b):
+    return False if a is False or b is False else None if a is None or b is None else True
+
+
+def scope_chain_validates(levels) -> object:
+    """Whether a token is validated along policy scopes listed innermost first (operation, API, product,
+    global): a scope counts only when every scope inside it keeps <base />, since a policy without it
+    drops its parents. Null when an unread scope decides it."""
+    if not levels:
+        return False
+    level, rest = levels[0], levels[1:]
+    validates = None if level is None else any(e in level for e in TOKEN_VALIDATION)
+    inherits = None if level is None else INHERITS in level
+    return _or(validates, _and(inherits, scope_chain_validates(rest)))
+
+
+def api_access_control(api: dict, global_elements, products: list) -> object:
+    """Whether a call without a subscription key is stopped: a key requirement or token validation.
+
+    An OAuth 2.0 or OpenID Connect server on the API only configures the developer-portal test console;
+    the gateway validates nothing because of it, so it is not access control. `products` are the API's
+    products ({subscription_required, policy_elements}), or None when they could not be read. A keyless
+    call runs only through an open product, so a keyed product's policy never applies to it; with several
+    open products, every one must protect it. Every operation must be protected; an API with no listed
+    operations is judged as one operation running the default policy. Null when an unread policy decides it.
     """
-    if api["subscription_required"] or api["oauth2_or_openid_configured"]:
+    if api["subscription_required"]:
         return True
-    levels = [global_elements, api["policy_elements"], *product_elements]
-    ops = [o["policy_elements"] for o in api["operations"] or []]
-    if any(lvl and any(e in lvl for e in TOKEN_VALIDATION) for lvl in levels):
-        return True
-    if ops and all(o and any(e in o for e in TOKEN_VALIDATION) for o in ops):
-        return True  # every operation validates a token
-    if any(lvl is None for lvl in levels) or api["operations"] is None or any(o is None for o in ops):
-        return None
-    return False
+    open_products = [
+        None if p is None else p["policy_elements"]
+        for p in (products or [])
+        if p is None or p.get("subscription_required") is not True
+    ]
+    product_paths = [[p] for p in open_products] or [[]]
+    if api["operations"] is None:
+        operations = [None]
+    else:
+        operations = [o["policy_elements"] for o in api["operations"]] or [[INHERITS]]
+    result = True
+    for op in operations:
+        for product in product_paths:
+            result = _and(result, scope_chain_validates([op, api["policy_elements"], *product, global_elements]))
+    return result
 
 
 def collect_service(client, monitor, service: dict, collector: Collector, now: datetime) -> dict:
@@ -364,9 +418,26 @@ def collect_service(client, monitor, service: dict, collector: Collector, now: d
         rows = collector.guard(f"apimanagement.{operation}({label})", lambda: [project(r) for r in fn(rg, name)])
         return None if rows is None else sorted(rows, key=lambda r: r.get("name") or "")
 
+    # Fragments first, so a policy's <include-fragment> can be expanded into the fragment's elements.
+    fragments = collector.guard(
+        f"apimanagement.policy_fragment.list_by_service({label})",
+        lambda: [model_attr(f, "name") for f in client.policy_fragment.list_by_service(rg, name)],
+    )
+    fragment_records = None
+    fragment_map = None
+    if fragments is not None:
+        fragment_records = []
+        for fid in sorted(fragments):
+            elements = collector.guard(
+                f"apimanagement.policy_fragment.get({label}/{fid})",
+                lambda fid=fid: policy_elements(model_attr(client.policy_fragment.get(rg, name, fid, format="rawxml"), "value")),
+            )
+            fragment_records.append({"name": fid, "policy_elements": elements})
+        fragment_map = {str(f["name"]).lower(): f["policy_elements"] for f in fragment_records}
+
     global_elements = collector.guard(
         f"apimanagement.policy.get({label})",
-        lambda: optional_policy(lambda: client.policy.get(rg, name, "policy", format="rawxml")),
+        lambda: optional_policy(lambda: client.policy.get(rg, name, "policy", format="rawxml"), fragment_map),
     )
     products = _list("product.list_by_service", client.product.list_by_service, project_product)
     apis_by_product: dict = {}
@@ -374,7 +445,9 @@ def collect_service(client, monitor, service: dict, collector: Collector, now: d
         pid = product["name"]
         product["policy_elements"] = collector.guard(
             f"apimanagement.product_policy.get({label}/{pid})",
-            lambda pid=pid: optional_policy(lambda: client.product_policy.get(rg, name, pid, "policy", format="rawxml")),
+            lambda pid=pid: optional_policy(
+                lambda: client.product_policy.get(rg, name, pid, "policy", format="rawxml"), fragment_map
+            ),
         )
         product["apis"] = collector.guard(
             f"apimanagement.product_api.list_by_product({label}/{pid})",
@@ -388,7 +461,9 @@ def collect_service(client, monitor, service: dict, collector: Collector, now: d
         aid = api["name"]
         api["policy_elements"] = collector.guard(
             f"apimanagement.api_policy.get({label}/{aid})",
-            lambda aid=aid: optional_policy(lambda: client.api_policy.get(rg, name, aid, "policy", format="rawxml")),
+            lambda aid=aid: optional_policy(
+                lambda: client.api_policy.get(rg, name, aid, "policy", format="rawxml"), fragment_map
+            ),
         )
         operations = collector.guard(
             f"apimanagement.api_operation.list_by_api({label}/{aid})",
@@ -401,29 +476,16 @@ def collect_service(client, monitor, service: dict, collector: Collector, now: d
             op["policy_elements"] = collector.guard(
                 f"apimanagement.api_operation_policy.get({label}/{aid}/{op['name']})",
                 lambda aid=aid, op=op: optional_policy(
-                    lambda: client.api_operation_policy.get(rg, name, aid, op["name"], "policy", format="rawxml")
+                    lambda: client.api_operation_policy.get(rg, name, aid, op["name"], "policy", format="rawxml"),
+                    fragment_map,
                 ),
             )
         api["operations"] = None if operations is None else sorted(operations, key=lambda o: o["name"] or "")
         api["products"] = sorted(p["name"] for p in apis_by_product.get(aid, []))
-        product_levels = [p["policy_elements"] for p in apis_by_product.get(aid, [])]
+        api_products = list(apis_by_product.get(aid, []))
         if products is None:
-            product_levels.append(None)  # unread products could hold the protecting policy
-        api["access_control"] = api_access_control(api, global_elements, product_levels)
-
-    fragments = collector.guard(
-        f"apimanagement.policy_fragment.list_by_service({label})",
-        lambda: [model_attr(f, "name") for f in client.policy_fragment.list_by_service(rg, name)],
-    )
-    fragment_records = None
-    if fragments is not None:
-        fragment_records = []
-        for fid in sorted(fragments):
-            elements = collector.guard(
-                f"apimanagement.policy_fragment.get({label}/{fid})",
-                lambda fid=fid: policy_elements(model_attr(client.policy_fragment.get(rg, name, fid, format="rawxml"), "value")),
-            )
-            fragment_records.append({"name": fid, "policy_elements": elements})
+            api_products.append(None)  # unread products could be open and hold the protecting policy
+        api["access_control"] = api_access_control(api, global_elements, api_products)
 
     diagnostics = None
     if monitor is not None:
@@ -454,7 +516,7 @@ def collect_service(client, monitor, service: dict, collector: Collector, now: d
             lambda lg: {"name": model_attr(lg, "name"), "logger_type": model_attr(lg, "logger_type")},
         ),
         "diagnostic_settings": diagnostics,
-        "audit_logs_exported": logs_exported(diagnostics, categories=("gatewaylogs",)),
+        "audit_logs_exported": audit_logging_summary(diagnostics, ("GatewayLogs",))["audit_logging_enabled"],
     }
 
 

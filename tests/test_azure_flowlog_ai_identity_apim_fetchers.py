@@ -247,7 +247,7 @@ def test_private_endpoint_with_public_access_is_flagged():
     assert closed["private_endpoint_but_public_access"] is False
 
 
-def _policy(*filters, policy_type="SystemManaged", mode="Blocking"):
+def _policy(*filters, policy_type="SystemManaged", mode="Blocking", threshold="Medium"):
     return NS(
         name="p",
         properties=NS(
@@ -256,7 +256,7 @@ def _policy(*filters, policy_type="SystemManaged", mode="Blocking"):
             base_policy_name=None,
             custom_blocklists=None,
             content_filters=[
-                NS(name=n, source=src, enabled=en, blocking=bl, severity_threshold="Medium")
+                NS(name=n, source=src, enabled=en, blocking=bl, severity_threshold=threshold)
                 for n, src, en, bl in filters
             ],
         ),
@@ -289,6 +289,33 @@ def test_custom_policy_without_jailbreak_protection_is_weaker_than_default():
     # A system-managed policy is Microsoft's, never "weaker than default".
     system = ai.project_rai_policy(_policy(*HARM, ("Jailbreak", "Prompt", False, False)))
     assert system["weaker_than_default"] is False
+
+
+@pytest.mark.parametrize(
+    "threshold,thresholds_ok,weaker",
+    [
+        ("Low", True, False),  # blocks more than the default
+        ("Medium", True, False),  # the default
+        ("High", False, True),  # blocks only the most severe content: looser than the default
+        (None, None, None),  # unknown threshold is never read as "at least default"
+    ],
+)
+def test_custom_policy_severity_threshold_against_default(threshold, thresholds_ok, weaker):
+    policy = ai.project_rai_policy(_policy(*HARM, JAILBREAK, policy_type="UserManaged", threshold=threshold))
+    assert policy["harm_filters_enabled_and_blocking"] is True
+    assert policy["harm_thresholds_at_least_default"] is thresholds_ok
+    assert policy["weaker_than_default"] is weaker
+    if threshold == "High":
+        assert len(policy["harm_filters_looser_than_default"]) == len(HARM)
+
+
+def test_one_high_threshold_is_enough_to_be_weaker():
+    filters = [*HARM]
+    policy = _policy(*filters, JAILBREAK, policy_type="UserManaged")
+    policy.properties.content_filters[0].severity_threshold = "High"
+    record = ai.project_rai_policy(policy)
+    assert record["weaker_than_default"] is True
+    assert record["harm_filters_looser_than_default"] == ["Hate (Prompt): High"]
 
 
 def test_asynchronous_mode_is_flagged():
@@ -530,8 +557,8 @@ def test_privileged_graph_permission(permission, privileged):
 )
 def test_resource_identities(identity_type, system, users):
     uai = {f"{SUB}/resourceGroups/id/providers/Microsoft.ManagedIdentity/userAssignedIdentities/u1": {}} if users else {}
-    resource = NS(id="r1", name="r1", type="t", identity=NS(type=identity_type, principal_id="p", user_assigned_identities=uai))
-    holder = mi.resource_identities(resource)
+    row = {"id": "r1", "name": "r1", "type": "t", "identity": {"type": identity_type, "principalId": "p", "userAssignedIdentities": uai}}
+    holder = mi.resource_identities(row)
     assert holder["system_assigned"] is system and len(holder["user_assigned_ids"]) == users
 
 
@@ -592,7 +619,8 @@ def test_subscription_scope_kind(scope, kind):
     assert apim.subscription_scope_kind(scope) == kind
 
 
-def _api(subscription_required=False, oauth=False, policy=(), operations=()):
+def _api(subscription_required=False, oauth=False, policy=("base",), operations=()):
+    # policy defaults to Azure's default (<base /> only), which is what an API with no policy of its own runs.
     return {
         "subscription_required": subscription_required,
         "oauth2_or_openid_configured": oauth,
@@ -601,22 +629,36 @@ def _api(subscription_required=False, oauth=False, policy=(), operations=()):
     }
 
 
+def _product(subscription_required, policy):
+    return {"subscription_required": subscription_required, "policy_elements": policy}
+
+
 @pytest.mark.parametrize(
     "api,global_elements,products,expected",
     [
         (_api(subscription_required=True), [], [], True),
         (_api(policy=["validate-jwt"]), [], [], True),
         (_api(), ["validate-azure-ad-token"], [], True),  # global policy protects it
-        (_api(), [], [["validate-jwt"]], True),  # a containing product protects it
+        (_api(), [], [_product(False, ["validate-jwt"])], True),  # an open product validates the token
+        (_api(), [], [_product(True, ["validate-jwt"])], False),  # keyed product: never runs for a keyless call
+        (_api(), [], [_product(True, None)], False),  # an unread keyed product cannot matter
         (_api(operations=[["validate-jwt"], ["validate-jwt"]]), [], [], True),
         (_api(operations=[["validate-jwt"], []]), [], [], False),  # one open operation
         (_api(), [], [], False),
         (_api(policy=None), [], [], None),  # API policy unread
-        (_api(), [], [None], None),  # product policy unread
+        (_api(), [], [_product(False, None)], None),  # open product's policy unread
+        (_api(), [], [None], None),  # products unread
     ],
 )
 def test_api_access_control(api, global_elements, products, expected):
     assert apim.api_access_control(api, global_elements, products) is expected
+
+
+def test_commented_out_policy_elements_do_not_count():
+    xml = "<policies><inbound><!-- <validate-jwt header-name='Authorization' /> --><cors/></inbound></policies>"
+    assert apim.policy_elements(xml) == ["cors"]
+    multiline = "<policies><inbound><!--\n  <ip-filter action='allow'>\n  </ip-filter>\n--></inbound></policies>"
+    assert apim.policy_elements(multiline) == []
 
 
 def test_policy_elements_match_whole_element_names():
@@ -642,7 +684,12 @@ def test_backend_auth_configured_without_values():
 def test_gateway_logs_count_as_audit_logs():
     setting = {"workspace_id": "ws", "storage_account_id": None, "event_hub_authorization_rule_id": None,
                "logs": [{"category": "GatewayLogs", "category_group": None, "enabled": True}]}
-    assert apim.logs_exported([setting], categories=("gatewaylogs",)) is True
+    assert apim.audit_logging_summary([setting], ("GatewayLogs",))["audit_logging_enabled"] is True
+    group = {**setting, "logs": [{"category": None, "category_group": "allLogs", "enabled": True}]}
+    assert apim.audit_logging_summary([group], ("GatewayLogs",))["audit_logging_enabled"] is True
+    no_sink = {**setting, "workspace_id": None}
+    assert apim.audit_logging_summary([no_sink], ("GatewayLogs",))["audit_logging_enabled"] is False
+    assert apim.audit_logging_summary(None, ("GatewayLogs",))["audit_logging_enabled"] is None
 
 
 def test_sign_up_unavailable_in_v2_tier_is_not_a_failure():
@@ -655,3 +702,382 @@ def test_sign_up_unavailable_in_v2_tier_is_not_a_failure():
     collector = apim.Collector(apim.logger)
     assert apim.sign_up_status(Fails, "rg", "svc", collector) == "not_available_in_tier"
     assert collector.ok
+
+
+# --------------------------------------------------------------------------- #
+# collect()-level: the real collection paths over fake clients (no Azure SDK, no network)
+# --------------------------------------------------------------------------- #
+
+import asyncio  # noqa: E402
+import logging  # noqa: E402
+import types  # noqa: E402
+
+from azure_common import Collector  # noqa: E402
+
+
+class _Group:
+    """An SDK operation group: named methods answer from `methods`, anything else returns []."""
+
+    def __init__(self, **methods):
+        self._methods = methods
+
+    def __getattr__(self, name):
+        return self._methods.get(name, lambda *a, **k: [])
+
+
+class _Client:
+    def __init__(self, **groups):
+        self._groups = groups
+
+    def __getattr__(self, name):
+        return self._groups.get(name, _Group())
+
+
+def _raise(exc):
+    def fail(*a, **k):
+        raise exc
+
+    return fail
+
+
+def _collector():
+    return Collector(logging.getLogger("test"))
+
+
+def _fake_module(monkeypatch, dotted: str, **attrs):
+    module = types.ModuleType(dotted)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    monkeypatch.setitem(sys.modules, dotted, module)
+
+
+# --- network_flow_logs ------------------------------------------------------- #
+
+def test_collect_vnet_read_failure_leaves_targets_and_coverage_unknown(monkeypatch):
+    watcher = {"id": f"{SUB}/resourceGroups/nw/providers/Microsoft.Network/networkWatchers/w1", "name": "w1", "location": "eastus"}
+    vnet_id = f"{SUB}/resourceGroups/net/providers/Microsoft.Network/virtualNetworks/v1"
+    flow_log = {"id": "fl1", "target_resource_id": vnet_id, "target_type": "virtual_network", "enabled": True,
+                "retention_days": 30, "retained_indefinitely": False}
+    client = _Client(
+        network_watchers=_Group(list_all=lambda: [watcher]),
+        flow_logs=_Group(list=lambda rg, name: [flow_log]),
+        virtual_networks=_Group(list_all=_raise(RuntimeError("(403) AuthorizationFailed"))),
+    )
+    _fake_module(monkeypatch, "azure.mgmt.network", NetworkManagementClient=lambda **k: client)
+    monkeypatch.setattr(flow, "project_watcher", lambda w: dict(w))
+    monkeypatch.setattr(flow, "project_flow_log", lambda f: dict(f))
+    collector = _collector()
+    watchers, flow_logs, vnets = flow.collect(SUB.split("/")[-1], object(), collector)
+    assert vnets is None
+    assert flow_logs[0]["target_attached"] is None  # never "unattached" because the VNet list failed
+    assert not collector.ok
+
+
+def test_summary_with_unread_vnets_is_unknown_not_zero():
+    flow_log = {"enabled": True, "retention_days": 30, "retained_indefinitely": False, "legacy_nsg_flow_log": False,
+                "target_type": "virtual_network", "target_attached": None, "target_resource_id": "v1",
+                "enabled_filtering_criteria": None, "traffic_analytics_enabled": False,
+                "traffic_analytics_interval_minutes": None}
+    summary = flow.summarize([], [flow_log], None)
+    assert summary["virtual_networks_read"] is False
+    assert summary["total_virtual_networks"] is None and summary["virtual_networks_not_covered"] is None
+    assert summary["enabled_flow_logs_target_unknown"] == 1
+
+
+# --- ai_services_configuration ----------------------------------------------- #
+
+def _connection(name, cid):
+    return {"id": cid, "name": name, "properties": {"authType": "AAD", "category": "AzureBlob"}}
+
+
+def test_collect_keeps_same_named_connections_in_different_projects(monkeypatch):
+    acct = ai.project_account(_account())
+    proj = lambda n: NS(name=n, id=f"{acct['id']}/projects/{n}", identity=None, properties=NS(is_default=False, provisioning_state="Succeeded"))  # noqa: E731
+    client = _Client(projects=_Group(list=lambda rg, name: [proj("p1"), proj("p2")]))
+    lists = {
+        # The account list repeats project connections under an account-scoped id (measured), plus its own.
+        f"{acct['id']}/connections": [_connection("storage", f"{acct['id']}/connections/storage"),
+                                      _connection("acct-only", f"{acct['id']}/connections/acct-only")],
+        f"{acct['id']}/projects/p1/connections": [_connection("storage", f"{acct['id']}/projects/p1/connections/storage")],
+        f"{acct['id']}/projects/p2/connections": [_connection("storage", f"{acct['id']}/projects/p2/connections/storage")],
+    }
+    monkeypatch.setattr(ai, "list_all", lambda rest, path, version: {"items": lists[path], "pages": 1})
+    record = ai.collect_account(client, object(), None, acct, _collector())
+    repeats = [c for c in record["connections"] if c["repeats_project_connection"]]
+    assert [(c["level"], c["name"]) for c in repeats] == [("account", "storage")]
+    summary = ai.summarize([record], [])
+    assert summary["total_connections"] == 3  # p1/storage, p2/storage, acct-only — not merged by name
+
+
+# --- managed_identity_configuration ------------------------------------------ #
+
+def test_collect_reads_identity_holders_from_resource_graph(monkeypatch):
+    uai_id = f"{SUB}/resourceGroups/id/providers/Microsoft.ManagedIdentity/userAssignedIdentities/u1"
+    uai = NS(id=uai_id, name="u1", location="eastus", tags=None, principal_id="pu", client_id="c", tenant_id="t", isolation_scope=None)
+    msi = _Client(user_assigned_identities=_Group(list_by_subscription=lambda: [uai]))
+    authorization = _Client(role_definitions=_Group(list=lambda scope: []), role_assignments=_Group(list_for_subscription=lambda: []))
+    _fake_module(monkeypatch, "azure.mgmt.msi", ManagedServiceIdentityClient=lambda **k: msi)
+    _fake_module(monkeypatch, "azure.mgmt.authorization", AuthorizationManagementClient=lambda **k: authorization)
+    monkeypatch.setattr(mi, "arm_rest_client", lambda cred: "rest")
+    monkeypatch.setattr(mi, "resource_graph_client", lambda cred: "graph")
+    rows = [{"id": "vm1", "name": "vm1", "type": "microsoft.compute/virtualmachines",
+             "identity": {"type": "SystemAssigned, UserAssigned", "principalId": "ps", "userAssignedIdentities": {uai_id: {}}}}]
+    seen = {}
+
+    def query_all(client, sub, query):
+        seen["query"] = query
+        return {"rows": rows, "total_records": 1, "pages": 1}
+
+    monkeypatch.setattr(mi, "query_all", query_all)
+    monkeypatch.setattr(mi, "list_all", lambda rest, path, version: {"items": [], "pages": 1})
+
+    async def no_graph(collector, cred, principal_ids):
+        return {}, "read"
+
+    monkeypatch.setattr(mi, "read_graph_roles", no_graph)
+    user_assigned, system_assigned, _ = mi.collect(SUB.split("/")[-1], object(), _collector())
+    assert "isnotnull(identity)" in seen["query"]
+    assert [r["resource_id"] for r in user_assigned[0]["attached_resources"]] == ["vm1"]
+    assert system_assigned[0]["principal_id"] == "ps"
+
+
+def test_graph_role_reads_follow_next_link():
+    import entra_graph
+
+    class Page:
+        def __init__(self, value, next_link=None):
+            self.value, self.odata_next_link = value, next_link
+
+    class Builder:
+        async def get(self, request_configuration=None):
+            return Page([1, 2], "https://graph.microsoft.com/next")
+
+        def with_url(self, url):
+            builder = Builder()
+            builder.get = lambda request_configuration=None: _done(Page([3]))
+            return builder
+
+    async def _done(page):
+        return page
+
+    items = asyncio.run(entra_graph.paginate(_collector(), "op", Builder(), raise_on_error=True))
+    assert items == [1, 2, 3]
+
+
+def test_paginate_raise_on_error_lets_the_caller_classify_a_403():
+    import entra_graph
+
+    class Denied(Exception):
+        response_status_code = 403
+
+    class Builder:
+        async def get(self, request_configuration=None):
+            raise Denied("Authorization_RequestDenied")
+
+    collector = _collector()
+    with pytest.raises(Denied):
+        asyncio.run(entra_graph.paginate(collector, "op", Builder(), raise_on_error=True))
+    assert collector.ok  # not recorded by paginate: the caller decides what a 403 means
+    assert asyncio.run(entra_graph.paginate(collector, "op", Builder())) == []  # default unchanged
+    assert not collector.ok
+
+
+# --- api_management_configuration -------------------------------------------- #
+
+def _apim_client(product_required, product_policy, api_policy=""):
+    product = NS(name="prod", display_name="Prod", state="published", subscription_required=product_required,
+                 approval_required=False, subscriptions_limit=None)
+    api = NS(name="orders", display_name="Orders", path="orders", api_type="http", is_current=True,
+             protocols=["https"], service_url="https://backend", subscription_required=False, authentication_settings=None)
+    return _Client(
+        policy=_Group(get=lambda *a, **k: NS(value="")),
+        product=_Group(list_by_service=lambda rg, name: [product]),
+        product_policy=_Group(get=lambda *a, **k: NS(value=product_policy)),
+        product_api=_Group(list_by_product=lambda rg, name, pid: [NS(name="orders")]),
+        api=_Group(list_by_service=lambda rg, name: [api]),
+        api_policy=_Group(get=lambda *a, **k: NS(value=api_policy)),
+        sign_up_settings=_Group(get=lambda rg, name: NS(enabled=False)),
+    )
+
+
+JWT = "<policies><inbound><validate-jwt header-name='Authorization'/></inbound></policies>"
+BASE_ONLY = "<policies><inbound><base /></inbound></policies>"
+
+
+@pytest.mark.parametrize(
+    "product_required,product_policy,api_policy,expected",
+    [
+        (True, JWT, "", False),  # keyed product: its policy never runs for a keyless call
+        (False, JWT, BASE_ONLY, True),  # open product: the keyless call runs through it
+        (False, JWT, "<policies><inbound><cors/></inbound></policies>", False),  # API policy drops <base />
+        (False, "", "<policies><inbound><!-- <validate-jwt/> --></inbound></policies>", False),  # commented out
+    ],
+)
+def test_collect_service_access_control(product_required, product_policy, api_policy, expected):
+    service = {"id": "svc", "resource_group": "rg", "name": "svc"}
+    record = apim.collect_service(
+        _apim_client(product_required, product_policy, api_policy), None, service, _collector(),
+        datetime(2026, 10, 13, tzinfo=timezone.utc),
+    )
+    assert record["apis"][0]["access_control"] is expected
+
+
+# --------------------------------------------------------------------------- #
+# PR #148 review fixes
+# --------------------------------------------------------------------------- #
+
+import foundry_connections  # noqa: E402  (on sys.path once a fetcher is loaded)
+
+
+@pytest.mark.parametrize(
+    "api,global_elements,products,expected",
+    [
+        # An OAuth/OpenID server only configures the portal test console; it is not access control.
+        (_api(oauth=True, policy=["base"]), [], [], False),
+        (_api(oauth=True, policy=["validate-jwt", "base"]), [], [], True),
+        # A global validate-jwt protects only when the API policy keeps <base />.
+        (_api(policy=["base"]), ["validate-jwt"], [], True),
+        (_api(policy=["cors"]), ["validate-jwt"], [], False),
+        # An operation policy without <base /> drops the API's validate-jwt.
+        (_api(policy=["validate-jwt", "base"], operations=[["base"], ["cors"]]), [], [], False),
+        (_api(policy=["validate-jwt", "base"], operations=[["base"], ["base"]]), [], [], True),
+        # An open product without <base /> drops the global policy.
+        (_api(policy=["base"]), ["validate-jwt"], [_product(False, ["cors"])], False),
+        (_api(policy=["base"]), ["validate-jwt"], [_product(False, ["base"])], True),
+        # Every open product must protect the call.
+        (_api(policy=["base"]), [], [_product(False, ["validate-jwt"]), _product(False, ["base"])], False),
+        (_api(policy=["base"]), None, [], None),  # global policy unread and it decides
+    ],
+)
+def test_api_access_control_scope_chain(api, global_elements, products, expected):
+    assert apim.api_access_control(api, global_elements, products) is expected
+
+
+def test_policy_elements_expand_fragments_and_mark_base():
+    xml = "<policies><inbound><base /><include-fragment fragment-id='JwtCheck' /></inbound></policies>"
+    assert apim.policy_elements(xml, {"jwtcheck": ["validate-jwt"]}) == ["validate-jwt", "base"]
+    assert apim.policy_elements(xml, {}) is None  # included fragment unknown
+    assert apim.policy_elements(xml, None) is None  # fragments could not be listed
+    commented = "<policies><inbound><!-- <include-fragment fragment-id='x'/> --></inbound></policies>"
+    assert apim.policy_elements(commented, None) == []
+
+
+def test_missing_policy_runs_azure_default_and_inherits():
+    class NotFound(Exception):
+        status_code = 404
+    def missing():
+        raise NotFound("ResourceNotFound")
+    import types
+    original = apim.is_not_found
+    apim.is_not_found = lambda exc: isinstance(exc, NotFound)
+    try:
+        assert apim.optional_policy(missing) == ["base"]
+    finally:
+        apim.is_not_found = original
+    assert types  # keep import used
+
+
+@pytest.mark.parametrize(
+    "error,retried",
+    [("(InvalidApiVersion) The api-version is invalid", True),
+     ("(NoRegisteredProviderFound) No registered resource provider found for API version", True),
+     ("(NoSuchApi) unknown", True),
+     ("(AuthorizationFailed) The client does not have authorization", False)],
+)
+def test_federated_credential_api_version_fallback(error, retried):
+    assert mi.api_version_rejected(Exception(error)) is retried
+
+
+@pytest.mark.parametrize(
+    "permission,app_id,privileged",
+    [
+        ("Mail.Read", mi.MICROSOFT_GRAPH_APP_ID, True),  # tenant-wide read of every mailbox
+        ("Files.Read.All", mi.MICROSOFT_GRAPH_APP_ID, True),
+        ("Sites.Read.All", mi.MICROSOFT_GRAPH_APP_ID, True),
+        ("User.Read.All", mi.MICROSOFT_GRAPH_APP_ID, False),
+        ("Directory.ReadWrite.All", mi.MICROSOFT_GRAPH_APP_ID, True),
+        ("Orders.ReadWrite", "11111111-2222-3333-4444-555555555555", False),  # a custom API, not Graph
+        ("Directory.ReadWrite.All", None, None),  # resource could not be read
+        (None, mi.MICROSOFT_GRAPH_APP_ID, None),  # role id not resolved
+    ],
+)
+def test_privileged_graph_permission_only_judges_graph(permission, app_id, privileged):
+    assert mi.privileged_graph_permission(permission, app_id) is privileged
+
+
+def test_unknown_graph_privilege_counts_as_unknown():
+    assert mi.any_true([False, None]) is None and mi.any_true([None, True]) is True and mi.any_true([False]) is False
+
+
+def test_search_audit_logs_use_operation_logs():
+    setting = [{"workspace_id": "ws", "logs": [{"category": "OperationLogs", "enabled": True}]}]
+    assert ai.audit_logs_exported(setting, ai.SEARCH_AUDIT_CATEGORIES) is True
+    assert ai.audit_logs_exported(setting) is False  # an AI services account needs Audit
+
+
+def test_marketplace_partner_destination_is_carried():
+    import azure_common
+    setting = NS(id="s", name="s", storage_account_id=None, workspace_id=None, event_hub_authorization_rule_id=None,
+                 event_hub_name=None, marketplace_partner_id="/partner/datadog",
+                 logs=[NS(category="Audit", category_group=None, enabled=True)])
+    record = azure_common.diagnostic_setting_record(setting)
+    assert record["marketplace_partner_id"] == "/partner/datadog"
+    assert ai.audit_logs_exported([record]) is True  # a partner destination is a destination
+
+
+def test_connection_target_never_keeps_credentials():
+    assert foundry_connections.strip_query("mongodb://admin:pass@h:27017/db?x=1") == "mongodb://h:27017/db"
+    assert "hunter2" not in foundry_connections.strip_query("Server=h;Password=hunter2;")
+
+
+def test_most_specific_vnet_flow_log_wins():
+    # A filtered subnet log replaces the unfiltered VNet log for that subnet, so it is not fully covered.
+    vnet = _vnet("eastus", _subnet("a"), _subnet("b"))
+    logs = {VNET.lower(): _log(), f"{VNET}/subnets/a".lower(): _log("dstport=443")}
+    record = flow.vnet_record(vnet, logs, set(), {"eastus"})
+    assert [s["coverage"] for s in record["subnets"]] == ["subnet_filtered", "vnet"]
+    assert record["subnets"][0]["flow_log_sources"] == ["vnet", "subnet_filtered"]
+    assert record["coverage"] == "partial"
+    # An unfiltered subnet log under a filtered VNet log is full for that subnet.
+    logs = {VNET.lower(): _log("x"), f"{VNET}/subnets/a".lower(): _log()}
+    assert flow.vnet_record(_vnet("eastus", _subnet("a")), logs, set(), {"eastus"})["coverage"] == "full"
+
+
+@pytest.mark.parametrize(
+    "logs,uncertain,coverage",
+    [({VNET.lower(): {"enabled_filtering_criteria": None}}, set(), "full"),
+     ({VNET.lower(): {"enabled_filtering_criteria": "dstport=443"}}, set(), "partial"),  # only a filtered log
+     ({}, {"eastus"}, "unknown"),  # its region's flow logs could not be listed
+     ({}, set(), "none")],
+)
+def test_vnet_without_subnets(logs, uncertain, coverage):
+    assert flow.vnet_record(_vnet("eastus"), logs, uncertain, {"eastus"})["coverage"] == coverage
+
+
+def test_nic_flow_logs_count_as_vnet_flow_logs():
+    nic = {"enabled": True, "target_type": "network_interface", "legacy_nsg_flow_log": False,
+           "enabled_filtering_criteria": None, "target_attached": None, "traffic_analytics_enabled": False,
+           "traffic_analytics_interval_minutes": None, "retained_indefinitely": False, "retention_days": 30}
+    assert flow.summarize([], [nic], [])["vnet_flow_logs"] == 1
+
+
+def _user_identity(name, attached, roles, fics):
+    return mi.identity_record(
+        {"principal_id": name, "name": name, "kind": "user_assigned", "resource_type": None,
+         "attached_resources": attached, "federated_credentials": fics},
+        {name: roles}, {name: []},
+    )
+
+
+def test_federated_only_identity_is_not_unattached():
+    role = {"broad_role": False, "scope_level": "resource_group", "role_resolved": True,
+            **{cap: False for cap in mi.CAPABILITIES}}
+    fic = {"issuer_kind": "github_actions", "broad_subject": False, "nonstandard_audience": False}
+    identities = [
+        _user_identity("orphan", [], [role], []),
+        _user_identity("gha", [], [role], [fic]),  # used only through GitHub Actions federation
+        _user_identity("vm", [{"resource_id": "vm1"}], [role], []),
+    ]
+    summary = mi.summarize(identities, [], "read")
+    assert summary["unattached_identities_with_roles"] == 1
+    assert summary["federated_only_identities_with_roles"] == 1

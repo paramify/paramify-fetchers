@@ -59,7 +59,10 @@ evidence_set:
     otherwise, and null when retained indefinitely. enabled_filtering_criteria is the VNet flow log's
     filter, when it logs only matching traffic. target_attached is whether the target can produce
     records: an NSG attached to a subnet or network interface, or a VNet or subnet that exists; null
-    for network interface targets and when the NSG list could not be read. storage_account_name and
+    for network interface targets, and when the NSG or VNet list it depends on could not be read
+    (counted in summary.enabled_flow_logs_target_unknown). If the VNet list could not be read,
+    results.virtual_networks and every VNet, subnet and region coverage figure in the summary are null
+    and summary.virtual_networks_read is false: unknown, never "no networks" or "not covered". storage_account_name and
     storage_account_resource_group locate the destination; whether that storage is immutable is
     evidenced by azure_log_storage_immutability, which reads the insights-logs-* containers flow logs
     write to. traffic_analytics_enabled, traffic_analytics_interval_minutes (10 or 60) and
@@ -69,13 +72,17 @@ evidence_set:
     endpoints, service association or resource navigation links, application gateway IP
     configurations). nsg_supported is false for GatewaySubnet, AzureFirewallSubnet,
     AzureFirewallManagementSubnet and RouteServerSubnet, which cannot take an NSG and so cannot be
-    covered by an NSG flow log. coverage is vnet or subnet for an enabled, unfiltered VNet flow log on
-    the VNet or the subnet; nsg for an enabled NSG flow log on the subnet's NSG; vnet_filtered or
-    subnet_filtered when the only VNet flow log is filtered; none when nothing logs it; and unknown
-    when it is not covered by what was read but its region's flow logs could not be listed (that also
-    sets metadata.partial_failure). flow_log_sources lists every match. A VNet is full when every subnet
-    is covered unfiltered, partial when some are, none when none are, and unknown when any is unknown.
-    Flow logs on network interfaces are listed but not counted towards subnet coverage.
+    covered by an NSG flow log. Azure applies only the most specific VNet flow log (network
+    interface, then subnet, then VNet), so a subnet's own flow log replaces the VNet's for that subnet.
+    coverage is subnet or vnet for the VNet flow log in effect when it is enabled and unfiltered; nsg for
+    an enabled NSG flow log on the subnet's NSG (a separate mechanism that counts on its own);
+    subnet_filtered or vnet_filtered when the flow log in effect is filtered and no NSG flow log covers
+    it; none when nothing logs it; and unknown when it is not covered by what was read but its region's
+    flow logs could not be listed (that also sets metadata.partial_failure). flow_log_sources lists every
+    match, including a VNet log a subnet log overrides. A VNet is full when every subnet is covered
+    unfiltered, partial when some are, none when none are, and unknown when any is unknown; a VNet with no
+    subnets is judged on its own flow log the same way (filtered reads partial). Flow logs on network
+    interfaces count as VNet flow logs (vnet_flow_logs) but not towards subnet coverage.
     network_watcher_in_region is null when the watcher list could not be read.
     Summary: subnets_in_use_covered over subnets_in_use is the share of subnets with workloads whose
     traffic is logged (subnets_covered over total_subnets counts empty subnets too);

@@ -140,8 +140,10 @@ def project_nsg(nsg) -> dict:
     }
 
 
-def target_attached(flow_log: dict, nsgs, vnets: list[dict]):
+def target_attached(flow_log: dict, nsgs, vnets):
     """Whether the flow log's target exists and has traffic to log; None when that can't be told.
+
+    `nsgs` / `vnets` are None when their list could not be read, which leaves their targets unknown.
 
     An NSG must be attached to a subnet or network interface; a VNet or subnet must exist.
     Network interface targets are not checked.
@@ -150,6 +152,8 @@ def target_attached(flow_log: dict, nsgs, vnets: list[dict]):
     kind = flow_log["target_type"]
     if kind == "network_security_group":
         return None if nsgs is None else nsgs.get(target, False)
+    if kind in ("virtual_network", "subnet") and vnets is None:
+        return None
     if kind == "virtual_network":
         return any((v["id"] or "").lower() == target for v in vnets)
     if kind == "subnet":
@@ -165,6 +169,10 @@ def subnet_coverage(subnet: dict, vnet: dict, enabled_by_target: dict, uncertain
     vnet_filtered / subnet_filtered — a VNet flow log that logs only traffic matching a filter
     none                   — nothing logs it
     unknown                — not covered by what was read, but flow logs in its region could not be listed
+
+    Azure applies only the most specific VNet flow log (network interface > subnet > VNet), so a subnet's
+    own log, filtered or not, replaces the VNet's. An NSG flow log is a separate mechanism and counts on
+    its own. flow_log_sources still lists every log found.
     """
     sources = []
     for key, label in (
@@ -176,11 +184,13 @@ def subnet_coverage(subnet: dict, vnet: dict, enabled_by_target: dict, uncertain
         if log is not None:
             filtered = label != "nsg" and log["enabled_filtering_criteria"]
             sources.append(f"{label}_filtered" if filtered else label)
-    full = [s for s in sources if s in FULL_SOURCES]
+    vnet_family = [s for s in sources if s.startswith("subnet")] or [s for s in sources if s.startswith("vnet")]
+    in_effect = vnet_family[:1] + [s for s in sources if s == "nsg"]
+    full = [s for s in in_effect if s in FULL_SOURCES]
     if full:
         status = full[0]
-    elif sources:
-        status = sources[0]
+    elif in_effect:
+        status = in_effect[0]
     elif vnet["location"] in uncertain_regions:
         status = "unknown"
     else:
@@ -192,7 +202,14 @@ def vnet_record(vnet: dict, enabled_by_target: dict, uncertain_regions: set, wat
     subnets = [subnet_coverage(s, vnet, enabled_by_target, uncertain_regions) for s in vnet["subnets"]]
     statuses = {s["coverage"] for s in subnets}
     if not subnets:
-        coverage = "full" if (vnet["id"] or "").lower() in enabled_by_target else "none"
+        # No subnets: judged on the VNet's own flow log, with the same filter and region rules as a subnet.
+        log = enabled_by_target.get((vnet["id"] or "").lower())
+        if log is not None:
+            coverage = "partial" if log["enabled_filtering_criteria"] else "full"
+        elif vnet["location"] in uncertain_regions:
+            coverage = "unknown"
+        else:
+            coverage = "none"
     elif statuses <= set(FULL_SOURCES):
         coverage = "full"
     elif "unknown" in statuses:
@@ -210,7 +227,9 @@ def vnet_record(vnet: dict, enabled_by_target: dict, uncertain_regions: set, wat
     }
 
 
-def summarize(watchers, flow_logs, vnets) -> dict:
+def summarize(watchers, flow_logs, vnet_records) -> dict:
+    """`vnet_records` is None when the VNet list could not be read; its coverage figures are then null."""
+    vnets = vnet_records or []
     enabled = [f for f in flow_logs if f["enabled"]]
     subnets = [s for v in vnets for s in v["subnets"]]
     in_use = [s for s in subnets if s["in_use"]]
@@ -234,7 +253,10 @@ def summarize(watchers, flow_logs, vnets) -> dict:
             for kind in sorted({f["target_type"] for f in flow_logs})
         },
         "legacy_nsg_flow_logs": count(flow_logs, lambda f: f["legacy_nsg_flow_log"]),
-        "vnet_flow_logs": count(flow_logs, lambda f: f["target_type"] in ("virtual_network", "subnet")),
+        # VNet flow logs can target a VNet, a subnet or a network interface; NSG flow logs are the legacy kind.
+        "vnet_flow_logs": count(
+            flow_logs, lambda f: f["target_type"] in ("virtual_network", "subnet", "network_interface")
+        ),
         "enabled_flow_logs_filtered": count(enabled, lambda f: f["enabled_filtering_criteria"]),
         "enabled_flow_logs_on_unattached_targets": count(enabled, lambda f: f["target_attached"] is False),
         "enabled_flow_logs_with_traffic_analytics": count(enabled, lambda f: f["traffic_analytics_enabled"]),
@@ -266,7 +288,16 @@ def summarize(watchers, flow_logs, vnets) -> dict:
             in_use, lambda s: s["nsg_supported"] and not s["network_security_group_id"]
         ),
         "subnets_in_use_nsg_not_supported": count(in_use, lambda s: not s["nsg_supported"]),
+        "enabled_flow_logs_target_unknown": count(enabled, lambda f: f["target_attached"] is None),
+        "virtual_networks_read": vnet_records is not None,
     }
+    if vnet_records is None:
+        # A failed VNet read is unknown coverage, never "no networks" or "nothing covered".
+        for key in list(summary):
+            if key.startswith(("total_virtual_networks", "virtual_networks_", "total_subnets", "subnets_",
+                               "regions_with_virtual_networks", "regions_without_network_watcher")):
+                if key != "virtual_networks_read":
+                    summary[key] = None
     for days in RETENTION_THRESHOLDS:
         summary[f"enabled_flow_logs_retained_under_{days}_days"] = count(
             enabled, lambda f, days=days: f["retention_days"] is not None and f["retention_days"] < days
@@ -301,7 +332,6 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
     vnets = collector.guard(
         "network.virtual_networks.list_all",
         lambda: [project_vnet(v) for v in client.virtual_networks.list_all()],
-        default=[],
     )
     nsgs = None
     if any(f["target_type"] == "network_security_group" for f in flow_logs):
@@ -312,15 +342,18 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
         nsgs = None if nsg_rows is None else {n["id"]: n["attached"] for n in nsg_rows}
     watcher_regions = None if watchers is None else {w["location"] for w in watchers}
     if watchers is None:
-        uncertain_regions.update(v["location"] for v in vnets)
+        uncertain_regions.update(v["location"] for v in vnets or [])
     for f in flow_logs:
         f["target_attached"] = target_attached(f, nsgs, vnets)
     enabled_by_target = {(f["target_resource_id"] or "").lower(): f for f in flow_logs if f["enabled"]}
-    records = [vnet_record(v, enabled_by_target, uncertain_regions, watcher_regions) for v in vnets]
+    records = None if vnets is None else sorted(
+        (vnet_record(v, enabled_by_target, uncertain_regions, watcher_regions) for v in vnets),
+        key=lambda r: r["id"] or "",
+    )
     return (
         sorted(watchers or [], key=lambda r: r["id"] or ""),
         sorted(flow_logs, key=lambda r: r["id"] or ""),
-        sorted(records, key=lambda r: r["id"] or ""),
+        records,
     )
 
 

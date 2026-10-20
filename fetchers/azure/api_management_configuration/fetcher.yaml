@@ -61,7 +61,8 @@ evidence_set:
     diagnostic_settings.list for each service.
     Never written to the evidence: policy XML (only which security elements each policy contains:
     ip-filter, rate-limit, rate-limit-by-key, quota, quota-by-key, validate-jwt, validate-azure-ad-token,
-    check-header, cors, validate-content, authentication-managed-identity, authentication-certificate),
+    check-header, cors, validate-content, authentication-managed-identity, authentication-certificate;
+    elements inside XML comments do not count),
     named-value values (only secret, key_vault_backed and secret_stored_in_api_management), subscription
     keys (only scope, state and allow_tracing), and identity-provider and backend credentials (backends
     record only auth_configured).
@@ -81,10 +82,16 @@ evidence_set:
     Subscriptions: scope_kind is all_apis (the service itself), product or api; built_in_all_access marks
     the built-in "master" subscription, whose keys work for every API. allow_tracing on a subscription
     lets its callers request traces that can include request data.
-    APIs: access_control is true when the API requires a subscription key, has an OAuth 2.0 / OpenID
-    Connect server, or a validate-jwt or validate-azure-ad-token policy applies at global, API or a
-    containing product's level, or on every operation; false when none does; null when a policy that could
-    protect it could not be read. accepts_http and backend_uses_http mark plain HTTP.
+    APIs: access_control answers whether a call without a subscription key is stopped. It is true when the
+    API requires a subscription key, or when a validate-jwt or validate-azure-ad-token policy runs on every
+    operation's call. Policies apply innermost first (operation, API, open product, global), and an outer
+    scope's policy runs only when every scope inside it keeps <base />; a scope with no policy of its own
+    runs Azure's default, which keeps it. Policy fragments pulled in with <include-fragment> count as
+    part of the policy. An OAuth 2.0 / OpenID Connect server on the API (oauth2_or_openid_configured) only
+    configures the developer portal's test console, so it is not access control. A keyed product's policy
+    never runs for a keyless call; with several open products (ones that require no subscription), each
+    must protect it. False when nothing does; null when a policy or fragment that decides it could not be
+    read. policy_elements lists base when a policy keeps <base />. accepts_http and backend_uses_http mark plain HTTP.
     audit_logs_exported is true when a diagnostic setting with a destination enables GatewayLogs or the
     audit or allLogs group, and null when settings could not be read. Lists that could not be read are null
     and set metadata.partial_failure. A summary with total_apis 0 proves nothing about API protection:

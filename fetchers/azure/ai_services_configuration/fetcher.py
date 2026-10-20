@@ -5,18 +5,17 @@ import logging
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
 from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from arm_rest import arm_rest_client, list_all  # noqa: E402
 from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
-    arm_endpoint,
     basename,
     build_payload,
     classify_failure_code,
@@ -24,7 +23,6 @@ from azure_common import (  # noqa: E402
     credential,
     failure_reason,
     list_diagnostic_settings,
-    logs_exported,
     model_attr,
     monitor_client,
     provider_registration_status,
@@ -34,6 +32,8 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from diagnostics import audit_logging_summary  # noqa: E402
+from foundry_connections import compact, connection_fields  # noqa: E402
 
 logger = logging.getLogger("azure_ai_services_configuration")
 
@@ -49,24 +49,11 @@ MICROSOFT_MANAGED_KEY_SOURCE = "microsoft.cognitiveservices"
 # The harm categories a content filter must block. Others (e.g. Protected Material Code) are
 # annotate-only in Microsoft's own default policy, so they are listed, not judged.
 HARM_CATEGORIES = ("hate", "sexual", "violence", "selfharm")
+# A threshold is the lowest severity blocked, so High blocks least. Microsoft's DefaultV2 blocks every harm
+# category at Medium on prompts and completions (learn.microsoft.com/azure/foundry/guardrails/default-safety-policies).
+SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2}
+DEFAULT_HARM_THRESHOLD = "medium"
 FIRST_PARTY_PUBLISHERS = {"openai", "microsoft"}
-# Connection auth types that keep a credential in the connection, and those that keep none.
-STORED_SECRET_AUTH = {
-    "apikey",
-    "customkeys",
-    "pat",
-    "usernamepassword",
-    "accesskey",
-    "sas",
-    "accountkey",
-    "serviceprincipal",
-    "oauth2",
-}
-KEYLESS_AUTH = {"aad", "managedidentity", "projectmanagedidentity", "agenticidentity", "useridentity"}
-
-
-def compact(name) -> str:
-    return "".join(ch for ch in str(name or "").lower() if ch.isalnum())
 
 
 def network_exposure(public_network_access, default_action) -> str:
@@ -82,9 +69,14 @@ def network_exposure(public_network_access, default_action) -> str:
     return "open"
 
 
-def audit_logs_exported(diagnostics):
-    """The Audit category or the audit / allLogs group exported; None when settings could not be read."""
-    return logs_exported(diagnostics, categories=("audit",))
+ACCOUNT_AUDIT_CATEGORIES = ("Audit",)
+# AI Search has no Audit category: its resource log, one record per request, is OperationLogs.
+SEARCH_AUDIT_CATEGORIES = ("OperationLogs",)
+
+
+def audit_logs_exported(diagnostics, categories=ACCOUNT_AUDIT_CATEGORIES):
+    """One of `categories`, or the audit / allLogs group, exported; None when settings could not be read."""
+    return audit_logging_summary(diagnostics, categories)["audit_logging_enabled"]
 
 
 def processing_scope(sku) -> str:
@@ -97,15 +89,6 @@ def processing_scope(sku) -> str:
     if name in ("standard", "provisionedmanaged", "batch"):
         return "regional"
     return "unknown"
-
-
-def strip_query(target) -> str:
-    """A connection target without query string or fragment, which can carry a SAS token."""
-    text = str(target or "")
-    if "://" not in text:
-        return text
-    parts = urlsplit(text)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
 def project_account(account) -> dict:
@@ -209,8 +192,22 @@ def project_rai_policy(policy) -> dict:
         f["enabled"] is True and f["blocking"] is True for f in harm
     )
     jailbreak = filter_blocking(filters, "jailbreak")
+    ranks = [SEVERITY_RANK.get(compact(f["severity_threshold"])) for f in harm]
+    # True when no harm filter blocks less than the default; None when a threshold is missing or unrecognised.
+    if any(r is not None and r > SEVERITY_RANK[DEFAULT_HARM_THRESHOLD] for r in ranks):
+        thresholds_ok = False
+    elif not ranks or any(r is None for r in ranks):
+        thresholds_ok = None
+    else:
+        thresholds_ok = True
     policy_type = model_attr(props, "type")
     custom = compact(policy_type) != "systemmanaged"
+    if not custom:
+        weaker = False
+    elif not (harm_ok and jailbreak) or thresholds_ok is False:
+        weaker = True
+    else:
+        weaker = None if thresholds_ok is None else False
     mode = model_attr(props, "mode")
     return {
         "name": model_attr(policy, "name"),
@@ -222,14 +219,20 @@ def project_rai_policy(policy) -> dict:
         "content_filters": filters,
         # Every harm category present, and each of its prompt and completion filters on and blocking.
         "harm_filters_enabled_and_blocking": harm_ok,
+        "harm_thresholds_at_least_default": thresholds_ok,
+        "harm_filters_looser_than_default": sorted(
+            f"{f['name']} ({f['source']}): {f['severity_threshold']}"
+            for f in harm
+            if (SEVERITY_RANK.get(compact(f["severity_threshold"])) or 0) > SEVERITY_RANK[DEFAULT_HARM_THRESHOLD]
+        ),
         "jailbreak_blocking": jailbreak,
         "indirect_attack_blocking": filter_blocking(filters, "indirectattack"),
         "custom_blocklists": [model_attr(b, "blocklist_name") for b in model_attr(props, "custom_blocklists") or []],
         "non_blocking_filters": sorted(
             f"{f['name']} ({f['source']})" for f in filters if not (f["enabled"] is True and f["blocking"] is True)
         ),
-        # A custom policy that drops below Microsoft's default protection.
-        "weaker_than_default": custom and not (harm_ok and jailbreak),
+        # A custom policy that drops below Microsoft's default protection; null when a threshold is unknown.
+        "weaker_than_default": weaker,
     }
 
 
@@ -244,32 +247,9 @@ def project_project(project) -> dict:
     }
 
 
-def stored_secret(auth_type):
-    """True for auth types that keep a credential in the connection, False for keyless, None if unrecognised."""
-    kind = compact(auth_type)
-    if kind in STORED_SECRET_AUTH:
-        return True
-    if kind in KEYLESS_AUTH or kind == "none":
-        return False
-    return None
-
-
 def project_connection(raw: dict, level: str, project) -> dict:
-    """One Foundry connection from wire JSON; credentials are never read (list does not return them)."""
-    props = raw.get("properties") or {}
-    auth = props.get("authType")
-    return {
-        "id": raw.get("id"),
-        "name": raw.get("name"),
-        "level": level,
-        "project": project,
-        "category": props.get("category"),
-        "auth_type": auth,
-        "uses_stored_secret": stored_secret(auth),
-        "unauthenticated": compact(auth) == "none",
-        "target": strip_query(props.get("target")),
-        "is_shared_to_all": props.get("isSharedToAll"),
-    }
+    """One Foundry connection, tagged with the level (account / project) it was listed at."""
+    return {**connection_fields(raw), "level": level, "project": project}
 
 
 def project_search_service(raw: dict) -> dict:
@@ -359,12 +339,10 @@ def summarize(accounts: list[dict], search_services: list[dict]) -> dict:
     total = len(accounts)
     deployments = [d for a in accounts for d in a["deployments"] or []]
     policies = [p for a in accounts for p in a["content_filter_policies"] or []]
-    # The account-level list repeats its projects' connections; count each once per account.
-    unique = {}
-    for a in accounts:
-        for c in a["connections"] or []:
-            unique[(a["id"], c["name"])] = c
-    connections = list(unique.values())
+    # Project connections are kept per project; an account-level repeat of one is not counted twice.
+    connections = [
+        c for a in accounts for c in a["connections"] or [] if not c.get("repeats_project_connection")
+    ]
 
     def count(items, pred):
         return sum(1 for i in items if pred(i))
@@ -413,7 +391,8 @@ def summarize(accounts: list[dict], search_services: list[dict]) -> dict:
             lambda d: d["version_upgrade_option"] in ("OnceNewDefaultVersionAvailable", "OnceCurrentVersionExpired"),
         ),
         "content_filter_policies_custom": count(policies, lambda p: p["custom"]),
-        "content_filter_policies_weaker_than_default": count(policies, lambda p: p["weaker_than_default"]),
+        "content_filter_policies_weaker_than_default": count(policies, lambda p: p["weaker_than_default"] is True),
+        "content_filter_policies_weaker_unknown": count(policies, lambda p: p["weaker_than_default"] is None),
         "content_filter_policies_custom_unused": count(policies, lambda p: p["custom"] and p["in_use"] is False),
         "total_projects": sum(len(a["projects"] or []) for a in accounts),
         "total_connections": len(connections),
@@ -443,26 +422,7 @@ def summarize(accounts: list[dict], search_services: list[dict]) -> dict:
     return summary
 
 
-def arm_list(client, url: str) -> list:
-    """Every item of an ARM list call, following nextLink, through the client's authenticated pipeline."""
-    from azure.core.rest import HttpRequest  # lazy
-
-    items = []
-    for _ in range(100):
-        # The pipeline client sends URLs as given: resolve a relative path against the ARM
-        # endpoint of the credential's cloud (nextLink is already absolute).
-        absolute = url if url.startswith("https://") else arm_endpoint() + url
-        response = client._client.send_request(HttpRequest("GET", absolute))
-        response.raise_for_status()
-        body = response.json()
-        items.extend(body.get("value") or [])
-        url = body.get("nextLink")
-        if not url:
-            return items
-    raise RuntimeError(f"ARM paging did not terminate for {url}")
-
-
-def collect_account(client, monitor, account: dict, collector: Collector) -> dict:
+def collect_account(client, rest, monitor, account: dict, collector: Collector) -> dict:
     rg, name = account["resource_group"], account["name"]
     label = f"{rg}/{name}"
     diagnostics = None
@@ -488,7 +448,7 @@ def collect_account(client, monitor, account: dict, collector: Collector) -> dic
             f"cognitiveservices.connections.list({label})",
             lambda: [
                 project_connection(c, "account", None)
-                for c in arm_list(client, f"{account['id']}/connections?api-version={CONNECTIONS_API}")
+                for c in list_all(rest, f"{account['id']}/connections", CONNECTIONS_API)["items"]
             ],
         )
         for project in projects or []:
@@ -496,10 +456,15 @@ def collect_account(client, monitor, account: dict, collector: Collector) -> dic
                 f"cognitiveservices.project_connections.list({label}/{project['name']})",
                 lambda project=project: [
                     project_connection(c, "project", project["name"])
-                    for c in arm_list(client, f"{project['id']}/connections?api-version={CONNECTIONS_API}")
+                    for c in list_all(rest, f"{project['id']}/connections", CONNECTIONS_API)["items"]
                 ],
             )
             connections = None if rows is None or connections is None else connections + rows
+    if connections:
+        # The account list repeats each project's connections under an account-scoped id (measured).
+        in_projects = {c["name"] for c in connections if c["level"] == "project"}
+        for c in connections:
+            c["repeats_project_connection"] = c["level"] == "account" and c["name"] in in_projects
     by_name = None if policies is None else {p["name"]: p for p in policies}
     records = None if deployments is None else [deployment_record(d, by_name) for d in deployments]
     used = {d["rai_policy_name"] for d in records or []}
@@ -529,7 +494,8 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
         )
 
     client = collector.guard("cognitiveservices.CognitiveServicesManagementClient (init)", _client)
-    if client is None:
+    rest = collector.guard("arm_rest.arm_rest_client (init)", lambda: arm_rest_client(cred))
+    if client is None or rest is None:
         return [], []
     accounts = collector.guard(
         "cognitiveservices.accounts.list",
@@ -540,10 +506,9 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
         "search.searchServices.list",
         lambda: [
             project_search_service(s)
-            for s in arm_list(
-                client,
-                f"/subscriptions/{subscription_id}/providers/Microsoft.Search/searchServices?api-version={SEARCH_API}",
-            )
+            for s in list_all(
+                rest, f"/subscriptions/{subscription_id}/providers/Microsoft.Search/searchServices", SEARCH_API
+            )["items"]
         ],
         default=[],
     )
@@ -552,7 +517,7 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
         if accounts or search
         else None
     )
-    records = [collect_account(client, monitor, a, collector) for a in accounts]
+    records = [collect_account(client, rest, monitor, a, collector) for a in accounts]
     for service in search:
         diagnostics = None
         if monitor is not None:
@@ -561,7 +526,7 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
                 lambda service=service: list_diagnostic_settings(monitor, service["id"]),
             )
         service["diagnostic_settings"] = diagnostics
-        service["audit_logs_exported"] = audit_logs_exported(diagnostics)
+        service["audit_logs_exported"] = audit_logs_exported(diagnostics, SEARCH_AUDIT_CATEGORIES)
     return (
         sorted(records, key=lambda r: r["id"] or ""),
         sorted(search, key=lambda r: r["id"] or ""),

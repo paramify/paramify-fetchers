@@ -190,6 +190,7 @@ async def paginate(
     builder,
     request_configuration=None,
     page_limit: int = 1000,
+    raise_on_error: bool = False,
 ) -> List[Any]:
     """Follow `@odata.nextLink` to the end and return every item.
 
@@ -203,6 +204,8 @@ async def paginate(
     a tenant that 429s on page 40 still yields 39 pages *and* a non-zero exit.
     `page_limit` is a runaway guard, not a paging cap: a server echoing the same
     nextLink back would otherwise loop forever inside the fetcher's timeout.
+    `raise_on_error=True` re-raises instead, for a caller that must tell a 403 or 404 from a
+    failure and would otherwise read a partial list as complete.
     """
     items: List[Any] = []
     try:
@@ -225,6 +228,8 @@ async def paginate(
                 break
             response = await builder.with_url(next_link).get()
     except Exception as exc:  # noqa: BLE001 — boundary: record, keep what we have
+        if raise_on_error:
+            raise  # the caller classifies it (403 vs 404 vs failure) and records it itself
         collector.record(operation, exc)
     return items
 

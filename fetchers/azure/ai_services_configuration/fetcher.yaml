@@ -67,8 +67,10 @@ evidence_set:
     still reachable publicly. api_keys_enabled is false only when disableLocalAuth is true (it defaults
     to false). customer_managed_key is true when encryption.keySource is anything other than
     Microsoft.CognitiveServices. audit_logs_exported is true when a diagnostic setting with a
-    destination enables the Audit category or the audit or allLogs category group, false otherwise, and
-    null when diagnostic settings could not be read.
+    destination (including a Marketplace partner such as Datadog) enables the audit category or the
+    audit or allLogs category group, false otherwise, and null when diagnostic settings could not be
+    read. The category is Audit for an AI services account and OperationLogs for an AI Search service,
+    which has no Audit category.
     Deployments: model_publisher is the model format (OpenAI, Anthropic, MoonshotAI, ...) and
     third_party_publisher is true for publishers other than OpenAI and Microsoft. processing_scope comes
     from the deployment type: global (Global* types, may process data in any Azure region), data_zone
@@ -80,7 +82,12 @@ evidence_set:
     could not be listed. Microsoft's default policy blocks jailbreaks but does not enable indirect-attack
     detection. version_upgrade_option shows whether the model is upgraded automatically.
     Content filter policies: custom is true for user-managed policies; weaker_than_default marks a custom
-    policy that does not block every harm category and jailbreaks; in_use is whether any deployment uses
+    policy that does not block every harm category and jailbreaks, or that sets any harm filter's
+    severity_threshold looser than Microsoft's DefaultV2 (Medium on prompts and completions). A threshold is
+    the lowest severity blocked, so High blocks only the most severe content and is looser than Medium;
+    harm_filters_looser_than_default names those filters and harm_thresholds_at_least_default is false.
+    A missing or unrecognised threshold leaves both null (unknown, counted in
+    summary.content_filter_policies_weaker_unknown), never "at least default"; in_use is whether any deployment uses
     it; asynchronous_filtering marks policies that let output stream before filtering completes;
     non_blocking_filters lists every filter that is off or annotate-only.
     Connections: listed at account and project level (the account list repeats its projects'

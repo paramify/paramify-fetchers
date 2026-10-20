@@ -12,12 +12,12 @@ from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from arm_rest import arm_rest_client, list_all  # noqa: E402
 from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
-    arm_endpoint,
     basename,
     build_payload,
     classify_failure_code,
@@ -31,7 +31,8 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
-from entra_graph import with_graph_client  # noqa: E402
+from entra_graph import paginate, with_graph_client  # noqa: E402
+from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_managed_identity_configuration")
 
@@ -186,17 +187,20 @@ def project_federated_credential(raw: dict) -> dict:
     }
 
 
-def resource_identities(resource) -> dict:
-    """The identity block of one ARM resource, normalized: system principal and user-assigned ids."""
-    identity = model_attr(resource, "identity")
-    kind = str(model_attr(identity, "type") or "").lower()
-    user_assigned = model_attr(identity, "user_assigned_identities") or {}
+IDENTITY_HOLDERS_QUERY = "resources | where isnotnull(identity) | project id, name, type, identity | order by id asc"
+
+
+def resource_identities(row: dict) -> dict:
+    """The identity block of one Resource Graph row, normalized: system principal and user-assigned ids."""
+    identity = row.get("identity") or {}
+    kind = str(identity.get("type") or "").lower()
+    user_assigned = identity.get("userAssignedIdentities") or {}
     return {
-        "resource_id": model_attr(resource, "id"),
-        "resource_name": model_attr(resource, "name"),
-        "resource_type": model_attr(resource, "type"),
+        "resource_id": row.get("id"),
+        "resource_name": row.get("name"),
+        "resource_type": row.get("type"),
         "system_assigned": "systemassigned" in kind.replace(" ", "").replace(",", ""),
-        "system_principal_id": model_attr(identity, "principal_id"),
+        "system_principal_id": identity.get("principalId"),
         "user_assigned_ids": sorted(k.lower() for k in user_assigned),
     }
 
@@ -221,10 +225,47 @@ def project_role_assignment(assignment, roles: dict) -> dict:
     }
 
 
-def privileged_graph_permission(value) -> bool:
-    """Graph application permissions that can change the tenant or reach every mailbox or file."""
-    text = str(value or "")
-    return "ReadWrite" in text or "FullControl" in text or text in ("Mail.Send", "Mail.Send.Shared")
+MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+DEFAULT_ACCESS_ROLE_ID = "00000000-0000-0000-0000-000000000000"
+# Read-only application permissions that still reach every mailbox, file, site, chat or calendar in the tenant.
+TENANT_WIDE_READ_PERMISSIONS = {
+    "Mail.Read",
+    "Mail.ReadBasic.All",
+    "Files.Read.All",
+    "Sites.Read.All",
+    "Calendars.Read",
+    "Contacts.Read",
+    "Chat.Read.All",
+    "ChannelMessage.Read.All",
+    "Notes.Read.All",
+}
+
+
+def privileged_graph_permission(value, resource_app_id=MICROSOFT_GRAPH_APP_ID):
+    """Microsoft Graph application permissions that can change the tenant or read every mailbox, file or site.
+
+    Only Microsoft Graph's permissions are judged: a ReadWrite role on a custom API is not a Graph
+    privilege, so it is False. Null when the permission or its resource could not be resolved.
+    """
+    if resource_app_id is None or value is None:
+        return None
+    if str(resource_app_id).lower() != MICROSOFT_GRAPH_APP_ID:
+        return False
+    text = str(value)
+    return (
+        "ReadWrite" in text
+        or "FullControl" in text
+        or text in ("Mail.Send", "Mail.Send.Shared")
+        or text in TENANT_WIDE_READ_PERMISSIONS
+    )
+
+
+def any_true(values):
+    """True if any value is True; null if none is but one is unknown; False otherwise."""
+    values = list(values)
+    if any(v is True for v in values):
+        return True
+    return None if any(v is None for v in values) else False
 
 
 def identity_record(identity: dict, roles_by_principal, graph_roles) -> dict:
@@ -239,7 +280,7 @@ def identity_record(identity: dict, roles_by_principal, graph_roles) -> dict:
         if roles is None
         else any(r["scope_level"] in ("subscription", "management_group", "root") for r in roles),
         "graph_app_roles": graph,
-        "has_privileged_graph_role": None if graph is None else any(g["privileged"] for g in graph),
+        "has_privileged_graph_role": None if graph is None else any_true(g["privileged"] for g in graph),
     }
     for cap in CAPABILITIES:
         record[f"role_{cap}"] = None if roles is None else any(r[cap] is True for r in roles)
@@ -263,9 +304,16 @@ def summarize(user_assigned: list[dict], system_assigned: list[dict], graph_acce
             for t in sorted({i["resource_type"] for i in system_assigned})
         },
         "user_assigned_identities_no_resource_attached": count(user_assigned, lambda i: i["attached_resources"] == []),
-        # Standing access with nothing using it: the identity to review first.
+        # Standing access with nothing using it: the identity to review first. An identity used only
+        # through federated credentials (GitHub Actions, AKS workload identity) is never attached to a
+        # resource by design, so one with federated credentials is counted separately, not here.
         "unattached_identities_with_roles": count(
-            user_assigned, lambda i: i["attached_resources"] == [] and bool(i["role_assignments"])
+            user_assigned,
+            lambda i: i["attached_resources"] == [] and bool(i["role_assignments"]) and not i["federated_credentials"],
+        ),
+        "federated_only_identities_with_roles": count(
+            user_assigned,
+            lambda i: i["attached_resources"] == [] and bool(i["role_assignments"]) and bool(i["federated_credentials"]),
         ),
         "user_assigned_identities_with_federated_credentials": count(
             user_assigned, lambda i: i["federated_credentials"]
@@ -286,40 +334,34 @@ def summarize(user_assigned: list[dict], system_assigned: list[dict], graph_acce
         "graph_access": graph_access,
         "identities_with_privileged_graph_roles": count(everyone, lambda i: i["has_privileged_graph_role"] is True),
         "identities_with_graph_roles": count(everyone, lambda i: i["graph_app_roles"]),
-        "identities_graph_roles_unknown": count(everyone, lambda i: i["graph_app_roles"] is None),
+        # Unknown when the assignments could not be listed, or an assigned permission could not be resolved.
+        "identities_graph_roles_unknown": count(
+            everyone, lambda i: i["graph_app_roles"] is None or i["has_privileged_graph_role"] is None
+        ),
     }
     for cap in CAPABILITIES:
         summary[f"identities_{cap}"] = count(everyone, lambda i, cap=cap: i[f"role_{cap}"] is True)
     return summary
 
 
-def arm_list(client, path: str) -> list:
-    """Every item of an ARM list call (following nextLink) through the client's authenticated pipeline."""
-    from azure.core.rest import HttpRequest  # lazy
-
-    url, items = arm_endpoint() + path, []
-    for _ in range(100):
-        response = client._client.send_request(HttpRequest("GET", url))
-        response.raise_for_status()
-        body = response.json()
-        items.extend(body.get("value") or [])
-        url = body.get("nextLink")
-        if not url:
-            return items
-    raise RuntimeError(f"ARM paging did not terminate for {path}")
+def api_version_rejected(exc) -> bool:
+    """ARM refusing the api-version itself. A retired version usually comes back as NoRegisteredProviderFound
+    rather than InvalidApiVersion, so every form is treated as "try the next version"."""
+    text = str(exc).lower().replace(" ", "")
+    return any(code in text for code in ("invalidapiversion", "nosuchapi", "noregisteredproviderfound", "invalidresourcetype"))
 
 
-def list_federated_credentials(msi, identity_id: str) -> list:
+def list_federated_credentials(rest, identity_id: str) -> list:
     """Federated credentials on the preview API (flexible expressions), falling back to the stable one."""
     last = None
     for version in FIC_API_VERSIONS:
         try:
             return [
                 project_federated_credential(f)
-                for f in arm_list(msi, f"{identity_id}/federatedIdentityCredentials?api-version={version}")
+                for f in list_all(rest, f"{identity_id}/federatedIdentityCredentials", version)["items"]
             ]
         except Exception as exc:  # noqa: BLE001 — try the next API version, re-raise the last
-            if "invalidapiversion" not in str(exc).lower().replace(" ", "") and "nosuchapi" not in str(exc).lower():
+            if not api_version_rejected(exc):
                 raise
             last = exc
     raise last
@@ -339,7 +381,12 @@ async def read_graph_roles(collector: Collector, cred, principal_ids: list) -> t
         results: dict = {}
         for pid in principal_ids:
             try:
-                response = await client.service_principals.by_service_principal_id(pid).app_role_assignments.get()
+                rows = await paginate(
+                    collector,
+                    f"msgraph.servicePrincipals.appRoleAssignments({pid})",
+                    client.service_principals.by_service_principal_id(pid).app_role_assignments,
+                    raise_on_error=True,
+                )
             except Exception as exc:  # noqa: BLE001
                 if is_denied(exc):
                     return None, "not_authorized"
@@ -350,23 +397,33 @@ async def read_graph_roles(collector: Collector, cred, principal_ids: list) -> t
                 results[pid] = None
                 continue
             assignments = []
-            for a in getattr(response, "value", None) or []:
+            for a in rows:
                 resource_id = str(getattr(a, "resource_id", "") or "")
                 if resource_id not in roles_by_resource:
                     try:
                         sp = await client.service_principals.by_service_principal_id(resource_id).get()
                         roles_by_resource[resource_id] = {
-                            str(r.id): r.value for r in (getattr(sp, "app_roles", None) or [])
+                            "app_id": getattr(sp, "app_id", None),
+                            "roles": {str(r.id): r.value for r in (getattr(sp, "app_roles", None) or [])},
                         }
                     except Exception as exc:  # noqa: BLE001
                         collector.record(f"msgraph.servicePrincipals({resource_id})", exc)
-                        roles_by_resource[resource_id] = {}
-                value = roles_by_resource[resource_id].get(str(getattr(a, "app_role_id", "")))
+                        # Unread resource: its permissions and whether it is Graph are unknown, never "not privileged".
+                        roles_by_resource[resource_id] = {"app_id": None, "roles": {}}
+                resource = roles_by_resource[resource_id]
+                role_id = str(getattr(a, "app_role_id", "") or "")
+                if role_id == DEFAULT_ACCESS_ROLE_ID and resource["app_id"] is not None:
+                    # Default access: an assignment that grants no app role, so no permission at all.
+                    assignments.append({"resource": getattr(a, "resource_display_name", None),
+                                        "resource_app_id": resource["app_id"], "permission": None, "privileged": False})
+                    continue
+                value = resource["roles"].get(role_id)
                 assignments.append(
                     {
                         "resource": getattr(a, "resource_display_name", None),
+                        "resource_app_id": resource["app_id"],
                         "permission": value,
-                        "privileged": privileged_graph_permission(value),
+                        "privileged": privileged_graph_permission(value, resource["app_id"]),
                     }
                 )
             results[pid] = sorted(assignments, key=lambda g: (g["resource"] or "", g["permission"] or ""))
@@ -381,23 +438,18 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
         from azure.mgmt.authorization import AuthorizationManagementClient  # lazy
         from azure.mgmt.msi import ManagedServiceIdentityClient  # lazy
 
-        # azure-mgmt-resource 26 moved the class under .resources; older majors re-export it.
-        try:
-            from azure.mgmt.resource.resources import ResourceManagementClient  # lazy
-        except ImportError:  # pragma: no cover - depends on installed SDK version
-            from azure.mgmt.resource import ResourceManagementClient  # lazy
-
         kwargs = {"credential": cred, "subscription_id": subscription_id, **arm_client_kwargs()}
         return (
             ManagedServiceIdentityClient(**kwargs),
-            ResourceManagementClient(**kwargs),
             AuthorizationManagementClient(**kwargs),
+            arm_rest_client(cred),
+            resource_graph_client(cred),
         )
 
     clients = collector.guard("managed identity clients (init)", _clients)
     if clients is None:
         return [], [], "failed"
-    msi, resource_client, authorization = clients
+    msi, authorization, rest, graph = clients
 
     user_assigned = collector.guard(
         "msi.user_assigned_identities.list_by_subscription",
@@ -405,10 +457,8 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
         default=[],
     )
     holders = collector.guard(
-        "resource.resources.list",
-        lambda: [
-            resource_identities(r) for r in resource_client.resources.list() if model_attr(r, "identity") is not None
-        ],
+        "resourcegraph.resources(identity)",
+        lambda: [resource_identities(r) for r in query_all(graph, subscription_id, IDENTITY_HOLDERS_QUERY)["rows"]],
     )
 
     def _roles():
@@ -447,7 +497,7 @@ def collect(subscription_id, cred, collector: Collector) -> tuple:
     for identity in user_assigned:
         fics = collector.guard(
             f"msi.federated_identity_credentials.list({identity['resource_group']}/{identity['name']})",
-            lambda identity=identity: list_federated_credentials(msi, identity["id"]),
+            lambda identity=identity: list_federated_credentials(rest, identity["id"]),
         )
         ua_records.append(
             {
