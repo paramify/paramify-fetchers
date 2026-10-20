@@ -1529,6 +1529,42 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     ),
     (
         "azure.mgmt.web.models",
+        "StringDictionary",
+        ["properties"],
+        "azure/app_service_configuration — a renamed properties reads every scanned app as holding no settings",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "ConnectionStringDictionary",
+        ["properties"],
+        "azure/app_service_configuration — a renamed properties reads every app as holding no connection strings",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "ConnStringValueTypePair",
+        ["value"],
+        "azure/app_service_configuration — a renamed value reads every connection string as empty",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppStackProperties",
+        ["major_versions"],
+        "azure/app_service_configuration — runtime end of support (a rename reads every runtime unknown)",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppMajorVersion",
+        ["minor_versions"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppMinorVersion",
+        ["value", "stack_settings"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
         "WebAppRuntimeSettings",
         ["runtime_version", "end_of_life_date", "is_deprecated"],
         "azure/app_service_configuration — a renamed end_of_life_date reads as 'supported'",

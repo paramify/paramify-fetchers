@@ -66,7 +66,12 @@ STACKS = [
         minor("6", windows_runtime_settings=runtime("v6.0", eol(2024, 11, 12), True)),
         minor("v4.8", windows_runtime_settings=runtime("v4.0")),
     ),
-    stack("node", minor("20-lts", linux_runtime_settings=runtime("NODE|20-lts", eol(2026, 4, 30)))),
+    stack(
+        "node",
+        minor("20-lts", linux_runtime_settings=runtime("NODE|20-lts", eol(2026, 4, 30)),
+              windows_runtime_settings=runtime("~20", eol(2026, 4, 30))),
+        minor("22-lts", windows_runtime_settings=runtime("~22", eol(2027, 4, 30))),
+    ),
     stack("php", minor("5.6", windows_runtime_settings=runtime("5.6", eol(2021, 2, 1), True))),
     stack("python", minor("3.12", linux_runtime_settings=runtime("PYTHON|3.12", eol(2028, 10, 31)))),
     stack(
@@ -87,8 +92,8 @@ def index():
     return appsvc.runtime_index([e for s in STACKS for e in appsvc.project_web_app_stack(s)])
 
 
-def support(kind, **config):
-    return appsvc.runtime_support_record(kind, config, index(), NOW)
+def support(kind, node_version=None, node_version_read=False, **config):
+    return appsvc.runtime_support_record(kind, config, index(), NOW, node_version, node_version_read)
 
 
 # --- TLS cipher suites ---
@@ -152,9 +157,24 @@ def test_windows_dotnet_runtimes_join_to_stack_end_of_life():
 
 
 def test_net_framework_4_has_no_end_of_life_date_and_is_supported():
-    record = support("app", net_framework_version="v4.0", php_version="Off")
+    record = support("app", net_framework_version="v4.0", php_version="Off", node_version_read=True)
     assert record["past_end_of_support"] is False
     assert [r["setting"] for r in record["declared_runtimes"]] == ["net_framework_version"]
+
+
+def test_windows_default_framework_is_unknown_while_the_node_setting_is_unread():
+    record = support("app", net_framework_version="v4.0")
+    assert record["past_end_of_support"] is None
+    [default] = record["declared_runtimes"]
+    assert default["stack"] is None and default["note"] == appsvc.NODE_VERSION_UNREAD
+    assert support("app", net_framework_version="v4.0", php_version="5.6")["past_end_of_support"] is True
+
+
+@pytest.mark.parametrize("node, past", [("~20", True), ("20.11.1", True), ("~22", False), ("10.14.9", None)])
+def test_windows_node_version_replaces_the_default_framework(node, past):
+    record = support("app", net_framework_version="v4.0", node_version=node, node_version_read=True)
+    assert record["past_end_of_support"] is past
+    assert [r["setting"] for r in record["declared_runtimes"]] == ["WEBSITE_NODE_DEFAULT_VERSION"]
 
 
 def test_legacy_php_alongside_dotnet_is_reported_past_end_of_support():
@@ -355,6 +375,13 @@ PEM_HEADER = "-----BEGIN " + "PRIVATE KEY-----"
     ("API_TOKEN_ENABLED", "true", None),
     ("WEBSITE_TIME_ZONE", "Mountain Standard Time", None),
     ("DB_PASSWORD", "", None),
+    ("SIGNALR", "Endpoint=https://x.service.signalr.net;AccessKey=xxxx;Version=1.0;", "credential_in_value"),
+    ("APP_CONFIG", "Endpoint=https://x.azconfig.io;Id=xxxx;Secret=xxxx", "credential_in_value"),
+    ("REDIS_URL", "rediss://:xxxxxxxx@cache.example.net:6380", "credential_in_value"),
+    ("ConnectionStrings__Sb", "Endpoint=sb://x.servicebus.windows.net/;Authentication=ManagedIdentity", None),
+    ("STORAGE_CONNECTION_STRING", "DefaultEndpointsProtocol=https;AccountName=st;EndpointSuffix=core.windows.net",
+     None),
+    ("EVENTHUB_SAS_KEY", "Endpoint=sb://x.servicebus.windows.net/;EntityPath=hub;", None),
 ])
 def test_literal_secret_reason(name, value, reason):
     assert appsvc.literal_secret_reason(name, value) == reason
@@ -386,11 +413,11 @@ def test_scan_writes_names_and_reasons_never_values(monkeypatch):
     assert collector.ok
     a, b = apps["web-a"]["literal_secret_scan"], apps["web-b"]["literal_secret_scan"]
     assert a == {
-        "status": "scanned", "app_settings_read": 3, "connection_strings_read": 2, "has_literal_secrets": True,
+        "status": "scanned", "reason": None, "app_settings_read": 3, "connection_strings_read": 2, "has_literal_secrets": True,
         "literal_secrets": [{"name": "DB_PASSWORD", "kind": "app_setting", "reason": "secret_like_name"},
                             {"name": "Default", "kind": "connection_string", "reason": "credential_in_value"}],
     }
-    assert b == {"status": "not_authorized", "app_settings_read": None, "connection_strings_read": None,
+    assert b == {"status": "not_authorized", "reason": None, "app_settings_read": None, "connection_strings_read": None,
                  "literal_secrets": None, "has_literal_secrets": None}
     dumped = json.dumps(list(apps.values()), default=str)
     assert "xxxx" not in dumped and "SecretUri" not in dumped and "Mountain" not in dumped
@@ -399,6 +426,7 @@ def test_scan_writes_names_and_reasons_never_values(monkeypatch):
     assert summary["literal_secret_scan_enabled"] is True
     assert summary["apps_scanned_for_literal_secrets"] == 1
     assert summary["apps_literal_secret_scan_not_authorized"] == 1
+    assert summary["apps_literal_secret_scan_not_read"] == 0
     assert summary["apps_with_literal_secrets"] == 1
     assert summary["literal_secret_settings"] == 2
 
@@ -411,7 +439,10 @@ def test_scan_is_off_by_default_and_reads_no_values(monkeypatch):
     assert all(a["literal_secret_scan"]["status"] == "off" for a in apps.values())
     summary = appsvc.summarize(list(apps.values()))
     assert summary["literal_secret_scan_enabled"] is False
-    assert summary["apps_with_literal_secrets"] is None and summary["literal_secret_settings"] is None
+    assert all(summary[k] is None for k in (
+        "apps_scanned_for_literal_secrets", "apps_literal_secret_scan_not_authorized",
+        "apps_literal_secret_scan_not_read", "apps_with_literal_secrets", "literal_secret_settings",
+    ))
 
 
 def test_scan_failure_other_than_403_is_recorded(monkeypatch):
@@ -441,7 +472,56 @@ def test_main_writes_the_scan_block_and_limitations(monkeypatch, tmp_path):
     evidence = json.loads(path.read_text())
     assert evidence["results"]["literal_secret_scan"] == {
         "enabled": True, "permission": "Microsoft.Web/sites/config/list/action", "apps_not_authorized": 1,
+        "apps_not_read": 0,
     }
-    assert evidence["results"]["limitations"] == appsvc.SCAN_LIMITATIONS
+    assert evidence["results"]["limitations"] == appsvc.LIMITATIONS
     assert evidence["summary"]["literal_secret_settings"] == 2
     assert "xxxx" not in path.read_text()
+
+
+def test_main_with_the_scan_off_leaves_the_scan_block_counts_null(monkeypatch, tmp_path):
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.delenv(appsvc.SCAN_ENV, raising=False)
+    monkeypatch.setattr(appsvc, "resolve_subscription", lambda c: {"subscription_id": SUB, "subscription_source": "env"})
+    monkeypatch.setattr(appsvc, "credential", lambda: object())
+    monkeypatch.setattr(appsvc, "provider_registration_status", lambda *a: "registered")
+    monkeypatch.setattr(appsvc, "web_client", lambda *a: web_client())
+    monkeypatch.setattr(appsvc, "_attach_diagnostic_settings", lambda *a: None)
+    assert appsvc.main() == 0
+    [path] = tmp_path.glob("azure_app_service_configuration_*.json")
+    block = json.loads(path.read_text())["results"]["literal_secret_scan"]
+    assert block["enabled"] is False and block["apps_not_authorized"] is None and block["apps_not_read"] is None
+
+
+def test_read_only_lock_reads_not_read_with_a_reason_not_a_failure(monkeypatch):
+    locked = Exception("(ScopeLocked) The scope cannot perform POST operation because of a read-only lock")
+    client = web_client(settings={"web-a": locked}, strings={})
+    apps, collector = collect(monkeypatch, client, scan=True)
+    assert collector.ok
+    scan = apps["web-a"]["literal_secret_scan"]
+    assert scan["status"] == "not_read" and "ReadOnly lock" in scan["reason"]
+    assert appsvc.summarize(list(apps.values()), scan_enabled=True)["apps_literal_secret_scan_not_read"] == 1
+
+
+def test_app_without_a_resource_group_reads_not_read_when_the_scan_is_on(monkeypatch):
+    client = web_client(settings={}, strings={})
+    orphan = site("orphan")
+    orphan.id = "/providers/Microsoft.Web/sites/orphan"
+    client.web_apps.list = lambda: [site("web-a"), orphan]
+    apps, _ = collect(monkeypatch, client, scan=True)
+    assert apps["orphan"]["literal_secret_scan"]["status"] == "not_read"
+    assert apps["web-a"]["literal_secret_scan"]["status"] == "scanned"
+
+
+def test_scanned_node_setting_feeds_runtime_support_and_is_not_a_secret(monkeypatch):
+    client = web_client(
+        settings={"web-a": ns(properties={"WEBSITE_NODE_DEFAULT_VERSION": "~20"})}, strings={},
+    )
+    client.web_apps.get_configuration = per_app({"web-a": config(net_framework_version="v4.0"),
+                                                 "web-b": config(net_framework_version="v4.0")})
+    apps, _ = collect(monkeypatch, client, scan=True)
+    a, b = apps["web-a"]["runtime_support"], apps["web-b"]["runtime_support"]
+    assert [r["setting"] for r in a["declared_runtimes"]] == ["WEBSITE_NODE_DEFAULT_VERSION"]
+    assert a["past_end_of_support"] is True and a["runtimes_past_end_of_support"] == ["~20"]
+    assert b["past_end_of_support"] is False and b["declared_runtimes"][0]["stack"] == "dotnet"
+    assert apps["web-a"]["literal_secret_scan"]["literal_secrets"] == []

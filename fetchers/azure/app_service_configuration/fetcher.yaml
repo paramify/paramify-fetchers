@@ -24,9 +24,11 @@ config_schema:
     description: >
       Opt-in. When true, reads each web app's app settings and connection strings
       (config/list, which needs Microsoft.Web/sites/config/list/action) to find the
-      ones holding a literal secret instead of a Key Vault reference. Values are
-      classified in memory and never written; only setting names and why each was
-      flagged are. Off by default, so plain Reader is enough.
+      ones holding a literal secret: a credential typed into the setting instead of a
+      Key Vault or App Configuration reference. Values are classified in memory and
+      never written; only setting names and why each was flagged are. The same read
+      gives a Windows Node app's version (WEBSITE_NODE_DEFAULT_VERSION) for runtime
+      support. Off by default, so plain Reader is enough.
 
 target_schema:
   subscription_id:
@@ -69,17 +71,17 @@ evidence_set:
   instructions: |
     Script: azure/app_service_configuration/fetcher.py
 
-    Access: Reader on the subscription. Optional: Microsoft.Web/sites/config/list/action, used only when scan_literal_secrets is on; without it, each app's literal-secret scan reads not_authorized and the scan counts leave those apps out.
+    Access: Reader on the subscription. Optional: Microsoft.Web/sites/config/list/action, used only when scan_literal_secrets is on to look for literal secrets (credentials typed into app settings or connection strings instead of Key Vault or App Configuration references); without it, each app's literal-secret scan reads not_authorized, the scan counts leave those apps out, and a Windows app's Node version stays unread.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
     - providers.get("Microsoft.Web") — tells "App Service not in use" from "no apps"
-    - web_apps.list() — every web app (function apps are left out)
+    - web_apps.list() — every web app's production site (function apps and deployment slots, which carry their own TLS, basic-auth and settings, are left out)
     - web_apps.get_configuration() (per app) — TLS, FTP, runtime versions and access restrictions
     - web_apps.get_auth_settings_v2_without_secrets() (per app) — App Service Authentication (Easy Auth)
     - web_apps.get_scm_allowed() and get_ftp_allowed() (per app) — whether basic-auth publishing is allowed
     - web_apps.get_app_settings_key_vault_references() and get_site_connection_string_key_vault_references() (per app) — which settings resolve from Key Vault, without reading values
-    - web_apps.list_application_settings() and list_connection_strings() (per app, only when scan_literal_secrets is on) — finds settings holding a literal secret; values are never written
+    - web_apps.list_application_settings() and list_connection_strings() (per app, only when scan_literal_secrets is on) — finds settings holding a literal secret, and a Windows app's Node version; secret values are never written
     - provider.get_web_app_stacks() — App Service's runtime list with end-of-life dates
     - diagnostic_settings.list() (per app) — which log categories are exported
 
@@ -134,13 +136,14 @@ evidence_set:
     - literal_secret_scan_enabled — True if scan_literal_secrets is on; false if it is off
     - apps_scanned_for_literal_secrets — Number of web apps whose app settings and connection strings were read; null if the scan is off
     - apps_literal_secret_scan_not_authorized — Number of web apps whose settings could not be read because Microsoft.Web/sites/config/list/action is not granted; null if the scan is off
-    - apps_with_literal_secrets — Number of scanned web apps with at least one setting holding a literal secret: not a Key Vault or App Configuration reference, and either a credential in the value (a password, account or shared access key, SAS signature, private key, or user name and password in a URL) or an app setting named like a secret (password, secret, key, token, credential) whose value is a single word of 8 or more characters that is not a URL or boolean; null if the scan is off
+    - apps_literal_secret_scan_not_read — Number of web apps the scan skipped without a failure: a ReadOnly lock refused config/list (409 ScopeLocked), or the app's id has no resource group; null if the scan is off
+    - apps_with_literal_secrets — Number of scanned web apps with at least one setting holding a literal secret; null if the scan is off. A setting counts when it is not a Key Vault or App Configuration reference and either its value carries a credential (Password=, Pwd=, AccountKey=, SharedAccessKey=, SharedAccessSignature=, AccessKey= or Secret=, a SAS sig= parameter, a private key, or a password in a URL), or it is an app setting whose name contains password, passwd, secret, API key, access key, account key, private key or credential, or has the word key, token, pwd or sas, unless the name also has id, name, uri, url, endpoint, vault, version, header, enabled, path, file, lifetime, expiry, expiration or type, and whose value is a single word of 8 or more characters that is not a URL, a boolean or key=value; pairs. Application Insights' instrumentation key and connection string never count. This is a heuristic, so 0 doesn't prove there are no literal secrets
     - literal_secret_settings — Number of app settings and connection strings holding a literal secret across the scanned web apps; null if the scan is off
 
     Are the runtimes still supported?
     - apps_with_declared_runtime — Number of web apps whose configuration names at least one language runtime version
-    - apps_with_runtime_past_end_of_support — Number of web apps with at least one declared runtime past end of support (matched by its exact spelling to App Service's runtime list, and marked deprecated there or past its end-of-life date)
-    - apps_with_runtime_support_unknown — Number of web apps with no runtime past end of support where support is unknown: nothing declared, a custom container, a runtime not in App Service's list, or a failed read
+    - apps_with_runtime_past_end_of_support — Number of web apps with at least one declared runtime past end of support (matched by its exact spelling to App Service's runtime list, and marked deprecated there or past its end-of-life date). On Windows a Node app's version is the WEBSITE_NODE_DEFAULT_VERSION app setting, read only when scan_literal_secrets is on; without it, the .NET Framework v4.0 every such Windows app carries reads as unknown rather than as its runtime
+    - apps_with_runtime_support_unknown — Number of web apps with no runtime past end of support where support is unknown: nothing declared, a custom container, a runtime not in App Service's list, a Windows app on .NET Framework v4.0 whose Node setting wasn't read, or a failed read
 
     Is the app logging?
     - always_on_apps — Number of web apps with Always On switched on

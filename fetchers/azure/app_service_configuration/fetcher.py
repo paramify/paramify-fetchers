@@ -65,7 +65,7 @@ FTP_ENCRYPTED_STATES = ("Disabled", "FtpsOnly")
 # live); "Internet" is the service tag for the whole public Internet.
 ALL_ADDRESSES = ("any", "*", "0.0.0.0/0", "::/0", "internet")
 
-# App Service's fixed cipher suite order, strongest first (May 2024 reorder); a minimum blocks every suite after it.
+# App Service's fixed cipher suite order, strongest first; a minimum blocks every suite after it.
 TLS_CIPHER_SUITE_ORDER = (
     "TLS_AES_256_GCM_SHA384",
     "TLS_AES_128_GCM_SHA256",
@@ -97,23 +97,30 @@ WINDOWS_RUNTIME_SETTINGS = (
 )
 CUSTOM_CONTAINER_PREFIXES = ("docker|", "compose|", "kube|")
 JAVA_RUNTIME_KEY = re.compile(r"java\d+Runtime")
+# A Windows app's Node version is this app setting, not config/web; only config/list returns it.
+NODE_VERSION_SETTING = "WEBSITE_NODE_DEFAULT_VERSION"
+# The .NET Framework version every Windows app carries unless .NET (Core) replaces it.
+WINDOWS_DEFAULT_FRAMEWORK = "v4.0"
+NODE_VERSION_UNREAD = (
+    f"the Windows default; a Node app's version is in {NODE_VERSION_SETTING}, which only the opt-in "
+    "literal-secret scan reads"
+)
 
 # Opt-in literal-secret scan: config/list returns setting values, which are classified here and never kept.
 SCAN_ENV = "AZURE_APP_SERVICE_SCAN_LITERAL_SECRETS"
 CONFIG_LIST_PERMISSION = "Microsoft.Web/sites/config/list/action"
-SCAN_OFF, SCAN_DONE, SCAN_NOT_AUTHORIZED, SCAN_ERROR = "off", "scanned", "not_authorized", "error"
+SCAN_OFF, SCAN_DONE, SCAN_NOT_AUTHORIZED, SCAN_NOT_READ, SCAN_ERROR = (
+    "off", "scanned", "not_authorized", "not_read", "error"
+)
 SETTING_REFERENCE_PREFIXES = ("@microsoft.keyvault(", "@microsoft.appconfiguration(")
 CREDENTIAL_IN_VALUE = re.compile(
-    r"(?:^|[;,\s])(?:password|pwd|accountkey|sharedaccesskey|sharedaccesssignature)\s*=\s*[^;,\s]"
+    r"(?:^|[;,\s])(?:password|pwd|accountkey|sharedaccesskey|sharedaccesssignature|accesskey|secret)\s*=\s*[^;,\s]"
     r"|[?&]sig=[^&\s]"
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
-    r"|://[^/\s:@]+:[^/\s@]+@",
+    r"|://[^/\s:@]*:[^/\s@]+@",
     re.IGNORECASE,
 )
-SECRET_NAME_PARTS = (
-    "password", "passwd", "secret", "apikey", "accesskey", "accountkey", "privatekey", "credential",
-    "connectionstring",
-)
+SECRET_NAME_PARTS = ("password", "passwd", "secret", "apikey", "accesskey", "accountkey", "privatekey", "credential")
 SECRET_NAME_WORDS = frozenset({"key", "token", "pwd", "sas"})
 # A name that points at or describes a secret rather than holding one.
 NOT_SECRET_NAME_WORDS = frozenset({
@@ -122,16 +129,28 @@ NOT_SECRET_NAME_WORDS = frozenset({
 })
 # Named like secrets, documented as not secret.
 NOT_SECRET_SETTINGS = frozenset({"appinsights_instrumentationkey", "applicationinsights_connection_string"})
-SCAN_LIMITATIONS = [
+# key=value; pairs: a connection string, judged by its value only.
+KEY_VALUE_PAIRS = re.compile(r"[^=;\s]+=[^;]*;")
+LIMITATIONS = [
+    "Deployment slots are not read: web_apps.list() returns production sites, and each slot carries its own "
+    "TLS, access restrictions, basic-auth policy and settings.",
+    f"On Windows, a Node app's version is the {NODE_VERSION_SETTING} app setting, which only config/list "
+    f"returns. With the literal-secret scan off or refused, the .NET Framework {WINDOWS_DEFAULT_FRAMEWORK} "
+    "every such app carries reads as unknown rather than as its runtime.",
     f"The literal-secret scan is off unless {SCAN_ENV} is true, and needs {CONFIG_LIST_PERMISSION}, which "
     "returns setting values. Values are classified in memory and never written; only setting names and "
-    "the reason each was flagged are.",
+    "the reason each was flagged are. A ReadOnly lock refuses config/list (409 ScopeLocked); that app reads "
+    "not_read, not a collection failure.",
     "A setting holds a literal secret when it is not a Key Vault or App Configuration reference and either "
-    "its value carries a credential (a password, account or shared access key, SAS signature, private key, "
-    "or user name and password in a URL), or it is an app setting named like a secret (password, secret, "
-    "key, token, API key, credential) whose value is a single word of at least 8 characters that is not a "
-    "URL or boolean. It is a heuristic: a secret with an ordinary name and no credential syntax is missed, "
-    "and a long non-secret value under a secret-like name is flagged.",
+    "its value carries a credential (Password=, Pwd=, AccountKey=, SharedAccessKey=, SharedAccessSignature=, "
+    "AccessKey= or Secret=, a SAS sig= parameter, a private key, or a password in a URL), or it is an app "
+    "setting whose name contains password, passwd, secret, API key, access key, account key, private key or "
+    "credential, or has the word key, token, pwd or sas, unless the name also has id, name, uri, url, "
+    "endpoint, vault, version, header, enabled, path, file, lifetime, expiry, expiration or type, and whose "
+    "value is a single word of at least 8 characters that is not a URL, a boolean or key=value; pairs. "
+    "Application Insights' instrumentation key and connection string never count.",
+    "The scan is a heuristic, so 0 does not prove there are no literal secrets: a secret under an ordinary "
+    "name with no credential syntax is missed, and a long non-secret value under a secret-like name is flagged.",
 ]
 
 
@@ -283,6 +302,7 @@ def project_literal_secrets(app_settings, connection_strings) -> dict:
     """Read config/list results into setting NAMES and reasons only; every value is dropped here."""
     settings = model_attr(app_settings, "properties") or {}
     strings = model_attr(connection_strings, "properties") or {}
+    node_version = settings.get(NODE_VERSION_SETTING)
     found = [
         {"name": str(name), "kind": "app_setting", "reason": reason}
         for name, value in settings.items()
@@ -296,6 +316,7 @@ def project_literal_secrets(app_settings, connection_strings) -> dict:
         "app_settings_read": len(settings),
         "connection_strings_read": len(strings),
         "literal_secrets": sorted(found, key=lambda r: (r["kind"], r["name"])),
+        "node_version": str(node_version).strip() if node_version else None,
     }
 
 
@@ -500,6 +521,7 @@ def could_be_secret(text: str) -> bool:
         and not any(c.isspace() for c in text)
         and text.lower() not in ("true", "false")
         and not re.match(r"^[a-z][a-z0-9+.-]*://", text, re.IGNORECASE)
+        and not KEY_VALUE_PAIRS.search(text)
     )
 
 
@@ -515,12 +537,13 @@ def literal_secret_reason(name, value, by_name: bool = True):
     return None
 
 
-def literal_secret_scan_record(status: str, found: dict | None = None) -> dict:
+def literal_secret_scan_record(status: str, found: dict | None = None, reason: str | None = None) -> dict:
     """`literal_secrets` and `has_literal_secrets` are null unless the scan ran: off or refused is unknown."""
     found = found or {}
     secrets = found.get("literal_secrets")
     return {
         "status": status,
+        "reason": reason,
         "app_settings_read": found.get("app_settings_read"),
         "connection_strings_read": found.get("connection_strings_read"),
         "literal_secrets": secrets,
@@ -545,7 +568,11 @@ def runtime_index(entries: list[dict]) -> dict:
     return index
 
 
-def declared_runtimes(kind, config: dict) -> list[tuple[str, str, str]]:
+def is_windows_code_app(kind, config: dict) -> bool:
+    return "linux" not in str(kind or "").lower() and not config.get("windows_fx_version")
+
+
+def declared_runtimes(kind, config: dict, node_version=None) -> list[tuple[str, str, str]]:
     """(setting, value, os) for each runtime the app declares; "Off" and blanks are not declared."""
     if "linux" in str(kind or "").lower():
         candidates = [("linux_fx_version", config.get("linux_fx_version"), "linux")]
@@ -553,6 +580,7 @@ def declared_runtimes(kind, config: dict) -> list[tuple[str, str, str]]:
         candidates = [("windows_fx_version", config.get("windows_fx_version"), "windows")]
     else:
         candidates = [(field, config.get(field), "windows") for field in WINDOWS_RUNTIME_SETTINGS]
+        candidates.append((NODE_VERSION_SETTING, node_version, "windows"))
         if config.get("java_container"):
             candidates.append((
                 "java_container",
@@ -576,9 +604,30 @@ def _parse_time(value):
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def runtime_keys(setting, value: str) -> list[str]:
+    """A Node setting may be "18.17.1" where the stack list says "~18" (or "10.14" for old versions)."""
+    keys = [value.lower()]
+    match = re.match(r"^~?(\d+)(?:\.(\d+))?", value) if setting == NODE_VERSION_SETTING else None
+    if match:
+        keys.append(f"~{match.group(1)}")
+        if match.group(2):
+            keys.append(f"{match.group(1)}.{match.group(2)}")
+    return keys
+
+
+def unread_default_record(setting, value) -> dict:
+    return {
+        "setting": setting, "value": value, "custom_container": False, "stack": None, "version": None,
+        "end_of_life_date": None, "days_until_end_of_life": None, "is_deprecated": None,
+        "past_end_of_support": None, "note": NODE_VERSION_UNREAD,
+    }
+
+
 def runtime_record(setting, value, os_name, index: dict, now: datetime) -> dict:
     custom_container = value.lower().startswith(CUSTOM_CONTAINER_PREFIXES)
-    entry = None if custom_container else index.get((os_name, value.lower()))
+    entry = None if custom_container else next(
+        (index[(os_name, key)] for key in runtime_keys(setting, value) if (os_name, key) in index), None
+    )
     eol = _parse_time(entry["end_of_life_date"]) if entry and entry.get("end_of_life_date") else None
     if entry is None:
         past = None
@@ -594,12 +643,28 @@ def runtime_record(setting, value, os_name, index: dict, now: datetime) -> dict:
         "days_until_end_of_life": (eol.date() - now.date()).days if eol else None,
         "is_deprecated": entry["is_deprecated"] if entry else None,
         "past_end_of_support": past,
+        "note": None,
     }
 
 
-def runtime_support_record(kind, config: dict, index: dict, now: datetime) -> dict:
-    """Any declared runtime past end of support makes the app past it; an unmatched one makes it unknown."""
-    runtimes = [runtime_record(*declared, index, now) for declared in declared_runtimes(kind, config)]
+def runtime_support_record(
+    kind, config: dict, index: dict, now: datetime, node_version=None, node_version_read: bool = False
+) -> dict:
+    """Any declared runtime past end of support makes the app past it; an unmatched one makes it unknown.
+
+    On Windows the default .NET Framework v4.0 is not a Node app's runtime: it is dropped when a Node
+    version is set, and unknown when the Node setting was not read.
+    """
+    runtimes = []
+    for setting, value, os_name in declared_runtimes(kind, config, node_version):
+        default = (is_windows_code_app(kind, config) and setting == "net_framework_version"
+                   and value.lower() == WINDOWS_DEFAULT_FRAMEWORK)
+        if default and node_version:
+            continue
+        if default and not node_version_read:
+            runtimes.append(unread_default_record(setting, value))
+            continue
+        runtimes.append(runtime_record(setting, value, os_name, index, now))
     verdicts = [r["past_end_of_support"] for r in runtimes]
     if any(verdicts):
         past = True
@@ -863,6 +928,9 @@ def summarize(apps: list[dict], scan_enabled: bool = False) -> dict:
         "apps_literal_secret_scan_not_authorized": (
             sum(1 for s in scans if s.get("status") == SCAN_NOT_AUTHORIZED) if scan_enabled else None
         ),
+        "apps_literal_secret_scan_not_read": (
+            sum(1 for s in scans if s.get("status") == SCAN_NOT_READ) if scan_enabled else None
+        ),
         "apps_with_literal_secrets": sum(1 for s in scanned if s["has_literal_secrets"]) if scan_enabled else None,
         "literal_secret_settings": sum(len(s["literal_secrets"]) for s in scanned) if scan_enabled else None,
     }
@@ -887,6 +955,7 @@ def collect_web_apps(subscription_id, cred, collector: Collector, scan_secrets: 
         ]
 
     apps = collector.guard("web.web_apps.list", _list, default=[])
+    node_versions: dict = {}
 
     for app in apps:
         group, name = app.get("resource_group"), app.get("name")
@@ -895,6 +964,10 @@ def collect_web_apps(subscription_id, cred, collector: Collector, scan_secrets: 
                 "web.web_apps.get_configuration",
                 RuntimeError(f"web app {name!r} has no resource group in its id"),
             )
+            if scan_secrets:
+                app["literal_secret_scan"] = literal_secret_scan_record(
+                    SCAN_NOT_READ, reason="the app's id has no resource group"
+                )
             continue
         config = collector.guard(
             f"web.web_apps.get_configuration ({name})",
@@ -916,10 +989,12 @@ def collect_web_apps(subscription_id, cred, collector: Collector, scan_secrets: 
             app["authentication"] = authentication_record(settings)
         _attach_publishing_and_references(client, collector, app, group, name)
         if scan_secrets:
-            app["literal_secret_scan"] = _scan_literal_secrets(client, collector, group, name)
+            app["literal_secret_scan"], found = _scan_literal_secrets(client, collector, group, name)
+            if found is not None:
+                node_versions[app["id"]] = found["node_version"]
 
     if apps:
-        _attach_runtime_support(client, collector, apps, datetime.now(timezone.utc))
+        _attach_runtime_support(client, collector, apps, datetime.now(timezone.utc), node_versions)
         _attach_diagnostic_settings(subscription_id, cred, collector, apps)
 
     return sorted(apps, key=lambda r: r.get("id") or "")
@@ -952,8 +1027,12 @@ def _attach_publishing_and_references(client, collector: Collector, app, group, 
     app["key_vault_references"] = references
 
 
-def _scan_literal_secrets(client, collector: Collector, group, name) -> dict:
-    """config/list for app settings and connection strings; a 403 is the opt-in permission not granted."""
+def is_scope_locked(exc: BaseException) -> bool:
+    return getattr(exc, "status_code", None) == 409 or "scopelocked" in str(exc).lower()
+
+
+def _scan_literal_secrets(client, collector: Collector, group, name) -> tuple[dict, dict | None]:
+    """(scan record, names and Node version or None). A 403 is the opt-in permission not granted; a 409 a lock."""
     try:
         found = project_literal_secrets(
             client.web_apps.list_application_settings(resource_group_name=group, name=name),
@@ -961,17 +1040,19 @@ def _scan_literal_secrets(client, collector: Collector, group, name) -> dict:
         )
     except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
         if is_not_authorized(exc):
-            return literal_secret_scan_record(SCAN_NOT_AUTHORIZED)
+            return literal_secret_scan_record(SCAN_NOT_AUTHORIZED), None
+        if is_scope_locked(exc):
+            return literal_secret_scan_record(SCAN_NOT_READ, reason="a ReadOnly lock refuses config/list"), None
         collector.record(f"web.web_apps.list_application_settings/list_connection_strings ({name})", exc)
-        return literal_secret_scan_record(SCAN_ERROR)
-    return literal_secret_scan_record(SCAN_DONE, found)
+        return literal_secret_scan_record(SCAN_ERROR), None
+    return literal_secret_scan_record(SCAN_DONE, found), found
 
 
 def scan_enabled() -> bool:
     return os.environ.get(SCAN_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _attach_runtime_support(client, collector: Collector, apps, now: datetime) -> None:
+def _attach_runtime_support(client, collector: Collector, apps, now: datetime, node_versions: dict) -> None:
     """One tenant-wide GET of Microsoft.Web/webAppStacks, joined to each app's declared runtimes."""
     entries = collector.guard(
         "web.provider.get_web_app_stacks",
@@ -982,7 +1063,10 @@ def _attach_runtime_support(client, collector: Collector, apps, now: datetime) -
     index = runtime_index(entries)
     for app in apps:
         if app.get("configuration") is not None:
-            app["runtime_support"] = runtime_support_record(app.get("kind"), app["configuration"], index, now)
+            app["runtime_support"] = runtime_support_record(
+                app.get("kind"), app["configuration"], index, now,
+                node_version=node_versions.get(app["id"]), node_version_read=app["id"] in node_versions,
+            )
 
 
 def _attach_diagnostic_settings(subscription_id, cred, collector: Collector, apps) -> None:
@@ -1081,9 +1165,12 @@ def main() -> int:
                 "permission": CONFIG_LIST_PERMISSION,
                 "apps_not_authorized": sum(
                     1 for a in apps if dig(a, "literal_secret_scan", "status") == SCAN_NOT_AUTHORIZED
-                ),
+                ) if scan_secrets else None,
+                "apps_not_read": sum(
+                    1 for a in apps if dig(a, "literal_secret_scan", "status") == SCAN_NOT_READ
+                ) if scan_secrets else None,
             },
-            "limitations": SCAN_LIMITATIONS,
+            "limitations": LIMITATIONS,
             "provider_registration_status": registration,
         },
         summary={**summarize(apps, scan_secrets), "provider_registration_status": registration},

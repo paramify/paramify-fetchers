@@ -616,7 +616,11 @@ schemas and the `paramify` CLI — not the internal code.
     `Microsoft.Web/sites/config/list/action`, and lists the names of those holding a
     literal secret instead of a Key Vault or App Configuration reference, each with the
     reason (`credential_in_value` or `secret_like_name`). Values are classified in memory
-    and never written. A 403 reads `not_authorized` for that app, not a collection failure.
+    and never written. A 403 reads `not_authorized` for that app and a ReadOnly lock's 409
+    reads `not_read`; neither is a collection failure. The same read supplies a Windows
+    app's Node version (`WEBSITE_NODE_DEFAULT_VERSION`) to runtime support; without it, a
+    Windows app on the default .NET Framework v4.0 reads as unknown rather than supported.
+    Production sites only; deployment slots are not read.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`
