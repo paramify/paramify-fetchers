@@ -749,20 +749,18 @@ def test_profile_scope_matches_host_names_and_excludes_routes_whose_every_host_i
         "custom_domain": [("qa.example.com", "QA.*", "name_matched"), ("files.example.com", "files.example.com", "name_matched"),
                           ("webdav.example.com", "webdav*", "name_matched")],
         "route": [("qa-http", None, "all_hosts_excluded"), ("qa", None, "all_hosts_excluded"),
-                  ("files", None, "all_hosts_excluded"), ("webdav-route", None, "all_hosts_excluded")],
+                  ("files", None, "all_hosts_excluded"), ("webdav-route", "webdav*", "name_matched")],
     }
     # mixed also serves an in-scope domain; nohost serves no host at all
     assert {fd.arm_key(fd_route(n)["id"]) for n in ("mixed", "nohost", "core")}.isdisjoint(scope["routes"])
     assert exclusions.unmatched() == ["nothing.example.com"]
 
 
-def test_profile_scope_matches_route_names_only_when_asked():
+def test_profile_scope_matches_route_names():
     c = topology()
-    plain = fd.profile_scope(c["profile"], c["endpoints"], c["custom_domains"], scope_exclusions("default"))
-    named = fd.profile_scope(c["profile"], c["endpoints"], c["custom_domains"], scope_exclusions("default"),
-                             match_route_names=True)
-    assert plain["excluded"] == []
+    named = fd.profile_scope(c["profile"], c["endpoints"], c["custom_domains"], scope_exclusions("default"))
     assert by_kind(named["excluded"]) == {"route": [("default", "default", "name_matched")]}
+    assert named["routes"] == {fd.arm_key(fd_route("default")["id"])}
 
 
 def test_endpoint_host_name_excludes_routes_on_the_default_domain():

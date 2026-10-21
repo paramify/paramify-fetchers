@@ -301,7 +301,7 @@ def profile_groups(collected: dict, regions_by_id: dict, regions_by_host: dict, 
     A group is out of scope when routes reach it and every one of them is; its record then keeps all its routes.
     """
     profile = collected["profile"]
-    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions, match_route_names=True)
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions)
     paths = origin_paths(profile, collected["endpoints"], collected["rule_sets"])
     in_scope = [p for p in paths if arm_key(p["route_id"]) not in scope["routes"]]
     records, excluded_groups, excluded = [], set(), list(scope["excluded"])

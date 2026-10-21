@@ -432,11 +432,10 @@ def route_serving(endpoint: dict, route: dict) -> bool:
 
 # --- scope exclusions by host name (and optionally route name) ---
 
-def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exclusions,
-                  match_route_names: bool = False) -> dict:
-    """The custom domains and endpoints whose host name matches a pattern, and the routes out of scope (key -> pattern).
+def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exclusions) -> dict:
+    """The custom domains and endpoints whose host name matches a pattern (key -> pattern), and the keys of the routes out of scope.
 
-    A route is out of scope when every host it serves is, or (with match_route_names) when its own name matches.
+    A route is out of scope when its own name matches, or when every host it serves is out.
     """
     domains_by_key = {arm_key(d["id"]): d for d in domains}
     host_patterns, excluded = {}, []
@@ -452,20 +451,20 @@ def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exc
             host_patterns[arm_key(endpoint["id"])] = pattern
             excluded.append(excluded_item("endpoint", endpoint["host_name"], pattern, profile=profile["name"],
                                           endpoint=endpoint["name"], id=endpoint["id"]))
-    routes = {}
+    routes = set()
     for endpoint in endpoints:
         for route in endpoint["routes"]:
             hosts = route_hosts(endpoint, route, domains_by_key)
             context = {"profile": profile["name"], "endpoint": endpoint["name"], "id": route["id"],
                        "hosts": [h["host_name"] for h in hosts]}
-            pattern = exclusions.match(route["name"]) if match_route_names else None
+            pattern = exclusions.match(route["name"])
             if pattern:
                 excluded.append(excluded_item("route", route["name"], pattern, **context))
             elif hosts and all(arm_key(h["id"]) in host_patterns for h in hosts):
                 excluded.append(excluded_item("route", route["name"], None, reason="all_hosts_excluded", **context))
             else:
                 continue
-            routes[arm_key(route["id"])] = pattern
+            routes.add(arm_key(route["id"]))
     return {"hosts": host_patterns, "routes": routes, "excluded": excluded}
 
 

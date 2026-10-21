@@ -192,8 +192,7 @@ def secrets_in_scope(profile: dict, secrets: list[dict], domains: list[dict], ex
 
 def tls_for_profile(collected: dict, now: datetime, exclusions: ScopeExclusions | None = None) -> dict:
     profile = collected["profile"]
-    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions(),
-                          match_route_names=True)
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions())
     domains_by_key = {arm_key(d["id"]): d for d in collected["custom_domains"]}
     secrets_by_key = {arm_key(s["id"]): s for s in collected["secrets"]}
     routes, routed, served = [], set(), set()

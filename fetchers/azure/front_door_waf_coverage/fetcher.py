@@ -234,8 +234,7 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
 
 def coverage_for_profile(collected: dict, waf_by_key: dict, exclusions: ScopeExclusions | None = None) -> dict:
     profile, sps = collected["profile"], collected["security_policies"]
-    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions(),
-                          match_route_names=True)
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions())
     excluded_hosts, excluded_routes = scope["hosts"], scope["routes"]
     domains_by_key = {arm_key(d["id"]): d for d in collected["custom_domains"]}
     host_routes, endpoints_without_routes, routed, excluded = [], [], set(), list(scope["excluded"])
