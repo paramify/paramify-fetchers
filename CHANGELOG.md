@@ -741,14 +741,16 @@ schemas and the `paramify` CLI — not the internal code.
     host-routes of an out-of-scope route. Both fetcher.yaml texts move to the new
     description format.
   - `azure_dns_configuration` 0.3.0: public record-set names, relative or FQDN.
-- **A config field the runner injects into the fetcher can be a `${env:VAR}`
-  reference.** The runner resolves it the way it resolves a secret. An unset or
-  empty variable gives way to the next value down (platform config, then the
-  default; an error for a required field with neither) and leaves a run note, and
-  a malformed reference is an error. `manifest set-config` and
-  `set-platform-config` save the reference as typed on integer and boolean fields
-  instead of rejecting or coercing it. Target fields (not a target's secrets)
-  are not resolved.
+- **A string config field can be a `${env:VAR}` reference.** The runner
+  resolves it the way it resolves a secret. An unset or empty variable gives way
+  to the next value down (platform config, then the default; an error for a
+  required field with neither) and leaves one run note per entry naming every
+  unset variable; a malformed reference is an error. String config fields only,
+  not targets: the runner refuses a reference on an integer or boolean field,
+  and `manifest set-config`, `set-platform-config`, `add-target` and
+  `set-target` refuse one on a typed config field or any target field (a
+  target's secrets still take references). `effective_config`, and so the TUI,
+  shows the value the runner would inject.
 
 ### Changed
 

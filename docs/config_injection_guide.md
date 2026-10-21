@@ -52,11 +52,11 @@ paramify manifest set-secret rippling_all_employees api_token RIPPLING_API_TOKEN
 **Key names aren't checked.** A misspelled key is saved, passes `validate`,
 and never reaches the fetcher.
 
-A config field the runner injects into the fetcher can also be `${env:VAR}`,
-read from the environment at run time. If `VAR` is unset or empty, the next
-value down applies (platform config, then the default), and the run prints a
-note. Target fields don't take `${env:VAR}` (a target's secrets do): the
-fetcher gets the text as written.
+A string config field can also be `${env:VAR}`, read from the environment at
+run time. If `VAR` is unset or empty, the next value down applies (platform
+config, then the default), and the run prints a note. Integer and boolean
+fields and target fields don't take `${env:VAR}` (a target's secrets do), and
+`manifest` refuses one there.
 
 ## 3. Check it
 

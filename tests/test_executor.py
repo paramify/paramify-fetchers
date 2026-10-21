@@ -21,6 +21,7 @@ import os
 
 import pytest
 
+from framework import api
 from framework.contract import (
     ConfigField,
     Fetcher,
@@ -36,6 +37,7 @@ from framework.runner.executor import (
     _build_env,
     _emit_notes,
     _emit_shadowed,
+    merged_config,
     run_entry,
 )
 from framework.secret_resolver import SecretResolutionError, UnsetSecretError
@@ -152,13 +154,26 @@ def test_config_env_reference_unset_falls_back_to_default(tmp_path, monkeypatch)
     monkeypatch.delenv("UNSET_VAR", raising=False)
     fetcher = make_fetcher(tmp_path, config_schema={
         "patterns": cfg("patterns", "PATTERNS"),
-        "days": cfg("days", "DAYS", default=7, type="integer"),
+        "region": cfg("region", "REGION", default="eastus"),
     })
     env: dict = {}
     _apply_config(env, fetcher, None, None, ManifestEntry(
-        use="x", config={"patterns": "${env:UNSET_VAR}", "days": "${env:UNSET_VAR}"}))
+        use="x", config={"patterns": "${env:UNSET_VAR}", "region": "${env:UNSET_VAR}"}))
     assert "PATTERNS" not in env
-    assert env["DAYS"] == "7"
+    assert env["REGION"] == "eastus"
+
+
+@pytest.mark.parametrize("field", [
+    cfg("days", "DAYS", default=7, type="integer"),
+    cfg("strict", "STRICT", default=False, type="boolean"),
+])
+def test_config_env_reference_on_a_typed_field_raises(tmp_path, monkeypatch, field):
+    monkeypatch.setenv("SET_VAR", "1")
+    fetcher = make_fetcher(tmp_path, config_schema={field.name: field})
+    for entry, platform in ((ManifestEntry(use="x", config={field.name: "${env:SET_VAR}"}), None),
+                            (ManifestEntry(use="x"), PlatformConfig(config={field.name: "${env:SET_VAR}"}))):
+        with pytest.raises(RuntimeError, match=f"config '{field.name}' is {field.type}; .*string config fields only"):
+            _apply_config({}, fetcher, None, platform, entry)
 
 
 def test_config_env_reference_unset_falls_back_to_platform_value(tmp_path, monkeypatch):
@@ -181,30 +196,45 @@ def test_config_env_reference_unset_falls_back_to_platform_value(tmp_path, monke
     assert env["PATTERNS"] == "from-default"
 
 
-def test_config_env_reference_unset_is_noted(tmp_path, monkeypatch):
+def test_merged_config_lists_every_unset_reference(tmp_path, monkeypatch):
     monkeypatch.delenv("UNSET_VAR", raising=False)
+    monkeypatch.delenv("OTHER_UNSET", raising=False)
     monkeypatch.setenv("SET_VAR", "qa.*")
     fetcher = make_fetcher(tmp_path, config_schema={
         "patterns": cfg("patterns", "PATTERNS", default="from-default"),
         "hosts": cfg("hosts", "HOSTS"),
     })
-    notes: list = []
-    _apply_config({}, fetcher, None, None, ManifestEntry(
-        use="x", config={"patterns": "${env:UNSET_VAR}", "hosts": "${env:SET_VAR}"}), note_sink=notes)
-    assert notes == [("patterns", "UNSET_VAR")]
+    merged = merged_config(fetcher, None, PlatformConfig(config={"patterns": "${env:OTHER_UNSET}"}), ManifestEntry(
+        use="x", config={"patterns": "${env:UNSET_VAR}", "hosts": "${env:SET_VAR}"}))
+    assert merged.unset == [("patterns", "UNSET_VAR"), ("patterns", "OTHER_UNSET")]
+    assert merged.values == {"patterns": "from-default", "hosts": "qa.*"}
+    assert merged.sources == {"patterns": "default", "hosts": "entry"}
 
 
-def test_config_env_reference_unset_emits_a_fetcher_note(tmp_path, monkeypatch):
+def test_config_env_reference_unset_emits_one_fetcher_note_per_entry(tmp_path, monkeypatch):
     monkeypatch.delenv("UNSET_VAR", raising=False)
+    monkeypatch.delenv("OTHER_UNSET", raising=False)
     fdir = tmp_path / "fetcher"
     fdir.mkdir()
     (fdir / "fetcher.py").write_text("pass\n")
-    fetcher = make_fetcher(fdir, config_schema={"patterns": cfg("patterns", "PATTERNS")})
+    fetcher = make_fetcher(fdir, supports_targets=True,
+                           target_schema={"region": TargetField(name="region", type="string", env="REGION")},
+                           config_schema={"patterns": cfg("patterns", "PATTERNS", default="qa.*")})
+    entry = ManifestEntry(use="t_fetcher", config={"patterns": "${env:UNSET_VAR}"},
+                          targets=[TargetInstance(values={"region": r}, secrets={}) for r in ("a", "b")])
     seen: list = []
-    run_entry(fetcher, ManifestEntry(use="t_fetcher", config={"patterns": "${env:UNSET_VAR}"}),
-              tmp_path / "out", on_note=seen.append)
-    assert len(seen) == 1
-    assert "1 config reference unset: patterns (${env:UNSET_VAR})" in seen[0]
+    run_entry(fetcher, entry, tmp_path / "out", None,
+              PlatformConfig(config={"patterns": "${env:OTHER_UNSET}"}), on_note=seen.append)
+    assert seen == ["2 config references unset: patterns (${env:UNSET_VAR}, ${env:OTHER_UNSET}) uses the default."]
+
+
+def test_effective_config_skips_an_unset_reference_like_the_runner(tmp_path, monkeypatch):
+    monkeypatch.delenv("UNSET_VAR", raising=False)
+    fetcher = make_fetcher(tmp_path, config_schema={"patterns": cfg("patterns", "PATTERNS")})
+    m = {"run": {"fetchers": [{"use": "t_fetcher", "config": {"patterns": "${env:UNSET_VAR}"}}],
+                 "platforms": {"testcat": {"config": {"patterns": "qa.*"}}}}}
+    [field] = api.effective_config(m, ["t_fetcher"], tmp_path, {"t_fetcher": fetcher}, {})["t_fetcher"]
+    assert (field["value"], field["source"]) == ("qa.*", "platforms.testcat")
 
 
 def test_required_config_env_reference_unset_raises(tmp_path, monkeypatch):

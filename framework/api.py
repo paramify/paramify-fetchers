@@ -39,7 +39,14 @@ from packaging.utils import canonicalize_name
 from framework import samples as _samples
 from framework import yaml_io
 from framework.config_loader import discover_fetchers, discover_platforms
-from framework.contract import ConfigField, Secret, TargetField, effective_secrets
+from framework.contract import (
+    ConfigField,
+    ManifestEntry,
+    PlatformConfig,
+    Secret,
+    TargetField,
+    effective_secrets,
+)
 from framework.custom_tags import category_display_names
 from framework.envelope import ENVELOPE_KEYS, is_enveloped, wrap_outputs
 from framework.issue_reports import (
@@ -950,7 +957,7 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
         if fetcher.is_issue_report:
             from framework.runner.executor import merged_config  # lazy: import cycle
 
-            _, values = merged_config(fetcher, spec, platform_cfg, entry)
+            values = merged_config(fetcher, spec, platform_cfg, entry).values
             if not values.get(ASSESSMENT_ID_FIELD):
                 errors.append(
                     f"{entry.use}: no {ASSESSMENT_ID_FIELD} set, so its report cannot be "
@@ -1113,12 +1120,12 @@ def run(
         # can't drift.
         assessment = None
         if fetcher.is_issue_report:
-            _, values = merged_config(
+            values = merged_config(
                 fetcher,
                 platforms.get(fetcher.category or ""),
                 parsed.platforms.get(fetcher.category or ""),
                 entry,
-            )
+            ).values
             assessment = {
                 ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
                 ASSESSMENT_NAME_FIELD: values.get(ASSESSMENT_NAME_FIELD),
@@ -2892,20 +2899,24 @@ def effective_config(
     platforms: Optional[dict] = None,
 ) -> Dict[str, List[dict]]:
     """Per entry, every config field that applies to it, with its value and where
-    that value comes from — the merge the runner actually performs:
+    that value comes from — the runner's own merge (executor.merged_config):
 
         platform defaults <- platform values <- per-fetcher values
 
     Returns {use: [descriptor + {"value", "source"}]}, where source is "entry",
-    "platforms.<category>", "default", or None when nothing supplies it. A field
-    the category declares (and the fetcher doesn't) is included too, since it is
-    injected into that fetcher's environment just the same.
+    "platforms.<category>", "default", or None when nothing supplies it. A
+    ${env:} reference shows its resolved value, and one whose variable is unset
+    gives way to the next value down, as at run time. A field the category
+    declares (and the fetcher doesn't) is included too, since it is injected into
+    that fetcher's environment just the same.
 
     Front-ends need this to render config honestly: reading only the entry's own
     `config` block reports a value set once at the category level as unset on
     every entry that inherits it. Batched over `uses` so a caller redrawing a
     table scans the fetcher tree once, not once per row.
     """
+    from framework.runner.executor import merged_config  # lazy: import cycle
+
     discovered = fetchers if fetchers is not None else discover_fetchers(root)
     specs = platforms if platforms is not None else discover_platforms(root)
     all_platforms = _run(m).get("platforms") or {}
@@ -2917,26 +2928,18 @@ def effective_config(
             out[use] = []
             continue
         spec = specs.get(f.category) if f.category else None
-        schema: Dict[str, ConfigField] = {}
-        if spec:
-            schema.update(spec.config_schema)
-        schema.update(f.config_schema)  # fetcher overrides platform on a name clash
-
         platform_values = ((all_platforms.get(f.category or "") or {}).get("config")) or {}
         entry_values = (_find_entry(m, use) or {}).get("config") or {}
+        merged = merged_config(f, spec, PlatformConfig(config=dict(platform_values)),
+                               ManifestEntry(use=use, config=dict(entry_values)))
+        labels = {"entry": "entry", "platform": f"platforms.{f.category}", "default": "default"}
 
         fields: List[dict] = []
-        for name, fdef in schema.items():
+        for name, fdef in merged.schema.items():
             d = _config_descriptor(fdef)
             d["category"] = f.category
-            if name in entry_values:
-                d["value"], d["source"] = entry_values[name], "entry"
-            elif name in platform_values:
-                d["value"], d["source"] = platform_values[name], f"platforms.{f.category}"
-            elif fdef.default is not None:
-                d["value"], d["source"] = fdef.default, "default"
-            else:
-                d["value"], d["source"] = None, None
+            d["value"] = merged.values.get(name)
+            d["source"] = labels.get(merged.sources.get(name, ""))
             fields.append(d)
         out[use] = fields
     return out

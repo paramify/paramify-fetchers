@@ -227,10 +227,14 @@ def _parse_kv(arg: str, path, json_out: bool):
     return arg.split("=", 1)
 
 
-def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool, env_ref_ok: bool = False):
-    # Config values resolve ${env:VAR} at run time, so the reference is saved as typed;
-    # target values don't, so a reference there still has to coerce.
-    if env_ref_ok and is_env_ref_attempt(value):
+def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool, target: bool = False):
+    # The runner resolves ${env:VAR} in string config fields only, so anywhere else
+    # a reference would be saved as literal text (or coerced to false).
+    if is_env_ref_attempt(value):
+        if target:
+            _fail(path, f"{key}: target fields aren't resolved, so ${{env:}} references don't work there", json_out)
+        if typ != "string":
+            _fail(path, f"config '{key}' is {typ}; ${{env:}} references work on string config fields only", json_out)
         return value
     try:
         return _coerce(value, typ)
@@ -1619,7 +1623,7 @@ def manifest_set_config(
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
-    value = _coerce_or_fail(raw, _config_type(root, fetcher, key), key, path, json_out, env_ref_ok=True)
+    value = _coerce_or_fail(raw, _config_type(root, fetcher, key), key, path, json_out)
     api.set_fetcher_config(m, fetcher, key, value)
     _save_and_report(m, path, root, json_out)
 
@@ -1655,7 +1659,7 @@ def manifest_add_target(
     vals = {}
     for kv in (values or []):
         k, raw = _parse_kv(kv, path, json_out)
-        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out)
+        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out, target=True)
     secret_env = {}
     for s in (secret or []):
         k, v = _parse_kv(s, path, json_out)
@@ -1684,7 +1688,7 @@ def manifest_set_target(
     vals = {}
     for kv in (values or []):
         k, raw = _parse_kv(kv, path, json_out)
-        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out)
+        vals[k] = _coerce_or_fail(raw, _target_field_type(root, fetcher, k), k, path, json_out, target=True)
     secret_env = {}
     for sv in (secret or []):
         k, v = _parse_kv(sv, path, json_out)
@@ -1723,7 +1727,7 @@ def manifest_set_platform_config(
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
-    value = _coerce_or_fail(raw, _platform_config_type(root, category, key), key, path, json_out, env_ref_ok=True)
+    value = _coerce_or_fail(raw, _platform_config_type(root, category, key), key, path, json_out)
     api.set_platform_config(m, category, key, value)
     _save_and_report(m, path, root, json_out)
 

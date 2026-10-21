@@ -22,7 +22,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from framework.contract import (
     ConfigField,
@@ -36,7 +36,12 @@ from framework.contract import (
 )
 from framework.discovery import DISCOVERY_DIR
 from framework.issue_reports import ISSUE_REPORTS_DIR
-from framework.secret_resolver import SecretResolutionError, UnsetSecretError, resolve
+from framework.secret_resolver import (
+    SecretResolutionError,
+    UnsetSecretError,
+    is_env_ref_attempt,
+    resolve,
+)
 
 _INHERITED_ENV_VARS = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "USER", "TZ")
 
@@ -147,32 +152,66 @@ def _coerce_env(value) -> str:
     return str(value)
 
 
+class MergedConfig(NamedTuple):
+    schema: Dict[str, ConfigField]
+    values: Dict[str, object]       # what the runner injects, references resolved
+    sources: Dict[str, str]         # per value: "entry", "platform" or "default"
+    unset: List[Tuple[str, str]]    # (field, VAR) for every reference whose variable was unset or empty
+    errors: Dict[str, str]          # per field: a reference the runner refuses
+
+
 def merged_config(
     fetcher: Fetcher,
     platform_spec: Optional[PlatformSpec],
     platform_cfg: Optional[PlatformConfig],
     entry: ManifestEntry,
-) -> Tuple[Dict[str, ConfigField], Dict[str, object]]:
-    """Resolve a fetcher's effective config. Returns (schema, values).
+) -> MergedConfig:
+    """Resolve a fetcher's effective config.
 
     The precedence ladder, lowest to highest: schema defaults, platform values,
-    per-fetcher values. Extracted from _apply_config so callers that need a
-    resolved value the fetcher never sees can read it without re-implementing the
-    ladder — `api.run()` does this for the issue-report `assessment_id`, which is
-    resolved from the manifest but injected into no env var.
+    per-fetcher values. A string field's value may be a ${env:VAR} reference; one
+    whose variable is unset or empty gives way to the next value down, as if it
+    had not been set. A reference on an integer or boolean field, or a malformed
+    one, is an error for that field, and its text stays the value so a view can
+    show it. Extracted from _apply_config so callers that need a resolved value
+    the fetcher never sees can read it without re-implementing the ladder —
+    `api.run()` does this for the issue-report `assessment_id`, which is resolved
+    from the manifest but injected into no env var.
     """
     schema: Dict[str, ConfigField] = {}
     if platform_spec:
         schema.update(platform_spec.config_schema)
     schema.update(fetcher.config_schema)  # per-fetcher overrides platform on name clash
 
-    values: Dict[str, object] = {
-        name: f.default for name, f in schema.items() if f.default is not None
-    }
-    if platform_cfg:
-        values.update({k: v for k, v in platform_cfg.config.items() if v is not None})
-    values.update({k: v for k, v in entry.config.items() if v is not None})
-    return schema, values
+    platform_values = platform_cfg.config if platform_cfg else {}
+    values: Dict[str, object] = {}
+    sources: Dict[str, str] = {}
+    unset: List[Tuple[str, str]] = []
+    errors: Dict[str, str] = {}
+    # Undeclared keys ride along as strings: assessment_id lives in the manifest, not a schema.
+    names = dict.fromkeys([*schema, *platform_values, *entry.config])
+    for name in names:
+        fdef = schema.get(name) or ConfigField(name=name)
+        layers = (("entry", entry.config.get(name)), ("platform", platform_values.get(name)),
+                  ("default", fdef.default))
+        for source, value in layers:
+            if value is None:
+                continue
+            if is_env_ref_attempt(value):
+                if fdef.type != "string":
+                    errors[name] = (f"config '{name}' is {fdef.type}; ${{env:}} references work on "
+                                    f"string config fields only")
+                else:
+                    try:
+                        value = resolve(value)
+                    except UnsetSecretError as e:
+                        unset.append((name, e.env_var))
+                        continue
+                    except SecretResolutionError as e:
+                        errors[name] = f"config '{name}': {e}"
+            values[name], sources[name] = value, source
+            break
+    return MergedConfig(schema, values, sources, unset, errors)
 
 
 def _apply_config(
@@ -182,47 +221,31 @@ def _apply_config(
     platform_cfg: Optional[PlatformConfig],
     entry: ManifestEntry,
     secret_sink: Optional[set] = None,
-    note_sink: Optional[List[Tuple[str, str]]] = None,
 ) -> None:
-    """Merge config and inject each field that declares an `env` mapping. Also
-    lets the platform's auth passthrough_env vars through the whitelist.
+    """Inject each merged config field (see merged_config) that declares an `env`
+    mapping. Also lets the platform's auth passthrough_env vars through the
+    whitelist."""
+    merged = merged_config(fetcher, platform_spec, platform_cfg, entry)
+    if merged.errors:
+        raise RuntimeError(f"{fetcher.name}: {next(iter(merged.errors.values()))}")
 
-    A string value may be a ${env:VAR} reference, resolved like a secret's. One
-    whose variable is unset or empty gives way to the next value down the ladder
-    (platform config, then the default), as if it had not been set, and lands in
-    note_sink as (field, VAR); a malformed one is an error."""
-    schema, _ = merged_config(fetcher, platform_spec, platform_cfg, entry)
-    platform_values = platform_cfg.config if platform_cfg else {}
-
-    for name, fdef in schema.items():
+    for name, fdef in merged.schema.items():
         if not fdef.env:
             continue
-        val, unset = None, None
-        for layer in (entry.config.get(name), platform_values.get(name), fdef.default):
-            if layer is None:
-                continue
-            try:
-                val = resolve(layer)
-                break
-            except UnsetSecretError as e:
-                unset = unset or e
-            except SecretResolutionError as e:
-                raise RuntimeError(f"{fetcher.name}: config '{name}': {e}") from e
-        if val is None and unset is not None and fdef.required:
-            raise RuntimeError(
-                f"{fetcher.name}: required config '{name}' reads ${{env:{unset.env_var}}}, "
-                f"which is unset or empty in the runner's environment"
-            ) from unset
-        if unset is not None and note_sink is not None:
-            note_sink.append((name, unset.env_var))
-        if val is None:
+        if name not in merged.values:
             if fdef.required:
+                refs = ", ".join(f"${{env:{var}}}" for field, var in merged.unset if field == name)
+                if refs:
+                    raise RuntimeError(
+                        f"{fetcher.name}: required config '{name}' reads {refs}, "
+                        f"unset or empty in the runner's environment"
+                    )
                 raise RuntimeError(
                     f"{fetcher.name}: required config '{name}' has no value "
                     f"(set it under platforms.{fetcher.category}.config or the fetcher's config)"
                 )
             continue
-        env[fdef.env] = _coerce_env(val)
+        env[fdef.env] = _coerce_env(merged.values[name])
 
     passthrough = set(platform_spec.passthrough_env if platform_spec else [])
     if platform_cfg:
@@ -323,7 +346,6 @@ def _build_env(
     secret_sink: Optional[set] = None,
     note_sink: Optional[List[Tuple[str, str]]] = None,
     shadow_sink: Optional[List[Tuple[str, str]]] = None,
-    config_note_sink: Optional[List[Tuple[str, str]]] = None,
 ) -> Dict[str, str]:
     """Build the env dict to pass to a single fetcher invocation.
 
@@ -336,7 +358,7 @@ def _build_env(
     env["PYTHONUNBUFFERED"] = "1"
     env["EVIDENCE_DIR"] = str(output_dir.resolve())
 
-    _apply_config(env, fetcher, platform_spec, platform_cfg, entry, secret_sink, config_note_sink)
+    _apply_config(env, fetcher, platform_spec, platform_cfg, entry, secret_sink)
 
     # An optional secret the manifest omits is simply not injected: the fetcher's
     # credential chain falls through to ambient identity (IRSA, workload identity,
@@ -607,18 +629,18 @@ def _emit_notes(
     )
 
 
-def _emit_config_notes(
-    notes: List[Tuple[str, str]], on_note: Optional[Callable[[str], None]]
-) -> None:
-    """Say which config ${env:} references were unset, so a fallback is not silent."""
-    if on_note is None or not notes:
+def _emit_config_notes(merged: MergedConfig, on_note: Optional[Callable[[str], None]]) -> None:
+    """Say which config ${env:} references were unset and what applied instead."""
+    if on_note is None or not merged.unset:
         return
-    fields = ", ".join(f"{name} (${{env:{var}}})" for name, var in notes)
-    plural = "s" if len(notes) > 1 else ""
-    on_note(
-        f"{len(notes)} config reference{plural} unset: {fields}. "
-        f"The platform value or default applies, if there is one."
-    )
+    refs: Dict[str, List[str]] = {}
+    for name, var in merged.unset:
+        refs.setdefault(name, []).append(f"${{env:{var}}}")
+    applied = {"platform": "the platform value", "default": "the default"}
+    fields = "; ".join(f"{name} ({', '.join(r)}) uses {applied.get(merged.sources.get(name, ''), 'no value')}"
+                       for name, r in refs.items())
+    plural = "s" if len(merged.unset) > 1 else ""
+    on_note(f"{len(merged.unset)} config reference{plural} unset: {fields}.")
 
 
 def run_entry(
@@ -646,15 +668,15 @@ def run_entry(
     output_dir.mkdir(parents=True, exist_ok=True)
     inv_dir = invocation_dir(fetcher, output_dir)
     inv_dir.mkdir(parents=True, exist_ok=True)
+    # Config is per entry, so its notes are too, whatever the number of targets.
+    _emit_config_notes(merged_config(fetcher, platform_spec, platform_cfg, entry), on_note)
 
     if not fetcher.supports_targets:
         secrets_seen: set = set()
         notes: List[Tuple[str, str]] = []
-        config_notes: List[Tuple[str, str]] = []
         env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg,
-                         secrets_seen, notes, config_note_sink=config_notes)
+                         secrets_seen, notes)
         _emit_notes(notes, on_note)
-        _emit_config_notes(config_notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
 
     if not entry.targets:
@@ -668,11 +690,9 @@ def run_entry(
             )
         secrets_seen = set()
         notes = []
-        config_notes = []
         env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg,
-                         secrets_seen, notes, config_note_sink=config_notes)
+                         secrets_seen, notes)
         _emit_notes(notes, on_note)
-        _emit_config_notes(config_notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
 
     results = []
@@ -680,12 +700,10 @@ def run_entry(
         try:
             secrets_seen = set()
             notes = []
-            config_notes = []
             shadowed: List[Tuple[str, str]] = []
             env = _build_env(fetcher, entry, target, inv_dir, platform_spec, platform_cfg,
-                             secrets_seen, notes, shadowed, config_notes)
+                             secrets_seen, notes, shadowed)
             _emit_notes(notes, on_note)
-            _emit_config_notes(config_notes, on_note)
             _emit_shadowed(shadowed, on_note)
             results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir))
         except (RuntimeError, SecretResolutionError) as e:
