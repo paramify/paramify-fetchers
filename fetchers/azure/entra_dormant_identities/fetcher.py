@@ -159,7 +159,7 @@ def user_record(user: dict, activity_ok: bool, directory: list, azure: list, rea
 
 def service_principal_record(sp: dict, activity: Optional[dict], activity_ok: bool, tenant_id: Optional[str],
                              directory: list, azure: list, readable: tuple, days: int, now: datetime,
-                             app_created: Optional[str] = None) -> dict:
+                             app_created: Optional[str] = None, apps_ok: bool = True) -> dict:
     """A principal holding a role; dormancy is judged on its sign-ins as a client, the way it uses a role."""
     enabled = sp.get("accountEnabled")
     enabled = True if enabled is None else bool(enabled)
@@ -171,7 +171,8 @@ def service_principal_record(sp: dict, activity: Optional[dict], activity_ok: bo
     )
     since = _days_since(last_client, now)
     # Graph returns createdDateTime on a service principal though Learn doesn't document it; the app
-    # registration's is documented. With neither, a new principal gets no grace.
+    # registration's is documented. With neither, a new principal gets no grace, unless the app
+    # registrations couldn't be read: then this tenant's own app has an unknown age.
     created_at = sp.get("createdDateTime") or app_created
     created = _days_since(created_at, now)
     own_app: Optional[bool] = None if not tenant_id else (
@@ -184,6 +185,8 @@ def service_principal_record(sp: dict, activity: Optional[dict], activity_ok: bo
         dormant = None
     elif since is not None:
         dormant = enabled and since > days
+    elif created_at is None and own_app and not apps_ok:
+        dormant = None if enabled else False
     else:
         dormant = enabled and _past_grace(created, days)
     return {
@@ -256,6 +259,7 @@ def summarize(users: List[dict], sps: List[dict], deleted: List[dict], status: D
         "dormant_after_days": days,
         "tenant_readable": status["tenant"] == READ,
         "users_readable": listed,
+        "applications_readable": status["applications"] == READ,
         "user_sign_in_activity": status["user_sign_in_activity"],
         "service_principal_sign_in_activity": status["service_principal_sign_in_activity"],
         "directory_roles_readable": directory_ok,
@@ -373,8 +377,9 @@ def collect(client, subscription_id: str, collector) -> tuple:
 
     # This tenant's app registrations, for the creation date a service principal may lack.
     apps = _graph_list(client, collector, "graph.applications.get",
-                       f"/applications?$select=appId,createdDateTime&$top={USER_PAGE}") or []
-    app_created = {(a.get("appId") or "").lower(): a.get("createdDateTime") for a in apps}
+                       f"/applications?$select=appId,createdDateTime&$top={USER_PAGE}")
+    status["applications"] = READ if apps is not None else NOT_READ
+    app_created = {(a.get("appId") or "").lower(): a.get("createdDateTime") for a in apps or []}
 
     before = len(collector.failures)
     activities = _graph_list(client, collector, "graph.reports.servicePrincipalSignInActivities.get(beta)",
@@ -444,7 +449,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
                 obj, by_app.get((obj.get("appId") or "").lower()),
                 status["service_principal_sign_in_activity"] == READ, tenant_id,
                 directory.get(pid, []), azure.get(pid, []), readable, days, now,
-                app_created.get((obj.get("appId") or "").lower()),
+                app_created.get((obj.get("appId") or "").lower()), status["applications"] == READ,
             ))
         elif found is not None and obj is None and pid in rbac_ids:
             deleted.append(deleted_principal_record(

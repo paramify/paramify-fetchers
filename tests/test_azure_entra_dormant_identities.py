@@ -197,7 +197,7 @@ def test_inactive_guest_and_deleted_role_holders(monkeypatch):
     results, s, collector = _collect(monkeypatch, FakeClient(*_tenant()))
 
     assert collector.failures == []
-    assert s["users_readable"] is True
+    assert s["users_readable"] is True and s["applications_readable"] is True
     assert s["user_sign_in_activity"] == s["service_principal_sign_in_activity"] == "read"
     assert s["dormant_after_days"] == 90
     assert s["users_checked"] == 8
@@ -252,6 +252,35 @@ def test_a_service_principals_own_creation_date_wins_and_none_means_no_grace(mon
     assert sps["sp-new"]["days_since_created"] == 3 and sps["sp-new"]["dormant"] is False
     # No creation date from either source: an app not yet signed in reads dormant.
     assert sps["sp-unused"]["days_since_created"] is None and sps["sp-unused"]["dormant"] is True
+
+
+def test_refused_app_registrations_leave_own_apps_without_a_creation_date_unknown(monkeypatch):
+    graph, arm, objects = _tenant()
+    objects["sp-unused"] = _sp("sp-unused", "app-unused", created=400)
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm, objects, errors={"/applications": DENIED}))
+
+    assert [f["operation"] for f in collector.failures] == ["graph.applications.get"]
+    assert s["applications_readable"] is False
+    sps = {r["id"]: r for r in results["service_principals"]}
+    # Its age is unknown, so not dormant; one with its own creation date or a client sign-in is judged as usual.
+    assert sps["sp-new"]["dormant"] is None and sps["sp-new"]["days_since_created"] is None
+    assert sps["sp-unused"]["dormant"] is True and sps["sp-busy"]["dormant"] is False
+    assert s["dormant_service_principals_holding_roles"] == 2
+    assert s["service_principals_holding_roles_dormancy_unknown"] == 4
+
+
+def test_refused_app_registrations_make_the_all_clear_unknown_not_false(monkeypatch):
+    graph, arm, objects = _tenant()
+    graph["/directoryRoles/r-ga/members"] = []
+    graph["/directoryRoles/r-dr/members"] = []
+    arm["roleAssignments"] = [_assignment("a1", "u-active"), _assignment("a10", "sp-new", ptype="ServicePrincipal")]
+    _, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects))
+    assert s["applications_readable"] is True and s["no_inactive_identity_holds_a_role"] is True
+
+    _, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects, errors={"/applications": DENIED}))
+    assert s["dormant_service_principals_holding_roles"] == 0
+    assert s["service_principals_holding_roles_dormancy_unknown"] == 1
+    assert s["no_inactive_identity_holds_a_role"] is None
 
 
 def test_an_app_with_no_owner_organization_is_unknown(monkeypatch):
