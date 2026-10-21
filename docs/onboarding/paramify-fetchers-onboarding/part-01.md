@@ -12,7 +12,7 @@ A traced, inspected run. You'll install the CLI from this repo, build a scratch 
 
 ## Prerequisites
 
-- **Python 3.10+** — `pyproject.toml` requires `>=3.10`; this guide was written and verified against Python 3.14.5.
+- **Python 3.11+** — `pyproject.toml` requires `>=3.11`; this guide was written and verified against Python 3.14.5.
 - A clone of `paramify-fetchers`, on `main`.
 - A virtualenv. Commands below assume it's activated.
 - **No credentials.** Deliberately. Everything in this part runs with `RIPPLING_API_TOKEN=fake`.

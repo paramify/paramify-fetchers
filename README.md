@@ -103,7 +103,7 @@ paramify evidence evidence/run-*/demo_hello.json   # read what it wrote
 
 ## Install
 
-**Prerequisites:** Python 3.10 or later.
+**Prerequisites:** Python 3.11 or later.
 
 ```bash
 git clone https://github.com/paramify/paramify-fetchers.git
