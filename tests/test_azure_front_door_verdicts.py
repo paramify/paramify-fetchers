@@ -258,8 +258,8 @@ def config(*rules, default=None, public_network_access=None):
     pytest.param("Enabled", config(fd_rule(OWN_FDID)), False, True, "front_door_id_restricted", [], id="own-fdid-only"),
     pytest.param("Enabled", config(fd_rule(OWN_FDID.upper(), header="X-Azure-FDID")), False, True,
                  "front_door_id_restricted", [], id="header-and-id-case-insensitive"),
-    pytest.param("Enabled", config(fd_rule(OWN_FDID, OTHER_FDID)), False, True, "front_door_id_restricted", [],
-                 id="own-and-known-profile"),
+    pytest.param("Enabled", config(fd_rule(OWN_FDID, OTHER_FDID)), False, False, None,
+                 ["other_front_door_id_allowed"], id="own-and-another-profile"),
     pytest.param(None, config(rule("Allow all", 2147483647, ip="Any")), False, False, None,
                  ["public_access_unrestricted"], id="allow-all-and-unset-public-access"),
     pytest.param("Enabled", config(), False, False, None, ["public_access_unrestricted"], id="no-rules"),
@@ -269,7 +269,7 @@ def config(*rules, default=None, public_network_access=None):
                  id="service-tag-without-fdid"),
     pytest.param("Enabled", config(fd_rule(OWN_FDID, UNKNOWN_FDID)), False, False, None,
                  ["unknown_front_door_id_allowed"], id="unknown-fdid"),
-    pytest.param("Enabled", config(fd_rule(OTHER_FDID)), False, False, None, ["profile_front_door_id_not_allowed"],
+    pytest.param("Enabled", config(fd_rule(OTHER_FDID)), False, False, None, ["other_front_door_id_allowed"],
                  id="other-profile-only"),
     pytest.param("Enabled", config(fd_rule(OWN_FDID), rule("office", 200)), False, False, None,
                  ["non_front_door_allow_rule"], id="ip-allow-bypasses-front-door"),
@@ -296,6 +296,18 @@ def test_lockdown_reports_the_ids_it_compared():
     assert record["profile_front_door_id_allowed"] is True
     assert record["other_front_door_ids_allowed"] == [UNKNOWN_FDID]
     assert record["non_front_door_allow_rules"] == ["office"]
+
+
+def test_other_profile_front_door_id_is_counted():
+    group = {"id": "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Cdn/profiles/p/originGroups/g", "name": "g",
+             "profile": "p", "serving": True, "best_priority": 1, "origins": [origin_rec("east", "eastus", "app-east")]}
+    sites = {origins.arm_key(SITE.format("app-east")): site_row("app-east", "eastus", "plan", public="Enabled")}
+    configs = {origins.arm_key(SITE.format("app-east")): config(fd_rule(OWN_FDID, OTHER_FDID))}
+    profile_fdids = {origins.profile_key(group["id"]): OWN_FDID, "/other-profile": OTHER_FDID}
+    app_origins = origins.app_service_origin_records([group], profile_fdids, sites, {}, {}, configs, "s")
+    summary = origins.summarize_app_services(app_origins, [], None)
+    assert summary["serving_app_service_origins_other_front_door_id_allowed"] == 1
+    assert summary["serving_app_service_origins_not_locked"] == 1
 
 
 def test_unknown_profile_front_door_id_is_a_gap():
@@ -430,6 +442,57 @@ def test_site_queries_cover_the_subscription_slots_and_hosts():
     assert "mv-expand h = properties.enabledHostNames" in queries[2] and "bad'host" not in queries[2]
 
 
+class FakeGraph:
+    """Serves `rows` two per page by skip token; `repeat` keeps handing back the first token."""
+
+    def __init__(self, rows, truncated=False, repeat=False):
+        self.rows, self.truncated, self.repeat, self.requests = rows, truncated, repeat, []
+
+    def resources(self, request):
+        from types import SimpleNamespace as NS
+
+        self.requests.append(request)
+        start = int(request.options.skip_token or 0)
+        end = 2 if self.repeat else start + 2
+        return NS(total_records=len(self.rows), result_truncated="true" if self.truncated else "false",
+                  data=self.rows[start:end], skip_token=str(end) if end < len(self.rows) else None)
+
+
+@pytest.fixture
+def graph_models(monkeypatch):
+    from types import ModuleType
+    from types import SimpleNamespace as NS
+
+    models = ModuleType("azure.mgmt.resourcegraph.models")
+    models.QueryRequest = lambda **kw: NS(**kw)
+    models.QueryRequestOptions = lambda **kw: NS(**kw)
+    monkeypatch.setitem(sys.modules, "azure.mgmt.resourcegraph.models", models)
+
+
+def test_graph_rows_pages_across_subscriptions(graph_models):
+    graph = FakeGraph([{"key": str(n)} for n in range(5)])
+    assert [r["key"] for r in origins.graph_rows(graph, "resources | order by key asc")] == ["0", "1", "2", "3", "4"]
+    assert len(graph.requests) == 3
+    assert all(r.subscriptions is None for r in graph.requests)
+
+
+@pytest.mark.parametrize("graph", [
+    pytest.param(FakeGraph([{"key": "a"}], truncated=True), id="truncated"),
+    pytest.param(FakeGraph([{"key": str(n)} for n in range(5)], repeat=True), id="repeated-skip-token"),
+])
+def test_graph_paging_failure_is_reported(graph_models, graph):
+    collector = origins.Collector(origins.logger)
+    assert origins.lookup_plans(graph, collector, ["/subscriptions/s/serverfarms/p"]) == {}
+    assert not collector.ok
+
+
+def test_lookup_queries_have_a_stable_order():
+    queries = (origins.region_queries(["/a"], ["a.example"]) + origins.site_queries("sub-1", ["/a"], ["a.example"])
+               + origins.plan_queries(["/p"]))
+    assert len(queries) == 6
+    assert all(" | order by key asc" in q for q in queries)
+
+
 # --- live origin health and traffic ---
 
 HOURS = [f"2026-10-08T{h:02d}:00:00Z" for h in range(6)]
@@ -518,6 +581,32 @@ def test_single_region_group_has_no_hourly_breakdown_or_shifts():
     [record], _ = origins.origin_health_records([group], {key: failover_metrics()})
     assert (record["multi_region"], record["hourly_by_region"], record["traffic_shift_count"]) == (False, [], 0)
     assert record["regions_serving_last_hour"] == ["eastus"]
+
+
+def with_empty_final_hour(metrics):
+    for s in metrics["health"] + metrics["requests"]:
+        s["points"].append({"time": "2026-10-08T06:00:00Z", "average": None, "minimum": None, "total": None})
+    return metrics
+
+
+def test_last_hour_is_the_newest_hour_with_data():
+    group = health_group()
+    key = origins.profile_key(group["id"])
+    [record], _ = origins.origin_health_records([group], {key: with_empty_final_hour(failover_metrics())})
+    assert record["last_hour"] == HOURS[-1]
+    assert record["regions_serving_last_hour"] == ["westus"]
+    assert record["all_regions_healthy_last_hour"] is False
+    assert len(record["hourly_by_region"]) == 7
+    west = next(o for o in record["origins"] if o["origin"] == "west")
+    assert west["last_hour_health_avg"] == 100
+
+
+def test_health_data_counts_an_unresolved_region():
+    group = health_group(regions=(None, None))
+    key = origins.profile_key(group["id"])
+    [record], _ = origins.origin_health_records([group], {key: with_empty_final_hour(failover_metrics())})
+    assert [r["region"] for r in record["regions"]] == ["unresolved"]
+    assert (record["has_health_data"], record["all_regions_healthy_last_hour"]) == (True, None)
 
 
 def test_group_without_metrics_has_no_data():
