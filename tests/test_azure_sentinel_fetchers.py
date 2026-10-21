@@ -530,6 +530,98 @@ def test_incidents_automation_and_xdr_changes_are_not_acknowledgements(azure, tm
     assert closed["hours_to_acknowledge"] == pytest.approx(30, abs=0.01)
 
 
+def run_with_history(azure, tmp_path, rows):
+    azure.queries.insert(0, ("ModifiedBy", table(HISTORY_COLUMNS, rows)))
+    code, ev = run("sentinel_incidents", tmp_path)
+    return code, ev, {i["name"]: i for i in ws_a(ev)["incidents"]}
+
+
+def test_incidents_closing_straight_from_new_is_an_acknowledgement(azure, tmp_path):
+    created = NOW - timedelta(days=3)
+    _, _, by_name = run_with_history(azure, tmp_path, [
+        update("i-closed", created, "New", "Low"),
+        update("i-closed", created + timedelta(hours=5), "Closed", "Low", NOW - timedelta(days=2), by="pat@contoso.com")])
+    assert by_name["i-closed"]["hours_to_acknowledge"] == pytest.approx(5, abs=0.01)
+
+
+def test_incidents_person_closing_after_automation_assigned_it(azure, tmp_path):
+    created = NOW - timedelta(days=3)
+    _, _, by_name = run_with_history(azure, tmp_path, [
+        update("i-closed", created, "New", "High"),
+        update("i-closed", created + timedelta(hours=1), "Active", "High", owner="tier1@contoso.com",
+               by="AUTOMATION RULE - triage"),
+        update("i-closed", created + timedelta(hours=20), "Closed", "High", NOW - timedelta(days=2),
+               owner="tier1@contoso.com", by="tier1@contoso.com")])
+    assert by_name["i-closed"]["hours_to_acknowledge"] == pytest.approx(20, abs=0.01)
+
+
+def test_incidents_reopen_is_not_an_acknowledgement(azure, tmp_path):
+    created = NOW - timedelta(days=3)
+    _, _, by_name = run_with_history(azure, tmp_path, [
+        update("i-closed", created, "New", "Low"),
+        update("i-closed", created + timedelta(hours=1), "Closed", "Low", created + timedelta(hours=1),
+               by="Automation rule - close benign"),
+        update("i-closed", created + timedelta(hours=9), "Active", "Low", owner="pat@contoso.com", by="pat@contoso.com"),
+        update("i-closed", NOW - timedelta(days=2), "Closed", "Low", NOW - timedelta(days=2), owner="pat@contoso.com",
+               by="pat@contoso.com")])
+    assert by_name["i-closed"]["acknowledged_time_utc"] is None
+
+
+def test_incidents_older_than_the_history_have_no_acknowledgement(azure, tmp_path):
+    rows = incident_history()[:3] + [
+        update("i-new", NOW - timedelta(days=10), "New", "High"),
+        update("i-new", NOW - timedelta(days=9), "Active", "High", owner="pat@contoso.com", by="pat@contoso.com")]
+    _, ev, by_name = run_with_history(azure, tmp_path, rows)
+    assert by_name["i-new"]["acknowledged_time_utc"] is None and by_name["i-new"]["hours_to_acknowledge"] is None
+    assert ws_a(ev)["acknowledged_incidents"] == 1
+    assert all((m["mtta_hours"] or 12) == pytest.approx(12, abs=0.01) for m in ws_a(ev)["monthly"])
+
+
+def test_incidents_monthly_counts_only_in_scope_incidents(azure, tmp_path):
+    rows = azure.queries[[q[0] for q in azure.queries].index("arg_max(TimeGenerated, Status, ClosedTime")][1]["tables"][0]["rows"]
+    rows.append(["i-old-closed", "Closed", iso(NOW - timedelta(days=5)), iso(NOW - timedelta(days=200)), "[]"])
+    code, ev = run("sentinel_incidents", tmp_path)
+    # i-old-closed closed in the lookback but was created before it, so it's not listed and not counted.
+    assert sum(m["incidents_closed"] for m in ws_a(ev)["monthly"]) == 1
+
+
+def test_incidents_open_unacknowledged_means_no_person_acknowledged_it(azure, tmp_path):
+    azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"].append(incident("i-recent", "New", NOW - timedelta(days=1)))
+    code, ev = run("sentinel_incidents", tmp_path)
+    # i-recent has an owner but no person acknowledged it; i-new is older than the history, so it can't be known.
+    assert ws_a(ev)["open_unacknowledged"] == 1 and ev["summary"]["open_unacknowledged"] == 1
+
+
+def test_incidents_refused_close_times_are_unknown(azure, tmp_path):
+    azure.queries.insert(0, ("arg_max(TimeGenerated, Status, ClosedTime", Resp(403, {"error": {
+        "code": "InsufficientAccessError", "message": "no"}})))
+    code, ev = run("sentinel_incidents", tmp_path)
+    ws = ws_a(ev)
+    closed = next(i for i in ws["incidents"] if i["name"] == "i-closed")
+    assert code == 1 and closed["close_time_status"] == "unknown"
+    assert ws["closed_missing_close_time"] is None and ws["closed_close_time_not_retained"] is None
+    assert ev["summary"]["closed_missing_close_time"] is None
+
+
+def test_incidents_queries_skip_when_the_list_fails_and_use_explicit_bounds(azure, tmp_path):
+    run("sentinel_incidents", tmp_path)
+    kql = [c[2] for c in azure.calls if c[0] == "POST" and "SecurityIncident" in c[2]]
+    assert kql and all("TimeGenerated > datetime(" in q and "ago(" not in q for q in kql)
+    azure.calls.clear()
+    azure.arm[(f"{SI_A}/incidents", "2025-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_incidents", tmp_path)
+    assert code == 1 and not any(c[0] == "POST" and "SecurityIncident" in c[2] for c in azure.calls)
+
+
+def test_incident_with_no_alerts_reads_empty_when_entities_are_skipped(azure, tmp_path):
+    azure.queries.insert(0, ("arg_max(TimeGenerated, Status, ClosedTime", table(
+        ["IncidentName", "Status", "ClosedTime", "CreatedTime", "Tasks"], [])))
+    azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"][0]["properties"]["additionalData"]["alertsCount"] = 0
+    code, ev = run("sentinel_incidents", tmp_path)
+    new = next(i for i in ws_a(ev)["incidents"] if i["name"] == "i-new")
+    assert new["entities"] == [] and not any(c[0] == "POST" and "SystemAlertId" in c[2] for c in azure.calls)
+
+
 def test_incident_entities_are_capped_per_kind():
     files = [{"$id": str(n), "Type": "file", "Name": f"f{n:02}.dll"} for n in range(30)]
     rows = [{"IncidentName": "x", "AlertId": "a", "Entities": json.dumps(
@@ -553,7 +645,9 @@ def test_incidents_without_security_alert_leave_entities_unknown(azure, tmp_path
     arm[1]["properties"]["additionalData"]["alertsCount"] = 0
     code, ev = run("sentinel_incidents", tmp_path)
     ws = ws_a(ev)
-    assert code == 0 and all(i["entities"] is None for i in ws["incidents"]) and "SecurityAlert" in ws["notes"][-1]
+    by_name = {i["name"]: i for i in ws["incidents"]}
+    assert code == 0 and by_name["i-new"]["entities"] is None and "SecurityAlert" in ws["notes"][-1]
+    assert by_name["i-closed"]["entities"] == []  # no alerts, so no entities whether or not they could be read
 
 
 def test_incident_with_no_alerts_has_no_entities(azure, tmp_path):

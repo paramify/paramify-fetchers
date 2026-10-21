@@ -30,29 +30,33 @@ PAGE_SIZE = "1000"
 OPEN_STATUSES = frozenset({"New", "Active"})
 MAX_ENTITIES_PER_KIND = 25
 MAX_RECURRING = 25
-# Changes an automation rule or the Defender XDR sync made: not a person acknowledging the incident.
-SYSTEM_MODIFIERS = ("Automation rule", "Microsoft XDR", "Microsoft Defender XDR", "Microsoft 365 Defender")
+# ModifiedBy prefixes (any case) of changes an automation rule or the Defender XDR sync made. Microsoft doesn't
+# document what a playbook or Logic App writes there, so their updates count as a person's.
+SYSTEM_MODIFIERS = ("automation rule", "microsoft xdr", "microsoft defender xdr", "microsoft 365 defender")
 
 # The ARM incident has no close time or change history; SecurityIncident holds one row per update.
+# Bounded by an explicit time so the rows read start exactly where the lookback does.
 CLOSED_TIME_QUERY = (
     "SecurityIncident "
-    "| where TimeGenerated > ago({days}d) "
+    "| where TimeGenerated > datetime({since}) "
     "| summarize arg_max(TimeGenerated, Status, ClosedTime, CreatedTime, Tasks) by IncidentName "
     "| project IncidentName, Status, ClosedTime, CreatedTime, Tasks"
 )
+# Every update row. Keeping only rows that change status, severity or owner (serialize, prev()) would shrink it
+# on busy workspaces, but needs checking on a real workspace first.
 HISTORY_QUERY = (
     "SecurityIncident "
-    "| where TimeGenerated > ago({days}d) "
+    "| where TimeGenerated > datetime({since}) "
     "| project TimeGenerated, IncidentName, Status, Severity, ClosedTime, ModifiedBy, "
     "OwnerId = tostring(Owner.objectId), "
     "Owner = coalesce(tostring(Owner.userPrincipalName), tostring(Owner.assignedTo), tostring(Owner.email))"
 )
 ENTITIES_QUERY = (
     "SecurityIncident "
-    "| where TimeGenerated > ago({days}d) "
+    "| where TimeGenerated > datetime({since}) "
     "| summarize arg_max(TimeGenerated, AlertIds) by IncidentName "
     "| mv-expand AlertId = AlertIds to typeof(string) "
-    "| join kind=inner (SecurityAlert | where TimeGenerated > ago({days}d) "
+    "| join kind=inner (SecurityAlert | where TimeGenerated > datetime({since}) "
     "| summarize arg_max(TimeGenerated, Entities) by SystemAlertId) on $left.AlertId == $right.SystemAlertId "
     "| project IncidentName, AlertId, Entities"
 )
@@ -145,10 +149,13 @@ def in_scope(incident: Dict[str, Any], cutoff: datetime) -> bool:
     return incident.get("status") in OPEN_STATUSES or created_in(incident, cutoff)
 
 
-def close_time_status(incident: Dict[str, Any], retained_from: datetime) -> Optional[str]:
-    """found, missing, or not_retained: last touched before SecurityIncident's retention, so its close record is gone."""
+def close_time_status(incident: Dict[str, Any], retained_from: datetime, read: bool = True) -> Optional[str]:
+    """found, missing, not_retained (last touched before SecurityIncident's retention, so its close record is gone),
+    or unknown when the close times couldn't be read."""
     if incident.get("status") != "Closed":
         return None
+    if not read:
+        return "unknown"
     if incident.get("closed_time_utc"):
         return "found"
     touched = parse_time(incident.get("last_modified_time_utc")) or parse_time(incident.get("created_time_utc"))
@@ -169,17 +176,23 @@ def owned(row: Dict[str, Any]) -> bool:
     return bool(row.get("OwnerId") or row.get("Owner"))
 
 
+def by_person(row: Dict[str, Any]) -> bool:
+    return not (row.get("ModifiedBy") or "").strip().lower().startswith(SYSTEM_MODIFIERS)
+
+
 def acknowledged_time(rows: List[Dict[str, Any]], complete: bool) -> Optional[str]:
-    """First update by a person that moved the incident to Active or gave it an owner; never the creation row."""
-    if not complete and rows and (rows[0].get("Status") == "Active" or owned(rows[0])):
-        return None  # already acknowledged before the oldest retained update, at an unknown time
+    """First update by a person that changes the status (to Active or Closed) or the owner, up to the first close,
+    so a reopen never counts. Unknown unless every update since creation was read."""
+    if not complete or not rows or rows[0].get("Status") == "Closed":
+        return None
     for before, row in zip(rows, rows[1:]):
-        if (row.get("ModifiedBy") or "").startswith(SYSTEM_MODIFIERS):
-            continue
-        activated = row.get("Status") == "Active" and before.get("Status") != "Active"
+        status = row.get("Status")
+        moved = status != before.get("Status") and status in ("Active", "Closed")
         assigned = owned(row) and (row.get("OwnerId"), row.get("Owner")) != (before.get("OwnerId"), before.get("Owner"))
-        if activated or assigned:
+        if (moved or assigned) and by_person(row):
             return row.get("TimeGenerated")
+        if status == "Closed":
+            return None
     return None
 
 
@@ -314,12 +327,13 @@ def tally(values: List[Optional[str]], empty: str) -> Dict[str, int]:
 
 
 def monthly_metrics(
-    everything: List[Dict[str, Any]], rows_by: Dict[str, List[Dict[str, Any]]],
+    everything: List[Dict[str, Any]], scoped: List[Dict[str, Any]], rows_by: Dict[str, List[Dict[str, Any]]],
     cutoff: datetime, now: datetime, history_from: datetime,
 ) -> List[Dict[str, Any]]:
-    """Per calendar month of the lookback: MTTD by month created, MTTA by month acknowledged, MTTR by month closed, and the open backlog at month end."""
+    """Per calendar month of the lookback: MTTD by month created, MTTA by month acknowledged and MTTR by month closed
+    over the in-scope incidents, and the open backlog at month end over every incident."""
     times = {
-        field: [(parse_time(i.get(field)), i) for i in everything]
+        field: [(parse_time(i.get(field)), i) for i in scoped]
         for field in ("created_time_utc", "acknowledged_time_utc", "closed_time_utc")
     }
     months = []
@@ -373,7 +387,9 @@ def recurrence(incidents: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def incident_summary(incidents: List[Dict[str, Any]], now: datetime, cutoff: datetime, history_read: bool) -> Dict[str, Any]:
+def incident_summary(
+    incidents: List[Dict[str, Any]], now: datetime, cutoff: datetime, history_read: bool, closes_read: bool
+) -> Dict[str, Any]:
     open_ = [i for i in incidents if i.get("status") in OPEN_STATUSES]
     closed = [i for i in incidents if i.get("status") == "Closed"]
     recent = [i for i in incidents if created_in(i, cutoff)]
@@ -385,14 +401,17 @@ def incident_summary(incidents: List[Dict[str, Any]], now: datetime, cutoff: dat
         "open_by_severity": tally([i.get("severity") for i in open_], "unknown"),
         "closed_incidents": len(closed),
         "closed_undetermined": sum(1 for i in closed if (i.get("classification") or "Undetermined") == "Undetermined"),
-        "closed_missing_close_time": sum(1 for i in closed if i.get("close_time_status") == "missing"),
-        "closed_close_time_not_retained": sum(1 for i in closed if i.get("close_time_status") == "not_retained"),
+        "closed_missing_close_time": sum(1 for i in closed if i.get("close_time_status") == "missing") if closes_read else None,
+        "closed_close_time_not_retained": (
+            sum(1 for i in closed if i.get("close_time_status") == "not_retained") if closes_read else None
+        ),
         "median_hours_to_close": round(statistics.median(hours), 2) if hours else None,
         "max_hours_to_close": max(hours) if hours else None,
         "oldest_open_age_days": round(max(ages).total_seconds() / 86400, 1) if ages else None,
         "acknowledged_incidents": sum(1 for i in incidents if i.get("acknowledged_time_utc")) if history_read else None,
-        "open_unacknowledged": sum(
-            1 for i in open_ if i.get("status") == "New" and not (i.get("owner_user_principal_name") or i.get("owner_assigned_to"))
+        # Only incidents whose whole history was read can be known to be unacknowledged.
+        "open_unacknowledged": (
+            sum(1 for i in open_ if i.get("history_complete") and not i.get("acknowledged_time_utc")) if history_read else None
         ),
         "mttd_hours": mean_hours([i.get("hours_to_detect") for i in recent]),
         "mtta_hours": mean_hours([i.get("hours_to_acknowledge") for i in recent]),
@@ -400,12 +419,12 @@ def incident_summary(incidents: List[Dict[str, Any]], now: datetime, cutoff: dat
     }
 
 
-def security_incident_query(client, ws: Dict[str, Any], kql: str, days: int, label: str, collector, notes: List[str]):
+def security_incident_query(client, ws: Dict[str, Any], kql: str, since: str, days: int, label: str, collector, notes: List[str]):
     """(rows, table_exists): rows None when the query failed or the table doesn't exist."""
     try:
         if not ws.get("customer_id"):
             raise LookupError("workspace has no customerId to query")
-        return client.query(ws["customer_id"], kql.format(days=days), iso_duration_days(days)), True
+        return client.query(ws["customer_id"], kql.format(since=since), iso_duration_days(days + 1)), True
     except Exception as exc:  # noqa: BLE001
         if table_missing(exc, "SecurityIncident"):
             notes.append("SecurityIncident table does not exist in this workspace; closed times and history unavailable")
@@ -427,14 +446,20 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         ),
     )
     notes: List[str] = []
-    latest_rows, table_exists = security_incident_query(client, ws, CLOSED_TIME_QUERY, days, "SecurityIncident", collector, notes)
+    if listed is None:
+        return {"lookback_days": days, "incidents": None, "notes": notes}
+    since = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+    latest_rows, table_exists = security_incident_query(
+        client, ws, CLOSED_TIME_QUERY, since, days, "SecurityIncident", collector, notes
+    )
+    closes_read = latest_rows is not None or not table_exists
     history: Optional[List[Dict[str, Any]]] = None
     entity_rows: Optional[List[Dict[str, Any]]] = None
     if latest_rows is not None:
-        history, _ = security_incident_query(client, ws, HISTORY_QUERY, days, "SecurityIncident history", collector, notes)
-    if latest_rows and listed is not None:
+        history, _ = security_incident_query(client, ws, HISTORY_QUERY, since, days, "SecurityIncident history", collector, notes)
+    if latest_rows:
         try:
-            entity_rows = client.query(ws["customer_id"], ENTITIES_QUERY.format(days=days), iso_duration_days(days))
+            entity_rows = client.query(ws["customer_id"], ENTITIES_QUERY.format(since=since), iso_duration_days(days + 1))
         except Exception as exc:  # noqa: BLE001
             if table_missing(exc, "SecurityAlert"):
                 notes.append("SecurityAlert table does not exist in this workspace; entities unavailable")
@@ -446,8 +471,6 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     rows_by: Dict[str, List[Dict[str, Any]]] = {}
     for r in sorted(history or [], key=lambda r: parse_time(r.get("TimeGenerated")) or now):
         rows_by.setdefault(r.get("IncidentName"), []).append(r)
-    if listed is None:
-        return {"lookback_days": days, "incidents": None, "notes": notes}
     retention = collector.guard(
         f"operationalinsights.tables.get(SecurityIncident, {ws['name']})",
         lambda: table_retention_days(client, ws["id"], "SecurityIncident", ws.get("retention_in_days")),
@@ -472,9 +495,9 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     incidents = []
     for incident in everything:
         if in_scope(incident, cutoff):
-            incident["close_time_status"] = close_time_status(incident, retained_from)
+            incident["close_time_status"] = close_time_status(incident, retained_from, closes_read)
             found = (entities or {}).get(incident["name"])
-            if found is None and entities is not None and incident.get("alerts_count") == 0:
+            if found is None and incident.get("alerts_count") == 0:
                 found = {"alerts_found": 0, "entities": [], "entities_truncated": False}
             # Alerts older than the lookback, or a refused or missing SecurityAlert, leave entities unknown.
             incident.update(found or {"alerts_found": None, "entities": None, "entities_truncated": None})
@@ -494,8 +517,8 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         "updates_retained_from": history_from.strftime("%Y-%m-%dT%H:%M:%SZ") if history is not None else None,
         "incidents_listed_total": len(listed),
         "incidents": incidents,
-        **incident_summary(incidents, now, cutoff, history is not None),
-        "monthly": monthly_metrics(everything, rows_by, cutoff, now, history_from) if history is not None else None,
+        **incident_summary(incidents, now, cutoff, history is not None, closes_read),
+        "monthly": monthly_metrics(everything, incidents, rows_by, cutoff, now, history_from) if history is not None else None,
         **recurrence([i for i in incidents if created_in(i, cutoff)]),
         "completeness": {
             "compared_from": compare_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -508,9 +531,9 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
 
 
 def _total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]:
-    """Sum over the workspaces that have the field; None when none does, so an unread history never reads as zero."""
-    values = [w[field] for w in workspaces if w.get(field) is not None]
-    return sum(values) if values else None
+    """Sum over the workspaces; None if any workspace's value is unknown, so a partial count never passes for a whole one."""
+    values = [w.get(field) for w in workspaces]
+    return None if any(v is None for v in values) else sum(values)
 
 
 def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -519,10 +542,10 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
         "incidents_in_scope": sum(w.get("incidents_in_scope") or 0 for w in collected),
         "open_incidents": sum(w.get("open_incidents") or 0 for w in collected),
         "closed_incidents": sum(w.get("closed_incidents") or 0 for w in collected),
-        "closed_missing_close_time": sum(w.get("closed_missing_close_time") or 0 for w in collected),
-        "closed_close_time_not_retained": sum(w.get("closed_close_time_not_retained") or 0 for w in collected),
+        "closed_missing_close_time": _total(collected, "closed_missing_close_time"),
+        "closed_close_time_not_retained": _total(collected, "closed_close_time_not_retained"),
         "acknowledged_incidents": _total(collected, "acknowledged_incidents"),
-        "open_unacknowledged": sum(w.get("open_unacknowledged") or 0 for w in collected),
+        "open_unacknowledged": _total(collected, "open_unacknowledged"),
         "recurring_titles": sum(w.get("recurring_titles") or 0 for w in collected),
     }
 

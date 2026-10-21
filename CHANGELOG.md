@@ -608,8 +608,11 @@ schemas and the `paramify` CLI — not the internal code.
   still gives close times and now tasks, the fetcher reads every update row in
   the lookback. Each incident gains:
   - `acknowledged_time_utc` and `hours_to_acknowledge`: the first update by a
-    person that moves it to Active or gives it a new owner. The creation row and
-    changes by automation rules or the Defender XDR sync don't count.
+    person that moves it to Active or Closed or changes its owner, up to its
+    first close, so a reopen never counts. Changes by automation rules or the
+    Defender XDR sync don't count; playbook and Logic App updates count as a
+    person's, since Microsoft doesn't document what they write as the modifier.
+    Known only when every update since creation was read.
   - `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
     who made it), and `tasks` with status and completion time.
   - `hours_to_detect` (first activity to creation), `comments_count`,
@@ -631,10 +634,14 @@ schemas and the `paramify` CLI — not the internal code.
   backlog at month end by severity and owner, which is `null` for month ends
   older than SecurityIncident's retention. It also gains `recurring_titles`,
   `recurrence_by_title` and `recurrence_by_rule` (two or more incidents created
-  in the lookback), `open_unacknowledged`, and `mttd_hours`, `mtta_hours` and
-  `mttr_hours`. When the update history can't be read, the timeline fields,
-  `monthly` and `acknowledged_incidents` are `null` rather than empty. Existing
-  fields are unchanged; KSI-PIY-RES is not mapped, since it isn't evidenceable.
+  in the lookback), `open_unacknowledged` (open, every update read, and no
+  person has acknowledged it), and `mttd_hours`, `mtta_hours` and `mttr_hours`.
+  When the update history can't be read, the timeline fields, `monthly`,
+  `acknowledged_incidents` and `open_unacknowledged` are `null` rather than
+  empty. When close times can't be read, `close_time_status` is `unknown` and
+  the close-time counts are `null`, rather than every closed incident counting
+  as missing. Other existing fields are unchanged; KSI-PIY-RES is not mapped,
+  since it isn't evidenceable.
 - **TUI fixes found while recording that walkthrough.** On a manifest with no
   evidence and no scripts, nothing on the Paramify tab held focus, so its keys
   did nothing. Enter in a picker's filter box now takes the highlighted option.

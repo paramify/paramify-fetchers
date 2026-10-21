@@ -89,10 +89,10 @@ evidence_set:
     - incidents_in_scope — Number of incidents created in the lookback, plus older incidents still open
     - open_incidents — Number of incidents still open (New or Active)
     - closed_incidents — Number of in-scope incidents that are closed
-    - acknowledged_incidents — Number of in-scope incidents with a known acknowledgement time; null if no workspace's SecurityIncident history could be read. An incident is acknowledged at the first update by a person that moves it to Active or gives it a new owner. Its creation and changes by automation rules or the Defender XDR sync don't count, so incidents worked only in the Defender portal show none. An incident created before the lookback, or already acknowledged before the oldest update read, has no known time
-    - open_unacknowledged — Number of open incidents still New with no owner
-    - recurring_titles — Number of incident titles shared by two or more incidents created in the lookback
+    - acknowledged_incidents — Number of in-scope incidents with a known acknowledgement time; null if any workspace's SecurityIncident history couldn't be read. An incident is acknowledged at the first update by a person that moves it to Active or Closed or changes its owner, up to its first close, so a reopen never counts. Changes by automation rules or the Defender XDR sync don't count, so incidents worked only in the Defender portal show none; Microsoft doesn't document what a playbook or Logic App writes as the modifier, so their updates count as a person's. Only an incident whose every update was read (created in the lookback and within the SecurityIncident table's retention) can have a known time
+    - open_unacknowledged — Number of open incidents whose every update was read and that no person has acknowledged; null if any workspace's SecurityIncident history couldn't be read. Older open incidents aren't counted, since their acknowledgement can't be known
+    - recurring_titles — Number of incident titles shared by two or more incidents created in the lookback, counted per workspace and summed, so a title recurring in two workspaces counts twice
 
     Can every close time be shown?
-    - closed_missing_close_time — Number of closed incidents whose close time wasn't found in the SecurityIncident table, even though it should still be within the table's retention
-    - closed_close_time_not_retained — Number of closed incidents whose close record is older than the SecurityIncident table's retention, so the close time is gone
+    - closed_missing_close_time — Number of closed incidents whose close time wasn't found in the SecurityIncident table, even though it should still be within the table's retention; null if any workspace's close times couldn't be read
+    - closed_close_time_not_retained — Number of closed incidents whose close record is older than the SecurityIncident table's retention, so the close time is gone; null if any workspace's close times couldn't be read
