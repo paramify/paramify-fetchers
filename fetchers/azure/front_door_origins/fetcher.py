@@ -44,7 +44,11 @@ from frontdoor import (  # noqa: E402
     rule_sets_with_rules,
     wire,
 )
-from resource_graph import query_all  # noqa: E402
+from resource_graph import (  # noqa: E402
+    ALL_SUBSCRIPTIONS,
+    query_all,
+    resource_graph_client,
+)
 from scope_exclusions import ScopeExclusions, excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_front_door_origins")
@@ -443,8 +447,9 @@ def public_allow_rules(rules: list[dict], default_action) -> tuple[list[dict], b
 
 
 def lockdown(public_network_access, config: dict | None, profile_fdid: str | None, known_fdids: set,
-             private_link: bool) -> dict:
-    """Whether only Front Door can reach the app: public access off, or access restrictions admitting only its own profile's X-Azure-FDID."""
+             private_link: bool, fronting_fdids: frozenset = frozenset()) -> dict:
+    """Whether only Front Door can reach the app: public access off, or access restrictions admitting only the X-Azure-FDID
+    of its own profile or of another profile that also serves the app (fronting_fdids), whose WAF is judged on its own record."""
     rules = (config or {}).get("ip_security_restrictions") or []
     allows, unmatched_allowed = public_allow_rules(rules, (config or {}).get("ip_security_restrictions_default_action"))
     fd_rules = [r for r in allows if is_front_door_rule(r)]
@@ -478,10 +483,10 @@ def lockdown(public_network_access, config: dict | None, profile_fdid: str | Non
         if set(allowed_fdids) - known_fdids - {own}:
             gaps.append("unknown_front_door_id_allowed")
         # Another profile in the subscription may lack the serving profile's WAF, so it is a way around it.
-        if (set(allowed_fdids) & known_fdids) - {own}:
+        if (set(allowed_fdids) & known_fdids) - {own} - {str(f).lower() for f in fronting_fdids}:
             gaps.append("other_front_door_id_allowed")
         # Over private link Front Door skips access restrictions, so only a public origin needs its own id admitted.
-        if not private_link and not gaps:
+        if not private_link and not set(gaps) - {"other_front_door_id_allowed"}:
             if own is None:
                 gaps.append("profile_front_door_id_unknown")
             elif own not in allowed_fdids:
@@ -496,6 +501,13 @@ def app_service_origin_records(groups: list[dict], profile_fdids: dict, sites_by
                                plans_by_key: dict, configs_by_key: dict, subscription_id) -> list[dict]:
     known = {str(f).lower() for f in profile_fdids.values() if f}
     own_sub = f"/subscriptions/{str(subscription_id or '').lower()}/"
+    fronting: dict = {}
+    for group in groups:
+        for origin in group["origins"]:
+            site_id, _ = origin_site_id(origin, sites_by_host)
+            fdid = profile_fdids.get(profile_key(group["id"]))
+            if site_id and fdid and group["serving"] and origin["effective_enabled_state"] == "Enabled":
+                fronting.setdefault(site_id, set()).add(fdid)
     records = []
     for group in groups:
         for origin in group["origins"]:
@@ -534,7 +546,7 @@ def app_service_origin_records(groups: list[dict], profile_fdids: dict, sites_by
                 "public_network_access": public_access,
                 "plan": plan_record(plans_by_key.get(arm_key(site.get("server_farm_id")))),
                 **lockdown(public_access, config, profile_fdids.get(profile_key(group["id"])), known,
-                           origin["private_link"] is not None),
+                           origin["private_link"] is not None, frozenset(fronting.get(site_id, ()))),
             })
     return records
 
@@ -759,7 +771,16 @@ def traffic_shifts(hours: list[str], region_hours: dict) -> list[dict]:
     return shifts
 
 
-def group_health_record(profile_key_: str, group: dict, health: list[dict], requests: list[dict], shared_hosts: dict) -> dict:
+def newest_hour_with_data(metrics: dict) -> str | None:
+    """The newest hour in which any of the profile's series has a health value or requests; ingestion lags per profile."""
+    hours = [p["time"] for s in metrics["health"] for p in s["points"] if p["average"] is not None]
+    hours += [p["time"] for s in metrics["requests"] for p in s["points"] if (p["total"] or 0) > 0]
+    return max(hours, default=None)
+
+
+def group_health_record(profile_key_: str, group: dict, health: list[dict], requests: list[dict], shared_hosts: dict,
+                        last_hour: str | None) -> dict:
+    """A group's health and traffic; "last hour" is the profile's newest hour with data, so a group silent then isn't serving."""
     threshold = health_threshold(group)
     group_name = str(group["name"] or "").lower()
     origin_rows, origin_hours, region_hours = [], [], {}
@@ -798,10 +819,6 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
                 slot["healthy"] = slot["healthy"] or h["health_avg"] >= threshold
             slot["requests"] += h["requests"] or 0
     hours = sorted({t for by_hour in region_hours.values() for t in by_hour})
-    # The window's final buckets can be empty (metrics lag), so "last hour" is the newest hour with any data.
-    with_data = [t for t in hours if any(s["health"] or s["requests"] > 0
-                                         for s in (by_hour.get(t) for by_hour in region_hours.values()) if s)]
-    last_hour = with_data[-1] if with_data else None
     for row, by_hour in zip(origin_rows, origin_hours):
         row["last_hour_health_avg"] = by_hour.get(last_hour, {}).get("health_avg")
     group_requests = sum(s["requests"] for by_hour in region_hours.values() for s in by_hour.values())
@@ -866,7 +883,8 @@ def origin_health_records(groups: list[dict], metrics_by_profile: dict) -> tuple
     for g in groups:
         key = profile_key(g["id"])
         metrics = metrics_by_profile.get(key) or {"health": [], "requests": []}
-        records.append(group_health_record(key, g, metrics["health"], metrics["requests"], hosts_by_profile))
+        records.append(group_health_record(key, g, metrics["health"], metrics["requests"], hosts_by_profile,
+                                           newest_hour_with_data(metrics)))
     unmatched = [
         {"profile_id": key, "metric": metric, "origin": s["origin"], "origin_group": s["origin_group"],
          "total": sum(p["total"] or 0 for p in s["points"]) if metric == "OriginRequestCount" else None}
@@ -913,7 +931,7 @@ def region_queries(resource_ids: list[str], host_names: list[str]) -> list[str]:
     for i in range(0, len(resource_ids), LOOKUP_CHUNK):
         ids = kql_list(resource_ids[i:i + LOOKUP_CHUNK])
         if ids:
-            queries.append(f"resources | where id in~ ({ids}) | project key = tolower(id), location | order by key asc")
+            queries.append(f"resources | where id in~ ({ids}) | project key = tolower(id), id, location | order by id asc")
     for i in range(0, len(host_names), LOOKUP_CHUNK):
         hosts = kql_list(host_names[i:i + LOOKUP_CHUNK])
         if not hosts:
@@ -921,28 +939,24 @@ def region_queries(resource_ids: list[str], host_names: list[str]) -> list[str]:
         queries.append(
             "resources | where type =~ 'microsoft.web/sites'"
             " | mv-expand h = properties.enabledHostNames to typeof(string)"
-            f" | where h in~ ({hosts}) | project key = tolower(h), location"
+            f" | where h in~ ({hosts}) | project key = tolower(h), id, location"
             " | union (resources | where type =~ 'microsoft.storage/storageaccounts'"
             " | mv-expand e = pack_array(properties.primaryEndpoints.blob, properties.primaryEndpoints.web,"
             " properties.primaryEndpoints.dfs, properties.primaryEndpoints.file, properties.primaryEndpoints.queue,"
             " properties.primaryEndpoints.table) to typeof(string)"
-            f" | extend h = tolower(tostring(parse_url(e).Host)) | where h in~ ({hosts}) | project key = h, location)"
-            " | order by key asc, location asc"
+            f" | extend h = tolower(tostring(parse_url(e).Host)) | where h in~ ({hosts}) | project key = h, id, location)"
+            " | order by id asc, key asc"
         )
     return queries
 
 
 def graph_client(cred, collector: Collector):
-    from azure.mgmt.resourcegraph import ResourceGraphClient
-
-    return collector.guard(
-        "resourcegraph.ResourceGraphClient (init)", lambda: ResourceGraphClient(credential=cred, **arm_client_kwargs())
-    )
+    return collector.guard("resourcegraph.ResourceGraphClient (init)", lambda: resource_graph_client(cred))
 
 
 def graph_rows(client, query: str) -> list[dict]:
-    # No subscription filter: an origin can live in any subscription the credential reads.
-    return query_all(client, None, query)["rows"]
+    # An origin can live in any subscription the credential reads.
+    return query_all(client, ALL_SUBSCRIPTIONS, query)["rows"]
 
 
 def lookup_regions(client, collector: Collector, resource_ids: list[str], host_names: list[str]) -> tuple[dict, dict]:
@@ -970,17 +984,17 @@ def site_queries(subscription_id: str, site_ids: list[str], host_names: list[str
     queries = []
     if subscription_id and "'" not in subscription_id:
         queries.append(f"resources | where type =~ 'microsoft.web/sites' and subscriptionId =~ '{subscription_id}'"
-                       f" | project {SITE_COLUMNS}, host = '' | order by key asc")
+                       f" | project {SITE_COLUMNS}, host = '' | order by id asc")
     for i in range(0, len(site_ids), LOOKUP_CHUNK):
         ids = kql_list(site_ids[i:i + LOOKUP_CHUNK])
         if ids:
             queries.append(f"resources | where {SITE_TYPES} and id in~ ({ids}) | project {SITE_COLUMNS}, host = ''"
-                           " | order by key asc")
+                           " | order by id asc")
     for i in range(0, len(host_names), LOOKUP_CHUNK):
         hosts = kql_list(host_names[i:i + LOOKUP_CHUNK])
         if hosts:
             queries.append(f"resources | where {SITE_TYPES} | mv-expand h = properties.enabledHostNames to typeof(string)"
-                           f" | where h in~ ({hosts}) | project {SITE_COLUMNS}, host = tolower(h) | order by key asc, host asc")
+                           f" | where h in~ ({hosts}) | project {SITE_COLUMNS}, host = tolower(h) | order by id asc, host asc")
     return queries
 
 
@@ -991,7 +1005,7 @@ def plan_queries(plan_ids: list[str]) -> list[str]:
         if ids:
             queries.append(f"resources | where type =~ 'microsoft.web/serverfarms' and id in~ ({ids})"
                            " | project key = tolower(id), id, name, location, sku, zone_redundant = tobool(properties.zoneRedundant)"
-                           " | order by key asc")
+                           " | order by id asc")
     return queries
 
 
