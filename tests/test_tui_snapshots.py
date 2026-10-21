@@ -11,7 +11,7 @@ import pytest
 pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
 pytest.importorskip("pytest_textual_snapshot", reason="snapshot tests need the 'snapshots' extra")
 
-from textual.widgets import Input  # noqa: E402
+from textual.widgets import DataTable, Input  # noqa: E402
 
 from framework import api  # noqa: E402
 from framework.tui.app import FetcherApp  # noqa: E402
@@ -40,7 +40,20 @@ def shot(snap_compare, demo_workspace, no_network, monkeypatch, tui_size):
     async def settle(pilot) -> None:
         app = pilot.app
         await asyncio.wait_for(app.workers.wait_for_complete(), 30)
+        # Workers post their events, so drain those before checking what they changed.
+        await pilot._wait_for_screen()
         await pilot.pause()
+        # A DataTable sizes columns on idle but keeps rows drawn before then, so wait, then redraw.
+        for _ in range(600):
+            tables = [t for screen in app.screen_stack for t in screen.query(DataTable)]
+            if not any(t._require_update_dimensions or t._updated_cells for t in tables):
+                break
+            await pilot.pause(0.05)
+        else:
+            raise AssertionError("a DataTable never finished sizing its columns")
+        for table in tables:
+            table._clear_caches()
+            table.refresh()
         # Jump the welcome animation to its settled frame.
         clock.now = 10.0
         for screen in app.screen_stack:
