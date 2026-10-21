@@ -12,6 +12,58 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_app_service_backups`** (`EVD-AZURE-APPSVC-BACKUPS`, KSI-RPL-ABO). For
+  each App Service web app, whether it is actually
+  being backed up, judged from its restore points: automatic backups plus
+  successful custom backups.
+  - **Observed backups.** It reports `latest_restore_point_age_hours` at run time
+    and `largest_restore_point_gap_hours` inside `restore_point_window_hours`
+    (default 48). `backed_up` is true only when the newest restore point is inside
+    that window. `effective_backup_interval_hours` is the observed interval, and
+    `configured_backup_interval_hours` is kept separate.
+  - **Recovery point objective.** Set the optional `recovery_point_objective_hours`
+    and each app reports `meets_recovery_point_objective`.
+  - **Custom backups.** It also reports each app's custom backup configuration and
+    history, and restores made from custom backups within
+    `restore_test_window_days`.
+  - **Backup storage.** It reports the region, replication and version immutability
+    of the storage accounts custom backups go to.
+  - **Exclusions.** Function apps and deployment slots are listed in
+    `results.exclusions` with counts and the reason.
+  - **Permissions.** Reader is enough. The custom configuration needs the opt-in
+    `Microsoft.Web/sites/config/list/action`. Without it the configuration is
+    recorded as `not_authorized` (unknown), not as a collection failure.
+  - **Checks and limits.** The web app list is checked against Azure Resource
+    Graph, and `results.limitations` states what the evidence does not cover. SAS
+    tokens and database connection strings are never written.
+  - **Shared module.** `_shared/app_service.py` now holds the web-app client and
+    kind filter that `azure_app_service_configuration` also uses.
+- **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
+  over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
+  Code (Read). It records Bicep and ARM checks together, each tagged with its
+  framework, with per-framework counts.
+
+  A scan that checked nothing never reads as clean. These cases exit non-zero:
+  - no `.bicep` files and no ARM `deploymentTemplate` JSON (`no_files`; counts
+    are null, not 0)
+  - files present but checkov ran zero checks (`no_checks`), e.g. resources
+    declared only through `br/public:avm` registry modules
+  - files checkov could not parse (`partial`; each is listed, and can be
+    excluded with `skip_paths` once reviewed)
+
+  The `org@` prefix of an Azure DevOps clone URL is dropped, and `clone_token`
+  is optional, so public repos can be scanned.
+
+  `source_type: tfvc` reads Azure DevOps TFVC, which `git clone` cannot fetch.
+  It looks up the project's newest changeset (or the one named in
+  `tfvc_version`), then downloads `tfvc_path` at that changeset as one zip
+  through the TFVC items API, using a `tfvc_token` PAT with Code (Read). The
+  evidence records `source_type` and, in `metadata`, the path, `changeset` and
+  `changeset_date`, where a git source records its branch and commit. Git stays
+  the default. As in `checkov_terraform` 0.2.0, failed checks on
+  `skip_resources` matches move to `skipped_checks`, the effective skip lists
+  are recorded in `metadata`, `use_default_skip_checks` can drop the shipped
+  defaults, and `metadata.branch` names the branch actually scanned.
 - **`web_vulnerability_disclosure`** (`EVD-WEB-VULNERABILITY-DISCLOSURE`), the
   second `web` fetcher. Given a site or a security.txt URL, it fetches
   `/.well-known/security.txt` and records it verbatim, with its fields parsed per
@@ -29,6 +81,28 @@ schemas and the `paramify` CLI — not the internal code.
   `gpg --show-keys`. Also run live against paramify.com. Linked URLs and their
   redirects may only reach public addresses; a link to a private, loopback or
   link-local address is recorded as `blocked_address`. No KSI mapping.
+- **A `zendesk` category and its first fetcher, `zendesk_help_center_section`**
+  (`EVD-ZENDESK-HELP-CENTER-SECTION`). Given a Help Center section URL, it lists
+  the section's articles through the Help Center API as an anonymous user, so
+  only public articles count. It follows `next_page` to the end and fails the
+  run when the collected number differs from the API's `count` or any API call
+  fails. Each article keeps Zendesk's own fields and body HTML, plus plain
+  text, a text hash, any "Last updated" date in the text, and an anonymous GET
+  of its page recording whether it was sent to a sign-in page or met a
+  Cloudflare bot challenge (a challenge leaves `all_articles_public` null,
+  since public access could not be checked). Fixed fields
+  come first: article count, newest and oldest `updated_at`,
+  `days_since_last_update`, `all_articles_public`, and two Paramify-specific
+  keyword heuristics for a Secure Configuration Guide
+  (`mentions_top_level_admin`, `scg_terms`) that show keyword presence, not
+  adequate guidance, plus `all_user_segments_everyone` (no article is
+  restricted to a user segment). An empty section is recorded, not failed.
+  Run live against support.paramify.com's Recommended Secure Configuration
+  section (4 articles, matching the API's `count`). There, Cloudflare
+  challenged every anonymous article-page GET, so `all_articles_public`
+  read null. No KSI mapping. The README's supported services grid lists
+  Zendesk, using the Simple Icons `zendesk` mark (CC0) in light and dark
+  variants (`fetchers/logos/zendesk.svg` and `zendesk-dark.svg`).
 - **A `web` category and its first fetcher, `web_page_text`**
   (`EVD-WEB-PAGE-TEXT`). It fetches one public URL per target, with no
   credential, and records the text the page served. For HTML that is the
@@ -591,6 +665,58 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_policy_compliance` 0.2.0: what was evaluated, whether remediation took,
+  and what keeps coming back.**
+  - Each listed non-compliant state now carries `evaluation_details`: the
+    expressions Azure Policy evaluated, with field path, operator, actual value and
+    target value, plus any ifNotExists lookup.
+  - The service returns these only per resource, so they are read for at most
+    `max_evaluation_detail_resources` (default 100) of the listed resources. The
+    resources with the most listed states are read first.
+  - `evaluation_details_status` gives the reason a state has no details. It is
+    `collected` only when Azure returned an evaluated expression or an ifNotExists
+    lookup; a state returned without either is `not_returned`, as Resource Provider
+    mode policies (`Microsoft.KeyVault.Data` and the like) always are. A state the
+    resource's query did not return at all is `not_in_detail_result`. A
+    per-resource read that Azure refuses (a 403, or an AuthorizationFailed error
+    code, which Policy Insights has returned with a 409) is retried once, 5 s
+    later. A run makes at most 3 retries, and none after a retry is refused again,
+    since the refusal is then systematic. Still refused, that resource's states
+    are `not_authorized`, with the error code and refused action (never the
+    principal) in `evaluation_details_reason`, and it is counted in
+    `evaluation_details_not_authorized_resources`. It does not fail the run, since
+    the details only enrich the states; any other error on that read, a 404 or a
+    5xx included, still does.
+    `evaluation_details_truncated` says when not every listed resource was read.
+  - Each remediation task's per-resource deployments (status, error, times) are
+    listed in `remediation_deployments`, up to `max_remediation_deployments`
+    (default 1000), and each is checked against its resource's latest compliance
+    state, with `current_state_evaluated_at` and `reevaluated_since_deployment`.
+    The states are read only for the remediated resources. New summary keys count
+    remediated resources (`remediated_resources_listed`) and those now compliant,
+    now non-compliant, and whose succeeded remediation is now non-compliant. These
+    count each resource once, and its latest deployment decides; tasks re-run on
+    one resource add deployments, not resources. The non-compliant counts include
+    resources that were fixed and later drifted back; `non_compliance_recurrence`
+    shows the drift when that pair was read. `now_compliant` is null when the state
+    was evaluated before the deployment last changed, and that deployment counts as
+    `remediated_resources_not_yet_reevaluated` instead. When either time is
+    missing, `now_compliant` comes from the state. Azure deletes a task 60 days
+    after its last change, so this covers about the last 60 days at most.
+  - From 30 days of history, the summary counts (resource, policy) pairs
+    non-compliant throughout and pairs non-compliant only some of the time.
+    `history_truncated` is also set when fewer groups come back than the service
+    counts. When the history read fails, `history_collected` is false and these
+    counts are null rather than 0.
+  - For up to `max_recurrence_pairs` (default 100) of the part-time ones,
+    `non_compliance_recurrence` counts the separate non-compliant episodes and how
+    many times the pair fell back out of compliance. `recurring_non_compliant_pairs`
+    counts pairs with more than one episode.
+  - Every bounded list has a truncation flag; a limit of 0 skips that list and
+    leaves its flag false. Existing fields are unchanged. Still Reader-only. Also
+    mapped to `KSI-SVC-EIS`.
+  - `runtime.timeout` is 3600 seconds: the added queries run serially, and a
+    production run took about 8 minutes, near the runner's 600-second default.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`
@@ -738,6 +864,66 @@ schemas and the `paramify` CLI — not the internal code.
   `monitored_operation_coverage_reaching_human` does the same for the existing
   map. `action_groups` and `monitored_operation_coverage` are
   unchanged.
+- **`azure_resource_inventory` 0.2.0 shows each resource's Defender and Policy
+  coverage.** Two more Resource Graph queries read Defender for Cloud assessments
+  (`SecurityResources`) and Azure Policy states (`PolicyResources`). They are joined
+  to the inventory by resource id in the fetcher, because Resource Graph allows one
+  cross-table join per query and pages `summarize` only to its first page. Each
+  resource gains `defender_assessments`, `defender_unhealthy`,
+  `defender_unhealthy_high_severity` (High or Critical), `policy_evaluations` and
+  `policy_non_compliant`; a result on a child resource, such as a subnet, counts for
+  the inventoried parent. Only Healthy and Unhealthy assessments count:
+  NotApplicable ones did not happen (off by policy, for instance) and are counted
+  apart, in `defender_not_applicable` and `defender_not_applicable_total`; an
+  assessment with a missing or unexpected status counts in neither, but in
+  `defender_unknown_status_total`. The
+  summary lists `resources_without_defender_assessment`
+  and `resources_without_policy_evaluation`. A resource counts there only when the
+  service covers another resource of its type in the subscription. Types it covers
+  on no resource are listed apart, with counts, in `types_without_defender_assessment`
+  and `types_without_policy_evaluation`, so a type Defender has no recommendations
+  for is not a gap. `all_assessable_resources_assessed_by_defender` and
+  `all_evaluable_resources_evaluated_by_policy` are false when the service covers
+  nothing at all, and on an empty inventory, which is what Resource Graph returns
+  to a caller without Reader. `defender_coverage_collected` and
+  `policy_coverage_collected` say whether each coverage query was read to the end. Also new: coverage percentages, unhealthy High/Critical and
+  non-compliant counts on inventoried resources, and
+  `resources_covered_by_neither_by_type` (uncovered resources of every type, gaps
+  and never-covered types alike). Assessments and policy states about anything not
+  inventoried (the subscription, resource groups, deleted resources) are counted
+  apart, with `defender_unhealthy_outside_inventory`,
+  `defender_unhealthy_high_severity_outside_inventory`,
+  `defender_unhealthy_without_severity_outside_inventory` and
+  `policy_non_compliant_outside_inventory`, so the inventoried counts plus these add
+  up to the totals; many High recommendations (owner MFA, Defender plans) are about
+  the subscription itself. Assessments of AWS, GCP or on-premises machines (a
+  `resourceDetails` source other than Azure) always count outside, by source.
+  `results.coverage_queries` gives each query's page count, reported total and
+  `outside_inventory_by_target`, the same counts for those results by the type of
+  what they target (never its name). Every
+  query is paged to the end; a coverage query that fails or comes back truncated
+  is a collection failure, and that service's counts stay null rather than reading
+  as uncovered. Also mapped to `KSI-MLA-EVC`, `KSI-CNA-EIS` and `KSI-SVC-EIS`.
+  Existing fields and summary keys are unchanged.
+- **`azure_defender_plans` 0.2.0 records each plan's sub-plan, enablement time
+  and inheritance.** Each plan now carries `sub_plan` (Servers `P1` / `P2`,
+  `DefenderForStorageV2`, `PerKeyVault`, …), `enablement_time` (the last time it
+  was set to Standard; `null` when Azure does not report it, which can be the case
+  for every plan, so `enabled_plan_enablement_times` can be all `null` and is not a
+  reliable signal for a validator), `resources_coverage_status`, `enforce`,
+  `deprecated` and `replaced_by`, and `inherited` / `inherited_from` with
+  `inherited_from_scope` (`management_group`, `subscription`, `resource_group` or
+  `resource`), all from the same `pricings.list` call. Azure documents inheritance as reported for
+  resource-level pricing only, so at subscription scope it reads `null` and
+  `plans_reporting_inheritance` says whether any plan reported it. New summary
+  keys: `enabled_plans`, `enabled_plan_sub_plans`, `enabled_plan_enablement_times`,
+  `enabled_plans_not_fully_covered` (an enabled plan with no coverage status is
+  listed as `unknown`, so it never reads as covered), `plans_not_enabled`
+  (deprecated plans left out), `deprecated_plans`, `deprecated_plans_enabled`,
+  `enforced_plans`, `inherited_plans` and `plans_inherited_from_management_group`.
+  The summary does
+  not judge which plans a system needs. Existing fields and summary keys are
+  unchanged.
 - **`azure_diagnostic_settings` also maps to `KSI-MLA-OSM`**, which its
   subscription activity-log export already evidenced.
 - **`KSI-SVC-PRR` counts as config-evidenceable.** Its residual elements are a
@@ -809,6 +995,123 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`checkov_bicep` passes its list settings to checkov intact** (0.2.0 →
+  0.2.1). `checks`, `skip_checks`, `skip_paths` and `skip_resources` take
+  entries separated by commas or newlines, each trimmed. `checks` and
+  `skip_checks` also take spaces and tabs, since check ids never contain them,
+  and `_shared/skip-checks.default.txt` is read the same way, with `#`
+  starting a comment anywhere on a line. Configured values reach checkov as
+  `--flag=value`. Before:
+  - a `skip_paths` entry with a space (`My Templates/legacy`) became two skip
+    paths, and each piece could skip folders it was not meant to;
+  - a `skip_paths` entry with `*` or `?` was expanded against the files in the
+    fetcher's working directory, so `*.json` could reach checkov as
+    `--skip-path report.json`;
+  - `checks` failed the run if it had a space after a comma
+    (`CKV_AZURE_3, CKV_AZURE_44`), ids separated only by spaces, or one id
+    per line;
+  - `skip_checks` failed the run if its ids were separated only by spaces,
+    and read only its first line, so checks listed below it still ran;
+  - a line of `_shared/skip-checks.default.txt` holding several ids or a
+    trailing `#` comment failed the run;
+  - `skip_resources` patterns on separate lines became one pattern that
+    matched nothing;
+  - a `skip_paths` or `repo_id` value starting with `-` was read as an option,
+    and the run failed.
+
+  `skip_paths` entries are Python regular expressions, which is how checkov
+  reads them: it searches each file's path for every entry, so `.`, `*`, `?`,
+  `+`, `(`, `)`, `[` and `]` need a backslash to match literally. They are
+  not globs. An entry that is not a valid regular expression, such as
+  `*.json`, now fails the run with `bad_config` naming it, before anything
+  is fetched; checkov's Bicep scan crashed on one. The check needs `python3`
+  on PATH, which the checkov category now declares.
+
+  `metadata.skip_paths` now holds the entries checkov was given as
+  `--skip-path` values. It used to disagree in three cases:
+  - a path with a space was one entry, while checkov got two;
+  - a `*` pattern was listed as written, while checkov got the files it
+    matched;
+  - entries on separate lines with no comma between them were one entry,
+    while checkov got one per line.
+
+  New `metadata.checks` lists the `checks` allowlist, so a restricted scan no
+  longer reads as a full one. It is empty when every check ran.
+- **`azure_defender_assessments` reports each assessment's own severity**
+  (0.1.1 → 0.2.0). Severity came from the subscription's assessment metadata
+  catalogue, which can rate a check lower than the assessment itself does (App
+  Service authentication, for one, is High on the assessment and Low in the
+  catalogue), so `unhealthy_by_severity` undercounted High findings. Severity
+  now comes from each assessment's `properties.metadata.severity` in Resource
+  Graph (`SecurityResources`, one query paged to the end), with the catalogue
+  only as a fallback. Each record gains `severity_source` (`assessment`,
+  `catalogue`, or `null` when neither has one), and the summary gains
+  `severity_from_catalogue_count` and `severity_unknown_count`, and
+  `unhealthy_severity_from_catalogue_count` and
+  `unhealthy_severity_unknown_count` for Unhealthy records only, since an
+  Unhealthy record with no severity is missing from `unhealthy_by_severity`.
+  The catalogue still supplies categories, threats, type, user impact,
+  implementation effort and policy definition id. A failed
+  Resource Graph query is a collection failure (exit 1), and every record falls
+  back to the catalogue. Other fields are unchanged.
+
+- **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →
+  0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
+  counterpart of `DenyAction`, was reported as `unresolved` with no reason and
+  raised `unresolved_effect_assignments`. It now resolves to `auditAction`, an
+  audit-only effect. `mutate` and `addToNetworkGroup` (both in Microsoft's
+  effects reference) and `enforceSetting` (used by built-in definitions) now
+  resolve as enforcing effects. Every assignment's `policy_effects.effect_counts`
+  and the summary's `member_policy_effect_counts` therefore gain four keys,
+  zero unless used: `auditAction`, `mutate`, `addToNetworkGroup` and
+  `enforceSetting`. Any other unrecognised value is still unresolved, but its
+  `reason` now names the value (`unknown effect value 'X'`). Two new summary
+  keys count unresolved member policies: `unresolved_member_policies`, and
+  `unresolved_member_policies_not_enforced` for those in any assignment whose
+  enforcementMode is not Default. Members of an initiative whose definition
+  can't be read aren't counted; that assignment shows only in
+  `unresolved_effect_assignments`. The per-assignment fields are unchanged: a
+  partly resolved DoNotEnforce initiative is still classed by its resolved
+  members, so its `effect_class` can read `audit_only` and
+  `enforcing_effects_not_enforced` false. The new summary keys are where that
+  gap shows.
+- **`azure_entra_authentication_policy` counts X.509 as phishing-resistant only
+  when it is multi-factor** (0.1.0 → 0.2.0). An enabled X.509 certificate method
+  was always listed in `phishing_resistant_methods_enabled`, even with its default
+  authentication mode set to `x509CertificateSingleFactor`, which does not satisfy
+  MFA by itself. It now counts only when the default mode is
+  `x509CertificateMultiFactor`; a new summary field,
+  `x509_certificate_multi_factor`, reports the mode (`null` when it is not
+  reported).
+- **`azure_entra_mfa_status` finds every admin** (0.1.0 → 0.2.0). Admin status
+  came only from the registration report's `isAdmin` flag, which exists only on
+  users with a registration row, so an admin who had registered nothing was
+  counted as a non-admin and `admin_mfa_coverage_percentage` was overstated.
+  Admins are now the holders of privileged directory roles (the same list
+  `azure_entra_privileged_roles` uses), directly or through a role-assignable
+  group, plus anyone the report flags. Each user carries
+  `privileged_directory_roles` and `is_admin_in_registration_report`; the summary
+  adds `admin_users_without_mfa`, `admin_users_without_registration_details` and
+  `admin_role_membership_readable`. The fetcher now reads `GET /directoryRoles`,
+  the members of each privileged role and the transitive members of any group
+  holding one: covered by `Directory.Read.All`, which the Entra fetchers already
+  document (or `RoleManagement.Read.Directory` + `GroupMember.Read.All`). If that
+  read is denied the run fails and the admin figures read `null`.
+- **Checkov evidence no longer overstates pass rates** (`checkov_terraform` and
+  `checkov_kubernetes` 0.1.0 → 0.2.0). `skip_resources` deleted failed checks on
+  matching resources, so they left `total_checks` and raised
+  `aggregate_percentage`; they are now moved to `skipped_checks` (marked
+  `SKIPPED`, with the matching pattern in `suppress_comment`) and counted in
+  `summary.skipped_by_resource_filter`. An empty pattern from a trailing comma
+  no longer matches every resource. The 17 checks in
+  `skip-checks-k8s.default.txt`, among them `CKV_K8S_20` and `CKV_K8S_31`, were
+  always skipped and left no trace in the evidence. The effective skip list is
+  now recorded in `metadata.skip_checks`, and the new `use_default_skip_checks`
+  knob (default `true`, so results are unchanged) set to `false` lets
+  `skip_checks` replace the defaults. When the requested branch could not be
+  cloned, the scan fell back to the default branch but `metadata.branch` still
+  named the requested one. `metadata.branch` now names the branch actually
+  scanned, with `requested_branch` and `branch_fallback` beside it.
 - **`gcp_cloud_sql_encryption_status` reads point-in-time recovery per engine**
   (0.1.0 → 0.1.1). The fetcher took the first non-null of
   `pointInTimeRecoveryEnabled` and `binaryLogEnabled`, so a MySQL instance with
@@ -1570,7 +1873,7 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- [`docs/private_mirror_workflow.md`](docs/private_mirror_workflow.md) — keeping a
+- [`docs/private_mirror_workflow.md`](https://github.com/paramify/paramify-fetchers/blob/v0.3.1-beta/docs/private_mirror_workflow.md) — keeping a
   private copy of this repo that still receives upstream releases, for teams whose
   fetcher work can't be public.
 
