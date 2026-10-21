@@ -268,8 +268,8 @@ def config(*rules, default=None, public_network_access=None):
                  id="service-tag-without-fdid"),
     pytest.param("Enabled", config(fd_rule(OWN_FDID, UNKNOWN_FDID)), False, False, None,
                  ["unknown_front_door_id_allowed"], id="unknown-fdid"),
-    pytest.param("Enabled", config(fd_rule(OTHER_FDID)), False, False, None, ["other_front_door_id_allowed"],
-                 id="other-profile-only"),
+    pytest.param("Enabled", config(fd_rule(OTHER_FDID)), False, False, None,
+                 ["other_front_door_id_allowed", "profile_front_door_id_not_allowed"], id="other-profile-only"),
     pytest.param("Enabled", config(fd_rule(OWN_FDID), rule("office", 200)), False, False, None,
                  ["non_front_door_allow_rule"], id="ip-allow-bypasses-front-door"),
     pytest.param("Enabled", config(fd_rule(OWN_FDID, priority=50), rule("Deny all", 100, "Deny", ip="Any"),
@@ -307,6 +307,19 @@ def test_other_profile_front_door_id_is_counted():
     summary = origins.summarize_app_services(app_origins, [], None)
     assert summary["serving_app_service_origins_other_front_door_id_allowed"] == 1
     assert summary["serving_app_service_origins_not_locked"] == 1
+
+
+def test_app_fronted_by_two_profiles_is_locked_on_both():
+    groups = [{"id": f"/subscriptions/s/resourceGroups/rg/providers/Microsoft.Cdn/profiles/{p}/originGroups/g",
+               "name": "g", "profile": p, "serving": True, "best_priority": 1,
+               "origins": [origin_rec("east", "eastus", "app-east")]} for p in ("p1", "p2")]
+    sites = {origins.arm_key(SITE.format("app-east")): site_row("app-east", "eastus", "plan", public="Enabled")}
+    configs = {origins.arm_key(SITE.format("app-east")): config(fd_rule(OWN_FDID, OTHER_FDID))}
+    profile_fdids = {origins.profile_key(groups[0]["id"]): OWN_FDID, origins.profile_key(groups[1]["id"]): OTHER_FDID}
+    records = origins.app_service_origin_records(groups, profile_fdids, sites, {}, {}, configs, "s")
+    assert [(r["profile"], r["locked_to_front_door"], r["lockdown_gaps"]) for r in records] == [
+        ("p1", True, []), ("p2", True, [])]
+    assert [r["other_front_door_ids_allowed"] for r in records] == [[OTHER_FDID], [OWN_FDID]]
 
 
 def test_unknown_profile_front_door_id_is_a_gap():
@@ -485,11 +498,13 @@ def test_graph_paging_failure_is_reported(graph_models, graph):
     assert not collector.ok
 
 
-def test_lookup_queries_have_a_stable_order():
+def test_lookup_queries_project_id_and_order_by_it():
     queries = (origins.region_queries(["/a"], ["a.example"]) + origins.site_queries("sub-1", ["/a"], ["a.example"])
                + origins.plan_queries(["/p"]))
     assert len(queries) == 6
-    assert all(" | order by key asc" in q for q in queries)
+    assert all(" | order by id asc" in q and " id, " in q for q in queries)
+    union = origins.region_queries([], ["a.example"])[0]
+    assert union.count("project key = ") == 2 and union.count(", id, location") == 2
 
 
 # --- live origin health and traffic ---
@@ -598,6 +613,23 @@ def test_last_hour_is_the_newest_hour_with_data():
     assert len(record["hourly_by_region"]) == 7
     west = next(o for o in record["origins"] if o["origin"] == "west")
     assert west["last_hour_health_avg"] == 100
+
+
+def test_last_hour_is_the_profiles_newest_hour_with_data():
+    group = health_group()
+    stale = {**health_group(), "id": group["id"].replace("/originGroups/g", "/originGroups/stale"), "name": "stale",
+             "origins": [origin_rec("old-east", "eastus"), origin_rec("old-west", "westus")]}
+    metrics = failover_metrics()
+    metrics["health"].append(series("old-east.azurewebsites.net", [100], "health", group="stale"))
+    metrics["requests"].append(series("old-east.azurewebsites.net", [10]))
+    records, _ = origins.origin_health_records([group, stale], {origins.profile_key(group["id"]): metrics})
+    old = next(r for r in records if r["origin_group"] == "stale")
+    assert old["last_hour"] == HOURS[-1] and old["has_traffic"] is True
+    assert (old["regions_serving_last_hour"], old["all_regions_healthy_last_hour"]) == ([], None)
+    assert all(r["healthy_last_hour"] is None and r["serving_last_hour"] is False for r in old["regions"])
+    summary = origins.summarize_health([old], [], 7, ("start", "end"))
+    assert summary["serving_groups_all_regions_healthy_last_hour"] == 0
+    assert summary["serving_multi_region_groups_all_regions_serving_last_hour"] == 0
 
 
 def test_health_data_counts_an_unresolved_region():

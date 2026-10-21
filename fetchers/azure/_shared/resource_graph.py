@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from azure_common import arm_client_kwargs, model_attr
 
@@ -12,6 +12,9 @@ PAGE_SIZE = 1000
 # A guard, not a cap: reaching it means the service kept handing back skip tokens.
 MAX_PAGES = 1000
 
+# Pass as query_all's subscription_id to read every subscription the credential can see.
+ALL_SUBSCRIPTIONS = object()
+
 
 def resource_graph_client(cred):
     from azure.mgmt.resourcegraph import ResourceGraphClient  # lazy
@@ -20,11 +23,11 @@ def resource_graph_client(cred):
     return ResourceGraphClient(credential=cred, **arm_client_kwargs())
 
 
-def query_all(client, subscription_id: Optional[str], query: str) -> Dict[str, Any]:
+def query_all(client, subscription_id, query: str) -> Dict[str, Any]:
     """Page `query` to the end; raise on truncation, non-termination or a short count.
 
-    `query` must order by a stable key, or skip-token paging is unstable. With no
-    subscription id it reads every subscription the credential can see.
+    `query` must project `id` and order by it, or skip-token paging is unstable.
+    `subscription_id` is one subscription, or ALL_SUBSCRIPTIONS.
     """
     from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions  # lazy
 
@@ -36,7 +39,7 @@ def query_all(client, subscription_id: Optional[str], query: str) -> Dict[str, A
     while True:
         response = client.resources(
             QueryRequest(
-                subscriptions=[subscription_id] if subscription_id else None,
+                subscriptions=None if subscription_id is ALL_SUBSCRIPTIONS else [subscription_id],
                 query=query,
                 options=QueryRequestOptions(
                     top=PAGE_SIZE, skip_token=skip_token, result_format="objectArray"
