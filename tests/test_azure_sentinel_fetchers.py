@@ -426,13 +426,15 @@ def test_incidents_failed_workspace_nulls_the_totals(azure, tmp_path):
     assert set(MODS["sentinel_incidents"].summarize([], False).values()) == {None}
 
 
-@pytest.mark.parametrize("failure", ["workspaces", "onboarding"])
-def test_incidents_failed_discovery_nulls_the_totals(azure, tmp_path, failure):
+@pytest.mark.parametrize("failure", ["workspaces", "onboarding", "unknown name"])
+def test_incidents_failed_discovery_nulls_the_totals(azure, tmp_path, monkeypatch, failure):
     refused = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
     if failure == "workspaces":
         azure.arm[(f"/subscriptions/{SUB}/providers/Microsoft.OperationalInsights/workspaces", "2023-09-01")] = refused
-    else:
+    elif failure == "onboarding":
         azure.arm[(f"{SI_A}/onboardingStates", "2025-09-01")] = refused
+    else:
+        monkeypatch.setenv("SENTINEL_WORKSPACES", "law-missing")
     code, ev = run("sentinel_incidents", tmp_path)
     # Finding no Sentinel workspace isn't knowing there are none.
     assert code == 1 and ev["summary"]["workspaces_collected"] == 0
@@ -756,6 +758,17 @@ def test_incident_owner_matches_by_id_then_any_name(arm_owner, row_owner):
         assert not complete(incident_, rows, NOW - timedelta(days=30), NOW)
 
 
+def test_incident_closed_time_order_sorts_like_update_order():
+    mod = MODS["sentinel_incidents"]
+    assert "strcat_delim(unicode_codepoints_to_string(1)," in mod.CLOSED_TIME_QUERY
+    at = iso(NOW)
+    rows = [{"TimeGenerated": at, "LastModifiedTime": at, "ModifiedBy": by, "Status": "Active", "Owner": ""}
+            for by in ("Automation rule - a", "Automation rule", "Automation rule\tb")]
+    # The query's Order string, emulated: joined by U+0001, a modifier that is a prefix of another sorts first.
+    keys = ("LastModifiedTime", "TimeGenerated", "ModifiedBy", "Status", "Owner")
+    assert sorted(rows, key=lambda r: "\x01".join(r[k] for k in keys)) == sorted(rows, key=mod.update_order)
+
+
 @pytest.mark.parametrize("person", ["Alice@contoso.com", "pat@contoso.com"])
 def test_incident_rows_tied_for_the_latest_time_each_count(person):
     created = NOW - timedelta(days=2)
@@ -824,6 +837,21 @@ def test_incidents_open_counts_split_on_whether_the_history_was_read(azure, tmp_
     assert by_name["i-synced"]["history_complete"] is True and by_name["i-fresh"]["history_complete"] is False
     ws = ws_a(ev)
     assert ws["open_unacknowledged"] == 1 and ws["open_new_unowned_history_incomplete"] == 1
+
+
+@pytest.mark.parametrize("owner, label", [({"email": "pat@contoso.com"}, "pat@contoso.com"), ({"objectId": "u-9"}, "u-9")])
+def test_incidents_owner_known_only_by_email_or_id_is_an_owner(azure, tmp_path, owner, label):
+    created = NOW - timedelta(days=1)
+    stale, assigned = incident("i-stale-new", "New", NOW - timedelta(days=120)), incident("i-assigned", "New", created)
+    stale["properties"]["owner"] = assigned["properties"]["owner"] = owner
+    azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"] += [stale, assigned]
+    row = update("i-assigned", created + timedelta(minutes=1), "New", "High", owner=label, by="Automation rule - assign")
+    row[6], row[7] = owner.get("objectId", ""), owner.get("email", "")  # OwnerId, and Owner from the names only
+    _, ev, by_name = run_with_history(azure, tmp_path, incident_history() + [update("i-assigned", created, "New", "High"), row])
+    ws = ws_a(ev)
+    # Neither is unowned or unassigned, from its rows or from the incident list.
+    assert by_name["i-assigned"]["history_complete"] is True and ws["open_new_unowned_history_incomplete"] == 0
+    assert ws["monthly"][-1]["open_at_end_by_owner"] == {"john@contoso.com": 1, label: 2}
 
 
 def test_incidents_backlog_older_than_the_history_still_new_and_unowned(azure, tmp_path):  # history incomplete
@@ -906,6 +934,40 @@ def test_incidents_hidden_security_alert_is_refused(azure, tmp_path):
     assert by_name["i-closed"]["entities"] == []  # no alerts, so no entities whether or not they could be read
 
 
+@pytest.mark.parametrize("minutes", [20, 120])
+def test_incidents_security_alert_refused_only_once_an_alerted_incident_is_an_hour_old(azure, tmp_path, minutes):
+    azure.queries.insert(0, ("SystemAlertId", SECURITY_ALERT_MISSING))
+    arm = azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"]
+    for i in arm:
+        i["properties"]["additionalData"]["alertsCount"] = 0
+    arm.append(incident("i-first", "New", NOW - timedelta(minutes=minutes)))
+    code, ev = run("sentinel_incidents", tmp_path)
+    ws = ws_a(ev)
+    if minutes < 60:  # its alerts may not be ingested yet
+        assert code == 0 and "under an hour old" in ws["notes"][-1]
+    else:
+        assert code == 1 and json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+
+
+SECURITY_INCIDENT_MISSING = Resp(400, {"error": {"code": "BadArgumentError", "innererror": {
+    "message": "'where' operator: Failed to resolve table or column expression named 'SecurityIncident'"}}})
+
+
+@pytest.mark.parametrize("minutes", [20, 120])
+def test_incidents_security_incident_refused_only_once_an_incident_is_an_hour_old(azure, tmp_path, minutes):
+    azure.arm[(f"{SI_A}/incidents", "2025-09-01")] = {"value": [incident("i-first", "New", NOW - timedelta(minutes=minutes))]}
+    azure.queries.insert(0, ("SecurityIncident", SECURITY_INCIDENT_MISSING))
+    code, ev = run("sentinel_incidents", tmp_path)
+    ws = ws_a(ev)
+    if minutes < 60:  # a brand-new workspace's first incident may not be ingested yet
+        assert code == 0 and ws["notes"] == [
+            "SecurityIncident table wasn't found, and every incident listed is under an hour old, so may not be ingested yet"]
+        assert ws["incidents"][0]["history_complete"] is False and ev["summary"]["acknowledged_incidents"] == 0
+    else:
+        assert code == 1 and json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+        assert ws["acknowledged_incidents"] is None
+
+
 def test_incidents_without_security_alert_and_no_alerts(azure, tmp_path):
     azure.queries.insert(0, ("SystemAlertId", SECURITY_ALERT_MISSING))
     for i in azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"]:
@@ -942,6 +1004,11 @@ def test_incidents_without_security_alert_and_no_alerts(azure, tmp_path):
     ("intranet:80/path?tok=1", "intranet"),
     ("my-host:8443", "my-host"),
     ("host.example.com:99999/x", None),
+    ("https:443", None),
+    ("http:8080/x", None),
+    ("sips:5061", None),
+    ("sms:911", None),
+    ("javascript:1", None),
 ])
 def test_incident_url_entities_keep_scheme_and_host_only(url, expected):
     assert MODS["sentinel_incidents"].url_host(url) == expected

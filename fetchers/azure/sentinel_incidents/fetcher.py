@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlsplit
+from urllib.parse import non_hierarchical, urlsplit, uses_netloc, uses_relative
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
@@ -51,15 +51,18 @@ LIMITATIONS = [
 # prefixes. What a person's update writes isn't documented, so any other modifier counts as a person.
 SYSTEM_MODIFIER_NAMES = frozenset({"incident created from alert", "alert grouping", "fusion"})
 SYSTEM_MODIFIER_PREFIXES = ("automation rule", "playbook", "microsoft xdr", "microsoft defender xdr", "microsoft 365 defender")
+# The incident's owner names in the order the rows' Owner falls back through, then its object id.
+OWNER_FIELDS = ("owner_user_principal_name", "owner_assigned_to", "owner_email", "owner_object_id")
 
 # The ARM incident has no close time or change history; SecurityIncident holds one row per update.
 # Bounded by an explicit time so the rows read start exactly where the lookback does.
-# The latest row is picked by update_order's key, written out as one sortable string.
+# The latest row is picked by update_order's key as one string, its parts joined by U+0001 so a shorter one sorts first.
 CLOSED_TIME_QUERY = (
     "SecurityIncident "
     "| where TimeGenerated > datetime({since}) "
-    "| extend Order = strcat(format_datetime(coalesce(LastModifiedTime, TimeGenerated), 'yyyy-MM-dd HH:mm:ss.fffffff'), "
-    "' ', format_datetime(TimeGenerated, 'yyyy-MM-dd HH:mm:ss.fffffff'), ' ', ModifiedBy, ' ', Status, ' ', "
+    "| extend Order = strcat_delim(unicode_codepoints_to_string(1), "
+    "format_datetime(coalesce(LastModifiedTime, TimeGenerated), 'yyyy-MM-dd HH:mm:ss.fffffff'), "
+    "format_datetime(TimeGenerated, 'yyyy-MM-dd HH:mm:ss.fffffff'), ModifiedBy, Status, "
     "coalesce(tostring(Owner.userPrincipalName), tostring(Owner.assignedTo), tostring(Owner.email))) "
     "| summarize arg_max(Order, Status, ClosedTime, CreatedTime, Tasks) by IncidentName "
     "| project IncidentName, Status, ClosedTime, CreatedTime, Tasks"
@@ -104,6 +107,9 @@ ENTITY_ID_FIELDS = {
 GENERIC_ID_FIELDS = ("Name", "DisplayName")
 # Anything else in a host (a backslash, a percent escape) can carry a path or token.
 URL_HOST = re.compile(r"[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\]")
+# Schemes "name:digits" is read with; after any other name the digits are a port, as in "server01:8080".
+URL_SCHEMES = frozenset(uses_netloc + uses_relative + non_hierarchical + [
+    "tel", "urn", "javascript", "data", "about", "blob", "sms", "geo"]) - {""}
 
 logger = logging.getLogger(NAME)
 
@@ -170,6 +176,11 @@ def created_in(incident: Dict[str, Any], cutoff: datetime) -> bool:
     return created is not None and created >= cutoff
 
 
+def created_before(raw: Dict[str, Any], at: datetime) -> bool:
+    created = parse_time(dig(raw, "properties", "createdTimeUtc"))
+    return created is not None and created < at
+
+
 def in_scope(incident: Dict[str, Any], cutoff: datetime) -> bool:
     """Created inside the lookback, or still open however old it is."""
     return incident.get("status") in OPEN_STATUSES or created_in(incident, cutoff)
@@ -211,6 +222,11 @@ def changes(rows: List[Dict[str, Any]], field: str) -> List[Dict[str, Any]]:
 
 def owned(row: Dict[str, Any]) -> bool:
     return bool(row.get("OwnerId") or row.get("Owner"))
+
+
+def incident_owner(incident: Dict[str, Any]) -> Optional[str]:
+    """The owner as rows name it, else its object id; None only when no owner field is set."""
+    return next((incident[k] for k in OWNER_FIELDS if incident.get(k)), None)
 
 
 def by_person(row: Dict[str, Any]) -> bool:
@@ -262,9 +278,9 @@ def is_current(incident: Dict[str, Any], row: Dict[str, Any]) -> bool:
         return False
     if (row.get("Severity") or "").lower() != (incident.get("severity") or "").lower():
         return False
-    names = {(incident.get(k) or "").lower() for k in ("owner_user_principal_name", "owner_assigned_to", "owner_email")}
+    names = {(incident.get(k) or "").lower() for k in OWNER_FIELDS[:3]}
     names.discard("")
-    if owned(row) != bool(incident.get("owner_object_id") or names):
+    if owned(row) != (incident_owner(incident) is not None):
         return False
     if row.get("OwnerId") and incident.get("owner_object_id"):
         return row["OwnerId"].lower() == incident["owner_object_id"].lower()
@@ -317,9 +333,9 @@ def url_host(url: str) -> Optional[str]:
     and internationalised hosts give None too."""
     try:
         parts = urlsplit(url)
-        # urlsplit reads "server01:8080/a" as scheme "server01"; a port after it, outside tel, urn, mailto and sip, is a host.
+        # urlsplit reads "server01:8080/a" as scheme "server01"; a port after a name that isn't a scheme makes it a host.
         port = re.match(r"(\d{1,5})(?:[/?#]|$)", parts.path)
-        bare_port = port and int(port.group(1)) <= 65535 and parts.scheme not in ("tel", "urn", "mailto", "sip")
+        bare_port = port and int(port.group(1)) <= 65535 and parts.scheme not in URL_SCHEMES
         if not parts.netloc and (not parts.scheme or bare_port):
             parts = urlsplit(f"//{url}")
         host = parts.hostname
@@ -396,9 +412,10 @@ def state_at(incident: Dict[str, Any], rows: List[Dict[str, Any]], at: datetime)
     before = [r for r in rows if (parse_time(row_time(r)) or at) <= at]
     if before:
         r = before[-1]
-        return {"open": r.get("Status") in OPEN_STATUSES, "severity": r.get("Severity"), "owner": r.get("Owner") or None}
+        return {"open": r.get("Status") in OPEN_STATUSES, "severity": r.get("Severity"),
+                "owner": r.get("Owner") or r.get("OwnerId") or None}
     current = {"open": incident.get("status") in OPEN_STATUSES, "severity": incident.get("severity"),
-               "owner": incident.get("owner_user_principal_name") or incident.get("owner_assigned_to")}
+               "owner": incident_owner(incident)}
     modified = parse_time(incident.get("last_modified_time_utc"))
     if not rows or (modified is not None and modified <= at):
         return current
@@ -513,8 +530,7 @@ def incident_summary(
         ),
         # The open incidents open_unacknowledged can't judge, from the incident list alone: still New and nobody owns it.
         "open_new_unowned_history_incomplete": sum(
-            1 for i in open_ if i.get("status") == "New" and not i.get("history_complete")
-            and not (i.get("owner_user_principal_name") or i.get("owner_assigned_to"))
+            1 for i in open_ if i.get("status") == "New" and not i.get("history_complete") and incident_owner(i) is None
         ),
         "mttd_hours": mean_hours([i.get("hours_to_detect") for i in recent]),
         "mtta_hours": mean_hours([i.get("hours_to_acknowledge") for i in recent]),
@@ -543,7 +559,8 @@ def security_incident_query(
     client, ws: Dict[str, Any], kql: str, cutoff: datetime, label: str, missing: Optional[str], collector, notes: List[str]
 ) -> Optional[List[Dict[str, Any]]]:
     """Rows, or None when they couldn't be read. A SecurityIncident the query can't resolve is empty, noted as
-    `missing`, unless the workspace lists incidents (`missing` None): then table-level access hides it, a refusal."""
+    `missing`, unless the workspace lists an incident over an hour old (`missing` None): then table-level access
+    hides it, a refusal."""
     try:
         if not ws.get("customer_id"):
             raise LookupError("workspace has no customerId to query")
@@ -554,7 +571,8 @@ def security_incident_query(
             return None
         if missing is None:
             collector.record(f"loganalytics.query({label}, {ws['name']})", PermissionError(
-                "SecurityIncident can't be resolved although the workspace lists incidents: table-level access can hide it"))
+                "SecurityIncident can't be resolved although the workspace lists incidents over an hour old: "
+                "table-level access can hide it"))
             return None
         notes.append(missing)
         return []
@@ -579,11 +597,16 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         f"operationalinsights.tables.get(SecurityIncident, {ws['name']})", lambda: security_incident_table(client, ws)
     )
     exists, retention = table or (None, None)
-    # Sentinel writes SecurityIncident for every incident, so with incidents listed a query that can't find it was refused.
-    missing = None if listed else (
-        "SecurityIncident table does not exist in this workspace: no incident has been written" if exists is False
-        else "SecurityIncident table wasn't found, and the workspace lists no incidents"
-    )
+    ingested_by = now - INGESTION_LAG
+    # Sentinel writes SecurityIncident for every incident, so once one is an hour old a query that can't find it was refused.
+    missing: Optional[str] = None
+    if not any(created_before(raw, ingested_by) for raw in listed):
+        missing = (
+            "SecurityIncident table wasn't found, and every incident listed is under an hour old, so may not be ingested yet"
+            if listed else
+            "SecurityIncident table does not exist in this workspace: no incident has been written" if exists is False
+            else "SecurityIncident table wasn't found, and the workspace lists no incidents"
+        )
     latest_rows = security_incident_query(client, ws, CLOSED_TIME_QUERY, cutoff, "SecurityIncident", missing, collector, notes)
     closes_read = latest_rows is not None
     history: Optional[List[Dict[str, Any]]] = None
@@ -597,11 +620,16 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         try:
             entity_rows = query_since(client, ws, ENTITIES_QUERY, cutoff)
         except Exception as exc:  # noqa: BLE001
+            alerted = [raw for raw in listed if (dig(raw, "properties", "additionalData", "alertsCount") or 0) > 0]
             if not table_missing(exc, "SecurityAlert"):
                 collector.record(f"loganalytics.query(SecurityAlert entities, {ws['name']})", exc)
-            elif any((dig(raw, "properties", "additionalData", "alertsCount") or 0) > 0 for raw in listed):
+            elif any(created_before(raw, ingested_by) for raw in alerted):
                 collector.record(f"loganalytics.query(SecurityAlert entities, {ws['name']})", PermissionError(
-                    "SecurityAlert can't be resolved although incidents have alerts: table-level access can hide it"))
+                    "SecurityAlert can't be resolved although incidents over an hour old have alerts: "
+                    "table-level access can hide it"))
+            elif alerted:
+                notes.append("SecurityAlert table wasn't found, and every incident with alerts is under an hour old, "
+                             "so they may not be ingested yet; entities unavailable")
             else:
                 notes.append("SecurityAlert table does not exist in this workspace; entities unavailable")
 

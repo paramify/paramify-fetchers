@@ -629,7 +629,10 @@ schemas and the `paramify` CLI — not the internal code.
   - `provider_incident_id` and `provider_incident_url`: for an incident synced
     from Defender XDR, its id and link there; Microsoft Graph alerts give the same
     id as `incidentId`.
-  - `owner_object_id` and `owner_email`, beside the existing owner names.
+  - `owner_object_id` and `owner_email`, beside the existing owner names. An
+    owner known only by email or object id is still an owner, in
+    `history_complete`, `open_new_unowned_history_incomplete` and the backlog
+    by owner.
   - `history_complete`: whether every update was read: the incident was created
     inside the history read, which starts at the lookback or SecurityIncident's
     retention, whichever is later; its creation row was read; and a row tied for
@@ -655,14 +658,17 @@ schemas and the `paramify` CLI — not the internal code.
   `open_unacknowledged` are `null` rather than empty. When close times can't be
   read, `close_time_status` is `unknown` and the close-time counts are `null`,
   rather than every closed incident counting as missing. A SecurityIncident
-  table the query can't find, in a workspace that lists incidents, is hidden by
-  table-level access: the run records an access failure and exits 1, and close
-  times and history are unknown. In a workspace that lists none it reads as
-  empty. SecurityAlert is treated the same way when any incident has alerts.
+  table the query can't find, in a workspace that lists an incident over an hour
+  old, is hidden by table-level access: the run records an access failure and
+  exits 1, and close times and history are unknown. In a workspace that lists
+  none, or only incidents under an hour old that may not be ingested yet, it
+  reads as empty, with a note. SecurityAlert is treated the same way when an
+  incident over an hour old has alerts.
   The summary's counts, existing ones included, are `null` when any workspace's
-  incident list failed or the workspace list or a check for Sentinel failed,
-  and the counts that can be unknown are `null` when any workspace's value is;
-  with no Sentinel workspace found they are 0.
+  incident list failed, the workspace list or a check for Sentinel failed, or a
+  workspace named in `SENTINEL_WORKSPACES` wasn't found, and the counts that
+  can be unknown are `null` when any workspace's value is; with no Sentinel
+  workspace found they are 0.
   Each workspace also gains `limitations`: in a workspace connected to Defender
   XDR, analysts usually work incidents in the Defender portal and
   SecurityIncident shows mostly the XDR sync's updates, so those incidents read

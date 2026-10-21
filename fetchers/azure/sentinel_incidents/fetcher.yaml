@@ -82,7 +82,7 @@ evidence_set:
     Summary fields:
 
     Which workspaces were checked?
-    - workspaces_collected — Number of Sentinel workspaces read. If the workspace list or a check for Sentinel fails, every incident count below is null rather than 0
+    - workspaces_collected — Number of Sentinel workspaces read. If the workspace list or a check for Sentinel fails, or a workspace named in SENTINEL_WORKSPACES isn't found, every incident count below is null rather than 0
     - workspaces_without_sentinel — Number of workspaces skipped because Sentinel isn't turned on
 
     Are incidents being worked and closed?
