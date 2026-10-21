@@ -66,4 +66,4 @@ permissions:
 
 - [Pin a release and upgrade safely](versioning_guide.md)
 - [Cut a release](releasing_guide.md)
-- [Work in a private copy of this repo](private_mirror_workflow.md)
+- [Work in a private copy of this repo](private_mirror_guide.md)
