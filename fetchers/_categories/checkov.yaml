@@ -15,13 +15,15 @@ description: >
 #
 # Runner dependency: the `checkov` CLI and `git` must be on PATH. `checkov` is in
 # the top-level requirements.txt; `git` is a system tool. `curl` and `unzip` are
-# used only by checkov_bicep's TFVC source.
+# used only by checkov_bicep's TFVC source, and `python3` only by checkov_bicep
+# to check that its skip_paths are valid regular expressions.
 requires:
   tools:
     - checkov
     - curl
     - git
     - jq
+    - python3
     - unzip
   # Listed as a package too, not just a binary: a `checkov` on PATH from some
   # other environment will not match the pin this repo installs.

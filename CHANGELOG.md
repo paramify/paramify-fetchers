@@ -67,6 +67,32 @@ schemas and the `paramify` CLI — not the internal code.
   every Azure DevOps fetcher. It sends credentials only to the host it paged from
   and never follows a redirect, and it keeps the TF/VS error code on every
   failure.
+- **`azure_app_service_backups`** (`EVD-AZURE-APPSVC-BACKUPS`, KSI-RPL-ABO). For
+  each App Service web app, whether it is actually
+  being backed up, judged from its restore points: automatic backups plus
+  successful custom backups.
+  - **Observed backups.** It reports `latest_restore_point_age_hours` at run time
+    and `largest_restore_point_gap_hours` inside `restore_point_window_hours`
+    (default 48). `backed_up` is true only when the newest restore point is inside
+    that window. `effective_backup_interval_hours` is the observed interval, and
+    `configured_backup_interval_hours` is kept separate.
+  - **Recovery point objective.** Set the optional `recovery_point_objective_hours`
+    and each app reports `meets_recovery_point_objective`.
+  - **Custom backups.** It also reports each app's custom backup configuration and
+    history, and restores made from custom backups within
+    `restore_test_window_days`.
+  - **Backup storage.** It reports the region, replication and version immutability
+    of the storage accounts custom backups go to.
+  - **Exclusions.** Function apps and deployment slots are listed in
+    `results.exclusions` with counts and the reason.
+  - **Permissions.** Reader is enough. The custom configuration needs the opt-in
+    `Microsoft.Web/sites/config/list/action`. Without it the configuration is
+    recorded as `not_authorized` (unknown), not as a collection failure.
+  - **Checks and limits.** The web app list is checked against Azure Resource
+    Graph, and `results.limitations` states what the evidence does not cover. SAS
+    tokens and database connection strings are never written.
+  - **Shared module.** `_shared/app_service.py` now holds the web-app client and
+    kind filter that `azure_app_service_configuration` also uses.
 - **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
   over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
   Code (Read). It records Bicep and ARM checks together, each tagged with its
@@ -962,6 +988,48 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`checkov_bicep` passes its list settings to checkov intact** (0.2.0 →
+  0.2.1). `checks`, `skip_checks`, `skip_paths` and `skip_resources` take
+  entries separated by commas or newlines, each trimmed. `checks` and
+  `skip_checks` also take spaces and tabs, since check ids never contain them,
+  and `_shared/skip-checks.default.txt` is read the same way, with `#`
+  starting a comment anywhere on a line. Configured values reach checkov as
+  `--flag=value`. Before:
+  - a `skip_paths` entry with a space (`My Templates/legacy`) became two skip
+    paths, and each piece could skip folders it was not meant to;
+  - a `skip_paths` entry with `*` or `?` was expanded against the files in the
+    fetcher's working directory, so `*.json` could reach checkov as
+    `--skip-path report.json`;
+  - `checks` failed the run if it had a space after a comma
+    (`CKV_AZURE_3, CKV_AZURE_44`), ids separated only by spaces, or one id
+    per line;
+  - `skip_checks` failed the run if its ids were separated only by spaces,
+    and read only its first line, so checks listed below it still ran;
+  - a line of `_shared/skip-checks.default.txt` holding several ids or a
+    trailing `#` comment failed the run;
+  - `skip_resources` patterns on separate lines became one pattern that
+    matched nothing;
+  - a `skip_paths` or `repo_id` value starting with `-` was read as an option,
+    and the run failed.
+
+  `skip_paths` entries are Python regular expressions, which is how checkov
+  reads them: it searches each file's path for every entry, so `.`, `*`, `?`,
+  `+`, `(`, `)`, `[` and `]` need a backslash to match literally. They are
+  not globs. An entry that is not a valid regular expression, such as
+  `*.json`, now fails the run with `bad_config` naming it, before anything
+  is fetched; checkov's Bicep scan crashed on one. The check needs `python3`
+  on PATH, which the checkov category now declares.
+
+  `metadata.skip_paths` now holds the entries checkov was given as
+  `--skip-path` values. It used to disagree in three cases:
+  - a path with a space was one entry, while checkov got two;
+  - a `*` pattern was listed as written, while checkov got the files it
+    matched;
+  - entries on separate lines with no comma between them were one entry,
+    while checkov got one per line.
+
+  New `metadata.checks` lists the `checks` allowlist, so a restricted scan no
+  longer reads as a full one. It is empty when every check ran.
 - **`azure_defender_assessments` reports each assessment's own severity**
   (0.1.1 → 0.2.0). Severity came from the subscription's assessment metadata
   catalogue, which can rate a check lower than the assessment itself does (App
@@ -1798,7 +1866,7 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- [`docs/private_mirror_workflow.md`](docs/private_mirror_workflow.md) — keeping a
+- [`docs/private_mirror_workflow.md`](https://github.com/paramify/paramify-fetchers/blob/v0.3.1-beta/docs/private_mirror_workflow.md) — keeping a
   private copy of this repo that still receives upstream releases, for teams whose
   fetcher work can't be public.
 
