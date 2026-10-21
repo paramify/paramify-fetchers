@@ -370,6 +370,7 @@ def test_incidents(azure, tmp_path):
     assert {k: ws["completeness"][k] for k in ("arm_created", "kql_created", "counts_agree")} == {
         "arm_created": 1, "kql_created": 1, "counts_agree": True}
     assert ws["security_incident_retention_days"] == 90 and ws["notes"] == []
+    assert "Microsoft Graph security/incidents" in ws["limitations"][0]
 
 
 def test_incidents_without_the_table(azure, tmp_path):
@@ -378,12 +379,16 @@ def test_incidents_without_the_table(azure, tmp_path):
         "message": "'where' operator: Failed to resolve table or column expression named 'SecurityIncident'"}}})))
     code, ev = run("sentinel_incidents", tmp_path)
     ws = ws_a(ev)
-    assert code == 0 and ws["closed_missing_close_time"] == 1 and "SecurityIncident" in ws["notes"][0]
-    # No table means no update was ever written: the history is read and empty, so nothing is known complete.
-    assert ws["monthly"] and ws["acknowledged_incidents"] == 0 and ws["open_unacknowledged"] == 0
-    assert ev["summary"]["acknowledged_incidents"] == 0
-    assert all(i["status_changes"] == [] and i["history_complete"] is False and i["tasks"] is None for i in ws["incidents"])
+    # A workspace listing incidents always has the table, so here it couldn't be read: nothing from it is known.
+    assert code == 0 and ws["notes"] == [
+        "SecurityIncident table not found although the workspace lists incidents (table-level access can hide it); "
+        "close times and history unknown"]
+    assert ws["closed_missing_close_time"] is None and ws["completeness"]["counts_agree"] is None
+    assert ws["monthly"] is None and ws["acknowledged_incidents"] is None and ws["open_unacknowledged"] is None
+    assert ev["summary"]["acknowledged_incidents"] is None
+    assert all(i["status_changes"] is None and i["history_complete"] is None and i["tasks"] is None for i in ws["incidents"])
     assert all(i["entities"] is None for i in ws["incidents"])
+    assert next(i for i in ws["incidents"] if i["name"] == "i-closed")["close_time_status"] == "unknown"
 
 
 def onboard_second_workspace(azure, incidents=None):
@@ -401,6 +406,7 @@ def test_incidents_idle_workspace_keeps_the_totals(azure, tmp_path):
     code, ev = run("sentinel_incidents", tmp_path)
     idle = next(w for w in ev["results"]["workspaces"] if w["name"] == "law-plain")
     assert code == 0 and idle["acknowledged_incidents"] == 0 and idle["open_unacknowledged"] == 0
+    assert idle["notes"] == ["SecurityIncident table does not exist in this workspace: no incident has been written"]
     a = ws_a(ev)
     assert ev["summary"]["acknowledged_incidents"] == a["acknowledged_incidents"] == 1
     assert ev["summary"]["open_unacknowledged"] == a["open_unacknowledged"]
@@ -412,8 +418,9 @@ def test_incidents_failed_workspace_nulls_the_totals(azure, tmp_path):
     code, ev = run("sentinel_incidents", tmp_path)
     assert code == 1 and ws_a(ev)["acknowledged_incidents"] == 1
     assert all(ev["summary"][k] is None for k in (
-        "acknowledged_incidents", "open_unacknowledged", "closed_missing_close_time", "closed_close_time_not_retained",
-        "open_new_unowned_before_history"))
+        "incidents_in_scope", "open_incidents", "closed_incidents", "acknowledged_incidents", "open_unacknowledged",
+        "closed_missing_close_time", "closed_close_time_not_retained", "open_new_unowned_history_incomplete",
+        "recurring_titles"))
     assert MODS["sentinel_incidents"].summarize([])["acknowledged_incidents"] is None
 
 
@@ -645,19 +652,52 @@ def test_incidents_open_unacknowledged_means_no_person_acknowledged_it(azure, tm
 
 
 def test_incident_history_is_complete_only_from_its_creation_row_to_its_last_change():
-    mod = MODS["sentinel_incidents"]
-    created = NOW - timedelta(days=3)
-    incident_ = {"created_time_utc": iso(created), "last_modified_time_utc": iso(created + timedelta(hours=5))}
+    complete = MODS["sentinel_incidents"].history_complete
+    created, changed, since = NOW - timedelta(hours=2), NOW - timedelta(minutes=10), NOW - timedelta(days=30)
+    incident_ = {"created_time_utc": iso(created), "last_modified_time_utc": iso(changed)}
     rows = [dict(zip(HISTORY_COLUMNS, r)) for r in history_table([
-        update("x", created, "New", "Low"), update("x", created + timedelta(hours=5), "Active", "Low")])["tables"][0]["rows"]]
-    assert mod.history_complete(incident_, rows, NOW - timedelta(days=30))
-    assert not mod.history_complete(incident_, [], NOW - timedelta(days=30))
-    assert not mod.history_complete(incident_, rows[1:], NOW - timedelta(days=30))  # its creation row wasn't read
-    assert not mod.history_complete(incident_, rows[:1], NOW - timedelta(days=30))  # its last update isn't in yet
-    assert not mod.history_complete(incident_, rows, NOW - timedelta(days=1))
+        update("x", created, "New", "Low"), update("x", changed, "Active", "Low")])["tables"][0]["rows"]]
+    assert complete(incident_, rows, since, NOW) and complete(incident_, rows[::-1], since, NOW)  # in any order
+    assert not complete(incident_, [], since, NOW)
+    assert not complete(incident_, rows[1:], since, NOW)  # its creation row wasn't read
+    assert not complete(incident_, rows[:1], since, NOW)  # changed in the last hour, and that update isn't in yet
+    assert not complete(incident_, rows, NOW - timedelta(hours=1), NOW)
+    # A lastModifiedTimeUtc over an hour old isn't ingestion lag: the Defender XDR sync moves it without a row.
+    assert complete({**incident_, "last_modified_time_utc": iso(created + timedelta(seconds=10))}, rows[:1], since,
+                    created + timedelta(hours=2))
 
 
-def test_incidents_backlog_older_than_the_history_still_new_and_unowned(azure, tmp_path):
+def test_incidents_history_is_ordered_by_the_modification_each_row_records(azure, tmp_path):
+    created = NOW - timedelta(days=3)
+    rows = [update("i-closed", created, "New", "High"),
+            update("i-closed", created + timedelta(seconds=1), "Active", "High", owner="tier1@contoso.com",
+                   by="Automation rule - triage"),
+            update("i-closed", NOW - timedelta(days=2), "Closed", "High", NOW - timedelta(days=2), by="pat@contoso.com")]
+    rows[1][0] = rows[0][0]  # written in the same second as the creation row, and returned first
+    _, _, by_name = run_with_history(azure, tmp_path, [rows[1], rows[0], rows[2]])
+    closed = by_name["i-closed"]
+    assert closed["history_complete"] is True and closed["hours_to_acknowledge"] == pytest.approx(24, abs=0.01)
+    assert [(c["from"], c["to"]) for c in closed["status_changes"]] == [("New", "Active"), ("Active", "Closed")]
+
+
+def test_incidents_open_counts_split_on_whether_the_history_was_read(azure, tmp_path):
+    created = NOW - timedelta(days=3)
+    synced = incident("i-synced", "New", created)
+    synced["properties"].update(owner={}, providerName="Microsoft XDR", lastModifiedTimeUtc=iso(created + timedelta(seconds=10)))
+    fresh = incident("i-fresh", "New", NOW - timedelta(minutes=30))
+    fresh["properties"].update(owner={}, lastModifiedTimeUtc=iso(NOW - timedelta(minutes=5)))
+    azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"] += [synced, fresh]
+    _, ev, by_name = run_with_history(azure, tmp_path, incident_history() + [
+        update("i-synced", created, "New", "High", by="Microsoft XDR"),
+        update("i-fresh", NOW - timedelta(minutes=30), "New", "High")])
+    # i-synced's lastModifiedTimeUtc moved 10 s after creation, days ago, with no row: its history is still whole.
+    # i-fresh changed 5 minutes ago and that update isn't in yet, so only the incident list speaks for it.
+    assert by_name["i-synced"]["history_complete"] is True and by_name["i-fresh"]["history_complete"] is False
+    ws = ws_a(ev)
+    assert ws["open_unacknowledged"] == 1 and ws["open_new_unowned_history_incomplete"] == 1
+
+
+def test_incidents_backlog_older_than_the_history_still_new_and_unowned(azure, tmp_path):  # history incomplete
     stale = incident("i-stale-new", "New", NOW - timedelta(days=120))
     stale_active = incident("i-stale-active", "Active", NOW - timedelta(days=120))
     for i in (stale, stale_active):
@@ -665,7 +705,7 @@ def test_incidents_backlog_older_than_the_history_still_new_and_unowned(azure, t
     azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"] += [stale, stale_active]
     code, ev = run("sentinel_incidents", tmp_path)
     # i-new is as old but owned; i-stale-active has been taken up.
-    assert ws_a(ev)["open_new_unowned_before_history"] == 1 and ev["summary"]["open_new_unowned_before_history"] == 1
+    assert ws_a(ev)["open_new_unowned_history_incomplete"] == 1 and ev["summary"]["open_new_unowned_history_incomplete"] == 1
 
 
 @pytest.mark.parametrize("by", ["", "  ", None, "Incident created from alert", "Alert Grouping", "Playbook - close benign"])
@@ -696,7 +736,9 @@ def test_incidents_queries_skip_when_the_list_fails_and_use_explicit_bounds(azur
     azure.calls.clear()
     azure.arm[(f"{SI_A}/incidents", "2025-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
     code, ev = run("sentinel_incidents", tmp_path)
-    assert code == 1 and not any(c[0] == "POST" and "SecurityIncident" in c[2] for c in azure.calls)
+    # The entities query reads SecurityIncident too.
+    assert code == 1 and ws_a(ev)["incidents"] is None
+    assert not any(c[0] == "POST" and "SecurityIncident" in c[2] for c in azure.calls)
 
 
 def test_incident_with_no_alerts_reads_empty_when_entities_are_skipped(azure, tmp_path):
@@ -705,7 +747,8 @@ def test_incident_with_no_alerts_reads_empty_when_entities_are_skipped(azure, tm
     azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"][0]["properties"]["additionalData"]["alertsCount"] = 0
     code, ev = run("sentinel_incidents", tmp_path)
     new = next(i for i in ws_a(ev)["incidents"] if i["name"] == "i-new")
-    assert new["entities"] == [] and not any(c[0] == "POST" and "SystemAlertId" in c[2] for c in azure.calls)
+    assert (new["alerts_found"], new["entities"]) == (0, [])
+    assert not any(c[0] == "POST" and "SystemAlertId" in c[2] for c in azure.calls)
 
 
 def test_incident_entities_are_capped_per_kind():
@@ -715,13 +758,6 @@ def test_incident_entities_are_capped_per_kind():
     out = MODS["sentinel_incidents"].incident_entities(rows)["x"]
     kinds = [e["kind"] for e in out["entities"]]
     assert kinds.count("file") == 25 and "host" in kinds and "ip" in kinds and out["entities_truncated"] is True
-
-
-def test_incidents_entities_skip_when_the_list_fails(azure, tmp_path):
-    azure.arm[(f"{SI_A}/incidents", "2025-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
-    code, ev = run("sentinel_incidents", tmp_path)
-    assert code == 1 and ws_a(ev)["incidents"] is None
-    assert not any(c[0] == "POST" and "SystemAlertId" in c[2] for c in azure.calls)
 
 
 def test_incidents_without_security_alert_leave_entities_unknown(azure, tmp_path):
@@ -734,13 +770,6 @@ def test_incidents_without_security_alert_leave_entities_unknown(azure, tmp_path
     by_name = {i["name"]: i for i in ws["incidents"]}
     assert code == 0 and by_name["i-new"]["entities"] is None and "SecurityAlert" in ws["notes"][-1]
     assert by_name["i-closed"]["entities"] == []  # no alerts, so no entities whether or not they could be read
-
-
-def test_incident_with_no_alerts_has_no_entities(azure, tmp_path):
-    azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"][0]["properties"]["additionalData"]["alertsCount"] = 0
-    code, ev = run("sentinel_incidents", tmp_path)
-    new = next(i for i in ws_a(ev)["incidents"] if i["name"] == "i-new")
-    assert (new["alerts_found"], new["entities"]) == (0, [])
 
 
 @pytest.mark.parametrize("url, expected", [
@@ -758,6 +787,10 @@ def test_incident_with_no_alerts_has_no_entities(azure, tmp_path):
     ("https://evil.com\\@good.com/", None),
     ("http://[::1]:8080/x", "http://[::1]"),
     ("//evil.com/a", "evil.com"),
+    ("host.example.com:8443/x", "host.example.com"),
+    ("localhost:8080", "localhost"),
+    ("http://a_b.example/x", None),
+    ("https://bücher.example/x", None),
 ])
 def test_incident_url_entities_keep_scheme_and_host_only(url, expected):
     assert MODS["sentinel_incidents"].url_host(url) == expected
