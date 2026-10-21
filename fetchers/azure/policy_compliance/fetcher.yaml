@@ -1,15 +1,16 @@
 name: azure_policy_compliance
-version: 0.1.0
+version: 0.2.0
 description: >
-  Azure Policy compliance state on the subscription — the result of evaluating the
-  assigned policies, not the assignments themselves. The service's own
-  subscription-wide counts of non-compliant resources and policies, the same per
-  policy assignment with its non-compliant member policies itemized, a bounded list
-  of the non-compliant (resource, policy) records, and every policy remediation task
-  with its deployment counts. Reads the latest policy states over the service's
-  default evaluation window, which is recorded. A subscription that never registered
-  Microsoft.PolicyInsights reports provider_registration_status: not_registered,
-  which is valid evidence rather than a collection failure.
+  Reads what Azure Policy found on the subscription: the service's counts of
+  non-compliant resources and policies, overall and per assignment, and a bounded
+  list of non-compliant (resource, policy) records with the expressions Azure
+  evaluated; a resource whose read Azure refuses is marked not_authorized rather
+  than failing the run. It also lists remediation tasks with their per-resource
+  deployments, each checked against the resource's latest state, and counts from
+  30 days of history which pairs were non-compliant throughout or only some of the
+  time. A subscription that never registered Microsoft.PolicyInsights reports
+  provider_registration_status: not_registered, which is valid evidence rather than
+  a collection failure.
 category: azure
 
 supports_targets: true
@@ -17,6 +18,9 @@ supports_targets: true
 runtime:
   type: python
   entry: fetcher.py
+  # Hundreds of serial queries at the default limits, plus 429 backoff; a production
+  # run took ~8 minutes.
+  timeout: 3600
 
 output:
   type: json
@@ -33,6 +37,38 @@ config_schema:
       How many non-compliant (resource, policy) records to itemize. The summary
       counts are complete regardless; this bounds only the list, and
       non_compliant_states_truncated says when it was reached. 0 skips the list.
+  max_evaluation_detail_resources:
+    type: integer
+    required: false
+    default: 100
+    env: AZURE_POLICY_MAX_EVALUATION_DETAIL_RESOURCES
+    description: >
+      How many of the listed non-compliant resources to read evaluation details
+      for, one query each (the service refuses them at subscription scope); the
+      resources with the most listed states go first. evaluation_details_truncated
+      says when there were more. 0 skips them. A refused read (403 or
+      AuthorizationFailed) is retried once, at most 3 times a run and not after a
+      retry is refused again; still refused, it marks that resource's states
+      not_authorized and does not fail the run. Any other error does.
+  max_recurrence_pairs:
+    type: integer
+    required: false
+    default: 100
+    env: AZURE_POLICY_MAX_RECURRENCE_PAIRS
+    description: >
+      How many intermittently non-compliant (resource, policy) pairs to read the
+      30-day history of, one query each, to count their separate non-compliant
+      episodes. The pair counts are complete regardless; recurrence_pairs_truncated
+      says when there were more. 0 reads none.
+  max_remediation_deployments:
+    type: integer
+    required: false
+    default: 1000
+    env: AZURE_POLICY_MAX_REMEDIATION_DEPLOYMENTS
+    description: >
+      How many remediation deployments to itemize across all remediation tasks;
+      remediation_deployments_truncated says when there were more. 0 skips them.
+      Azure deletes a task 60 days after its last change, so older ones are gone.
 
 target_schema:
   subscription_id:
@@ -57,6 +93,7 @@ ksis:
   - KSI-SVC-ACM      # configuration is continuously checked against the assigned policy baseline
   - KSI-CNA-EIS      # drift from intended state, per resource, and the remediation tasks that correct it
   - KSI-MLA-EVC      # the evaluation results themselves
+  - KSI-SVC-EIS      # remediation deployments that took, and non-compliance that keeps coming back
 
 evidence_set:
   reference_id: EVD-AZURE-POLICY-COMPLIANCE
@@ -67,4 +104,16 @@ evidence_set:
     policy_states.summarize_for_subscription("latest", <subscription_id>),
     policy_states.list_query_results_for_subscription("latest", <subscription_id>,
     query_options=QueryOptions(filter="complianceState eq 'NonCompliant'", top=N+1)),
-    and remediations.list_for_subscription(). Reader on the subscription.
+    per listed resource policy_states.list_query_results_for_resource("latest",
+    <resource_id>, query_options=QueryOptions(filter="ComplianceState eq
+    'NonCompliant'", expand="PolicyEvaluationDetails")),
+    policy_states.list_query_results_for_subscription("default", ...) over the last 30
+    days grouped per (resource, policy, compliance state) and a count of those groups,
+    and per intermittent pair the same query filtered to that pair and ordered by
+    time, remediations.list_for_subscription(), and per task
+    remediations.list_deployments_at_subscription / _at_resource_group /
+    _at_management_group / _at_resource, then latest-state queries (resource, state,
+    time) for the task's policy, filtered to its remediated resources 20 at a time.
+    Reader on the subscription. A per-resource details read refused with a 403 or an
+    AuthorizationFailed error code is retried once (at most 3 retries a run), then
+    marks that resource's states not_authorized instead of failing the run.
