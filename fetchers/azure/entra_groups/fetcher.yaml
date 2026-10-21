@@ -53,6 +53,9 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 #                            only and the guest and disabled-user figures read null.
 #   Member.Read.Hidden     — optional; members of groups with hidden membership. Without
 #                            it Graph returns them as an empty list, so they read unknown.
+#   Application.Read.All   — optional; the account state of owners that are apps or managed
+#                            identities. Without it, groups_with_only_disabled_owners reads
+#                            null when any owner is one.
 #   Organization.Read.All  — optional; the tenant name/domain recorded as provenance.
 # Directory.Read.All, or the Directory Readers role, covers all but Member.Read.Hidden.
 # A denied read is recorded as an API failure and the run exits non-zero.
@@ -66,7 +69,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_groups/fetcher.py
 
-    Access: Microsoft Graph GroupMember.Read.All and User.Read.All, or Directory.Read.All (the Directory Readers role covers it). Optional: Member.Read.Hidden; without it, the members of groups with hidden membership read unknown. Optional: Organization.Read.All; without it, no tenant name or domain is recorded.
+    Access: Microsoft Graph GroupMember.Read.All and User.Read.All, or Directory.Read.All (the Directory Readers role covers it). Optional: Member.Read.Hidden; without it, the members of groups with hidden membership read unknown. Optional: Application.Read.All; without it, groups_with_only_disabled_owners reads null when any owner is an app or managed identity. Optional: Organization.Read.All; without it, no tenant name or domain is recorded.
 
     Commands Executed:
     - Microsoft Graph GET /organization — the tenant's name and domain
@@ -81,8 +84,8 @@ evidence_set:
     What was checked?
     - total_groups — Number of groups in the tenant; a group that is neither security- nor mail-enabled (rare) is in none of the four kind counts, so the four may not add up to the total
     - groups_readable — True if the whole group list was read; false if any page failed, and every count reads null, since a partial list would pass for the whole tenant
-    - members_readable — True if every group's members were read; false if any member read failed, and the member fields read null
-    - member_details_readable — True if every user member came back with a sign-in name, account state and guest status; false if members couldn't be read or Graph returned some users as an id only (User.Read.All isn't granted), and the guest and disabled-user fields read null
+    - members_readable — True if every group's members were read, apart from hidden_membership_groups_unread; false if any member read failed, and the member fields read null
+    - member_details_readable — True if every user member came back with a sign-in name, account state and guest status; false if members couldn't be read or any one user came back without them (Graph returns users as an id only when User.Read.All isn't granted), and the guest and disabled-user fields then read null for the whole tenant
     - owners_readable — True if every group's owners (the users or service principals who can manage the group) were read; false if any owner read failed, and the owner fields read null
     - owner_details_readable — True if owners were read and every owner came back with its account state (enabled or disabled); false if not (User.Read.All or Application.Read.All isn't granted), and groups_with_only_disabled_owners reads null
 
@@ -111,7 +114,7 @@ evidence_set:
     - groups_with_owners_not_in_graph — Number of groups whose owners Microsoft Graph doesn't return: synced groups, distribution groups and mail-enabled security groups (created in Exchange); the owner fields leave them out
     - groups_without_owner — Number of groups with no owner, among groups whose owners Graph returns; null if owners couldn't be read
     - cloud_groups_without_owner — Number of groups created in Entra ID with no owner, among groups whose owners Graph returns; null if owners couldn't be read
-    - groups_with_only_disabled_owners — Number of groups whose every owner is a disabled account; null if owners or their account state couldn't be read
+    - groups_with_only_disabled_owners — Number of groups whose every owner is a disabled account, among groups whose owners Graph returns; null if owners or their account state couldn't be read
 
     Who is in them?
     - total_direct_memberships — Number of direct member entries across all groups (a user in three groups counts three times); null if members couldn't be read

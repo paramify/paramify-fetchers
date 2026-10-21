@@ -291,12 +291,36 @@ def test_owners_read_without_user_read_all_leave_the_disabled_owner_figure_null(
     assert {g["id"]: g for g in evidence["results"]["groups"]}["g-mixed"]["has_enabled_owner"] is None
 
 
-def test_a_user_missing_its_type_or_state_counts_as_limited(monkeypatch, tmp_path):
+def test_one_user_missing_its_type_or_state_nulls_the_guest_and_disabled_figures_tenant_wide(monkeypatch, tmp_path):
+    for partial in (_user("u-1", user_type=None), _user("u-1", enabled=None)):
+        tenant = _tenant()
+        tenant["members"]["g-admins"] = [partial, _user("u-guest", guest=True)]
+        _, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
+        s = evidence["summary"]
+        assert s["member_details_readable"] is False
+        assert s["groups_with_guest_members"] is None
+        assert s["role_assignable_groups_with_guest_members"] is None
+        # g-dyn's disabled member came back in full, but the tenant figure still reads null.
+        assert s["groups_with_disabled_user_members"] is None
+        assert s["total_direct_memberships"] == 9
+
+
+def test_a_service_principal_owner_returned_as_an_id_only_leaves_the_disabled_owner_figure_null(
+    monkeypatch, tmp_path
+):
     tenant = _tenant()
-    tenant["members"]["g-admins"] = [_user("u-1", user_type=None)]
-    _, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
-    assert evidence["summary"]["member_details_readable"] is False
-    assert evidence["summary"]["groups_with_disabled_user_members"] is None
+    tenant["owners"]["g-mixed"] = [
+        _user("u-off", enabled=False), ns(id="sp-x", odata_type="#microsoft.graph.servicePrincipal"),
+    ]
+    code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
+
+    assert code == 0
+    s = evidence["summary"]
+    assert s["owners_readable"] is True and s["owner_details_readable"] is False
+    assert s["groups_with_only_disabled_owners"] is None
+    mixed = {g["id"]: g for g in evidence["results"]["groups"]}["g-mixed"]
+    assert mixed["owner_count"] == 2 and mixed["has_enabled_owner"] is None
+    assert {o["principal_type"] for o in mixed["owners"]} == {"User", "ServicePrincipal"}
 
 
 def test_a_group_missing_from_the_owner_pass_is_unknown_not_ownerless(monkeypatch, tmp_path):
