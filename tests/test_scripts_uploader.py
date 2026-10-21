@@ -310,3 +310,69 @@ def test_missing_tag_permission_does_not_fail_the_sync(monkeypatch):
     assert summary["ok"] and summary["errors"] == 0
     assert len(fake.session.posts) == 1
     assert summary["tags"]["disabled"]
+
+
+# --------------------------------------------------------------------------- #
+# ParamifyScriptsClient — the HTTP boundary for create-set and CONNECT (GitHub #83)
+# --------------------------------------------------------------------------- #
+
+class _Resp:
+    def __init__(self, status_code, json_data=None, text=""):
+        self.status_code = status_code
+        self._json = {} if json_data is None else json_data
+        self.text = text
+
+    def json(self):
+        return self._json
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+class _Session:
+    def __init__(self, get=None, post=None):
+        self.headers = {}
+        self._get, self._post = get, post
+        self.posts = []
+
+    def get(self, url, params=None, timeout=None):
+        return self._get(url, params)
+
+    def post(self, url, json=None, timeout=None):
+        self.posts.append((url, json))
+        return self._post(url, json)
+
+
+def _client(get=None, post=None):
+    c = uploader.ParamifyScriptsClient("tok", "https://app.example.com/api/v0")
+    c.session = _Session(get, post)
+    return c
+
+
+@pytest.mark.parametrize("status, text", [
+    (400, "Script already connected to evidence"),   # as observed live
+    (409, "Script already connected to evidence"),   # same refusal on the code 0.9.2 permits
+])
+def test_associate_tolerates_already_connected(status, text):
+    c = _client(post=lambda url, body: _Resp(status, text=text))
+    c.associate_script("ev-1", "s-1")  # no raise: the state we wanted holds
+    assert c.session.posts[0][1] == {"associationType": "CONNECT", "subjectType": "SCRIPT", "subjectId": "s-1"}
+
+
+@pytest.mark.parametrize("status, text", [
+    (400, "subjectId must be a uuid"),
+    (409, '{"statusMessage":"Conflict","error":{"message":"Conflict"}}'),
+    (403, "forbidden"),
+])
+def test_associate_other_refusals_raise(status, text):
+    c = _client(post=lambda url, body: _Resp(status, text=text))
+    with pytest.raises(uploader.ParamifyError):
+        c.associate_script("ev-1", "s-1")
+
+
+def test_create_evidence_set_falls_back_to_find_on_409():
+    gets = [_Resp(200, {"evidences": [{"id": "ev-7", "referenceId": "EVD-X"}]})]
+    c = _client(get=lambda url, params: gets.pop(0),
+                post=lambda url, body: _Resp(409, text="Evidence already exists"))
+    assert c.create_evidence_set("EVD-X", "X") == "ev-7"

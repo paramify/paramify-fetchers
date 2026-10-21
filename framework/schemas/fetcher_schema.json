@@ -11,9 +11,9 @@
 
     "kind": {
       "type": "string",
-      "enum": ["evidence", "issue_report", "inventory"],
+      "enum": ["evidence", "issue_report", "inventory", "discovery"],
       "default": "evidence",
-      "description": "What class of output this fetcher produces. `evidence` (the default) writes a JSON payload the runner wraps in the evidence envelope and the paramify_evidence uploader attaches to an evidence set. `inventory` is evidence with a record contract: the payload's `data` is one record per asset, each with a `unique_asset_identifier`, for a Paramify inventory pipeline attached to the evidence set to turn into Inventory items. The uploader sends an inventory only when the run collected all of it (see docs/inventory_fetchers.md). `issue_report` writes the source tool's own file (a scan report) UNMODIFIED into <run>/issue-reports/, where the paramify_issues uploader posts it to an assessment intake. Issue reports are never enveloped: Paramify's intake parser reads the vendor's own structure, so anything added to the file breaks it."
+      "description": "What class of output this fetcher produces. `evidence` (the default) writes a JSON payload the runner wraps in the evidence envelope and the paramify_evidence uploader attaches to an evidence set. `inventory` is evidence with a record contract: the payload's `data` is one record per asset, each with a `unique_asset_identifier`, for a Paramify inventory pipeline attached to the evidence set to turn into Inventory items. The uploader sends an inventory only when the run collected all of it (see docs/inventory_fetchers_guide.md). `issue_report` writes the source tool's own file (a scan report) UNMODIFIED into <run>/issue-reports/, where the paramify_issues uploader posts it to an assessment intake. Issue reports are never enveloped: Paramify's intake parser reads the vendor's own structure, so anything added to the file breaks it."
     },
 
     "runtime": {
@@ -100,7 +100,7 @@
 
     "evidence_set": {
       "type": "object",
-      "description": "Paramify evidence-set identity for this fetcher (1 fetcher = 1 evidence set). Fetcher-knowledge — what this evidence is and how it's collected — so it ships with the fetcher and is the shipped default the runner carries into the envelope. Customers override reference_id per program in the uploader config; they never edit this. Do NOT add controls/solution_capabilities here — that linkage stays Paramify-side. See docs/uploader_design.md.",
+      "description": "Paramify evidence-set identity for this fetcher (1 fetcher = 1 evidence set). Fetcher-knowledge — what this evidence is and how it's collected — so it ships with the fetcher and is the shipped default the runner carries into the envelope. Customers override reference_id per program in the uploader config; they never edit this. Do NOT add controls/solution_capabilities here — that linkage stays Paramify-side. See docs/uploader_guide.md.",
       "required": ["reference_id", "name"],
       "properties": {
         "reference_id": {
@@ -130,7 +130,7 @@
 
     "issue_report": {
       "type": "object",
-      "description": "Paramify assessment-intake identity for a `kind: issue_report` fetcher — the analogue of `evidence_set`, and equally fetcher-knowledge. Deliberately holds no assessmentId: which assessment a report goes to is a per-customer choice that lives in the manifest (`config.assessment_id`, written by `paramify assessments select`). See docs/issue_report_fetchers.md.",
+      "description": "Paramify assessment-intake identity for a `kind: issue_report` fetcher — the analogue of `evidence_set`, and equally fetcher-knowledge. Deliberately holds no assessmentId: which assessment a report goes to is a per-customer choice that lives in the manifest (`config.assessment_id`, written by `paramify assessments select`). See docs/issue_report_fetchers_guide.md.",
       "required": ["assessment_type"],
       "properties": {
         "assessment_type": {
@@ -154,7 +154,7 @@
     "validators": {
       "type": "array",
       "deprecated": true,
-      "description": "DEPRECATED — superseded by the central validators/ registry (validators/<category>/<key>.yaml, framework/schemas/validator_schema.json). Nothing in the framework reads this block; only gitlab/significant_change_notifications still carries one, and it is kept here so that fetcher's data stays shape-checked until it is migrated. Do not add new inline validators: author them in the registry, where a validator is a first-class object linked to fetchers by evidence_set.reference_id. See docs/validators_design.md.",
+      "description": "DEPRECATED — superseded by the central validators/ registry (validators/<category>/<key>.yaml, framework/schemas/validator_schema.json). Nothing in the framework reads this block; only gitlab/significant_change_notifications still carries one, and it is kept here so that fetcher's data stays shape-checked until it is migrated. Do not add new inline validators: author them in the registry, where a validator is a first-class object linked to fetchers by evidence_set.reference_id. See docs/validators_guide.md.",
       "items": {
         "type": "object",
         "required": ["id", "regex"],
@@ -213,6 +213,19 @@
               "type": { "enum": ["csv", "json", "xml", "nessus"] }
             }
           }
+        }
+      }
+    },
+    {
+      "$comment": "A discovery fetcher reports what exists in a tenant; it is never uploaded, so an evidence_set or ksis would promise an upload and a claim that never happen. Its output is the discovery document (framework/schemas/discovery_schema.json), which is JSON.",
+      "if": {
+        "properties": { "kind": { "const": "discovery" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "not": { "anyOf": [{ "required": ["evidence_set"] }, { "required": ["ksis"] }, { "required": ["validators"] }] },
+        "properties": {
+          "output": { "properties": { "type": { "const": "json" } } }
         }
       }
     }

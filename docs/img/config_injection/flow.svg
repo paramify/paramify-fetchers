@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 470" width="960" height="470" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <style>
+    .bg { fill: #ffffff; }
+    .lane { fill: #f6f8fa; stroke: #d0d7de; }
+    .lane-skill { fill: #eef4ff; stroke: #9ec0ff; }
+    .box { fill: #ffffff; stroke: #d0d7de; }
+    .you { fill: #fff8e5; stroke: #d4a72c; }
+    .h { fill: #1f2328; font-size: 15px; font-weight: 700; }
+    .sub { fill: #59636e; font-size: 12px; }
+    .t { fill: #1f2328; font-size: 13px; font-weight: 600; }
+    .c { fill: #59636e; font-size: 11.5px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+    .n { fill: #0969da; font-size: 13px; font-weight: 700; }
+    .arrow { stroke: #8c959f; stroke-width: 2; fill: none; }
+    .head { fill: #8c959f; }
+    .key { fill: #59636e; font-size: 12px; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .lane { fill: #161b22; stroke: #30363d; }
+      .lane-skill { fill: #121d2f; stroke: #1f6feb; }
+      .box { fill: #0d1117; stroke: #30363d; }
+      .you { fill: #2b2111; stroke: #9e6a03; }
+      .h, .t { fill: #e6edf3; }
+      .sub, .c, .key { fill: #9198a1; }
+      .n { fill: #58a6ff; }
+      .arrow { stroke: #6e7681; }
+      .head { fill: #6e7681; }
+    }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="head"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="960" height="470" rx="12"/>
+
+  <!-- Lane 1: declared in code -->
+  <rect class="lane" x="16" y="16" width="264" height="400" rx="10"/>
+  <text class="h" x="32" y="44">1 · Declared in the repo</text>
+  <text class="sub" x="32" y="62">Keys, defaults, env names (step 1)</text>
+
+  <rect class="box" x="32" y="96" width="232" height="120" rx="8"/>
+  <text class="t" x="46" y="124">Category defaults</text>
+  <text class="c" x="46" y="148">_categories/rippling.yaml</text>
+  <text class="c" x="46" y="170">page_size: 100</text>
+  <text class="c" x="46" y="192">→ RIPPLING_PAGE_SIZE</text>
+
+  <rect class="box" x="32" y="248" width="232" height="120" rx="8"/>
+  <text class="t" x="46" y="276">Fetcher keys</text>
+  <text class="c" x="46" y="300">&lt;fetcher&gt;/fetcher.yaml</text>
+  <text class="c" x="46" y="322">exclude_aws_managed_roles</text>
+  <text class="c" x="46" y="344">secret: api_token</text>
+
+  <!-- Lane 2: your manifest -->
+  <rect class="lane-skill" x="304" y="16" width="352" height="400" rx="10"/>
+  <text class="h" x="320" y="44">2 · Your manifest</text>
+  <text class="sub" x="320" y="62">Values for this run (steps 2–3)</text>
+
+  <rect class="you" x="320" y="78" width="320" height="70" rx="8"/>
+  <text class="n" x="334" y="103">1</text><text class="t" x="354" y="103">Platform config, whole category</text>
+  <text class="c" x="354" y="128">rippling → page_size: 250</text>
+
+  <rect class="you" x="320" y="160" width="320" height="70" rx="8"/>
+  <text class="n" x="334" y="185">2</text><text class="t" x="354" y="185">Fetcher config, one entry</text>
+  <text class="c" x="354" y="210">exclude_aws_managed_roles: true</text>
+
+  <rect class="you" x="320" y="242" width="320" height="70" rx="8"/>
+  <text class="n" x="334" y="267">3</text><text class="t" x="354" y="267">Secret: an env var name, no value</text>
+  <text class="c" x="354" y="292">${env:RIPPLING_API_TOKEN}</text>
+
+  <rect class="you" x="320" y="324" width="320" height="70" rx="8"/>
+  <text class="n" x="334" y="349">4</text><text class="t" x="354" y="349">Ambient vars to let through</text>
+  <text class="c" x="354" y="374">aws → passthrough_env</text>
+
+  <!-- Lane 3: what the runner does -->
+  <rect class="lane" x="680" y="16" width="264" height="400" rx="10"/>
+  <text class="h" x="696" y="44">3 · paramify run</text>
+  <text class="sub" x="696" y="62">Builds each fetcher's env (step 4)</text>
+
+  <rect class="box" x="696" y="96" width="232" height="120" rx="8"/>
+  <text class="t" x="710" y="124">Merge, later wins</text>
+  <text class="sub" x="710" y="148">1 · category default</text>
+  <text class="sub" x="710" y="170">2 · platforms.&lt;category&gt;.config</text>
+  <text class="sub" x="710" y="192">3 · the entry's own config</text>
+
+  <rect class="box" x="696" y="248" width="232" height="120" rx="8"/>
+  <text class="t" x="710" y="276">All the fetcher sees</text>
+  <text class="c" x="710" y="300">RIPPLING_PAGE_SIZE=250</text>
+  <text class="c" x="710" y="322">RIPPLING_API_TOKEN=…</text>
+  <text class="c" x="710" y="344">+ PATH, HOME, passthrough</text>
+
+  <path class="arrow" d="M812 216 V246" marker-end="url(#a)"/>
+
+  <!-- cross-lane arrows -->
+  <path class="arrow" d="M264 156 H284 V113 H318" marker-end="url(#a)"/>
+  <path class="arrow" d="M264 308 H318" marker-end="url(#a)"/>
+  <path class="arrow" d="M640 113 H660 V156 H694" marker-end="url(#a)"/>
+
+  <!-- key -->
+  <rect class="you" x="16" y="434" width="16" height="16" rx="3"/>
+  <text class="key" x="40" y="447">= a value you set</text>
+</svg>

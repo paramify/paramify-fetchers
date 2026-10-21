@@ -109,7 +109,8 @@ def _security_groups(n_groups: int) -> dict:
     everything = {"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}
     return {
         "ec2 describe-security-groups": [
-            {"GroupId": f"sg-{i}", "IpPermissions": [tcp], "IpPermissionsEgress": [everything]}
+            {"GroupId": f"sg-{i}", "GroupName": f"group-{i}", "VpcId": "vpc-1",
+             "IpPermissions": [tcp], "IpPermissionsEgress": [everything]}
             for i in range(n_groups)
         ]
     }
@@ -125,11 +126,15 @@ def test_security_groups_makes_the_same_calls_at_any_group_count(tmp_path):
         "GroupId": "sg-0",
         "Rules": [
             {"Direction": "INBOUND RULES", "Protocol": "tcp", "FromPort": 443, "ToPort": 443,
-             "CIDRs": "0.0.0.0/0", "IPv6CIDRs": ""},
+             "CIDRs": "0.0.0.0/0", "IPv6CIDRs": "", "SecurityGroupIds": "", "PrefixListIds": ""},
             {"Direction": "OUTBOUND RULES", "Protocol": "-1", "FromPort": None, "ToPort": None,
-             "CIDRs": "0.0.0.0/0", "IPv6CIDRs": ""},
+             "CIDRs": "0.0.0.0/0", "IPv6CIDRs": "", "SecurityGroupIds": "", "PrefixListIds": ""},
         ],
+        "GroupName": "group-0",
+        "VpcId": "vpc-1",
     }
+    # Keys are only ever appended: validators match on this order.
+    assert list(payload["results"][0]) == ["GroupId", "Rules", "GroupName", "VpcId"]
 
 
 def test_security_groups_keeps_all_traffic_and_ipv6_rules(tmp_path):
@@ -151,13 +156,50 @@ def test_security_groups_keeps_all_traffic_and_ipv6_rules(tmp_path):
     })
     rules = payload["results"][0]["Rules"]
     # Keys are only ever appended: validators match on this order.
-    assert all(list(r) == ["Direction", "Protocol", "FromPort", "ToPort", "CIDRs", "IPv6CIDRs"] for r in rules)
+    assert all(list(r) == ["Direction", "Protocol", "FromPort", "ToPort", "CIDRs", "IPv6CIDRs",
+                           "SecurityGroupIds", "PrefixListIds"] for r in rules)
     assert [(r["Protocol"], r["FromPort"], r["ToPort"], r["CIDRs"], r["IPv6CIDRs"]) for r in rules] == [
         ("-1", None, None, "0.0.0.0/0", ""),
         ("tcp", 22, 22, "", "::/0"),
         ("tcp", 443, 443, "10.0.0.0/8, 0.0.0.0/0", "2001:db8::/32, ::/0"),
         ("icmp", -1, -1, "0.0.0.0/0", ""),
         ("tcp", 5432, 5432, "", ""),
+    ]
+
+
+def test_security_groups_keeps_group_and_prefix_list_sources(tmp_path):
+    # Before 0.4.0 a rule sourced from another security group or a prefix list
+    # came out with empty CIDRs and nothing else, so it read as a rule that
+    # allowed nothing; the group's name and VPC were not recorded either.
+    inbound = [
+        {"IpProtocol": "tcp", "FromPort": 5432, "ToPort": 5432,
+         "UserIdGroupPairs": [{"GroupId": "sg-app", "UserId": "111122223333"},
+                              {"GroupId": "sg-peer", "UserId": "444455556666",
+                               "VpcPeeringConnectionId": "pcx-1"}]},
+        {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
+         "IpRanges": [{"CidrIp": "10.0.0.0/8"}],
+         "PrefixListIds": [{"PrefixListId": "pl-cloudfront"}, {"PrefixListId": "pl-office"}]},
+    ]
+    outbound = [
+        {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
+         "PrefixListIds": [{"PrefixListId": "pl-s3"}]},
+        {"IpProtocol": "-1", "UserIdGroupPairs": [{"GroupId": "sg-self"}]},
+    ]
+    _, payload = _run(tmp_path, "security_groups", {
+        "ec2 describe-security-groups": [{
+            "GroupId": "sg-1", "GroupName": "db", "VpcId": "vpc-9",
+            "IpPermissions": inbound, "IpPermissionsEgress": outbound,
+        }],
+    })
+    (group,) = payload["results"]
+    assert (group["GroupId"], group["GroupName"], group["VpcId"]) == ("sg-1", "db", "vpc-9")
+    assert [(r["Direction"], r["CIDRs"], r["SecurityGroupIds"], r["PrefixListIds"]) for r in group["Rules"]] == [
+        # Same-account references are the bare group id; another account's are
+        # <account-id>/<group-id>, as the console writes them.
+        ("INBOUND RULES", "", "sg-app, 444455556666/sg-peer", ""),
+        ("INBOUND RULES", "10.0.0.0/8", "", "pl-cloudfront, pl-office"),
+        ("OUTBOUND RULES", "", "", "pl-s3"),
+        ("OUTBOUND RULES", "", "sg-self", ""),
     ]
 
 
@@ -199,3 +241,64 @@ def test_iam_roles_makes_the_same_calls_at_any_role_count(tmp_path):
         "Tags": [],
     }
     assert payload["results"][-1] == {"Type": "PasswordPolicy", "Policy": {"MinimumPasswordLength": 14}}
+
+
+def test_iam_mfa_status_tells_security_keys_from_virtual_devices(tmp_path):
+    # Before 0.2.0 every ARN serial was "virtual", so a FIDO security key
+    # (arn:...:u2f/...), the phishing-resistant factor, read as an app.
+    acct = "arn:aws:iam::111122223333"
+    devices = [
+        [f"{acct}:u2f/user/alice/yubikey-ABCDEFGHIJKLMNOPQRSTUVWXYZ", "2026-01-01T00:00:00Z"],
+        [f"{acct}:mfa/alice-phone", "2026-01-02T00:00:00Z"],
+        ["GAHT12345678", "2026-01-03T00:00:00Z"],
+        ["arn:aws-us-gov:iam::111122223333:u2f/user/alice/key2", "2026-01-04T00:00:00Z"],
+        [f"{acct}:sms-mfa/alice", "2026-01-05T00:00:00Z"],
+    ]
+    _, payload = _run(tmp_path, "iam_mfa_status", {
+        "iam get-account-summary": {"AccountMFAEnabled": 1},
+        "iam list-virtual-mfa-devices": [],
+        "iam list-users": ["alice"],
+        "iam list-mfa-devices": devices,
+    })
+    (user,) = payload["results"]["users"]
+    assert user["MFAEnabled"] is True
+    assert [d["Type"] for d in user["MFADevices"]] == ["fido", "virtual", "hardware", "fido", "unknown"]
+    assert all(list(d) == ["SerialNumber", "EnableDate", "Type"] for d in user["MFADevices"])
+    assert payload["results"]["root_account"] == {"RootMFAEnabled": True, "RootHardwareMFA": True}
+
+
+def test_iam_policies_lists_boundary_use_apart_from_attachments(tmp_path):
+    # Before 0.3.0 an entity that only used the policy as its permissions
+    # boundary was listed under AttachedUsers / AttachedRoles.
+    arn = "arn:aws:iam::111122223333:policy/guardrail"
+    other = "arn:aws:iam::111122223333:policy/other"
+    policy = {
+        "PolicyName": "guardrail", "PolicyId": "ANPA0", "Arn": arn,
+        "CreateDate": "2024-01-01T00:00:00Z", "UpdateDate": "2024-01-01T00:00:00Z",
+        "PolicyVersionList": [{"IsDefaultVersion": True, "Document": {"Version": "2012-10-17", "Statement": []}}],
+    }
+    _, payload = _run(tmp_path, "iam_policies", {
+        "iam list-policies": [arn],
+        "iam get-account-authorization-details": {
+            "Policies": [policy],
+            "Users": [
+                {"Name": "attaches", "Attached": [arn], "Boundary": None},
+                {"Name": "bounded", "Attached": [other], "Boundary": arn},
+                {"Name": "both", "Attached": [arn], "Boundary": arn},
+                {"Name": "neither", "Attached": None, "Boundary": other},
+            ],
+            "Groups": [{"Name": "ops", "Attached": [arn]}],
+            "Roles": [
+                {"Name": "app", "Attached": [], "Boundary": arn},
+                {"Name": "admin", "Attached": [arn], "Boundary": None},
+            ],
+        },
+    })
+    (result,) = payload["results"]
+    assert result["AttachedGroups"] == ["ops"]
+    assert result["AttachedUsers"] == ["attaches", "both"]
+    assert result["AttachedRoles"] == ["admin"]
+    assert result["BoundaryUsers"] == ["bounded", "both"]
+    assert result["BoundaryRoles"] == ["app"]
+    # The new keys are appended, so patterns that read the existing order still match.
+    assert list(result)[-5:] == ["AttachedGroups", "AttachedUsers", "AttachedRoles", "BoundaryUsers", "BoundaryRoles"]

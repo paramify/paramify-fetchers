@@ -1,0 +1,143 @@
+name: azure_change_provenance
+version: 0.1.0
+description: >
+  Every control-plane change to the subscription's resources, resource groups and
+  the subscription itself over the last 14 days (Azure Resource Graph change
+  history), each attributed to an ARM deployment run by a pipeline or an
+  application, to a deployment a person ran by hand or through the Portal's create
+  wizards, to a change made by a named pipeline identity, or to a direct edit made
+  outside any of them, such as from the portal or the CLI. Each change carries who
+  made it, the client it came from, the change type and the properties it touched.
+  The summary gives the share of changes that were redeployments, a conservative
+  share that counts changes with no recorded caller against it, and breaks the
+  direct edits down by client, by caller and by resource type. This is evidence
+  that changes are made by redeploying version-controlled templates rather than by
+  modifying resources in place.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_change_provenance.json
+  aggregation: per_target
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    default: 14
+    env: AZURE_CHANGE_LOOKBACK_DAYS
+    description: >
+      How many days of change history to collect, from 1 to 14. Resource Graph keeps
+      change history for 14 days, so a larger value is clamped to 14 with a warning.
+      Schedule the fetcher at least every 14 days, or changes in between are never
+      seen.
+
+  pipeline_principals:
+    type: string
+    required: false
+    env: AZURE_PIPELINE_PRINCIPALS
+    description: >
+      Comma-separated application (client) ids or UPNs of the identities your
+      deployment pipelines run as. Changes those identities make are counted as
+      redeployments (`origin: pipeline`) even when they don't go through an ARM
+      deployment, which is how Terraform and other tools that call ARM directly
+      apply changes, and ARM deployments they run count as redeployments even when
+      the identity is a user. Leave empty and only ARM deployments run by an
+      application count; deployments run by a person are `manual_deployment`.
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CMT-RMV      # Redeploying vs modifying — changes made through deployments, not direct edits
+
+evidence_set:
+  reference_id: EVD-AZURE-CHANGE-PROVENANCE
+  name: Azure Change Provenance
+  instructions: >
+    Script: fetcher.py. Reader on the subscription is sufficient. Changes come from
+    two Azure Resource Graph queries (azure-mgmt-resourcegraph
+    ResourceGraphClient.resources, subscriptions=[<subscription_id>], paged with
+    $skipToken to the end, failing the run if Resource Graph returns fewer rows than
+    it counted or reports the result truncated). The `resourcechanges` table covers
+    resources and `resourcecontainerchanges` covers resource groups and the
+    subscription. Both are filtered to the last `lookback_days` days and projected
+    from properties: targetResourceId, targetResourceType, changeType (Create /
+    Update / Delete), and from changeAttributes: timestamp, changedBy, changedByType,
+    clientType, operation, correlationId, changesCount, plus the keys of `changes` as
+    changed_properties. The deployment history comes from
+    azure-mgmt-resource-deployments DeploymentsMgmtClient.deployments:
+    list_at_subscription_scope() and list_by_resource_group(<rg>) for every resource
+    group from ResourceManagementClient.resource_groups.list(). Each deployment gives
+    its correlationId, timestamp, duration, provisioningState, templateHash,
+    templateLink and outputResources.
+    A change that names its caller (changedBy is neither empty nor "System" or
+    "Unspecified") is matched to a deployment when its correlationId equals the
+    deployment's correlationId; every change a deployment makes carries it
+    (`via_deployment: true`, `attribution: correlation_id`). A matched change is
+    `origin: manual_deployment` when the deployment was run by a person: changedByType
+    is "User", clientType is "Azure Portal", or the deployment is named the way the
+    Portal's create wizards name theirs (Microsoft.<type>-…, such as
+    Microsoft.Web-WebApp-Portal-… or Microsoft.Template-…, CreateVm-…, or containing
+    -Portal-). It is `origin: deployment` otherwise, which is a deployment run by an
+    application or managed identity, and whenever the caller is one of the
+    configured `pipeline_principals`, which take precedence over every other signal. A missing templateLink is not used as a
+    signal, because CLI and pipeline runs of a local template have none either.
+    An unmatched named change is `origin: pipeline` when changedBy is one of the
+    `pipeline_principals`, and `origin: direct` in every other case, an edit made
+    outside any deployment or pipeline. A named change with a different
+    correlationId is a separate request even when it lands during a deployment.
+    Azure records some changes with changedBy "System" or "Unspecified", often the
+    Create of a resource whose named write follows seconds later, and these rows
+    reuse correlationIds from unrelated requests. Each takes the origin of the
+    nearest named change to the same resource within 10 minutes
+    (`attribution: same_resource`). Failing that, it is attributed to a deployment
+    when its target is one of the deployment's output resources and its timestamp
+    falls within that deployment's run, between timestamp minus duration and
+    timestamp, with 10 minutes of slack either side (`attribution:
+    deployment_window`); its origin is manual_deployment when the deployment's
+    matched changes were, or when nothing matched and the deployment is
+    Portal-named, and deployment otherwise. Failing both, it is `origin: platform`
+    when changedBy or changedByType is "System", meaning a background change by
+    Azure itself, and `origin: unattributed` otherwise, a change Azure records no
+    caller for. Resource Graph keeps restamping a change's timestamp for hours after
+    the operation (measured: 10 minutes later within 12 hours), so a callerless row
+    whose named partner has drifted past the window falls back to platform or
+    unattributed. Changes that name their caller are unaffected, since they match
+    deployments by correlationId alone. Each entry in results.deployments also
+    carries run_by, the callers of the changes it matched, and origin, deployment or
+    manual_deployment (null when no change matched it).
+    summary.percent_redeployed is deployment plus pipeline changes over deployment,
+    pipeline, manual_deployment and direct changes; platform and unattributed
+    changes are excluded. summary.percent_redeployed_conservative also counts
+    unattributed changes in the denominator, as if each were a direct edit.
+    Limits: ARM keeps at most 800 deployments per resource group and prunes older
+    ones, so a change made by a pruned deployment reads as direct; resource groups
+    at that limit are listed in summary.resource_groups_at_deployment_history_cap.
+    Deleting a resource group deletes its deployment history with it, so every
+    change in a resource group deleted since, including the deletes themselves,
+    reads as direct; summary.direct_changes_in_deleted_resource_groups counts the
+    direct changes whose resource group no longer exists. Resource Graph keeps 14
+    days of changes, so the fetcher must run at least every 14 days to see every
+    change.

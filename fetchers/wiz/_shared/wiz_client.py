@@ -56,7 +56,7 @@ from urllib.parse import urlparse
 import requests
 from dotenv import load_dotenv
 
-# Re-export the one report_failure implementation (docs/fetcher_contract.md § Output).
+# Re-export the one report_failure implementation (docs/fetcher_contract_guide.md, step 6).
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
 from fetcher_status import report_failure  # noqa: E402,F401
 

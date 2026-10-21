@@ -31,7 +31,7 @@ from "the template was never installed."
 ## Fanout-capable
 
 Single-target per invocation; the runner fans out across projects via
-`supports_targets: true`. See [`docs/run_manifest_reference.md`](../../../docs/run_manifest_reference.md).
+`supports_targets: true`. See [`docs/run_manifest_guide.md`](../../../docs/run_manifest_guide.md#3-fan-out-with-targets).
 
 ## Required env vars
 

@@ -16,7 +16,7 @@
 
 set -o pipefail
 
-# The one place a fetcher reports WHY it failed (docs/fetcher_contract.md § Output).
+# The one place a fetcher reports WHY it failed (docs/fetcher_contract_guide.md, step 6).
 source "$(dirname "$0")/../../_lib/status.sh"
 FETCHER="okta_authenticators"   # attributes report_failure's log line to this fetcher
 

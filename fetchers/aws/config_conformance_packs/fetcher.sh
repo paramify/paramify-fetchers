@@ -11,7 +11,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The preflight below can exit before ../_shared/aws.sh is sourced, so the
 # status helper is sourced here: a config error must reach the runner via
-# $FETCHER_STATUS_FILE, not only stderr (docs/fetcher_contract.md § Output).
+# $FETCHER_STATUS_FILE, not only stderr (docs/fetcher_contract_guide.md, step 6).
 source "$SCRIPT_DIR/../../_lib/status.sh"
 FEDRAMP_LOW_TEMPLATE="$SCRIPT_DIR/Operational-Best-Practices-for-FedRAMP-Low.yaml"
 FEDRAMP_MODERATE_TEMPLATE="$SCRIPT_DIR/Operational-Best-Practices-for-FedRAMP-Moderate.yaml"

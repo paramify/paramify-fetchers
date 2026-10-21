@@ -15,7 +15,7 @@ Falcon has three pagination styles and this module covers all three:
   - after token              — /spotlight/combined/vulnerabilities/v1
   - integer offset           — /alerts/queries/alerts/v2, /policy/combined/*
 
-Collection-failure convention (see docs/authoring_a_fetcher.md): a failed call
+Collection-failure convention (see docs/authoring_fetcher_guide.md, step 3): a failed call
 appends to `api_failures` and returns None rather than raising, so one bad
 endpoint does not lose the evidence already collected. The caller exits
 non-zero when `api_failures` is non-empty. Authentication failure is the one
@@ -74,7 +74,7 @@ import requests
 from dotenv import load_dotenv
 
 # One implementation per runtime lives in fetchers/_lib; a category-shared module
-# may RE-EXPORT it and must not reimplement it (docs/fetcher_contract.md § Output).
+# may RE-EXPORT it and must not reimplement it (docs/fetcher_contract_guide.md, step 6).
 # Same mechanism a fetcher uses, one directory further up: this file is
 # fetchers/crowdstrike/_shared/, so fetchers/_lib is parents[2] / "_lib".
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))

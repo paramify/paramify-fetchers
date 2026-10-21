@@ -48,6 +48,9 @@ azure-mgmt-subscription>=3.1.1,<4
 azure-mgmt-resource>=26.0.0,<27
 # Resource Graph: one query over every ARM resource, for the subscription inventory.
 azure-mgmt-resourcegraph>=8.0.1,<9
+# ARM deployment history (correlation ids, output resources); the deployments
+# operation group left azure-mgmt-resource for its own distribution.
+azure-mgmt-resource-deployments>=2.0.0,<3
 
 # Storage, networking, Defender for Cloud.
 azure-mgmt-storage>=25.1.0,<26

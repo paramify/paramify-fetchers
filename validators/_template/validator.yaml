@@ -1,5 +1,5 @@
 # Template validator. Copy this file to validators/<category>/<key>.yaml and
-# fill in the placeholders. See docs/validators_design.md for the full model.
+# fill in the placeholders. See docs/validators_guide.md for a walkthrough.
 #
 # Validated against framework/schemas/validator_schema.json.
 #
@@ -25,7 +25,7 @@ key: category_short_name                # stable id; MUST equal this file's base
                                         # and match ^[a-z0-9]+(?:_[a-z0-9]+)*$
 # No Paramify UUID lives here — these files are shared TEMPLATES. The per-instance
 # validator id is resolved and cached customer-side at sync time; the customer's
-# tuned copy is never overwritten. See docs/validators_design.md.
+# tuned copy is never overwritten.
 
 name: Validator display name            # e.g. S3 Buckets All Encrypted.
                                         # MUST be unique across the whole
