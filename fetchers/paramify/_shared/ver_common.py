@@ -43,14 +43,20 @@ ACCEPTANCE_DAYS = 192  # VER-TFR-MAV
 OPEN_ISSUE_STATUSES = ("OPEN",)
 CLOSED_ISSUE_STATUSES = ("CLOSED",)
 
-# Potential Agency Impact N-rating. INTERIM positional mapping (confirmed with
-# the FedRAMP package owner). Absent level => no rating emitted.
+# Potential Agency Impact N-rating. The issue's own PAIN rating (painRating,
+# "N0".."N5") is used when set. Otherwise the risk level is mapped by position,
+# an INTERIM fallback (confirmed with the FedRAMP package owner). Neither set
+# => no rating emitted.
+PAIN_TO_NRATING = {"N0": 0, "N1": 1, "N2": 2, "N3": 3, "N4": 4, "N5": 5}
 LEVEL_TO_NRATING = {"CHILL": 1, "LOW": 2, "MODERATE": 3, "HIGH": 4, "CRITICAL": 5}
 
-# Not emitted. FedRAMP's "Fully Mitigated" means the vulnerability is still
-# detected but its impact is negligible, and no mapping from Paramify data to
-# that state has been decided. Closed issues are no longer detected, so they
-# are Remediated.
+# FedRAMP's "Fully Mitigated" means the vulnerability is still detected but its
+# impact is negligible. Only N0 ("exploitation is extremely unlikely to have any
+# adverse effects") meets that bar; N1 still has minimal customer effects.
+NEGLIGIBLE_PAIN = ("N0",)
+
+# Emitted for an open issue whose PAIN rating is in NEGLIGIBLE_PAIN. Closed
+# issues are no longer detected, so they are Remediated instead.
 DISPOSITION_FULLY = "Fully Mitigated"
 DISPOSITION_REMEDIATED = "Remediated"
 DISPOSITION_PARTIALLY = "Partially Mitigated"
@@ -327,15 +333,36 @@ def acceptance_rationale(issue: Dict) -> str:
 
 
 # --- VDT field derivations --------------------------------------------------
+def _pain_rating(issue: Dict) -> Optional[str]:
+    """The issue's PAIN rating normalized to "N0".."N5", or None when unset or
+    not a recognised value."""
+    value = issue.get("painRating")
+    if not isinstance(value, str):
+        return None
+    value = value.strip().upper()
+    return value if value in PAIN_TO_NRATING else None
+
+
+def _current_nrating(issue: Dict) -> Optional[int]:
+    """PAIN rating when set, else the INTERIM risk-level mapping, else None."""
+    pain = _pain_rating(issue)
+    if pain is not None:
+        return PAIN_TO_NRATING[pain]
+    return LEVEL_TO_NRATING.get(issue.get("level"))
+
+
 def _final_disposition(issue: Dict) -> Optional[str]:
     """False Positive (accepted FP deviation) > Remediated (closed) >
-    Partially Mitigated (open with accepted risk-adjustment or milestone) > omit.
+    Fully Mitigated (open, PAIN rating negligible) > Partially Mitigated (open
+    with accepted risk-adjustment or milestone) > omit.
     Milestones are read from the `milestones` array embedded in the /issues
     response -- no per-issue calls."""
     if _accepted_deviations(issue, ("FALSE_POSITIVE",)):
         return DISPOSITION_FALSE_POSITIVE
     if issue.get("status") in CLOSED_ISSUE_STATUSES:
         return DISPOSITION_REMEDIATED
+    if issue.get("status") in OPEN_ISSUE_STATUSES and _pain_rating(issue) in NEGLIGIBLE_PAIN:
+        return DISPOSITION_FULLY
     if issue.get("status") in OPEN_ISSUE_STATUSES and (
         _accepted_deviations(issue, ("RISK_ADJUSTMENT",)) or issue.get("milestones")
     ):
@@ -386,7 +413,7 @@ def map_vulnerability_detail(issue: Dict) -> Dict:
     evaluated = effective_evaluation_date(issue)
     if evaluated is not None:
         detail["evaluationCompletedAt"] = evaluated.astimezone(timezone.utc).strftime(TIMESTAMP_FORMAT)
-    rating = LEVEL_TO_NRATING.get(issue.get("level"))
+    rating = _current_nrating(issue)
     if rating is not None:
         detail["currentRating"] = rating
     detail["overdueStatus"] = _overdue_status(issue)

@@ -739,6 +739,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Paramify VER fetchers use the PAIN rating and report open N0 issues as
+  `Fully Mitigated`.** `currentRating` now comes from the issue's Potential
+  Agency Impact N-rating (`painRating`) when one is set, and falls back to the
+  risk level only when it is not; an issue with a PAIN rating but no risk level
+  previously had no `currentRating`. An issue that is still open and rated N0 is
+  reported as `finalDisposition: "Fully Mitigated"`, FedRAMP's term for a
+  vulnerability that is still detected at negligible impact. N1 still has
+  minimal customer effects, so it is not Fully Mitigated. Closed issues remain
+  `Remediated`, and an accepted `FALSE_POSITIVE` deviation still takes
+  precedence.
 - **Paramify VER fetchers report closed issues as `Remediated`.** A closed
   issue is no longer detected, which FedRAMP defines as a remediated
   vulnerability; "Fully Mitigated" means still detected at negligible impact.
@@ -746,7 +756,7 @@ schemas and the `paramify` CLI — not the internal code.
   report `"Remediated"`. An accepted `FALSE_POSITIVE` deviation still takes
   precedence. The `_summary` dispositions in the Vulnerability Detail Report
   and Historical VER Activity gain a `remediated` count; `fullyMitigated` is
-  kept for compatibility and is 0, since nothing maps to it yet.
+  kept for compatibility.
 - **Every uploader reads "already exists" / "already connected" the same way.**
   The API refuses a repeat evidence-set create or a repeat CONNECT instead of
   ignoring it, and each uploader held its own test for that refusal: the scripts
