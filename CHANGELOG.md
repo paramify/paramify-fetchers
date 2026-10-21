@@ -96,6 +96,23 @@ schemas and the `paramify` CLI — not the internal code.
   `skip_resources` matches move to `skipped_checks`, the effective skip lists
   are recorded in `metadata`, `use_default_skip_checks` can drop the shipped
   defaults, and `metadata.branch` names the branch actually scanned.
+- **`web_vulnerability_disclosure`** (`EVD-WEB-VULNERABILITY-DISCLOSURE`), the
+  second `web` fetcher. Given a site or a security.txt URL, it fetches
+  `/.well-known/security.txt` and records it verbatim, with its fields parsed per
+  RFC 9116 and whether it carries an OpenPGP cleartext signature (not verified).
+  It then follows each `Policy:` link and extracts its text as `web_page_text`
+  does, and each https `Encryption:` link, where an ASCII-armored public key is
+  read with the standard library (fingerprint, creation, expiry, user IDs,
+  subkeys). Fixed fields come first for validators: `expires_in_days`,
+  `canonical_matches_url`, `contact_emails_in_key`,
+  `key_expires_after_security_txt`, `policies_all_ok` and `policy_placeholders`
+  (`[X]`-style blanks left in the policy). Missing REQUIRED fields, a wrong
+  content type and broken linked pages are recorded as findings. The run fails
+  only when security.txt itself cannot be collected or parsed. Tested with the
+  security.txt and key Paramify publishes, served locally; the key's facts match
+  `gpg --show-keys`. Also run live against paramify.com. Linked URLs and their
+  redirects may only reach public addresses; a link to a private, loopback or
+  link-local address is recorded as `blocked_address`. No KSI mapping.
 - **A `zendesk` category and its first fetcher, `zendesk_help_center_section`**
   (`EVD-ZENDESK-HELP-CENTER-SECTION`). Given a Help Center section URL, it lists
   the section's articles through the Help Center API as an anonymous user, so
@@ -1007,6 +1024,17 @@ schemas and the `paramify` CLI — not the internal code.
   it and only `gitlab/significant_change_notifications` still carries one; it stays
   in the schema, marked deprecated, so that fetcher's data remains shape-checked
   until it migrates to the registry. New validators belong in `validators/`.
+
+### Removed
+
+- **The docs the illustrated guides replaced.** `docs/design.md`,
+  `authoring_a_fetcher.md`, `config_injection_design.md`, `envelope_design.md`,
+  `fetcher_contract.md`, `inventory_fetchers.md`, `issue_report_fetchers.md`,
+  `pipelines.md`, `platform_onboarding.md`, `private_mirror_workflow.md`,
+  `releasing.md`, `run_manifest_reference.md`, `uploader_design.md`,
+  `validators_design.md` and `versioning.md` are gone. Links now point at the
+  guides (`design.md`'s at `architecture_guide.md`); the onboarding source lists
+  keep pinned copies.
 
 ### Fixed
 
