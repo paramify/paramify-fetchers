@@ -744,9 +744,11 @@ schemas and the `paramify` CLI — not the internal code.
 - **A config field the runner injects into the fetcher can be a `${env:VAR}`
   reference.** The runner resolves it the way it resolves a secret. An unset or
   empty variable gives way to the next value down (platform config, then the
-  default; an error for a required field with neither), and a malformed reference
-  is an error. `manifest set-config` and `set-platform-config` save the reference
-  as typed on integer and boolean fields instead of rejecting or coercing it.
+  default; an error for a required field with neither) and leaves a run note, and
+  a malformed reference is an error. `manifest set-config` and
+  `set-platform-config` save the reference as typed on integer and boolean fields
+  instead of rejecting or coercing it. Target fields (not a target's secrets)
+  are not resolved.
 
 ### Changed
 

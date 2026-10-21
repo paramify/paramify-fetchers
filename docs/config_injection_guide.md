@@ -54,7 +54,9 @@ and never reaches the fetcher.
 
 A config field the runner injects into the fetcher can also be `${env:VAR}`,
 read from the environment at run time. If `VAR` is unset or empty, the next
-value down applies (platform config, then the default).
+value down applies (platform config, then the default), and the run prints a
+note. Target fields don't take `${env:VAR}` (a target's secrets do): the
+fetcher gets the text as written.
 
 ## 3. Check it
 

@@ -182,14 +182,15 @@ def _apply_config(
     platform_cfg: Optional[PlatformConfig],
     entry: ManifestEntry,
     secret_sink: Optional[set] = None,
+    note_sink: Optional[List[Tuple[str, str]]] = None,
 ) -> None:
     """Merge config and inject each field that declares an `env` mapping. Also
     lets the platform's auth passthrough_env vars through the whitelist.
 
     A string value may be a ${env:VAR} reference, resolved like a secret's. One
     whose variable is unset or empty gives way to the next value down the ladder
-    (platform config, then the default), as if it had not been set; a malformed
-    one is an error."""
+    (platform config, then the default), as if it had not been set, and lands in
+    note_sink as (field, VAR); a malformed one is an error."""
     schema, _ = merged_config(fetcher, platform_spec, platform_cfg, entry)
     platform_values = platform_cfg.config if platform_cfg else {}
 
@@ -212,6 +213,8 @@ def _apply_config(
                 f"{fetcher.name}: required config '{name}' reads ${{env:{unset.env_var}}}, "
                 f"which is unset or empty in the runner's environment"
             ) from unset
+        if unset is not None and note_sink is not None:
+            note_sink.append((name, unset.env_var))
         if val is None:
             if fdef.required:
                 raise RuntimeError(
@@ -320,6 +323,7 @@ def _build_env(
     secret_sink: Optional[set] = None,
     note_sink: Optional[List[Tuple[str, str]]] = None,
     shadow_sink: Optional[List[Tuple[str, str]]] = None,
+    config_note_sink: Optional[List[Tuple[str, str]]] = None,
 ) -> Dict[str, str]:
     """Build the env dict to pass to a single fetcher invocation.
 
@@ -332,7 +336,7 @@ def _build_env(
     env["PYTHONUNBUFFERED"] = "1"
     env["EVIDENCE_DIR"] = str(output_dir.resolve())
 
-    _apply_config(env, fetcher, platform_spec, platform_cfg, entry, secret_sink)
+    _apply_config(env, fetcher, platform_spec, platform_cfg, entry, secret_sink, config_note_sink)
 
     # An optional secret the manifest omits is simply not injected: the fetcher's
     # credential chain falls through to ambient identity (IRSA, workload identity,
@@ -603,6 +607,20 @@ def _emit_notes(
     )
 
 
+def _emit_config_notes(
+    notes: List[Tuple[str, str]], on_note: Optional[Callable[[str], None]]
+) -> None:
+    """Say which config ${env:} references were unset, so a fallback is not silent."""
+    if on_note is None or not notes:
+        return
+    fields = ", ".join(f"{name} (${{env:{var}}})" for name, var in notes)
+    plural = "s" if len(notes) > 1 else ""
+    on_note(
+        f"{len(notes)} config reference{plural} unset: {fields}. "
+        f"The platform value or default applies, if there is one."
+    )
+
+
 def run_entry(
     fetcher: Fetcher,
     entry: ManifestEntry,
@@ -617,8 +635,9 @@ def run_entry(
     Per-target failures are isolated — they don't abort sibling targets.
     When on_line is provided, each invocation streams its stdout lines to it.
     on_note reports how the invocation was assembled — an optional secret
-    dropped because its reference could not be resolved, and a static credential
-    ignored because the target named an identity that supersedes it.
+    dropped because its reference could not be resolved, a config reference
+    that was unset, and a static credential ignored because the target named an
+    identity that supersedes it.
 
     `output_dir` is the run directory. An issue-report fetcher is pointed at its
     issue-reports/ subdirectory instead, and reports its outputs relative to the
@@ -631,9 +650,11 @@ def run_entry(
     if not fetcher.supports_targets:
         secrets_seen: set = set()
         notes: List[Tuple[str, str]] = []
+        config_notes: List[Tuple[str, str]] = []
         env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg,
-                         secrets_seen, notes)
+                         secrets_seen, notes, config_note_sink=config_notes)
         _emit_notes(notes, on_note)
+        _emit_config_notes(config_notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
 
     if not entry.targets:
@@ -647,9 +668,11 @@ def run_entry(
             )
         secrets_seen = set()
         notes = []
+        config_notes = []
         env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg,
-                         secrets_seen, notes)
+                         secrets_seen, notes, config_note_sink=config_notes)
         _emit_notes(notes, on_note)
+        _emit_config_notes(config_notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
 
     results = []
@@ -657,10 +680,12 @@ def run_entry(
         try:
             secrets_seen = set()
             notes = []
+            config_notes = []
             shadowed: List[Tuple[str, str]] = []
             env = _build_env(fetcher, entry, target, inv_dir, platform_spec, platform_cfg,
-                             secrets_seen, notes, shadowed)
+                             secrets_seen, notes, shadowed, config_notes)
             _emit_notes(notes, on_note)
+            _emit_config_notes(config_notes, on_note)
             _emit_shadowed(shadowed, on_note)
             results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir))
         except (RuntimeError, SecretResolutionError) as e:

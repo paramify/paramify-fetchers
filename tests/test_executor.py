@@ -181,6 +181,32 @@ def test_config_env_reference_unset_falls_back_to_platform_value(tmp_path, monke
     assert env["PATTERNS"] == "from-default"
 
 
+def test_config_env_reference_unset_is_noted(tmp_path, monkeypatch):
+    monkeypatch.delenv("UNSET_VAR", raising=False)
+    monkeypatch.setenv("SET_VAR", "qa.*")
+    fetcher = make_fetcher(tmp_path, config_schema={
+        "patterns": cfg("patterns", "PATTERNS", default="from-default"),
+        "hosts": cfg("hosts", "HOSTS"),
+    })
+    notes: list = []
+    _apply_config({}, fetcher, None, None, ManifestEntry(
+        use="x", config={"patterns": "${env:UNSET_VAR}", "hosts": "${env:SET_VAR}"}), note_sink=notes)
+    assert notes == [("patterns", "UNSET_VAR")]
+
+
+def test_config_env_reference_unset_emits_a_fetcher_note(tmp_path, monkeypatch):
+    monkeypatch.delenv("UNSET_VAR", raising=False)
+    fdir = tmp_path / "fetcher"
+    fdir.mkdir()
+    (fdir / "fetcher.py").write_text("pass\n")
+    fetcher = make_fetcher(fdir, config_schema={"patterns": cfg("patterns", "PATTERNS")})
+    seen: list = []
+    run_entry(fetcher, ManifestEntry(use="t_fetcher", config={"patterns": "${env:UNSET_VAR}"}),
+              tmp_path / "out", on_note=seen.append)
+    assert len(seen) == 1
+    assert "1 config reference unset: patterns (${env:UNSET_VAR})" in seen[0]
+
+
 def test_required_config_env_reference_unset_raises(tmp_path, monkeypatch):
     monkeypatch.delenv("UNSET_VAR", raising=False)
     fetcher = make_fetcher(tmp_path, config_schema={"region": cfg("region", "REGION", required=True)})
