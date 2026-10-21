@@ -1,0 +1,13 @@
+{
+  "_comment": "SYNTHETIC test fixture for tests/test_web_page_text.py; not a real trust center export.",
+  "company": "Example, Inc.",
+  "lastUpdated": "2025-03-03",
+  "certifications": [
+    {"name": "SOC 2 Type II", "status": "current", "period_end": "2025-01-31"},
+    {"name": "FedRAMP Moderate", "status": "in_process"}
+  ],
+  "policies": [
+    {"title": "Data Processing Agreement", "url": "https://www.example.com/legal/dpa"}
+  ],
+  "uptime_commitment_percent": 99.9
+}
