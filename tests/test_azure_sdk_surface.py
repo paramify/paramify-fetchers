@@ -412,6 +412,13 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure/dns_configuration",
     ),
     (
+        "azure.mgmt.dns",
+        "DnsManagementClient",
+        "record_sets",
+        ["list_all_by_dns_zone"],
+        "azure/dns_configuration — every public record set with its targets and alias",
+    ),
+    (
         "azure.mgmt.privatedns",
         "PrivateDnsManagementClient",
         None,
@@ -1423,6 +1430,13 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "Zone",
         ["name_servers", "number_of_record_sets", "zone_type"],
         "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "RecordSet",
+        ["ttl", "fqdn", "target_resource", "a_records", "aaaa_records", "cname_record", "mx_records",
+         "ns_records", "ptr_records", "srv_records", "txt_records", "caa_records", "soa_record"],
+        "azure/dns_configuration — a renamed record list reads that type's records as empty",
     ),
     (
         "azure.mgmt.privatedns.models",
