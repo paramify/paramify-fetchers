@@ -114,7 +114,7 @@ secrets:
 evidence_set:
   reference_id: EVD-S1-EXCLUSIONS
   name: SentinelOne Exclusions
-  instructions: 'Script: fetcher.py. Calls /web/api/v2.1/exclusions (cursor pagination) and counts exclusions by type.'
+  instructions: 'Script: sentinelone/exclusions/fetcher.py. Calls /web/api/v2.1/exclusions (cursor pagination) and counts exclusions by type.'
 ```
 
 Check that discovery reads it the way you meant:
