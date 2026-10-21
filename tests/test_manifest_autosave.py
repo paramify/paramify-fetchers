@@ -28,7 +28,6 @@ from framework.tui.modals import ConfirmModal, FormModal, TargetsModal  # noqa: 
 from framework.tui.screens.manifest import ManifestPage  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SIZE = (180, 50)
 
 
 def _manifest(tmp_path: Path):
@@ -61,10 +60,10 @@ def _targets(path: Path, name: str) -> list:
     return []
 
 
-def _run(coro_fn, manifest: Path):
+def _run(coro_fn, manifest: Path, size: tuple):
     async def main():
         app = FetcherApp(manifest_path=str(manifest), root_override=str(REPO_ROOT))
-        async with app.run_test(size=SIZE) as pilot:
+        async with app.run_test(size=size) as pilot:
             await pilot.pause()
             return await coro_fn(app, pilot)
 
@@ -80,7 +79,7 @@ async def _manifest_tab(pilot):
 # Target edits
 # --------------------------------------------------------------------------- #
 
-def test_removing_a_target_is_on_disk_without_pressing_save(tmp_path):
+def test_removing_a_target_is_on_disk_without_pressing_save(tmp_path, tui_size):
     path, name, field = _manifest(tmp_path)
     assert len(_targets(path, name)) == 2
 
@@ -95,12 +94,12 @@ def test_removing_a_target_is_on_disk_without_pressing_save(tmp_path):
         await pilot.press("y")
         await pilot.pause()
 
-    _run(body, path)
+    _run(body, path, tui_size)
     remaining = _targets(path, name)
     assert len(remaining) == 1 and remaining[0][field] == "second-value"
 
 
-def test_editing_a_target_is_on_disk_without_pressing_save(tmp_path):
+def test_editing_a_target_is_on_disk_without_pressing_save(tmp_path, tui_size):
     path, name, field = _manifest(tmp_path)
 
     async def body(app, pilot):
@@ -115,11 +114,11 @@ def test_editing_a_target_is_on_disk_without_pressing_save(tmp_path):
         await pilot.press("ctrl+s")
         await pilot.pause()
 
-    _run(body, path)
+    _run(body, path, tui_size)
     assert _targets(path, name)[0][field] == "edited-value"
 
 
-def test_removing_a_fetcher_is_on_disk_without_pressing_save(tmp_path):
+def test_removing_a_fetcher_is_on_disk_without_pressing_save(tmp_path, tui_size):
     path, name, field = _manifest(tmp_path)
 
     async def body(app, pilot):
@@ -130,7 +129,7 @@ def test_removing_a_fetcher_is_on_disk_without_pressing_save(tmp_path):
         await pilot.press("y")
         await pilot.pause()
 
-    _run(body, path)
+    _run(body, path, tui_size)
     assert _on_disk(path)["run"]["fetchers"] == []
 
 
@@ -138,7 +137,7 @@ def test_removing_a_fetcher_is_on_disk_without_pressing_save(tmp_path):
 # A save that cannot happen must not also cost the edit
 # --------------------------------------------------------------------------- #
 
-def test_a_failed_save_keeps_the_edit_in_memory_and_says_so(tmp_path, monkeypatch):
+def test_a_failed_save_keeps_the_edit_in_memory_and_says_so(tmp_path, monkeypatch, tui_size):
     path, name, field = _manifest(tmp_path)
 
     def boom(*a, **kw):
@@ -161,7 +160,7 @@ def test_a_failed_save_keeps_the_edit_in_memory_and_says_so(tmp_path, monkeypatc
         notes = [str(n.message) for n in app._notifications]
         return len(in_memory), notes
 
-    count, notes = _run(body, path)
+    count, notes = _run(body, path, tui_size)
     assert count == 1                                   # the removal survived
     assert len(_targets(path, name)) == 2               # the file did not change
     assert any("not saved" in n.lower() for n in notes)

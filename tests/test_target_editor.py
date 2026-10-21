@@ -27,7 +27,6 @@ from framework.tui.app import FetcherApp  # noqa: E402
 from framework.tui.modals import ConfirmModal, FormModal, TargetsModal  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SIZE = (180, 50)
 
 
 # --------------------------------------------------------------------------- #
@@ -113,10 +112,10 @@ def _fanout_manifest(tmp_path: Path):
     return path, name, fields
 
 
-def _run(coro_fn, manifest: Path):
+def _run(coro_fn, manifest: Path, size: tuple):
     async def main():
         app = FetcherApp(manifest_path=str(manifest), root_override=str(REPO_ROOT))
-        async with app.run_test(size=SIZE) as pilot:
+        async with app.run_test(size=size) as pilot:
             await pilot.pause()
             return await coro_fn(app, pilot)
 
@@ -130,7 +129,7 @@ async def _open_targets(app, pilot):
     await pilot.pause()
 
 
-def test_t_opens_the_targets_table_with_a_row_per_target(tmp_path):
+def test_t_opens_the_targets_table_with_a_row_per_target(tmp_path, tui_size):
     manifest, name, fields = _fanout_manifest(tmp_path)
 
     async def body(app, pilot):
@@ -140,13 +139,13 @@ def test_t_opens_the_targets_table_with_a_row_per_target(tmp_path):
         rows = [table.get_row_at(i) for i in range(table.row_count)]
         return rows
 
-    rows = _run(body, manifest)
+    rows = _run(body, manifest, tui_size)
     assert len(rows) == 2
     assert rows[0][0] == "0" and "first-value" in rows[0]
     assert rows[1][0] == "1" and "second-value" in rows[1]
 
 
-def test_unset_fields_render_as_a_dash_not_an_empty_cell(tmp_path):
+def test_unset_fields_render_as_a_dash_not_an_empty_cell(tmp_path, tui_size):
     manifest, name, fields = _fanout_manifest(tmp_path)
 
     async def body(app, pilot):
@@ -154,12 +153,12 @@ def test_unset_fields_render_as_a_dash_not_an_empty_cell(tmp_path):
         table = app.screen.query_one("#targets-table", DataTable)
         return list(table.get_row_at(0))
 
-    row = _run(body, manifest)
+    row = _run(body, manifest, tui_size)
     # every column is populated text; the columns this fetcher leaves unset show —
     assert "" not in row
 
 
-def test_e_opens_the_edit_form_prefilled_for_the_highlighted_row(tmp_path):
+def test_e_opens_the_edit_form_prefilled_for_the_highlighted_row(tmp_path, tui_size):
     manifest, name, fields = _fanout_manifest(tmp_path)
 
     async def body(app, pilot):
@@ -172,12 +171,12 @@ def test_e_opens_the_edit_form_prefilled_for_the_highlighted_row(tmp_path):
         inputs = [i.value for i in app.screen.query("Input")]
         return app.screen._title, inputs
 
-    title, values = _run(body, manifest)
+    title, values = _run(body, manifest, tui_size)
     assert "Edit target 1" in title
     assert "second-value" in values      # the row's own values, not the first row's
 
 
-def test_x_asks_before_removing_and_names_the_target(tmp_path):
+def test_x_asks_before_removing_and_names_the_target(tmp_path, tui_size):
     manifest, name, fields = _fanout_manifest(tmp_path)
 
     async def body(app, pilot):
@@ -187,11 +186,11 @@ def test_x_asks_before_removing_and_names_the_target(tmp_path):
         assert isinstance(app.screen, ConfirmModal)
         return app.screen._message
 
-    question = _run(body, manifest)
+    question = _run(body, manifest, tui_size)
     assert "first-value" in question and "target 0" in question
 
 
-def test_a_opens_the_add_form(tmp_path):
+def test_a_opens_the_add_form(tmp_path, tui_size):
     manifest, name, fields = _fanout_manifest(tmp_path)
 
     async def body(app, pilot):
@@ -200,11 +199,11 @@ def test_a_opens_the_add_form(tmp_path):
         await pilot.pause()
         return type(app.screen).__name__, app.screen._title
 
-    kind, title = _run(body, manifest)
+    kind, title = _run(body, manifest, tui_size)
     assert kind == "FormModal" and "Add target" in title
 
 
-def test_escape_closes_the_editor_back_to_the_page(tmp_path):
+def test_escape_closes_the_editor_back_to_the_page(tmp_path, tui_size):
     manifest, name, fields = _fanout_manifest(tmp_path)
 
     async def body(app, pilot):
@@ -214,10 +213,10 @@ def test_escape_closes_the_editor_back_to_the_page(tmp_path):
         return type(app.screen).__name__
 
     # back to the workspace, with no modal left on the stack
-    assert _run(body, manifest) == "WorkspaceScreen"
+    assert _run(body, manifest, tui_size) == "WorkspaceScreen"
 
 
-def test_the_entry_editor_says_where_targets_are_edited(tmp_path):
+def test_the_entry_editor_says_where_targets_are_edited(tmp_path, tui_size):
     """`e` on the page edits the ENTRY, not a target. 104 of the 138 fanout
     fetchers declare no entry config, so that form is nothing but secrets —
     indistinguishable from the target editor failing to open unless the form
@@ -232,7 +231,7 @@ def test_the_entry_editor_says_where_targets_are_edited(tmp_path):
         assert isinstance(app.screen, FormModal)
         return app.screen._title, app.screen._subtitle
 
-    title, subtitle = _run(body, manifest)
+    title, subtitle = _run(body, manifest, tui_size)
     assert "entry config and secrets" in title
     assert "'t'" in subtitle
     # short enough to survive the card width — a clipped subtitle takes the
