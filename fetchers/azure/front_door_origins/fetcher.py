@@ -35,13 +35,16 @@ from frontdoor import (  # noqa: E402
     arm_key,
     attached_rules,
     cdn_client,
+    custom_domains,
     endpoints_with_routes,
     front_door_profiles,
+    profile_scope,
     route_https,
     route_serving,
     rule_sets_with_rules,
     wire,
 )
+from scope_exclusions import ScopeExclusions, excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_front_door_origins")
 
@@ -58,6 +61,8 @@ ALL_ADDRESSES = ("any", "*", "0.0.0.0/0", "::/0", "internet")
 PLATFORM_SCALED_TIERS = ("dynamic", "flexconsumption", "elasticpremium")
 PRODUCTION_TAG_ENV = "AZURE_PRODUCTION_APP_TAG"
 LOOKBACK_ENV = "AZURE_FRONT_DOOR_METRICS_LOOKBACK_DAYS"
+SCOPE_EXCLUSIONS_ENV = "AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS"
+EXCLUDED_KINDS = ("custom_domain", "endpoint", "route", "origin_group", "app")
 DEFAULT_LOOKBACK_DAYS = 7
 MAX_LOOKBACK_DAYS = 30
 # The metrics API returns only 10 dimension series unless asked for more.
@@ -289,6 +294,30 @@ def group_record(profile: dict, group: dict, origins: list[dict], paths: list[di
         "connection_protected": serving and not reasons,
         "unprotected_reasons": reasons,
     }
+
+
+def profile_groups(collected: dict, regions_by_id: dict, regions_by_host: dict, exclusions: ScopeExclusions) -> dict:
+    """Each origin group's record, judged on in-scope routes only, and what this profile leaves out of scope.
+
+    A group is out of scope when routes reach it and every one of them is; its record then keeps all its routes.
+    """
+    profile = collected["profile"]
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions, match_route_names=True)
+    paths = origin_paths(profile, collected["endpoints"], collected["rule_sets"])
+    in_scope = [p for p in paths if arm_key(p["route_id"]) not in scope["routes"]]
+    records, excluded_groups, excluded = [], set(), list(scope["excluded"])
+    for g in collected["origin_groups"]:
+        key = arm_key(g["id"])
+        reaching = [p for p in paths if arm_key(p["origin_group_id"]) == key]
+        out = bool(reaching) and not any(arm_key(p["origin_group_id"]) == key for p in in_scope)
+        records.append(group_record(profile, {k: v for k, v in g.items() if k != "origins_projected"}, g["origins_projected"],
+                                    paths if out else in_scope, regions_by_id, regions_by_host))
+        if out:
+            excluded_groups.add(key)
+            excluded.append(excluded_item("origin_group", g["name"], None, reason="only_excluded_routes", profile=profile["name"],
+                                          id=g["id"], routes=sorted({p["route"] for p in reaching}),
+                                          origins=[o["name"] for o in g["origins_projected"]]))
+    return {"groups": records, "excluded_groups": excluded_groups, "excluded": excluded}
 
 
 def summarize(profiles: list[dict], skipped_by_sku: dict, groups: list[dict]) -> dict:
@@ -608,6 +637,24 @@ def production_apps(sites_by_key: dict, subscription_id, production_tag, groups:
         and str(site.get("subscriptionId") or "").lower() == str(subscription_id or "").lower()
         and matches_tag(site.get("tags"), production_tag)
     ]
+
+
+def exclude_apps(apps: list[dict], all_app_origins: list[dict], app_origins: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Production apps minus those that only out-of-scope origin groups reach, and those apps."""
+    in_scope = {r["site_id"] for r in app_origins}
+    groups_by_site: dict = {}
+    for r in all_app_origins:
+        if r["site_id"] not in in_scope:
+            groups_by_site.setdefault(r["site_id"], set()).add(r["origin_group"])
+    kept, excluded = [], []
+    for app in apps:
+        groups = groups_by_site.get(arm_key(app["id"]))
+        if groups is None:
+            kept.append(app)
+            continue
+        excluded.append(excluded_item("app", app["name"], None, reason="only_excluded_origin_groups", id=app["id"],
+                                      origin_groups=sorted(groups)))
+    return kept, excluded
 
 
 def summarize_app_services(app_origins: list[dict], apps: list[dict], production_tag: str | None) -> dict:
@@ -1057,7 +1104,7 @@ def collect_origin_metrics(subscription_id, cred, collector: Collector, profiles
     return metrics
 
 
-def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[dict], dict]:
+def collect_profiles(subscription_id, cred, collector: Collector, read_domains: bool = False) -> tuple[list[dict], dict]:
     cdn = cdn_client(subscription_id, cred, collector)
     cdn_origins = cdn_client(subscription_id, cred, collector, api_version=ORIGIN_API_VERSION)
     if cdn is None or cdn_origins is None:
@@ -1085,6 +1132,8 @@ def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[
         collected.append({
             "profile": profile,
             "endpoints": endpoints_with_routes(cdn, collector, profile),
+            # Custom-domain host names only matter to scope exclusions.
+            "custom_domains": custom_domains(cdn, collector, profile) if read_domains else [],
             "rule_sets": rule_sets_with_rules(cdn, collector, profile),
             "origin_groups": sorted(groups, key=lambda g: arm_key(g["id"])),
         })
@@ -1117,13 +1166,14 @@ def main() -> int:
     configs_by_key: dict = {}
     metrics_by_profile: dict = {}
     days = lookback_days(collector)
+    exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV)
     window = metrics_window(days, datetime.now(timezone.utc))
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Cdn")
         if registration == NOT_REGISTERED:
             logger.warning("Microsoft.Cdn is not registered on subscription %s", subscription_id)
-        collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector)
+        collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector, read_domains=bool(exclusions))
         origins = [o for c in collected for g in c["origin_groups"] for o in g["origins_projected"]]
         ids = sorted({arm_key(i) for o in origins for i in (o["azure_origin_id"], (o["private_link"] or {}).get("target_id")) if i})
         hosts = sorted({str(o["host_name"]).lower() for o in origins if o["host_name"]})
@@ -1148,27 +1198,31 @@ def main() -> int:
             ),
         )
 
-    profiles, groups = [], []
+    profiles, groups, all_groups, excluded_groups, excluded = [], [], [], set(), []
     for c in collected:
-        paths = origin_paths(c["profile"], c["endpoints"], c["rule_sets"])
-        profile_groups = [
-            group_record(c["profile"], {k: v for k, v in g.items() if k != "origins_projected"}, g["origins_projected"],
-                         paths, regions_by_id, regions_by_host)
-            for g in c["origin_groups"]
-        ]
-        groups += profile_groups
+        scoped = profile_groups(c, regions_by_id, regions_by_host, exclusions)
+        in_scope = [g for g in scoped["groups"] if arm_key(g["id"]) not in scoped["excluded_groups"]]
+        all_groups += scoped["groups"]
+        groups += in_scope
+        excluded_groups |= scoped["excluded_groups"]
+        excluded += scoped["excluded"]
         profiles.append({
             **c["profile"],
-            "origin_group_count": len(profile_groups),
-            "origin_count": sum(g["total_origins"] for g in profile_groups),
+            "origin_group_count": len(in_scope),
+            "origin_count": sum(g["total_origins"] for g in in_scope),
         })
 
     profile_fdids = {arm_key(p["id"]): p.get("front_door_id") for p in profiles}
-    app_origins = app_service_origin_records(groups, profile_fdids, sites_by_key, sites_by_host, plans_by_key, configs_by_key,
-                                             subscription_id)
+    all_app_origins = app_service_origin_records(all_groups, profile_fdids, sites_by_key, sites_by_host, plans_by_key,
+                                                 configs_by_key, subscription_id)
+    app_origins = [r for r in all_app_origins if arm_key(r["origin_group_id"]) not in excluded_groups]
     production_tag = (os.environ.get(PRODUCTION_TAG_ENV) or "").strip() or None
-    apps = production_apps(sites_by_key, subscription_id, production_tag, groups, app_origins, plans_by_key)
-    health, unmatched = origin_health_records(groups, metrics_by_profile)
+    apps, excluded_apps = exclude_apps(production_apps(sites_by_key, subscription_id, production_tag, groups, app_origins,
+                                                       plans_by_key), all_app_origins, app_origins)
+    excluded += excluded_apps
+    # Metric series are matched against every group, so an out-of-scope group's series don't read as unmatched.
+    all_health, unmatched = origin_health_records(all_groups, metrics_by_profile)
+    health = [r for r in all_health if arm_key(r["origin_group_id"]) not in excluded_groups]
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -1176,11 +1230,13 @@ def main() -> int:
         collector=collector,
         results={"origin_groups": groups, "profiles": profiles, "provider_registration_status": registration,
                  "app_service_origins": app_origins, "production_apps": apps, "origin_health": health,
-                 "unmatched_origin_metrics": unmatched},
+                 "unmatched_origin_metrics": unmatched, "excluded": excluded},
         summary={**summarize(profiles, skipped_by_sku, groups), "provider_registration_status": registration,
                  **summarize_app_services(app_origins, apps, production_tag),
-                 **summarize_health(health, unmatched, days, window)},
+                 **summarize_health(health, unmatched, days, window),
+                 **exclusions.summary(excluded, EXCLUDED_KINDS)},
     )
+    exclusions.warn_unmatched(logger)
     filename = f"azure_front_door_origins_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)
 

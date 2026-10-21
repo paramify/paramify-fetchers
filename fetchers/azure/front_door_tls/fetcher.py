@@ -35,14 +35,18 @@ from frontdoor import (  # noqa: E402
     custom_domains,
     endpoints_with_routes,
     front_door_profiles,
+    profile_scope,
     route_hosts,
     route_https,
     route_serving,
     rule_sets_with_rules,
 )
+from scope_exclusions import ScopeExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_front_door_tls")
 
+SCOPE_EXCLUSIONS_ENV = "AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS"
+EXCLUDED_KINDS = ("custom_domain", "endpoint", "route")
 EXPIRY_WARNING_DAYS = 30
 # A predefined cipher-suite set fixes the floor; minimumTlsVersion applies only to Customized.
 CIPHER_SUITE_SET_FLOOR = {"TLS10_2019": "TLS10", "TLS12_2022": "TLS12", "TLS12_2023": "TLS12"}
@@ -167,8 +171,9 @@ def domain_record(profile: dict, domain: dict, secrets_by_key: dict, routed: set
     }
 
 
-def tls_for_profile(collected: dict, now: datetime) -> dict:
+def tls_for_profile(collected: dict, now: datetime, exclusions: ScopeExclusions | None = None) -> dict:
     profile = collected["profile"]
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions())
     domains_by_key = {arm_key(d["id"]): d for d in collected["custom_domains"]}
     secrets_by_key = {arm_key(s["id"]): s for s in collected["secrets"]}
     routes, routed, served = [], set(), set()
@@ -178,9 +183,11 @@ def tls_for_profile(collected: dict, now: datetime) -> dict:
             routed |= keys
             if route_serving(endpoint, route):
                 served |= keys
-            routes.append(route_record(profile, endpoint, route, domains_by_key, collected["rule_sets"]))
-    domains = [domain_record(profile, d, secrets_by_key, routed, served, now) for d in collected["custom_domains"]]
-    return {"routes": routes, "custom_domains": domains}
+            if arm_key(route["id"]) not in scope["routes"]:
+                routes.append(route_record(profile, endpoint, route, domains_by_key, collected["rule_sets"]))
+    domains = [domain_record(profile, d, secrets_by_key, routed, served, now)
+               for d in collected["custom_domains"] if arm_key(d["id"]) not in scope["hosts"]]
+    return {"routes": routes, "custom_domains": domains, "excluded": scope["excluded"]}
 
 
 def summarize(profiles: list[dict], skipped_by_sku: dict, routes: list[dict], domains: list[dict], secrets: list[dict]) -> dict:
@@ -283,11 +290,13 @@ def main() -> int:
         )
 
     now = datetime.now(timezone.utc)
-    profiles, routes, domains, secrets = [], [], [], []
+    exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV)
+    profiles, routes, domains, secrets, excluded = [], [], [], [], []
     for c in collected:
-        tls = tls_for_profile(c, now)
+        tls = tls_for_profile(c, now, exclusions)
         routes += tls["routes"]
         domains += tls["custom_domains"]
+        excluded += tls["excluded"]
         secrets += c["secrets"]
         profiles.append({
             **c["profile"],
@@ -306,12 +315,15 @@ def main() -> int:
             "custom_domains": domains,
             "profiles": profiles,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(profiles, skipped_by_sku, routes, domains, secrets),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, EXCLUDED_KINDS),
         },
     )
+    exclusions.warn_unmatched(logger)
     filename = f"azure_front_door_tls_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)
 

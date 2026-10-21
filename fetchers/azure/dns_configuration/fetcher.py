@@ -31,8 +31,11 @@ from azure_common import (  # noqa: E402
     sorted_counts,
     write_evidence,
 )
+from scope_exclusions import ScopeExclusions, excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_dns_configuration")
+
+SCOPE_EXCLUSIONS_ENV = "AZURE_DNS_SCOPE_EXCLUSIONS"
 
 DNSSEC_API_VERSION = "2023-07-01-preview"
 
@@ -263,6 +266,25 @@ def private_zone_record(zone: dict, links: list[dict]) -> dict:
     }
 
 
+def exclude_record_sets(public: list[dict], exclusions: ScopeExclusions) -> tuple[list[dict], list[dict]]:
+    """Each zone without the record sets whose relative name or FQDN matches a pattern, and those record sets."""
+    zones, excluded = [], []
+    for zone in public:
+        if zone["record_sets"] is None:
+            zones.append(zone)
+            continue
+        kept = []
+        for record in zone["record_sets"]:
+            pattern = exclusions.match(record["name"], record["fqdn"])
+            if pattern is None:
+                kept.append(record)
+                continue
+            excluded.append(excluded_item("record_set", record["name"], pattern, zone=zone["name"], zone_id=zone["id"],
+                                          type=record["type"], fqdn=record["fqdn"]))
+        zones.append({**zone, "record_sets": kept})
+    return zones, excluded
+
+
 def summarize(public: list[dict], private: list[dict]) -> dict:
     total = len(public)
     signed = sum(1 for z in public if z["dnssec_enabled"] is True)
@@ -410,6 +432,10 @@ def main() -> int:
             ),
         )
 
+    exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV)
+    public, excluded = exclude_record_sets(public, exclusions)
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -418,8 +444,10 @@ def main() -> int:
             "public_zones": public,
             "private_zones": private,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(public, private), "provider_registration_status": registration},
+        summary={**summarize(public, private), "provider_registration_status": registration,
+                 **exclusions.summary(excluded, ("record_set",))},
     )
     filename = f"azure_dns_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)

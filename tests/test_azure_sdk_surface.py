@@ -1053,7 +1053,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "CdnManagementClient",
         "afd_custom_domains",
         ["list_by_profile"],
-        "azure/front_door_waf_coverage",
+        "azure/front_door_waf_coverage, azure/front_door_tls, azure/front_door_origins (scope exclusions)",
     ),
     (
         "azure.mgmt.cdn",

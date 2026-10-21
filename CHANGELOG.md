@@ -717,6 +717,30 @@ schemas and the `paramify` CLI — not the internal code.
   profiles, attached WAF policies and L4 listeners have not yet been
   exercised against live data. `tests/test_azure_app_gateway_verdicts.py`
   covers those paths against modelled gateways.
+- **Scope exclusions for Azure fetchers.** A shared helper,
+  `fetchers/azure/_shared/scope_exclusions.py`, takes case-insensitive glob
+  patterns (comma- or space-separated) and answers whether a name is excluded and
+  by which pattern. A fetcher that adopts it reads them from its
+  `scope_exclusions` config field, and its evidence keeps every excluded item in
+  `results.excluded` with the pattern that matched (or the reason it followed),
+  echoes the patterns, lists the ones that matched nothing, and counts each
+  excluded kind. Every verdict, count and percentage covers only what remains in
+  scope. With no patterns set the output is unchanged apart from those empty or
+  zero fields. Adopted by:
+  - `azure_front_door_origins` 0.4.0: custom-domain host names, endpoint host
+    names and route names. A route is out of scope when its name matches or every
+    host it serves does, an origin group when every route reaching it is, and a
+    production app when only out-of-scope groups reach it, so multi-region
+    redundancy is judged on the core domains. Custom domains are read only when
+    patterns are set.
+  - `azure_front_door_tls` 0.2.0 and `azure_front_door_waf_coverage` 0.2.0:
+    custom-domain and endpoint host names; a route whose every host matches is
+    out of scope too. Both fetcher.yaml texts move to the new description format.
+  - `azure_dns_configuration` 0.3.0: public record-set names, relative or FQDN.
+- **A config value can be a `${env:VAR}` reference.** The runner resolves it the
+  way it resolves a secret. An unset or empty variable falls back to the field's
+  default (an error for a required field without one), and a malformed reference
+  is an error.
 
 ### Changed
 

@@ -1,14 +1,21 @@
 name: azure_front_door_tls
-version: 0.1.0
-description: >
-  TLS enforcement at Azure Front Door Standard/Premium. Every route with the
-  protocols it accepts and whether it accepts only HTTPS (HTTPS-only, or HTTP
-  redirected to HTTPS by the route or by a rule set), and every custom domain with
-  the TLS floor it enforces (from its cipher-suite set or customized minimum
-  version), its certificate type, issuer and expiry, and whether a serving route
-  uses it. A route still serving plain HTTP, a domain below TLS 1.2, or an expired
-  certificate is visible rather than reading as "TLS configured".
+version: 0.2.0
+description: >-
+  Shows whether each in-scope Front Door route accepts only HTTPS, and each in-scope custom domain's TLS floor, certificate and expiry.
 category: azure
+
+config_schema:
+  scope_exclusions:
+    type: string
+    required: false
+    env: AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS
+    description: >
+      Custom domains and endpoints to leave out of scope, as case-insensitive glob
+      patterns separated by commas or spaces (* matches any run of characters,
+      dots included), matched against custom-domain and endpoint host names. A
+      route whose every host matches is out of scope too. Each is listed under
+      excluded and left out of every count. Can be ${env:VAR}. Empty: everything
+      is in scope.
 
 supports_targets: true
 
@@ -47,37 +54,73 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-FRONTDOOR-TLS
   name: Azure Front Door TLS
-  instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-cdn CdnManagementClient):
-    profiles.list() kept to sku Standard_AzureFrontDoor / Premium_AzureFrontDoor
-    (other CDN SKUs counted in skipped_profiles_by_sku); per profile
-    afd_endpoints.list_by_profile, afd_custom_domains.list_by_profile,
-    secrets.list_by_profile and rule_sets.list_by_profile with rules.list_by_rule_set;
-    per endpoint routes.list_by_endpoint. Reader is sufficient — all GETs; a secret
-    returns certificate metadata and a Key Vault reference, never key material.
-    Routes: supportedProtocols absent reads as [Http, Https] and httpsRedirect absent
-    as Disabled (documented API defaults). https_only = the route accepts Https and
-    not Http (https_only_protocols), or accepts Http with httpsRedirect Enabled
-    (https_redirect), or accepts Http and, walking its rule sets in route order and
-    each set's rules by order, a rule redirects to destinationProtocol Https with no
-    condition or only a RequestScheme condition matching exactly HTTP, before any rule
-    that stops evaluation (rule_set_redirect, named in https_redirect_rule);
-    https_only_basis names which.
-    serving = endpoint and route both Enabled. forwarding_protocol is the protocol
-    to the origin, reported for azure_front_door_origins. Endpoint default domains
-    (*.azurefd.net) use the platform TLS policy and carry no TLS settings of their
-    own. Custom domains: effective_minimum_tls is minimumTlsVersion when
-    cipherSuiteSetType is Customized (the API applies the version only then), else
-    the floor the predefined set implies (TLS10_2019 → TLS10, TLS12_2022 / TLS12_2023
-    → TLS12), else minimumTlsVersion when no set is stored; below_tls12 is null when
-    the floor is unknown. The certificate is the profile secret tlsSettings.secret
-    points to; days_until_expiry, certificate_expired and certificate_expiring_soon
-    (within expiry_warning_days, 30) come from its expirationDate at run time, and
-    are all null when no expiry is readable (counted in
-    served_domains_certificate_expiry_unknown).
-    certificate_status is found, managed_without_secret (a Front Door managed
-    certificate whose domain exposes no secret, so no expiry is readable; the platform
-    renews it), or missing (any other certificate with no resolvable secret).
-    served = a serving route lists the domain. Summary serving_routes_accepting_plain_http
-    and served_domains_below_tls12 are the counts a check asserts on. Maps to
-    KSI-SVC-SIN / KSI-CNA-MAT.
+  instructions: |
+    Script: azure/front_door_tls/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.Cdn — notes an unregistered provider
+    - profiles.list() — Front Door Standard and Premium profiles
+    - afd_endpoints.list_by_profile() and routes.list_by_endpoint() — each route, the protocols it accepts, its HTTPS redirect and the hosts it serves
+    - afd_custom_domains.list_by_profile() — each custom domain's TLS settings and certificate
+    - secrets.list_by_profile() — each certificate's type, issuer and expiry (metadata and a Key Vault reference, never key material)
+    - rule_sets.list_by_profile() and rules.list_by_rule_set() — rules that redirect HTTP to HTTPS
+
+    Output: azure_front_door_tls_<subscription>.json — each in-scope route with whether it accepts only HTTPS, each in-scope custom domain with its TLS floor and certificate, and the domains, endpoints and routes left out of scope with the pattern that took each out.
+
+    Summary fields:
+
+    What was checked?
+    - total_front_door_profiles — Number of Front Door Standard and Premium profiles
+    - premium_profiles — Number of Front Door Premium profiles
+    - standard_profiles — Number of Front Door Standard profiles
+    - skipped_profiles_by_sku — Number of classic CDN profiles skipped, for each SKU
+    - total_routes — Number of in-scope routes across all profiles (out-of-scope ones are counted in excluded_routes)
+    - serving_routes — Number of in-scope routes that serve traffic: the route and its endpoint are both enabled
+    - total_custom_domains — Number of in-scope custom domains across all profiles
+    - served_custom_domains — Number of in-scope custom domains that a serving route serves
+    - unrouted_custom_domains — Number of in-scope custom domains that no route lists
+    - certificate_secrets — Number of certificate secrets (customer certificates and Front Door managed ones) across all profiles, including ones only out-of-scope domains use
+    - provider_registration_status — Whether Microsoft.Cdn is registered on the subscription: registered, not_registered or unknown
+
+    Which parts of Front Door are left out of scope?
+    - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against custom-domain host names and endpoint host names (azurefd.net). A custom domain is in scope unless its host name matches one; a route is in scope unless every host it serves matches (its custom domains, plus the endpoint's own host name when the route links it). Empty when none are set, so everything is in scope
+    - scope_exclusion_patterns_unmatched — List of configured patterns that matched no custom-domain or endpoint host name, such as a mistyped name
+    - excluded_custom_domains — Number of custom domains whose host name matches a pattern; each is listed under excluded with the pattern, and no other count includes them
+    - excluded_endpoints — Number of endpoints whose own host name matches a pattern
+    - excluded_routes — Number of routes out of scope because every host they serve matches a pattern
+
+    Do serving routes accept only HTTPS?
+    - serving_routes_https_only — Number of serving routes that only ever handle HTTPS: they accept only HTTPS, or they redirect plain HTTP to HTTPS (a route that sets no protocols accepts both, and one that sets no redirect doesn't redirect)
+    - serving_routes_accepting_plain_http — Number of serving routes that answer plain HTTP without redirecting it to HTTPS
+    - serving_routes_https_only_protocols — Number of serving routes that accept only HTTPS
+    - serving_routes_https_redirect — Number of serving routes that accept HTTP and redirect it to HTTPS with the route's own HTTPS redirect setting
+    - serving_routes_rule_set_redirect — Number of serving routes that accept HTTP and redirect it to HTTPS with a rule-set rule: one that redirects to HTTPS with no condition, or only a condition matching exactly HTTP requests, ahead of any rule that stops evaluation
+    - serving_routes_on_endpoint_default_domain — Number of serving routes that also serve the endpoint's own azurefd.net host name, which uses the platform's TLS policy rather than settings of its own
+
+    Do served domains enforce TLS 1.2 or higher?
+    - served_domains_below_tls12 — Number of served custom domains whose TLS floor is below TLS 1.2. The floor is set by the domain's cipher-suite set (TLS10_2019 means TLS 1.0; TLS12_2022 and TLS12_2023 mean TLS 1.2), or by its minimum TLS version when the set is Customized or not set
+    - served_domains_minimum_tls13 — Number of served custom domains whose TLS floor is TLS 1.3
+    - served_domains_tls_floor_unknown — Number of served custom domains whose TLS floor can't be read: an unknown cipher-suite set, or no set and no minimum version
+    - domains_by_cipher_suite_set — Number of in-scope custom domains for each cipher-suite set:
+      - TLS10_2019 (TLS 1.0 and up)
+      - TLS12_2022 (TLS 1.2 and up)
+      - TLS12_2023 (TLS 1.2 and up)
+      - Customized (the domain's own cipher list and minimum version)
+      - None (no set stored)
+
+    Is each served domain's certificate valid and current?
+    - served_domains_validation_not_approved — Number of served custom domains whose domain-ownership validation state isn't Approved
+    - served_domains_certificate_missing — Number of served custom domains that don't use a Front Door managed certificate and whose certificate secret can't be found
+    - served_domains_managed_certificate_without_secret — Number of served custom domains on a Front Door managed certificate that exposes no certificate secret, so its expiry can't be read (the platform renews it)
+    - served_domains_certificate_expired — Number of served custom domains whose certificate's expiry date has passed
+    - served_domains_certificate_expiring_soon — Number of served custom domains whose certificate expires within expiry_warning_days days and hasn't expired yet
+    - served_domains_certificate_expiry_unknown — Number of served custom domains whose certificate expiry can't be read (no certificate secret found, or no date in it)
+    - expiry_warning_days — Days before expiry that a certificate counts as expiring soon (30)
+    - domains_by_certificate_type — Number of in-scope custom domains for each certificate type:
+      - ManagedCertificate (issued and renewed by Front Door)
+      - AzureFirstPartyManagedCertificate (an Azure first-party managed certificate)
+      - CustomerCertificate (brought from Key Vault)
+      - None (no type set)

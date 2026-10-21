@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import sys
 from pathlib import Path
@@ -317,3 +318,78 @@ def test_unreadable_record_sets_are_null_and_fail_the_run(monkeypatch):
     assert zones["ok.example"]["record_sets"][0]["failover_method"] == "traffic_manager"
     assert not collector.ok
     assert "record_sets.list_all_by_dns_zone(rg-dns/example.com)" in collector.failures[0]["operation"]
+
+
+# --- scope exclusions ---
+
+def scoped_zone():
+    records = [dns.project_record_set(rs) for rs in (
+        alias("A", AFD),
+        record_set("CNAME", name="www", cname_record=m.CnameRecord(cname="web.z01.azurefd.net")),
+        record_set("CNAME", name="qa", cname_record=m.CnameRecord(cname="qa.z01.azurefd.net")),
+        record_set("A", name="webdav", a_records=[m.ARecord(ipv4_address="203.0.113.5")]),
+        record_set("CNAME", name="files", cname_record=m.CnameRecord(cname="files.azureedge.net")),
+    )]
+    return zone(record_sets=records)
+
+
+def test_record_sets_match_on_relative_name_or_fqdn():
+    exclusions = dns.ScopeExclusions(["QA", "webdav.example.com", "files.example.com.", "typo.example.com"])
+    [z], excluded = dns.exclude_record_sets([scoped_zone()], exclusions)
+
+    assert [r["name"] for r in z["record_sets"]] == ["@", "www"]
+    assert [(e["name"], e["type"], e["pattern"]) for e in excluded] == [
+        ("qa", "CNAME", "QA"), ("webdav", "A", "webdav.example.com"), ("files", "CNAME", "files.example.com.")]
+    assert excluded[0] == {"kind": "record_set", "name": "qa", "pattern": "QA", "reason": "name_matched",
+                           "zone": "example.com", "zone_id": z["id"], "type": "CNAME", "fqdn": "qa.example.com."}
+    assert exclusions.unmatched() == ["typo.example.com"]
+
+
+def test_counts_cover_only_record_sets_in_scope():
+    exclusions = dns.ScopeExclusions(["qa", "webdav", "files"])
+    zones, excluded = dns.exclude_record_sets([scoped_zone()], exclusions)
+    summary = {**dns.summarize(zones, []), **exclusions.summary(excluded, ("record_set",))}
+
+    assert summary["total_public_record_sets"] == 2
+    assert summary["public_endpoint_record_sets_by_failover_method"] == {
+        "front_door": 2, "traffic_manager": 0, "cdn": 0, "record_update": 0}
+    assert summary["excluded_record_sets"] == 3
+    assert summary["scope_exclusion_patterns_unmatched"] == []
+
+
+def test_no_patterns_leaves_zones_untouched_and_unread_zones_null():
+    zones = [scoped_zone(), zone("unread.example", record_sets=None)]
+    kept, excluded = dns.exclude_record_sets(zones, dns.ScopeExclusions())
+    assert kept == zones and excluded == []
+
+
+def run_main(monkeypatch, tmp_path, patterns):
+    monkeypatch.setattr(dns, "resolve_subscription", lambda c: {"subscription_id": "sub", "subscription_source": "env"})
+    monkeypatch.setattr(dns, "credential", lambda: object())
+    monkeypatch.setattr(dns, "provider_registration_status", lambda *a: "registered")
+    monkeypatch.setattr(dns, "collect_public_zones", lambda *a: [scoped_zone()])
+    monkeypatch.setattr(dns, "collect_private_zones", lambda *a: [])
+    monkeypatch.setattr(dns, "load_dotenv", lambda: None)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    if patterns is None:
+        monkeypatch.delenv(dns.SCOPE_EXCLUSIONS_ENV, raising=False)
+    else:
+        monkeypatch.setenv(dns.SCOPE_EXCLUSIONS_ENV, patterns)
+    assert dns.main() == 0
+    return json.loads((tmp_path / "azure_dns_configuration_sub.json").read_text())
+
+
+def test_main_without_patterns_adds_only_empty_scope_fields(monkeypatch, tmp_path):
+    evidence = run_main(monkeypatch, tmp_path, None)
+    assert evidence["results"]["excluded"] == []
+    assert evidence["summary"]["scope_exclusion_patterns"] == []
+    assert evidence["summary"]["scope_exclusion_patterns_unmatched"] == []
+    assert evidence["summary"]["excluded_record_sets"] == 0
+    assert evidence["summary"]["total_public_record_sets"] == 5
+
+
+def test_main_with_patterns_from_the_env(monkeypatch, tmp_path):
+    evidence = run_main(monkeypatch, tmp_path, "qa, webdav.example.com")
+    assert [e["name"] for e in evidence["results"]["excluded"]] == ["qa", "webdav"]
+    assert evidence["summary"]["total_public_record_sets"] == 3
+    assert evidence["summary"]["scope_exclusion_patterns"] == ["qa", "webdav.example.com"]

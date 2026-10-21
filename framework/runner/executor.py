@@ -184,13 +184,28 @@ def _apply_config(
     secret_sink: Optional[set] = None,
 ) -> None:
     """Merge config and inject each field that declares an `env` mapping. Also
-    lets the platform's auth passthrough_env vars through the whitelist."""
+    lets the platform's auth passthrough_env vars through the whitelist.
+
+    A string value may be a ${env:VAR} reference, resolved like a secret's. One
+    whose variable is unset or empty falls back to the field's default, as if the
+    manifest had not set it; a malformed one is an error."""
     schema, values = merged_config(fetcher, platform_spec, platform_cfg, entry)
 
     for name, fdef in schema.items():
         if not fdef.env:
             continue
         val = values.get(name)
+        try:
+            val = resolve(val)
+        except UnsetSecretError as e:
+            if fdef.required and fdef.default is None:
+                raise RuntimeError(
+                    f"{fetcher.name}: required config '{name}' reads ${{env:{e.env_var}}}, "
+                    f"which is unset or empty in the runner's environment"
+                ) from e
+            val = fdef.default
+        except SecretResolutionError as e:
+            raise RuntimeError(f"{fetcher.name}: config '{name}': {e}") from e
         if val is None:
             if fdef.required:
                 raise RuntimeError(

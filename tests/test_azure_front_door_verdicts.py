@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -565,3 +566,257 @@ def test_lookback_days(monkeypatch, raw, days, failed):
     collector = origins.Collector(origins.logger)
     assert origins.lookback_days(collector) == days
     assert (not collector.ok) is failed
+
+
+# --- scope exclusions ---
+
+PROFILE_ID = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Cdn/profiles/p"
+ENDPOINT_HOST = "e-abc123.z01.azurefd.net"
+REGIONS = {f"{name}-{region}.azurewebsites.net": region
+           for name in ("core", "shared", "qa", "cdn", "webdav", "spare", "unused") for region in ("eastus", "westus")}
+PATTERNS = ("QA.*", "webdav*", "files.example.com", "nothing.example.com")
+
+
+def fd_domain(name):
+    return {"id": f"{PROFILE_ID}/customDomains/{name.replace('.', '-')}", "name": name.replace(".", "-"), "host_name": name,
+            "domain_validation_state": "Approved", "certificate_type": "ManagedCertificate", "minimum_tls_version": "TLS12",
+            "cipher_suite_set_type": None, "customized_cipher_suites_tls12": [], "customized_cipher_suites_tls13": [],
+            "secret_id": None}
+
+
+def fd_route(name, domains=(), group="core", forwarding="HttpsOnly", default_domain=False):
+    return {"id": f"{PROFILE_ID}/afdEndpoints/e/routes/{name}", "name": name, "enabled_state": "Enabled",
+            "supported_protocols": ["Https"], "https_redirect": None, "forwarding_protocol": forwarding,
+            "patterns_to_match": ["/*"], "link_to_default_domain": "Enabled" if default_domain else "Disabled",
+            "custom_domains": [{"id": fd_domain(d)["id"], "is_active": True} for d in domains],
+            "origin_group_id": f"{PROFILE_ID}/originGroups/{group}", "origin_path": None, "rule_set_ids": []}
+
+
+def fd_group(name, regions=("eastus", "westus")):
+    group_id = f"{PROFILE_ID}/originGroups/{name}"
+    return {"id": group_id, "name": name, "session_affinity_state": None, "load_balancing": None,
+            "health_probe": {"probe_path": "/", "probe_request_type": "HEAD", "probe_protocol": "Https",
+                             "probe_interval_in_seconds": 100},
+            "authentication": {"type": "SystemAssignedIdentity"}, "provisioning_state": "Succeeded",
+            "deployment_status": None,
+            "origins_projected": [{
+                "id": f"{group_id}/origins/{name}-{r}", "name": f"{name}-{r}", "host_name": f"{name}-{r}.azurewebsites.net",
+                "origin_host_header": None, "http_port": 80, "https_port": 443, "priority": 1, "weight": 1000,
+                "enabled_state": "Enabled", "enforce_certificate_name_check": True,
+                "certificate_name_check_validation_mode": None, "custom_certificate_subjects": [], "azure_origin_id": None,
+                "private_link": None, "provisioning_state": "Succeeded", "deployment_status": None,
+            } for r in regions]}
+
+
+def topology(read_domains=True):
+    """One profile: core domains on two-region groups; QA, WebDAV and a file CDN on single-region groups.
+
+    The QA route forwards plain HTTP to the shared group, which a core route also reaches.
+    """
+    routes = [
+        fd_route("core", ["www.example.com", "api.example.com"]),
+        fd_route("mixed", ["api.example.com", "qa.example.com"]),
+        fd_route("default", default_domain=True),
+        fd_route("shared-core", ["www.example.com"], group="shared"),
+        fd_route("qa-http", ["qa.example.com"], group="shared", forwarding="HttpOnly"),
+        fd_route("qa", ["qa.example.com"], group="qa"),
+        fd_route("files", ["files.example.com"], group="cdn"),
+        fd_route("webdav-route", ["webdav.example.com"], group="webdav"),
+        fd_route("nohost", group="spare"),
+    ]
+    domains = [fd_domain(d) for d in ("www.example.com", "api.example.com", "qa.example.com", "files.example.com",
+                                      "webdav.example.com")]
+    return {
+        "profile": {"id": PROFILE_ID, "name": "p", "sku": "Premium_AzureFrontDoor", "resource_state": "Active",
+                    "front_door_id": None},
+        "endpoints": [{"id": f"{PROFILE_ID}/afdEndpoints/e", "name": "e", "host_name": ENDPOINT_HOST,
+                       "enabled_state": "Enabled", "deployment_status": None, "routes": routes}],
+        "custom_domains": domains if read_domains else [],
+        "rule_sets": {},
+        "secrets": [],
+        "security_policies": [],
+        "origin_groups": [fd_group(g, ("eastus",) if g in ("qa", "cdn", "webdav") else ("eastus", "westus"))
+                          for g in ("core", "shared", "qa", "cdn", "webdav", "spare", "unused")],
+    }
+
+
+def scope_exclusions(*patterns):
+    return origins.ScopeExclusions(patterns)
+
+
+def by_kind(excluded):
+    found: dict = {}
+    for e in excluded:
+        found.setdefault(e["kind"], []).append((e["name"], e["pattern"], e["reason"]))
+    return found
+
+
+def test_profile_scope_matches_host_names_and_excludes_routes_whose_every_host_is_out():
+    c = topology()
+    exclusions = scope_exclusions(*PATTERNS)
+    scope = fd.profile_scope(c["profile"], c["endpoints"], c["custom_domains"], exclusions)
+
+    assert by_kind(scope["excluded"]) == {
+        "custom_domain": [("qa.example.com", "QA.*", "name_matched"), ("files.example.com", "files.example.com", "name_matched"),
+                          ("webdav.example.com", "webdav*", "name_matched")],
+        "route": [("qa-http", None, "all_hosts_excluded"), ("qa", None, "all_hosts_excluded"),
+                  ("files", None, "all_hosts_excluded"), ("webdav-route", None, "all_hosts_excluded")],
+    }
+    # mixed also serves an in-scope domain; nohost serves no host at all
+    assert {fd.arm_key(fd_route(n)["id"]) for n in ("mixed", "nohost", "core")}.isdisjoint(scope["routes"])
+    assert exclusions.unmatched() == ["nothing.example.com"]
+
+
+def test_profile_scope_matches_route_names_only_when_asked():
+    c = topology()
+    plain = fd.profile_scope(c["profile"], c["endpoints"], c["custom_domains"], scope_exclusions("default"))
+    named = fd.profile_scope(c["profile"], c["endpoints"], c["custom_domains"], scope_exclusions("default"),
+                             match_route_names=True)
+    assert plain["excluded"] == []
+    assert by_kind(named["excluded"]) == {"route": [("default", "default", "name_matched")]}
+
+
+def test_endpoint_host_name_excludes_routes_on_the_default_domain():
+    c = topology()
+    scope = fd.profile_scope(c["profile"], c["endpoints"], c["custom_domains"], scope_exclusions("*.azurefd.net"))
+    assert by_kind(scope["excluded"]) == {"endpoint": [(ENDPOINT_HOST, "*.azurefd.net", "name_matched")],
+                                          "route": [("default", None, "all_hosts_excluded")]}
+
+
+def test_origin_redundancy_is_judged_on_in_scope_routes_only():
+    plain = origins.profile_groups(topology(), {}, REGIONS, scope_exclusions())
+    scoped = origins.profile_groups(topology(), {}, REGIONS, scope_exclusions(*PATTERNS))
+
+    assert plain["excluded"] == [] and plain["excluded_groups"] == set()
+    assert "http_to_origin" in {g["name"]: g for g in plain["groups"]}["shared"]["unprotected_reasons"]
+
+    in_scope = {g["name"]: g for g in scoped["groups"] if fd.arm_key(g["id"]) not in scoped["excluded_groups"]}
+    assert sorted(in_scope) == ["core", "shared", "spare", "unused"]
+    assert [r["route"] for r in in_scope["shared"]["routes"]] == ["shared-core"]
+    assert in_scope["shared"]["connection_protected"] is True
+    assert sorted(r["route"] for r in in_scope["core"]["routes"]) == ["core", "default", "mixed"]
+    assert in_scope["unused"]["serving"] is False
+    assert by_kind(scoped["excluded"])["origin_group"] == [
+        ("qa", None, "only_excluded_routes"), ("cdn", None, "only_excluded_routes"), ("webdav", None, "only_excluded_routes")]
+    qa = next(e for e in scoped["excluded"] if e["kind"] == "origin_group" and e["name"] == "qa")
+    assert qa["routes"] == ["qa"] and qa["origins"] == ["qa-eastus"]
+
+    assert origins.summarize([], {}, plain["groups"])["serving_groups_single_enabled_origin"] == 3
+    summary = origins.summarize([], {}, list(in_scope.values()))
+    assert summary["total_origin_groups"] == 4
+    assert summary["serving_groups_multi_region_active_active"] == 3
+    assert summary["serving_groups_single_enabled_origin"] == 0
+
+
+def test_route_name_pattern_takes_a_route_out_of_its_group():
+    scoped = origins.profile_groups(topology(), {}, REGIONS, scope_exclusions("webdav-*", "qa-http"))
+    assert by_kind(scoped["excluded"]) == {
+        "route": [("qa-http", "qa-http", "name_matched"), ("webdav-route", "webdav-*", "name_matched")],
+        "origin_group": [("webdav", None, "only_excluded_routes")],
+    }
+
+
+def test_apps_reached_only_through_excluded_groups_are_excluded():
+    def row(site, group):
+        return {"site_id": origins.arm_key(SITE.format(site)), "origin_group": group}
+
+    apps = [{"id": SITE.format(n), "name": n} for n in ("app-core", "app-qa", "app-alone")]
+    all_rows = [row("app-core", "core"), row("app-core", "qa"), row("app-qa", "qa"), row("app-qa", "cdn")]
+    kept, excluded = origins.exclude_apps(apps, all_rows, [row("app-core", "core")])
+    assert [a["name"] for a in kept] == ["app-core", "app-alone"]
+    assert excluded == [{"kind": "app", "name": "app-qa", "pattern": None, "reason": "only_excluded_origin_groups",
+                         "id": SITE.format("app-qa"), "origin_groups": ["cdn", "qa"]}]
+
+
+def test_tls_counts_only_in_scope_domains_and_routes():
+    plain = tls.tls_for_profile(topology(), NOW)
+    scoped = tls.tls_for_profile(topology(), NOW, scope_exclusions(*PATTERNS))
+
+    assert plain["excluded"] == [] and len(plain["custom_domains"]) == 5 and len(plain["routes"]) == 9
+    assert [d["host_name"] for d in scoped["custom_domains"]] == ["www.example.com", "api.example.com"]
+    assert [r["route"] for r in scoped["routes"]] == ["core", "mixed", "default", "shared-core", "nohost"]
+    assert [e["kind"] for e in scoped["excluded"]].count("route") == 4
+    summary = tls.summarize([], {}, scoped["routes"], scoped["custom_domains"], [])
+    assert summary["total_custom_domains"] == 2 and summary["total_routes"] == 5
+
+
+def test_waf_coverage_drops_host_routes_on_excluded_hosts():
+    plain = coverage.coverage_for_profile(topology(), {})
+    scoped = coverage.coverage_for_profile(topology(), {}, scope_exclusions(*PATTERNS, "*.azurefd.net"))
+
+    assert plain["excluded"] == []
+    assert (plain["endpoint_count"], plain["route_count"], plain["custom_domain_count"]) == (1, 9, 5)
+    assert len(plain["host_routes"]) == 10
+    assert sorted((h["route"], h["host_name"]) for h in scoped["host_routes"]) == [
+        ("core", "api.example.com"), ("core", "www.example.com"), ("mixed", "api.example.com"),
+        ("shared-core", "www.example.com")]
+    assert (scoped["endpoint_count"], scoped["route_count"], scoped["custom_domain_count"]) == (0, 4, 2)
+    host_routes = by_kind(scoped["excluded"])["host_route"]
+    assert ("qa.example.com", "QA.*", "name_matched") in host_routes and len(host_routes) == 6
+    summary = coverage.summarize([], {}, scoped["host_routes"], [], scoped["unrouted_custom_domains"], [])
+    assert summary["serving_host_routes"] == 4 and summary["unprotected_host_routes"] == 4
+
+
+def run_origins(monkeypatch, tmp_path, patterns):
+    reads = []
+    sites = {origins.arm_key(SITE.format(n)): site_row(n, "eastus", "plan") for n in ("app-core", "app-qa")}
+    by_host = {"core-eastus.azurewebsites.net": origins.arm_key(SITE.format("app-core")),
+               "qa-eastus.azurewebsites.net": origins.arm_key(SITE.format("app-qa"))}
+    point = {"time": "2026-10-08T03:00:00Z", "average": 100.0, "minimum": 100.0, "total": 5.0}
+    metrics = {origins.arm_key(PROFILE_ID): {
+        "health": [{"origin": f"{g}-eastus.azurewebsites.net", "origin_group": g, "points": [point]} for g in ("core", "qa")],
+        "requests": [{"origin": f"{g}-eastus.azurewebsites.net", "origin_group": None, "points": [point]}
+                     for g in ("core", "qa")],
+    }}
+
+    def collect_profiles(subscription_id, cred, collector, read_domains=False):
+        reads.append(read_domains)
+        return [topology(read_domains)], {}
+
+    for name, fake in {
+        "resolve_subscription": lambda c: {"subscription_id": "s", "subscription_source": "env"},
+        "credential": lambda: object(),
+        "provider_registration_status": lambda *a: "registered",
+        "collect_profiles": collect_profiles,
+        "graph_client": lambda *a: object(),
+        "lookup_regions": lambda *a: ({}, REGIONS),
+        "lookup_sites": lambda *a: (sites, by_host),
+        "lookup_plans": lambda *a: {},
+        "read_site_configs": lambda *a: {},
+        "collect_origin_metrics": lambda *a: metrics,
+        "load_dotenv": lambda: None,
+    }.items():
+        monkeypatch.setattr(origins, name, fake)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.delenv(origins.PRODUCTION_TAG_ENV, raising=False)
+    if patterns is None:
+        monkeypatch.delenv(origins.SCOPE_EXCLUSIONS_ENV, raising=False)
+    else:
+        monkeypatch.setenv(origins.SCOPE_EXCLUSIONS_ENV, patterns)
+    assert origins.main() == 0
+    return reads, json.loads((tmp_path / "azure_front_door_origins_s.json").read_text())
+
+
+def test_origins_without_patterns_reads_no_domains_and_adds_only_empty_scope_fields(monkeypatch, tmp_path):
+    reads, evidence = run_origins(monkeypatch, tmp_path, None)
+    summary = evidence["summary"]
+    assert reads == [False]
+    assert evidence["results"]["excluded"] == []
+    assert (summary["scope_exclusion_patterns"], summary["scope_exclusion_patterns_unmatched"]) == ([], [])
+    assert all(summary[f"excluded_{k}s"] == 0 for k in origins.EXCLUDED_KINDS)
+    assert summary["total_origin_groups"] == 7 and summary["production_web_apps"] == 2
+    assert evidence["results"]["profiles"][0]["origin_group_count"] == 7
+
+
+def test_origins_with_patterns_leave_qa_groups_apps_and_health_out(monkeypatch, tmp_path):
+    reads, evidence = run_origins(monkeypatch, tmp_path, ",".join(PATTERNS))
+    results, summary = evidence["results"], evidence["summary"]
+    assert reads == [True]
+    assert [a["name"] for a in results["production_apps"]] == ["app-core"]
+    assert [h["origin_group"] for h in results["origin_health"]] == ["core", "shared", "spare", "unused"]
+    assert summary["origin_metric_series_unmatched"] == 0
+    assert {k: summary[f"excluded_{k}s"] for k in origins.EXCLUDED_KINDS} == {
+        "custom_domain": 3, "endpoint": 0, "route": 4, "origin_group": 3, "app": 1}
+    assert summary["scope_exclusion_patterns_unmatched"] == ["nothing.example.com"]
+    assert summary["total_origin_groups"] == 4 and results["profiles"][0]["origin_group_count"] == 4
+    assert {r["origin_group"] for r in results["app_service_origins"]} == {"core"}

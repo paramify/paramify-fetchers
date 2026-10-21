@@ -140,6 +140,40 @@ def test_required_config_without_value_raises(tmp_path):
         _apply_config({}, fetcher, None, None, ManifestEntry(use="x"))
 
 
+def test_config_env_reference_is_resolved(tmp_path, monkeypatch):
+    fetcher = make_fetcher(tmp_path, config_schema={"patterns": cfg("patterns", "PATTERNS")})
+    monkeypatch.setenv("MY_PATTERNS", "qa.*, *.sandbox.*")
+    env: dict = {}
+    _apply_config(env, fetcher, None, None, ManifestEntry(use="x", config={"patterns": "${env:MY_PATTERNS}"}))
+    assert env["PATTERNS"] == "qa.*, *.sandbox.*"
+
+
+def test_config_env_reference_unset_falls_back_to_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("UNSET_VAR", raising=False)
+    fetcher = make_fetcher(tmp_path, config_schema={
+        "patterns": cfg("patterns", "PATTERNS"),
+        "days": cfg("days", "DAYS", default=7, type="integer"),
+    })
+    env: dict = {}
+    _apply_config(env, fetcher, None, None, ManifestEntry(
+        use="x", config={"patterns": "${env:UNSET_VAR}", "days": "${env:UNSET_VAR}"}))
+    assert "PATTERNS" not in env
+    assert env["DAYS"] == "7"
+
+
+def test_required_config_env_reference_unset_raises(tmp_path, monkeypatch):
+    monkeypatch.delenv("UNSET_VAR", raising=False)
+    fetcher = make_fetcher(tmp_path, config_schema={"region": cfg("region", "REGION", required=True)})
+    with pytest.raises(RuntimeError, match=r"required config 'region' reads \$\{env:UNSET_VAR\}"):
+        _apply_config({}, fetcher, None, None, ManifestEntry(use="x", config={"region": "${env:UNSET_VAR}"}))
+
+
+def test_config_malformed_env_reference_raises(tmp_path):
+    fetcher = make_fetcher(tmp_path, config_schema={"patterns": cfg("patterns", "PATTERNS")})
+    with pytest.raises(RuntimeError, match="config 'patterns'.*Malformed"):
+        _apply_config({}, fetcher, None, None, ManifestEntry(use="x", config={"patterns": "${env:lower}"}))
+
+
 def test_passthrough_env_only_passes_vars_actually_set(tmp_path, monkeypatch):
     """passthrough_env opts a var THROUGH the whitelist, but only when it is
     actually present in the runner's environment."""

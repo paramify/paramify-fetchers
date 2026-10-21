@@ -12,6 +12,7 @@ from azure_common import (
     model_attr,
     resource_group_from_id,
 )
+from scope_exclusions import excluded_item
 
 FRONT_DOOR_SKUS = ("Standard_AzureFrontDoor", "Premium_AzureFrontDoor")
 DEFAULT_RULE_SET_TYPES = ("DefaultRuleSet", "Microsoft_DefaultRuleSet")
@@ -427,6 +428,45 @@ def route_hosts(endpoint: dict, route: dict, domains_by_key: dict) -> List[dict]
 
 def route_serving(endpoint: dict, route: dict) -> bool:
     return endpoint["enabled_state"] == "Enabled" and route["enabled_state"] == "Enabled"
+
+
+# --- scope exclusions by host name (and optionally route name) ---
+
+def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exclusions,
+                  match_route_names: bool = False) -> dict:
+    """The custom domains and endpoints whose host name matches a pattern (key -> pattern), and the routes out of scope.
+
+    A route is out of scope when every host it serves is, or (with match_route_names) when its own name matches.
+    """
+    domains_by_key = {arm_key(d["id"]): d for d in domains}
+    host_patterns, excluded = {}, []
+    for domain in domains:
+        pattern = exclusions.match(domain["host_name"])
+        if pattern:
+            host_patterns[arm_key(domain["id"])] = pattern
+            excluded.append(excluded_item("custom_domain", domain["host_name"], pattern, profile=profile["name"],
+                                          custom_domain=domain["name"], id=domain["id"]))
+    for endpoint in endpoints:
+        pattern = exclusions.match(endpoint["host_name"])
+        if pattern:
+            host_patterns[arm_key(endpoint["id"])] = pattern
+            excluded.append(excluded_item("endpoint", endpoint["host_name"], pattern, profile=profile["name"],
+                                          endpoint=endpoint["name"], id=endpoint["id"]))
+    routes = set()
+    for endpoint in endpoints:
+        for route in endpoint["routes"]:
+            hosts = route_hosts(endpoint, route, domains_by_key)
+            context = {"profile": profile["name"], "endpoint": endpoint["name"], "id": route["id"],
+                       "hosts": [h["host_name"] for h in hosts]}
+            pattern = exclusions.match(route["name"]) if match_route_names else None
+            if pattern:
+                excluded.append(excluded_item("route", route["name"], pattern, **context))
+            elif hosts and all(arm_key(h["id"]) in host_patterns for h in hosts):
+                excluded.append(excluded_item("route", route["name"], None, reason="all_hosts_excluded", **context))
+            else:
+                continue
+            routes.add(arm_key(route["id"]))
+    return {"hosts": host_patterns, "routes": routes, "excluded": excluded}
 
 
 # --- rule sets: HTTP→HTTPS redirects and origin overrides ---
