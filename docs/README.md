@@ -80,4 +80,4 @@ permissions:
 - [Pin a release and upgrade safely](versioning_guide.md), and the
   [versioning policy](versioning.md)
 - [Cut a release](releasing_guide.md), and the [release process](releasing.md)
-- [Work in a private copy of this repo](private_mirror_workflow.md)
+- [Work in a private copy of this repo](private_mirror_guide.md)
