@@ -143,13 +143,14 @@ evidence_set:
     Does each App Service origin accept traffic only through its own Front Door profile?
     - app_service_origins — Number of origins that are App Service apps or slots, found by the origin's Azure resource, its private-link target, or the app owning its host name
     - serving_app_service_origins — Number of App Service origins that are enabled and in a serving group
-    - serving_app_service_origins_locked_to_front_door — Number of serving App Service origins locked to Front Door: the app's public network access is off, or its access restrictions turn away every public caller except Front Door requests carrying the profile's own Front Door id (or another profile's in the subscription) in the X-Azure-FDID header
+    - serving_app_service_origins_locked_to_front_door — Number of serving App Service origins locked to Front Door: the app's public network access is off, or its access restrictions turn away every public caller except Front Door requests carrying the profile's own Front Door id in the X-Azure-FDID header
     - serving_app_service_origins_not_locked — Number of serving App Service origins not locked to Front Door
     - serving_app_service_origins_public_network_access_disabled — Number of serving App Service origins whose app has public network access turned off
     - serving_app_service_origins_public_access_unrestricted — Number of serving App Service origins whose app lets any public caller in, through an "Allow all" rule, an allow default, or no rules
     - serving_app_service_origins_non_front_door_allow_rule — Number of serving App Service origins whose app allows a public caller other than Front Door, such as an IP range or subnet
     - serving_app_service_origins_front_door_rule_without_fdid — Number of serving App Service origins whose app allows the Front Door service tag without an X-Azure-FDID header, so any customer's Front Door can reach it
     - serving_app_service_origins_unknown_front_door_id_allowed — Number of serving App Service origins whose app allows a Front Door id that no profile in the subscription has
+    - serving_app_service_origins_other_front_door_id_allowed — Number of serving App Service origins whose app allows another profile's Front Door id from the subscription, which can bypass the serving profile's WAF
     - serving_app_service_origins_profile_front_door_id_not_allowed — Number of serving App Service origins reached over the public internet whose app's rules don't admit the origin's own profile
     - serving_app_service_origins_profile_front_door_id_unknown — Number of serving App Service origins reached over the public internet whose profile's Front Door id couldn't be read
     - serving_app_service_origins_access_restrictions_unread — Number of serving App Service origins whose app's access restrictions couldn't be read

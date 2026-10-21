@@ -42,14 +42,13 @@ from frontdoor import (  # noqa: E402
     rule_sets_with_rules,
     wire,
 )
+from resource_graph import query_all  # noqa: E402
 
 logger = logging.getLogger("azure_front_door_origins")
 
 # First GA api-version with certificateNameCheckValidationMode and tokenDestinationHeader.
 ORIGIN_API_VERSION = "2026-07-01"
 LOOKUP_CHUNK = 50
-PAGE_SIZE = 1000
-MAX_PAGES = 100
 FRONT_DOOR_SERVICE_TAG = "azurefrontdoor.backend"
 FDID_HEADER = "x-azure-fdid"
 # An access-restriction address matching every caller; "Any" is ARM's synthetic "Allow all" rule.
@@ -416,7 +415,7 @@ def public_allow_rules(rules: list[dict], default_action) -> tuple[list[dict], b
 
 def lockdown(public_network_access, config: dict | None, profile_fdid: str | None, known_fdids: set,
              private_link: bool) -> dict:
-    """Whether only Front Door can reach the app: public access off, or access restrictions admitting only known profiles' X-Azure-FDID."""
+    """Whether only Front Door can reach the app: public access off, or access restrictions admitting only its own profile's X-Azure-FDID."""
     rules = (config or {}).get("ip_security_restrictions") or []
     allows, unmatched_allowed = public_allow_rules(rules, (config or {}).get("ip_security_restrictions_default_action"))
     fd_rules = [r for r in allows if is_front_door_rule(r)]
@@ -449,6 +448,9 @@ def lockdown(public_network_access, config: dict | None, profile_fdid: str | Non
             gaps.append("front_door_rule_without_fdid")
         if set(allowed_fdids) - known_fdids - {own}:
             gaps.append("unknown_front_door_id_allowed")
+        # Another profile in the subscription may lack the serving profile's WAF, so it is a way around it.
+        if (set(allowed_fdids) & known_fdids) - {own}:
+            gaps.append("other_front_door_id_allowed")
         # Over private link Front Door skips access restrictions, so only a public origin needs its own id admitted.
         if not private_link and not gaps:
             if own is None:
@@ -630,6 +632,7 @@ def summarize_app_services(app_origins: list[dict], apps: list[dict], production
         "serving_app_service_origins_non_front_door_allow_rule": gap("non_front_door_allow_rule"),
         "serving_app_service_origins_front_door_rule_without_fdid": gap("front_door_rule_without_fdid"),
         "serving_app_service_origins_unknown_front_door_id_allowed": gap("unknown_front_door_id_allowed"),
+        "serving_app_service_origins_other_front_door_id_allowed": gap("other_front_door_id_allowed"),
         "serving_app_service_origins_profile_front_door_id_not_allowed": gap("profile_front_door_id_not_allowed"),
         "serving_app_service_origins_profile_front_door_id_unknown": gap("profile_front_door_id_unknown"),
         "production_tag": production_tag,
@@ -712,7 +715,7 @@ def traffic_shifts(hours: list[str], region_hours: dict) -> list[dict]:
 def group_health_record(profile_key_: str, group: dict, health: list[dict], requests: list[dict], shared_hosts: dict) -> dict:
     threshold = health_threshold(group)
     group_name = str(group["name"] or "").lower()
-    origin_rows, region_hours = [], {}
+    origin_rows, origin_hours, region_hours = [], [], {}
     for o in group["origins"]:
         host = str(o["host_name"] or "").lower()
         keys = request_keys(o)
@@ -723,7 +726,7 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
                        "requests": o_requests.get(t, {}).get("requests")} for t in set(o_health) | set(o_requests)}
         times = sorted(by_hour)
         served = [t for t in times if (by_hour[t]["requests"] or 0) > 0]
-        last = by_hour[times[-1]] if times else {}
+        origin_hours.append(by_hour)
         origin_rows.append({
             "origin": o["name"],
             "host_name": o["host_name"],
@@ -733,7 +736,6 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
             "health_min": min((h["health_min"] for h in by_hour.values() if h["health_min"] is not None), default=None),
             "hours_with_health_data": sum(1 for h in by_hour.values() if h["health_avg"] is not None),
             "hours_healthy": sum(1 for h in by_hour.values() if h["health_avg"] is not None and h["health_avg"] >= threshold),
-            "last_hour_health_avg": last.get("health_avg"),
             "requests": sum(h["requests"] or 0 for h in by_hour.values()) if o_requests else None,
             "hours_serving": len(served),
             "first_hour_serving": served[0] if served else None,
@@ -749,7 +751,12 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
                 slot["healthy"] = slot["healthy"] or h["health_avg"] >= threshold
             slot["requests"] += h["requests"] or 0
     hours = sorted({t for by_hour in region_hours.values() for t in by_hour})
-    last_hour = hours[-1] if hours else None
+    # The window's final buckets can be empty (metrics lag), so "last hour" is the newest hour with any data.
+    with_data = [t for t in hours if any(s["health"] or s["requests"] > 0
+                                         for s in (by_hour.get(t) for by_hour in region_hours.values()) if s)]
+    last_hour = with_data[-1] if with_data else None
+    for row, by_hour in zip(origin_rows, origin_hours):
+        row["last_hour_health_avg"] = by_hour.get(last_hour, {}).get("health_avg")
     group_requests = sum(s["requests"] for by_hour in region_hours.values() for s in by_hour.values())
     regions = []
     for name, by_hour in sorted(region_hours.items()):
@@ -780,7 +787,7 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
         "enabled_regions": group["enabled_regions"],
         "multi_region": multi_region,
         "health_threshold_percentage": threshold,
-        "has_health_data": bool(with_health),
+        "has_health_data": any(r["hours_with_health_data"] for r in regions),
         "has_traffic": group_requests > 0,
         "requests": group_requests,
         "last_hour": last_hour,
@@ -859,7 +866,7 @@ def region_queries(resource_ids: list[str], host_names: list[str]) -> list[str]:
     for i in range(0, len(resource_ids), LOOKUP_CHUNK):
         ids = kql_list(resource_ids[i:i + LOOKUP_CHUNK])
         if ids:
-            queries.append(f"resources | where id in~ ({ids}) | project key = tolower(id), location")
+            queries.append(f"resources | where id in~ ({ids}) | project key = tolower(id), location | order by key asc")
     for i in range(0, len(host_names), LOOKUP_CHUNK):
         hosts = kql_list(host_names[i:i + LOOKUP_CHUNK])
         if not hosts:
@@ -873,6 +880,7 @@ def region_queries(resource_ids: list[str], host_names: list[str]) -> list[str]:
             " properties.primaryEndpoints.dfs, properties.primaryEndpoints.file, properties.primaryEndpoints.queue,"
             " properties.primaryEndpoints.table) to typeof(string)"
             f" | extend h = tolower(tostring(parse_url(e).Host)) | where h in~ ({hosts}) | project key = h, location)"
+            " | order by key asc, location asc"
         )
     return queries
 
@@ -886,20 +894,8 @@ def graph_client(cred, collector: Collector):
 
 
 def graph_rows(client, query: str) -> list[dict]:
-    from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
-
-    rows, skip_token, pages = [], None, 0
-    while True:
-        # No subscription filter: an origin can live in any subscription the credential reads.
-        response = client.resources(QueryRequest(
-            query=query, options=QueryRequestOptions(top=PAGE_SIZE, skip_token=skip_token, result_format="objectArray")
-        ))
-        rows += model_attr(response, "data") or []
-        skip_token, pages = model_attr(response, "skip_token"), pages + 1
-        if not skip_token:
-            return rows
-        if pages >= MAX_PAGES:
-            raise RuntimeError(f"Resource Graph paging did not terminate after {pages} page(s)")
+    # No subscription filter: an origin can live in any subscription the credential reads.
+    return query_all(client, None, query)["rows"]
 
 
 def lookup_regions(client, collector: Collector, resource_ids: list[str], host_names: list[str]) -> tuple[dict, dict]:
@@ -927,16 +923,17 @@ def site_queries(subscription_id: str, site_ids: list[str], host_names: list[str
     queries = []
     if subscription_id and "'" not in subscription_id:
         queries.append(f"resources | where type =~ 'microsoft.web/sites' and subscriptionId =~ '{subscription_id}'"
-                       f" | project {SITE_COLUMNS}, host = ''")
+                       f" | project {SITE_COLUMNS}, host = '' | order by key asc")
     for i in range(0, len(site_ids), LOOKUP_CHUNK):
         ids = kql_list(site_ids[i:i + LOOKUP_CHUNK])
         if ids:
-            queries.append(f"resources | where {SITE_TYPES} and id in~ ({ids}) | project {SITE_COLUMNS}, host = ''")
+            queries.append(f"resources | where {SITE_TYPES} and id in~ ({ids}) | project {SITE_COLUMNS}, host = ''"
+                           " | order by key asc")
     for i in range(0, len(host_names), LOOKUP_CHUNK):
         hosts = kql_list(host_names[i:i + LOOKUP_CHUNK])
         if hosts:
             queries.append(f"resources | where {SITE_TYPES} | mv-expand h = properties.enabledHostNames to typeof(string)"
-                           f" | where h in~ ({hosts}) | project {SITE_COLUMNS}, host = tolower(h)")
+                           f" | where h in~ ({hosts}) | project {SITE_COLUMNS}, host = tolower(h) | order by key asc, host asc")
     return queries
 
 
@@ -946,7 +943,8 @@ def plan_queries(plan_ids: list[str]) -> list[str]:
         ids = kql_list(plan_ids[i:i + LOOKUP_CHUNK])
         if ids:
             queries.append(f"resources | where type =~ 'microsoft.web/serverfarms' and id in~ ({ids})"
-                           " | project key = tolower(id), id, name, location, sku, zone_redundant = tobool(properties.zoneRedundant)")
+                           " | project key = tolower(id), id, name, location, sku, zone_redundant = tobool(properties.zoneRedundant)"
+                           " | order by key asc")
     return queries
 
 
