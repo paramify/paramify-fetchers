@@ -3,8 +3,8 @@
 Three issue-report fetchers send Wiz data into Paramify assessment pipelines. Each
 writes a CSV to `<run>/issue-reports/`, and `paramify issues upload`
 (`uploaders/paramify_issues`) sends it into the assessment. General background is
-in [issue_report_fetchers.md](issue_report_fetchers.md); the pipeline itself is
-in [pipelines.md](pipelines.md).
+in [issue_report_fetchers_guide.md](issue_report_fetchers_guide.md); the pipeline itself is
+in [pipelines_guide.md](pipelines_guide.md).
 
 | Fetcher | Assessment type | What it exports | How |
 |---|---|---|---|
@@ -111,7 +111,7 @@ see.** The cycle only sees what these files contain, so scope matters:
   assessment with old cycles left open takes each scan into the oldest of them,
   and newer cycles show nothing until it is closed. The upload prints the cycle
   it landed on and warns when newer ones exist. See
-  [pipelines.md](pipelines.md#how-cycles-work).
+  [pipelines_guide.md](pipelines_guide.md#5-watch-jobs-and-close-cycles).
 
 ## Verified vs unverified against real Wiz
 
