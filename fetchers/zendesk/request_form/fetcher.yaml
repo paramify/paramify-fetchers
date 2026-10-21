@@ -1,0 +1,140 @@
+name: zendesk_request_form
+version: 0.1.0
+description: >-
+  Lists Zendesk's ticket forms and ticket fields with a read-only API token,
+  showing which forms end users see, their portal fields and dropdown options,
+  and whether one offers a security or vulnerability report. Also lists the
+  ticket forms an anonymous visitor gets and makes one anonymous GET of the
+  Help Center's "Submit a request" page.
+
+category: zendesk
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: zendesk_request_form.json
+  aggregation: per_target
+
+target_schema:
+  # One target per Zendesk instance (or per set of forms).
+  name:
+    type: string
+    required: true
+    env: ZENDESK_TARGET_NAME
+    description: >
+      Label for this target, used as the discriminator in the evidence
+      filename (sanitized to [A-Za-z0-9_-]).
+  base_url:
+    type: string
+    required: true
+    env: ZENDESK_BASE_URL
+    description: >
+      Zendesk origin, e.g. https://support.example.com or
+      https://example.zendesk.com. Must be https, since the API token is sent
+      to it.
+  ticket_form_ids:
+    type: string
+    required: false
+    env: ZENDESK_TICKET_FORM_IDS
+    description: >
+      Comma-separated ticket form ids to record, e.g. 360001234567,360007654321.
+      Defaults to every form. An id the API does not return fails the run.
+  locale:
+    type: string
+    required: false
+    env: ZENDESK_LOCALE
+    description: >
+      Help Center locale for the anonymous request-page check
+      (/hc/<locale>/requests/new). Defaults to en-us.
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: ZENDESK_VERIFY_SSL
+    description: Verify TLS certificates. Defaults to true and should stay true.
+
+secrets:
+  - name: email
+    env: ZENDESK_EMAIL
+    required: true
+    description: >
+      Email address of the Zendesk user the API token belongs to. A read-only
+      agent or admin is enough; the fetcher only GETs.
+  - name: api_token
+    env: ZENDESK_API_TOKEN
+    required: true
+    description: >
+      A Zendesk API token (Admin Center > Apps and integrations > Zendesk API).
+      Sent as HTTP Basic "<email>/token:<token>". Never logged or written to
+      evidence.
+
+evidence_set:
+  reference_id: EVD-ZENDESK-REQUEST-FORM
+  name: Zendesk Submit-a-Request Form
+  instructions: >
+    Script: fetcher.py. First, GET /api/v2/ticket_forms.json with no
+    credential on a fresh session: `anonymous_forms` keeps each form's fields
+    as returned (the same names as below), and `anonymous_forms_ok` is true
+    when the list was read, false on an HTTP error or bad shape (message in
+    anonymous_forms_error), null on a network error. This shows a form exists
+    and is end-user visible without any token. It is never fatal, and it is
+    kept in the failure evidence.
+
+    Then, with a Zendesk API token (HTTP Basic "<email>/token",
+    `credentials_supplied: true`), GET /api/v2/ticket_forms.json and
+    /api/v2/ticket_fields.json, following every page. Bad credentials do not
+    fail ticket_forms: Zendesk falls back to the anonymous user and answers
+    200 (seen live on 2026-10-16, where bad Basic auth got 200 on
+    ticket_forms and 401 "Couldn't authenticate you" on ticket_fields). So
+    ticket_fields is the credential check: `authenticated` is true only once
+    it succeeds, false when Zendesk answers 401 to an authenticated call, and
+    null otherwise (not reached, or another error). Offset pages via
+    next_page (the run fails unless the number collected equals the API's
+    `count`) or cursor pages via meta.has_more and links.next. The run fails on
+    authenticated API error (401 auth_failed, 403 not_authorized, 429
+    rate_limited, others target_unreachable), an unexpected response shape,
+    or a ticket_form_ids entry the API did not return; a failed run still
+    carries anonymous_forms. Field names are taken from Zendesk's API
+    documentation. The anonymous ticket_forms shape was checked live
+    (agent_conditions is absent there, so it records null); the
+    authenticated shapes were not.
+
+    Each form keeps Zendesk's fields as returned (id, name, display_name,
+    active, default, end_user_visible, in_all_brands, restricted_brand_ids,
+    ticket_field_ids, agent_conditions, end_user_conditions), plus `fields`:
+    each ticket_field_id resolved to its field (id, type, title,
+    title_in_portal, description, active, required, required_in_portal,
+    visible_in_portal, editable_in_portal, and custom_field_options as name,
+    value, default). Ids with no matching field are listed in
+    missing_field_ids.
+
+    Fixed fields first, computed over forms that are active and
+    end_user_visible: forms_end_user_visible (how many), with
+    forms_end_user_visible_source "authenticated" on a successful run, or
+    "anonymous" when it was counted from anonymous_forms because the
+    authenticated calls failed (null if neither list was read);
+    security_report_option
+    (every form name, or option of an active portal-visible field, matching
+    secur/vulnerab/disclos, case-insensitive), has_security_report_option, and
+    required_portal_fields (portal titles of active, portal-visible fields with
+    required_in_portal true; field conditions are not applied, so a
+    conditional field is listed as if always shown). The keyword match is a
+    Paramify-specific heuristic: it shows an option exists, not that reports
+    are handled. Zendesk's documented ticket field types include no requester
+    email, so the email address the request page asks an anonymous visitor
+    for is not expected among the fields (unverified live).
+
+    requests_new_status is one GET of <base_url>/hc/<locale>/requests/new with
+    no credential or cookie: http_status, final_url, redirected_to_signin, and
+    bot_challenge (Cloudflare's `cf-mitigated: challenge`). It is never fatal.
+    requests_new_public is true on a 200 with no sign-in redirect, false on a
+    sign-in redirect or another error status, and null when a bot challenge or
+    a network error left it unverified.
+
+    This does not show that submitted requests are answered or triaged, or
+    that the public page is reachable when Cloudflare challenges it.
