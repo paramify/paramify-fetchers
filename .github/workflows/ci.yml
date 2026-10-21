@@ -47,20 +47,13 @@ jobs:
   test:
     name: test (py ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    # A row marked experimental reports its result but does not fail the run.
-    continue-on-error: ${{ matrix.experimental || false }}
     strategy:
       fail-fast: false
       matrix:
         # 3.11 is the oldest Python that pyproject's requires-python allows. 3.14
         # is the one deploy/Dockerfile and the dev venvs run, so keep that row in
         # step with the Dockerfile's FROM.
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
-        # 3.15 is new, and some dependencies may not ship wheels for it yet.
-        # Remove `experimental` when this row passes reliably.
-        include:
-          - python-version: "3.15"
-            experimental: true
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

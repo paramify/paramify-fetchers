@@ -20,9 +20,8 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- **CI runs the tests on Python 3.15.** The 3.15 row reports its result but
-  does not fail the run yet, because some dependencies may not ship 3.15 wheels
-  so soon after its release. The 3.10 row is gone.
+- **CI runs the tests on Python 3.15.** The test matrix is now 3.11 to 3.15.
+  The 3.10 row is gone.
 
 - **`azure_app_service_backups`** (`EVD-AZURE-APPSVC-BACKUPS`, KSI-RPL-ABO). For
   each App Service web app, whether it is actually
