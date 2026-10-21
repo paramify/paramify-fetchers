@@ -132,7 +132,7 @@ set.
 A breakdown's field line ends in `:`, and each value sits under it, indented two
 spaces, as `- <value> (<meaning>)`:
 
-```yaml
+```text
     Summary fields:
 
     Which password policies are in force?
