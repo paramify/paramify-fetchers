@@ -1,14 +1,19 @@
 name: azure_front_door_origins
-version: 0.1.0
-description: >
-  The back ends behind Azure Front Door Standard/Premium. Every origin group with its
-  origins, their priority, weight and region, health probe and load-balancing
-  settings, and whether more than one region actually serves traffic (active-active)
-  or stands by for failover. For each group, how Front Door connects to its origins:
-  the protocol each serving route forwards with, certificate name checking, private
-  link and managed-identity origin authentication, so an origin reached over plain
-  HTTP or the public internet without authentication is visible.
+version: 0.3.0
+description: >-
+  Shows whether Front Door's back ends span two healthy, serving regions, are reached securely, accept traffic only through their own profile, and have a regional twin with enough capacity.
 category: azure
+
+config_schema:
+  metrics_lookback_days:
+    type: integer
+    required: false
+    default: 7
+    env: AZURE_FRONT_DOOR_METRICS_LOOKBACK_DAYS
+    description: >
+      How many days of hourly origin health and request metrics to read, from 1 to
+      30; a larger value is clamped to 30 with a warning. The window ends at the
+      last whole hour.
 
 supports_targets: true
 
@@ -37,47 +42,133 @@ target_schema:
     description: >
       Deployment environment label (e.g. prod / preprod) written into the evidence
       metadata. Optional — set per target for multi-subscription runs.
+  production_tag:
+    type: string
+    required: false
+    env: AZURE_PRODUCTION_APP_TAG
+    description: >
+      Tag that marks production App Service apps in this target's subscription, as
+      key=value or just key (case-insensitive). Only apps carrying it are listed in
+      production_apps and checked for a regional twin. Leave empty and every app in
+      the subscription is checked.
 
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-CNA-OFA   # a second region serves traffic (active-active) or stands by (failover), with health probes
+  - KSI-CNA-OFA   # a second region serves traffic (active-active) or stands by (failover), with health probes; each app has a regional twin with capacity
+  - KSI-CNA-RNT   # each App Service origin accepts traffic only through its own Front Door profile
+  - KSI-RPL-TRC   # measured origin health and traffic per region show when traffic failed over between regions
   - KSI-SVC-VCM   # Front Door reaches each origin over HTTPS with a checked certificate, via private link or managed-identity auth
 
 evidence_set:
   reference_id: EVD-AZURE-FRONTDOOR-ORIGINS
   name: Azure Front Door Origins
-  instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-cdn CdnManagementClient):
-    profiles.list() kept to sku Standard_AzureFrontDoor / Premium_AzureFrontDoor
-    (other CDN SKUs counted in skipped_profiles_by_sku); per profile
-    afd_origin_groups.list_by_profile and per group afd_origins.list_by_origin_group on
-    a client pinned to api-version 2026-07-01 (certificateNameCheckValidationMode,
-    customCertificateSubjects and tokenDestinationHeader are read by wire key);
-    afd_endpoints.list_by_profile, routes.list_by_endpoint, rule_sets.list_by_profile
-    and rules.list_by_rule_set; azure-mgmt-resourcegraph ResourceGraphClient.resources
-    for origin regions. Reader is sufficient — all reads. Region: an origin has no
-    region field, so it is the Resource Graph location of its azureOrigin resource,
-    else of its private-link target, else of the App Service site (enabledHostNames)
-    or storage account (primaryEndpoints) whose host name it uses; otherwise null
-    (region_source null). The query spans every subscription the credential can read;
-    an origin elsewhere stays unresolved. private_link.private_endpoint_location is
-    Front Door's private endpoint region, not the origin's, and is not used as one.
-    enabledState absent reads as Enabled and enforceCertificateNameCheck absent as
-    true (documented defaults). Active origins are the enabled ones at the best
-    (lowest) priority, plus any with no priority; multi_region_active_active = active
-    origins span two or more resolved regions; multi_region_failover = enabled
-    origins do. Paths: each route reaches its originGroup, and each
-    RouteConfigurationOverride action in a rule set attached to it reaches the
-    override's group (the route's own when unset), with forwarding_protocol from the
-    route or the override (absent = MatchRequest). protocols_to_origin is Https for
-    HttpsOnly, Http for HttpOnly, and for MatchRequest Https when the route accepts
-    only HTTPS (as in azure_front_door_tls) else both. serving = an enabled route on
-    an enabled endpoint reaches the group. unprotected_reasons: no_enabled_origin
-    (every origin in the group is disabled), http_to_origin (a serving path can
-    forward HTTP), certificate_name_check_disabled (an enabled
-    origin skips it), no_private_link_or_origin_auth (not every enabled origin uses
-    private link and the group has no managed-identity authentication);
-    connection_protected = serving and none apply. Private link status is reported
-    as returned; measured null on approved, working links, so it is not used.
-    Maps to KSI-CNA-OFA / KSI-SVC-VCM.
+  instructions: |
+    Script: azure/front_door_origins/fetcher.py
+
+    Access: Reader on the subscription. Optional: Reader on other subscriptions holding origin apps; without it, those origins read as not visible and not locked.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.Cdn — notes an unregistered provider
+    - profiles.list() — Front Door Standard and Premium profiles
+    - profiles.get() (per profile) — the profile's Front Door id, which Front Door sends as the X-Azure-FDID header
+    - afd_origin_groups.list_by_profile() and afd_origins.list_by_origin_group() — origin groups, origins, health probes and origin authentication
+    - afd_endpoints.list_by_profile() and routes.list_by_endpoint() — which routes send traffic to each group, and over which protocol
+    - rule_sets.list_by_profile() and rules.list_by_rule_set() — rules that override a route's origin group or protocol
+    - Resource Graph: Resources | where id in~ (…) — the region of each origin's target resource
+    - Resource Graph: Resources | where type =~ 'microsoft.web/sites' — every App Service app in the subscription, and each origin's app or slot, with its public network access and plan
+    - Resource Graph: Resources | where type =~ 'microsoft.web/serverfarms' — each app's plan capacity and zone redundancy
+    - web_apps.get_configuration() or get_configuration_slot() (per origin app) — the app's access restrictions
+    - metrics.list() for OriginHealthPercentage and OriginRequestCount (per profile) — hourly health and request count of each origin over the lookback window
+
+    Output: azure_front_door_origins_<subscription>.json — each origin group with its origins, regions and connection settings, its measured health and traffic per region, each App Service origin with whether only its Front Door profile can reach it, and each app with its regional twin.
+
+    Summary fields:
+
+    What was checked?
+    - total_front_door_profiles — Number of Front Door Standard and Premium profiles
+    - premium_profiles — Number of Front Door Premium profiles
+    - standard_profiles — Number of Front Door Standard profiles
+    - skipped_profiles_by_sku — Number of classic CDN profiles skipped, for each SKU
+    - total_origin_groups — Number of origin groups across all profiles
+    - serving_origin_groups — Number of origin groups that serve traffic: an enabled route on an enabled endpoint sends requests to the group, directly or through a rule-set override
+    - unused_origin_groups — Number of origin groups that no serving route reaches
+    - total_origins — Number of origins across all groups
+    - enabled_origins — Number of origins that are enabled (an origin with no state set counts as enabled)
+    - private_link_origins — Number of origins Front Door reaches over private link
+    - origins_by_region_source — Number of origins for each way their region was found:
+      - azure_origin (the Azure resource the origin names)
+      - private_link_target (the resource its private link points at)
+      - host_name (the App Service app or storage account owning its host name)
+      - None (region not found)
+    - origin_api_version — What the fetcher reads origins and origin groups with: the Front Door API version
+    - provider_registration_status — Whether Microsoft.Cdn is registered on the subscription: registered, not_registered or unknown
+
+    Does more than one region serve traffic?
+    - serving_regions — List of regions holding an active origin in a serving group (active = enabled at the group's best priority)
+    - serving_groups_multi_region_active_active — Number of serving groups whose active origins span two or more regions
+    - serving_groups_multi_region_failover — Number of serving groups whose enabled origins span two or more regions, so a second region can take over
+    - serving_groups_single_enabled_origin — Number of serving groups with exactly one enabled origin
+    - serving_groups_without_enabled_origin — Number of serving groups where every origin is disabled
+    - serving_groups_region_unresolved — Number of serving groups with an enabled origin whose region wasn't found
+    - serving_groups_multi_origin_without_health_probe — Number of serving groups with more than one enabled origin and no health probe to detect a failed one
+    - serving_groups_http_health_probe — Number of serving groups whose health probe uses plain HTTP
+
+    Are the regions healthy and serving, and when did traffic move?
+    - metrics_lookback_days — Days of hourly metrics read (the configured lookback, 1 to 30)
+    - metrics_window_start — Time of the start of the metrics window (UTC)
+    - metrics_window_end — Time of the end of the metrics window, the last whole hour (UTC)
+    - serving_groups_with_health_data — Number of serving groups with health-probe results in the window (a group without a health probe has none)
+    - serving_groups_with_traffic — Number of serving groups whose origins received requests in the window
+    - serving_groups_without_traffic — Number of serving groups whose origins received no requests in the window
+    - serving_groups_all_regions_healthy_last_hour — Number of serving groups where every region with health data was healthy in the newest hour with data; a region is healthy in an hour when one of its origins passed at least the share of health probes the group's load-balancing settings require (3 of 4, so 75%, by default)
+    - serving_groups_region_unhealthy_last_hour — Number of serving groups where a region with health data was not healthy in the newest hour with data
+    - serving_multi_region_groups — Number of serving groups whose enabled origins span two or more regions
+    - serving_multi_region_groups_all_regions_healthy_last_hour — Number of serving multi-region groups where every region with health data was healthy in the newest hour with data
+    - serving_multi_region_groups_all_regions_serving_last_hour — Number of serving multi-region groups where every region with an enabled origin received requests in the newest hour with data
+    - serving_multi_region_groups_with_traffic_shift — Number of serving multi-region groups where the set of regions receiving requests changed at least once in the window
+    - regions_serving_traffic — List of regions whose origins in serving groups received requests in the window
+    - origin_metric_series_unmatched — Number of metric series whose origin matched no origin in the profile (such as an origin deleted during the window)
+
+    Does Front Door reach its origins securely?
+    - serving_groups_connection_protected — Number of serving groups reached securely: at least one enabled origin, only HTTPS to the origins, certificate name checks on, and private link on every enabled origin or managed-identity authentication on the group
+    - serving_groups_connection_unprotected — Number of serving groups not reached securely
+    - serving_groups_http_to_origin — Number of serving groups where a route can forward plain HTTP to the origins
+    - serving_groups_certificate_name_check_disabled — Number of serving groups with an enabled origin that skips checking the origin certificate's name
+    - serving_groups_without_private_link_or_origin_auth — Number of serving groups where not every enabled origin uses private link and the group has no managed-identity authentication
+    - serving_groups_all_private_link — Number of serving groups where every enabled origin uses private link
+    - serving_groups_origin_authentication — Number of serving groups that authenticate to their origins with a managed identity
+
+    Does each App Service origin accept traffic only through its own Front Door profile?
+    - app_service_origins — Number of origins that are App Service apps or slots, found by the origin's Azure resource, its private-link target, or the app owning its host name
+    - serving_app_service_origins — Number of App Service origins that are enabled and in a serving group
+    - serving_app_service_origins_locked_to_front_door — Number of serving App Service origins locked to Front Door: the app's public network access is off, or its access restrictions turn away every public caller except Front Door requests carrying the profile's own Front Door id (or another profile's in the subscription) in the X-Azure-FDID header
+    - serving_app_service_origins_not_locked — Number of serving App Service origins not locked to Front Door
+    - serving_app_service_origins_public_network_access_disabled — Number of serving App Service origins whose app has public network access turned off
+    - serving_app_service_origins_public_access_unrestricted — Number of serving App Service origins whose app lets any public caller in, through an "Allow all" rule, an allow default, or no rules
+    - serving_app_service_origins_non_front_door_allow_rule — Number of serving App Service origins whose app allows a public caller other than Front Door, such as an IP range or subnet
+    - serving_app_service_origins_front_door_rule_without_fdid — Number of serving App Service origins whose app allows the Front Door service tag without an X-Azure-FDID header, so any customer's Front Door can reach it
+    - serving_app_service_origins_unknown_front_door_id_allowed — Number of serving App Service origins whose app allows a Front Door id that no profile in the subscription has
+    - serving_app_service_origins_profile_front_door_id_not_allowed — Number of serving App Service origins reached over the public internet whose app's rules don't admit the origin's own profile
+    - serving_app_service_origins_profile_front_door_id_unknown — Number of serving App Service origins reached over the public internet whose profile's Front Door id couldn't be read
+    - serving_app_service_origins_access_restrictions_unread — Number of serving App Service origins whose app's access restrictions couldn't be read
+    - serving_app_service_origins_site_not_found — Number of serving App Service origins pointing at an app that no longer exists in the subscription
+    - serving_app_service_origins_site_not_visible — Number of serving App Service origins pointing at an app in another subscription the credential can't read
+
+    Does each production app have a regional twin with enough capacity?
+    - production_tag — The configured tag that marks production apps, set per target; null when every app in the subscription counts as production
+    - production_web_apps — Number of production web apps (apps, not slots, whose kind isn't a function app)
+    - production_web_apps_behind_front_door — Number of production web apps reached by an enabled origin in a serving group
+    - production_web_apps_not_behind_front_door — Number of production web apps that no enabled origin in a serving group reaches
+    - production_web_apps_regional_twin_ready — Number of production web apps behind Front Door with a twin (another enabled origin in the same group, on a different app, in a different region) whose plan is platform-scaled or has at least as many instances
+    - production_web_apps_without_regional_twin — Number of production web apps behind Front Door with no twin in another region, including apps whose possible twin's region wasn't found
+    - production_web_apps_twin_capacity_short — Number of production web apps whose every twin's plan has fewer instances than the app's own plan
+    - production_web_apps_twin_capacity_unknown — Number of production web apps with a twin whose capacity can't be compared (a plan wasn't found, or the twin isn't an App Service app)
+    - production_function_apps — Number of production function apps (apps whose kind contains functionapp)
+    - production_function_apps_behind_front_door — Number of production function apps reached by an enabled origin in a serving group
+    - production_function_apps_not_behind_front_door — Number of production function apps that no enabled origin in a serving group reaches
+    - production_function_apps_regional_twin_ready — Number of production function apps behind Front Door with a twin in another region whose plan is platform-scaled or has at least as many instances
+    - production_function_apps_without_regional_twin — Number of production function apps behind Front Door with no twin in another region, including apps whose possible twin's region wasn't found
+    - production_function_apps_twin_capacity_short — Number of production function apps whose every twin's plan has fewer instances than the app's own plan
+    - production_function_apps_twin_capacity_unknown — Number of production function apps with a twin whose capacity can't be compared
