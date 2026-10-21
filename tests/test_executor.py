@@ -161,6 +161,26 @@ def test_config_env_reference_unset_falls_back_to_default(tmp_path, monkeypatch)
     assert env["DAYS"] == "7"
 
 
+def test_config_env_reference_unset_falls_back_to_platform_value(tmp_path, monkeypatch):
+    monkeypatch.delenv("UNSET_VAR", raising=False)
+    monkeypatch.setenv("PLATFORM_VAR", "from-platform-env")
+    field = cfg("patterns", "PATTERNS", default="from-default")
+    fetcher = make_fetcher(tmp_path, config_schema={"patterns": field})
+    entry = ManifestEntry(use="x", config={"patterns": "${env:UNSET_VAR}"})
+
+    env: dict = {}
+    _apply_config(env, fetcher, None, PlatformConfig(config={"patterns": "qa.*"}), entry)
+    assert env["PATTERNS"] == "qa.*"
+
+    env = {}
+    _apply_config(env, fetcher, None, PlatformConfig(config={"patterns": "${env:PLATFORM_VAR}"}), entry)
+    assert env["PATTERNS"] == "from-platform-env"
+
+    env = {}
+    _apply_config(env, fetcher, None, PlatformConfig(config={"patterns": "${env:UNSET_VAR}"}), entry)
+    assert env["PATTERNS"] == "from-default"
+
+
 def test_required_config_env_reference_unset_raises(tmp_path, monkeypatch):
     monkeypatch.delenv("UNSET_VAR", raising=False)
     fetcher = make_fetcher(tmp_path, config_schema={"region": cfg("region", "REGION", required=True)})

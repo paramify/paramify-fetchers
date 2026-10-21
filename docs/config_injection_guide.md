@@ -52,8 +52,9 @@ paramify manifest set-secret rippling_all_employees api_token RIPPLING_API_TOKEN
 **Key names aren't checked.** A misspelled key is saved, passes `validate`,
 and never reaches the fetcher.
 
-A config value can also be `${env:VAR}`, read from the environment at run time.
-If `VAR` is unset or empty, the field's default applies.
+A config field the runner injects into the fetcher can also be `${env:VAR}`,
+read from the environment at run time. If `VAR` is unset or empty, the next
+value down applies (platform config, then the default).
 
 ## 3. Check it
 

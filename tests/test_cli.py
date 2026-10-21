@@ -781,6 +781,27 @@ def test_set_platform_config_bad_int_json(in_repo, tmp_path):
     assert "integer" in out["errors"][0]
 
 
+@pytest.mark.parametrize("fetcher, key", [
+    ("azure_front_door_origins", "metrics_lookback_days"),  # integer
+    ("aws_iam_roles", "exclude_aws_managed_roles"),  # boolean
+])
+def test_set_config_keeps_env_reference_on_typed_fields(in_repo, tmp_path, fetcher, key):
+    m = str(tmp_path / "m.yaml")
+    runner.invoke(app, ["manifest", "init", "-f", m])
+    runner.invoke(app, ["manifest", "add", fetcher, "-f", m])
+    _json(runner.invoke(app, ["manifest", "set-config", fetcher, f"{key}=${{env:MY_VALUE}}", "-f", m, "--json"]))
+    shown = _json(runner.invoke(app, ["manifest", "show", "-f", m, "--json"]))
+    assert _entry(shown, fetcher)["config"][key] == "${env:MY_VALUE}"
+
+
+def test_set_platform_config_keeps_env_reference_on_integer_field(in_repo, tmp_path):
+    m = str(tmp_path / "m.yaml")
+    runner.invoke(app, ["manifest", "init", "-f", m])
+    _json(runner.invoke(app, ["manifest", "set-platform-config", "rippling", "page_size=${env:PAGE_SIZE}", "-f", m, "--json"]))
+    shown = _json(runner.invoke(app, ["manifest", "show", "-f", m, "--json"]))
+    assert shown["run"]["platforms"]["rippling"]["config"]["page_size"] == "${env:PAGE_SIZE}"
+
+
 # --------------------------------------------------------------------------- #
 # `manifest new` — the manifests/<name>.yaml picker convention
 # --------------------------------------------------------------------------- #

@@ -95,6 +95,7 @@ from framework.issue_reports import (
     CLOSE_CYCLE_VALUES,
     ISSUE_REPORTS_DIR,
 )
+from framework.secret_resolver import is_env_ref_attempt
 
 _DEFAULT_MANIFEST = "manifest.yaml"
 
@@ -226,7 +227,11 @@ def _parse_kv(arg: str, path, json_out: bool):
     return arg.split("=", 1)
 
 
-def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool):
+def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool, env_ref_ok: bool = False):
+    # Config values resolve ${env:VAR} at run time, so the reference is saved as typed;
+    # target values don't, so a reference there still has to coerce.
+    if env_ref_ok and is_env_ref_attempt(value):
+        return value
     try:
         return _coerce(value, typ)
     except ValueError:
@@ -1614,7 +1619,7 @@ def manifest_set_config(
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
-    value = _coerce_or_fail(raw, _config_type(root, fetcher, key), key, path, json_out)
+    value = _coerce_or_fail(raw, _config_type(root, fetcher, key), key, path, json_out, env_ref_ok=True)
     api.set_fetcher_config(m, fetcher, key, value)
     _save_and_report(m, path, root, json_out)
 
@@ -1718,7 +1723,7 @@ def manifest_set_platform_config(
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
-    value = _coerce_or_fail(raw, _platform_config_type(root, category, key), key, path, json_out)
+    value = _coerce_or_fail(raw, _platform_config_type(root, category, key), key, path, json_out, env_ref_ok=True)
     api.set_platform_config(m, category, key, value)
     _save_and_report(m, path, root, json_out)
 

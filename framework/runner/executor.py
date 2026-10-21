@@ -187,25 +187,31 @@ def _apply_config(
     lets the platform's auth passthrough_env vars through the whitelist.
 
     A string value may be a ${env:VAR} reference, resolved like a secret's. One
-    whose variable is unset or empty falls back to the field's default, as if the
-    manifest had not set it; a malformed one is an error."""
-    schema, values = merged_config(fetcher, platform_spec, platform_cfg, entry)
+    whose variable is unset or empty gives way to the next value down the ladder
+    (platform config, then the default), as if it had not been set; a malformed
+    one is an error."""
+    schema, _ = merged_config(fetcher, platform_spec, platform_cfg, entry)
+    platform_values = platform_cfg.config if platform_cfg else {}
 
     for name, fdef in schema.items():
         if not fdef.env:
             continue
-        val = values.get(name)
-        try:
-            val = resolve(val)
-        except UnsetSecretError as e:
-            if fdef.required and fdef.default is None:
-                raise RuntimeError(
-                    f"{fetcher.name}: required config '{name}' reads ${{env:{e.env_var}}}, "
-                    f"which is unset or empty in the runner's environment"
-                ) from e
-            val = fdef.default
-        except SecretResolutionError as e:
-            raise RuntimeError(f"{fetcher.name}: config '{name}': {e}") from e
+        val, unset = None, None
+        for layer in (entry.config.get(name), platform_values.get(name), fdef.default):
+            if layer is None:
+                continue
+            try:
+                val = resolve(layer)
+                break
+            except UnsetSecretError as e:
+                unset = unset or e
+            except SecretResolutionError as e:
+                raise RuntimeError(f"{fetcher.name}: config '{name}': {e}") from e
+        if val is None and unset is not None and fdef.required:
+            raise RuntimeError(
+                f"{fetcher.name}: required config '{name}' reads ${{env:{unset.env_var}}}, "
+                f"which is unset or empty in the runner's environment"
+            ) from unset
         if val is None:
             if fdef.required:
                 raise RuntimeError(

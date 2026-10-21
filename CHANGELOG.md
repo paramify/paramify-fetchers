@@ -737,10 +737,12 @@ schemas and the `paramify` CLI — not the internal code.
     custom-domain and endpoint host names; a route whose every host matches is
     out of scope too. Both fetcher.yaml texts move to the new description format.
   - `azure_dns_configuration` 0.3.0: public record-set names, relative or FQDN.
-- **A config value can be a `${env:VAR}` reference.** The runner resolves it the
-  way it resolves a secret. An unset or empty variable falls back to the field's
-  default (an error for a required field without one), and a malformed reference
-  is an error.
+- **A config field the runner injects into the fetcher can be a `${env:VAR}`
+  reference.** The runner resolves it the way it resolves a secret. An unset or
+  empty variable gives way to the next value down (platform config, then the
+  default; an error for a required field with neither), and a malformed reference
+  is an error. `manifest set-config` and `set-platform-config` save the reference
+  as typed on integer and boolean fields instead of rejecting or coercing it.
 
 ### Changed
 
