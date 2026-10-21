@@ -171,8 +171,8 @@ To ask for a new platform or fetcher, post in [Fetcher requests](https://github.
 - **How it works:** [`docs/architecture.md`](docs/architecture.md) explains the four parts, the evidence envelope and the repo layout.
 - **FedRAMP KSI coverage:** [`docs/ksi_mapping.md`](docs/ksi_mapping.md).
 
-The [documentation index](docs/README.md) lists every other guide and design
-document.
+The [documentation index](docs/README.md) lists every other guide and
+reference page.
 
 ## License
 

@@ -342,7 +342,7 @@ the design we're trying to leave behind.
   170KB. `CLAUDE.md` explicitly defers this.
 - **Don't add `controls`, `solution_capabilities`, or `validation_rules`** to
   `fetcher.yaml`. These were in the old `catalog.json` and were intentionally
-  cut. See [`architecture_guide.md`](architecture_guide.md).
+  cut.
 - **Don't add schema fields the schema doesn't define** (no `envelope_version`,
   no `payload_schema`, no `controls`). The schema is deliberately minimal;
   fields return when their absence causes real friction. (`target_schema` *is*
