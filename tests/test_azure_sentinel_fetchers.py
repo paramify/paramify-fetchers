@@ -150,7 +150,7 @@ class FakeAzure:
             ("union withsource=ParamifySourceTable", table(["ParamifySourceTable", "LastIngested", "Records"], [
                 ["AzureActivity", iso(NOW), 10], ["SecurityAlert", iso(NOW), 2], ["Usage", iso(NOW), 5],
                 ["Heartbeat", iso(NOW), 50]])),
-            ("ModifiedBy", table(HISTORY_COLUMNS, incident_history())),
+            ("ModifiedBy", history_table(incident_history())),
             ("SystemAlertId", table(["IncidentName", "AlertId", "Entities"], INCIDENT_ALERT_ENTITIES)),
             ("arg_max(TimeGenerated, Status, ClosedTime", table(["IncidentName", "Status", "ClosedTime", "CreatedTime", "Tasks"], [
                 ["i-closed", "Closed", iso(NOW - timedelta(days=2)), iso(NOW - timedelta(days=3)), INCIDENT_TASKS],
@@ -194,8 +194,8 @@ class FakeAzure:
             return self.graph_post_response
         self.calls.append(("POST", url, json["query"]))
         assert headers["x-ms-app"] == "paramify-fetchers"
-        for fragment, body in self.queries:
-            if fragment in json["query"]:
+        for fragment, body in self.queries:  # a fragment matches the query text or the workspace's query URL
+            if fragment in json["query"] or fragment in url:
                 if isinstance(body, list):
                     body = body.pop(0) if len(body) > 1 else body[0]
                 return body if isinstance(body, Resp) else Resp(200, body)
@@ -379,17 +379,59 @@ def test_incidents_without_the_table(azure, tmp_path):
     code, ev = run("sentinel_incidents", tmp_path)
     ws = ws_a(ev)
     assert code == 0 and ws["closed_missing_close_time"] == 1 and "SecurityIncident" in ws["notes"][0]
-    # No history was read, so nothing built from it reads as zero or empty.
-    assert ws["monthly"] is None and ws["acknowledged_incidents"] is None and ev["summary"]["acknowledged_incidents"] is None
-    assert all(i["status_changes"] is None and i["history_complete"] is None and i["tasks"] is None for i in ws["incidents"])
+    # No table means no update was ever written: the history is read and empty, so nothing is known complete.
+    assert ws["monthly"] and ws["acknowledged_incidents"] == 0 and ws["open_unacknowledged"] == 0
+    assert ev["summary"]["acknowledged_incidents"] == 0
+    assert all(i["status_changes"] == [] and i["history_complete"] is False and i["tasks"] is None for i in ws["incidents"])
     assert all(i["entities"] is None for i in ws["incidents"])
 
 
-HISTORY_COLUMNS = ["TimeGenerated", "IncidentName", "Status", "Severity", "ClosedTime", "ModifiedBy", "OwnerId", "Owner"]
+def onboard_second_workspace(azure, incidents=None):
+    """law-plain becomes a Sentinel workspace too; its queries are routed by its customerId."""
+    azure.arm[(f"{WS_B}/providers/Microsoft.SecurityInsights/onboardingStates", "2025-09-01")] = {
+        "value": [{"name": "default", "properties": {}}]}
+    azure.arm[(f"{WS_B}/providers/Microsoft.SecurityInsights/incidents", "2025-09-01")] = (
+        incidents if incidents is not None else {"value": []})
 
 
-def update(name, at, status, severity, closed=None, owner="", by="Incident created from alert"):
-    return [iso(at), name, status, severity, iso(closed) if closed else None, by, "u-1" if owner else "", owner]
+def test_incidents_idle_workspace_keeps_the_totals(azure, tmp_path):
+    onboard_second_workspace(azure)
+    azure.queries.insert(0, ("cust-b/query", Resp(400, {"error": {"code": "BadArgumentError", "innererror": {
+        "message": "'where' operator: Failed to resolve table or column expression named 'SecurityIncident'"}}})))
+    code, ev = run("sentinel_incidents", tmp_path)
+    idle = next(w for w in ev["results"]["workspaces"] if w["name"] == "law-plain")
+    assert code == 0 and idle["acknowledged_incidents"] == 0 and idle["open_unacknowledged"] == 0
+    a = ws_a(ev)
+    assert ev["summary"]["acknowledged_incidents"] == a["acknowledged_incidents"] == 1
+    assert ev["summary"]["open_unacknowledged"] == a["open_unacknowledged"]
+    assert ev["summary"]["closed_missing_close_time"] == a["closed_missing_close_time"] == 0
+
+
+def test_incidents_failed_workspace_nulls_the_totals(azure, tmp_path):
+    onboard_second_workspace(azure, Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}}))
+    code, ev = run("sentinel_incidents", tmp_path)
+    assert code == 1 and ws_a(ev)["acknowledged_incidents"] == 1
+    assert all(ev["summary"][k] is None for k in (
+        "acknowledged_incidents", "open_unacknowledged", "closed_missing_close_time", "closed_close_time_not_retained",
+        "open_new_unowned_before_history"))
+    assert MODS["sentinel_incidents"].summarize([])["acknowledged_incidents"] is None
+
+
+HISTORY_COLUMNS = ["TimeGenerated", "IncidentName", "Status", "Severity", "ClosedTime", "ModifiedBy", "OwnerId", "Owner",
+                   "CreatedTime", "LastModifiedTime"]
+
+
+def update(name, at, status, severity, closed=None, owner="", by="Incident created from alert", created=None):
+    return [iso(at), name, status, severity, iso(closed) if closed else None, by, "u-1" if owner else "", owner,
+            iso(created) if created else None, iso(at)]
+
+
+def history_table(rows):
+    """An incident's first row is its creation row unless it says otherwise; later rows keep its CreatedTime."""
+    first = {}
+    for r in rows:
+        r[8] = r[8] or first.setdefault(r[1], r[9])
+    return table(HISTORY_COLUMNS, rows)
 
 
 def incident_history():
@@ -400,7 +442,8 @@ def incident_history():
         update("i-closed", created + timedelta(hours=12), "Active", "High", owner="john@contoso.com", by="john@contoso.com"),
         update("i-closed", NOW - timedelta(days=2), "Closed", "High", NOW - timedelta(days=2),
                owner="john@contoso.com", by="john@contoso.com"),
-        update("i-new", NOW - timedelta(days=10), "New", "High", owner="john@contoso.com", by="Microsoft XDR"),
+        update("i-new", NOW - timedelta(days=10), "New", "High", owner="john@contoso.com", by="Microsoft XDR",
+               created=NOW - timedelta(days=200)),
     ]
 
 
@@ -493,8 +536,9 @@ def test_incidents_backlog_before_retention_is_unknown(azure, tmp_path):
 
 def test_incidents_history_starts_at_the_lookback_when_retention_is_longer(azure, tmp_path):
     azure.arm[(f"{WS_A}/tables/SecurityIncident", "2023-09-01")] = {"properties": {"retentionInDays": 365}}
-    azure.queries.insert(0, ("ModifiedBy", table(HISTORY_COLUMNS, incident_history()[:3] + [
-        update("i-new", NOW - timedelta(days=10), "Active", "High", owner="pat@contoso.com", by="pat@contoso.com")])))
+    azure.queries.insert(0, ("ModifiedBy", history_table(incident_history()[:3] + [
+        update("i-new", NOW - timedelta(days=10), "Active", "High", owner="pat@contoso.com", by="pat@contoso.com",
+               created=NOW - timedelta(days=200))])))
     code, ev = run("sentinel_incidents", tmp_path)
     ws = ws_a(ev)
     old = next(i for i in ws["incidents"] if i["name"] == "i-new")
@@ -517,7 +561,7 @@ def test_incidents_refused_history_keeps_close_times(azure, tmp_path):
 
 def test_incidents_automation_and_xdr_changes_are_not_acknowledgements(azure, tmp_path):
     created = NOW - timedelta(days=3)
-    azure.queries.insert(0, ("ModifiedBy", table(HISTORY_COLUMNS, [
+    azure.queries.insert(0, ("ModifiedBy", history_table([
         update("i-closed", created, "New", "High", owner="tier1@contoso.com", by="Automation rule - assign tier 1"),
         update("i-closed", created + timedelta(hours=1), "New", "High", owner="tier2@contoso.com",
                by="Automation rule - escalate"),
@@ -531,7 +575,7 @@ def test_incidents_automation_and_xdr_changes_are_not_acknowledgements(azure, tm
 
 
 def run_with_history(azure, tmp_path, rows):
-    azure.queries.insert(0, ("ModifiedBy", table(HISTORY_COLUMNS, rows)))
+    azure.queries.insert(0, ("ModifiedBy", history_table(rows)))
     code, ev = run("sentinel_incidents", tmp_path)
     return code, ev, {i["name"]: i for i in ws_a(ev)["incidents"]}
 
@@ -568,9 +612,10 @@ def test_incidents_reopen_is_not_an_acknowledgement(azure, tmp_path):
 
 
 def test_incidents_older_than_the_history_have_no_acknowledgement(azure, tmp_path):
+    old = NOW - timedelta(days=200)
     rows = incident_history()[:3] + [
-        update("i-new", NOW - timedelta(days=10), "New", "High"),
-        update("i-new", NOW - timedelta(days=9), "Active", "High", owner="pat@contoso.com", by="pat@contoso.com")]
+        update("i-new", NOW - timedelta(days=10), "New", "High", created=old),
+        update("i-new", NOW - timedelta(days=9), "Active", "High", owner="pat@contoso.com", by="pat@contoso.com", created=old)]
     _, ev, by_name = run_with_history(azure, tmp_path, rows)
     assert by_name["i-new"]["acknowledged_time_utc"] is None and by_name["i-new"]["hours_to_acknowledge"] is None
     assert ws_a(ev)["acknowledged_incidents"] == 1
@@ -586,10 +631,51 @@ def test_incidents_monthly_counts_only_in_scope_incidents(azure, tmp_path):
 
 
 def test_incidents_open_unacknowledged_means_no_person_acknowledged_it(azure, tmp_path):
-    azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"].append(incident("i-recent", "New", NOW - timedelta(days=1)))
-    code, ev = run("sentinel_incidents", tmp_path)
-    # i-recent has an owner but no person acknowledged it; i-new is older than the history, so it can't be known.
+    recent = NOW - timedelta(days=1)
+    azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"] += [
+        incident("i-recent", "New", recent), incident("i-unread", "New", recent)]
+    _, ev, by_name = run_with_history(azure, tmp_path, incident_history() + [
+        update("i-recent", recent, "New", "High"),
+        update("i-recent", recent + timedelta(minutes=1), "New", "High", owner="john@contoso.com",
+               by="Automation rule - assign")])
+    # i-recent has an owner but no person acknowledged it. i-unread has no rows read yet, and i-new is older than
+    # the history, so neither can be known.
+    assert by_name["i-recent"]["history_complete"] is True and by_name["i-unread"]["history_complete"] is False
     assert ws_a(ev)["open_unacknowledged"] == 1 and ev["summary"]["open_unacknowledged"] == 1
+
+
+def test_incident_history_is_complete_only_from_its_creation_row_to_its_last_change():
+    mod = MODS["sentinel_incidents"]
+    created = NOW - timedelta(days=3)
+    incident_ = {"created_time_utc": iso(created), "last_modified_time_utc": iso(created + timedelta(hours=5))}
+    rows = [dict(zip(HISTORY_COLUMNS, r)) for r in history_table([
+        update("x", created, "New", "Low"), update("x", created + timedelta(hours=5), "Active", "Low")])["tables"][0]["rows"]]
+    assert mod.history_complete(incident_, rows, NOW - timedelta(days=30))
+    assert not mod.history_complete(incident_, [], NOW - timedelta(days=30))
+    assert not mod.history_complete(incident_, rows[1:], NOW - timedelta(days=30))  # its creation row wasn't read
+    assert not mod.history_complete(incident_, rows[:1], NOW - timedelta(days=30))  # its last update isn't in yet
+    assert not mod.history_complete(incident_, rows, NOW - timedelta(days=1))
+
+
+def test_incidents_backlog_older_than_the_history_still_new_and_unowned(azure, tmp_path):
+    stale = incident("i-stale-new", "New", NOW - timedelta(days=120))
+    stale_active = incident("i-stale-active", "Active", NOW - timedelta(days=120))
+    for i in (stale, stale_active):
+        i["properties"]["owner"] = {}
+    azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"] += [stale, stale_active]
+    code, ev = run("sentinel_incidents", tmp_path)
+    # i-new is as old but owned; i-stale-active has been taken up.
+    assert ws_a(ev)["open_new_unowned_before_history"] == 1 and ev["summary"]["open_new_unowned_before_history"] == 1
+
+
+@pytest.mark.parametrize("by", ["", "  ", None, "Incident created from alert", "Alert Grouping", "Playbook - close benign"])
+def test_incidents_blank_or_system_modifier_is_not_a_person(azure, tmp_path, by):
+    created = NOW - timedelta(days=3)
+    _, _, by_name = run_with_history(azure, tmp_path, [
+        update("i-closed", created, "New", "High"),
+        update("i-closed", created + timedelta(hours=2), "Active", "High", owner="tier1@contoso.com", by=by),
+        update("i-closed", created + timedelta(hours=3), "Closed", "High", created + timedelta(hours=3), by=by)])
+    assert by_name["i-closed"]["acknowledged_time_utc"] is None
 
 
 def test_incidents_refused_close_times_are_unknown(azure, tmp_path):
@@ -663,6 +749,15 @@ def test_incident_with_no_alerts_has_no_entities(azure, tmp_path):
     ("https://app.example.com/login;jsessionid=abc", "https://app.example.com"),
     ("host.example.com/users/@john/x?sig=abc", "host.example.com"),
     ("http://[evil.example/x", None),
+    ("http://evil.example\\reset\\TOKEN123", None),
+    ("https:\\\\evil.com\\path\\SECRET?sig=x", None),
+    ("https://evil.com%2Fpath%3Fsig%3DSECRET", None),
+    ("\\\\server\\share\\secret.docx", None),
+    ("file:C:\\Users\\bob\\secret.txt", None),
+    ("javascript:fetch('x", None),
+    ("https://evil.com\\@good.com/", None),
+    ("http://[::1]:8080/x", "http://[::1]"),
+    ("//evil.com/a", "evil.com"),
 ])
 def test_incident_url_entities_keep_scheme_and_host_only(url, expected):
     assert MODS["sentinel_incidents"].url_host(url) == expected

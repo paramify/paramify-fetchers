@@ -608,11 +608,13 @@ schemas and the `paramify` CLI — not the internal code.
   still gives close times and now tasks, the fetcher reads every update row in
   the lookback. Each incident gains:
   - `acknowledged_time_utc` and `hours_to_acknowledge`: the first update by a
-    person that moves it to Active or Closed or changes its owner, up to its
-    first close, so a reopen never counts. Changes by automation rules or the
-    Defender XDR sync don't count; playbook and Logic App updates count as a
-    person's, since Microsoft doesn't document what they write as the modifier.
-    Known only when every update since creation was read.
+    person that moves it to Active or Closed or gives it an owner or a different
+    one, up to its first close, so a reopen never counts and removing an owner
+    doesn't either. Updates with no modifier, and those by automation rules,
+    playbooks, alert grouping, Fusion, incident creation or the Defender XDR
+    sync, don't count. Microsoft doesn't document what a person's update writes
+    as the modifier, so any other modifier counts as a person, an unlisted
+    system included. Known only when every update since creation was read.
   - `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
     who made it), and `tasks` with status and completion time.
   - `hours_to_detect` (first activity to creation), `comments_count`,
@@ -624,24 +626,33 @@ schemas and the `paramify` CLI — not the internal code.
   - `provider_incident_id` and `provider_incident_url`: for an incident synced
     from Defender XDR, its id and link there; Microsoft Graph alerts give the same
     id as `incidentId`.
-  - `history_complete`: whether the incident was created inside the history
-    read, which starts at the lookback or SecurityIncident's retention, whichever
-    is later. One already acknowledged before its oldest update read has no
-    acknowledgement time rather than a late one.
+  - `history_complete`: whether every update was read: the incident was created
+    inside the history read, which starts at the lookback or SecurityIncident's
+    retention, whichever is later; its creation row was read; and its last row
+    read is no older than its `lastModifiedTimeUtc`. One already acknowledged
+    before its oldest update read has no acknowledgement time rather than a late
+    one.
 
   Each workspace gains `monthly`: per calendar month of the lookback, MTTD by
-  month created, MTTA by month acknowledged, MTTR by month closed, and the open
-  backlog at month end by severity and owner, which is `null` for month ends
-  older than SecurityIncident's retention. It also gains `recurring_titles`,
-  `recurrence_by_title` and `recurrence_by_rule` (two or more incidents created
-  in the lookback), `open_unacknowledged` (open, every update read, and no
-  person has acknowledged it), and `mttd_hours`, `mtta_hours` and `mttr_hours`.
+  month created, MTTA by month acknowledged and MTTR by month closed over the
+  in-scope incidents, and the open backlog at month end by severity and owner
+  over every incident, which is `null` for month ends older than
+  SecurityIncident's retention. An older incident closed in the lookback leaves
+  the backlog without counting in that month's MTTR, so monthly MTTR may read
+  low. It also gains `recurring_titles`, `recurrence_by_title` and
+  `recurrence_by_rule` (two or more incidents created in the lookback),
+  `open_unacknowledged` (open, every update read, and no person has acknowledged
+  it), `open_new_unowned_before_history` (open, created before the history read,
+  and still New with no owner), and `mttd_hours`, `mtta_hours` and `mttr_hours`.
   When the update history can't be read, the timeline fields, `monthly`,
   `acknowledged_incidents` and `open_unacknowledged` are `null` rather than
-  empty. When close times can't be read, `close_time_status` is `unknown` and
-  the close-time counts are `null`, rather than every closed incident counting
-  as missing. Other existing fields are unchanged; KSI-PIY-RES is not mapped,
-  since it isn't evidenceable.
+  empty; a workspace with no SecurityIncident table has an empty history. When
+  close times can't be read, `close_time_status` is `unknown` and the close-time
+  counts are `null`, rather than every closed incident counting as missing. A
+  summary count that can be unknown is `null` when any workspace's value is, its
+  incident list failing included, or when no workspace was collected. Other
+  existing fields are unchanged; KSI-PIY-RES is not mapped, since it isn't
+  evidenceable.
 - **TUI fixes found while recording that walkthrough.** On a manifest with no
   evidence and no scripts, nothing on the Paramify tab held focus, so its keys
   did nothing. Enter in a picker's filter box now takes the highlighted option.
