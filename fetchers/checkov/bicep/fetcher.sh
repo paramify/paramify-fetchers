@@ -15,7 +15,8 @@
 #                        CHECKOV_USE_DEFAULT_SKIP_CHECKS, CHECKOV_SKIP_RESOURCES,
 #                        CHECKOV_SKIP_PATHS, CHECKOV_BICEP_CHECKS,
 #                        CHECKOV_EXTERNAL_CHECKS_DIR, CHECKOV_REPO_ID, CHECKOV_GIT_USERNAME
-# Required tools:        checkov, jq, plus git (git source) or curl + unzip (tfvc source)
+# Required tools:        checkov, jq, plus git (git source) or curl + unzip (tfvc source),
+#                        and python3 when skip_paths is set
 #
 # Exit codes: 0 = at least one check ran and every Bicep/ARM file parsed (findings are evidence);
 #             1 = could not fetch the source / checkov failed / nothing to scan / zero checks ran /
@@ -67,9 +68,9 @@ if [ -z "$REPO_URL" ]; then
 fi
 case "$SOURCE_TYPE" in
     git)
-        TOOLS="git checkov jq" ;;
+        TOOLS=(git checkov jq) ;;
     tfvc)
-        TOOLS="curl unzip checkov jq"
+        TOOLS=(curl unzip checkov jq)
         REPO_URL="${REPO_URL%/}"
         case "$REPO_URL" in https://*|http://*) ;; *)
             report_failure "source_type tfvc needs repo_url to be the Azure DevOps project URL (https://dev.azure.com/<org>/<project>), got $REPO_URL" bad_config
@@ -89,9 +90,9 @@ case "$SOURCE_TYPE" in
         report_failure "source_type must be git or tfvc (got '$SOURCE_TYPE')" bad_config
         exit 1 ;;
 esac
-# shellcheck disable=SC2086
-checkov_require_tools "$COMPONENT" $TOOLS || {
-    report_failure "required tool missing from PATH (a $SOURCE_TYPE source needs ${TOOLS// /, })" internal_error
+checkov_require_tools "$COMPONENT" "${TOOLS[@]}" || {
+    TOOLS_TEXT="$(printf '%s, ' "${TOOLS[@]}")"
+    report_failure "required tool missing from PATH (a $SOURCE_TYPE source needs ${TOOLS_TEXT%, })" internal_error
     exit 1
 }
 
@@ -99,10 +100,53 @@ _TARGET_SRC="$REPO_URL"; [ "$SOURCE_TYPE" = "tfvc" ] && _TARGET_SRC="$REPO_URL/$
 _TARGET_ID="$(printf '%s' "$_TARGET_SRC" | sed -e 's#^https\{0,1\}://##' -e 's#\.git$##' | tr -c 'A-Za-z0-9._-' '_')"
 OUTPUT_JSON="$OUTPUT_DIR/${COMPONENT}_${_TARGET_ID}.json"
 
+# Split a list on commas, newlines and any extra separators in $2 into _SPLIT, each entry trimmed,
+# empty entries dropped.
+split_list() {
+    local -a raw; local e
+    _SPLIT=()
+    IFS=$',\n'"${2:-}" read -r -d '' -a raw <<< "$1"
+    for e in "${raw[@]}"; do
+        e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"
+        [ -n "$e" ] && _SPLIT+=("$e")
+    done
+    return 0
+}
+# A JSON array of the arguments, for metadata.
+json_list() { jq -cn '$ARGS.positional' --args -- "$@"; }
+
+# checkov splits --check on commas without trimming, so it gets the cleaned CSV. Check ids never
+# contain whitespace, so spaces and tabs separate them too; skip paths may contain spaces.
+split_list "${CHECKOV_BICEP_CHECKS:-}" $' \t'
+REQUESTED_CHECKS="$(IFS=,; printf '%s' "${_SPLIT[*]}")"
+CHECKS_JSON="$(json_list "${_SPLIT[@]}")"
+split_list "${CHECKOV_SKIP_PATHS:-}"
+SKIP_PATHS=("${_SPLIT[@]}")
+SKIP_PATHS_JSON="$(json_list "${SKIP_PATHS[@]}")"
+
+# checkov reads each skip path as a Python regular expression and its Bicep runner crashes on an
+# invalid one, so check them before fetching anything.
+if [ ${#SKIP_PATHS[@]} -gt 0 ]; then
+    BAD_SKIP_PATH="$(python3 -I -c '
+import re, sys
+for p in sys.argv[1:]:
+    try:
+        re.compile(p)
+    except re.error as e:
+        print("%r is not a valid regular expression (%s)" % (p, e))
+        sys.exit(3)' "${SKIP_PATHS[@]}" 2>&1)"
+    case $? in
+        0) ;;
+        3) report_failure "skip_paths entry $BAD_SKIP_PATH; skip_paths entries are regular expressions, not globs (\\.json\$ rather than *.json)" bad_config
+           exit 1 ;;
+        *) report_failure "could not check skip_paths with python3: $BAD_SKIP_PATH" internal_error
+           exit 1 ;;
+    esac
+fi
+
 # --- skip-checks: the shipped defaults (unless use_default_skip_checks is false) + CHECKOV_SKIP_CHECKS,
 # minus explicitly-requested checks. --skip-check leaves no trace in checkov's output, so it goes in metadata.
 SKIP_CHECKS_LIST=""
-REQUESTED_CHECKS="${CHECKOV_BICEP_CHECKS:-}"
 add_skip() {
     local c="$1"; [ -z "$c" ] && return
     case ",$REQUESTED_CHECKS," in *",$c,"*) return ;; esac
@@ -113,28 +157,23 @@ DEFAULT_SKIPS_APPLIED=true
 [ "${CHECKOV_USE_DEFAULT_SKIP_CHECKS:-true}" = "false" ] && DEFAULT_SKIPS_APPLIED=false
 DEFAULT_SKIP_CHECKS_FILE="$SCRIPT_DIR/../_shared/skip-checks.default.txt"
 if [ "$DEFAULT_SKIPS_APPLIED" = "true" ] && [ -f "$DEFAULT_SKIP_CHECKS_FILE" ]; then
-    while IFS= read -r c || [ -n "$c" ]; do
-        c="$(printf '%s' "$c" | xargs)"; [ -z "$c" ] && continue
-        case "$c" in \#*) continue ;; esac
-        add_skip "$c"
-    done < "$DEFAULT_SKIP_CHECKS_FILE"
+    # Split like skip_checks once # comments are dropped.
+    split_list "$(sed 's/#.*//' "$DEFAULT_SKIP_CHECKS_FILE")" $' \t'
+    for c in "${_SPLIT[@]}"; do add_skip "$c"; done
 fi
-if [ -n "${CHECKOV_SKIP_CHECKS:-}" ]; then
-    IFS=',' read -ra _U <<< "$CHECKOV_SKIP_CHECKS"
-    for c in "${_U[@]}"; do add_skip "$(printf '%s' "$c" | xargs)"; done
-fi
+split_list "${CHECKOV_SKIP_CHECKS:-}" $' \t'
+for c in "${_SPLIT[@]}"; do add_skip "$c"; done
 
-# --- skip-resources (defaults file + config), applied post-scan ---
-SKIP_RESOURCES_LIST=""
+# --- skip-resources (defaults file + config, split on commas and newlines), applied post-scan ---
+SKIP_RESOURCES=()
 DEFAULT_SKIP_RES_FILE="$SCRIPT_DIR/../_shared/skip-resources.default.txt"
 if [ -f "$DEFAULT_SKIP_RES_FILE" ]; then
-    while IFS= read -r r || [ -n "$r" ]; do
-        r="$(printf '%s' "$r" | xargs)"; [ -z "$r" ] && continue
-        case "$r" in \#*) continue ;; esac
-        SKIP_RESOURCES_LIST="${SKIP_RESOURCES_LIST:+$SKIP_RESOURCES_LIST,}$r"
-    done < "$DEFAULT_SKIP_RES_FILE"
+    split_list "$(sed 's/#.*//' "$DEFAULT_SKIP_RES_FILE")"
+    SKIP_RESOURCES=("${_SPLIT[@]}")
 fi
-[ -n "${CHECKOV_SKIP_RESOURCES:-}" ] && SKIP_RESOURCES_LIST="${SKIP_RESOURCES_LIST:+$SKIP_RESOURCES_LIST,}$CHECKOV_SKIP_RESOURCES"
+split_list "${CHECKOV_SKIP_RESOURCES:-}"
+SKIP_RESOURCES+=("${_SPLIT[@]}")
+SKIP_RESOURCES_JSON="$(json_list "${SKIP_RESOURCES[@]}")"
 
 # What was actually fetched; checkov_clone_repo / checkov_fetch_tfvc overwrite these.
 SCANNED_BRANCH="$BRANCH"; BRANCH_FALLBACK=false; COMMIT_SHA=unknown; CHANGESET=""; CHANGESET_DATE=""
@@ -146,8 +185,8 @@ metadata_json() {
           --argjson fallback "$BRANCH_FALLBACK" --arg sha "$COMMIT_SHA" --arg ts "$TIMESTAMP" \
           --arg path "$TFVC_PATH" --arg version "$TFVC_VERSION" \
           --argjson changeset "${CHANGESET:-null}" --arg csdate "$CHANGESET_DATE" \
-          --arg skips "$SKIP_CHECKS_LIST" --argjson defaults "$DEFAULT_SKIPS_APPLIED" \
-          --arg skipres "$SKIP_RESOURCES_LIST" --arg skippaths "${CHECKOV_SKIP_PATHS:-}" \
+          --argjson checks "$CHECKS_JSON" --arg skips "$SKIP_CHECKS_LIST" --argjson defaults "$DEFAULT_SKIPS_APPLIED" \
+          --argjson skipres "$SKIP_RESOURCES_JSON" --argjson skippaths "$SKIP_PATHS_JSON" \
        '{source_type: $type, repo_url: $repo}
         + (if $type == "tfvc" then
              {tfvc_path: $path, requested_version: $version, changeset: $changeset,
@@ -156,10 +195,11 @@ metadata_json() {
              {branch: $branch, requested_branch: $requested, branch_fallback: $fallback, commit_sha: $sha}
            end)
         + {scan_timestamp: $ts, partial_failure: false, api_failures: [],
+         checks: $checks,
          skip_checks: ($skips | split(",") | map(select(. != ""))),
          default_skip_checks_applied: $defaults,
-         skip_resources: ($skipres | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))),
-         skip_paths: ($skippaths | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != "")))}'
+         skip_resources: $skipres,
+         skip_paths: $skippaths}'
 }
 
 # A result with nothing scanned: counts are null, not 0, so no reader can take it for a clean scan.
@@ -187,7 +227,6 @@ if [ "$SOURCE_TYPE" = "tfvc" ]; then
         exit 1
     fi
     WHERE="$TFVC_PATH in $REPO_URL (changeset $CHANGESET)"
-    BRANCH_ARGS=""
     log_info "Downloaded $WHERE"
 else
     if ! checkov_clone_repo "$REPO_URL" "$BRANCH" "$TOKEN" "$GIT_USER" "$COMPONENT"; then
@@ -197,7 +236,6 @@ else
         exit 1
     fi
     WHERE="$REPO_URL (branch $SCANNED_BRANCH, commit ${COMMIT_SHA:0:12})"
-    BRANCH_ARGS="--branch $SCANNED_BRANCH"
     log_info "Cloned $REPO_URL @ ${COMMIT_SHA:0:12} (branch $SCANNED_BRANCH)"
 fi
 
@@ -214,25 +252,27 @@ if [ "$BICEP_FILES" -eq 0 ] && [ "$ARM_FILES" -eq 0 ]; then
 fi
 
 # --- build checkov args ---
+# An array, so a value with spaces (a skip path, the checks dir) stays one argument, and configured
+# values use --flag=value, so one starting with "-" is not read as an option.
 # No --quiet: it strips passed_checks, skipped_checks and parsing_errors from the JSON.
-CHECKOV_ARGS="--framework bicep,arm --output json --repo-id $REPO_ID $BRANCH_ARGS"
-[ "${CHECKOV_SOFT_FAIL:-true}" = "true" ] && CHECKOV_ARGS="$CHECKOV_ARGS --soft-fail"
-[ "${CHECKOV_COMPACT:-true}" = "true" ]   && CHECKOV_ARGS="$CHECKOV_ARGS --compact"
-[ -n "${CHECKOV_BICEP_CHECKS:-}" ]        && CHECKOV_ARGS="$CHECKOV_ARGS --check $CHECKOV_BICEP_CHECKS"
+CHECKOV_ARGS=(--framework "bicep,arm" --output json "--repo-id=$REPO_ID")
+[ "$SOURCE_TYPE" = "git" ]                && CHECKOV_ARGS+=("--branch=$SCANNED_BRANCH")
+[ "${CHECKOV_SOFT_FAIL:-true}" = "true" ] && CHECKOV_ARGS+=(--soft-fail)
+[ "${CHECKOV_COMPACT:-true}" = "true" ]   && CHECKOV_ARGS+=(--compact)
+[ -n "$REQUESTED_CHECKS" ]               && CHECKOV_ARGS+=("--check=$REQUESTED_CHECKS")
 if [ -n "${CHECKOV_EXTERNAL_CHECKS_DIR:-}" ] && [ -d "$CHECKOV_EXTERNAL_CHECKS_DIR" ]; then
-    CHECKOV_ARGS="$CHECKOV_ARGS --external-checks-dir $CHECKOV_EXTERNAL_CHECKS_DIR"
+    CHECKOV_ARGS+=("--external-checks-dir=$CHECKOV_EXTERNAL_CHECKS_DIR")
 fi
 
-[ -n "$SKIP_CHECKS_LIST" ] && CHECKOV_ARGS="$CHECKOV_ARGS --skip-check $SKIP_CHECKS_LIST"
+[ -n "$SKIP_CHECKS_LIST" ] && CHECKOV_ARGS+=("--skip-check=$SKIP_CHECKS_LIST")
 
-if [ -n "${CHECKOV_SKIP_PATHS:-}" ]; then
-    for p in $(echo "$CHECKOV_SKIP_PATHS" | tr ',' ' '); do CHECKOV_ARGS="$CHECKOV_ARGS --skip-path $p"; done
-fi
+# One --skip-path per split_list entry; metadata.skip_paths is the same list.
+for p in "${SKIP_PATHS[@]}"; do CHECKOV_ARGS+=("--skip-path=$p"); done
 
 # --- run checkov ---
 RAW="$(mktemp)"; ERR="$(mktemp)"; NORM="$(mktemp)"
 log_info "Scanning $BICEP_FILES Bicep and $ARM_FILES ARM template files"
-checkov --directory "$CLONE_DIR" $CHECKOV_ARGS > "$RAW" 2> "$ERR"
+checkov --directory "$CLONE_DIR" "${CHECKOV_ARGS[@]}" > "$RAW" 2> "$ERR"
 
 # One report per framework with results: an array for both, an object for one, a bare summary for none.
 if ! jq -e 'if type=="array" then all(.[]; type=="object" and has("summary"))
@@ -266,10 +306,9 @@ jq --arg root "$CLONE_DIR/" '
 # A failed check on a matching resource moves to skipped_checks (SKIPPED, naming the pattern), so it
 # stays in total_checks; deleting it would raise the pass rate. Each pattern is a whole-name glob, * the only wildcard.
 RESOURCE_SKIPPED=0
-if [ -n "$SKIP_RESOURCES_LIST" ]; then
-    if ! jq --arg list "$SKIP_RESOURCES_LIST" '
-        ($list | split(",") | map(gsub("^\\s+|\\s+$"; "") | select(length > 0)
-            | {pattern: ., regex: ("^" + (gsub("(?<c>[.+?^${}()|\\[\\]\\\\])"; "\\\(.c)") | gsub("\\*"; ".*")) + "$")})) as $pats
+if [ ${#SKIP_RESOURCES[@]} -gt 0 ]; then
+    if ! jq --argjson list "$SKIP_RESOURCES_JSON" '
+        ($list | map({pattern: ., regex: ("^" + (gsub("(?<c>[.+?^${}()|\\[\\]\\\\])"; "\\\(.c)") | gsub("\\*"; ".*")) + "$")})) as $pats
         | def matched($r): first($pats[] | select(. as $p | $r | test($p.regex)) | .pattern) // null;
         (.results.failed_checks | map(. + {_skip: ((.resource // "") as $r | if $r == "" then null else matched($r) end)})) as $failed
         | .results.failed_checks = ($failed | map(select(._skip == null) | del(._skip)))
@@ -277,7 +316,7 @@ if [ -n "$SKIP_RESOURCES_LIST" ]; then
             | .check_result = ((.check_result // {}) + {result: "SKIPPED",
                                 suppress_comment: ("resource matches skip_resources pattern " + $p)})))
     ' "$NORM" > "$NORM.f"; then
-        MSG="skip_resources filter failed for patterns: $SKIP_RESOURCES_LIST"
+        MSG="skip_resources filter failed for patterns: $(IFS=,; printf '%s' "${SKIP_RESOURCES[*]}")"
         write_status_json error "$MSG" "$BICEP_FILES" "$ARM_FILES"
         report_failure "$MSG" bad_config
         exit 1
