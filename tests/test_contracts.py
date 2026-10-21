@@ -255,7 +255,7 @@ def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
                 problems.append(f"summary group must start with a question: {group[0]!r}")
             lines = group[1:]
             # a breakdown's values sit on indented lines under a field line ending in ':'
-            in_breakdown = [i > 0 and (lines[i - 1].endswith(":") or bool(BREAKDOWN_LINE.match(lines[i - 1])))
+            in_breakdown = [i > 0 and (lines[i - 1].rstrip().endswith(":") or bool(BREAKDOWN_LINE.match(lines[i - 1])))
                             for i in range(len(lines))]
             if not lines or any(
                 not (FIELD_LINE.match(ln) or (in_breakdown[i] and BREAKDOWN_LINE.match(ln)))
@@ -263,7 +263,7 @@ def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
             ):
                 problems.append(f"each summary field line must read '- <field> — <meaning>', with any breakdown "
                                 f"values under a line ending in ':' as '  - <value> (<meaning>)', under {group[0]!r}")
-            if any(ln.endswith(":") and not (i + 1 < len(lines) and BREAKDOWN_LINE.match(lines[i + 1]))
+            if any(ln.rstrip().endswith(":") and not (i + 1 < len(lines) and BREAKDOWN_LINE.match(lines[i + 1]))
                    for i, ln in enumerate(lines)):
                 problems.append(f"a summary field line ending in ':' needs its values below it, under {group[0]!r}")
             for ln in group[1:]:
@@ -287,6 +287,59 @@ def test_converted_fetcher_text_follows_the_format(yaml_path: Path) -> None:
     spec = yaml.safe_load(yaml_path.read_text())
     problems = _text_format_problems(yaml_path, spec)
     assert not problems, f"{yaml_path.parent.relative_to(FETCHERS_ROOT)}:\n  " + "\n  ".join(problems)
+
+
+_ALERT_RULES_YAML = FETCHERS_ROOT / "azure" / "alert_rules" / "fetcher.yaml"
+_GOOD_TEXT = """Script: azure/alert_rules/fetcher.py
+
+Access: Reader on the subscription.
+
+Commands Executed:
+- GET Microsoft.Insights/metricAlerts — metric alert rules
+
+Output: azure_alert_rules_<subscription>.json — each alert rule and whether it reaches a person.
+
+Summary fields:
+
+Which rules exist?
+- total_rules — Number of alert rules
+- rules_by_kind — Number of alert rules for each kind:
+  - metric (a metric alert rule)
+  - log (a log search alert rule)
+"""
+_BREAKDOWN = "for each kind:\n  - metric (a metric alert rule)\n  - log (a log search alert rule)"
+
+
+@pytest.mark.parametrize(("old", "new", "es_description", "problem"), [
+    (None, None, None, None),
+    ("for each kind:\n", "for each kind: \n", None, None),
+    ("- total_rules — Number", "- total_rules: Number", None, "each summary field line"),
+    (_BREAKDOWN, "for each kind:", None, "needs its values below it"),
+    (_BREAKDOWN, "for each kind: ", None, "needs its values below it"),
+    ("  - metric", "- metric", None, "each summary field line"),
+    ("alert rules\n- rules_by_kind", "alert rules\n  - extra (no parent)\n- rules_by_kind", None,
+     "each summary field line"),
+    ("- rules_by_kind — Number of alert rules for each kind:", "- total_rules — Number of rules for each kind:",
+     None, "listed twice"),
+    ("Script: azure/alert_rules/fetcher.py", "Script: fetcher.py", None, "do not open with"),
+    ("metric alert rules\n", "`metric` alert rules\n", None, "markdown"),
+    ("Which rules exist?", "Which rules exist", None, "must start with a question"),
+    (None, None, "Shows rules. And more.", "evidence_set.description is not one sentence"),
+])
+def test_text_format_check_catches_each_break(old, new, es_description, problem) -> None:
+    """The layout check itself, on a known-good text and one break at a time."""
+    text = _GOOD_TEXT if old is None else _GOOD_TEXT.replace(old, new, 1)
+    assert old is None or text != _GOOD_TEXT
+    spec = {"name": "azure_alert_rules", "runtime": {"type": "python", "entry": "fetcher.py"},
+            "description": "Shows every alert rule and whether it reaches a person.",
+            "evidence_set": {"reference_id": "EVD-X", "name": "X", "instructions": text}}
+    if es_description:
+        spec["evidence_set"]["description"] = es_description
+    problems = _text_format_problems(_ALERT_RULES_YAML, spec)
+    if problem is None:
+        assert problems == []
+    else:
+        assert any(problem in p for p in problems), problems
 
 
 def test_frequency_enum_matches_the_contract() -> None:

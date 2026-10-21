@@ -76,7 +76,7 @@ evidence_set:
   instructions: |                         # plain text; layout below
     Script: okta/password_policy/fetcher.py
 
-    Access: An API token from an Okta read-only administrator.
+    Access: The Read-Only Administrator role in Okta.
 
     Commands Executed:
     - GET /api/v1/policies (type PASSWORD) — every password policy
@@ -100,13 +100,14 @@ paramify describe <category>_<short_name>
 
 Paramify shows both as plain text. Line breaks come through, but markdown and
 HTML don't render, so leave out backticks, bold and tags. `description` becomes
-the evidence set's description (unless `evidence_set.description` overrides it),
-and `instructions` fills its Instructions tab. The uploader sends both only when
-it creates the evidence set.
+the evidence set's description, and `instructions` fills its Instructions tab.
+An `evidence_set.description`, when set, replaces `description` in Paramify and
+follows the same rule. The uploader sends both only when it creates the evidence
+set.
 
 - **`description`**: one sentence of at most 30 words on what the evidence
-  shows, not how it's collected. Start with "Shows whether…", "Lists…" or
-  "Labels each…", and don't repeat the fetcher's name.
+  shows, not how it's collected. Start with what it shows ("Shows whether…",
+  "Lists…", "Labels each…"), and don't repeat the fetcher's name.
 - **`instructions`**: a `|` block with these sections in order, a blank line
   between each:
   - **Script:** the entry's path under `fetchers/`, alone on its line.
@@ -121,13 +122,25 @@ it creates the evidence set.
   - **Summary fields:** every field the summary writes, once, in groups. Each
     group opens with the question it answers ("Is every web app backed up?"),
     ordered from what exists to how it's configured to whether it works. Each
-    field line opens with its value type: "Number of …", "Percentage of …",
-    "True if …; false if …; null if …", "List of …", "Whether …: <its values>",
-    or a unit ("Hours since …"), and never leans on another line ("of those").
-    A breakdown's values go on indented lines under it:
-    "  - uploaded (an uploaded PFX file that nobody renews)". Define the
-    fetcher's own judgement words where they first appear, and give each
-    percentage's formula with what it reads when the denominator is 0.
+    field line opens with its value type: "Number of …", "Number of … for each
+    …", "Percentage of …", "True if …; false if …; null if …", "List of …",
+    "Whether …: <its values>", or a unit ("Hours since …"), and never leans on
+    another line ("of those"). Define the fetcher's own judgement words where
+    they first appear. Give each percentage's formula using the summary's own
+    field names, and what it reads when the denominator is 0.
+
+A breakdown's field line ends in `:`, and each value sits under it, indented two
+spaces, as `- <value> (<meaning>)`:
+
+```yaml
+    Summary fields:
+
+    Which password policies are in force?
+    - total_policies — Number of password policies
+    - policies_by_status — Number of password policies for each status:
+      - ACTIVE (applies to the groups it's assigned to)
+      - INACTIVE (turned off, so it applies to nobody)
+```
 
 [`azure/alert_rules`](../fetchers/azure/alert_rules/fetcher.yaml) is a full
 example. `tests/test_contracts.py` checks this layout for the fetchers listed in
