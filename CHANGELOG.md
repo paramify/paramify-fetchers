@@ -629,10 +629,12 @@ schemas and the `paramify` CLI — not the internal code.
   - `provider_incident_id` and `provider_incident_url`: for an incident synced
     from Defender XDR, its id and link there; Microsoft Graph alerts give the same
     id as `incidentId`.
+  - `owner_object_id` and `owner_email`, beside the existing owner names.
   - `history_complete`: whether every update was read: the incident was created
     inside the history read, which starts at the lookback or SecurityIncident's
-    retention, whichever is later; its creation row was read; and its latest row
-    read matches its current status, owner and severity and, if its
+    retention, whichever is later; its creation row was read; and a row tied for
+    the latest time read matches its current status, severity and owner (by
+    object id when both sides have one, else by name) and, if its
     `lastModifiedTimeUtc` is within the last hour, is that recent. One already
     acknowledged before its oldest update read has no acknowledgement time rather
     than a late one.
@@ -653,18 +655,22 @@ schemas and the `paramify` CLI — not the internal code.
   `open_unacknowledged` are `null` rather than empty. When close times can't be
   read, `close_time_status` is `unknown` and the close-time counts are `null`,
   rather than every closed incident counting as missing. A SecurityIncident
-  table the query can't find reads as empty only when the workspace lists no
-  incidents and ARM doesn't list the table. Otherwise table-level access hides
-  it: the run records an access failure and exits 1, and close times and history
-  are unknown. The summary's counts, existing ones included, are `null` when any
-  workspace's incident list failed, and the counts that can be unknown are
-  `null` when any workspace's value is; with no Sentinel workspace they are 0.
+  table the query can't find, in a workspace that lists incidents, is hidden by
+  table-level access: the run records an access failure and exits 1, and close
+  times and history are unknown. In a workspace that lists none it reads as
+  empty. SecurityAlert is treated the same way when any incident has alerts.
+  The summary's counts, existing ones included, are `null` when any workspace's
+  incident list failed or the workspace list or a check for Sentinel failed,
+  and the counts that can be unknown are `null` when any workspace's value is;
+  with no Sentinel workspace found they are 0.
   Each workspace also gains `limitations`: in a workspace connected to Defender
   XDR, analysts usually work incidents in the Defender portal and
   SecurityIncident shows mostly the XDR sync's updates, so those incidents read
   as not acknowledged and an open one can count in `open_unacknowledged`; their
   acknowledgement times would need Defender XDR's incident activity history,
-  which neither SecurityIncident nor Graph's `security/incidents` provides.
+  which neither SecurityIncident nor Graph's `security/incidents` (its current
+  state and comments, but not when an incident was first activated or assigned)
+  provides.
   Other existing fields are unchanged; KSI-PIY-RES is not mapped, since it isn't
   evidenceable.
 - **TUI fixes found while recording that walkthrough.** On a manifest with no

@@ -150,9 +150,9 @@ class FakeAzure:
             ("union withsource=ParamifySourceTable", table(["ParamifySourceTable", "LastIngested", "Records"], [
                 ["AzureActivity", iso(NOW), 10], ["SecurityAlert", iso(NOW), 2], ["Usage", iso(NOW), 5],
                 ["Heartbeat", iso(NOW), 50]])),
-            ("ModifiedBy", history_table(incident_history())),
+            (HISTORY_ROUTE, history_table(incident_history())),
             ("SystemAlertId", table(["IncidentName", "AlertId", "Entities"], INCIDENT_ALERT_ENTITIES)),
-            ("arg_max(LastModifiedTime, Status, ClosedTime", table(["IncidentName", "Status", "ClosedTime", "CreatedTime", "Tasks"], [
+            ("arg_max(Order, Status, ClosedTime", table(["IncidentName", "Status", "ClosedTime", "CreatedTime", "Tasks"], [
                 ["i-closed", "Closed", iso(NOW - timedelta(days=2)), iso(NOW - timedelta(days=3)), INCIDENT_TASKS],
                 ["i-new", "New", None, iso(NOW - timedelta(days=200)), "[]"]])),
             ("by ProductName", table(["ProductName", "LastIngested", "Records"], [
@@ -370,7 +370,7 @@ def test_incidents(azure, tmp_path):
     assert {k: ws["completeness"][k] for k in ("arm_created", "kql_created", "counts_agree")} == {
         "arm_created": 1, "kql_created": 1, "counts_agree": True}
     assert ws["security_incident_retention_days"] == 90 and ws["notes"] == []
-    assert "security/incidents (current status and owner only)" in ws["limitations"][0]
+    assert "but not when an incident was first activated or assigned" in ws["limitations"][0]
 
 
 def test_incidents_without_the_table(azure, tmp_path):
@@ -421,21 +421,49 @@ def test_incidents_failed_workspace_nulls_the_totals(azure, tmp_path):
         "incidents_in_scope", "open_incidents", "closed_incidents", "acknowledged_incidents", "open_unacknowledged",
         "closed_missing_close_time", "closed_close_time_not_retained", "open_new_unowned_history_incomplete",
         "recurring_titles"))
-    # No Sentinel workspace at all is a known nothing, which workspaces_collected 0 already says.
-    assert set(MODS["sentinel_incidents"].summarize([]).values()) == {0}
+    # No Sentinel workspace at all is a known nothing, which workspaces_collected 0 already says; unless discovery failed.
+    assert set(MODS["sentinel_incidents"].summarize([], True).values()) == {0}
+    assert set(MODS["sentinel_incidents"].summarize([], False).values()) == {None}
 
 
-def test_incidents_hidden_table_in_an_idle_workspace_is_refused(azure, tmp_path):
+@pytest.mark.parametrize("failure", ["workspaces", "onboarding"])
+def test_incidents_failed_discovery_nulls_the_totals(azure, tmp_path, failure):
+    refused = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    if failure == "workspaces":
+        azure.arm[(f"/subscriptions/{SUB}/providers/Microsoft.OperationalInsights/workspaces", "2023-09-01")] = refused
+    else:
+        azure.arm[(f"{SI_A}/onboardingStates", "2025-09-01")] = refused
+    code, ev = run("sentinel_incidents", tmp_path)
+    # Finding no Sentinel workspace isn't knowing there are none.
+    assert code == 1 and ev["summary"]["workspaces_collected"] == 0
+    assert ev["summary"]["incidents_in_scope"] is None and ev["summary"]["acknowledged_incidents"] is None
+
+
+def test_incidents_no_sentinel_workspace_counts_zero(azure, tmp_path):
+    azure.arm[(f"{SI_A}/onboardingStates", "2025-09-01")] = {"value": []}
+    code, ev = run("sentinel_incidents", tmp_path)
+    assert code == 0 and ev["summary"]["workspaces_without_sentinel"] == 2
+    assert ev["summary"]["incidents_in_scope"] == 0 and ev["summary"]["acknowledged_incidents"] == 0
+
+
+@pytest.mark.parametrize("arm_table", ["listed", "refused"])
+def test_incidents_quiet_workspace_the_query_cant_find_is_empty(azure, tmp_path, arm_table):
     onboard_second_workspace(azure)
-    azure.arm[(f"{WS_B}/tables/SecurityIncident", "2023-09-01")] = {"properties": {"retentionInDays": 90}}
+    azure.arm[(f"{WS_B}/tables/SecurityIncident", "2023-09-01")] = (
+        {"properties": {"retentionInDays": 90}} if arm_table == "listed"
+        else Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}}))
     azure.queries.insert(0, ("cust-b/query", Resp(400, {"error": {"code": "BadArgumentError", "innererror": {
         "message": "'where' operator: Failed to resolve table or column expression named 'SecurityIncident'"}}})))
     code, ev = run("sentinel_incidents", tmp_path)
-    idle = next(w for w in ev["results"]["workspaces"] if w["name"] == "law-plain")
-    # ARM lists the table, so the query not finding it is table-level access, not an empty workspace.
-    assert code == 1 and idle["acknowledged_incidents"] is None and ev["summary"]["acknowledged_incidents"] is None
+    quiet = next(w for w in ev["results"]["workspaces"] if w["name"] == "law-plain")
+    # No incidents listed, so there's nothing to read, whatever ARM says of the table; only a refused GET fails the run.
+    assert code == (0 if arm_table == "listed" else 1) and quiet["acknowledged_incidents"] == 0
+    assert quiet["notes"] == ["SecurityIncident table wasn't found, and the workspace lists no incidents"]
+    assert ev["summary"]["acknowledged_incidents"] == ws_a(ev)["acknowledged_incidents"]
 
 
+# Fragments only the history query has; the closed-time query also names ModifiedBy, for its ordering.
+HISTORY_ROUTE = "ModifiedBy, CreatedTime, LastModifiedTime"
 HISTORY_COLUMNS = ["TimeGenerated", "IncidentName", "Status", "Severity", "ClosedTime", "ModifiedBy", "OwnerId", "Owner",
                    "CreatedTime", "LastModifiedTime"]
 
@@ -555,7 +583,7 @@ def test_incidents_backlog_before_retention_is_unknown(azure, tmp_path):
 
 def test_incidents_history_starts_at_the_lookback_when_retention_is_longer(azure, tmp_path):
     azure.arm[(f"{WS_A}/tables/SecurityIncident", "2023-09-01")] = {"properties": {"retentionInDays": 365}}
-    azure.queries.insert(0, ("ModifiedBy", history_table(incident_history()[:3] + [
+    azure.queries.insert(0, (HISTORY_ROUTE, history_table(incident_history()[:3] + [
         update("i-new", NOW - timedelta(days=10), "Active", "High", owner="pat@contoso.com", by="pat@contoso.com",
                created=NOW - timedelta(days=200))])))
     code, ev = run("sentinel_incidents", tmp_path)
@@ -568,7 +596,7 @@ def test_incidents_history_starts_at_the_lookback_when_retention_is_longer(azure
 
 
 def test_incidents_refused_history_keeps_close_times(azure, tmp_path):
-    azure.queries.insert(0, ("ModifiedBy", Resp(403, {"error": {"code": "InsufficientAccessError", "message": "no"}})))
+    azure.queries.insert(0, (HISTORY_ROUTE, Resp(403, {"error": {"code": "InsufficientAccessError", "message": "no"}})))
     code, ev = run("sentinel_incidents", tmp_path)
     ws = ws_a(ev)
     closed = next(i for i in ws["incidents"] if i["name"] == "i-closed")
@@ -580,7 +608,7 @@ def test_incidents_refused_history_keeps_close_times(azure, tmp_path):
 
 def test_incidents_automation_and_xdr_changes_are_not_acknowledgements(azure, tmp_path):
     created = NOW - timedelta(days=3)
-    azure.queries.insert(0, ("ModifiedBy", history_table([
+    azure.queries.insert(0, (HISTORY_ROUTE, history_table([
         update("i-closed", created, "New", "High", owner="tier1@contoso.com", by="Automation rule - assign tier 1"),
         update("i-closed", created + timedelta(hours=1), "New", "High", owner="tier2@contoso.com",
                by="Automation rule - escalate"),
@@ -603,7 +631,7 @@ def freeze_now(monkeypatch, at):
 
 
 def run_with_history(azure, tmp_path, rows):
-    azure.queries.insert(0, ("ModifiedBy", history_table(rows)))
+    azure.queries.insert(0, (HISTORY_ROUTE, history_table(rows)))
     code, ev = run("sentinel_incidents", tmp_path)
     return code, ev, {i["name"]: i for i in ws_a(ev)["incidents"]}
 
@@ -651,7 +679,7 @@ def test_incidents_older_than_the_history_have_no_acknowledgement(azure, tmp_pat
 
 
 def test_incidents_monthly_counts_only_in_scope_incidents(azure, tmp_path):
-    rows = azure.queries[[q[0] for q in azure.queries].index("arg_max(LastModifiedTime, Status, ClosedTime")][1]["tables"][0]["rows"]
+    rows = azure.queries[[q[0] for q in azure.queries].index("arg_max(Order, Status, ClosedTime")][1]["tables"][0]["rows"]
     rows.append(["i-old-closed", "Closed", iso(NOW - timedelta(days=5)), iso(NOW - timedelta(days=200)), "[]"])
     code, ev = run("sentinel_incidents", tmp_path)
     # i-old-closed closed in the lookback but was created before it, so it's not listed and not counted.
@@ -672,15 +700,22 @@ def test_incidents_open_unacknowledged_means_no_person_acknowledged_it(azure, tm
     assert ws_a(ev)["open_unacknowledged"] == 1 and ev["summary"]["open_unacknowledged"] == 1
 
 
+def history_rows(rows):
+    return [dict(zip(HISTORY_COLUMNS, r)) for r in history_table(rows)["tables"][0]["rows"]]
+
+
+def complete(incident_, rows, since, now):
+    return MODS["sentinel_incidents"].timeline(incident_, rows, since, now)["history_complete"]
+
+
 def test_incident_history_is_complete_only_from_its_creation_row_to_its_last_change():
-    complete = MODS["sentinel_incidents"].history_complete
     created, changed, since = NOW - timedelta(hours=2), NOW - timedelta(minutes=10), NOW - timedelta(days=30)
     incident_ = {"created_time_utc": iso(created), "last_modified_time_utc": iso(changed), "status": "Active",
                  "severity": "Low", "owner_user_principal_name": "pat@contoso.com"}
-    rows = [dict(zip(HISTORY_COLUMNS, r)) for r in history_table([
+    rows = history_rows([
         update("x", created, "New", "Low"),
-        update("x", changed, "Active", "Low", owner="Pat@contoso.com", by="pat@contoso.com")])["tables"][0]["rows"]]
-    assert complete(incident_, rows, since, NOW) and complete(incident_, rows[::-1], since, NOW)  # in any order
+        update("x", changed, "Active", "low", owner="Pat@contoso.com", by="pat@contoso.com")])
+    assert complete(incident_, rows, since, NOW)  # severity and owner in any case
     assert not complete(incident_, [], since, NOW)
     assert not complete(incident_, rows[1:], since, NOW)  # its creation row wasn't read
     assert not complete(incident_, rows, NOW - timedelta(hours=1), NOW)
@@ -699,6 +734,40 @@ def test_incidents_dropped_row_leaves_the_history_incomplete(azure, tmp_path):
     # A person set it Active and took it yesterday, but only its creation row arrived.
     _, ev, by_name = run_with_history(azure, tmp_path, incident_history() + [update("i-dropped", created, "New", "High")])
     assert by_name["i-dropped"]["history_complete"] is False and ws_a(ev)["open_unacknowledged"] == 0
+
+
+@pytest.mark.parametrize("arm_owner, row_owner", [
+    ({"email": "pat@contoso.com", "objectId": "u-1"}, "pat@contoso.com"),  # email only, matched by object id
+    ({"email": "pat@contoso.com"}, "pat@contoso.com"),  # email only, no id on the ARM side: by name
+    ({"userPrincipalName": "pat@contoso.com", "assignedTo": "Pat Doe"}, "Pat Doe"),  # display name vs UPN
+    ({"userPrincipalName": "renamed@contoso.com", "objectId": "u-1"}, "pat@contoso.com"),  # renamed, same id
+])
+def test_incident_owner_matches_by_id_then_any_name(arm_owner, row_owner):
+    created = NOW - timedelta(days=2)
+    mod = MODS["sentinel_incidents"]
+    arm = incident("x", "Active", created)
+    arm["properties"]["owner"] = arm_owner
+    incident_ = mod.project_incident(arm, {})
+    rows = history_rows([update("x", created, "New", "High"),
+                         update("x", created + timedelta(hours=1), "Active", "High", owner=row_owner, by="pat@contoso.com")])
+    assert complete(incident_, rows, NOW - timedelta(days=30), NOW)
+    if "objectId" in arm_owner:  # with ids on both sides, the id decides
+        rows[-1]["OwnerId"] = "u-2"
+        assert not complete(incident_, rows, NOW - timedelta(days=30), NOW)
+
+
+@pytest.mark.parametrize("person", ["Alice@contoso.com", "pat@contoso.com"])
+def test_incident_rows_tied_for_the_latest_time_each_count(person):
+    created = NOW - timedelta(days=2)
+    at = created + timedelta(hours=1)
+    incident_ = MODS["sentinel_incidents"].project_incident(incident("x", "New", created), {})
+    incident_.update(owner_user_principal_name=person, owner_assigned_to=None)
+    rows = history_rows([update("x", created, "New", "High"),
+                         update("x", at, "New", "High", owner="tier1@contoso.com", by="Automation rule - assign", created=created),
+                         update("x", at, "New", "High", owner=person, by=person, created=created)])
+    rows.sort(key=MODS["sentinel_incidents"].update_order)
+    # "Alice" sorts before "Automation rule" and "pat" after it; either way one of the tied rows is the incident now.
+    assert complete(incident_, rows, NOW - timedelta(days=30), NOW)
 
 
 def test_incidents_acknowledgement_found_survives_a_missing_later_row(azure, tmp_path, monkeypatch):
@@ -779,7 +848,7 @@ def test_incidents_blank_or_system_modifier_is_not_a_person(azure, tmp_path, by)
 
 
 def test_incidents_refused_close_times_are_unknown(azure, tmp_path):
-    azure.queries.insert(0, ("arg_max(LastModifiedTime, Status, ClosedTime", Resp(403, {"error": {
+    azure.queries.insert(0, ("arg_max(Order, Status, ClosedTime", Resp(403, {"error": {
         "code": "InsufficientAccessError", "message": "no"}})))
     code, ev = run("sentinel_incidents", tmp_path)
     ws = ws_a(ev)
@@ -802,7 +871,7 @@ def test_incidents_queries_skip_when_the_list_fails_and_use_explicit_bounds(azur
 
 
 def test_incident_with_no_alerts_reads_empty_when_entities_are_skipped(azure, tmp_path):
-    azure.queries.insert(0, ("arg_max(LastModifiedTime, Status, ClosedTime", table(
+    azure.queries.insert(0, ("arg_max(Order, Status, ClosedTime", table(
         ["IncidentName", "Status", "ClosedTime", "CreatedTime", "Tasks"], [])))
     azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"][0]["properties"]["additionalData"]["alertsCount"] = 0
     code, ev = run("sentinel_incidents", tmp_path)
@@ -820,16 +889,30 @@ def test_incident_entities_are_capped_per_kind():
     assert kinds.count("file") == 25 and "host" in kinds and "ip" in kinds and out["entities_truncated"] is True
 
 
-def test_incidents_without_security_alert_leave_entities_unknown(azure, tmp_path):
-    azure.queries.insert(0, ("SystemAlertId", Resp(400, {"error": {"code": "BadArgumentError", "innererror": {
-        "message": "'join' operator: Failed to resolve table or column expression named 'SecurityAlert'"}}})))
+SECURITY_ALERT_MISSING = Resp(400, {"error": {"code": "BadArgumentError", "innererror": {
+    "message": "'join' operator: Failed to resolve table or column expression named 'SecurityAlert'"}}})
+
+
+def test_incidents_hidden_security_alert_is_refused(azure, tmp_path):
+    azure.queries.insert(0, ("SystemAlertId", SECURITY_ALERT_MISSING))
     arm = azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"]
     arm[1]["properties"]["additionalData"]["alertsCount"] = 0
     code, ev = run("sentinel_incidents", tmp_path)
     ws = ws_a(ev)
     by_name = {i["name"]: i for i in ws["incidents"]}
-    assert code == 0 and by_name["i-new"]["entities"] is None and "SecurityAlert" in ws["notes"][-1]
+    # i-new has alerts, so SecurityAlert must be there: the query not finding it is table-level access.
+    assert code == 1 and json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+    assert by_name["i-new"]["entities"] is None and not any("SecurityAlert" in n for n in ws["notes"])
     assert by_name["i-closed"]["entities"] == []  # no alerts, so no entities whether or not they could be read
+
+
+def test_incidents_without_security_alert_and_no_alerts(azure, tmp_path):
+    azure.queries.insert(0, ("SystemAlertId", SECURITY_ALERT_MISSING))
+    for i in azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"]:
+        i["properties"]["additionalData"]["alertsCount"] = 0
+    code, ev = run("sentinel_incidents", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and "SecurityAlert" in ws["notes"][-1] and all(i["entities"] == [] for i in ws["incidents"])
 
 
 @pytest.mark.parametrize("url, expected", [
@@ -854,6 +937,11 @@ def test_incidents_without_security_alert_leave_entities_unknown(azure, tmp_path
     ("tel:5551234", None),
     ("urn:123", None),
     ("mailto:12345", None),
+    ("sip:5060", None),
+    ("server01:8080/x", "server01"),
+    ("intranet:80/path?tok=1", "intranet"),
+    ("my-host:8443", "my-host"),
+    ("host.example.com:99999/x", None),
 ])
 def test_incident_url_entities_keep_scheme_and_host_only(url, expected):
     assert MODS["sentinel_incidents"].url_host(url) == expected
