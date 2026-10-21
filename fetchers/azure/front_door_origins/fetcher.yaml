@@ -93,7 +93,7 @@ evidence_set:
     - Resource Graph: Resources | where id in~ (…) — the region of each origin's target resource
     - Resource Graph: Resources | where type =~ 'microsoft.web/sites' — every App Service app in the subscription, and each origin's app or slot, with its public network access and plan
     - Resource Graph: Resources | where type =~ 'microsoft.web/serverfarms' — each app's plan capacity and zone redundancy
-    - web_apps.get_configuration() or get_configuration_slot() (per origin app) — the app's access restrictions
+    - web_apps.get_configuration() or get_configuration_slot() (per origin app an in-scope origin group reaches) — the app's access restrictions
     - metrics.list() for OriginHealthPercentage and OriginRequestCount (per profile) — hourly health and request count of each origin over the lookback window
 
     Output: azure_front_door_origins_<subscription>.json — each origin group with its origins, regions and connection settings, its measured health and traffic per region, each App Service origin with whether only its Front Door profile can reach it, each app with its regional twin, and the domains, routes, origin groups and apps left out of scope with the pattern that took each out.

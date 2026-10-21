@@ -434,7 +434,7 @@ def route_serving(endpoint: dict, route: dict) -> bool:
 
 def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exclusions,
                   match_route_names: bool = False) -> dict:
-    """The custom domains and endpoints whose host name matches a pattern (key -> pattern), and the routes out of scope.
+    """The custom domains and endpoints whose host name matches a pattern, and the routes out of scope (key -> pattern).
 
     A route is out of scope when every host it serves is, or (with match_route_names) when its own name matches.
     """
@@ -452,7 +452,7 @@ def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exc
             host_patterns[arm_key(endpoint["id"])] = pattern
             excluded.append(excluded_item("endpoint", endpoint["host_name"], pattern, profile=profile["name"],
                                           endpoint=endpoint["name"], id=endpoint["id"]))
-    routes = set()
+    routes = {}
     for endpoint in endpoints:
         for route in endpoint["routes"]:
             hosts = route_hosts(endpoint, route, domains_by_key)
@@ -465,7 +465,7 @@ def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exc
                 excluded.append(excluded_item("route", route["name"], None, reason="all_hosts_excluded", **context))
             else:
                 continue
-            routes.add(arm_key(route["id"]))
+            routes[arm_key(route["id"])] = pattern
     return {"hosts": host_patterns, "routes": routes, "excluded": excluded}
 
 

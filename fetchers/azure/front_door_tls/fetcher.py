@@ -41,12 +41,12 @@ from frontdoor import (  # noqa: E402
     route_serving,
     rule_sets_with_rules,
 )
-from scope_exclusions import ScopeExclusions  # noqa: E402
+from scope_exclusions import ScopeExclusions, excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_front_door_tls")
 
 SCOPE_EXCLUSIONS_ENV = "AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS"
-EXCLUDED_KINDS = ("custom_domain", "endpoint", "route")
+EXCLUDED_KINDS = ("custom_domain", "endpoint", "route", "secret")
 EXPIRY_WARNING_DAYS = 30
 # A predefined cipher-suite set fixes the floor; minimumTlsVersion applies only to Customized.
 CIPHER_SUITE_SET_FLOOR = {"TLS10_2019": "TLS10", "TLS12_2022": "TLS12", "TLS12_2023": "TLS12"}
@@ -121,8 +121,9 @@ def effective_minimum_tls(domain: dict) -> tuple[str | None, str]:
     return None, "unset"
 
 
-def route_record(profile: dict, endpoint: dict, route: dict, domains_by_key: dict, rule_sets_by_key: dict) -> dict:
-    hosts = route_hosts(endpoint, route, domains_by_key)
+def route_record(profile: dict, endpoint: dict, route: dict, domains_by_key: dict, rule_sets_by_key: dict,
+                 excluded_hosts=()) -> dict:
+    hosts = [h for h in route_hosts(endpoint, route, domains_by_key) if arm_key(h["id"]) not in excluded_hosts]
     return {
         "profile": profile["name"],
         "profile_sku": profile["sku"],
@@ -171,9 +172,28 @@ def domain_record(profile: dict, domain: dict, secrets_by_key: dict, routed: set
     }
 
 
+def secrets_in_scope(profile: dict, secrets: list[dict], domains: list[dict], excluded_hosts: dict) -> tuple[list[dict], list[dict]]:
+    """The profile's secrets minus those only out-of-scope custom domains use, and those secrets."""
+    users: dict = {}
+    for d in domains:
+        if d["secret_id"]:
+            users.setdefault(arm_key(d["secret_id"]), []).append(d)
+    kept, excluded = [], []
+    for secret in secrets:
+        using = users.get(arm_key(secret["id"]), [])
+        if using and all(arm_key(d["id"]) in excluded_hosts for d in using):
+            excluded.append(excluded_item("secret", secret["name"], None, reason="only_excluded_domains",
+                                          profile=profile["name"], id=secret["id"],
+                                          custom_domains=[d["host_name"] for d in using]))
+        else:
+            kept.append(secret)
+    return kept, excluded
+
+
 def tls_for_profile(collected: dict, now: datetime, exclusions: ScopeExclusions | None = None) -> dict:
     profile = collected["profile"]
-    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions())
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions(),
+                          match_route_names=True)
     domains_by_key = {arm_key(d["id"]): d for d in collected["custom_domains"]}
     secrets_by_key = {arm_key(s["id"]): s for s in collected["secrets"]}
     routes, routed, served = [], set(), set()
@@ -184,10 +204,11 @@ def tls_for_profile(collected: dict, now: datetime, exclusions: ScopeExclusions 
             if route_serving(endpoint, route):
                 served |= keys
             if arm_key(route["id"]) not in scope["routes"]:
-                routes.append(route_record(profile, endpoint, route, domains_by_key, collected["rule_sets"]))
+                routes.append(route_record(profile, endpoint, route, domains_by_key, collected["rule_sets"], scope["hosts"]))
     domains = [domain_record(profile, d, secrets_by_key, routed, served, now)
                for d in collected["custom_domains"] if arm_key(d["id"]) not in scope["hosts"]]
-    return {"routes": routes, "custom_domains": domains, "excluded": scope["excluded"]}
+    secrets, excluded_secrets = secrets_in_scope(profile, collected["secrets"], collected["custom_domains"], scope["hosts"])
+    return {"routes": routes, "custom_domains": domains, "secrets": secrets, "excluded": scope["excluded"] + excluded_secrets}
 
 
 def summarize(profiles: list[dict], skipped_by_sku: dict, routes: list[dict], domains: list[dict], secrets: list[dict]) -> dict:
@@ -297,12 +318,12 @@ def main() -> int:
         routes += tls["routes"]
         domains += tls["custom_domains"]
         excluded += tls["excluded"]
-        secrets += c["secrets"]
+        secrets += tls["secrets"]
         profiles.append({
             **c["profile"],
             "route_count": len(tls["routes"]),
             "custom_domain_count": len(tls["custom_domains"]),
-            "secret_count": len(c["secrets"]),
+            "secret_count": len(tls["secrets"]),
             "rule_set_count": len(c["rule_sets"]),
         })
 

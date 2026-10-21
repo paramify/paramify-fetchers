@@ -732,10 +732,14 @@ schemas and the `paramify` CLI — not the internal code.
     host it serves does, an origin group when every route reaching it is, and a
     production app when only out-of-scope groups reach it, so multi-region
     redundancy is judged on the core domains. Custom domains are read only when
-    patterns are set.
+    patterns are set, and access restrictions only for apps an in-scope group
+    reaches.
   - `azure_front_door_tls` 0.2.0 and `azure_front_door_waf_coverage` 0.2.0:
-    custom-domain and endpoint host names; a route whose every host matches is
-    out of scope too. Both fetcher.yaml texts move to the new description format.
+    custom-domain host names, endpoint host names and route names. A route is out
+    of scope when its name or every host it serves matches; TLS also leaves out
+    certificate secrets that only out-of-scope domains use, and WAF coverage the
+    host-routes of an out-of-scope route. Both fetcher.yaml texts move to the new
+    description format.
   - `azure_dns_configuration` 0.3.0: public record-set names, relative or FQDN.
 - **A config field the runner injects into the fetcher can be a `${env:VAR}`
   reference.** The runner resolves it the way it resolves a secret. An unset or

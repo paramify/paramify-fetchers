@@ -10,12 +10,13 @@ config_schema:
     required: false
     env: AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS
     description: >
-      Custom domains and endpoints to leave out of scope, as case-insensitive glob
-      patterns separated by commas or spaces (* matches any run of characters,
-      dots included), matched against custom-domain and endpoint host names. Every
-      host-route on a matching host is out of scope, and so is a route whose every
-      host matches. Each is listed under excluded and left out of every verdict and
-      count. Can be ${env:VAR}. Empty: everything is in scope.
+      Parts of Front Door to leave out of scope, as case-insensitive glob patterns
+      separated by commas or spaces (* matches any run of characters, dots
+      included), matched against custom-domain host names, endpoint host names
+      and route names. A route is out of scope when its name matches or every host
+      it serves does, and a host-route when its host matches or its route is out.
+      Each is listed under excluded and left out of every verdict and count. Can
+      be ${env:VAR}. Empty: everything is in scope.
 
 supports_targets: true
 
@@ -81,7 +82,7 @@ evidence_set:
     - premium_profiles — Number of Front Door Premium profiles
     - standard_profiles — Number of Front Door Standard profiles
     - skipped_profiles_by_sku — Number of classic CDN profiles skipped, for each SKU
-    - total_endpoints — Number of in-scope endpoints across all profiles (out-of-scope ones are counted in excluded_endpoints)
+    - total_endpoints — Number of endpoints across all profiles whose own host name is in scope or that carry an in-scope route
     - endpoints_without_routes — Number of in-scope endpoints with no routes
     - total_routes — Number of in-scope routes across all profiles
     - total_custom_domains — Number of in-scope custom domains across all profiles
@@ -93,12 +94,12 @@ evidence_set:
     - provider_registration_status — Whether Microsoft.Cdn is registered on the subscription: registered, not_registered or unknown
 
     Which parts of Front Door are left out of scope?
-    - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against custom-domain host names and endpoint host names (azurefd.net). A custom domain, endpoint or host-route is in scope unless its host name matches one; a route is in scope unless every host it serves matches. Empty when none are set, so everything is in scope
-    - scope_exclusion_patterns_unmatched — List of configured patterns that matched no custom-domain or endpoint host name, such as a mistyped name
+    - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against custom-domain host names, endpoint host names (azurefd.net) and route names. A custom domain or endpoint host is in scope unless its host name matches one; a route is in scope unless its name matches one or every host it serves matches; a host-route is in scope unless its host or its route is out. Empty when none are set, so everything is in scope
+    - scope_exclusion_patterns_unmatched — List of configured patterns that matched no custom-domain host name, endpoint host name or route name, such as a mistyped name
     - excluded_custom_domains — Number of custom domains whose host name matches a pattern; each is listed under excluded with the pattern, and no other count includes them
     - excluded_endpoints — Number of endpoints whose own host name matches a pattern
-    - excluded_routes — Number of routes out of scope because every host they serve matches a pattern
-    - excluded_host_routes — Number of host-routes out of scope because their host name matches a pattern
+    - excluded_routes — Number of routes out of scope: their name matches a pattern, or every host they serve does
+    - excluded_host_routes — Number of host-routes out of scope because their host name matches a pattern or their route is out of scope
 
     Is every serving host protected by a blocking WAF?
     - protected_host_routes — Number of serving host-routes protected by a blocking WAF: a WAF security policy applies to the host on that route, its WAF policy blocks, it covers every path (/*), and neither the route nor the policy marks the host inactive

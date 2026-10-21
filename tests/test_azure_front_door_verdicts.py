@@ -750,7 +750,8 @@ def test_waf_coverage_drops_host_routes_on_excluded_hosts():
     assert sorted((h["route"], h["host_name"]) for h in scoped["host_routes"]) == [
         ("core", "api.example.com"), ("core", "www.example.com"), ("mixed", "api.example.com"),
         ("shared-core", "www.example.com")]
-    assert (scoped["endpoint_count"], scoped["route_count"], scoped["custom_domain_count"]) == (0, 4, 2)
+    # The endpoint's own host is out, but it still carries in-scope routes.
+    assert (scoped["endpoint_count"], scoped["route_count"], scoped["custom_domain_count"]) == (1, 4, 2)
     host_routes = by_kind(scoped["excluded"])["host_route"]
     assert ("qa.example.com", "QA.*", "name_matched") in host_routes and len(host_routes) == 6
     summary = coverage.summarize([], {}, scoped["host_routes"], [], scoped["unrouted_custom_domains"], [])
@@ -758,7 +759,7 @@ def test_waf_coverage_drops_host_routes_on_excluded_hosts():
 
 
 def run_origins(monkeypatch, tmp_path, patterns):
-    reads = []
+    reads, config_reads = [], []
     sites = {origins.arm_key(SITE.format(n)): site_row(n, "eastus", "plan") for n in ("app-core", "app-qa")}
     by_host = {"core-eastus.azurewebsites.net": origins.arm_key(SITE.format("app-core")),
                "qa-eastus.azurewebsites.net": origins.arm_key(SITE.format("app-qa"))}
@@ -782,7 +783,7 @@ def run_origins(monkeypatch, tmp_path, patterns):
         "lookup_regions": lambda *a: ({}, REGIONS),
         "lookup_sites": lambda *a: (sites, by_host),
         "lookup_plans": lambda *a: {},
-        "read_site_configs": lambda *a: {},
+        "read_site_configs": lambda cred, collector, sites: config_reads.append(sorted(s["name"] for s in sites)) or {},
         "collect_origin_metrics": lambda *a: metrics,
         "load_dotenv": lambda: None,
     }.items():
@@ -794,13 +795,13 @@ def run_origins(monkeypatch, tmp_path, patterns):
     else:
         monkeypatch.setenv(origins.SCOPE_EXCLUSIONS_ENV, patterns)
     assert origins.main() == 0
-    return reads, json.loads((tmp_path / "azure_front_door_origins_s.json").read_text())
+    return reads + config_reads, json.loads((tmp_path / "azure_front_door_origins_s.json").read_text())
 
 
 def test_origins_without_patterns_reads_no_domains_and_adds_only_empty_scope_fields(monkeypatch, tmp_path):
     reads, evidence = run_origins(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
-    assert reads == [False]
+    assert reads == [False, ["app-core", "app-qa"]]
     assert evidence["results"]["excluded"] == []
     assert (summary["scope_exclusion_patterns"], summary["scope_exclusion_patterns_unmatched"]) == ([], [])
     assert all(summary[f"excluded_{k}s"] == 0 for k in origins.EXCLUDED_KINDS)
@@ -811,7 +812,8 @@ def test_origins_without_patterns_reads_no_domains_and_adds_only_empty_scope_fie
 def test_origins_with_patterns_leave_qa_groups_apps_and_health_out(monkeypatch, tmp_path):
     reads, evidence = run_origins(monkeypatch, tmp_path, ",".join(PATTERNS))
     results, summary = evidence["results"], evidence["summary"]
-    assert reads == [True]
+    # Access restrictions are read only for apps an in-scope group reaches.
+    assert reads == [True, ["app-core"]]
     assert [a["name"] for a in results["production_apps"]] == ["app-core"]
     assert [h["origin_group"] for h in results["origin_health"]] == ["core", "shared", "spare", "unused"]
     assert summary["origin_metric_series_unmatched"] == 0
@@ -820,3 +822,106 @@ def test_origins_with_patterns_leave_qa_groups_apps_and_health_out(monkeypatch, 
     assert summary["scope_exclusion_patterns_unmatched"] == ["nothing.example.com"]
     assert summary["total_origin_groups"] == 4 and results["profiles"][0]["origin_group_count"] == 4
     assert {r["origin_group"] for r in results["app_service_origins"]} == {"core"}
+
+
+def with_secrets(c):
+    """Certificate secrets: one per in-scope domain, one only an excluded domain uses, one shared, one unused."""
+    def secret(name):
+        return {"id": f"{PROFILE_ID}/secrets/{name}", "name": name, "type": "CustomerCertificate", "subject": None,
+                "subject_alternative_names": [], "certificate_authority": None, "thumbprint": None,
+                "expiration_date": "2027-01-01T00:00:00Z", "key_vault_secret_id": None, "secret_version": None,
+                "use_latest_version": True}
+
+    uses = {"www.example.com": "s-www", "qa.example.com": "s-qa", "api.example.com": "s-shared",
+            "files.example.com": "s-shared"}
+    for d in c["custom_domains"]:
+        if d["host_name"] in uses:
+            d["secret_id"] = secret(uses[d["host_name"]])["id"]
+    c["secrets"] = [secret(n) for n in ("s-www", "s-qa", "s-shared", "s-unused")]
+    return c
+
+
+def test_tls_matches_route_names_and_keeps_only_in_scope_hosts_and_secrets():
+    scoped = tls.tls_for_profile(with_secrets(topology()), NOW, scope_exclusions(*PATTERNS, "*.azurefd.net", "nohost"))
+    routes = {r["route"]: r for r in scoped["routes"]}
+
+    assert sorted(routes) == ["core", "mixed", "shared-core"]
+    assert routes["mixed"]["hosts"] == ["api.example.com"]
+    assert [s["name"] for s in scoped["secrets"]] == ["s-www", "s-shared", "s-unused"]
+    secret = next(e for e in scoped["excluded"] if e["kind"] == "secret")
+    assert secret == {"kind": "secret", "name": "s-qa", "pattern": None, "reason": "only_excluded_domains", "profile": "p",
+                      "id": f"{PROFILE_ID}/secrets/s-qa", "custom_domains": ["qa.example.com"]}
+    routes_out = by_kind(scoped["excluded"])["route"]
+    assert ("nohost", "nohost", "name_matched") in routes_out and ("default", None, "all_hosts_excluded") in routes_out
+
+
+def test_tls_route_record_drops_out_of_scope_default_domain():
+    c = topology()
+    endpoint = c["endpoints"][0]
+    route = fd_route("both", ["www.example.com", "qa.example.com"], default_domain=True)
+    record = tls.route_record(c["profile"], endpoint, route, {fd.arm_key(d["id"]): d for d in c["custom_domains"]}, {},
+                              {fd.arm_key(endpoint["id"]): "*.azurefd.net", fd.arm_key(fd_domain("qa.example.com")["id"]): "qa.*"})
+    assert record["hosts"] == ["www.example.com"]
+    assert record["serves_endpoint_default_domain"] is False
+
+
+def test_waf_route_name_takes_out_its_host_routes():
+    scoped = coverage.coverage_for_profile(topology(), {}, scope_exclusions("mixed", "nohost"))
+    assert {h["route"] for h in scoped["host_routes"]} == {"core", "default", "shared-core", "qa-http", "qa", "files",
+                                                          "webdav-route"}
+    assert sorted((e["name"], e["route"], e["reason"]) for e in scoped["excluded"] if e["kind"] == "host_route") == [
+        ("api.example.com", "mixed", "route_excluded"), ("qa.example.com", "mixed", "route_excluded")]
+    assert scoped["route_count"] == 7 and scoped["endpoint_count"] == 1
+
+
+def run_main(module, name, monkeypatch, tmp_path, patterns, collected, **fakes):
+    for attr, fake in {
+        "resolve_subscription": lambda c: {"subscription_id": "s", "subscription_source": "env"},
+        "credential": lambda: object(),
+        "provider_registration_status": lambda *a: "registered",
+        "collect_profiles": lambda *a, **k: ([collected], {}),
+        "load_dotenv": lambda: None,
+        **fakes,
+    }.items():
+        monkeypatch.setattr(module, attr, fake)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    if patterns is None:
+        monkeypatch.delenv(module.SCOPE_EXCLUSIONS_ENV, raising=False)
+    else:
+        monkeypatch.setenv(module.SCOPE_EXCLUSIONS_ENV, patterns)
+    assert module.main() == 0
+    return json.loads((tmp_path / f"{name}_s.json").read_text())
+
+
+@pytest.mark.parametrize("patterns", [None, ",".join(PATTERNS)])
+def test_tls_main(monkeypatch, tmp_path, patterns):
+    evidence = run_main(tls, "azure_front_door_tls", monkeypatch, tmp_path, patterns, with_secrets(topology()))
+    summary, profile = evidence["summary"], evidence["results"]["profiles"][0]
+    if patterns is None:
+        assert evidence["results"]["excluded"] == []
+        assert all(summary[f"excluded_{k}s"] == 0 for k in tls.EXCLUDED_KINDS)
+        assert (summary["total_custom_domains"], summary["total_routes"], summary["certificate_secrets"]) == (5, 9, 4)
+    else:
+        assert {k: summary[f"excluded_{k}s"] for k in tls.EXCLUDED_KINDS} == {
+            "custom_domain": 3, "endpoint": 0, "route": 4, "secret": 1}
+        assert (summary["total_custom_domains"], summary["total_routes"], summary["certificate_secrets"]) == (2, 5, 3)
+        assert summary["scope_exclusion_patterns_unmatched"] == ["nothing.example.com"]
+    assert (profile["custom_domain_count"], profile["route_count"], profile["secret_count"]) == (
+        summary["total_custom_domains"], summary["total_routes"], summary["certificate_secrets"])
+
+
+@pytest.mark.parametrize("patterns", [None, ",".join(PATTERNS)])
+def test_waf_coverage_main(monkeypatch, tmp_path, patterns):
+    collected = {**topology(), "log_categories": [], "log_settings": []}
+    evidence = run_main(coverage, "azure_front_door_waf_coverage", monkeypatch, tmp_path, patterns, collected,
+                        collect_waf_policies=lambda *a: ([], fd.definition_index([])))
+    summary = evidence["summary"]
+    if patterns is None:
+        assert evidence["results"]["excluded"] == []
+        assert all(summary[f"excluded_{k}s"] == 0 for k in coverage.EXCLUDED_KINDS)
+        assert (summary["total_host_routes"], summary["total_routes"], summary["total_custom_domains"]) == (10, 9, 5)
+    else:
+        assert {k: summary[f"excluded_{k}s"] for k in coverage.EXCLUDED_KINDS} == {
+            "custom_domain": 3, "endpoint": 0, "route": 4, "host_route": 5}
+        assert (summary["total_host_routes"], summary["total_routes"], summary["total_custom_domains"]) == (5, 5, 2)
+        assert summary["unprotected_host_routes"] == 5 and summary["protected_host_route_percentage"] == 0

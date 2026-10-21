@@ -1165,6 +1165,7 @@ def main() -> int:
     plans_by_key: dict = {}
     configs_by_key: dict = {}
     metrics_by_profile: dict = {}
+    scoped_profiles: list[dict] = []
     days = lookback_days(collector)
     exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV)
     window = metrics_window(days, datetime.now(timezone.utc))
@@ -1179,12 +1180,17 @@ def main() -> int:
         hosts = sorted({str(o["host_name"]).lower() for o in origins if o["host_name"]})
         graph = graph_client(cred, collector)
         regions_by_id, regions_by_host = lookup_regions(graph, collector, ids, hosts)
+        # Scope first, so access restrictions are read only for apps an in-scope group reaches.
+        scoped_profiles = [profile_groups(c, regions_by_id, regions_by_host, exclusions) for c in collected]
+        out_of_scope = set().union(*(sp["excluded_groups"] for sp in scoped_profiles))
+        in_scope_origins = [o for c in collected for g in c["origin_groups"] if arm_key(g["id"]) not in out_of_scope
+                            for o in g["origins_projected"]]
         known_sites = [(o, origin_site_id(o, {})[0]) for o in origins]
         sites_by_key, sites_by_host = lookup_sites(
             graph, collector, subscription_id, sorted({k for _, k in known_sites if k}),
             sorted({str(o["host_name"]).lower() for o, k in known_sites if o["host_name"] and not k}),
         )
-        origin_sites = {origin_site_id(o, sites_by_host)[0] for o in origins} & set(sites_by_key)
+        origin_sites = {origin_site_id(o, sites_by_host)[0] for o in in_scope_origins} & set(sites_by_key)
         plans_by_key = lookup_plans(graph, collector, sorted({
             arm_key(s["server_farm_id"]) for s in sites_by_key.values() if s.get("server_farm_id")}))
         configs_by_key = read_site_configs(cred, collector, [sites_by_key[k] for k in sorted(origin_sites)])
@@ -1199,8 +1205,7 @@ def main() -> int:
         )
 
     profiles, groups, all_groups, excluded_groups, excluded = [], [], [], set(), []
-    for c in collected:
-        scoped = profile_groups(c, regions_by_id, regions_by_host, exclusions)
+    for c, scoped in zip(collected, scoped_profiles):
         in_scope = [g for g in scoped["groups"] if arm_key(g["id"]) not in scoped["excluded_groups"]]
         all_groups += scoped["groups"]
         groups += in_scope

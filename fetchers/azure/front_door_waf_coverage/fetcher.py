@@ -234,8 +234,9 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
 
 def coverage_for_profile(collected: dict, waf_by_key: dict, exclusions: ScopeExclusions | None = None) -> dict:
     profile, sps = collected["profile"], collected["security_policies"]
-    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions())
-    excluded_hosts = scope["hosts"]
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions(),
+                          match_route_names=True)
+    excluded_hosts, excluded_routes = scope["hosts"], scope["routes"]
     domains_by_key = {arm_key(d["id"]): d for d in collected["custom_domains"]}
     host_routes, endpoints_without_routes, routed, excluded = [], [], set(), list(scope["excluded"])
     for endpoint in collected["endpoints"]:
@@ -246,12 +247,15 @@ def coverage_for_profile(collected: dict, waf_by_key: dict, exclusions: ScopeExc
         for route in endpoint["routes"]:
             routed |= {arm_key(d["id"]) for d in route["custom_domains"]}
             for host in route_hosts(endpoint, route, domains_by_key):
+                context = {"profile": profile["name"], "endpoint": endpoint["name"], "route": route["name"],
+                           "host_kind": host["kind"]}
                 pattern = excluded_hosts.get(arm_key(host["id"]))
                 if pattern:
-                    excluded.append(excluded_item("host_route", host["host_name"], pattern, profile=profile["name"],
-                                                  endpoint=endpoint["name"], route=route["name"], host_kind=host["kind"]))
-                    continue
-                host_routes.append(host_route_record(profile, endpoint, route, host, sps, waf_by_key))
+                    excluded.append(excluded_item("host_route", host["host_name"], pattern, **context))
+                elif arm_key(route["id"]) in excluded_routes:
+                    excluded.append(excluded_item("host_route", host["host_name"], None, reason="route_excluded", **context))
+                else:
+                    host_routes.append(host_route_record(profile, endpoint, route, host, sps, waf_by_key))
     domains = [d for d in collected["custom_domains"] if arm_key(d["id"]) not in excluded_hosts]
     unrouted = [
         {"profile": profile["name"], "custom_domain": d["name"], "host_name": d["host_name"]}
@@ -263,8 +267,10 @@ def coverage_for_profile(collected: dict, waf_by_key: dict, exclusions: ScopeExc
         "endpoints_without_routes": endpoints_without_routes,
         "unrouted_custom_domains": unrouted,
         "excluded": excluded,
-        "endpoint_count": sum(1 for e in collected["endpoints"] if arm_key(e["id"]) not in excluded_hosts),
-        "route_count": sum(1 for e in collected["endpoints"] for r in e["routes"] if arm_key(r["id"]) not in scope["routes"]),
+        # An endpoint whose own host name is out of scope still counts while it carries an in-scope route.
+        "endpoint_count": sum(1 for e in collected["endpoints"] if arm_key(e["id"]) not in excluded_hosts
+                              or any(arm_key(r["id"]) not in excluded_routes for r in e["routes"])),
+        "route_count": sum(1 for e in collected["endpoints"] for r in e["routes"] if arm_key(r["id"]) not in excluded_routes),
         "custom_domain_count": len(domains),
     }
 
