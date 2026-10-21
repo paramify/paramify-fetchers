@@ -614,9 +614,12 @@ schemas and the `paramify` CLI — not the internal code.
     playbooks, alert grouping, Fusion, incident creation or the Defender XDR
     sync, don't count. Microsoft doesn't document what a person's update writes
     as the modifier, so any other modifier counts as a person, an unlisted
-    system included. Known only when every update since creation was read.
+    system included. Known only when the creation row was read; a later row
+    missing doesn't undo one already found.
   - `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
-    who made it), and `tasks` with status and completion time.
+    who made it), and `tasks` with status and completion time. Times are each
+    update's LastModifiedTime, and rows written at the same instant always sort
+    alike.
   - `hours_to_detect` (first activity to creation), `comments_count`,
     `classification_comment` and `related_analytic_rule_ids`.
   - the `entities` on its alerts, as kind and identifier, from SecurityAlert
@@ -628,10 +631,11 @@ schemas and the `paramify` CLI — not the internal code.
     id as `incidentId`.
   - `history_complete`: whether every update was read: the incident was created
     inside the history read, which starts at the lookback or SecurityIncident's
-    retention, whichever is later; its creation row was read; and, if its
-    `lastModifiedTimeUtc` is within the last hour, that update was read too. One
-    already acknowledged before its oldest update read has no acknowledgement
-    time rather than a late one.
+    retention, whichever is later; its creation row was read; and its latest row
+    read matches its current status, owner and severity and, if its
+    `lastModifiedTimeUtc` is within the last hour, is that recent. One already
+    acknowledged before its oldest update read has no acknowledgement time rather
+    than a late one.
 
   Each workspace gains `monthly`: per calendar month of the lookback, MTTD by
   month created, MTTA by month acknowledged and MTTR by month closed over the
@@ -648,17 +652,19 @@ schemas and the `paramify` CLI — not the internal code.
   read, the timeline fields, `monthly`, `acknowledged_incidents` and
   `open_unacknowledged` are `null` rather than empty. When close times can't be
   read, `close_time_status` is `unknown` and the close-time counts are `null`,
-  rather than every closed incident counting as missing. A missing
-  SecurityIncident table reads as empty only in a workspace that lists no
-  incidents; where incidents exist the table couldn't be read (table-level
-  access can hide it), so close times and history are unknown. The summary's
-  counts, existing ones included, are `null` when any workspace's incident list
-  failed or no workspace was collected, and the counts that can be unknown are
-  `null` when any workspace's value is. Each workspace also gains `limitations`:
-  in a workspace connected to Defender XDR, analysts usually work incidents in
-  the Defender portal, SecurityIncident then shows only the XDR sync's updates,
-  so those incidents read as not acknowledged, and their acknowledgement times
-  would need Defender XDR's own incident data, which this fetcher doesn't read.
+  rather than every closed incident counting as missing. A SecurityIncident
+  table the query can't find reads as empty only when the workspace lists no
+  incidents and ARM doesn't list the table. Otherwise table-level access hides
+  it: the run records an access failure and exits 1, and close times and history
+  are unknown. The summary's counts, existing ones included, are `null` when any
+  workspace's incident list failed, and the counts that can be unknown are
+  `null` when any workspace's value is; with no Sentinel workspace they are 0.
+  Each workspace also gains `limitations`: in a workspace connected to Defender
+  XDR, analysts usually work incidents in the Defender portal and
+  SecurityIncident shows mostly the XDR sync's updates, so those incidents read
+  as not acknowledged and an open one can count in `open_unacknowledged`; their
+  acknowledgement times would need Defender XDR's incident activity history,
+  which neither SecurityIncident nor Graph's `security/incidents` provides.
   Other existing fields are unchanged; KSI-PIY-RES is not mapped, since it isn't
   evidenceable.
 - **TUI fixes found while recording that walkthrough.** On a manifest with no
