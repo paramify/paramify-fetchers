@@ -200,6 +200,9 @@ def resolve_zone_links(record_sets: list[dict], zone_name: str) -> list[dict]:
         if not link:
             continue
         name, types = link
+        # A name with no record set here, such as one in a delegated child zone, is not a link.
+        if not any((name.lower(), t) in direct for t in types):
+            continue
         record["same_zone_target"] = name
         methods = {direct.get((name.lower(), t)) for t in types} - {None}
         if record["failover_method"] == "record_update" and len(methods) == 1:

@@ -175,7 +175,8 @@ def test_zone_links_follow_one_hop_only_and_survive_loops():
     assert records[("b", "CNAME")]["failover_method"] == "front_door"
     assert records[("a", "CNAME")]["failover_method"] == "record_update"
     assert {records[(n, "CNAME")]["failover_method"] for n in ("x", "y", "self", "gone")} == {"record_update"}
-    assert records[("gone", "CNAME")]["same_zone_target"] == "missing"
+    assert records[("gone", "CNAME")]["same_zone_target"] is None
+    assert records[("a", "CNAME")]["same_zone_target"] == "b"
 
 
 def test_zone_link_with_mixed_targets_stays_record_update():
@@ -196,6 +197,18 @@ def test_names_outside_the_zone_are_not_links():
         alias("A", f"{SUB}/Microsoft.Network/dnszones/other.com/A/@"),
     )
     assert all(r["same_zone_target"] is None for r in records.values())
+
+
+def test_name_with_no_record_set_in_the_zone_is_not_a_link():
+    records = resolved(
+        "example.com",
+        record_set("CNAME", name="www", cname_record=m.CnameRecord(cname="app.child.example.com")),
+        record_set("CNAME", name="api", cname_record=m.CnameRecord(cname="mail.example.com")),
+        record_set("MX", name="mail", mx_records=[m.MxRecord(preference=10, exchange="mx.example.net")]),
+    )
+    assert records[("www", "CNAME")]["same_zone_target"] is None
+    assert records[("api", "CNAME")]["same_zone_target"] is None
+    assert records[("www", "CNAME")]["failover_method"] == "record_update"
 
 
 @pytest.mark.parametrize("resource_id, arm_type", [

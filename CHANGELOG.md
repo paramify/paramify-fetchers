@@ -835,8 +835,9 @@ schemas and the `paramify` CLI — not the internal code.
   `cdn`, or `record_update` (a fixed target, so failing over means changing the
   record within its TTL). A record that points at another record set in the zone
   (an alias, or a CNAME to a name in the zone) takes that record set's method, one
-  link deep, and names it in `same_zone_target`. Dangling aliases and CNAMEs to
-  deleted hosts aren't detected. New summary fields count record sets by type,
+  link deep, and names it in `same_zone_target` when the zone holds a record set
+  of that name and type (a name in a delegated child zone isn't a link). Dangling
+  aliases and CNAMEs to deleted hosts aren't detected. New summary fields count record sets by type,
   aliases, empty endpoint records and endpoints by failover method; zones whose
   record sets can't be read are null and fail the run. Adds KSI-CNA-MAT,
   KSI-RPL-ABO and KSI-RPL-TRC. Existing fields and keys are unchanged.
