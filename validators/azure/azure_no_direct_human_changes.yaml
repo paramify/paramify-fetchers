@@ -1,0 +1,33 @@
+key: azure_no_direct_human_changes
+name: Azure Changes Made Only Through Pipelines, Not By People
+type: AUTOMATED
+role: configuration
+statement: >
+  No control-plane change in the subscription during the fetcher's lookback window
+  (up to 14 days) was made by a person outside a pipeline: no direct change whose
+  caller type is User (Portal, CLI, PowerShell, SDK or REST) and no change from an
+  ARM deployment a person ran by hand or through the Portal. Substantiates
+  KSI-CMT-RMV (changes are made by redeploying version-controlled resources, not by
+  direct modification). Does NOT prove that a human change matches an approved
+  emergency-change record (the client's record; a FAIL lists who changed what in
+  summary.direct_changes_by_changed_by and manual_deployment_changes_by_changed_by
+  for that comparison), that pipeline deployments came from reviewed
+  version-controlled commits, anything older than the lookback window, or direct
+  changes by applications or managed identities that are not listed pipeline
+  principals. A human change Azure recorded with no caller, or with an Unspecified or
+  System caller type even when it names a person, is treated as callerless
+  (unattributed_changes or platform_changes) and is not counted. A deployment named
+  like a Portal create wizard's counts as manual whoever ran it, which can fail this
+  for a pipeline that uses such a name.
+
+# Counts violations, so it CANNOT guard itself: zero matches is its pass condition.
+# `azure_change_provenance_breakdown_present` is its mandatory integrity partner.
+regex: '"direct_changes_by_changed_by_type":\s*\{[^}]*?"[Uu][Ss][Ee][Rr]":\s*[1-9]|"manual_deployment_changes":\s*[1-9]'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-CHANGE-PROVENANCE

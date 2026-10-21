@@ -1,0 +1,20 @@
+key: sentinel_incident_fields_present
+name: Azure Sentinel Incident Fields Present
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one incident was collected carrying all of created_time_utc, last_modified_time_utc,
+  owner_assigned_to, severity and status, so zero incidents missing them reflects the incidents rather
+  than renamed fields. Integrity partner of sentinel_incidents_all_assigned and
+  sentinel_incidents_severity_status_timestamps_set. Relies on the fetcher's sorted keys.
+
+# Gaps may cross flat objects (sentinel_incidents 0.2.0's entity and change lists), never an incident's closing brace.
+regex: '"created_time_utc":(?:[^{}]|\{[^{}]*\})*?"last_modified_time_utc":(?:[^{}]|\{[^{}]*\})*?"owner_assigned_to":(?:[^{}]|\{[^{}]*\})*?"severity":(?:[^{}]|\{[^{}]*\})*?"status":'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-INCIDENTS

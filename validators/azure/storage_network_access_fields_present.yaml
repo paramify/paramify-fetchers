@@ -1,0 +1,21 @@
+key: storage_network_access_fields_present
+name: Azure Storage Network Access Fields Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one storage account carries the firewall default action, private endpoint
+  list and public network access setting in the layout
+  storage_accounts_public_network_restricted reads, so its zero violations reflect
+  posture rather than a renamed key, a changed layout or an empty collection.
+
+# Same layout as the violation regex with any values; a key added, renamed or reordered stops both.
+# The optional group is storage_encryption_status 0.2.0's owner_tag and primary_location, each a string or null.
+regex: '"default_action":\s*"[^"]*"\s*\},(?:\s*"owner_tag":\s*(?:null|"(?:[^"\\]|\\.)*"),\s*"primary_location":\s*(?:null|"(?:[^"\\]|\\.)*"),)?\s*"private_endpoint_connections":\s*\[[^\]]*\],\s*"public_network_access":\s*(?:null|")'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-STORAGE-ENC

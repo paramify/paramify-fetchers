@@ -1,0 +1,19 @@
+key: azure_policy_recurrence_history_complete
+name: Azure Policy Recurrence History Fully Read
+type: AUTOMATED
+role: integrity
+statement: >
+  The 30-day Azure Policy history behind the recurrence count was read, and neither the
+  grouped history nor the per-pair timelines were cut short, so zero recurring pairs
+  means none recurred rather than that some went unread. Not a compliance claim.
+
+# Anchored at the document start, one lookahead per key; every key is summary-only.
+regex: '^\s*\{(?=[\s\S]*?"history_collected":\s*true)(?=[\s\S]*?"history_truncated":\s*false)(?=[\s\S]*?"recurrence_pairs_truncated":\s*false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-POLICY-COMPLIANCE

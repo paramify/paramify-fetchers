@@ -1,0 +1,25 @@
+key: azure_frontdoor_origins_cert_name_check
+name: Front Door Origins Enforce Certificate Name Check
+type: AUTOMATED
+role: configuration
+statement: >
+  No serving Front Door (Standard/Premium) origin group has an enabled origin
+  with certificate name checking switched off, and at least one origin group
+  serves traffic. The "disabled certificate-name validation" part of "fail
+  unauthenticated Front Door origins, shared secrets or disabled certificate-name
+  validation" (KSI-SVC-VCM). It does not assert that Front Door forwards to the
+  origin over HTTPS (a separate TLS check), and unused origin groups are not
+  evaluated.
+
+regex: '"serving_groups_certificate_name_check_disabled":\s*(?<serving_groups_certificate_name_check_disabled>\d+),[^{}]*?"serving_origin_groups":\s*(?<serving_origin_groups>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-FRONTDOOR-ORIGINS

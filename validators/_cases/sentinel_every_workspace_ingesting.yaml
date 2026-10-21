@@ -1,0 +1,17 @@
+validator: sentinel_every_workspace_ingesting
+cases:
+  - name: sources_ingesting
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"data_connectors_total": 1,"name": "law-a","sentinel_onboarded": true,"source_tables": ["AuditLogs","AzureActivity","CommonSecurityLog","Syslog","SigninLogs","SecurityEvent"],"sources_ingesting": 6}]},"summary": {"min_sources_ingesting": 6,"workspaces_collected": 1,"workspaces_with_no_sources": 0,"workspaces_without_sentinel": 0}}}'
+
+  - name: workspace_with_no_sources
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"data_connectors_total": 1,"name": "law-a","sentinel_onboarded": true,"source_tables": [],"sources_ingesting": 0}]},"summary": {"min_sources_ingesting": 0,"workspaces_collected": 1,"workspaces_with_no_sources": 1,"workspaces_without_sentinel": 0}}}'
+
+  - name: not_collected
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"data_connectors_total": 1,"name": "law-a","sentinel_onboarded": true,"source_tables": ["AuditLogs","AzureActivity","CommonSecurityLog","Syslog","SigninLogs","SecurityEvent"],"sources_ingesting": 6}]},"summary": {"min_sources_ingesting": null,"workspaces_collected": 1,"workspaces_with_no_sources": 0,"workspaces_without_sentinel": 0}}}'
+
+  - name: key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"data_connectors_total": 1,"name": "law-a","sentinel_onboarded": true,"source_tables": ["AuditLogs","AzureActivity","CommonSecurityLog","Syslog","SigninLogs","SecurityEvent"],"sources_ingesting": 6}]},"summary": {"min_sources": 6,"workspaces_collected": 1,"workspaces_with_no_sources": 0,"workspaces_without_sentinel": 0}}}'

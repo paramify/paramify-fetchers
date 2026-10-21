@@ -1,0 +1,27 @@
+key: azure_nsg_no_any_any_allow_rules
+name: Azure NSGs Have No Any-to-Any Allow Rules
+type: AUTOMATED
+role: configuration
+statement: >
+  No custom NSG rule, inbound or outbound, allows traffic from any source to any
+  destination on every port. Any source or destination is *, Internet, 0.0.0.0/0 or
+  ::/0 (as the single prefix or one of the listed prefixes); every port is *, 0-65535
+  or 1-65535; any protocol but Icmp counts. Default (platform) rules are excluded,
+  since every NSG carries them; their AllowInternetOutBound is judged by
+  azure_nsg_internet_egress_restricted. Substantiates KSI-CNA-RNT, "fail any/any
+  rules unless covered by an approved unexpired exception". Does not read the
+  exception list, does not merge split port ranges (0-1023 plus 1024-65535 is not
+  caught), and does not see Azure Firewall rules.
+
+# Counts violations, so it cannot guard itself: azure_nsg_rule_fields_present is
+# its integrity partner. Each match is one rule object; custom rules are told from
+# default ones by the /securityRules/ segment of their id (ARM's form for custom rules).
+regex: '\{(?=[^{}]*"id":\s*"[^"]*/[sS]ecurity[rR]ules/)(?=[^{}]*"access":\s*"Allow")(?=[^{}]*"protocol":\s*"(?![iI][cC][mM][pP]")[^"]*")(?=[^{}]*(?:"destination_port_range":\s*"(?:\*|0-65535|1-65535)"|"destination_port_ranges":\s*\[[^\]]*"(?:\*|0-65535|1-65535)"))(?=[^{}]*(?:"source_address_prefix":\s*"(?:\*|Internet|0\.0\.0\.0/0|::/0)"|"source_address_prefixes":\s*\[[^\]]*"(?:\*|Internet|0\.0\.0\.0/0|::/0)"))(?=[^{}]*(?:"destination_address_prefix":\s*"(?:\*|Internet|0\.0\.0\.0/0|::/0)"|"destination_address_prefixes":\s*\[[^\]]*"(?:\*|Internet|0\.0\.0\.0/0|::/0)"))[^{}]*\}'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-NSG

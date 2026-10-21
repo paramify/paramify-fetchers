@@ -1,0 +1,27 @@
+validator: sqlmi_user_databases_all_tde_enabled
+cases:
+  - name: every_user_database_tde_on
+    expect: PASS
+    note: system databases carry tde_enabled null and are not counted.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","all_user_databases_tde_enabled":true,"databases":[{"name":"master","is_system_database":true,"tde_enabled":null},{"name":"app","is_system_database":false,"tde_enabled":true}]},{"name":"mi-b","all_user_databases_tde_enabled":true,"databases":[{"name":"app2","is_system_database":false,"tde_enabled":true}]}]}}}'
+
+  - name: one_database_tde_off
+    expect: FAIL
+    note: a common non-compliant shape.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","all_user_databases_tde_enabled":true},{"name":"mi-b","all_user_databases_tde_enabled":false,"tde_disabled_user_databases":1,"databases":[{"name":"app2","is_system_database":false,"tde_state":"Disabled","tde_enabled":false}]}]}}}'
+
+  - name: tde_state_unread
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{"managed_instances":[{"name":"mi-a","all_user_databases_tde_enabled":null,"tde_unknown_user_databases":1}]}}}'
+
+  - name: instance_without_user_databases
+    expect: FAIL
+    note: nothing to prove reads as not proven, never as encrypted.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","all_user_databases_tde_enabled":null,"total_user_databases":0}]}}}'
+
+  - name: flag_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. sqlmi_encryption_fields_present fails here; see
+      set_EVD-AZURE-SQLMI-ENCRYPTION.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","tde_all_enabled":false}]}}}'

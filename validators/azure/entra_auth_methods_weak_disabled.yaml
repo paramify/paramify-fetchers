@@ -1,0 +1,22 @@
+key: entra_auth_methods_weak_disabled
+name: Entra Weak Sign-In Methods Disabled
+type: AUTOMATED
+role: configuration
+statement: >-
+  The authentication methods policy was read, SMS and Voice call are both disabled in
+  it, and its migration is complete, so the legacy per-user MFA and SSPR policies
+  cannot re-allow them. Substantiates that weak, phone-based methods cannot be used to
+  sign in (KSI-IAM-APM). Does not cover email one-time passcode, software OATH, app
+  passwords or methods allowed by a federated identity provider, and fails on an SMS
+  or Voice method enabled for an excepted group.
+
+# Both flags are null when the policy could not be read, so an unreadable policy fails.
+regex: '"summary":\s*\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"legacy_method_policies_apply":\s*false)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"weak_method_enabled":\s*false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-AUTH-METHODS-POLICY

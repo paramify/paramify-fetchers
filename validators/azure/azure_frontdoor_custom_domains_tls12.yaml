@@ -1,0 +1,30 @@
+key: azure_frontdoor_custom_domains_tls12
+name: Front Door Custom Domains Enforce TLS 1.2+
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Front Door (Standard/Premium) custom domain that a serving route uses
+  enforces a TLS floor of 1.2 or higher (from its cipher-suite set or customized
+  minimum version), none has an unknown floor, and at least one is served. The
+  Front Door share of "every App Service, Front Door domain, SQL MI and storage
+  endpoint enforces TLS 1.2 or higher" (KSI-SVC-SIN). It does not assert that
+  routes refuse plain HTTP, which ciphers are allowed, or certificate validity
+  (a separate "fail HTTP, weak TLS/ciphers, expired certificates" check),
+  and endpoint default domains (*.azurefd.net) carry no TLS setting of their own,
+  so they rest on the platform's TLS policy and are not evaluated.
+
+regex: '"served_custom_domains":\s*(?<served_custom_domains>[1-9]\d*),[^{}]*?"served_domains_below_tls12":\s*(?<served_domains_below_tls12>\d+),[^{}]*?"served_domains_tls_floor_unknown":\s*(?<served_domains_tls_floor_unknown>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-FRONTDOOR-TLS

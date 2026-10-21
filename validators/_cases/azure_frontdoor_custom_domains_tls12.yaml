@@ -1,0 +1,21 @@
+validator: azure_frontdoor_custom_domains_tls12
+cases:
+  - name: all_served_domains_tls12
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"domains_by_cipher_suite_set": {"TLS12_2022": 3}, "served_custom_domains": 3, "served_domains_below_tls12": 0, "served_domains_certificate_expired": 0, "served_domains_minimum_tls13": 0, "served_domains_tls_floor_unknown": 0, "served_domains_validation_not_approved": 0, "serving_routes": 2}}}'
+
+  - name: one_domain_tls10
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"domains_by_cipher_suite_set": {"TLS12_2022": 3}, "served_custom_domains": 3, "served_domains_below_tls12": 1, "served_domains_certificate_expired": 0, "served_domains_minimum_tls13": 0, "served_domains_tls_floor_unknown": 0, "served_domains_validation_not_approved": 0, "serving_routes": 2}}}'
+
+  - name: one_domain_floor_unknown
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"domains_by_cipher_suite_set": {"TLS12_2022": 3}, "served_custom_domains": 3, "served_domains_below_tls12": 0, "served_domains_certificate_expired": 0, "served_domains_minimum_tls13": 0, "served_domains_tls_floor_unknown": 1, "served_domains_validation_not_approved": 0, "serving_routes": 2}}}'
+
+  - name: no_served_domains
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"domains_by_cipher_suite_set": {"TLS12_2022": 0}, "served_custom_domains": 0, "served_domains_below_tls12": 0, "served_domains_certificate_expired": 0, "served_domains_minimum_tls13": 0, "served_domains_tls_floor_unknown": 0, "served_domains_validation_not_approved": 0, "serving_routes": 2}}}'
+
+  - name: rollup_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"domains_by_cipher_suite_set": {"TLS12_2022": 3}, "served_custom_domains": 3, "served_domains_weak_tls": 1, "served_domains_certificate_expired": 0, "served_domains_minimum_tls13": 0, "served_domains_tls_floor_unknown": 0, "served_domains_validation_not_approved": 0, "serving_routes": 2}}}'

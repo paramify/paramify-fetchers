@@ -1,0 +1,9 @@
+evidence_set: EVD-AZURE-ENTRA-AUTH-METHODS-POLICY
+cases:
+  - name: weak_methods_off
+    expect: PASS
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"authentication_methods":[]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","MicrosoftAuthenticator"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"phishing_resistant_methods_enabled":["Fido2"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1"}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":1,"status":"failed","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":true,"api_failures":[]},"results":{"authentication_methods":[]},"summary":{"authentication_methods_policy_readable":false,"enabled_methods":null,"sms_enabled":null,"voice_enabled":null,"weak_methods_enabled":null,"weak_method_enabled":null,"phishing_resistant_methods_enabled":null,"phishing_resistant_method_enabled":null,"policy_migration_state":null,"legacy_method_policies_apply":null,"security_defaults_enabled":false,"entra_id_tier":"p1"}}}'

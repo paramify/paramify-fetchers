@@ -1,0 +1,27 @@
+key: azure_appsvc_plans_no_single_instance
+name: App Service Plans Hosting Apps Run 2+ Instances
+type: AUTOMATED
+role: configuration
+statement: >
+  Every App Service plan that hosts at least one site runs two or more
+  provisioned instances, is a platform-scaled tier (Consumption, Flex
+  Consumption, Elastic Premium), or has App Service automatic scaling on with a
+  maximum burst above one instance. A fixed single-instance plan, including any
+  Free or Shared plan, fails. The App Service plan share of "fail App Service
+  plans without adequate scaling capacity" (KSI-CNA-RVP). It does not read
+  Azure Monitor autoscale settings (Microsoft.Insights/autoscalesettings are not
+  collected), so a one-instance plan scaled that way still fails; it does not
+  judge whether the instance count is enough for the workload, or zone
+  redundancy; and every plan in the subscription, including one hosting only
+  stopped apps, is treated as production.
+
+# Violation count (partner: azure_appsvc_plans_capacity_fields_present); the keys sit in one flat run of the sorted plan record.
+regex: '"elastic_scale_enabled":\s*(?:false|true,[^{}\[\]]*?"maximum_elastic_worker_count":\s*(?:null|[01])),[^{}\[\]]*?"multi_instance":\s*false,[^{}\[\]]*?"platform_scaled":\s*false,[^{}\[\]]*?"sites":\s*\[\s*\{'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-APPSVC-PLANS

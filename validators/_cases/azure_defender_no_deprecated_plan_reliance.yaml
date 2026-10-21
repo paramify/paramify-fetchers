@@ -1,0 +1,821 @@
+validator: azure_defender_no_deprecated_plan_reliance
+cases:
+  - name: dns_beside_servers_p2
+    expect: PASS
+    note: "Dns redundant beside VirtualMachines P2, Container Registry beside Containers"
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"ContainerSensor":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"FullyCovered","sub_plan":"P2"}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService"],"deprecated_plans_enabled":{"ContainerRegistry":["Containers"],"Dns":["VirtualMachines"]},"enabled_plan_enablement_times":{"AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","ContainerRegistry":"2026-01-27T14:48:19Z","Containers":"2025-06-02T09:31:07Z","CosmosDbs":"2025-08-19T21:14:55Z","Dns":"2026-01-27T14:48:19Z","KeyVaults":"2025-03-11T16:05:42Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z","VirtualMachines":"2025-03-11T16:05:42Z"},"enabled_plan_sub_plans":{"AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"ContainerRegistry":null,"Containers":null,"CosmosDbs":null,"Dns":null,"KeyVaults":"PerKeyVault","OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount","VirtualMachines":"P2"},"enabled_plans":["AppServices","Arm","CloudPosture","ContainerRegistry","Containers","CosmosDbs","Dns","KeyVaults","OpenSourceRelationalDatabases","SqlServers","StorageAccounts","VirtualMachines"],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":4,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["AI","Api","SqlServerVirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":2,"provider_registration_status":"registered","standard_tier_percentage":75,"standard_tier_plans":12,"total_enabled_extensions":2,"total_plans":16}},"schema_version":"1.0"}'
+
+  - name: dns_beside_servers_p2_pretty_printed
+    expect: PASS
+    artifact: '{
+        "metadata": {
+          "evidence_set": {
+            "reference_id": "EVD-AZURE-DEFENDER"
+          },
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "partial_failure": false
+          },
+          "results": {
+            "defender_plans": [
+              {
+                "deprecated": false,
+                "enabled": false,
+                "enablement_time": null,
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Free",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI",
+                "resource_name": "AI",
+                "resources_coverage_status": "NotCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": false,
+                "enablement_time": null,
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Free",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api",
+                "resource_name": "Api",
+                "resources_coverage_status": "NotCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-03-11T16:05:42Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices",
+                "resource_name": "AppServices",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-03-11T16:05:42Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm",
+                "resource_name": "Arm",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": "PerSubscription"
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-06-02T09:31:07Z",
+                "enforce": null,
+                "extensions": {
+                  "SensitiveDataDiscovery": true
+                },
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture",
+                "resource_name": "CloudPosture",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": true,
+                "enabled": true,
+                "enablement_time": "2026-01-27T14:48:19Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [
+                  "Containers"
+                ],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry",
+                "resource_name": "ContainerRegistry",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-06-02T09:31:07Z",
+                "enforce": null,
+                "extensions": {
+                  "ContainerSensor": true
+                },
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers",
+                "resource_name": "Containers",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-08-19T21:14:55Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs",
+                "resource_name": "CosmosDbs",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": true,
+                "enabled": true,
+                "enablement_time": "2026-01-27T14:48:19Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [
+                  "VirtualMachines"
+                ],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns",
+                "resource_name": "Dns",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-03-11T16:05:42Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults",
+                "resource_name": "KeyVaults",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": "PerKeyVault"
+              },
+              {
+                "deprecated": true,
+                "enabled": false,
+                "enablement_time": null,
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Free",
+                "replaced_by": [
+                  "Containers"
+                ],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService",
+                "resource_name": "KubernetesService",
+                "resources_coverage_status": "NotCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-08-19T21:14:55Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases",
+                "resource_name": "OpenSourceRelationalDatabases",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": false,
+                "enablement_time": null,
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Free",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines",
+                "resource_name": "SqlServerVirtualMachines",
+                "resources_coverage_status": "NotCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-03-11T16:05:42Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers",
+                "resource_name": "SqlServers",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-03-11T16:05:42Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts",
+                "resource_name": "StorageAccounts",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": "PerStorageAccount"
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-03-11T16:05:42Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines",
+                "resource_name": "VirtualMachines",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": "P2"
+              }
+            ],
+            "provider_registration_status": "registered"
+          },
+          "summary": {
+            "deprecated_plans": [
+              "ContainerRegistry",
+              "Dns",
+              "KubernetesService"
+            ],
+            "deprecated_plans_enabled": {
+              "ContainerRegistry": [
+                "Containers"
+              ],
+              "Dns": [
+                "VirtualMachines"
+              ]
+            },
+            "enabled_plan_enablement_times": {
+              "AppServices": "2025-03-11T16:05:42Z",
+              "Arm": "2025-03-11T16:05:42Z",
+              "CloudPosture": "2025-06-02T09:31:07Z",
+              "ContainerRegistry": "2026-01-27T14:48:19Z",
+              "Containers": "2025-06-02T09:31:07Z",
+              "CosmosDbs": "2025-08-19T21:14:55Z",
+              "Dns": "2026-01-27T14:48:19Z",
+              "KeyVaults": "2025-03-11T16:05:42Z",
+              "OpenSourceRelationalDatabases": "2025-08-19T21:14:55Z",
+              "SqlServers": "2025-03-11T16:05:42Z",
+              "StorageAccounts": "2025-03-11T16:05:42Z",
+              "VirtualMachines": "2025-03-11T16:05:42Z"
+            },
+            "enabled_plan_sub_plans": {
+              "AppServices": null,
+              "Arm": "PerSubscription",
+              "CloudPosture": null,
+              "ContainerRegistry": null,
+              "Containers": null,
+              "CosmosDbs": null,
+              "Dns": null,
+              "KeyVaults": "PerKeyVault",
+              "OpenSourceRelationalDatabases": null,
+              "SqlServers": null,
+              "StorageAccounts": "PerStorageAccount",
+              "VirtualMachines": "P2"
+            },
+            "enabled_plans": [
+              "AppServices",
+              "Arm",
+              "CloudPosture",
+              "ContainerRegistry",
+              "Containers",
+              "CosmosDbs",
+              "Dns",
+              "KeyVaults",
+              "OpenSourceRelationalDatabases",
+              "SqlServers",
+              "StorageAccounts",
+              "VirtualMachines"
+            ],
+            "enabled_plans_not_fully_covered": {},
+            "enforced_plans": [],
+            "free_tier_plans": 4,
+            "inherited_plans": [],
+            "plans_inherited_from_management_group": [],
+            "plans_not_enabled": [
+              "AI",
+              "Api",
+              "SqlServerVirtualMachines"
+            ],
+            "plans_reporting_inheritance": 0,
+            "plans_with_enabled_extensions": 2,
+            "provider_registration_status": "registered",
+            "standard_tier_percentage": 75,
+            "standard_tier_plans": 12,
+            "total_enabled_extensions": 2,
+            "total_plans": 16
+          }
+        },
+        "schema_version": "1.0"
+      }'
+
+  - name: no_deprecated_plan_on
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"FullyCovered","sub_plan":"P1"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"ContainerSensor":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"FullyCovered","sub_plan":"P1"}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService"],"deprecated_plans_enabled":{},"enabled_plan_enablement_times":{"AI":"2026-01-27T14:48:19Z","Api":"2026-01-27T14:48:19Z","AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","Containers":"2025-06-02T09:31:07Z","CosmosDbs":"2025-08-19T21:14:55Z","KeyVaults":"2025-03-11T16:05:42Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z","VirtualMachines":"2025-03-11T16:05:42Z"},"enabled_plan_sub_plans":{"AI":null,"Api":"P1","AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"Containers":null,"CosmosDbs":null,"KeyVaults":"PerKeyVault","OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount","VirtualMachines":"P1"},"enabled_plans":["AI","Api","AppServices","Arm","CloudPosture","Containers","CosmosDbs","KeyVaults","OpenSourceRelationalDatabases","SqlServers","StorageAccounts","VirtualMachines"],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":4,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["SqlServerVirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":2,"provider_registration_status":"registered","standard_tier_percentage":75,"standard_tier_plans":12,"total_enabled_extensions":2,"total_plans":16}},"schema_version":"1.0"}'
+
+  - name: container_registry_beside_containers
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"FullyCovered","sub_plan":"P1"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"ContainerSensor":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"FullyCovered","sub_plan":"P1"}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService"],"deprecated_plans_enabled":{"ContainerRegistry":["Containers"]},"enabled_plan_enablement_times":{"AI":"2026-01-27T14:48:19Z","Api":"2026-01-27T14:48:19Z","AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","ContainerRegistry":"2026-01-27T14:48:19Z","Containers":"2025-06-02T09:31:07Z","CosmosDbs":"2025-08-19T21:14:55Z","KeyVaults":"2025-03-11T16:05:42Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z","VirtualMachines":"2025-03-11T16:05:42Z"},"enabled_plan_sub_plans":{"AI":null,"Api":"P1","AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"ContainerRegistry":null,"Containers":null,"CosmosDbs":null,"KeyVaults":"PerKeyVault","OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount","VirtualMachines":"P1"},"enabled_plans":["AI","Api","AppServices","Arm","CloudPosture","ContainerRegistry","Containers","CosmosDbs","KeyVaults","OpenSourceRelationalDatabases","SqlServers","StorageAccounts","VirtualMachines"],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":3,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["SqlServerVirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":2,"provider_registration_status":"registered","standard_tier_percentage":81,"standard_tier_plans":13,"total_enabled_extensions":2,"total_plans":16}},"schema_version":"1.0"}'
+
+  - name: two_replacements_both_on
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"FullyCovered","sub_plan":"P1"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"ContainerSensor":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["Containers","CosmosDbs"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/LegacyPlan","resource_name":"LegacyPlan","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"FullyCovered","sub_plan":"P1"}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService","LegacyPlan"],"deprecated_plans_enabled":{"LegacyPlan":["Containers","CosmosDbs"]},"enabled_plan_enablement_times":{"AI":"2026-01-27T14:48:19Z","Api":"2026-01-27T14:48:19Z","AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","Containers":"2025-06-02T09:31:07Z","CosmosDbs":"2025-08-19T21:14:55Z","KeyVaults":"2025-03-11T16:05:42Z","LegacyPlan":"2026-01-27T14:48:19Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z","VirtualMachines":"2025-03-11T16:05:42Z"},"enabled_plan_sub_plans":{"AI":null,"Api":"P1","AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"Containers":null,"CosmosDbs":null,"KeyVaults":"PerKeyVault","LegacyPlan":null,"OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount","VirtualMachines":"P1"},"enabled_plans":["AI","Api","AppServices","Arm","CloudPosture","Containers","CosmosDbs","KeyVaults","LegacyPlan","OpenSourceRelationalDatabases","SqlServers","StorageAccounts","VirtualMachines"],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":4,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["SqlServerVirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":2,"provider_registration_status":"registered","standard_tier_percentage":76,"standard_tier_plans":13,"total_enabled_extensions":2,"total_plans":17}},"schema_version":"1.0"}'
+
+  - name: dns_on_servers_off
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"ContainerSensor":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService"],"deprecated_plans_enabled":{"ContainerRegistry":["Containers"],"Dns":["VirtualMachines"]},"enabled_plan_enablement_times":{"AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","ContainerRegistry":"2026-01-27T14:48:19Z","Containers":"2025-06-02T09:31:07Z","CosmosDbs":"2025-08-19T21:14:55Z","Dns":"2026-01-27T14:48:19Z","KeyVaults":"2025-03-11T16:05:42Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z"},"enabled_plan_sub_plans":{"AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"ContainerRegistry":null,"Containers":null,"CosmosDbs":null,"Dns":null,"KeyVaults":"PerKeyVault","OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount"},"enabled_plans":["AppServices","Arm","CloudPosture","ContainerRegistry","Containers","CosmosDbs","Dns","KeyVaults","OpenSourceRelationalDatabases","SqlServers","StorageAccounts"],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":5,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["AI","Api","SqlServerVirtualMachines","VirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":2,"provider_registration_status":"registered","standard_tier_percentage":68,"standard_tier_plans":11,"total_enabled_extensions":2,"total_plans":16}},"schema_version":"1.0"}'
+
+  - name: dns_on_servers_off_pretty_printed
+    expect: FAIL
+    artifact: '{
+        "metadata": {
+          "evidence_set": {
+            "reference_id": "EVD-AZURE-DEFENDER"
+          },
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "partial_failure": false
+          },
+          "results": {
+            "defender_plans": [
+              {
+                "deprecated": false,
+                "enabled": false,
+                "enablement_time": null,
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Free",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI",
+                "resource_name": "AI",
+                "resources_coverage_status": "NotCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": false,
+                "enablement_time": null,
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Free",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api",
+                "resource_name": "Api",
+                "resources_coverage_status": "NotCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-03-11T16:05:42Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices",
+                "resource_name": "AppServices",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-03-11T16:05:42Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm",
+                "resource_name": "Arm",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": "PerSubscription"
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-06-02T09:31:07Z",
+                "enforce": null,
+                "extensions": {
+                  "SensitiveDataDiscovery": true
+                },
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture",
+                "resource_name": "CloudPosture",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": true,
+                "enabled": true,
+                "enablement_time": "2026-01-27T14:48:19Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [
+                  "Containers"
+                ],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry",
+                "resource_name": "ContainerRegistry",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-06-02T09:31:07Z",
+                "enforce": null,
+                "extensions": {
+                  "ContainerSensor": true
+                },
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers",
+                "resource_name": "Containers",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-08-19T21:14:55Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs",
+                "resource_name": "CosmosDbs",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": true,
+                "enabled": true,
+                "enablement_time": "2026-01-27T14:48:19Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [
+                  "VirtualMachines"
+                ],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns",
+                "resource_name": "Dns",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-03-11T16:05:42Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults",
+                "resource_name": "KeyVaults",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": "PerKeyVault"
+              },
+              {
+                "deprecated": true,
+                "enabled": false,
+                "enablement_time": null,
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Free",
+                "replaced_by": [
+                  "Containers"
+                ],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService",
+                "resource_name": "KubernetesService",
+                "resources_coverage_status": "NotCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-08-19T21:14:55Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases",
+                "resource_name": "OpenSourceRelationalDatabases",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": false,
+                "enablement_time": null,
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Free",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines",
+                "resource_name": "SqlServerVirtualMachines",
+                "resources_coverage_status": "NotCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-03-11T16:05:42Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers",
+                "resource_name": "SqlServers",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": null
+              },
+              {
+                "deprecated": false,
+                "enabled": true,
+                "enablement_time": "2025-03-11T16:05:42Z",
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Standard",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts",
+                "resource_name": "StorageAccounts",
+                "resources_coverage_status": "FullyCovered",
+                "sub_plan": "PerStorageAccount"
+              },
+              {
+                "deprecated": false,
+                "enabled": false,
+                "enablement_time": null,
+                "enforce": null,
+                "extensions": {},
+                "free_trial_remaining_time": "P0D",
+                "inherited": null,
+                "inherited_from": null,
+                "inherited_from_scope": null,
+                "pricing_tier": "Free",
+                "replaced_by": [],
+                "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines",
+                "resource_name": "VirtualMachines",
+                "resources_coverage_status": "NotCovered",
+                "sub_plan": null
+              }
+            ],
+            "provider_registration_status": "registered"
+          },
+          "summary": {
+            "deprecated_plans": [
+              "ContainerRegistry",
+              "Dns",
+              "KubernetesService"
+            ],
+            "deprecated_plans_enabled": {
+              "ContainerRegistry": [
+                "Containers"
+              ],
+              "Dns": [
+                "VirtualMachines"
+              ]
+            },
+            "enabled_plan_enablement_times": {
+              "AppServices": "2025-03-11T16:05:42Z",
+              "Arm": "2025-03-11T16:05:42Z",
+              "CloudPosture": "2025-06-02T09:31:07Z",
+              "ContainerRegistry": "2026-01-27T14:48:19Z",
+              "Containers": "2025-06-02T09:31:07Z",
+              "CosmosDbs": "2025-08-19T21:14:55Z",
+              "Dns": "2026-01-27T14:48:19Z",
+              "KeyVaults": "2025-03-11T16:05:42Z",
+              "OpenSourceRelationalDatabases": "2025-08-19T21:14:55Z",
+              "SqlServers": "2025-03-11T16:05:42Z",
+              "StorageAccounts": "2025-03-11T16:05:42Z"
+            },
+            "enabled_plan_sub_plans": {
+              "AppServices": null,
+              "Arm": "PerSubscription",
+              "CloudPosture": null,
+              "ContainerRegistry": null,
+              "Containers": null,
+              "CosmosDbs": null,
+              "Dns": null,
+              "KeyVaults": "PerKeyVault",
+              "OpenSourceRelationalDatabases": null,
+              "SqlServers": null,
+              "StorageAccounts": "PerStorageAccount"
+            },
+            "enabled_plans": [
+              "AppServices",
+              "Arm",
+              "CloudPosture",
+              "ContainerRegistry",
+              "Containers",
+              "CosmosDbs",
+              "Dns",
+              "KeyVaults",
+              "OpenSourceRelationalDatabases",
+              "SqlServers",
+              "StorageAccounts"
+            ],
+            "enabled_plans_not_fully_covered": {},
+            "enforced_plans": [],
+            "free_tier_plans": 5,
+            "inherited_plans": [],
+            "plans_inherited_from_management_group": [],
+            "plans_not_enabled": [
+              "AI",
+              "Api",
+              "SqlServerVirtualMachines",
+              "VirtualMachines"
+            ],
+            "plans_reporting_inheritance": 0,
+            "plans_with_enabled_extensions": 2,
+            "provider_registration_status": "registered",
+            "standard_tier_percentage": 68,
+            "standard_tier_plans": 11,
+            "total_enabled_extensions": 2,
+            "total_plans": 16
+          }
+        },
+        "schema_version": "1.0"
+      }'
+
+  - name: dns_on_servers_p1
+    expect: FAIL
+    note: "DNS alerts are part of Defender for Servers Plan 2 only"
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"ContainerSensor":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"FullyCovered","sub_plan":"P1"}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService"],"deprecated_plans_enabled":{"ContainerRegistry":["Containers"],"Dns":["VirtualMachines"]},"enabled_plan_enablement_times":{"AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","ContainerRegistry":"2026-01-27T14:48:19Z","Containers":"2025-06-02T09:31:07Z","CosmosDbs":"2025-08-19T21:14:55Z","Dns":"2026-01-27T14:48:19Z","KeyVaults":"2025-03-11T16:05:42Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z","VirtualMachines":"2025-03-11T16:05:42Z"},"enabled_plan_sub_plans":{"AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"ContainerRegistry":null,"Containers":null,"CosmosDbs":null,"Dns":null,"KeyVaults":"PerKeyVault","OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount","VirtualMachines":"P1"},"enabled_plans":["AppServices","Arm","CloudPosture","ContainerRegistry","Containers","CosmosDbs","Dns","KeyVaults","OpenSourceRelationalDatabases","SqlServers","StorageAccounts","VirtualMachines"],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":4,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["AI","Api","SqlServerVirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":2,"provider_registration_status":"registered","standard_tier_percentage":75,"standard_tier_plans":12,"total_enabled_extensions":2,"total_plans":16}},"schema_version":"1.0"}'
+
+  - name: second_entry_relied_on
+    expect: FAIL
+    note: "Dns is fine; KubernetesService is on with Containers off"
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"FullyCovered","sub_plan":"P2"}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService"],"deprecated_plans_enabled":{"Dns":["VirtualMachines"],"KubernetesService":["Containers"]},"enabled_plan_enablement_times":{"AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","CosmosDbs":"2025-08-19T21:14:55Z","Dns":"2026-01-27T14:48:19Z","KeyVaults":"2025-03-11T16:05:42Z","KubernetesService":"2026-01-27T14:48:19Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z","VirtualMachines":"2025-03-11T16:05:42Z"},"enabled_plan_sub_plans":{"AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"CosmosDbs":null,"Dns":null,"KeyVaults":"PerKeyVault","KubernetesService":null,"OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount","VirtualMachines":"P2"},"enabled_plans":["AppServices","Arm","CloudPosture","CosmosDbs","Dns","KeyVaults","KubernetesService","OpenSourceRelationalDatabases","SqlServers","StorageAccounts","VirtualMachines"],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":5,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["AI","Api","Containers","SqlServerVirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":1,"provider_registration_status":"registered","standard_tier_percentage":68,"standard_tier_plans":11,"total_enabled_extensions":1,"total_plans":16}},"schema_version":"1.0"}'
+
+  - name: replacement_matched_by_prefix_only
+    expect: FAIL
+    note: "ContainersX is on, Containers is not"
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"FullyCovered","sub_plan":"P1"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainersX","resource_name":"ContainersX","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"FullyCovered","sub_plan":"P1"}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService"],"deprecated_plans_enabled":{"ContainerRegistry":["Containers"]},"enabled_plan_enablement_times":{"AI":"2026-01-27T14:48:19Z","Api":"2026-01-27T14:48:19Z","AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","ContainerRegistry":"2026-01-27T14:48:19Z","ContainersX":"2026-01-27T14:48:19Z","CosmosDbs":"2025-08-19T21:14:55Z","KeyVaults":"2025-03-11T16:05:42Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z","VirtualMachines":"2025-03-11T16:05:42Z"},"enabled_plan_sub_plans":{"AI":null,"Api":"P1","AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"ContainerRegistry":null,"ContainersX":null,"CosmosDbs":null,"KeyVaults":"PerKeyVault","OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount","VirtualMachines":"P1"},"enabled_plans":["AI","Api","AppServices","Arm","CloudPosture","ContainerRegistry","ContainersX","CosmosDbs","KeyVaults","OpenSourceRelationalDatabases","SqlServers","StorageAccounts","VirtualMachines"],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":4,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["Containers","SqlServerVirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":1,"provider_registration_status":"registered","standard_tier_percentage":76,"standard_tier_plans":13,"total_enabled_extensions":1,"total_plans":17}},"schema_version":"1.0"}'
+
+  - name: deprecated_with_no_replacement
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"FullyCovered","sub_plan":"P1"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"ContainerSensor":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/LegacyPlan","resource_name":"LegacyPlan","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"FullyCovered","sub_plan":"P1"}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService","LegacyPlan"],"deprecated_plans_enabled":{"LegacyPlan":[]},"enabled_plan_enablement_times":{"AI":"2026-01-27T14:48:19Z","Api":"2026-01-27T14:48:19Z","AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","Containers":"2025-06-02T09:31:07Z","CosmosDbs":"2025-08-19T21:14:55Z","KeyVaults":"2025-03-11T16:05:42Z","LegacyPlan":"2026-01-27T14:48:19Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z","VirtualMachines":"2025-03-11T16:05:42Z"},"enabled_plan_sub_plans":{"AI":null,"Api":"P1","AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"Containers":null,"CosmosDbs":null,"KeyVaults":"PerKeyVault","LegacyPlan":null,"OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount","VirtualMachines":"P1"},"enabled_plans":["AI","Api","AppServices","Arm","CloudPosture","Containers","CosmosDbs","KeyVaults","LegacyPlan","OpenSourceRelationalDatabases","SqlServers","StorageAccounts","VirtualMachines"],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":4,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["SqlServerVirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":2,"provider_registration_status":"registered","standard_tier_percentage":76,"standard_tier_plans":13,"total_enabled_extensions":2,"total_plans":17}},"schema_version":"1.0"}'
+
+  - name: two_replacements_one_off
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"FullyCovered","sub_plan":"P1"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"ContainerSensor":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["Containers","CosmosDbs"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/LegacyPlan","resource_name":"LegacyPlan","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"FullyCovered","sub_plan":"P1"}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService","LegacyPlan"],"deprecated_plans_enabled":{"LegacyPlan":["Containers","CosmosDbs"]},"enabled_plan_enablement_times":{"AI":"2026-01-27T14:48:19Z","Api":"2026-01-27T14:48:19Z","AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","Containers":"2025-06-02T09:31:07Z","KeyVaults":"2025-03-11T16:05:42Z","LegacyPlan":"2026-01-27T14:48:19Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z","VirtualMachines":"2025-03-11T16:05:42Z"},"enabled_plan_sub_plans":{"AI":null,"Api":"P1","AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"Containers":null,"KeyVaults":"PerKeyVault","LegacyPlan":null,"OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount","VirtualMachines":"P1"},"enabled_plans":["AI","Api","AppServices","Arm","CloudPosture","Containers","KeyVaults","LegacyPlan","OpenSourceRelationalDatabases","SqlServers","StorageAccounts","VirtualMachines"],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":5,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["CosmosDbs","SqlServerVirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":2,"provider_registration_status":"registered","standard_tier_percentage":70,"standard_tier_plans":12,"total_enabled_extensions":2,"total_plans":17}},"schema_version":"1.0"}'
+
+  - name: provider_not_registered
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[],"provider_registration_status":"not_registered"},"summary":{"deprecated_plans":[],"deprecated_plans_enabled":{},"enabled_plan_enablement_times":{},"enabled_plan_sub_plans":{},"enabled_plans":[],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":0,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":[],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":0,"provider_registration_status":"not_registered","standard_tier_percentage":0,"standard_tier_plans":0,"total_enabled_extensions":0,"total_plans":0}},"schema_version":"1.0"}'
+
+  - name: registered_but_no_plans
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[],"provider_registration_status":"registered"},"summary":{"deprecated_plans":[],"deprecated_plans_enabled":{},"enabled_plan_enablement_times":{},"enabled_plan_sub_plans":{},"enabled_plans":[],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":0,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":[],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":0,"provider_registration_status":"registered","standard_tier_percentage":0,"standard_tier_plans":0,"total_enabled_extensions":0,"total_plans":0}},"schema_version":"1.0"}'
+
+  - name: map_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"FullyCovered","sub_plan":"P1"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"ContainerSensor":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"FullyCovered","sub_plan":"P1"}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService"],"enabled_deprecated":{},"enabled_plan_enablement_times":{"AI":"2026-01-27T14:48:19Z","Api":"2026-01-27T14:48:19Z","AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","Containers":"2025-06-02T09:31:07Z","CosmosDbs":"2025-08-19T21:14:55Z","KeyVaults":"2025-03-11T16:05:42Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z","VirtualMachines":"2025-03-11T16:05:42Z"},"enabled_plan_sub_plans":{"AI":null,"Api":"P1","AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"Containers":null,"CosmosDbs":null,"KeyVaults":"PerKeyVault","OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount","VirtualMachines":"P1"},"enabled_plans":["AI","Api","AppServices","Arm","CloudPosture","Containers","CosmosDbs","KeyVaults","OpenSourceRelationalDatabases","SqlServers","StorageAccounts","VirtualMachines"],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":4,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["SqlServerVirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":2,"provider_registration_status":"registered","standard_tier_percentage":75,"standard_tier_plans":12,"total_enabled_extensions":2,"total_plans":16}},"schema_version":"1.0"}'
+
+  - name: enabled_plans_key_renamed_with_dns_on
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"ContainerSensor":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"FullyCovered","sub_plan":"P2"}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService"],"deprecated_plans_enabled":{"ContainerRegistry":["Containers"],"Dns":["VirtualMachines"]},"enabled_plan_enablement_times":{"AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","ContainerRegistry":"2026-01-27T14:48:19Z","Containers":"2025-06-02T09:31:07Z","CosmosDbs":"2025-08-19T21:14:55Z","Dns":"2026-01-27T14:48:19Z","KeyVaults":"2025-03-11T16:05:42Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z","VirtualMachines":"2025-03-11T16:05:42Z"},"enabled_plan_sub_plans":{"AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"ContainerRegistry":null,"Containers":null,"CosmosDbs":null,"Dns":null,"KeyVaults":"PerKeyVault","OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount","VirtualMachines":"P2"},"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":4,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["AI","Api","SqlServerVirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":2,"provider_registration_status":"registered","standard_plans":["AppServices","Arm","CloudPosture","ContainerRegistry","Containers","CosmosDbs","Dns","KeyVaults","OpenSourceRelationalDatabases","SqlServers","StorageAccounts","VirtualMachines"],"standard_tier_percentage":75,"standard_tier_plans":12,"total_enabled_extensions":2,"total_plans":16}},"schema_version":"1.0"}'
+
+  - name: sub_plans_key_renamed_with_dns_on
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-DEFENDER"},"exit_code":0,"status":"success"},"payload":{"metadata":{"partial_failure":false},"results":{"defender_plans":[{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AI","resource_name":"AI","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Api","resource_name":"Api","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/AppServices","resource_name":"AppServices","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Arm","resource_name":"Arm","resources_coverage_status":"FullyCovered","sub_plan":"PerSubscription"},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"SensitiveDataDiscovery":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CloudPosture","resource_name":"CloudPosture","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/ContainerRegistry","resource_name":"ContainerRegistry","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-06-02T09:31:07Z","enforce":null,"extensions":{"ContainerSensor":true},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Containers","resource_name":"Containers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/CosmosDbs","resource_name":"CosmosDbs","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":true,"enabled":true,"enablement_time":"2026-01-27T14:48:19Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":["VirtualMachines"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/Dns","resource_name":"Dns","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KeyVaults","resource_name":"KeyVaults","resources_coverage_status":"FullyCovered","sub_plan":"PerKeyVault"},{"deprecated":true,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":["Containers"],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/KubernetesService","resource_name":"KubernetesService","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-08-19T21:14:55Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/OpenSourceRelationalDatabases","resource_name":"OpenSourceRelationalDatabases","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":false,"enablement_time":null,"enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Free","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServerVirtualMachines","resource_name":"SqlServerVirtualMachines","resources_coverage_status":"NotCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/SqlServers","resource_name":"SqlServers","resources_coverage_status":"FullyCovered","sub_plan":null},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/StorageAccounts","resource_name":"StorageAccounts","resources_coverage_status":"FullyCovered","sub_plan":"PerStorageAccount"},{"deprecated":false,"enabled":true,"enablement_time":"2025-03-11T16:05:42Z","enforce":null,"extensions":{},"free_trial_remaining_time":"P0D","inherited":null,"inherited_from":null,"inherited_from_scope":null,"pricing_tier":"Standard","replaced_by":[],"resource_id":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Security/pricings/VirtualMachines","resource_name":"VirtualMachines","resources_coverage_status":"FullyCovered","sub_plan":"P2"}],"provider_registration_status":"registered"},"summary":{"deprecated_plans":["ContainerRegistry","Dns","KubernetesService"],"deprecated_plans_enabled":{"ContainerRegistry":["Containers"],"Dns":["VirtualMachines"]},"enabled_plan_enablement_times":{"AppServices":"2025-03-11T16:05:42Z","Arm":"2025-03-11T16:05:42Z","CloudPosture":"2025-06-02T09:31:07Z","ContainerRegistry":"2026-01-27T14:48:19Z","Containers":"2025-06-02T09:31:07Z","CosmosDbs":"2025-08-19T21:14:55Z","Dns":"2026-01-27T14:48:19Z","KeyVaults":"2025-03-11T16:05:42Z","OpenSourceRelationalDatabases":"2025-08-19T21:14:55Z","SqlServers":"2025-03-11T16:05:42Z","StorageAccounts":"2025-03-11T16:05:42Z","VirtualMachines":"2025-03-11T16:05:42Z"},"enabled_plans":["AppServices","Arm","CloudPosture","ContainerRegistry","Containers","CosmosDbs","Dns","KeyVaults","OpenSourceRelationalDatabases","SqlServers","StorageAccounts","VirtualMachines"],"enabled_plans_not_fully_covered":{},"enforced_plans":[],"free_tier_plans":4,"inherited_plans":[],"plans_inherited_from_management_group":[],"plans_not_enabled":["AI","Api","SqlServerVirtualMachines"],"plans_reporting_inheritance":0,"plans_with_enabled_extensions":2,"provider_registration_status":"registered","standard_tier_percentage":75,"standard_tier_plans":12,"sub_plans":{"AppServices":null,"Arm":"PerSubscription","CloudPosture":null,"ContainerRegistry":null,"Containers":null,"CosmosDbs":null,"Dns":null,"KeyVaults":"PerKeyVault","OpenSourceRelationalDatabases":null,"SqlServers":null,"StorageAccounts":"PerStorageAccount","VirtualMachines":"P2"},"total_enabled_extensions":2,"total_plans":16}},"schema_version":"1.0"}'

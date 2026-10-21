@@ -1,0 +1,27 @@
+key: azure_policy_member_effects_resolved
+name: Azure Policy Member Policy Effects All Resolved
+type: AUTOMATED
+role: integrity
+statement: >
+  Every member policy of every Azure Policy assignment had its effect resolved, so no
+  enforcing effect is hiding inside a partially resolved initiative. A DoNotEnforce
+  initiative whose deployIfNotExists or modify members could not be read is classed
+  by its resolved members and reads as nothing held back; this fails it instead.
+  Complements azure_policy_assignment_effects_resolved, which catches assignments
+  where nothing resolved (including an initiative whose definition was unreadable).
+  Not a compliance claim.
+
+# member_policy_effect_counts is a flat {effect: count} map that always carries
+# "unresolved" once any assignment exists; no assignments leaves nothing to match.
+regex: '"member_policy_effect_counts":\s*\{[^{}]*?"unresolved":\s*(?<unresolved_members>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-POLICY-ASSIGN

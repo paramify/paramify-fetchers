@@ -1,0 +1,110 @@
+validator: storage_accounts_public_network_restricted
+cases:
+  - name: disabled_or_firewall_deny
+    expect: PASS
+    note: Disabled takes precedence over a leftover Allow; Enabled with Deny allows only selected networks.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","network_rule_set":{"bypass":"AzureServices","default_action":"Allow"},"private_endpoint_connections":[{"id":"/pe/1","name":"pe1","type":"t"}],"public_network_access":"Disabled"},{"name":"sa2","network_rule_set":{"bypass":"None","default_action":"Deny"},"private_endpoint_connections":[],"public_network_access":"Enabled"}]}}}'
+
+  - name: unset_with_firewall_deny
+    expect: PASS
+    note: unset can mean at most Enabled, and Enabled with Deny passes, so the verdict rests on the firewall default the fetcher records.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","network_rule_set":{"bypass":"AzureServices","default_action":"Deny"},"private_endpoint_connections":[],"public_network_access":null}]}}}'
+
+  - name: firewall_deny_pretty_printed_with_private_endpoints
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {"results": {"storage_accounts": [
+          {
+            "name": "sa1",
+            "network_rule_set": {
+              "bypass": "AzureServices",
+              "default_action": "Deny"
+            },
+            "private_endpoint_connections": [
+              {"id": "/pe/1", "name": "pe1", "type": "t"},
+              {"id": "/pe/2", "name": "pe2", "type": "t"}
+            ],
+            "public_network_access":   "Enabled"
+          }
+        ]}}
+      }
+
+  - name: enabled_and_open_to_all_networks
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","network_rule_set":{"bypass":"AzureServices","default_action":"Deny"},"private_endpoint_connections":[],"public_network_access":"Enabled"},{"name":"sa2","network_rule_set":{"bypass":"AzureServices","default_action":"Allow"},"private_endpoint_connections":[],"public_network_access":"Enabled"}]}}}'
+
+  - name: unset_and_open_to_all_networks
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","network_rule_set":{"bypass":"AzureServices","default_action":"Allow"},"private_endpoint_connections":[],"public_network_access":null}]}}}'
+
+  - name: private_endpoint_but_public_still_open
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","network_rule_set":{"bypass":"AzureServices","default_action":"Allow"},"private_endpoint_connections":[{"id":"/pe/1","name":"pe1","type":"t"}],"public_network_access":"Enabled"}]}}}'
+
+  - name: secured_by_perimeter_with_allow_is_not_proven
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","network_rule_set":{"bypass":"AzureServices","default_action":"Allow"},"private_endpoint_connections":[],"public_network_access":"SecuredByPerimeter"}]}}}'
+
+  - name: open_account_after_a_disabled_one_pretty_printed
+    expect: FAIL
+    note: a compliant account beside an open one must not hide it.
+    artifact: |
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {"results": {"storage_accounts": [
+          {"name": "sa1", "network_rule_set": {"bypass": "None", "default_action": "Allow"},
+           "private_endpoint_connections": [], "public_network_access": "Disabled"},
+          {"name": "sa2", "network_rule_set": {"bypass": "None", "default_action": "Allow"},
+           "private_endpoint_connections": [], "public_network_access": "Enabled"}
+        ]}}
+      }
+
+  - name: open_account_with_nested_list_in_private_endpoint
+    expect: FAIL
+    note: a list field inside a private endpoint entry must not drop the account out of the count.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","network_rule_set":{"bypass":"None","default_action":"Allow"},"private_endpoint_connections":[{"group_ids":["blob","file"],"id":"/pe/1","name":"pe1","type":"t"}],"public_network_access":"Enabled"}]}}}'
+
+  - name: nested_list_disabled_account_does_not_splice_into_next
+    expect: PASS
+    note: the token stops at the account's own public_network_access, and never crosses the next account's default_action.
+    artifact: |
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {"results": {"storage_accounts": [
+          {"name": "sa1", "network_rule_set": {"bypass": "None", "default_action": "Allow"},
+           "private_endpoint_connections": [{"group_ids": ["blob"], "id": "/pe/1"}],
+           "public_network_access": "Disabled"},
+          {"name": "sa2", "network_rule_set": {"bypass": "None", "default_action": "Deny"},
+           "private_endpoint_connections": [], "public_network_access": "Enabled"}
+        ]}}
+      }
+
+  - name: public_access_key_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. storage_network_access_fields_present fails here; see
+      set_EVD-AZURE-STORAGE-ENC.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","network_rule_set":{"bypass":"None","default_action":"Allow"},"private_endpoint_connections":[],"public_access":"Enabled"}]}}}'
+
+  - name: rule_set_layout_changed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. A new key after default_action breaks the adjacency this regex
+      reads; storage_network_access_fields_present fails on the same change.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","network_rule_set":{"bypass":"None","default_action":"Allow","ip_rules":[]},"private_endpoint_connections":[],"public_network_access":"Enabled"}]}}}'
+
+  - name: v0_2_0_restricted_accounts
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"storage_accounts":[{"access_key_max_age_days":41,"access_keys":[{"age_days":41,"created":"2026-08-10T12:00:00Z","exceeds_expiration_period":false,"name":"key1"},{"age_days":41,"created":"2026-08-10T12:00:00Z","exceeds_expiration_period":false,"name":"key2"}],"access_keys_within_expiration_period":true,"allow_blob_public_access":false,"allow_cross_tenant_replication":false,"allow_shared_key_access":false,"blob_properties":null,"classification_tag":"internal","containers":null,"containers_status":"not_attempted","customer_managed_key":false,"default_to_entra_authorization":true,"enable_https_traffic_only":true,"encryption_type":"Microsoft.Storage","file_service_properties":null,"geo_redundant":false,"geo_replication_stats":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stdata01","infrastructure_encryption":false,"key_expiration_period_in_days":90,"last_geo_failover_time":null,"location":"westus3","minimum_tls_version":"TLS1_2","name":"stdata01","network_rule_set":{"bypass":"AzureServices","default_action":"Deny"},"owner_tag":"platform-team","primary_location":"westus3","private_endpoint_connections":[{"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stdata01/privateEndpointConnections/pe-blob","name":"pe-blob","type":"Microsoft.Storage/storageAccounts/privateEndpointConnections"}],"public_network_access":"Enabled","read_access_secondary":false,"replication_settings":"Standard_ZRS","resource_group":"rg-data","secondary_location":null,"status_of_primary":"available","status_of_secondary":null,"tags":{"classification":"internal","owner":"platform-team"}},{"access_key_max_age_days":41,"access_keys":[{"age_days":41,"created":"2026-08-10T12:00:00Z","exceeds_expiration_period":false,"name":"key1"},{"age_days":41,"created":"2026-08-10T12:00:00Z","exceeds_expiration_period":false,"name":"key2"}],"access_keys_within_expiration_period":true,"allow_blob_public_access":false,"allow_cross_tenant_replication":false,"allow_shared_key_access":false,"blob_properties":null,"classification_tag":"internal","containers":null,"containers_status":"not_attempted","customer_managed_key":false,"default_to_entra_authorization":true,"enable_https_traffic_only":true,"encryption_type":"Microsoft.Storage","file_service_properties":null,"geo_redundant":false,"geo_replication_stats":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stdata02","infrastructure_encryption":false,"key_expiration_period_in_days":90,"last_geo_failover_time":null,"location":"westus3","minimum_tls_version":"TLS1_2","name":"stdata02","network_rule_set":{"bypass":"AzureServices","default_action":"Allow"},"owner_tag":null,"primary_location":"westus3","private_endpoint_connections":[],"public_network_access":"Disabled","read_access_secondary":false,"replication_settings":"Standard_ZRS","resource_group":"rg-data","secondary_location":null,"status_of_primary":"available","status_of_secondary":null,"tags":{}}]}}}'
+
+  - name: v0_2_0_open_account
+    expect: FAIL
+    note: the 0.2.0 keys between the rule set and the private endpoint list must not hide an open account.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"storage_accounts":[{"access_key_max_age_days":41,"access_keys":[{"age_days":41,"created":"2026-08-10T12:00:00Z","exceeds_expiration_period":false,"name":"key1"},{"age_days":41,"created":"2026-08-10T12:00:00Z","exceeds_expiration_period":false,"name":"key2"}],"access_keys_within_expiration_period":true,"allow_blob_public_access":false,"allow_cross_tenant_replication":false,"allow_shared_key_access":false,"blob_properties":null,"classification_tag":"internal","containers":null,"containers_status":"not_attempted","customer_managed_key":false,"default_to_entra_authorization":true,"enable_https_traffic_only":true,"encryption_type":"Microsoft.Storage","file_service_properties":null,"geo_redundant":false,"geo_replication_stats":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stdata01","infrastructure_encryption":false,"key_expiration_period_in_days":90,"last_geo_failover_time":null,"location":"westus3","minimum_tls_version":"TLS1_2","name":"stdata01","network_rule_set":{"bypass":"AzureServices","default_action":"Deny"},"owner_tag":"platform-team","primary_location":"westus3","private_endpoint_connections":[{"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stdata01/privateEndpointConnections/pe-blob","name":"pe-blob","type":"Microsoft.Storage/storageAccounts/privateEndpointConnections"}],"public_network_access":"Enabled","read_access_secondary":false,"replication_settings":"Standard_ZRS","resource_group":"rg-data","secondary_location":null,"status_of_primary":"available","status_of_secondary":null,"tags":{"classification":"internal","owner":"platform-team"}},{"access_key_max_age_days":41,"access_keys":[{"age_days":41,"created":"2026-08-10T12:00:00Z","exceeds_expiration_period":false,"name":"key1"},{"age_days":41,"created":"2026-08-10T12:00:00Z","exceeds_expiration_period":false,"name":"key2"}],"access_keys_within_expiration_period":true,"allow_blob_public_access":false,"allow_cross_tenant_replication":false,"allow_shared_key_access":false,"blob_properties":null,"classification_tag":"internal","containers":null,"containers_status":"not_attempted","customer_managed_key":false,"default_to_entra_authorization":true,"enable_https_traffic_only":true,"encryption_type":"Microsoft.Storage","file_service_properties":null,"geo_redundant":false,"geo_replication_stats":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stdata02","infrastructure_encryption":false,"key_expiration_period_in_days":90,"last_geo_failover_time":null,"location":"westus3","minimum_tls_version":"TLS1_2","name":"stdata02","network_rule_set":{"bypass":"AzureServices","default_action":"Allow"},"owner_tag":null,"primary_location":"westus3","private_endpoint_connections":[],"public_network_access":"Disabled","read_access_secondary":false,"replication_settings":"Standard_ZRS","resource_group":"rg-data","secondary_location":null,"status_of_primary":"available","status_of_secondary":null,"tags":{}},{"access_key_max_age_days":41,"access_keys":[{"age_days":41,"created":"2026-08-10T12:00:00Z","exceeds_expiration_period":false,"name":"key1"},{"age_days":41,"created":"2026-08-10T12:00:00Z","exceeds_expiration_period":false,"name":"key2"}],"access_keys_within_expiration_period":true,"allow_blob_public_access":false,"allow_cross_tenant_replication":false,"allow_shared_key_access":false,"blob_properties":null,"classification_tag":"internal","containers":null,"containers_status":"not_attempted","customer_managed_key":false,"default_to_entra_authorization":true,"enable_https_traffic_only":true,"encryption_type":"Microsoft.Storage","file_service_properties":null,"geo_redundant":false,"geo_replication_stats":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stdata03","infrastructure_encryption":false,"key_expiration_period_in_days":90,"last_geo_failover_time":null,"location":"westus3","minimum_tls_version":"TLS1_2","name":"stdata03","network_rule_set":{"bypass":"AzureServices","default_action":"Allow"},"owner_tag":"platform-team","primary_location":"westus3","private_endpoint_connections":[],"public_network_access":"Enabled","read_access_secondary":false,"replication_settings":"Standard_ZRS","resource_group":"rg-data","secondary_location":null,"status_of_primary":"available","status_of_secondary":null,"tags":{"classification":"internal","owner":"platform-team"}}]}}}'
+
+  - name: v0_2_0_open_account_with_quoted_owner_tag
+    expect: FAIL
+    note: an escaped quote in the owner tag must not hide the account either.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"storage_accounts":[{"access_key_max_age_days":41,"access_keys":[{"age_days":41,"created":"2026-08-10T12:00:00Z","exceeds_expiration_period":false,"name":"key1"},{"age_days":41,"created":"2026-08-10T12:00:00Z","exceeds_expiration_period":false,"name":"key2"}],"access_keys_within_expiration_period":true,"allow_blob_public_access":false,"allow_cross_tenant_replication":false,"allow_shared_key_access":false,"blob_properties":null,"classification_tag":"internal","containers":null,"containers_status":"not_attempted","customer_managed_key":false,"default_to_entra_authorization":true,"enable_https_traffic_only":true,"encryption_type":"Microsoft.Storage","file_service_properties":null,"geo_redundant":false,"geo_replication_stats":null,"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stdata03","infrastructure_encryption":false,"key_expiration_period_in_days":90,"last_geo_failover_time":null,"location":"westus3","minimum_tls_version":"TLS1_2","name":"stdata03","network_rule_set":{"bypass":"AzureServices","default_action":"Allow"},"owner_tag":"data \"blue\" team","primary_location":"westus3","private_endpoint_connections":[],"public_network_access":null,"read_access_secondary":false,"replication_settings":"Standard_ZRS","resource_group":"rg-data","secondary_location":null,"status_of_primary":"available","status_of_secondary":null,"tags":{"classification":"internal","owner":"data \"blue\" team"}}]}}}'

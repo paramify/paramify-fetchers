@@ -1,0 +1,18 @@
+key: sentinel_workspace_onboarded
+name: Azure Sentinel Workspace Onboarded
+type: AUTOMATED
+role: configuration
+statement: >
+  At least one Log Analytics workspace in the subscription is onboarded to Microsoft Sentinel and was
+  collected (the fetcher counts only Sentinel workspaces). Substantiates 'Sentinel is onboarded' for
+  KSI-MLA-OSM (Continuous Monitoring Strategy). A null or zero count fails.
+
+regex: '"workspaces_collected":\s*[1-9]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-DATA-SOURCES

@@ -1,0 +1,31 @@
+key: azure_inventory_all_resources_policy_evaluated
+name: Every Inventoried Resource Evaluated by Azure Policy
+type: AUTOMATED
+role: configuration
+statement: >
+  Every resource in the subscription's Resource Graph inventory whose type Azure Policy
+  evaluates anywhere in the subscription has at least one policy state (any compliance
+  state, including Exempt and Unknown, counts as evaluated), and the only resource types
+  with no policy state on any resource are on the approved list (default: Marketplace SaaS
+  resources, microsoft.saas/resources). Substantiates the Azure Policy half of "every
+  deployed resource is assessed by Defender and Azure Policy" (KSI-MLA-EVC), "every
+  in-scope Azure resource appears in Azure Policy assessment results" (KSI-CNA-EIS), and
+  the per-resource Policy coverage half of KSI-SVC-EIS. A failed policy-state query (null
+  flag), an empty inventory, or Policy evaluating nothing fails. Does NOT prove the
+  resources are compliant, that the assignments enforce (azure_policy_assignments) or
+  remediate (azure_policy_compliance), that each resource is evaluated by an enforcing
+  effect (a resource whose only policy states are Exempt, or audit-only, counts as
+  evaluated: that is appearing in Policy results, not enforcing coverage), that the
+  inventory equals the system boundary, resource groups or the subscription itself, or
+  other subscriptions.
+
+# Form A over the summary: the flag must read true and the unevaluated-types map may hold only allowlisted types.
+regex: '^\s*\{(?=[\s\S]*?"all_evaluable_resources_evaluated_by_policy":\s*true)(?=[\s\S]*?"types_without_policy_evaluation":\s*\{(?:\s*"(?:microsoft\.saas/resources)":\s*\d+\s*,?)*\s*\})'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-RESOURCE-INVENTORY

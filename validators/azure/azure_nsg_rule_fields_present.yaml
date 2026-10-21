@@ -1,0 +1,20 @@
+key: azure_nsg_rule_fields_present
+name: Azure NSG Rule Fields Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one NSG rule record carries every field azure_nsg_no_any_any_allow_rules
+  reads (id, access, protocol, the singular and plural port and address-prefix
+  fields), so a zero count of any-to-any rules reflects the rules rather than a
+  renamed field. Default rules count, since every NSG has them: this also fails when
+  the subscription has no NSG at all.
+
+regex: '\{(?=[^{}]*"id":\s*"[^"]*/(?:default[sS]|[sS])ecurity[rR]ules/)(?=[^{}]*"access":)(?=[^{}]*"protocol":)(?=[^{}]*"destination_port_range":)(?=[^{}]*"destination_port_ranges":)(?=[^{}]*"source_address_prefix":)(?=[^{}]*"source_address_prefixes":)(?=[^{}]*"destination_address_prefix":)(?=[^{}]*"destination_address_prefixes":)[^{}]*\}'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-NSG

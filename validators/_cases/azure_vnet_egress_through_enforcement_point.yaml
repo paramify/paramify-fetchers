@@ -1,0 +1,39 @@
+validator: azure_vnet_egress_through_enforcement_point
+cases:
+  - name: appliance_gateway_and_private_only
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"subnets":[]},"summary":{"network_interfaces_by_egress_path":{"appliance":6,"blackhole":0,"default_outbound":0,"gateway":0,"mixed":0,"nat_gateway":0,"none":1,"other":0,"platform_managed":0,"public_ip":0,"virtual_hub_unresolved":0},"workload_subnets":8,"workload_subnets_by_egress_path":{"appliance":5,"blackhole":0,"default_outbound":0,"gateway":1,"nat_gateway":0,"none":2,"other":0,"virtual_hub_unresolved":0},"workload_subnets_with_internet_bypass_routes":0}}}'
+
+  - name: subnets_on_default_outbound
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"subnets":[]},"summary":{"network_interfaces_by_egress_path":{"appliance":6,"blackhole":0,"default_outbound":0,"gateway":0,"mixed":0,"nat_gateway":0,"none":1,"other":0,"platform_managed":0,"public_ip":0,"virtual_hub_unresolved":0},"workload_subnets":8,"workload_subnets_by_egress_path":{"appliance":5,"blackhole":0,"default_outbound":3,"gateway":1,"nat_gateway":0,"none":2,"other":0,"virtual_hub_unresolved":0},"workload_subnets_with_internet_bypass_routes":0}}}'
+
+  - name: subnet_via_nat_gateway
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"subnets":[]},"summary":{"network_interfaces_by_egress_path":{"appliance":6,"blackhole":0,"default_outbound":0,"gateway":0,"mixed":0,"nat_gateway":0,"none":1,"other":0,"platform_managed":0,"public_ip":0,"virtual_hub_unresolved":0},"workload_subnets":8,"workload_subnets_by_egress_path":{"appliance":5,"blackhole":0,"default_outbound":0,"gateway":1,"nat_gateway":1,"none":2,"other":0,"virtual_hub_unresolved":0},"workload_subnets_with_internet_bypass_routes":0}}}'
+
+  - name: virtual_hub_unresolved
+    expect: FAIL
+    note: >
+      A spoke whose hub could not be read: its egress is unknown, so it must not pass.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"subnets":[]},"summary":{"network_interfaces_by_egress_path":{"appliance":6,"blackhole":0,"default_outbound":0,"gateway":0,"mixed":0,"nat_gateway":0,"none":1,"other":0,"platform_managed":0,"public_ip":0,"virtual_hub_unresolved":0},"workload_subnets":8,"workload_subnets_by_egress_path":{"appliance":5,"blackhole":0,"default_outbound":0,"gateway":1,"nat_gateway":0,"none":2,"other":0,"virtual_hub_unresolved":1},"workload_subnets_with_internet_bypass_routes":0}}}'
+
+  - name: default_outbound_renamed
+    expect: FAIL
+    note: >
+      The NIC rollup still carries default_outbound; the lookahead must not reach into it.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"subnets":[]},"summary":{"network_interfaces_by_egress_path":{"appliance":6,"blackhole":0,"default_outbound":0,"gateway":0,"mixed":0,"nat_gateway":0,"none":1,"other":0,"platform_managed":0,"public_ip":0,"virtual_hub_unresolved":0},"workload_subnets":8,"workload_subnets_by_egress_path":{"appliance":5,"blackhole":0,"implicit_outbound":0,"gateway":1,"nat_gateway":0,"none":2,"other":0,"virtual_hub_unresolved":0},"workload_subnets_with_internet_bypass_routes":0}}}'
+
+  - name: rollup_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"subnets":[]},"summary":{"network_interfaces_by_egress_path":{"appliance":6,"blackhole":0,"default_outbound":0,"gateway":0,"mixed":0,"nat_gateway":0,"none":1,"other":0,"platform_managed":0,"public_ip":0,"virtual_hub_unresolved":0},"workload_subnets":8,"subnets_by_path":{"appliance":5,"blackhole":0,"default_outbound":0,"gateway":1,"nat_gateway":0,"none":2,"other":0,"virtual_hub_unresolved":0},"workload_subnets_with_internet_bypass_routes":0}}}'
+
+  - name: no_workload_subnets
+    expect: FAIL
+    note: >
+      Nothing to judge: an empty subscription must not read as egress through an enforcement point.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"subnets":[]},"summary":{"network_interfaces_by_egress_path":{"appliance":6,"blackhole":0,"default_outbound":0,"gateway":0,"mixed":0,"nat_gateway":0,"none":1,"other":0,"platform_managed":0,"public_ip":0,"virtual_hub_unresolved":0},"workload_subnets":0,"workload_subnets_by_egress_path":{"appliance":0,"blackhole":0,"default_outbound":0,"gateway":0,"nat_gateway":0,"none":0,"other":0,"virtual_hub_unresolved":0},"workload_subnets_with_internet_bypass_routes":0}}}'
+
+  - name: workload_count_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"subnets":[]},"summary":{"network_interfaces_by_egress_path":{"appliance":6,"blackhole":0,"default_outbound":0,"gateway":0,"mixed":0,"nat_gateway":0,"none":1,"other":0,"platform_managed":0,"public_ip":0,"virtual_hub_unresolved":0},"workload_subnet_count":7,"workload_subnets_by_egress_path":{"appliance":5,"blackhole":0,"default_outbound":0,"gateway":1,"nat_gateway":0,"none":2,"other":0,"virtual_hub_unresolved":0},"workload_subnets_with_internet_bypass_routes":0}}}'

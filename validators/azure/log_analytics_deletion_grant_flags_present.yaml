@@ -1,0 +1,19 @@
+key: log_analytics_deletion_grant_flags_present
+name: Azure Log Analytics Deletion Grant Flags Present
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one deletion grant was collected with its assignment type, its Delete Data flag and its
+  purge flag, so zero standing purge or Delete Data grants reflects the role assignments rather than a
+  renamed field or an uncollected list. Integrity partner of
+  log_analytics_no_standing_purge_or_delete_data.
+
+regex: '"assignment_type":\s*"(?:active|eligible)",[^{}]*?"can_delete_data":\s*(?:true|false),[^{}]*?"can_purge":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-LOG-ANALYTICS-DELETION-RIGHTS

@@ -1,0 +1,34 @@
+key: azure_policy_no_noncompliant_enforcing_effects
+name: No Noncompliant Resources Under Enforcing Policy Effects
+type: AUTOMATED
+role: configuration
+statement: >
+  No policy with an enforcing effect (deny, denyAction, modify, deployIfNotExists,
+  append, mutate, addToNetworkGroup, enforceSetting: the set azure_policy_assignments
+  counts as enforcing) has a noncompliant resource in the latest evaluation, so every
+  noncompliant state those policies govern was denied, modified, deployed or
+  remediated, and the latest evaluation revalidated it. A noncompliant policy whose
+  effect the service did not report (null) is uncountable and fails too. Audit-effect
+  noncompliance is meant to be reported only and is not counted. Reads the service's
+  per-assignment summary, which is complete, not the bounded itemized list.
+  Substantiates the KSI-CNA-EIS claim that the intended state is automatically
+  enforced, for KSI-SVC-ACM that remediation where needed has taken effect, and for
+  KSI-SVC-EIS that no automated enforcement failed: a deployIfNotExists or modify that
+  fails at create or update time creates no remediation task and shows here as a
+  noncompliant state under that effect. Does
+  NOT prove the enforcing policies cover the right resources, or that
+  a remaining noncompliant resource is unapproved (the organization's exception record is not
+  in this evidence).
+
+# Form B: counts violations, so it cannot guard itself. Partners:
+# azure_policy_noncompliant_effects_itemized (the effect key is there to count) and
+# azure_policy_compliance_evaluated (an evaluation happened at all).
+regex: '"effect":\s*"(?<enforcing_effect>[Dd][Ee][Nn][Yy](?:[Aa][Cc][Tt][Ii][Oo][Nn])?|[Mm][Oo][Dd][Ii][Ff][Yy]|[Dd][Ee][Pp][Ll][Oo][Yy][Ii][Ff][Nn][Oo][Tt][Ee][Xx][Ii][Ss][Tt][Ss]|[Aa][Pp][Pp][Ee][Nn][Dd]|[Mm][Uu][Tt][Aa][Tt][Ee]|[Aa][Dd][Dd][Tt][Oo][Nn][Ee][Tt][Ww][Oo][Rr][Kk][Gg][Rr][Oo][Uu][Pp]|[Ee][Nn][Ff][Oo][Rr][Cc][Ee][Ss][Ee][Tt][Tt][Ii][Nn][Gg])"|"effect":\s*null'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-POLICY-COMPLIANCE

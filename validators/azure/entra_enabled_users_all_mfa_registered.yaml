@@ -1,0 +1,27 @@
+key: entra_enabled_users_all_mfa_registered
+name: Entra Enabled Accounts All MFA Registered
+type: AUTOMATED
+role: configuration
+statement: >-
+  Every enabled account, members and guests, is MFA capable (has registered a method
+  that satisfies MFA) in the authentication methods registration report; the
+  percentage reads 0 when there are no enabled accounts, so an empty user list fails.
+  This is stricter than "covered by a Conditional Access policy requiring MFA": an
+  account the policy covers but that has not registered yet fails here. Substantiates
+  the account side of that check (KSI-IAM-APM). Whether a policy enforces MFA is
+  asserted on the Conditional Access evidence set; guests whose home-tenant MFA is
+  trusted through inbound cross-tenant settings (not collected) still count as not
+  registered.
+
+regex: '"mfa_coverage_percentage":\s*(?<mfa_coverage_percentage>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # mfa_coverage_percentage
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-MFA

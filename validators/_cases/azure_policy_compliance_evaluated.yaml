@@ -1,0 +1,13 @@
+validator: azure_policy_compliance_evaluated
+cases:
+  - name: resources_evaluated
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"provider_registration_status":"registered","resources_evaluated":1374}}}'
+
+  - name: policyinsights_not_registered
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"non_compliant_assignments":0,"provider_registration_status":"not_registered","resources_evaluated":0}}}'
+
+  - name: rollup_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"provider_registration_status":"registered","evaluated_resources":1374}}}'

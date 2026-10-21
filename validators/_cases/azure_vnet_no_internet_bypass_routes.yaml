@@ -1,0 +1,17 @@
+validator: azure_vnet_no_internet_bypass_routes
+cases:
+  - name: no_bypass_routes
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"subnets":[]},"summary":{"network_interfaces_by_egress_path":{"appliance":6,"blackhole":0,"default_outbound":0,"gateway":0,"mixed":0,"nat_gateway":0,"none":1,"other":0,"platform_managed":0,"public_ip":0,"virtual_hub_unresolved":0},"workload_subnets":8,"workload_subnets_by_egress_path":{"appliance":5,"blackhole":0,"default_outbound":0,"gateway":1,"nat_gateway":0,"none":2,"other":0,"virtual_hub_unresolved":0},"workload_subnets_with_internet_bypass_routes":0}}}'
+
+  - name: one_subnet_with_bypass_route
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"subnets":[]},"summary":{"network_interfaces_by_egress_path":{"appliance":6,"blackhole":0,"default_outbound":0,"gateway":0,"mixed":0,"nat_gateway":0,"none":1,"other":0,"platform_managed":0,"public_ip":0,"virtual_hub_unresolved":0},"workload_subnets":8,"workload_subnets_by_egress_path":{"appliance":5,"blackhole":0,"default_outbound":0,"gateway":1,"nat_gateway":0,"none":2,"other":0,"virtual_hub_unresolved":0},"workload_subnets_with_internet_bypass_routes":1}}}'
+
+  - name: twelve_subnets_with_bypass_routes
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"subnets":[]},"summary":{"network_interfaces_by_egress_path":{"appliance":6,"blackhole":0,"default_outbound":0,"gateway":0,"mixed":0,"nat_gateway":0,"none":1,"other":0,"platform_managed":0,"public_ip":0,"virtual_hub_unresolved":0},"workload_subnets":8,"workload_subnets_by_egress_path":{"appliance":5,"blackhole":0,"default_outbound":0,"gateway":1,"nat_gateway":0,"none":2,"other":0,"virtual_hub_unresolved":0},"workload_subnets_with_internet_bypass_routes":12}}}'
+
+  - name: rollup_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"subnets":[]},"summary":{"network_interfaces_by_egress_path":{"appliance":6,"blackhole":0,"default_outbound":0,"gateway":0,"mixed":0,"nat_gateway":0,"none":1,"other":0,"platform_managed":0,"public_ip":0,"virtual_hub_unresolved":0},"workload_subnets":8,"workload_subnets_by_egress_path":{"appliance":5,"blackhole":0,"default_outbound":0,"gateway":1,"nat_gateway":0,"none":2,"other":0,"virtual_hub_unresolved":0},"bypass_route_subnets":0}}}'

@@ -1,0 +1,26 @@
+key: azure_policy_remediated_resources_revalidated
+name: Azure Policy Remediated Resources Revalidated Compliant
+type: AUTOMATED
+role: configuration
+statement: >
+  Every resource an Azure Policy remediation task deployed to (each resource's latest
+  deployment deciding) is compliant on an evaluation made after that deployment: none
+  is non-compliant again, none is still waiting for its next evaluation, and none has
+  an unknown state. Substantiates the KSI-SVC-ACM claim that remediation corrects
+  drift and the corrected state is revalidated. Does NOT prove that remediation ran
+  where it was needed (azure_policy_no_noncompliant_enforcing_effects covers that),
+  remediation done outside Azure Policy remediation tasks (pipelines, manual fixes),
+  or tasks older than Azure's 60-day task retention. With no remediation tasks in the
+  window it passes vacuously.
+
+# Form B over the summary's per-resource buckets; null (an unread bucket) counts too.
+# Integrity partner: azure_policy_remediation_fields_present.
+regex: '"remediated_resources_(?:now_non_compliant|not_yet_reevaluated|compliance_unknown)":\s*(?:[1-9]|null)'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-POLICY-COMPLIANCE

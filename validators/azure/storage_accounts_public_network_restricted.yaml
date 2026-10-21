@@ -1,0 +1,26 @@
+key: storage_accounts_public_network_restricted
+name: Azure Storage Accounts Not Open To All Networks
+type: AUTOMATED
+role: configuration
+statement: >
+  Every storage account either has public network access Disabled or a firewall
+  default action of Deny, so its public endpoint is not open to all networks and is
+  reached only through private endpoints or the networks it allows. An account whose
+  public network access is Enabled, SecuredByPerimeter or unset, with firewall default
+  Allow, fails. Unset reads as Azure's default (Enabled), so it passes only on Deny.
+  Substantiates "backends are reachable only through approved paths" for storage
+  (KSI-SVC-VCM). Does not prove which IP or virtual network rules are allowed or that
+  they are approved, the trusted-services bypass, or SQL MI and App Service paths.
+
+# Counts violations; storage_network_access_fields_present proves this layout was there.
+# The tempered token stops at the next account's default_action, so nested lists in a private endpoint can't hide an account.
+# The optional group is storage_encryption_status 0.2.0's owner_tag and primary_location.
+regex: '"default_action":\s*"[Aa]llow"\s*\},(?:\s*"owner_tag":\s*(?:null|"(?:[^"\\]|\\.)*"),\s*"primary_location":\s*(?:null|"(?:[^"\\]|\\.)*"),)?\s*"private_endpoint_connections":(?:(?!"public_network_access"|"default_action")[\s\S])*?"public_network_access":\s*(?:null|"(?!Disabled")[^"]*")'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-STORAGE-ENC

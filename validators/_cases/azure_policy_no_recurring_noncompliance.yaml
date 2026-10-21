@@ -1,0 +1,21 @@
+validator: azure_policy_no_recurring_noncompliance
+cases:
+  - name: nothing_recurred
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"history_collected":true,"history_intermittently_non_compliant_pairs":4,"max_non_compliant_episodes":1,"recurrence_pairs_read":4,"recurring_non_compliant_pairs":0}}}'
+
+  - name: two_pairs_recurred
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"history_collected":true,"history_intermittently_non_compliant_pairs":4,"max_non_compliant_episodes":3,"recurrence_pairs_read":4,"recurring_non_compliant_pairs":2}}}'
+
+  - name: twelve_recurring_is_not_zero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"history_collected":true,"recurrence_pairs_read":40,"recurring_non_compliant_pairs":12}}}'
+
+  - name: history_not_read_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"summary":{"history_collected":false,"recurrence_pairs_read":null,"recurring_non_compliant_pairs":null}}}'
+
+  - name: key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"history_collected":true,"recurrence_pairs_read":4,"recurring_pairs":0}}}'

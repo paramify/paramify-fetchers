@@ -1,0 +1,20 @@
+key: log_analytics_table_retention_present
+name: Azure Log Analytics Table Retention Present
+type: AUTOMATED
+role: integrity
+statement: >
+  A workspace's tables were read: the total-retention minimum is numeric and the non-default table
+  list is present, empty or with entries carrying plan and retention_in_days, so no short table
+  reflects the tables rather than a renamed field. A workspace whose tables could not be listed makes
+  the run exit non-zero, which collection_succeeded catches. Integrity partner of
+  log_analytics_table_retention_meets_period.
+
+regex: '"min_total_retention_in_days":\s*\d+,[^{}]*?"non_default_or_custom_tables":\s*\[\s*(?:\]|\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"plan":)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"retention_in_days":))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-LOG-ANALYTICS

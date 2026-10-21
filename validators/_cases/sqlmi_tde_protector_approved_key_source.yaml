@@ -1,0 +1,35 @@
+validator: sqlmi_tde_protector_approved_key_source
+cases:
+  - name: service_managed_and_customer_managed
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","encryption_protector":{"server_key_type":"ServiceManaged","auto_rotation_enabled":false},"customer_managed_key":false},{"name":"mi-b","encryption_protector":{"server_key_type":"AzureKeyVault","key_vault_key_uri":"https://kv.vault.azure.net/keys/k/1","auto_rotation_enabled":true},"customer_managed_key":true}]}}}'
+
+  - name: service_managed_pretty_printed
+    expect: PASS
+    note: guards the whitespace backtrack.
+    artifact: |
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {"results": {"managed_instances": [
+          {"customer_managed_key": false, "encryption_protector": {"auto_rotation_enabled": false, "server_key_type":   "ServiceManaged"}, "name": "mi-a"}
+        ]}}
+      }
+
+  - name: unapproved_key_type
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","encryption_protector":{"server_key_type":"ServiceManaged"}},{"name":"mi-b","encryption_protector":{"server_key_type":"ExternalHsm"}}]}}}'
+
+  - name: protector_unread
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{"managed_instances":[{"name":"mi-a","encryption_protector":{"server_key_type":"ServiceManaged"}},{"name":"mi-b","encryption_protector":null,"customer_managed_key":null}]}}}'
+
+  - name: key_type_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","encryption_protector":{"server_key_type":null}}]}}}'
+
+  - name: key_type_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. sqlmi_encryption_fields_present fails here; see
+      set_EVD-AZURE-SQLMI-ENCRYPTION.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","encryption_protector":{"key_type":"ExternalHsm"}}]}}}'

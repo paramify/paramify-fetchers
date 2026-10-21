@@ -1,0 +1,19 @@
+key: log_analytics_query_auditing_enabled
+name: Azure Log Analytics Query Auditing Enabled
+type: AUTOMATED
+role: configuration
+statement: >
+  Every collected Log Analytics workspace exports its query audit (Audit category) through a
+  diagnostic setting, and at least one does: without it there are no reviewer/query records to show
+  review frequency. Substantiates the 'reviewer/query records exist' half of KSI-MLA-RVL (Continuous
+  Monitoring, Continuous Monitoring Strategy, Security Event Notifications).
+
+regex: '"workspaces_with_query_auditing":\s*[1-9]\d*,[^{}]*?"workspaces_without_query_auditing":\s*0\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-LOG-ANALYTICS-QUERY-AUDIT

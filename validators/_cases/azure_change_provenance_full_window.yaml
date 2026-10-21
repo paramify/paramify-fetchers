@@ -1,0 +1,29 @@
+validator: azure_change_provenance_full_window
+cases:
+  - name: full_window_with_changes
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"changes":[],"lookback_days":14},"summary":{"total_changes":3127}}}'
+
+  - name: summary_before_results
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"total_changes":3},"results":{"lookback_days":14}}}'
+
+  - name: one_day_window
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"lookback_days":1},"summary":{"total_changes":12}}}'
+
+  - name: seven_day_window
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"lookback_days":7},"summary":{"total_changes":12}}}'
+
+  - name: no_changes_read
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"lookback_days":14},"summary":{"total_changes":0}}}'
+
+  - name: lookback_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"window_days":14},"summary":{"total_changes":12}}}'
+
+  - name: total_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"lookback_days":14},"summary":{"changes_total":12}}}'

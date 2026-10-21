@@ -1,0 +1,27 @@
+validator: sqlmi_encryption_fields_present
+cases:
+  - name: both_keys_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"all_user_databases_tde_enabled":false,"encryption_protector":{"server_key_type":"ServiceManaged"}}]}}}'
+
+  - name: both_keys_present_pretty_printed
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {"results": {"managed_instances": [
+          {"all_user_databases_tde_enabled": null, "encryption_protector": {"server_key_type": "AzureKeyVault"}}
+        ]}}
+      }
+
+  - name: tde_flag_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"tde_all_enabled":false,"encryption_protector":{"server_key_type":"ServiceManaged"}}]}}}'
+
+  - name: key_type_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"all_user_databases_tde_enabled":true,"encryption_protector":{"key_type":"ServiceManaged"}}]}}}'
+
+  - name: no_instances
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[]},"summary":{"total_managed_instances":0}}}'

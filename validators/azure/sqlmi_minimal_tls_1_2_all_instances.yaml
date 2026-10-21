@@ -1,0 +1,20 @@
+key: sqlmi_minimal_tls_1_2_all_instances
+name: Azure SQL MI Minimum TLS 1.2 On Every Instance
+type: AUTOMATED
+role: configuration
+statement: >
+  Every SQL Managed Instance sets its minimal TLS version to 1.2 or 1.3; None, 1.0,
+  1.1 or a missing value fails. Substantiates encryption in transit for the SQL MI
+  part of KSI-SVC-SIN. Does not prove the cipher suites, App Service, Front Door or
+  storage TLS, or that the TLS module is FIPS-validated.
+
+# Counts violations; sqlmi_configuration_fields_present proves the key was there.
+regex: '"minimal_tls_version":\s*(?:null|"(?!1\.[23]")[^"]*")'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SQLMI-CONFIG

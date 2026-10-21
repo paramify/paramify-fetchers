@@ -1,0 +1,21 @@
+key: sqlmi_user_databases_all_tde_enabled
+name: Azure SQL MI TDE On Every User Database
+type: AUTOMATED
+role: configuration
+statement: >
+  On every SQL Managed Instance, every user database has Transparent Data
+  Encryption enabled; an instance with a TDE-disabled database, an unread TDE state
+  or no user databases fails. Substantiates encryption at rest for SQL MI
+  (KSI-SVC-SIN). Does not prove the key source (sqlmi_tde_protector_approved_key_source),
+  backup encryption, or that the module is FIPS-validated.
+
+# Counts violations; sqlmi_encryption_fields_present proves the key was there.
+regex: '"all_user_databases_tde_enabled":\s*(?:false|null)'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SQLMI-ENCRYPTION

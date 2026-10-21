@@ -1,0 +1,22 @@
+key: log_analytics_query_audit_weeks_evaluated
+name: Azure Log Analytics Query Audit Weeks Evaluated
+type: AUTOMATED
+role: integrity
+statement: >
+  Every workspace with query auditing on had its query audit read for at least four retained weeks
+  and carries the weekly gap list, and at least one workspace does, so an empty gap list reflects
+  review activity rather than a missing field or too little history. A workspace that exports its
+  Audit category only to Storage or Event Hubs has no LAQueryLogs to read and no weekly figures, so
+  it fails here instead of passing the weekly review unread. Integrity partner of
+  log_analytics_weekly_human_review.
+
+# Form A: one workspace has 4+ weeks, and no auditing workspace reaches the next one (or the end) without them.
+regex: '^\s*\{(?=[\s\S]*?"weeks_retained":\s*(?:[4-9]|[1-9]\d+)\b[^{}]*?"weeks_without_human_queries":\s*\[)(?![\s\S]*?"query_auditing_enabled":\s*true\b(?:(?!"query_auditing_enabled"|"weeks_retained":\s*(?:[4-9]|[1-9]\d+)\b[^{}]*?"weeks_without_human_queries":\s*\[)[\s\S])*?(?:"query_auditing_enabled"|$))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-LOG-ANALYTICS-QUERY-AUDIT

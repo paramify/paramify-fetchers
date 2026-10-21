@@ -1,0 +1,19 @@
+key: sentinel_incidents_closed_within_sla
+name: Azure Sentinel Incidents Closed Within SLA
+type: AUTOMATED
+role: configuration
+statement: >
+  Every closed incident with a known close time was closed within the SLA: the longest time to close
+  in every workspace is at most 168 hours. 7 days is a placeholder, not the organization's incident response
+  SLA (FedRAMP reporting is 1 hour; per-severity targets come from the organization's IR Plan). Counts
+  violations, so it relies on sentinel_incident_sla_fields_present.
+
+regex: '"max_hours_to_close":\s*(?:168\.\d*[1-9]|169|1[7-9]\d|[2-9]\d\d|\d{4})'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-INCIDENTS

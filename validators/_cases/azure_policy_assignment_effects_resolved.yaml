@@ -1,0 +1,13 @@
+validator: azure_policy_assignment_effects_resolved
+cases:
+  - name: every_effect_resolved
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"unresolved_effect_assignments":0,"total_policy_assignments":17}}}'
+
+  - name: one_effect_unresolved
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"unresolved_effect_assignments":1,"total_policy_assignments":17}}}'
+
+  - name: rollup_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"unresolved_assignments":0,"total_policy_assignments":17}}}'

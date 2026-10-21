@@ -1,0 +1,13 @@
+validator: log_analytics_query_auditing_enabled
+cases:
+  - name: auditing_on
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"name": "law-ops","query_auditing_enabled": true,"weeks_in_window": 14,"weeks_not_retained": ["2026-01-11","2026-01-18","2026-01-25","2026-02-01","2026-02-08"],"weeks_retained": 9,"weeks_with_human_queries": 9,"weeks_without_human_queries": []}]},"summary": {"sentinel_workspaces": 0,"workspaces_collected": 1,"workspaces_with_query_auditing": 1,"workspaces_without_query_auditing": 0}}}'
+
+  - name: auditing_off
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"audit_settings": [],"id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logging/providers/Microsoft.OperationalInsights/workspaces/law-ops","lookback_days": 90,"name": "law-ops","notes": [],"query_auditing_enabled": false,"retention_in_days": 60,"sentinel_onboarded": false,"users": null,"weeks": null}]},"summary": {"sentinel_workspaces": 0,"workspaces_collected": 1,"workspaces_with_query_auditing": 0,"workspaces_without_query_auditing": 1}}}'
+
+  - name: summary_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"name": "law-ops","query_auditing_enabled": true,"weeks_in_window": 14,"weeks_not_retained": ["2026-01-11","2026-01-18","2026-01-25","2026-02-01","2026-02-08"],"weeks_retained": 9,"weeks_with_human_queries": 9,"weeks_without_human_queries": []}]},"summary": {"sentinel_workspaces": 0,"workspaces_collected": 1,"workspaces_unaudited": 0,"workspaces_with_query_auditing": 1}}}'

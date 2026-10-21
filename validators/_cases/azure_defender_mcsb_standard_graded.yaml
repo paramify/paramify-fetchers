@@ -1,0 +1,26 @@
+validator: azure_defender_mcsb_standard_graded
+cases:
+  - name: mcsb_graded_with_failing_controls
+    expect: PASS
+    note: a Failed benchmark still proves it is assigned and graded; this validator does not judge the failing controls
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"regulatory_compliance_status":"available"},"summary":{"mcsb_failed_controls":8,"mcsb_passed_controls":57,"mcsb_standard_present":true,"mcsb_state":"Failed","mcsb_total_controls":79}}}'
+
+  - name: mcsb_graded_all_passing
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"regulatory_compliance_status":"available"},"summary":{"mcsb_failed_controls":0,"mcsb_passed_controls":65,"mcsb_standard_present":true,"mcsb_state":"Passed","mcsb_total_controls":79}}}'
+
+  - name: mcsb_standard_absent
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"regulatory_compliance_status":"available"},"summary":{"mcsb_failed_controls":0,"mcsb_passed_controls":0,"mcsb_standard_present":false,"mcsb_state":null,"mcsb_total_controls":0}}}'
+
+  - name: free_tier_regulatory_compliance_unavailable
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"regulatory_compliance_status":"not_available_free_tier","standards":[]},"summary":{"mcsb_standard_present":false,"mcsb_state":null,"regulatory_compliance_status":"not_available_free_tier"}}}'
+
+  - name: mcsb_skipped_nothing_graded
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"regulatory_compliance_status":"available"},"summary":{"mcsb_standard_present":true,"mcsb_state":"Skipped","mcsb_total_controls":79}}}'
+
+  - name: state_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"regulatory_compliance_status":"available"},"summary":{"mcsb_standard_present":true,"mcsb_standard_state":"Failed","mcsb_total_controls":79}}}'

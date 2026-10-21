@@ -1,0 +1,34 @@
+# Set-level: every validator naming EVD-AZURE-SQLMI-CONFIG, combined the way Paramify does.
+evidence_set: EVD-AZURE-SQLMI-CONFIG
+cases:
+  - name: tls_1_2_entra_only_private
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","minimal_tls_version":"1.2","azure_ad_only_authentication":true,"public_data_endpoint_enabled":false},{"name":"mi-b","minimal_tls_version":"1.2","azure_ad_only_authentication":true,"public_data_endpoint_enabled":false}]}}}'
+
+  - name: sql_logins_and_one_public_endpoint
+    expect: FAIL
+    note: a common non-compliant shape.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","minimal_tls_version":"1.2","azure_ad_only_authentication":false,"public_data_endpoint_enabled":false},{"name":"mi-b","minimal_tls_version":"1.2","azure_ad_only_authentication":false,"public_data_endpoint_enabled":true}]}}}'
+
+  - name: tls_key_renamed_upstream
+    expect: FAIL
+    note: Only the integrity validator fails; the TLS count reads zero.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","min_tls":"1.0","azure_ad_only_authentication":true,"public_data_endpoint_enabled":false}]}}}'
+
+  - name: entra_only_key_renamed_upstream
+    expect: FAIL
+    note: Only the integrity validator fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","minimal_tls_version":"1.2","entra_only_authentication":false,"public_data_endpoint_enabled":false}]}}}'
+
+  - name: public_endpoint_key_renamed_upstream
+    expect: FAIL
+    note: Only the integrity validator fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","minimal_tls_version":"1.2","azure_ad_only_authentication":true,"public_endpoint_enabled":true}]}}}'
+
+  - name: no_instances
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[]}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"AuthorizationFailed"},"payload":{}}'

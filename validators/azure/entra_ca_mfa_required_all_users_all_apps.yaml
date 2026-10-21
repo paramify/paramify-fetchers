@@ -1,0 +1,25 @@
+key: entra_ca_mfa_required_all_users_all_apps
+name: Entra CA Enforces MFA For All Users And All Apps
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one enabled (not report-only) Conditional Access policy targets All users
+  and All cloud apps with no app excluded, makes MFA mandatory (MFA alone, an
+  authentication strength alone, or MFA under AND), and is not narrowed by sign-in or
+  user risk, device platform, excluded locations, or client app type (all clients, or
+  both modern client types). Substantiates that every enabled account is covered by an
+  enforced policy requiring MFA (KSI-IAM-APM). Does not judge the policy's excluded
+  users, groups or roles, guest type exclusions or device filters (the last two are
+  not collected), and does not credit Security Defaults.
+
+# Matches one policy record. Tokens skip JSON strings whole, so a brace in a display
+# name cannot end the record early, and each lookahead stays inside its own object.
+regex: '\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"is_enforced":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"requires_mfa":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"targets_all_users":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"targets_all_applications":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"access_controls":\s*\{(?:(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"operator":\s*"(?:AND|and)")|(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"grant":\s*\[\s*"mfa"\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"authentication_strength":\s*null)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"terms_of_use":\s*\[\s*\])|(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"grant":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"authentication_strength":\s*")(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"terms_of_use":\s*\[\s*\])))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"conditions":\s*\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"client_app_types":\s*\[\s*(?:"all"\s*|"browser"\s*,\s*"mobileAppsAndDesktopClients"\s*|"mobileAppsAndDesktopClients"\s*,\s*"browser"\s*)?\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude_locations":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude_platforms":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"include_locations":\s*\[\s*(?:"All"\s*)?\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"include_platforms":\s*\[\s*(?:"all"\s*)?\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"sign_in_risk_levels":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"user_risk_levels":\s*\[\s*\]))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"target_resources":\s*\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude":\s*\[\s*\]))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-CA-POLICIES

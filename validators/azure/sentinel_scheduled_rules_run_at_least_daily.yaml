@@ -1,0 +1,18 @@
+key: sentinel_scheduled_rules_run_at_least_daily
+name: Azure Sentinel Scheduled Rules Run At Least Daily
+type: AUTOMATED
+role: configuration
+statement: >
+  No analytics rule runs less often than once a day: no query_frequency longer than P1D (24 hours).
+  The approved frequency is assumed to be daily; the organization sets the real value. Counts violations, so it
+  relies on sentinel_scheduled_query_rule_enabled to prove query_frequency is present.
+
+regex: '"query_frequency":\s*"(?:P(?:[2-9]|[1-9]\d+)D|P\d+W|P1DT|PT(?:2[5-9]|[3-9]\d|\d{3,})H|PT(?:144[1-9]|14[5-9]\d|1[5-9]\d\d|[2-9]\d{3}|\d{5,})M)'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-ANALYTICS-RULES

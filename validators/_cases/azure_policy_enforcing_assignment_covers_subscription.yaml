@@ -1,0 +1,32 @@
+validator: azure_policy_enforcing_assignment_covers_subscription
+# Records carry the fetcher's sorted key order: actually_enforces first, scope_kind last,
+# with nested parameters, policy_definition and policy_effects blocks between the anchors.
+cases:
+  - name: enforcing_at_subscription_scope
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":false,"effect_class":"audit_only","enforced":true,"excluded_scope_count":0,"parameters":{},"policy_definition":{"kind":"policy_set_definition"},"policy_effects":{"members":[{"effect":"audit"}]},"scope":"/subscriptions/00000000-0000-0000-0000-000000000000","scope_kind":"subscription"},{"actually_enforces":true,"effect_class":"enforcing","enforced":true,"excluded_scope_count":0,"parameters":{"effect":"DeployIfNotExists"},"policy_definition":{"kind":"policy_definition"},"policy_effects":{"members":[{"effect":"deployIfNotExists"}]},"scope":"/subscriptions/00000000-0000-0000-0000-000000000000","scope_kind":"subscription"}]}}}'
+
+  - name: enforcing_inherited_from_management_group
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":true,"effect_class":"enforcing","enforced":true,"excluded_scope_count":0,"parameters":{},"policy_definition":{"kind":"policy_set_definition"},"policy_effects":{"members":[{"effect":"deny"}]},"scope":"/providers/Microsoft.Management/managementGroups/mg","scope_kind":"management_group"}]}}}'
+
+  - name: enforcing_only_on_one_resource_group
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":true,"effect_class":"enforcing","enforced":true,"excluded_scope_count":0,"parameters":{},"policy_definition":{"kind":"policy_definition"},"policy_effects":{"members":[{"effect":"deny"}]},"scope":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-a","scope_kind":"resource_group"}]}}}'
+
+  - name: enforcing_with_excluded_scopes
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":true,"effect_class":"enforcing","enforced":true,"excluded_scope_count":3,"parameters":{},"policy_definition":{"kind":"policy_definition"},"policy_effects":{"members":[{"effect":"modify"}]},"scope":"/subscriptions/00000000-0000-0000-0000-000000000000","scope_kind":"subscription"}]}}}'
+
+  - name: no_splice_from_enforcing_rg_record_to_audit_subscription_record
+    expect: FAIL
+    note: the enforcing record is resource-group scoped; the guard stops it borrowing the next record's subscription scope
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":true,"effect_class":"enforcing","enforced":true,"excluded_scope_count":0,"parameters":{},"policy_definition":{"kind":"policy_definition"},"policy_effects":{"members":[{"effect":"deny"}]},"scope":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-a","scope_kind":"resource_group"},{"actually_enforces":false,"effect_class":"audit_only","enforced":true,"excluded_scope_count":0,"parameters":{},"policy_definition":{"kind":"policy_set_definition"},"policy_effects":{"members":[{"effect":"audit"}]},"scope":"/subscriptions/00000000-0000-0000-0000-000000000000","scope_kind":"subscription"}]}}}'
+
+  - name: audit_only_estate
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":false,"effect_class":"audit_only","enforced":true,"excluded_scope_count":0,"parameters":{},"policy_definition":{"kind":"policy_set_definition"},"policy_effects":{"members":[{"effect":"audit"}]},"scope":"/subscriptions/00000000-0000-0000-0000-000000000000","scope_kind":"subscription"}]}}}'
+
+  - name: scope_kind_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":true,"effect_class":"enforcing","enforced":true,"excluded_scope_count":0,"parameters":{},"policy_definition":{"kind":"policy_definition"},"policy_effects":{"members":[{"effect":"deny"}]},"scope":"/subscriptions/00000000-0000-0000-0000-000000000000","assignment_scope_kind":"subscription"}]}}}'

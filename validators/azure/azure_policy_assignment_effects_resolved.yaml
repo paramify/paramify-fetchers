@@ -1,0 +1,25 @@
+key: azure_policy_assignment_effects_resolved
+name: Azure Policy Assignment Effects All Resolved
+type: AUTOMATED
+role: integrity
+statement: >
+  Every Azure Policy assignment's effect was resolved, so the enforcing and held-back
+  counts the other validators on this set read cover every assignment. An unresolved
+  effect is uncountable, not compliant: a DoNotEnforce assignment whose effect could
+  not be read would otherwise drop out of azure_policy_no_enforcing_effects_held_back
+  silently. Catches assignments where nothing resolved, including an initiative whose
+  definition was unreadable; azure_policy_member_effects_resolved catches the partly
+  resolved ones. Not a compliance claim.
+
+regex: '"unresolved_effect_assignments":\s*(?<unresolved_effect_assignments>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-POLICY-ASSIGN

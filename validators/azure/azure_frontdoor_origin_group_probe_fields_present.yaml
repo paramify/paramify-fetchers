@@ -1,0 +1,18 @@
+key: azure_frontdoor_origin_group_probe_fields_present
+name: Front Door Origin Group Probe Fields Present
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one Front Door origin group record carries health_probe_enabled and
+  serving in the shape azure_frontdoor_origins_health_probes counts, so its zero
+  means no unprobed serving group rather than renamed fields or no origin groups.
+
+regex: '"health_probe_enabled":\s*(?:true|false),(?:(?!"active_origins":)[\s\S])*?"serving":\s*(?:true|false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-FRONTDOOR-ORIGINS

@@ -1,0 +1,19 @@
+key: sqlmi_backups_failover_fields_present
+name: Azure SQL MI Failover Group Fields Were Read
+type: AUTOMATED
+role: integrity
+statement: >
+  The per-instance in_failover_group flag and at least one failover group's
+  replication_state are present, so zero violations from the two failover-group
+  validators reflect posture rather than a renamed key or an empty collection.
+
+# One match at the document start when every lookahead finds its key anywhere in the file.
+regex: '^\s*\{(?=[\s\S]*?"in_failover_group":\s*(?:true|false|null))(?=[\s\S]*?"replication_state":\s*(?:null|"))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SQLMI-BACKUPS

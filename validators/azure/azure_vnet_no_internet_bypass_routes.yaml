@@ -1,0 +1,29 @@
+key: azure_vnet_no_internet_bypass_routes
+name: No Azure Route Bypasses the Egress Firewall
+type: AUTOMATED
+role: configuration
+statement: >
+  No workload subnet whose default route goes to a firewall, appliance, gateway or
+  black hole has a route that sends some address range (a CIDR or a service tag such
+  as AzureCloud) straight to the Internet around it. Reads
+  workload_subnets_with_internet_bypass_routes, which must be present and 0.
+  Substantiates KSI-CNA-RNT, "fail unrestricted egress unless covered by an approved
+  unexpired exception", for the routing layer of a shared check: traffic to such a
+  range leaves unfiltered. Narrow, intended routes (Windows KMS activation is the
+  usual one) fail too and belong in the exception list, which this does not read.
+  Passing does not show that the firewall the traffic then reaches restricts anything
+  (Azure Firewall rule collections are not collected). Configured routes only:
+  BGP-learned routes are not seen.
+
+regex: '"workload_subnets_with_internet_bypass_routes":\s*(?<workload_subnets_with_internet_bypass_routes>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VNET-EGRESS

@@ -1,0 +1,21 @@
+key: azure_change_provenance_breakdown_present
+name: Azure Change Provenance Caller Breakdown Was Read
+type: AUTOMATED
+role: integrity
+statement: >
+  The change-provenance summary carries both fields the human-change check counts
+  (direct_changes_by_changed_by_type and manual_deployment_changes), so a zero count
+  of human changes reflects the subscription rather than a renamed or missing field.
+  Does not assert anything about posture.
+
+# Integrity partner to `azure_no_direct_human_changes`: one match only when the
+# summary object is followed by both keys, in either order.
+regex: '"summary":\s*\{(?=[\s\S]*?"direct_changes_by_changed_by_type":\s*\{)(?=[\s\S]*?"manual_deployment_changes":\s*\d)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-CHANGE-PROVENANCE

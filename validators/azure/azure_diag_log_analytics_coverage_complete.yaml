@@ -1,0 +1,26 @@
+key: azure_diag_log_analytics_coverage_complete
+name: Azure Log-Emitting Resources All Send to Log Analytics
+type: AUTOMATED
+role: configuration
+statement: >
+  Every resource in the subscription that emits resource logs has an enabled diagnostic
+  setting exporting at least one log category to a Log Analytics workspace
+  (log_analytics_coverage_percentage is 100; it is 0 when nothing emits logs, so an empty
+  inventory fails). Substantiates KSI-MLA-OSM (Audit Log Collection and Alerts):
+  "every in-scope diagnostic-capable Azure resource has an enabled diagnostic
+  setting to the approved workspace". Does not prove the workspace is the approved one
+  (the evidence carries each setting's workspace_id, so a tenant-tuned copy can pin it),
+  that every log category is exported, or that data is recently ingested (not in this evidence).
+
+regex: '"log_analytics_coverage_percentage":\s*(?<log_analytics_coverage_percentage>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+
+evidence_sets:
+  - EVD-AZURE-RESOURCE-DIAG-SETTINGS

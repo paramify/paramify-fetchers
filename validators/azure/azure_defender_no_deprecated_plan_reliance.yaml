@@ -1,0 +1,31 @@
+key: azure_defender_no_deprecated_plan_reliance
+name: No Reliance on a Deprecated Defender Plan
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Microsoft Defender for Cloud plan that Azure marks deprecated and that is still
+  on the Standard tier has each of its replacement plans (Azure's replacedBy list) on
+  Standard as well, and the deprecated DNS plan is backed by Defender for Servers Plan 2
+  (the plan that now carries DNS alerts), so no coverage rests on a retired plan alone. A
+  deprecated plan left on beside its replacement is redundant and passes. The plan list
+  is non-empty. Substantiates the "no disabled or outdated controls" part of KSI-SVC-EIS
+  at plan level. Does NOT prove the replacement plan reports FullyCovered, that the
+  redundant legacy plan was turned off, or anything Azure does not flag as deprecated:
+  the fetcher reads an absent flag as not deprecated, and Microsoft's 2026-07-05 notice
+  deprecating the Key Vault and Resource Manager plans in favour of fixed pricing is not
+  reflected in the API's flag.
+
+# Form A, self-guarding. The map must be present; no entry may name an empty
+# replacement list or a replacement missing from summary.enabled_plans (named
+# backreference, quoted, so Containers never matches ContainersX); Dns needs
+# VirtualMachines on P2 in summary.enabled_plan_sub_plans; total_plans > 0.
+# enabled_plan_sub_plans and enabled_plans sort after deprecated_plans_enabled.
+regex: '^\s*\{(?=[\s\S]*?"deprecated_plans_enabled":\s*\{)(?![\s\S]*?"deprecated_plans_enabled":\s*\{[^{}]*?"\w+":\s*\[(?:\s*\]|[^\]]*?"(?<r>\w+)"(?![\s\S]*?"enabled_plans":\s*\[[^\]]*"\k<r>")))(?![\s\S]*?"deprecated_plans_enabled":\s*\{[^{}]*?"Dns":(?![\s\S]*?"enabled_plan_sub_plans":\s*\{[^{}]*?"VirtualMachines":\s*"P2"))(?=[\s\S]*?"total_plans":\s*[1-9])'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DEFENDER

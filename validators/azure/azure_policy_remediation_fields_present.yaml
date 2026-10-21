@@ -1,0 +1,20 @@
+key: azure_policy_remediation_fields_present
+name: Azure Policy Remediation Outcomes Fully Read
+type: AUTOMATED
+role: integrity
+statement: >
+  The remediation counts the remediation validators read are all present and the
+  per-resource deployment list was not cut short, so zero failed or unverified
+  remediations reflects posture rather than a renamed key or a truncated list. Not a
+  compliance claim.
+
+# Anchored at the document start, one lookahead per key; every key is summary-only.
+regex: '^\s*\{(?=[\s\S]*?"remediated_resources_now_non_compliant":\s*\d)(?=[\s\S]*?"remediated_resources_not_yet_reevaluated":\s*\d)(?=[\s\S]*?"remediated_resources_compliance_unknown":\s*\d)(?=[\s\S]*?"remediation_failed_deployments":\s*\d)(?=[\s\S]*?"remediation_tasks_by_provisioning_state":\s*\{)(?=[\s\S]*?"remediation_deployments_truncated":\s*false)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-POLICY-COMPLIANCE

@@ -1,0 +1,21 @@
+key: azure_availability_rate_limit_alerts_none_unrouted
+name: No Disabled or Unrouted Azure Availability or Rate-Limit Alerts
+type: AUTOMATED
+role: configuration
+statement: >
+  No availability or rate-limit alert (as defined in azure_availability_alert_routed and
+  azure_rate_limit_alert_routed) is disabled, fails to route to an active action group, or
+  is or may be suppressed by a processing rule (routing or suppression unknown counts as
+  a failure). Substantiates "enabled and routed" for every such alert (KSI-CNA-RVP,
+  Baseline Configuration Standard). Does not prove that such alerts exist; the two presence validators do,
+  and their passing also proves the keys this one counts are present.
+
+regex: '(?:"metricName":\s*"[^"]*(?:[Aa]vailability|[Hh]ealth[Cc]heck[Ss]tatus|[Oo]rigin[Hh]ealth[Pp]ercentage|[Hh]ealthy[Hh]ost[Cc]ount)[^"]*"|"query":\s*"(?:[^"\\]|\\.)*?[Aa]vailability[Rr]esults|"metricName":\s*"[^"]*(?:[Ww]eb[Aa]pplication[Ff]irewall[Rr]equest[Cc]ount|[Aa]zwaf[Cc]ustom[Rr]ule|[Rr]ate[Ll]imit|[Tt]hrottl)[^"]*"|"query":\s*"(?:[^"\\]|\\.)*?(?:[Rr]ate[ _-]?[Ll]imit|[Tt]hrottl|(?<![0-9])429(?![0-9])|[Ww]eb[Aa]pplication[Ff]irewall[Ll]og|AGWFirewallLogs|[Aa]pplication[Gg]ateway[Ff]irewall[Ll]og))(?:(?!"action_group_ids")[\s\S])*?(?:"enabled":\s*false,\s*"evaluation_frequency"|(?:"routes_to_enabled_receiver":\s*(?:false|null)|"suppressed":\s*(?:true|null)))|"enabled":\s*false,\s*"evaluation_frequency"(?:(?!"action_group_ids")[\s\S])*?"kind":\s*"Microsoft\.Azure\.Monitor\.WebtestLocationAvailabilityCriteria"|"kind":\s*"Microsoft\.Azure\.Monitor\.WebtestLocationAvailabilityCriteria"(?:(?!"action_group_ids")[\s\S])*?(?:"routes_to_enabled_receiver":\s*(?:false|null)|"suppressed":\s*(?:true|null))'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ALERT-RULES

@@ -1,0 +1,21 @@
+key: storage_accounts_all_enforce_tls_1_2
+name: Azure Storage Accounts Enforce HTTPS And TLS 1.2
+type: AUTOMATED
+role: configuration
+statement: >
+  Every storage account accepts HTTPS only and sets its minimum TLS version to
+  TLS1_2 or TLS1_3; an account that allows HTTP, or is set to TLS1_0, TLS1_1 or no
+  value, fails. Substantiates encryption in transit for the storage part of
+  KSI-SVC-SIN. Does not prove cipher suites, SMB or NFS file-share transport, App
+  Service, Front Door or SQL MI TLS, or that the TLS module is FIPS-validated.
+
+# Counts violations; storage_encryption_fields_present proves both keys were there.
+regex: '"minimum_tls_version":\s*(?:null|"(?!TLS1_[23]")[^"]*")|"enable_https_traffic_only":\s*(?:false|null)'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-STORAGE-ENC

@@ -1,0 +1,20 @@
+key: log_analytics_local_auth_disabled
+name: Azure Log Analytics Local Auth Disabled
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Log Analytics workspace has local (shared-key) authentication disabled, so ingestion and
+  access go through Entra ID identities and Azure RBAC only (Azure Policy built-in: Log Analytics
+  workspaces should block non-Azure Active Directory based ingestion). An assumed access baseline for
+  KSI-MLA-OSM (Continuous Monitoring Strategy); the organization confirms it. Counts violations, so it relies on
+  log_analytics_local_auth_flags_present.
+
+regex: '"local_auth_disabled":\s*false'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-LOG-ANALYTICS

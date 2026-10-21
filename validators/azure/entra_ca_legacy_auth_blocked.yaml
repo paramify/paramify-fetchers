@@ -1,0 +1,22 @@
+key: entra_ca_legacy_auth_blocked
+name: Entra CA Blocks Legacy Authentication
+type: AUTOMATED
+role: configuration
+statement: >-
+  At least one enabled (not report-only) Conditional Access policy blocks All users on
+  All cloud apps when the client is Exchange ActiveSync or another legacy client, with
+  no app excluded and no risk, platform or location narrowing. Substantiates that
+  legacy authentication, which cannot present MFA, is refused (KSI-IAM-APM). Does not
+  judge the policy's excluded users, groups or roles; whether they are documented and
+  current is checked against the customer's exception record. Does not credit Security
+  Defaults, which also block legacy authentication.
+
+regex: '\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"is_enforced":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"blocks_access":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"targets_all_users":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"targets_all_applications":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"conditions":\s*\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"client_app_types":\s*\[(?=[^\]]*"exchangeActiveSync")(?=[^\]]*"other"))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude_locations":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude_platforms":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"include_locations":\s*\[\s*(?:"All"\s*)?\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"include_platforms":\s*\[\s*(?:"all"\s*)?\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"sign_in_risk_levels":\s*\[\s*\])(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"user_risk_levels":\s*\[\s*\]))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"target_resources":\s*\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"exclude":\s*\[\s*\]))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-CA-POLICIES

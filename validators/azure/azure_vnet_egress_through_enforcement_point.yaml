@@ -1,0 +1,42 @@
+key: azure_vnet_egress_through_enforcement_point
+name: Azure Workload Subnets Egress Through an Enforcement Point
+type: AUTOMATED
+role: configuration
+statement: >
+  There is at least one workload subnet, and none sends Internet-bound traffic
+  straight out: none egresses through Azure's implicit default outbound access or a
+  NAT gateway (neither filters anything), and none has an egress path that could not
+  be resolved (a Virtual WAN spoke whose hub was not readable). Every workload
+  subnet's Internet traffic therefore goes to a firewall or network virtual
+  appliance, a VPN or ExpressRoute gateway, a black hole, another non-Internet next
+  hop ("other"), or has no outbound access. Reads workload_subnets (at least 1) and the default_outbound,
+  nat_gateway and virtual_hub_unresolved counts of workload_subnets_by_egress_path
+  (each 0). Substantiates KSI-CNA-RNT, "fail unrestricted egress unless covered by an
+  approved unexpired exception", for the routing layer of a shared check. Does not
+  prove the firewall's or appliance's own rules restrict anything (Azure Firewall
+  rule collections are not collected), does not see load balancer outbound rules,
+  does not credit an NSG that denies Internet egress on a directly egressing subnet
+  (that is the EVD-AZURE-NSG set), and does not read the exception list. A subnet
+  delegated to App Service (Microsoft.Web/serverFarms) passes on its route, but the
+  app only uses that route with Route All on, which is not collected. Configured
+  routes only: BGP-learned routes are not seen.
+
+regex: '"workload_subnets":\s*(?<workload_subnets>[1-9]\d*),[^{}]*?"workload_subnets_by_egress_path":\s*\{(?=[^}]*"default_outbound":\s*(?<default_outbound>\d+))(?=[^}]*"nat_gateway":\s*(?<nat_gateway>\d+))(?=[^}]*"virtual_hub_unresolved":\s*(?<virtual_hub_unresolved>\d+))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0; MATCH_GROUP[4] EQUALS 0
+validation_rules:
+  # Also proves workload_subnets is at least 1: the regex only matches a non-zero count.
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # default_outbound
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # nat_gateway
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }   # virtual_hub_unresolved
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VNET-EGRESS

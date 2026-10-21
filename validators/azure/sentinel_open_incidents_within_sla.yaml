@@ -1,0 +1,23 @@
+key: sentinel_open_incidents_within_sla
+name: Azure Sentinel Open Incidents Within SLA
+type: AUTOMATED
+role: configuration
+statement: >
+  No incident has stayed open (New or Active) as long as the SLA: the oldest open incident in every
+  workspace is under 7 days old. The fetcher rounds the age to 0.1 day, so an age that reads 7.0 or more
+  fails; an incident open 6.95 to 7 days therefore fails too, rather than one open up to 7.05 days
+  passing. 7 days is a placeholder, not the organization's incident response SLA: FedRAMP requires
+  incident reporting within 1 hour, and per-severity targets come from the organization's incident
+  response plan objectives (KSI-INR-RIR). Counts violations, so it relies on
+  sentinel_incident_sla_fields_present.
+
+# Any age whose first digit is 7-9, or with two or more integer digits, reads 7.0 or more.
+regex: '"oldest_open_age_days":\s*(?:[7-9]|[1-9]\d)'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-INCIDENTS

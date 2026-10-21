@@ -1,0 +1,22 @@
+key: log_storage_containers_immutable
+name: Azure Log Storage Containers Immutable
+type: AUTOMATED
+role: configuration
+statement: >
+  The baseline requires an exported, immutable copy of the logs: logs are archived to Azure Storage
+  (no log containers at all fails) and every log container (the insights-logs-, insights-activity-logs
+  and similar containers Azure Monitor writes) is tamper-resistant: a Locked time-based immutability
+  policy or a legal hold, unprotected 0, and every Locked policy keeps at least 365 days (the assumed
+  approved retention). An Unlocked policy counts for neither protection nor retention, so a leftover
+  short Unlocked policy on a container under legal hold does not fail it.
+
+# Form A on the container records (min_retention_days counts Unlocked policies); the layout lookahead stops a renamed key hiding a short Locked policy.
+regex: '^\s*\{(?=[\s\S]*?"log_containers":\s*[1-9]\d*,[^{}]*?"unprotected":\s*0\b)(?=[\s\S]*?"retention_days":\s*(?:null|\d+),\s*"time_based_policy_state":)(?![\s\S]*?"retention_days":\s*(?:null|\d{1,2}|[12]\d\d|3[0-5]\d|36[0-4])\b,\s*"time_based_policy_state":\s*"Locked")'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-LOG-STORAGE-IMMUTABILITY

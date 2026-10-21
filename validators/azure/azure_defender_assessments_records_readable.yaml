@@ -1,0 +1,21 @@
+key: azure_defender_assessments_records_readable
+name: Defender Assessment Records Carry Severity and Status
+type: AUTOMATED
+role: integrity
+statement: >
+  Microsoft.Security is registered on the subscription and at least one assessment record
+  carries both a severity field and a recognised status_code (Healthy, Unhealthy or
+  NotApplicable), so the assessment list was read in a shape a posture check can count.
+  Also fails when Defender for Cloud was never turned on (provider not registered). Does
+  NOT prove any posture: the posture check for open high-severity findings is not attached
+  yet, so this evidence set passes on readable records even while a High finding is open.
+
+regex: '^\s*\{(?=[\s\S]*?"provider_registration_status":\s*"registered")(?=[\s\S]*?"severity":\s*(?:"[^"]*"|null)\s*,[^{}]*?"status_code":\s*"(?:[Hh]ealthy|[Uu]nhealthy|[Nn]ot[Aa]pplicable)")'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DEFENDER-ASSESSMENTS

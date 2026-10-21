@@ -1,0 +1,18 @@
+key: azure_defender_plans_listed
+name: Defender Plans Were Listed
+type: AUTOMATED
+role: integrity
+statement: >
+  Microsoft.Security is registered on the subscription and the Defender plan list came
+  back non-empty, so an empty deprecated-plan map or plan list reflects posture rather
+  than Defender not being in use or nothing being read. Not a compliance claim.
+
+regex: '^\s*\{(?=[\s\S]*?"provider_registration_status":\s*"registered")(?=[\s\S]*?"total_plans":\s*[1-9])'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DEFENDER

@@ -1,0 +1,35 @@
+validator: azure_no_direct_human_changes
+cases:
+  - name: only_pipeline_and_platform_changes
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_changes":7,"direct_changes_by_changed_by_type":{"Application":5,"System":2},"manual_deployment_changes":0,"total_changes":52}}}'
+
+  - name: no_direct_changes_at_all
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_changes":0,"direct_changes_by_changed_by_type":{},"manual_deployment_changes":0}}}'
+
+  - name: person_edited_in_portal
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_changes":8,"direct_changes_by_changed_by_type":{"Application":5,"System":2,"User":1},"manual_deployment_changes":0}}}'
+
+  - name: many_human_edits_pretty_printed
+    expect: FAIL
+    artifact: "{\n  \"metadata\": {\"exit_code\": 0},\n  \"payload\": {\n    \"summary\": {\n      \"direct_changes_by_changed_by_type\": {\n        \"Application\": 3486,\n        \"User\": 37\n      },\n      \"manual_deployment_changes\": 0\n    }\n  }\n}"
+
+  - name: person_ran_portal_deployment
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_changes_by_changed_by_type":{"Application":3},"manual_deployment_changes":7}}}'
+
+  - name: user_in_a_neighbouring_object_does_not_splice
+    expect: PASS
+    note: The [^}]*? fence stops at the end of the caller-type object, so a "User" key in the next object is not read as a human change.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_changes_by_changed_by_type":{"Application":2},"direct_changes_by_client_type":{"User":4},"manual_deployment_changes":0}}}'
+
+  - name: breakdown_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. Counting violations cannot tell "no human changes" from "the
+      fields I count are gone", so on its own this passes an artifact that hides
+      human changes. Its partner azure_change_provenance_breakdown_present fails
+      here; see set_EVD-AZURE-CHANGE-PROVENANCE.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_changes_by_caller_type":{"User":3},"manual_deployments":7}}}'

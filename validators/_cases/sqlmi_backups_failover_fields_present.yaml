@@ -1,0 +1,38 @@
+validator: sqlmi_backups_failover_fields_present
+cases:
+  - name: both_keys_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"in_failover_group":false}],"instance_failover_groups":[{"replication_state":"SEEDING"}]}}}'
+
+  - name: both_keys_present_pretty_printed
+    expect: PASS
+    artifact: |
+
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {"results": {
+          "instance_failover_groups": [{"replication_state": null}],
+          "managed_instances": [{"in_failover_group": true}]
+        }}
+      }
+
+  - name: instance_flag_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"is_in_failover_group":false}],"instance_failover_groups":[{"replication_state":"CATCH_UP"}]}}}'
+
+  - name: replication_state_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"in_failover_group":true}],"instance_failover_groups":[{"sync_state":"CATCH_UP"}]}}}'
+
+  - name: no_failover_groups_at_all
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"in_failover_group":false}],"instance_failover_groups":[]}}}'
+
+  - name: no_instances
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[],"instance_failover_groups":[]}}}'
+
+  - name: keys_only_in_instructions_text
+    expect: FAIL
+    note: the runner copies evidence_set.instructions into metadata; backticked names there must not count.
+    artifact: '{"metadata":{"exit_code":0,"evidence_set":{"instructions":"`in_failover_group` is null when ...; replication role and state"}},"payload":{"results":{"managed_instances":[{"is_in_failover_group":false}],"instance_failover_groups":[{"sync_state":"SEEDING"}]}}}'

@@ -1,0 +1,26 @@
+key: azure_policy_no_fully_disabled_assignments
+name: No Fully Disabled Azure Policy Assignments
+type: AUTOMATED
+role: configuration
+statement: >
+  No Azure Policy assignment has every member policy's effect set to disabled, which
+  would leave the control assigned but evaluating nothing. With
+  azure_policy_no_enforcing_effects_held_back (no enforcing effect held back by
+  DoNotEnforce), this is the assignments part of the KSI-SVC-EIS check that fails
+  disabled controls. Does NOT prove that individual member policies are not disabled by
+  parameter (initiative defaults disable some by design), or anything about Defender.
+
+# Form A on the summary rollup; effects the fetcher could not resolve are guarded by
+# azure_policy_assignment_effects_resolved and azure_policy_member_effects_resolved.
+regex: '"disabled_effect_assignments":\s*(?<disabled_effect_assignments>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-POLICY-ASSIGN

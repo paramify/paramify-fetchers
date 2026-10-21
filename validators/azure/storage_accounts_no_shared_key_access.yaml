@@ -1,0 +1,22 @@
+key: storage_accounts_no_shared_key_access
+name: Azure Storage Accounts Disallow Shared Key Access
+type: AUTOMATED
+role: configuration
+statement: >
+  Every storage account disallows Shared Key authorization, so account keys and
+  the SAS tokens signed with them cannot be used and every request authenticates
+  through Entra; an account that allows it (Azure's default when unset) fails.
+  Substantiates "fail shared secrets" for storage (KSI-SVC-VCM). Does not prove
+  Front Door origin authentication or certificate-name validation, key age or
+  rotation, or that clients use managed identities.
+
+# Counts violations; storage_encryption_fields_present proves the key was there.
+regex: '"allow_shared_key_access":\s*(?:true|null)'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-STORAGE-ENC

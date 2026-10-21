@@ -1,0 +1,19 @@
+key: log_analytics_workspace_retention_meets_period
+name: Azure Log Analytics Workspace Retention Meets Period
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Log Analytics workspace in the subscription keeps data for at least 365 days: the minimum
+  workspace retentionInDays is 365 or more. 365 days is an assumption of the approved period (FedRAMP
+  AU-11 via OMB M-21-31, 12 months in active storage); the organization sets the real value by changing the
+  threshold. A null minimum (no workspaces) fails.
+
+regex: '"min_workspace_retention_in_days":\s*(?:36[5-9]|3[7-9]\d|[4-9]\d\d|[1-9]\d{3,})\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-LOG-ANALYTICS

@@ -1,0 +1,19 @@
+key: sentinel_baseline_sources_ingesting
+name: Azure Sentinel Baseline Sources Ingesting
+type: AUTOMATED
+role: configuration
+statement: >
+  A Sentinel workspace is receiving the baseline connectors for an Azure and Entra ID estate: Entra ID
+  audit logs (AuditLogs) and sign-in logs (SigninLogs), and the Azure activity log (AzureActivity),
+  each with data inside the ingestion window. The baseline is an assumption of 'required connectors';
+  the organization adds or removes tables. Each table is a lookahead inside the list, so order does not matter.
+
+regex: '"source_tables":\s*\[(?=[^\]]*"AuditLogs")(?=[^\]]*"AzureActivity")(?=[^\]]*"SigninLogs")'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-DATA-SOURCES

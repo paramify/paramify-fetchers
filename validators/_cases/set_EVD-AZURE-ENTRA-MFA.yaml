@@ -1,0 +1,10 @@
+evidence_set: EVD-AZURE-ENTRA-MFA
+cases:
+  - name: enabled_accounts_registered
+    expect: PASS
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-MFA"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"users":[]},"summary":{"total_users":40,"enabled_users":36,"enabled_member_users":30,"mfa_capable_enabled_users":36,"mfa_coverage_percentage":100,"member_mfa_coverage_percentage":100,"mfa_coverage_percentage_all_users":80}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    note: 'registration report denied: every user reads not capable and the run exits non-zero'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":1,"status":"failed","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-MFA"}},"payload":{"metadata":{"partial_failure":true,"api_failures":[]},"results":{"users":[]},"summary":{"total_users":40,"enabled_users":36,"enabled_member_users":30,"mfa_capable_enabled_users":0,"mfa_coverage_percentage":0,"member_mfa_coverage_percentage":100,"mfa_coverage_percentage_all_users":80}}}'

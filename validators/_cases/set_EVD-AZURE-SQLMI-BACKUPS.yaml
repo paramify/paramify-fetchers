@@ -1,0 +1,31 @@
+# Set-level: every validator naming EVD-AZURE-SQLMI-BACKUPS, combined the way Paramify does.
+evidence_set: EVD-AZURE-SQLMI-BACKUPS
+cases:
+  - name: every_instance_in_a_synchronized_group
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","in_failover_group":true},{"name":"mi-b","in_failover_group":true}],"instance_failover_groups":[{"name":"fg-1","replication_state":"CATCH_UP"}]}}}'
+
+  - name: one_instance_outside_any_group
+    expect: FAIL
+    note: a common non-compliant shape.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","in_failover_group":true},{"name":"mi-b","in_failover_group":true},{"name":"mi-c","in_failover_group":false}],"instance_failover_groups":[{"name":"fg-1","replication_state":"CATCH_UP"}]}}}'
+
+  - name: group_not_synchronized
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","in_failover_group":true}],"instance_failover_groups":[{"name":"fg-1","replication_state":"SEEDING"}]}}}'
+
+  - name: instance_flag_renamed_upstream
+    expect: FAIL
+    note: >
+      Only the integrity validator fails: sqlmi_instances_all_in_failover_group
+      counts zero violations because the key it counts is gone.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","is_in_failover_group":true},{"name":"mi-c","is_in_failover_group":false}],"instance_failover_groups":[{"name":"fg-1","replication_state":"CATCH_UP"}]}}}'
+
+  - name: replication_state_renamed_upstream
+    expect: FAIL
+    note: Only the integrity validator fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","in_failover_group":true}],"instance_failover_groups":[{"name":"fg-1","sync_state":"SUSPENDED"}]}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"AuthorizationFailed"},"payload":{}}'

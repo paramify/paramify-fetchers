@@ -1,0 +1,19 @@
+key: sentinel_incident_sla_fields_present
+name: Azure Sentinel Incident SLA Fields Present
+type: AUTOMATED
+role: integrity
+statement: >
+  A workspace's incidents were summarised with both SLA fields (each a number, or null when there is
+  no closed or no open incident), so no SLA breach reflects the incidents rather than renamed fields.
+  Integrity partner of sentinel_open_incidents_within_sla and sentinel_incidents_closed_within_sla.
+
+# The optional group crosses sentinel_incidents 0.2.0's monthly list (its month objects hold no lists).
+regex: '"max_hours_to_close":\s*(?:null|\d)[^{}]*?(?:"monthly":\s*\[[^\[\]]*\][^{}]*?)?"oldest_open_age_days":\s*(?:null|\d)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-INCIDENTS

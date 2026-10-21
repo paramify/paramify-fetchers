@@ -1,0 +1,30 @@
+key: azure_policy_no_recurring_noncompliance
+name: No Recurring Azure Policy Noncompliance
+type: AUTOMATED
+role: configuration
+statement: >
+  No (resource, policy) pair fell back to non-compliant after being corrected within
+  the last 30 days of Azure Policy evaluations (no pair has more than one
+  non-compliant episode). Substantiates the KSI-SVC-EIS claim that corrections, once
+  made, persist. Recurrence is counted only on pairs that were corrected at some
+  point, so it also passes when noncompliance is never corrected: a pair
+  non-compliant for the whole window is persistent, not recurring. It is silent on
+  escalation: a FAIL means recurring noncompliance exists and the organization must show the
+  escalation or baseline correction it triggered. Does NOT prove escalation or a
+  baseline change (those records are the organization's, not in this evidence), or anything
+  about persistent noncompliance.
+
+# Form A: null (history not read) or a renamed key leaves nothing to match and fails.
+# Integrity partner: azure_policy_recurrence_history_complete (no truncation).
+regex: '"recurring_non_compliant_pairs":\s*(?<recurring_non_compliant_pairs>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-POLICY-COMPLIANCE

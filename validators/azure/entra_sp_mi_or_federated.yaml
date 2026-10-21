@@ -1,0 +1,25 @@
+key: entra_sp_mi_or_federated
+name: Entra Non-User Accounts Use Managed Identity Or Federation
+type: AUTOMATED
+role: configuration
+statement: >-
+  No enabled service principal without a federated identity credential can sign in
+  with a live stored credential: an unexpired client secret or Verify certificate on
+  its application registration, a secret held on the service principal itself (unless
+  it is a SAML signing key's "CN=" password), or a Verify certificate held on a service
+  principal with no SAML signing key. Managed identities pass (their certificate is
+  platform-managed); token-encryption keys are not sign-in credentials. Substantiates
+  that non-user accounts use managed identity or federation (KSI-IAM-SNU). Does not
+  judge "where supported", a secret kept beside a federated credential, or a client
+  certificate held on a SAML app's service principal.
+
+# Counts violations, so entra_sp_credential_fields_present must pass beside it.
+regex: '\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"account_enabled":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?"uses_federated_credential":\s*false)(?:(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"held_on":\s*"application")(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"expired":\s*false)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?(?:"credential_type":\s*"password"|"usage":\s*"Verify")))|(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"held_on":\s*"service_principal")(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"platform_managed":\s*false)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"expired":\s*false)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"credential_type":\s*"password")(?!(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"display_name":\s*"CN=))|(?!(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"usage":\s*"Sign")(?=(?:"(?:[^"\\]|\\.)*"|[^{}"]|\{(?:"(?:[^"\\]|\\.)*"|[^{}"])*\})*?\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"held_on":\s*"service_principal")(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"platform_managed":\s*false)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"expired":\s*false)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?(?:"credential_type":\s*"password"|"usage":\s*"Verify"))))'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-SERVICE-PRINCIPALS

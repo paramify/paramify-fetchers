@@ -1,0 +1,30 @@
+key: azure_change_provenance_full_window
+name: Azure Change Provenance Read a Full 14-Day Window
+type: AUTOMATED
+role: integrity
+statement: >
+  The change history behind the human-change check covers Resource Graph's full
+  14-day retention (results.lookback_days is 14) and holds at least one change
+  (summary.total_changes is not 0), so a narrowed window or an empty read cannot pass
+  as "no human changes". A tenant-tuned copy can match lookback_days to the run
+  cadence instead, as long as runs leave no gap. Does not prove the fetcher runs at
+  least every 14 days, or that the reading identity sees every resource in the
+  subscription (Resource Graph returns only what it can read).
+
+# Guards the population azure_no_direct_human_changes counts over. Both groups are
+# captured inside lookaheads, so the keys may appear in either order.
+regex: '"payload":\s*\{(?=[\s\S]*?"lookback_days":\s*(?<lookback_days>\d+))(?=[\s\S]*?"total_changes":\s*(?<total_changes>\d+))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 14; MATCH_GROUP[2] NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # lookback_days
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "14" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_changes
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-CHANGE-PROVENANCE

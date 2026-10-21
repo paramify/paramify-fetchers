@@ -1,0 +1,20 @@
+key: log_analytics_weekly_human_review
+name: Azure Log Analytics Weekly Human Review
+type: AUTOMATED
+role: configuration
+statement: >
+  In every week LAQueryLogs still holds, a person (an Entra user, not an application) ran at least one
+  query against the workspace: weeks_without_human_queries is empty. Weekly is an assumed audit review
+  frequency for the organization to confirm. Counts violations, so it relies on
+  log_analytics_query_audit_weeks_evaluated, which also fails a workspace whose query audit could not
+  be read week by week.
+
+regex: '"weeks_without_human_queries":\s*\[\s*"'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-LOG-ANALYTICS-QUERY-AUDIT

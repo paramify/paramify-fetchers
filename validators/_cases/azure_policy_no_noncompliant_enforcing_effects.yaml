@@ -1,0 +1,40 @@
+validator: azure_policy_no_noncompliant_enforcing_effects
+cases:
+  - name: only_audit_effects_noncompliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"is_compliant":false,"non_compliant_member_policies":[{"effect":"audit","non_compliant_resources":12,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/a"},{"effect":"auditifnotexists","non_compliant_resources":3,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/b"}],"non_compliant_resources":15},{"is_compliant":true,"non_compliant_member_policies":[],"non_compliant_resources":0}],"non_compliant_states":[{"policy_definition_action":"audit"}]},"summary":{"non_compliant_assignments":1,"resources_evaluated":40}}}'
+
+  - name: deployifnotexists_resource_left_unremediated
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"is_compliant":false,"non_compliant_member_policies":[{"effect":"audit","non_compliant_resources":12,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/a"}],"non_compliant_resources":12},{"is_compliant":false,"non_compliant_member_policies":[{"effect":"deployifnotexists","non_compliant_resources":1,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/c"}],"non_compliant_resources":1}],"non_compliant_states":[]},"summary":{"non_compliant_assignments":2,"resources_evaluated":40}}}'
+
+  - name: newer_enforcing_effects_noncompliant
+    expect: FAIL
+    note: mutate, addToNetworkGroup and enforceSetting joined the fetcher's enforcing set with the AuditAction fix
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"is_compliant":false,"non_compliant_member_policies":[{"effect":"addtonetworkgroup","non_compliant_resources":1,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/g"},{"effect":"Mutate","non_compliant_resources":1,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/h"},{"effect":"enforceSetting","non_compliant_resources":1,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/i"}],"non_compliant_resources":3}]},"summary":{"non_compliant_assignments":1,"resources_evaluated":40}}}'
+
+  - name: auditaction_is_not_enforcing
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"is_compliant":false,"non_compliant_member_policies":[{"effect":"auditaction","non_compliant_resources":2,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/j"}],"non_compliant_resources":2}]},"summary":{"non_compliant_assignments":1,"resources_evaluated":40}}}'
+
+  - name: deny_resource_noncompliant_mixed_case
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"is_compliant":false,"non_compliant_member_policies":[{"effect":"Deny","non_compliant_resources":2,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/d"}],"non_compliant_resources":2}]},"summary":{"non_compliant_assignments":1,"resources_evaluated":40}}}'
+
+  - name: modify_resource_noncompliant
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"is_compliant":false,"non_compliant_member_policies":[{"effect":"modify","non_compliant_resources":4,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/e"}],"non_compliant_resources":4}]},"summary":{"non_compliant_assignments":1,"resources_evaluated":40}}}'
+
+  - name: noncompliant_member_effect_not_reported
+    expect: FAIL
+    note: a null effect is uncountable, so it reads as a violation rather than as audit
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"is_compliant":false,"non_compliant_member_policies":[{"effect":"audit","non_compliant_resources":12,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/a"},{"effect":null,"non_compliant_resources":2,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/f"}],"non_compliant_resources":14}]},"summary":{"non_compliant_assignments":1,"resources_evaluated":40}}}'
+
+  - name: effect_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. Counting violations cannot tell "no violations" from "the key I count
+      is gone", so on its own this reports PASS over a hidden deployIfNotExists
+      violation. Its partner azure_policy_noncompliant_effects_itemized fails here; the
+      set-level case in set_EVD-AZURE-POLICY-COMPLIANCE.yaml is the assertion that matters.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"is_compliant":false,"non_compliant_member_policies":[{"policy_effect":"deployifnotexists","non_compliant_resources":1,"policy_definition_id":"/providers/microsoft.authorization/policydefinitions/c"}],"non_compliant_resources":1}]},"summary":{"non_compliant_assignments":1,"resources_evaluated":40}}}'

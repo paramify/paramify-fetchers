@@ -1,0 +1,18 @@
+key: sentinel_analytics_rule_counts_present
+name: Azure Sentinel Analytics Rule Counts Present
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one Sentinel workspace was collected with a numeric disabled_rules count, so a zero count
+  of disabled rules reflects the rules rather than a missing or renamed field. Integrity partner of
+  sentinel_analytics_rules_none_disabled; asserts nothing about posture.
+
+regex: '"disabled_rules":\s*\d'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-ANALYTICS-RULES

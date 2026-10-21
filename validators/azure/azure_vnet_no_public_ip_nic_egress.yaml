@@ -1,0 +1,31 @@
+key: azure_vnet_no_public_ip_nic_egress
+name: No Azure NIC Egresses Through Its Own Public IP
+type: AUTOMATED
+role: configuration
+statement: >
+  No network interface sends Internet traffic out through its own public IP. That
+  path exists only on a subnet with no firewall, gateway or NAT route (default
+  outbound or no outbound access), where the IP bypasses everything the subnet
+  would otherwise enforce. Reads the public_ip count of
+  network_interfaces_by_egress_path, which must be present and 0. Substantiates
+  KSI-CNA-RNT, "fail unrestricted egress unless covered by an approved unexpired
+  exception", for the routing layer of a shared check. Does not judge inbound
+  exposure of those IPs, does not credit an NSG that restricts them, and does not
+  read the exception list. Uniform scale-set instance NICs (AKS node pools included)
+  are not listed, so their instance public IPs are not seen; a NIC whose subnets
+  have different paths ("mixed") is not counted. Passing does not show that the
+  firewall other NICs egress through restricts anything (Azure Firewall rule
+  collections are not collected), and load balancer outbound rules are not seen.
+
+regex: '"network_interfaces_by_egress_path":\s*\{(?=[^}]*"public_ip":\s*(?<public_ip>\d+))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VNET-EGRESS

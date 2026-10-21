@@ -1,0 +1,21 @@
+validator: azure_change_provenance_breakdown_present
+cases:
+  - name: both_fields_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_changes_by_changed_by_type":{"Application":5},"manual_deployment_changes":0}}}'
+
+  - name: both_present_other_order_and_empty_breakdown
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"manual_deployment_changes":0,"total_changes":0,"direct_changes_by_changed_by_type":{}}}}'
+
+  - name: caller_type_breakdown_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_changes_by_caller_type":{"User":3},"manual_deployment_changes":0}}}'
+
+  - name: manual_deployment_count_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_changes_by_changed_by_type":{"Application":5},"manual_deployments":7}}}'
+
+  - name: no_summary_object
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{}}}'

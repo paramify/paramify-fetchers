@@ -1,0 +1,22 @@
+validator: azure_policy_recurrence_history_complete
+cases:
+  - name: history_read_in_full
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"history_collected":true,"history_truncated":false,"recurrence_pairs_read":27,"recurrence_pairs_truncated":false,"recurring_non_compliant_pairs":0}}}'
+
+  - name: more_flipping_pairs_than_were_read
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"history_collected":true,"history_truncated":false,"recurrence_pairs_read":100,"recurrence_pairs_truncated":true,"recurring_non_compliant_pairs":0}}}'
+
+  - name: grouped_history_cut_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"history_collected":true,"history_truncated":true,"recurrence_pairs_read":27,"recurrence_pairs_truncated":false,"recurring_non_compliant_pairs":0}}}'
+
+  - name: history_not_read
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"summary":{"history_collected":false,"history_truncated":null,"recurrence_pairs_read":null,"recurrence_pairs_truncated":null,"recurring_non_compliant_pairs":null}}}'
+
+  - name: older_build_without_history_collected
+    expect: FAIL
+    note: the 6e74eb2 build had no history_collected flag
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"history_truncated":false,"recurrence_pairs_read":27,"recurrence_pairs_truncated":false,"recurring_non_compliant_pairs":0}}}'

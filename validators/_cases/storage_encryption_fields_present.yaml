@@ -1,0 +1,35 @@
+validator: storage_encryption_fields_present
+cases:
+  - name: all_four_keys_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"allow_shared_key_access":true,"enable_https_traffic_only":false,"encryption_type":"Microsoft.Storage","minimum_tls_version":"TLS1_0"}]}}}'
+
+  - name: all_four_keys_present_pretty_printed
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {"results": {"storage_accounts": [
+          {"allow_shared_key_access": false, "enable_https_traffic_only": true, "encryption_type": "Microsoft.Keyvault", "minimum_tls_version": null}
+        ]}}
+      }
+
+  - name: tls_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"allow_shared_key_access":false,"enable_https_traffic_only":true,"encryption_type":"Microsoft.Storage","min_tls":"TLS1_0"}]}}}'
+
+  - name: https_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"allow_shared_key_access":false,"https_only":false,"encryption_type":"Microsoft.Storage","minimum_tls_version":"TLS1_2"}]}}}'
+
+  - name: key_source_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"allow_shared_key_access":false,"enable_https_traffic_only":true,"key_source":"Microsoft.Storage","minimum_tls_version":"TLS1_2"}]}}}'
+
+  - name: shared_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"shared_key_access":true,"enable_https_traffic_only":true,"encryption_type":"Microsoft.Storage","minimum_tls_version":"TLS1_2"}]}}}'
+
+  - name: no_accounts
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[]},"summary":{"total_storage_accounts":0}}}'

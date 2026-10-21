@@ -1,0 +1,29 @@
+# Set-level: every validator naming EVD-AZURE-SQLMI-ENCRYPTION, combined the way Paramify does.
+evidence_set: EVD-AZURE-SQLMI-ENCRYPTION
+cases:
+  - name: tde_everywhere_approved_protector
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","all_user_databases_tde_enabled":true,"encryption_protector":{"server_key_type":"ServiceManaged"}},{"name":"mi-b","all_user_databases_tde_enabled":true,"encryption_protector":{"server_key_type":"AzureKeyVault"}}]}}}'
+
+  - name: some_databases_unencrypted
+    expect: FAIL
+    note: a common non-compliant shape.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","all_user_databases_tde_enabled":true,"encryption_protector":{"server_key_type":"ServiceManaged"}},{"name":"mi-b","all_user_databases_tde_enabled":false,"encryption_protector":{"server_key_type":"ServiceManaged"}}]}}}'
+
+  - name: tde_flag_renamed_upstream
+    expect: FAIL
+    note: Only the integrity validator fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","tde_all_enabled":false,"encryption_protector":{"server_key_type":"ServiceManaged"}}]}}}'
+
+  - name: key_type_renamed_upstream
+    expect: FAIL
+    note: Only the integrity validator fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[{"name":"mi-a","all_user_databases_tde_enabled":true,"encryption_protector":{"key_type":"ExternalHsm"}}]}}}'
+
+  - name: no_instances
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"managed_instances":[]}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"AuthorizationFailed"},"payload":{}}'

@@ -1,0 +1,22 @@
+key: azure_policy_compliance_evaluated
+name: Azure Policy Compliance Evaluated Resources
+type: AUTOMATED
+role: integrity
+statement: >
+  Azure Policy evaluated at least one resource on the subscription in the latest
+  window, so zero noncompliant states means nothing failed rather than nothing was
+  assessed. Fails on a subscription with Microsoft.PolicyInsights unregistered or no
+  evaluations. Not a compliance claim.
+
+regex: '"resources_evaluated":\s*(?<resources_evaluated>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-POLICY-COMPLIANCE

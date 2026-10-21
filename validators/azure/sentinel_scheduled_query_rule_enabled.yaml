@@ -1,0 +1,20 @@
+key: sentinel_scheduled_query_rule_enabled
+name: Azure Sentinel Scheduled Query Rule Enabled
+type: AUTOMATED
+role: configuration
+statement: >
+  At least one enabled Scheduled (scheduled-query) analytics rule exists, with a query frequency.
+  Substantiates that the scheduled-query rules for KSI-MLA-RVL (Audit Log Collection and Alerts) are on, and is the integrity partner of
+  sentinel_scheduled_rules_run_at_least_daily (it proves query_frequency is present). Each condition
+  is a lookahead inside one rule object, so key order does not matter and a brace or quote inside a
+  rule name cannot end the object early.
+
+regex: '\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"enabled":\s*true)(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"kind":\s*"Scheduled")(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"query_frequency":\s*"P[^"]+")'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-ANALYTICS-RULES

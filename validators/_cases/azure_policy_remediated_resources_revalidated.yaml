@@ -1,0 +1,34 @@
+validator: azure_policy_remediated_resources_revalidated
+cases:
+  - name: every_remediated_resource_revalidated_compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":0,"remediated_resources_listed":3,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_now_compliant":3,"remediated_resources_now_non_compliant":0,"succeeded_remediations_now_non_compliant":0}}}'
+
+  - name: nothing_remediated
+    expect: PASS
+    note: with no remediation there is nothing to revalidate; azure_policy_no_noncompliant_enforcing_effects fails if remediation was needed
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":0,"remediated_resources_listed":0,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_now_compliant":0,"remediated_resources_now_non_compliant":0,"succeeded_remediations_now_non_compliant":0}}}'
+
+  - name: succeeded_deployment_but_resource_non_compliant_again
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":0,"remediated_resources_listed":3,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_now_compliant":2,"remediated_resources_now_non_compliant":1,"succeeded_remediations_now_non_compliant":1}}}'
+
+  - name: deployed_but_not_yet_reevaluated
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":0,"remediated_resources_listed":3,"remediated_resources_not_yet_reevaluated":1,"remediated_resources_now_compliant":2,"remediated_resources_now_non_compliant":0,"succeeded_remediations_now_non_compliant":0}}}'
+
+  - name: current_state_unknown
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":12,"remediated_resources_listed":12,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_now_compliant":0,"remediated_resources_now_non_compliant":0,"succeeded_remediations_now_non_compliant":0}}}'
+
+  - name: bucket_unread_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":0,"remediated_resources_listed":3,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_now_compliant":2,"remediated_resources_now_non_compliant":null,"succeeded_remediations_now_non_compliant":0}}}'
+
+  - name: older_still_key_spelling_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. The 6e74eb2 build spelled the bucket remediated_resources_still_non_compliant;
+      a violation count reads that rename as zero. azure_policy_remediation_fields_present
+      fails it; see set_EVD-AZURE-POLICY-COMPLIANCE.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":0,"remediated_resources_listed":3,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_now_compliant":2,"remediated_resources_still_non_compliant":1,"succeeded_remediations_still_non_compliant":1}}}'

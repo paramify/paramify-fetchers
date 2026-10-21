@@ -1,0 +1,33 @@
+key: azure_policy_mcsb_assigned_enforced
+name: Microsoft Cloud Security Benchmark Assigned and Enforced
+type: AUTOMATED
+role: configuration
+statement: >
+  The Microsoft cloud security benchmark initiative (built-in policy set
+  1f3afdf9-d0c9-4c3d-847f-89da613e70a8) is assigned on the subscription, directly or
+  inherited from a management group, with enforcementMode Default, no excluded
+  (notScopes) scopes, and at least one member effect that is not disabled (effect
+  class audit_only or enforcing), so it is evaluated across the whole subscription.
+  Substantiates the KSI-CNA-IBP claim that configuration is persistently compared
+  against the provider's best practices. Does NOT prove the benchmark's controls pass
+  (most of its members only audit), that individual members are not disabled by
+  parameter (only an assignment with every member disabled fails), that every
+  in-scope subscription was collected (one artifact per subscription), or that a
+  resource-group exclusion is unapproved.
+
+# One assignment record, matched in the fetcher's sorted key order:
+# effect_class, enforced (adjacent) < excluded_scope_count < policy_definition_id.
+# An all-disabled or unresolved benchmark assignment fails. The tempered token
+# (?:(?!"actually_enforces")[\s\S])*? stops at the next record's first key, so an
+# enforced, unexcluded non-benchmark record cannot splice onto a benchmark record
+# that is DoNotEnforce or excluded. The GUID is matched case-insensitively because
+# ARM upper-cases some management-group definition paths.
+regex: '"effect_class":\s*"(?:audit_only|enforcing)",\s*"enforced":\s*true,(?:(?!"actually_enforces")[\s\S])*?"excluded_scope_count":\s*0,(?:(?!"actually_enforces")[\s\S])*?"policy_definition_id":\s*"[^"]*/1[Ff]3[Aa][Ff][Dd][Ff]9-[Dd]0[Cc]9-4[Cc]3[Dd]-847[Ff]-89[Dd][Aa]613[Ee]70[Aa]8"'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-POLICY-ASSIGN

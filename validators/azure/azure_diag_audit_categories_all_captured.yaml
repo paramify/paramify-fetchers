@@ -1,0 +1,26 @@
+key: azure_diag_audit_categories_all_captured
+name: Azure Audit Log Categories All Exported
+type: AUTOMATED
+role: configuration
+statement: >
+  No resource whose type has Azure's "audit" category group leaves any category in that
+  group unexported: zero resources with captures_all_audit_categories false. Substantiates
+  the audit half of KSI-MLA-OSM (Audit Log Collection and Alerts): "each
+  resource type has all required audit/security categories enabled". Does not prove
+  security categories outside Azure's audit group: types with no audit group get a null
+  verdict and are never checked here (NSGs, Application Gateway, Azure Firewall, SQL MI
+  databases, VNets, App Insights, so ApplicationGatewayFirewallLog, the Azure Firewall
+  threat-intel and rule logs and NetworkSecurityGroupEvent are not required), and a
+  category named "Audit" outside the group is not seen. The security categories that
+  KSI-MLA-OSM also asks for are covered by azure_diag_no_uncaptured_log_categories, which requires every category.
+  Counts violations, so azure_diag_audit_capture_verdicts_present must pass alongside it.
+
+regex: '"captures_all_audit_categories":\s*false'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-RESOURCE-DIAG-SETTINGS

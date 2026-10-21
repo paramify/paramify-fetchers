@@ -1,0 +1,21 @@
+key: log_analytics_table_retention_meets_period
+name: Azure Log Analytics Table Retention Meets Period
+type: AUTOMATED
+role: configuration
+statement: >
+  No table in any workspace keeps data for less than 365 days in total (totalRetentionInDays, every
+  plan), and no Analytics-plan table that overrides the workspace default keeps less than 365 days
+  interactively (retentionInDays). Basic and Auxiliary tables are judged on total retention only,
+  because Microsoft fixes their interactive retention at 30 days; tables that inherit the workspace
+  value are covered by log_analytics_workspace_retention_meets_period. A table with no plan is treated
+  as Analytics. Counts violations, so it relies on log_analytics_table_retention_present.
+
+regex: '"min_total_retention_in_days":\s*(?:\d{1,2}|[12]\d\d|3[0-5]\d|36[0-4])\b|\{(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"plan":(?!\s*"(?:Basic|Auxiliary)"))(?=(?:"(?:[^"\\]|\\.)*"|[^{}"])*?"retention_in_days":\s*(?:\d{1,2}|[12]\d\d|3[0-5]\d|36[0-4])\b)'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-LOG-ANALYTICS

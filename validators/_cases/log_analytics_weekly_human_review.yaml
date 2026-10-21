@@ -1,0 +1,15 @@
+validator: log_analytics_weekly_human_review
+cases:
+  - name: every_week_reviewed
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"name": "law-ops","query_auditing_enabled": true,"weeks_in_window": 14,"weeks_not_retained": ["2026-01-11","2026-01-18","2026-01-25","2026-02-01","2026-02-08"],"weeks_retained": 9,"weeks_with_human_queries": 9,"weeks_without_human_queries": []}]},"summary": {"sentinel_workspaces": 0,"workspaces_collected": 1,"workspaces_with_query_auditing": 1,"workspaces_without_query_auditing": 0}}}'
+
+  - name: one_week_without_review
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"name": "law-ops","query_auditing_enabled": true,"weeks_in_window": 14,"weeks_not_retained": ["2026-01-11","2026-01-18","2026-01-25","2026-02-01","2026-02-08"],"weeks_retained": 9,"weeks_with_human_queries": 8,"weeks_without_human_queries": ["2026-03-29"]}]},"summary": {"sentinel_workspaces": 0,"workspaces_collected": 1,"workspaces_with_query_auditing": 1,"workspaces_without_query_auditing": 0}}}'
+
+  - name: gaps_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      log_analytics_query_audit_weeks_evaluated fails here (set-level case).
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"name": "law-ops","query_auditing_enabled": true,"weeks_in_window": 14,"weeks_not_retained": ["2026-01-11","2026-01-18","2026-01-25","2026-02-01","2026-02-08"],"weeks_retained": 9,"weeks_unreviewed": ["2026-03-29"],"weeks_with_human_queries": 8}]},"summary": {"sentinel_workspaces": 0,"workspaces_collected": 1,"workspaces_with_query_auditing": 1,"workspaces_without_query_auditing": 0}}}'

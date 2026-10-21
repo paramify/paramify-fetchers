@@ -1,0 +1,185 @@
+validator: entra_ca_legacy_auth_blocked
+cases:
+  - name: legacy_blocked_for_all
+    expect: PASS
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-CA-POLICIES"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"conditional_access_policies":[{"id":"11111111-1111-1111-1111-111111111111","display_name":"Require MFA for all users","state":"enabled","is_enforced":true,"is_report_only":false,"users":{"include":["All"],"exclude":["22222222-2222-2222-2222-222222222222"],"include_groups":[],"exclude_groups":[],"include_roles":[],"exclude_roles":[]},"target_resources":{"include":["All"],"exclude":[]},"access_controls":{"grant":["mfa"],"block":[],"operator":"OR","authentication_strength":null,"terms_of_use":[]},"conditions":{"client_app_types":["all"],"sign_in_risk_levels":[],"user_risk_levels":[],"include_platforms":[],"exclude_platforms":[],"include_locations":[],"exclude_locations":[]},"session_controls":{"sign_in_frequency":false,"persistent_browser":false,"application_enforced_restrictions":false,"cloud_app_security":false},"requires_mfa":true,"blocks_access":false,"requires_compliant_device":false,"targets_all_users":true,"targets_all_applications":true,"has_user_exclusions":true,"targets_legacy_authentication":false},{"id":"11111111-1111-1111-1111-111111111111","display_name":"Block legacy authentication","state":"enabled","is_enforced":true,"is_report_only":false,"users":{"include":["All"],"exclude":["22222222-2222-2222-2222-222222222222"],"include_groups":[],"exclude_groups":[],"include_roles":[],"exclude_roles":[]},"target_resources":{"include":["All"],"exclude":[]},"access_controls":{"grant":[],"block":["block"],"operator":"OR","authentication_strength":null,"terms_of_use":[]},"conditions":{"client_app_types":["exchangeActiveSync","other"],"sign_in_risk_levels":[],"user_risk_levels":[],"include_platforms":[],"exclude_platforms":[],"include_locations":[],"exclude_locations":[]},"session_controls":{"sign_in_frequency":false,"persistent_browser":false,"application_enforced_restrictions":false,"cloud_app_security":false},"requires_mfa":false,"blocks_access":true,"requires_compliant_device":false,"targets_all_users":true,"targets_all_applications":true,"has_user_exclusions":true,"targets_legacy_authentication":true}]},"summary":{"total_policies":2,"enabled_policies":2,"enforced_mfa_for_all_users_and_apps":1,"enforced_policies_targeting_legacy_authentication":1}}}'
+
+  - name: pretty_printed
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "evidence_set": {
+            "reference_id": "EVD-AZURE-ENTRA-CA-POLICIES"
+          },
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "api_failures": [],
+            "partial_failure": false
+          },
+          "results": {
+            "conditional_access_policies": [
+              {
+                "access_controls": {
+                  "authentication_strength": null,
+                  "block": [
+                    "block"
+                  ],
+                  "grant": [],
+                  "operator": "OR",
+                  "terms_of_use": []
+                },
+                "blocks_access": true,
+                "conditions": {
+                  "client_app_types": [
+                    "exchangeActiveSync",
+                    "other"
+                  ],
+                  "exclude_locations": [],
+                  "exclude_platforms": [],
+                  "include_locations": [],
+                  "include_platforms": [],
+                  "sign_in_risk_levels": [],
+                  "user_risk_levels": []
+                },
+                "display_name": "Block legacy authentication",
+                "has_user_exclusions": true,
+                "id": "11111111-1111-1111-1111-111111111111",
+                "is_enforced": true,
+                "is_report_only": false,
+                "requires_compliant_device": false,
+                "requires_mfa": false,
+                "session_controls": {
+                  "application_enforced_restrictions": false,
+                  "cloud_app_security": false,
+                  "persistent_browser": false,
+                  "sign_in_frequency": false
+                },
+                "state": "enabled",
+                "target_resources": {
+                  "exclude": [],
+                  "include": [
+                    "All"
+                  ]
+                },
+                "targets_all_applications": true,
+                "targets_all_users": true,
+                "targets_legacy_authentication": true,
+                "users": {
+                  "exclude": [
+                    "22222222-2222-2222-2222-222222222222"
+                  ],
+                  "exclude_groups": [],
+                  "exclude_roles": [],
+                  "include": [
+                    "All"
+                  ],
+                  "include_groups": [],
+                  "include_roles": []
+                }
+              },
+              {
+                "access_controls": {
+                  "authentication_strength": null,
+                  "block": [],
+                  "grant": [
+                    "mfa"
+                  ],
+                  "operator": "OR",
+                  "terms_of_use": []
+                },
+                "blocks_access": false,
+                "conditions": {
+                  "client_app_types": [
+                    "all"
+                  ],
+                  "exclude_locations": [],
+                  "exclude_platforms": [],
+                  "include_locations": [],
+                  "include_platforms": [],
+                  "sign_in_risk_levels": [],
+                  "user_risk_levels": []
+                },
+                "display_name": "Require MFA for all users",
+                "has_user_exclusions": true,
+                "id": "11111111-1111-1111-1111-111111111111",
+                "is_enforced": true,
+                "is_report_only": false,
+                "requires_compliant_device": false,
+                "requires_mfa": true,
+                "session_controls": {
+                  "application_enforced_restrictions": false,
+                  "cloud_app_security": false,
+                  "persistent_browser": false,
+                  "sign_in_frequency": false
+                },
+                "state": "enabled",
+                "target_resources": {
+                  "exclude": [],
+                  "include": [
+                    "All"
+                  ]
+                },
+                "targets_all_applications": true,
+                "targets_all_users": true,
+                "targets_legacy_authentication": false,
+                "users": {
+                  "exclude": [
+                    "22222222-2222-2222-2222-222222222222"
+                  ],
+                  "exclude_groups": [],
+                  "exclude_roles": [],
+                  "include": [
+                    "All"
+                  ],
+                  "include_groups": [],
+                  "include_roles": []
+                }
+              }
+            ]
+          },
+          "summary": {
+            "enabled_policies": 2,
+            "enforced_mfa_for_all_users_and_apps": 1,
+            "enforced_policies_targeting_legacy_authentication": 1,
+            "total_policies": 2
+          }
+        },
+        "schema_version": "1.0"
+      }
+
+  - name: only_other_clients
+    expect: FAIL
+    note: 'Exchange ActiveSync still allowed'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-CA-POLICIES"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"conditional_access_policies":[{"id":"11111111-1111-1111-1111-111111111111","display_name":"Block legacy authentication","state":"enabled","is_enforced":true,"is_report_only":false,"users":{"include":["All"],"exclude":["22222222-2222-2222-2222-222222222222"],"include_groups":[],"exclude_groups":[],"include_roles":[],"exclude_roles":[]},"target_resources":{"include":["All"],"exclude":[]},"access_controls":{"grant":[],"block":["block"],"operator":"OR","authentication_strength":null,"terms_of_use":[]},"conditions":{"client_app_types":["other"],"sign_in_risk_levels":[],"user_risk_levels":[],"include_platforms":[],"exclude_platforms":[],"include_locations":[],"exclude_locations":[]},"session_controls":{"sign_in_frequency":false,"persistent_browser":false,"application_enforced_restrictions":false,"cloud_app_security":false},"requires_mfa":false,"blocks_access":true,"requires_compliant_device":false,"targets_all_users":true,"targets_all_applications":true,"has_user_exclusions":true,"targets_legacy_authentication":true}]},"summary":{"total_policies":2,"enabled_policies":2,"enforced_mfa_for_all_users_and_apps":1,"enforced_policies_targeting_legacy_authentication":1}}}'
+
+  - name: report_only
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-CA-POLICIES"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"conditional_access_policies":[{"id":"11111111-1111-1111-1111-111111111111","display_name":"Block legacy authentication","state":"enabledForReportingButNotEnforced","is_enforced":false,"is_report_only":true,"users":{"include":["All"],"exclude":["22222222-2222-2222-2222-222222222222"],"include_groups":[],"exclude_groups":[],"include_roles":[],"exclude_roles":[]},"target_resources":{"include":["All"],"exclude":[]},"access_controls":{"grant":[],"block":["block"],"operator":"OR","authentication_strength":null,"terms_of_use":[]},"conditions":{"client_app_types":["exchangeActiveSync","other"],"sign_in_risk_levels":[],"user_risk_levels":[],"include_platforms":[],"exclude_platforms":[],"include_locations":[],"exclude_locations":[]},"session_controls":{"sign_in_frequency":false,"persistent_browser":false,"application_enforced_restrictions":false,"cloud_app_security":false},"requires_mfa":false,"blocks_access":true,"requires_compliant_device":false,"targets_all_users":true,"targets_all_applications":true,"has_user_exclusions":true,"targets_legacy_authentication":true}]},"summary":{"total_policies":2,"enabled_policies":2,"enforced_mfa_for_all_users_and_apps":1,"enforced_policies_targeting_legacy_authentication":1}}}'
+
+  - name: mfa_instead_of_block
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-CA-POLICIES"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"conditional_access_policies":[{"id":"11111111-1111-1111-1111-111111111111","display_name":"Block legacy authentication","state":"enabled","is_enforced":true,"is_report_only":false,"users":{"include":["All"],"exclude":["22222222-2222-2222-2222-222222222222"],"include_groups":[],"exclude_groups":[],"include_roles":[],"exclude_roles":[]},"target_resources":{"include":["All"],"exclude":[]},"access_controls":{"grant":["mfa"],"block":[],"operator":"OR","authentication_strength":null,"terms_of_use":[]},"conditions":{"client_app_types":["exchangeActiveSync","other"],"sign_in_risk_levels":[],"user_risk_levels":[],"include_platforms":[],"exclude_platforms":[],"include_locations":[],"exclude_locations":[]},"session_controls":{"sign_in_frequency":false,"persistent_browser":false,"application_enforced_restrictions":false,"cloud_app_security":false},"requires_mfa":true,"blocks_access":false,"requires_compliant_device":false,"targets_all_users":true,"targets_all_applications":true,"has_user_exclusions":true,"targets_legacy_authentication":true}]},"summary":{"total_policies":2,"enabled_policies":2,"enforced_mfa_for_all_users_and_apps":1,"enforced_policies_targeting_legacy_authentication":1}}}'
+
+  - name: trusted_locations_excluded
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-CA-POLICIES"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"conditional_access_policies":[{"id":"11111111-1111-1111-1111-111111111111","display_name":"Block legacy authentication","state":"enabled","is_enforced":true,"is_report_only":false,"users":{"include":["All"],"exclude":["22222222-2222-2222-2222-222222222222"],"include_groups":[],"exclude_groups":[],"include_roles":[],"exclude_roles":[]},"target_resources":{"include":["All"],"exclude":[]},"access_controls":{"grant":[],"block":["block"],"operator":"OR","authentication_strength":null,"terms_of_use":[]},"conditions":{"client_app_types":["exchangeActiveSync","other"],"sign_in_risk_levels":[],"user_risk_levels":[],"include_platforms":[],"exclude_platforms":[],"include_locations":[],"exclude_locations":["AllTrusted"]},"session_controls":{"sign_in_frequency":false,"persistent_browser":false,"application_enforced_restrictions":false,"cloud_app_security":false},"requires_mfa":false,"blocks_access":true,"requires_compliant_device":false,"targets_all_users":true,"targets_all_applications":true,"has_user_exclusions":true,"targets_legacy_authentication":true}]},"summary":{"total_policies":2,"enabled_policies":2,"enforced_mfa_for_all_users_and_apps":1,"enforced_policies_targeting_legacy_authentication":1}}}'
+
+  - name: pilot_group_only
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-CA-POLICIES"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"conditional_access_policies":[{"id":"11111111-1111-1111-1111-111111111111","display_name":"Block legacy authentication","state":"enabled","is_enforced":true,"is_report_only":false,"users":{"include":["All"],"exclude":["22222222-2222-2222-2222-222222222222"],"include_groups":[],"exclude_groups":[],"include_roles":[],"exclude_roles":[]},"target_resources":{"include":["All"],"exclude":[]},"access_controls":{"grant":[],"block":["block"],"operator":"OR","authentication_strength":null,"terms_of_use":[]},"conditions":{"client_app_types":["exchangeActiveSync","other"],"sign_in_risk_levels":[],"user_risk_levels":[],"include_platforms":[],"exclude_platforms":[],"include_locations":[],"exclude_locations":[]},"session_controls":{"sign_in_frequency":false,"persistent_browser":false,"application_enforced_restrictions":false,"cloud_app_security":false},"requires_mfa":false,"blocks_access":true,"requires_compliant_device":false,"targets_all_users":false,"targets_all_applications":true,"has_user_exclusions":true,"targets_legacy_authentication":true}]},"summary":{"total_policies":2,"enabled_policies":2,"enforced_mfa_for_all_users_and_apps":1,"enforced_policies_targeting_legacy_authentication":1}}}'
+
+  - name: app_excluded
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-CA-POLICIES"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"conditional_access_policies":[{"id":"11111111-1111-1111-1111-111111111111","display_name":"Block legacy authentication","state":"enabled","is_enforced":true,"is_report_only":false,"users":{"include":["All"],"exclude":["22222222-2222-2222-2222-222222222222"],"include_groups":[],"exclude_groups":[],"include_roles":[],"exclude_roles":[]},"target_resources":{"include":["All"],"exclude":["22222222-2222-2222-2222-222222222222"]},"access_controls":{"grant":[],"block":["block"],"operator":"OR","authentication_strength":null,"terms_of_use":[]},"conditions":{"client_app_types":["exchangeActiveSync","other"],"sign_in_risk_levels":[],"user_risk_levels":[],"include_platforms":[],"exclude_platforms":[],"include_locations":[],"exclude_locations":[]},"session_controls":{"sign_in_frequency":false,"persistent_browser":false,"application_enforced_restrictions":false,"cloud_app_security":false},"requires_mfa":false,"blocks_access":true,"requires_compliant_device":false,"targets_all_users":true,"targets_all_applications":true,"has_user_exclusions":true,"targets_legacy_authentication":true}]},"summary":{"total_policies":2,"enabled_policies":2,"enforced_mfa_for_all_users_and_apps":1,"enforced_policies_targeting_legacy_authentication":1}}}'
+
+  - name: no_policies
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-CA-POLICIES"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"conditional_access_policies":[]},"summary":{"total_policies":2,"enabled_policies":2,"enforced_mfa_for_all_users_and_apps":1,"enforced_policies_targeting_legacy_authentication":1}}}'
+
+  - name: client_app_types_renamed
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-CA-POLICIES"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"conditional_access_policies":[{"id":"11111111-1111-1111-1111-111111111111","display_name":"Block legacy authentication","state":"enabled","is_enforced":true,"is_report_only":false,"users":{"include":["All"],"exclude":["22222222-2222-2222-2222-222222222222"],"include_groups":[],"exclude_groups":[],"include_roles":[],"exclude_roles":[]},"target_resources":{"include":["All"],"exclude":[]},"access_controls":{"grant":[],"block":["block"],"operator":"OR","authentication_strength":null,"terms_of_use":[]},"conditions":{"client_apps":["exchangeActiveSync","other"],"sign_in_risk_levels":[],"user_risk_levels":[],"include_platforms":[],"exclude_platforms":[],"include_locations":[],"exclude_locations":[]},"session_controls":{"sign_in_frequency":false,"persistent_browser":false,"application_enforced_restrictions":false,"cloud_app_security":false},"requires_mfa":false,"blocks_access":true,"requires_compliant_device":false,"targets_all_users":true,"targets_all_applications":true,"has_user_exclusions":true,"targets_legacy_authentication":true}]},"summary":{"total_policies":2,"enabled_policies":2,"enforced_mfa_for_all_users_and_apps":1,"enforced_policies_targeting_legacy_authentication":1}}}'

@@ -1,0 +1,25 @@
+key: azure_defender_mcsb_standard_graded
+name: Defender Grades the Microsoft Cloud Security Benchmark
+type: AUTOMATED
+role: configuration
+statement: >
+  Microsoft Defender for Cloud regulatory compliance is in use on the subscription and
+  grades it against the Microsoft cloud security benchmark: the benchmark standard is
+  present with a Passed or Failed state, so its controls were actually assessed.
+  Substantiates the KSI-CNA-IBP claim that configuration is persistently compared
+  against the provider's best practices. Does NOT prove the benchmark passes (a Failed
+  state passes this validator, which does not judge the failing controls), that
+  every in-scope subscription was collected, or that the policy assignment is enforced
+  (azure_policy_mcsb_assigned_enforced on the assignments set).
+
+# mcsb_state is null when the benchmark standard is absent and Skipped/Unsupported
+# when nothing was graded; either, or a renamed key, leaves nothing to match.
+regex: '"mcsb_state":\s*"(?<mcsb_state>Passed|Failed)"'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DEFENDER-REG-COMPLIANCE

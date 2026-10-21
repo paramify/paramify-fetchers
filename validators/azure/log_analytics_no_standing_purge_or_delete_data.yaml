@@ -1,0 +1,22 @@
+key: log_analytics_no_standing_purge_or_delete_data
+name: Azure Log Analytics No Standing Purge Or Delete Data Rights
+type: AUTOMATED
+role: configuration
+statement: >
+  No principal holds a standing (active) role assignment that lets it irreversibly remove log data
+  from a Log Analytics workspace, through the Purge API or the Delete Data API (which Microsoft now
+  recommends), whether from Data Purger or a wildcard role such as Owner, Contributor or Log Analytics
+  Contributor, at the workspace or inherited. Those rights may only come through a PIM-eligible
+  assignment that has to be activated. This is an assumed access baseline for tamper-resistant logs
+  (AU-9); the organization confirms it. Counts violations, so it relies on
+  log_analytics_deletion_grant_flags_present.
+
+regex: '"assignment_type":\s*"active",[^{}]*?"can_(?:delete_data|purge)":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-LOG-ANALYTICS-DELETION-RIGHTS
