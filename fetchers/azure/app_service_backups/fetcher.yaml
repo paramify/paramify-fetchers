@@ -88,7 +88,7 @@ evidence_set:
   reference_id: EVD-AZURE-APPSVC-BACKUPS
   name: Azure App Service Backups
   instructions: >
-    Script: fetcher.py. Permissions: Reader. Optional (opt-in):
+    Script: azure/app_service_backups/fetcher.py. Permissions: Reader. Optional (opt-in):
     Microsoft.Web/sites/config/list/action for the custom backup configuration.
     Microsoft documents that action as listing security-sensitive settings such as
     publishing credentials, app settings and connection strings, so it is not

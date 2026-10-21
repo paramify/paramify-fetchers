@@ -60,7 +60,7 @@ Fill in every required field with real values:
 ```yaml
 name: <category>_<short_name>            # globally unique
 version: 0.1.0                            # 0.x.y while pre-contract-conformant
-description: <one sentence of at most 30 words on what the evidence shows>
+description: <one or two sentences describing what evidence this collects>
 category: <category>
 
 supports_targets: false   # true only if this fetcher should fan out
@@ -88,54 +88,10 @@ An **evidence** fetcher carries an `evidence_set` block — the Paramify evidenc
 evidence_set:
   reference_id: EVD-<CATEGORY>-<SHORT>   # stable idempotency key, e.g. EVD-OKTA-PHISHING-MFA
   name: <Human-readable display name>
-  instructions: |                         # optional; layout below
-    Script: <category>/<short_name>/<entry>
-    ...
+  instructions: <optional — what the fetcher runs / how the evidence is produced>
 ```
 
 `reference_id` and `name` are required; `instructions` is optional. Customers override `reference_id` per compliance program in the uploader config — they never edit this block. Do **not** add `controls`/`solution_capabilities` here; that linkage stays Paramify-side.
-
-### `description` and `instructions`
-
-Paramify shows both as plain text. `description` becomes the evidence set's description (unless `evidence_set.description` overrides it) and `instructions` fills its Instructions tab. Line breaks come through as written, but markdown and HTML don't render, so leave out backticks, `**bold**` and tags. The uploader sends both only when it creates the evidence set; a set that already exists keeps its text.
-
-**`description`** is one sentence of at most 30 words on what the evidence shows, not how it's collected. Start with what it shows ("Shows whether…", "Lists…", "Labels each…") and don't repeat the fetcher's name. An `evidence_set.description`, when set, replaces it in Paramify and follows the same rule.
-
-**`instructions`** is a `|` block, so its line breaks survive, with these sections in this order and a blank line between them:
-
-- **Script:** the entry's path under `fetchers/`, alone on its line.
-- **Access:** the role or permission it needs. Then any optional access and what reads as unknown without it ("Optional: …; without it, …"). Leave out how it signs in.
-- **Commands Executed:** one `- ` line per call: the actual call (SDK method, REST path, CLI command or queried table), ` — `, and a few words on why. Add "(per project)" when it repeats. No API versions, query strings or paging details.
-- **Output:** the output file's name, with a placeholder like `<subscription>` for the part that varies, ` — `, then one sentence on what it holds.
-- **Summary fields:** every field the summary writes, once, in groups. Each group starts with the question it answers ("Is every web app backed up?"), ordered from what exists to how it's configured to whether it works. Each field line opens with its value type: "Number of …", "Number of … for each …", "Percentage of …", "True if …; false if …; null if …", "List of …", "Whether …: <the values it takes>", or a unit ("Hours since …"). It stands on its own, so never "of those". For a breakdown ("Number of … for each source:"), put each value on an indented line below it: "  - uploaded (an uploaded PFX file that nobody renews)". Define the fetcher's own judgement words ("deliverable", "in use") where they first appear. Give each percentage's formula using the summary's own field names, and what it reads when the denominator is 0.
-
-From [`azure/alert_rules`](../fetchers/azure/alert_rules/fetcher.yaml), shortened:
-
-```yaml
-description: >-
-  Shows every metric, log search and smart detector alert rule and whether
-  each one actually reaches a person.
-
-evidence_set:
-  instructions: |
-    Script: azure/alert_rules/fetcher.py
-
-    Access: Reader or Monitoring Reader on the subscription. Optional: Reader on other subscriptions whose action groups the rules use; without it, those rules' verdicts read unknown.
-
-    Commands Executed:
-    - GET Microsoft.Insights/metricAlerts — metric alert rules
-    - GET Microsoft.Insights/actionGroups — action groups and their receivers
-
-    Output: azure_alert_rules_<subscription>.json — each alert rule with its condition, the receivers it notifies (phone numbers cut to the last 4 digits, webhooks to their host, Logic Apps and Functions to their resource id), any processing rules that suppress or add groups to it, and whether it reaches a person; mute durations are recorded but not evaluated, and activity log alerts are in azure_activity_log_alerts.
-
-    Summary fields:
-
-    Does every enabled rule reach a person?
-    - enabled_rules_reaching_human — Number of enabled rules that notify a person and aren't suppressed
-    - reaching_human_percentage — Percentage of enabled alerting rules that reach a person = enabled_rules_reaching_human / enabled_alerting_rules × 100 (a whole number, 0–100); 0 when enabled_alerting_rules is 0
-```
-
-`tests/test_contracts.py` checks this layout for the fetchers listed in `TEXT_FORMAT_FETCHERS`. Add a platform there once its fetchers are converted. Until then, every fetcher's instructions only need to open with its `Script:` path.
 
 An issue-report fetcher carries an `issue_report` block instead, and the two are mutually exclusive — see [`issue_report_fetchers.md`](issue_report_fetchers.md).
 

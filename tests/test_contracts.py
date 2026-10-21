@@ -185,7 +185,7 @@ def test_instructions_open_with_the_entry_path() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Description and instructions text (docs/authoring_a_fetcher.md). Paramify shows
+# Description and instructions text (docs/authoring_fetcher_guide.md). Paramify shows
 # both as plain text, so the layout is checked here for each converted fetcher;
 # add a category (or category/short_name) once its fetchers are converted.
 # --------------------------------------------------------------------------- #

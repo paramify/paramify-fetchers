@@ -42,7 +42,7 @@ secrets:
 evidence_set:
   reference_id: EVD-<CATEGORY>-INVENTORY
   name: <Tool> <Asset> Inventory
-  # Plain text, laid out as in docs/authoring_a_fetcher.md ("description and instructions").
+  # Plain text, laid out as in docs/authoring_fetcher_guide.md ("The description and instructions text").
   instructions: |
     Script: <category>/<short_name>/fetcher.py
 

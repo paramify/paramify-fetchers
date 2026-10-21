@@ -49,7 +49,7 @@ variable the fetcher reads: the runner drops any it doesn't know about
 ```yaml
 name: okta_password_policy                # <category>_<short_name>, globally unique
 version: 0.1.0
-description: Collects each Okta password policy's length, complexity, age, and lockout settings.
+description: Shows each Okta password policy's length, complexity, age and lockout settings.
 category: okta
 
 supports_targets: false                   # true to run once per target (fanout)
@@ -73,7 +73,7 @@ secrets:
 evidence_set:
   reference_id: EVD-OKTA-PASSWORD-POLICY
   name: Okta Password Policy
-  instructions: |                         # plain text; layout in authoring_a_fetcher.md
+  instructions: |                         # plain text; layout below
     Script: okta/password_policy/fetcher.py
 
     Access: An API token from an Okta read-only administrator.
@@ -95,6 +95,44 @@ paramify list | grep <category>_<short_name>
 paramify describe <category>_<short_name>
 ```
 </details>
+
+### The `description` and `instructions` text
+
+Paramify shows both as plain text. Line breaks come through, but markdown and
+HTML don't render, so leave out backticks, bold and tags. `description` becomes
+the evidence set's description (unless `evidence_set.description` overrides it),
+and `instructions` fills its Instructions tab. The uploader sends both only when
+it creates the evidence set.
+
+- **`description`**: one sentence of at most 30 words on what the evidence
+  shows, not how it's collected. Start with "Shows whether…", "Lists…" or
+  "Labels each…", and don't repeat the fetcher's name.
+- **`instructions`**: a `|` block with these sections in order, a blank line
+  between each:
+  - **Script:** the entry's path under `fetchers/`, alone on its line.
+  - **Access:** the role or permission it needs, then any optional access and
+    what reads as unknown without it ("Optional: …; without it, …"). Leave out
+    how it signs in.
+  - **Commands Executed:** one `- ` line per call: the actual call (SDK method,
+    REST path, CLI command or queried table), ` — `, and a few words on why. Add
+    "(per project)" when it repeats. No API versions, query strings or paging.
+  - **Output:** the output file's name, with a placeholder like `<subscription>`
+    for the part that varies, ` — `, then one sentence on what it holds.
+  - **Summary fields:** every field the summary writes, once, in groups. Each
+    group opens with the question it answers ("Is every web app backed up?"),
+    ordered from what exists to how it's configured to whether it works. Each
+    field line opens with its value type: "Number of …", "Percentage of …",
+    "True if …; false if …; null if …", "List of …", "Whether …: <its values>",
+    or a unit ("Hours since …"), and never leans on another line ("of those").
+    A breakdown's values go on indented lines under it:
+    "  - uploaded (an uploaded PFX file that nobody renews)". Define the
+    fetcher's own judgement words where they first appear, and give each
+    percentage's formula with what it reads when the denominator is 0.
+
+[`azure/alert_rules`](../fetchers/azure/alert_rules/fetcher.yaml) is a full
+example. `tests/test_contracts.py` checks this layout for the fetchers listed in
+`TEXT_FORMAT_FETCHERS`; until a platform is converted, its instructions only
+need to open with the `Script:` path.
 
 ## 3. Write `fetcher.py` and smoke-test it
 
