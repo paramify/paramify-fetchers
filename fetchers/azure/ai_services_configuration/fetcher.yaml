@@ -1,0 +1,104 @@
+name: azure_ai_services_configuration
+version: 0.1.0
+description: >
+  Inventories Azure AI services accounts (Microsoft.CognitiveServices/accounts — Azure AI Foundry,
+  Azure OpenAI, Language, Speech, Document Intelligence and the other kinds) and Azure AI Search
+  services in the subscription. For every account and search service: how reachable it is from the
+  internet, whether API keys still work or only Microsoft Entra ID sign-in does, customer-managed key
+  encryption, managed identity and whether audit logs are exported. For Foundry and OpenAI accounts
+  also: every model deployment with its publisher, where it may process data and the content filter and
+  Prompt Shields protection it runs under; every content filter policy, flagging custom ones weaker
+  than Microsoft's default; every Foundry project; and every connection agents use to reach other
+  systems, with whether it holds a stored secret.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_ai_services_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-MAT   # public network access and network rules on each AI endpoint
+  - KSI-IAM-SNU   # API keys disabled in favour of Entra ID and managed identities
+  - KSI-SVC-SIN   # customer-managed key encryption of AI data at rest
+  - KSI-MLA-LET   # audit logs exported from each account and search service
+  - KSI-SVC-ASM   # Foundry connections that hold stored keys rather than using Entra ID
+
+evidence_set:
+  reference_id: EVD-AZURE-AI-SERVICES-CONFIG
+  name: Azure AI Services Configuration
+  instructions: >
+    Script: fetcher.py. Azure SDK calls: azure-mgmt-cognitiveservices CognitiveServicesManagementClient
+    accounts.list(); for accounts of kind AIServices or OpenAI also deployments.list, rai_policies.list
+    and projects.list (resource_group, account); azure-mgmt-monitor diagnostic_settings.list for each
+    account and search service. Read as ARM JSON through the same authenticated client, because the SDK
+    drops connection auth types it has no model for and the repo has no AI Search SDK: GET
+    {account}/connections and {project}/connections (api-version 2025-06-01) and
+    /subscriptions/{id}/providers/Microsoft.Search/searchServices (api-version 2025-05-01). No call reads
+    keys, connection credentials or model content; connection targets are recorded without query string.
+    Accounts: network_exposure is private when publicNetworkAccess is Disabled, restricted when it is
+    not but the network rules default to Deny, and open otherwise (Azure treats unset values as Enabled
+    and Allow). private_endpoint_but_public_access marks an account with a private endpoint that is
+    still reachable publicly. api_keys_enabled is false only when disableLocalAuth is true (it defaults
+    to false). customer_managed_key is true when encryption.keySource is anything other than
+    Microsoft.CognitiveServices. audit_logs_exported is true when a diagnostic setting with a
+    destination (including a Marketplace partner such as Datadog) enables the audit category or the
+    audit or allLogs category group, false otherwise, and null when diagnostic settings could not be
+    read. The category is Audit for an AI services account and OperationLogs for an AI Search service,
+    which has no Audit category.
+    Deployments: model_publisher is the model format (OpenAI, Anthropic, MoonshotAI, ...) and
+    third_party_publisher is true for publishers other than OpenAI and Microsoft. processing_scope comes
+    from the deployment type: global (Global* types, may process data in any Azure region), data_zone
+    (DataZone* types, within a geography), regional (Standard, ProvisionedManaged, Batch) or unknown.
+    content_filter judges the hate, sexual, violence and self-harm filters, jailbreak_protection and
+    indirect_attack_protection the Prompt Shields filters; each is blocking when the deployment's content
+    filter (RAI) policy has them enabled and blocking, non_blocking when not, none when the deployment
+    names no policy, missing when the named policy is not on the account, and unknown when policies
+    could not be listed. Microsoft's default policy blocks jailbreaks but does not enable indirect-attack
+    detection. version_upgrade_option shows whether the model is upgraded automatically.
+    Content filter policies: custom is true for user-managed policies; weaker_than_default marks a custom
+    policy that does not block every harm category and jailbreaks, or that sets any harm filter's
+    severity_threshold looser than Microsoft's DefaultV2 (Medium on prompts and completions). A threshold is
+    the lowest severity blocked, so High blocks only the most severe content and is looser than Medium;
+    harm_filters_looser_than_default names those filters and harm_thresholds_at_least_default is false.
+    A missing or unrecognised threshold leaves both null (unknown, counted in
+    summary.content_filter_policies_weaker_unknown), never "at least default"; in_use is whether any deployment uses
+    it; asynchronous_filtering marks policies that let output stream before filtering completes;
+    non_blocking_filters lists every filter that is off or annotate-only.
+    Connections: listed at account and project level (the account list repeats its projects'
+    connections; summary counts each once per account). uses_stored_secret is true for auth types that
+    keep a credential in the connection (ApiKey, CustomKeys, PAT, UsernamePassword, AccessKey, SAS,
+    AccountKey, ServicePrincipal, OAuth2), false for Entra ID and managed identity types, and null for
+    unrecognised types (counted in connections_auth_type_unrecognized). remote_tool_connections are tools
+    and MCP servers agents can call. grounding_with_bing_connections counts Grounding with Bing Search
+    connections, which Microsoft documents as sending queries outside the Azure compliance boundary.
+    Search services: network_exposure is private when publicNetworkAccess is disabled, restricted when
+    IP rules are set, open otherwise; auth_mode is entra_only, api_key_only or entra_or_api_key;
+    cmk_enforcement is the service's customer-managed key enforcement.
+    Lists that could not be read are null and set metadata.partial_failure. provider_registration_status
+    (registered / not_registered / unknown) is the Microsoft.CognitiveServices resource provider's state.
