@@ -39,14 +39,14 @@ secret makes the build fail.
 ## Adding a fetcher
 
 - To write a fetcher from scratch, read
-  [`docs/authoring_a_fetcher.md`](docs/authoring_a_fetcher.md).
-  [`docs/fetcher_contract.md`](docs/fetcher_contract.md) gives the contract that
-  every fetcher must meet.
+  [`docs/authoring_fetcher_guide.md`](docs/authoring_fetcher_guide.md).
+  [`docs/fetcher_contract_guide.md`](docs/fetcher_contract_guide.md) checks a
+  fetcher against the contract that every fetcher must meet.
 - For a platform that has no fetchers yet, start from
   [`docs/platform_onboarding_guide.md`](docs/platform_onboarding_guide.md).
 - Some tools already produce findings, for example a vulnerability scan or a
   CSPM export. For these tools, write an issue-report fetcher:
-  [`docs/issue_report_fetchers.md`](docs/issue_report_fetchers.md).
+  [`docs/issue_report_fetchers_guide.md`](docs/issue_report_fetchers_guide.md).
 - If you use Claude Code, the `create-fetcher` and `onboard-platform` skills in
   [`.claude/skills/`](.claude/skills/) do the same steps with you.
 
