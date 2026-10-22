@@ -541,7 +541,7 @@ def test_incidents_response_timeline_and_entities(azure, tmp_path):
         {"title": "Reset password", "status": "New", "created_time_utc": iso(NOW - timedelta(days=3)), "completed_time_utc": None}]
     assert closed["comments_count"] == 2 and closed["classification_comment"].startswith("phishing")
     assert closed["related_analytic_rule_ids"] == [f"{SI_A}/alertRules/r1"]
-    assert closed["alerts_found"] == 1 and closed["history_complete"] is True and closed["updates_retained"] == 3
+    assert closed["alerts_found"] == 1 and closed["history_complete"] is True and closed["updates_read"] == 3
     # No command line, query string or credentials reach the evidence.
     assert closed["entities"] == [
         {"kind": "account", "id": "john@contoso.com"}, {"kind": "file", "id": "powershell.exe"},
@@ -997,7 +997,7 @@ def test_incidents_query_too_large_is_read_in_halves_by_incident(azure, tmp_path
                                              table(HISTORY_COLUMNS, rows[3:])]))
     code, ev = run("sentinel_incidents", tmp_path)
     closed = next(i for i in ws_a(ev)["incidents"] if i["name"] == "i-closed")
-    assert code == 0 and closed["hours_to_acknowledge"] == pytest.approx(12, abs=0.01) and closed["updates_retained"] == 3
+    assert code == 0 and closed["hours_to_acknowledge"] == pytest.approx(12, abs=0.01) and closed["updates_read"] == 3
     whole, *halves = history_posts(azure)
     assert "hash(" not in whole and len(halves) == 2
     assert [q.count("hash(IncidentName)") for q in halves] == [1, 1] and halves[0] != halves[1]

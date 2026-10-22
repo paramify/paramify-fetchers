@@ -922,13 +922,14 @@ schemas and the `paramify` CLI — not the internal code.
     object id when both sides have one, else by name) and, if its
     `lastModifiedTimeUtc` is within the last hour, is that recent. One already
     acknowledged before its oldest update read has no acknowledgement time rather
-    than a late one.
+    than a late one. `updates_read` counts the update rows read for it.
 
   Each workspace gains `monthly`: per calendar month of the lookback, MTTD by
   month created, MTTA by month acknowledged and MTTR by month closed over the
   in-scope incidents, and the open backlog at month end by severity and owner
   over every incident, which is `null` for month ends older than
-  SecurityIncident's retention. An older incident closed in the lookback leaves
+  SecurityIncident's retention; its `updates_retained` is true when the whole
+  month is inside the history read. An older incident closed in the lookback leaves
   the backlog without counting in that month's MTTR, so monthly MTTR may read
   low. It also gains `recurring_titles`, `recurrence_by_title` and
   `recurrence_by_rule` (two or more incidents created in the lookback),

@@ -339,7 +339,7 @@ def timeline(
     means every update was read: from the creation row to the incident as it is now."""
     if rows is None:
         return {k: None for k in ("acknowledged_time_utc", "hours_to_acknowledge", "status_changes", "owner_changes",
-                                  "severity_changes", "updates_retained", "history_complete")}
+                                  "severity_changes", "updates_read", "history_complete")}
     created = parse_time(incident.get("created_time_utc"))
     start = history_start(incident, rows, history_from)
     complete = start is not None and history_current(incident, rows, now)
@@ -350,7 +350,7 @@ def timeline(
         "status_changes": changes(rows, "Status"),
         "owner_changes": changes(rows, "Owner"),
         "severity_changes": changes(rows, "Severity"),
-        "updates_retained": len(rows),
+        "updates_read": len(rows),
         "history_complete": complete,
     }
 
