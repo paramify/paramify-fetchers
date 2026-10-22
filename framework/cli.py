@@ -277,6 +277,13 @@ def _platform_config_type(root: Path, category: str, key: str) -> str:
     return "string"
 
 
+def _category_fetcher_types(root: Path, category: str, key: str) -> List[str]:
+    """The types the category's fetchers declare for `key`, since a platform value reaches each of them."""
+    cat = api.catalog(root)
+    return [fld["type"] for c in cat["categories"] if c["name"] == category
+            for f in c["fetchers"] for fld in f["config"] if fld["name"] == key]
+
+
 def _target_field_type(root: Path, fetcher_name: str, key: str) -> str:
     cat = api.catalog(root)
     f = _find_fetcher(cat, fetcher_name)
@@ -1727,7 +1734,10 @@ def manifest_set_platform_config(
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
     key, raw = _parse_kv(kv, path, json_out)
-    value = _coerce_or_fail(raw, _platform_config_type(root, category, key), key, path, json_out)
+    typ = _platform_config_type(root, category, key)
+    if is_env_ref_attempt(raw) and typ == "string":
+        typ = next((t for t in _category_fetcher_types(root, category, key) if t != "string"), typ)
+    value = _coerce_or_fail(raw, typ, key, path, json_out)
     api.set_platform_config(m, category, key, value)
     _save_and_report(m, path, root, json_out)
 

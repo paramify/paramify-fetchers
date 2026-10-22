@@ -35,7 +35,12 @@ from framework.contract import (
     effective_secrets,
 )
 from framework.discovery import DISCOVERY_DIR
-from framework.issue_reports import ISSUE_REPORTS_DIR
+from framework.issue_reports import (
+    ASSESSMENT_ID_FIELD,
+    ASSESSMENT_NAME_FIELD,
+    CLOSE_CYCLE_FIELD,
+    ISSUE_REPORTS_DIR,
+)
 from framework.secret_resolver import (
     SecretResolutionError,
     UnsetSecretError,
@@ -152,6 +157,10 @@ def _coerce_env(value) -> str:
     return str(value)
 
 
+# Issue-report keys the manifest carries without any schema declaring them.
+UNDECLARED_KEYS = (ASSESSMENT_ID_FIELD, ASSESSMENT_NAME_FIELD, CLOSE_CYCLE_FIELD)
+
+
 class MergedConfig(NamedTuple):
     schema: Dict[str, ConfigField]
     values: Dict[str, object]       # what the runner injects, references resolved
@@ -173,7 +182,9 @@ def merged_config(
     whose variable is unset or empty gives way to the next value down, as if it
     had not been set. A reference on an integer or boolean field, or a malformed
     one, is an error for that field, and its text stays the value so a view can
-    show it. Extracted from _apply_config so callers that need a resolved value
+    show it. Only this fetcher's fields and the issue-report keys the manifest
+    carries undeclared are resolved; any other key (a sibling fetcher's, or a
+    stale one) passes through as written. Extracted from _apply_config so callers that need a resolved value
     the fetcher never sees can read it without re-implementing the ladder —
     `api.run()` does this for the issue-report `assessment_id`, which is resolved
     from the manifest but injected into no env var.
@@ -188,16 +199,15 @@ def merged_config(
     sources: Dict[str, str] = {}
     unset: List[Tuple[str, str]] = []
     errors: Dict[str, str] = {}
-    # Undeclared keys ride along as strings: assessment_id lives in the manifest, not a schema.
-    names = dict.fromkeys([*schema, *platform_values, *entry.config])
-    for name in names:
+    for name in dict.fromkeys([*schema, *platform_values, *entry.config]):
         fdef = schema.get(name) or ConfigField(name=name)
+        resolved = name in schema or name in UNDECLARED_KEYS
         layers = (("entry", entry.config.get(name)), ("platform", platform_values.get(name)),
                   ("default", fdef.default))
         for source, value in layers:
             if value is None:
                 continue
-            if is_env_ref_attempt(value):
+            if resolved and is_env_ref_attempt(value):
                 if fdef.type != "string":
                     errors[name] = (f"config '{name}' is {fdef.type}; ${{env:}} references work on "
                                     f"string config fields only")
@@ -221,11 +231,13 @@ def _apply_config(
     platform_cfg: Optional[PlatformConfig],
     entry: ManifestEntry,
     secret_sink: Optional[set] = None,
+    merged: Optional[MergedConfig] = None,
 ) -> None:
     """Inject each merged config field (see merged_config) that declares an `env`
     mapping. Also lets the platform's auth passthrough_env vars through the
     whitelist."""
-    merged = merged_config(fetcher, platform_spec, platform_cfg, entry)
+    if merged is None:
+        merged = merged_config(fetcher, platform_spec, platform_cfg, entry)
     if merged.errors:
         raise RuntimeError(f"{fetcher.name}: {next(iter(merged.errors.values()))}")
 
@@ -346,6 +358,7 @@ def _build_env(
     secret_sink: Optional[set] = None,
     note_sink: Optional[List[Tuple[str, str]]] = None,
     shadow_sink: Optional[List[Tuple[str, str]]] = None,
+    merged: Optional[MergedConfig] = None,
 ) -> Dict[str, str]:
     """Build the env dict to pass to a single fetcher invocation.
 
@@ -358,7 +371,7 @@ def _build_env(
     env["PYTHONUNBUFFERED"] = "1"
     env["EVIDENCE_DIR"] = str(output_dir.resolve())
 
-    _apply_config(env, fetcher, platform_spec, platform_cfg, entry, secret_sink)
+    _apply_config(env, fetcher, platform_spec, platform_cfg, entry, secret_sink, merged)
 
     # An optional secret the manifest omits is simply not injected: the fetcher's
     # credential chain falls through to ambient identity (IRSA, workload identity,
@@ -668,14 +681,15 @@ def run_entry(
     output_dir.mkdir(parents=True, exist_ok=True)
     inv_dir = invocation_dir(fetcher, output_dir)
     inv_dir.mkdir(parents=True, exist_ok=True)
-    # Config is per entry, so its notes are too, whatever the number of targets.
-    _emit_config_notes(merged_config(fetcher, platform_spec, platform_cfg, entry), on_note)
+    # Config is per entry: merged once, and its notes given once, whatever the number of targets.
+    merged = merged_config(fetcher, platform_spec, platform_cfg, entry)
+    _emit_config_notes(merged, on_note)
 
     if not fetcher.supports_targets:
         secrets_seen: set = set()
         notes: List[Tuple[str, str]] = []
         env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg,
-                         secrets_seen, notes)
+                         secrets_seen, notes, merged=merged)
         _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
 
@@ -691,7 +705,7 @@ def run_entry(
         secrets_seen = set()
         notes = []
         env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg,
-                         secrets_seen, notes)
+                         secrets_seen, notes, merged=merged)
         _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
 
@@ -702,7 +716,7 @@ def run_entry(
             notes = []
             shadowed: List[Tuple[str, str]] = []
             env = _build_env(fetcher, entry, target, inv_dir, platform_spec, platform_cfg,
-                             secrets_seen, notes, shadowed)
+                             secrets_seen, notes, shadowed, merged)
             _emit_notes(notes, on_note)
             _emit_shadowed(shadowed, on_note)
             results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir))

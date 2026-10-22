@@ -749,8 +749,11 @@ schemas and the `paramify` CLI — not the internal code.
   not targets: the runner refuses a reference on an integer or boolean field,
   and `manifest set-config`, `set-platform-config`, `add-target` and
   `set-target` refuse one on a typed config field or any target field (a
-  target's secrets still take references). `effective_config`, and so the TUI,
-  shows the value the runner would inject.
+  target's secrets still take references), as does `validate` for a hand-edited
+  one. Only the fetcher's own fields and the issue-report keys are resolved; a key
+  only a sibling fetcher declares passes through untouched. `effective_config`,
+  and so the TUI, shows a reference as written with whether it is set, like a
+  secret, and `validate` names an issue-report reference unset in its shell.
 
 ### Changed
 

@@ -293,7 +293,18 @@ def entry_detail(
         rows = []
         for c in config_fields:
             source = c.get("source")
-            if source == "entry":
+            ref = c.get("reference")
+            if ref:
+                # Shown as written, like a secret: never the variable's value.
+                state = c.get("reference_state")
+                style = {"set": palette.OK, "unset": palette.WARN}.get(state, palette.FAIL)
+                value = Text(ref if state == "set" else f"{ref}  ({state})", style=style)
+                if state == "set" and source != "entry":
+                    value.append(f"  ({source})", style="dim")
+                elif state == "unset" and source:
+                    value.append(f"  → {c['value']} ({source})", style="dim")
+                rows.append((c["name"], value))
+            elif source == "entry":
                 rows.append((c["name"], Text(str(c["value"]), style=palette.FG)))
             elif source and source.startswith("platforms."):
                 value = Text(str(c["value"]), style=palette.FG)

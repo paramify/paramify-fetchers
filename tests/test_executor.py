@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -226,6 +227,99 @@ def test_config_env_reference_unset_emits_one_fetcher_note_per_entry(tmp_path, m
     run_entry(fetcher, entry, tmp_path / "out", None,
               PlatformConfig(config={"patterns": "${env:OTHER_UNSET}"}), on_note=seen.append)
     assert seen == ["2 config references unset: patterns (${env:UNSET_VAR}, ${env:OTHER_UNSET}) uses the default."]
+
+
+def test_merged_config_leaves_other_fetchers_keys_alone(tmp_path, monkeypatch):
+    monkeypatch.delenv("UNSET_VAR", raising=False)
+    monkeypatch.setenv("ASSESSMENT", "a-1")
+    fetcher = make_fetcher(tmp_path, config_schema={"patterns": cfg("patterns", "PATTERNS")})
+    platform = PlatformConfig(config={"sibling_days": "${env:lower}", "stale": "${env:UNSET_VAR}"})
+    merged = merged_config(fetcher, None, platform, ManifestEntry(use="x", config={"assessment_id": "${env:ASSESSMENT}"}))
+    assert (merged.errors, merged.unset) == ({}, [])
+    assert merged.values == {"sibling_days": "${env:lower}", "stale": "${env:UNSET_VAR}", "assessment_id": "a-1"}
+    env: dict = {}
+    _apply_config(env, fetcher, None, platform, ManifestEntry(use="x"))
+    assert "PATTERNS" not in env
+
+
+def test_config_is_merged_once_per_entry(tmp_path, monkeypatch):
+    from framework.runner import executor
+
+    calls = []
+    real = executor.merged_config
+    monkeypatch.setattr(executor, "merged_config", lambda *a: calls.append(1) or real(*a))
+    fdir = tmp_path / "fetcher"
+    fdir.mkdir()
+    (fdir / "fetcher.py").write_text("pass\n")
+    fetcher = make_fetcher(fdir, supports_targets=True,
+                           target_schema={"region": TargetField(name="region", type="string", env="REGION")},
+                           config_schema={"patterns": cfg("patterns", "PATTERNS", default="qa.*")})
+    entry = ManifestEntry(use="t_fetcher",
+                          targets=[TargetInstance(values={"region": r}, secrets={}) for r in ("a", "b", "c")])
+    results = run_entry(fetcher, entry, tmp_path / "out")
+    assert len(results) == 3 and len(calls) == 1
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _manifest(use, config=None, platform=None, target=None):
+    m = api.init_manifest()
+    api.add_entry(m, use)
+    for k, v in (config or {}).items():
+        api.set_fetcher_config(m, use, k, v)
+    for k, v in (platform or {}).items():
+        api.set_platform_config(m, "azure", k, v)
+    if target:
+        api.add_target(m, use, target)
+    return m
+
+
+@pytest.mark.parametrize("config, platform, target, message", [
+    pytest.param({"metrics_lookback_days": "${env:DAYS}"}, None, None,
+                 "azure_front_door_origins: config 'metrics_lookback_days' is integer", id="typed-entry-field"),
+    pytest.param({"scope_exclusions": "${env:lower}"}, None, None,
+                 "azure_front_door_origins: config 'scope_exclusions': Malformed", id="malformed"),
+    pytest.param(None, None, {"production_tag": "${env:TAG}"},
+                 "azure_front_door_origins target[0]: production_tag is '${env:TAG}', but target fields aren't resolved",
+                 id="target-field"),
+])
+def test_validate_reports_references_the_runner_refuses(config, platform, target, message):
+    errors = api.validate(_manifest("azure_front_door_origins", config, platform, target), REPO_ROOT)
+    assert any(e.startswith(message) for e in errors), errors
+
+
+def test_validate_names_an_unset_assessment_reference(monkeypatch):
+    monkeypatch.delenv("WIZ_ASSESSMENT", raising=False)
+    m = _manifest("wiz_issues_report", {"assessment_id": "${env:WIZ_ASSESSMENT}", "close_cycle": "after_run"})
+    errors = [e for e in api.validate(m, REPO_ROOT) if "assessment_id" in e]
+    assert errors == ["wiz_issues_report: assessment_id reads ${env:WIZ_ASSESSMENT}, a reference unset in this "
+                      "environment"]
+
+
+def test_effective_config_shows_the_reference_and_whether_it_is_set(tmp_path, monkeypatch):
+    from framework.tui import render
+
+    monkeypatch.setenv("SET_VAR", "secret-ish-value")
+    monkeypatch.delenv("UNSET_VAR", raising=False)
+    fetcher = make_fetcher(tmp_path, config_schema={"hosts": cfg("hosts", "HOSTS"),
+                                                    "patterns": cfg("patterns", "PATTERNS", default="qa.*")})
+    m = {"run": {"fetchers": [{"use": "t_fetcher", "config": {"hosts": "${env:SET_VAR}", "patterns": "${env:UNSET_VAR}"}}]}}
+    view = api.effective_config(m, ["t_fetcher"], tmp_path, {"t_fetcher": fetcher}, {})["t_fetcher"]
+    by_name = {f["name"]: f for f in view}
+    assert {k: by_name["hosts"][k] for k in ("value", "source", "reference", "reference_state")} == {
+        "value": "secret-ish-value", "source": "entry", "reference": "${env:SET_VAR}", "reference_state": "set"}
+    assert {k: by_name["patterns"][k] for k in ("value", "source", "reference", "reference_state")} == {
+        "value": "qa.*", "source": "default", "reference": "${env:UNSET_VAR}", "reference_state": "unset"}
+
+    from rich.console import Console
+
+    console = Console(width=200, record=True)
+    console.print(render.entry_detail({"name": "t_fetcher", "secrets": [], "config": []}, m["run"]["fetchers"][0],
+                                      config_view=view))
+    shown = console.export_text()
+    assert "${env:SET_VAR}" in shown and "${env:UNSET_VAR}  (unset)" in shown
+    assert "secret-ish-value" not in shown
 
 
 def test_effective_config_skips_an_unset_reference_like_the_runner(tmp_path, monkeypatch):

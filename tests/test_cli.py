@@ -795,6 +795,7 @@ def test_set_config_keeps_env_reference_on_a_string_field(in_repo, tmp_path):
     ["set-config", "azure_front_door_origins", "metrics_lookback_days=${env:MY_VALUE}"],  # integer
     ["set-config", "aws_iam_roles", "exclude_aws_managed_roles=${env:MY_VALUE}"],  # boolean
     ["set-platform-config", "rippling", "page_size=${env:MY_VALUE}"],  # integer
+    ["set-platform-config", "azure", "metrics_lookback_days=${env:MY_VALUE}"],  # a fetcher's integer
 ])
 def test_env_reference_on_a_typed_config_field_is_refused(in_repo, tmp_path, command):
     m = str(tmp_path / "m.yaml")

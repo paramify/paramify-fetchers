@@ -56,7 +56,7 @@ A string config field can also be `${env:VAR}`, read from the environment at
 run time. If `VAR` is unset or empty, the next value down applies (platform
 config, then the default), and the run prints a note. Integer and boolean
 fields and target fields don't take `${env:VAR}` (a target's secrets do), and
-`manifest` refuses one there.
+`manifest` and `validate` refuse one there.
 
 ## 3. Check it
 

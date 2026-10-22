@@ -69,6 +69,7 @@ from framework.paramify_auth import (
 )
 from framework.probe import probe_categories
 from framework.runner import manifest_loader
+from framework.secret_resolver import is_env_ref_attempt
 
 
 def _missing_token_error() -> str:
@@ -904,6 +905,8 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
     may be passed pre-discovered (e.g. when validating many manifests in a loop)
     to avoid re-scanning the fetcher tree each call.
     """
+    from framework.runner.executor import merged_config  # lazy: import cycle
+
     errors = manifest_loader.schema_errors(manifest, root)
     if errors:
         return errors  # can't do semantic checks on a structurally-broken manifest
@@ -949,16 +952,27 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
                     f"(platforms.{fetcher.category}.config or fetcher config)"
                 )
 
+        # The references the runner would refuse, so a hand edit fails here rather than at run time.
+        merged = merged_config(fetcher, spec, platform_cfg, entry)
+        errors += [f"{entry.use}: {problem}" for problem in merged.errors.values()]
+        for j, t in enumerate(entry.targets):
+            errors += [f"{entry.use} target[{j}]: {k} is {v!r}, but target fields aren't resolved, so ${{env:}} "
+                       f"references don't work there" for k, v in t.values.items() if is_env_ref_attempt(v)]
+
         # An issue report with no assessment collects fine but can never be
         # intaken, so the gap is reported here rather than at upload time — after
         # someone has already paid for a scan. It is deliberately NOT a required
         # config field: making it one would block collecting without a Paramify
         # connection, which the framework is supposed to allow (docs/architecture_guide.md, step 3).
         if fetcher.is_issue_report:
-            from framework.runner.executor import merged_config  # lazy: import cycle
-
-            values = merged_config(fetcher, spec, platform_cfg, entry).values
-            if not values.get(ASSESSMENT_ID_FIELD):
+            values = merged.values
+            # A reference unset in this shell may well be set where the run happens, so it is named, not "not set".
+            first_unset = {name: var for name, var in reversed(merged.unset)}
+            unset = {name for name in (ASSESSMENT_ID_FIELD, CLOSE_CYCLE_FIELD)
+                     if values.get(name) is None and name in first_unset}
+            errors += [f"{entry.use}: {name} reads ${{env:{first_unset[name]}}}, a reference unset in this environment"
+                       for name in sorted(unset)]
+            if not values.get(ASSESSMENT_ID_FIELD) and ASSESSMENT_ID_FIELD not in unset:
                 errors.append(
                     f"{entry.use}: no {ASSESSMENT_ID_FIELD} set, so its report cannot be "
                     f"sent to Paramify (fix: paramify assessments select {entry.use})"
@@ -967,12 +981,13 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             # needs no Paramify decision), but the uploader will not guess it.
             close_cycle = values.get(CLOSE_CYCLE_FIELD)
             if close_cycle is None:
-                errors.append(
-                    f"{entry.use}: no {CLOSE_CYCLE_FIELD} set — say whether the "
-                    f"assessment's cycle closes after each run "
-                    f"({' or '.join(CLOSE_CYCLE_VALUES)}; fix: paramify assessments "
-                    f"select {entry.use} --close-cycle after_run|never)"
-                )
+                if CLOSE_CYCLE_FIELD not in unset:
+                    errors.append(
+                        f"{entry.use}: no {CLOSE_CYCLE_FIELD} set — say whether the "
+                        f"assessment's cycle closes after each run "
+                        f"({' or '.join(CLOSE_CYCLE_VALUES)}; fix: paramify assessments "
+                        f"select {entry.use} --close-cycle after_run|never)"
+                    )
             elif close_cycle not in CLOSE_CYCLE_VALUES:
                 errors.append(
                     f"{entry.use}: {CLOSE_CYCLE_FIELD} is {close_cycle!r}; expected "
@@ -2904,9 +2919,10 @@ def effective_config(
         platform defaults <- platform values <- per-fetcher values
 
     Returns {use: [descriptor + {"value", "source"}]}, where source is "entry",
-    "platforms.<category>", "default", or None when nothing supplies it. A
-    ${env:} reference shows its resolved value, and one whose variable is unset
-    gives way to the next value down, as at run time. A field the category
+    "platforms.<category>", "default", or None when nothing supplies it. When the
+    value as written is a ${env:} reference, "reference" holds it and
+    "reference_state" says "set", "unset" (value and source are then the next
+    value down, as at run time) or "invalid"; "value" is what the runner injects. A field the category
     declares (and the fetcher doesn't) is included too, since it is injected into
     that fetcher's environment just the same.
 
@@ -2940,6 +2956,16 @@ def effective_config(
             d["category"] = f.category
             d["value"] = merged.values.get(name)
             d["source"] = labels.get(merged.sources.get(name, ""))
+            # The value as written, when it is a reference: "set" when the runner resolves it,
+            # "unset" when the next value down applies, "invalid" when the runner refuses it.
+            top_source, top = next(((label, v) for label, v in (("entry", entry_values.get(name)),
+                                                                ("platform", platform_values.get(name)),
+                                                                ("default", fdef.default)) if v is not None),
+                                   (None, None))
+            if is_env_ref_attempt(top):
+                d["reference"] = top
+                d["reference_state"] = ("invalid" if name in merged.errors
+                                        else "set" if merged.sources.get(name) == top_source else "unset")
             fields.append(d)
         out[use] = fields
     return out
