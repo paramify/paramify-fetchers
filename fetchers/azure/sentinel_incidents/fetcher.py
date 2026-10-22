@@ -148,7 +148,7 @@ def project_incident(incident: Dict[str, Any], closed: Dict[str, Any]) -> Dict[s
     owner = props.get("owner") or {}
     extra = props.get("additionalData") or {}
     created = props.get("createdTimeUtc")
-    closed_time = closed.get(incident.get("name")) if props.get("status") == "Closed" else None
+    closed_time = closed.get(incident.get("name") or "") if props.get("status") == "Closed" else None
     return {
         "name": incident.get("name"),
         "incident_number": props.get("incidentNumber"),
@@ -412,7 +412,7 @@ def incident_entities(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """Per incident: its alerts still in SecurityAlert, and their entities as kind and identifier, deduplicated and capped per kind."""
     out: Dict[str, Dict[str, Any]] = {}
     for row in rows:
-        entry = out.setdefault(row.get("IncidentName"), {"alerts": set(), "entities": {}})
+        entry = out.setdefault(row.get("IncidentName") or "", {"alerts": set(), "entities": {}})
         entry["alerts"].add(row.get("AlertId"))
         found: List[Dict[str, Any]] = []
         walk_entities(as_list(row.get("Entities")), found)
@@ -670,11 +670,11 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             else:
                 notes.append("SecurityAlert table does not exist in this workspace; entities unavailable")
 
-    latest = {r.get("IncidentName"): r for r in latest_rows or []}
+    latest = {r.get("IncidentName") or "": r for r in latest_rows or []}
     closed = {name: r.get("ClosedTime") for name, r in latest.items() if r.get("ClosedTime")}
     rows_by: Dict[str, List[Dict[str, Any]]] = {}
     for r in sorted(history or [], key=update_order):
-        rows_by.setdefault(r.get("IncidentName"), []).append(r)
+        rows_by.setdefault(r.get("IncidentName") or "", []).append(r)
     retained_from = now - timedelta(days=retention) if retention else cutoff
     # The history query reads only the lookback, however long the table keeps rows.
     history_from = max(cutoff, retained_from)
@@ -734,8 +734,10 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
 def _total(workspaces: List[Dict[str, Any]], field: str, discovered: bool) -> Optional[int]:
     """Sum over every workspace, 0 when there are none; None if discovery failed or any workspace's value is unknown,
     its list failing included, so a partial count never passes for a whole one."""
-    values = [w.get(field) for w in workspaces]
-    return None if not discovered or any(v is None for v in values) else sum(values)
+    values: List[Optional[int]] = [w.get(field) for w in workspaces]
+    if not discovered or any(v is None for v in values):
+        return None
+    return sum(v or 0 for v in values)
 
 
 def summarize(workspaces: List[Dict[str, Any]], discovered: bool) -> Dict[str, Any]:
