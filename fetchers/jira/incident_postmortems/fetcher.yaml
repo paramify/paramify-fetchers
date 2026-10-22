@@ -105,7 +105,7 @@ evidence_set:
   reference_id: EVD-JIRA-INCIDENT-POSTMORTEMS
   name: Jira Incidents, Post-mortems and Action Items
   instructions: >-
-    Script: fetcher.py. Basic auth (account email + API token) to the Jira Cloud
+    Script: jira/incident_postmortems/fetcher.py. Basic auth (account email + API token) to the Jira Cloud
     REST API v3; Browse Projects on the incident project is enough. Reads GET
     /rest/api/3/myself, resolves the configured field names with GET
     /rest/api/3/field, pages POST /rest/api/3/search/jql for the incidents

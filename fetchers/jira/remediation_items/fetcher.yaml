@@ -42,7 +42,7 @@ evidence_set:
   reference_id: EVD-JIRA-REMEDIATION-ITEMS
   name: Jira Remediation Items Tracked to Resolution
   instructions: >-
-    Script: fetcher.py. Basic auth (account email + API token) to the Jira Cloud
+    Script: jira/remediation_items/fetcher.py. Basic auth (account email + API token) to the Jira Cloud
     REST API. Reads GET /rest/api/3/myself (collector), pages the tickets
     matching JIRA_REMEDIATION_JQL through POST /rest/api/3/search/jql
     (nextPageToken) with summary, project, type, status, priority, assignee,

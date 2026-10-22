@@ -65,7 +65,7 @@ evidence_set:
   reference_id: EVD-JIRA-ACCESS-ROLES
   name: Jira Privileged Access and Project Roles
   instructions: >-
-    Script: fetcher.py. Basic auth (account email + API token) to the Jira Cloud
+    Script: jira/access_roles/fetcher.py. Basic auth (account email + API token) to the Jira Cloud
     REST API as an account holding the Administer Jira global permission (the
     calls are read-only; application roles and other projects' role members
     have no lower permission). Reads GET /rest/api/3/myself; GET

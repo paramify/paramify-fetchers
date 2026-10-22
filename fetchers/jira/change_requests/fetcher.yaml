@@ -107,7 +107,7 @@ evidence_set:
   reference_id: EVD-JIRA-CHANGE-REQUESTS
   name: Jira Change Requests and CCB Approvals
   instructions: >-
-    Script: fetcher.py. Basic auth (account email + API token) to the Jira Cloud
+    Script: jira/change_requests/fetcher.py. Basic auth (account email + API token) to the Jira Cloud
     REST API v3; Browse Projects on the CCB project is enough. Reads GET
     /rest/api/3/myself, resolves the configured field names and checks pinned
     ids with GET /rest/api/3/field, reads the done-category statuses with GET
