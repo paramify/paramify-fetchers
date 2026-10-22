@@ -27,6 +27,7 @@ Everything here reaches a test as a FIXTURE. pyproject sets
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import importlib.util
 import json
@@ -60,10 +61,29 @@ def pytest_addoption(parser):
     )
 
 
+class _NotRun:
+    """Skipped and xfailed reports, counted here so the gate holds without the terminal reporter."""
+
+    def __init__(self) -> None:
+        self.reports: list = []
+
+    def pytest_runtest_logreport(self, report) -> None:
+        if report.skipped:  # an xfail reports as skipped too
+            self.reports.append(report)
+
+    def pytest_collectreport(self, report) -> None:
+        if report.skipped:
+            self.reports.append(report)
+
+
+def pytest_configure(config):
+    if config.getoption("--fail-on-skip"):
+        config.pluginmanager.register(_NotRun(), "fail-on-skip")
+
+
 def _not_run(config) -> list:
-    reporter = config.pluginmanager.get_plugin("terminalreporter")
-    stats = reporter.stats if reporter else {}
-    return stats.get("skipped", []) + stats.get("xfailed", [])
+    plugin = config.pluginmanager.get_plugin("fail-on-skip")
+    return plugin.reports if plugin else []
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -237,14 +257,31 @@ def build_fetcher_fn():
 # --------------------------------------------------------------------------- #
 
 DEMO_RUN_ID = "2026-01-01T00-00-00Z"
-# Smallest (cols, rows) with nothing cut: 242 fits the missing-token error, 58 the scripts preview.
-TUI_SIZE = (242, 58)
+# test_tui_layout.py checks that every page also fits 160x50.
+TUI_SIZE = (180, 50)
 
 
 @pytest.fixture(scope="session")
 def tui_size() -> tuple:
     """The terminal size every TUI snapshot, pilot and pty test runs at."""
     return TUI_SIZE
+
+
+@pytest.fixture
+def run_tui(tui_size):
+    """Boot the TUI on a manifest at tui_size, await body(app, pilot), return its result."""
+    from framework.tui.app import FetcherApp
+
+    def run(body, manifest, root: Path = REPO_ROOT):
+        async def main():
+            app = FetcherApp(manifest_path=str(manifest), root_override=str(root))
+            async with app.run_test(size=tui_size) as pilot:
+                await pilot.pause()
+                return await body(app, pilot)
+
+        return asyncio.run(main())
+
+    return run
 
 
 @functools.cache
@@ -303,7 +340,9 @@ def _demo_template(tmp_path_factory):
     with pytest.MonkeyPatch.context() as mp:
         _offline(mp)
         mp.chdir(root)
-        api.run(api.read_manifest(manifest), root, on_event=events.append, manifest_path=manifest)
+        summary = api.run(api.read_manifest(manifest), root, on_event=events.append, manifest_path=manifest)
+    if not summary.get("ok"):
+        pytest.fail(f"the demo run the TUI snapshots and replays use failed: {summary}", pytrace=False)
 
     roots = sorted({str(root), str(root.resolve())}, key=len, reverse=True)
     run_dir = next((root / "evidence").glob("run-*"))
@@ -324,9 +363,31 @@ def demo_workspace(_demo_template, tmp_path, monkeypatch):
     return SimpleNamespace(root=root, run_events=events)
 
 
+# Imported by every Python fetcher a no_network test runs; the fetcher is a child
+# process, out of reach of the in-process patches.
+_CHILD_NO_NETWORK = """\
+import socket
+
+
+def _refuse(*args, **kwargs):
+    with open({log!r}, "a") as fh:
+        fh.write(repr([a for a in args if not isinstance(a, socket.socket)]) + "\\n")
+    raise OSError("network blocked by tests/conftest.py no_network")
+
+
+for _name in ("getaddrinfo", "gethostbyname", "gethostbyname_ex"):
+    setattr(socket, _name, _refuse)
+for _name in ("connect", "connect_ex", "sendto"):
+    setattr(socket.socket, _name, _refuse)
+"""
+
+
 @pytest.fixture
-def no_network(monkeypatch):
-    """Refuse name lookups, connects and sendto, and fail at teardown if any were tried."""
+def no_network(monkeypatch, tmp_path):
+    """Refuse name lookups, connects and sendto, here and in the fetchers a run starts;
+    fail at teardown if any were tried."""
+    from framework.runner import executor
+
     attempts: list = []
 
     def refuse(*args, **kwargs):
@@ -338,5 +399,16 @@ def no_network(monkeypatch):
         monkeypatch.setattr(socket, name, refuse)
     for name in ("connect", "connect_ex", "sendto"):
         monkeypatch.setattr(socket.socket, name, refuse)
+
+    # A fetcher's env is a whitelist, so add the PYTHONPATH that loads the guard.
+    guard = tmp_path / "no-network"
+    guard.mkdir()
+    log = guard / "attempts.log"
+    (guard / "sitecustomize.py").write_text(_CHILD_NO_NETWORK.format(log=str(log)))
+    build_env = executor._build_env
+    monkeypatch.setattr(executor, "_build_env",
+                        lambda *a, **kw: {**build_env(*a, **kw), "PYTHONPATH": str(guard)})
     yield attempts
+    if log.exists():
+        attempts += log.read_text().splitlines()
     assert not attempts, f"network attempts (the app may have swallowed the error): {attempts}"

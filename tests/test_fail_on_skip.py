@@ -25,8 +25,9 @@ def _exit_code(tmp_path: Path, probe: str, *flags: str) -> int:
     shutil.copy(Path(__file__).with_name("conftest.py"), tmp_path / "conftest.py")
     (tmp_path / "test_ok.py").write_text("def test_ok():\n    pass\n")
     (tmp_path / "test_probe.py").write_text(PROBES[probe])
+    quiet = [] if "no:terminal" in flags else ["-q"]  # -q is the terminal plugin's option
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *flags],
+        [sys.executable, "-m", "pytest", *quiet, "-p", "no:cacheprovider", *flags],
         cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
         capture_output=True, text=True, timeout=120,
     )
@@ -37,6 +38,7 @@ def _exit_code(tmp_path: Path, probe: str, *flags: str) -> int:
 def test_a_run_that_did_not_run_everything_fails(tmp_path, probe):
     assert _exit_code(tmp_path, probe) == 0
     assert _exit_code(tmp_path, probe, "--fail-on-skip") == 1
+    assert _exit_code(tmp_path, probe, "--fail-on-skip", "-p", "no:terminal") == 1
 
 
 def test_a_clean_run_passes(tmp_path):

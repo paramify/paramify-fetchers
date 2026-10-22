@@ -29,14 +29,16 @@ WELCOME = "collect compliance evidence"
 def _launch(argv: list, ready: str, cwd: Path, env: dict, size: tuple) -> tuple:
     """Run argv on a pty until `ready` is drawn, press q; return (exit code or None, seen, text)."""
     master, slave = pty.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", size[1], size[0], 0, 0))
-    env = {**env, "TERM": "xterm-256color"}
-    proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=slave, stdout=slave, stderr=slave)
-    os.close(slave)
     raw = bytearray()
-    deadline = time.monotonic() + TIMEOUT
     seen = False
     try:
+        try:
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", size[1], size[0], 0, 0))
+            env = {**env, "TERM": "xterm-256color"}
+            proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=slave, stdout=slave, stderr=slave)
+        finally:
+            os.close(slave)
+        deadline = time.monotonic() + TIMEOUT
         while time.monotonic() < deadline:
             if select.select([master], [], [], 0.1)[0]:
                 try:

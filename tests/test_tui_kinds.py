@@ -16,7 +16,6 @@ Written sync (asyncio.run per test) so the suite needs no async pytest plugin.
 
 from __future__ import annotations
 
-import asyncio
 import io
 from pathlib import Path
 
@@ -34,7 +33,6 @@ from framework.issue_reports import (  # noqa: E402
     CLOSE_CYCLE_FIELD,
 )
 from framework.tui import kinds  # noqa: E402
-from framework.tui.app import FetcherApp  # noqa: E402
 from framework.tui.modals import MultiPickerModal  # noqa: E402
 from framework.tui.screens.manifest import ManifestPage  # noqa: E402
 
@@ -91,15 +89,6 @@ def _manifest(root: Path, entries: list, config: dict | None = None) -> Path:
     return path
 
 
-def _run(coro_fn, root: Path, manifest: Path, size: tuple):
-    async def main():
-        app = FetcherApp(manifest_path=str(manifest), root_override=str(root))
-        async with app.run_test(size=size) as pilot:
-            await pilot.pause()
-            return await coro_fn(app, pilot)
-
-    return asyncio.run(main())
-
 
 def _plain(renderable) -> str:
     console = Console(file=io.StringIO(), width=160, color_system=None)
@@ -151,7 +140,7 @@ def test_descriptors_say_where_the_output_goes(tmp_path):
 # catalog
 # --------------------------------------------------------------------------- #
 
-def test_catalog_tree_is_kind_then_platform(tmp_path, tui_size):
+def test_catalog_tree_is_kind_then_platform(tmp_path, run_tui):
     root = _stage_root(tmp_path)
 
     async def body(app, pilot):
@@ -161,13 +150,13 @@ def test_catalog_tree_is_kind_then_platform(tmp_path, tui_size):
             for k in tree.root.children
         ]
 
-    assert _run(body, root, _manifest(root, [EVIDENCE]), tui_size) == [
+    assert run_tui(body, _manifest(root, [EVIDENCE]), root) == [
         ("Evidence  (2)", [("acme  (1)", [EVIDENCE]), ("zeta  (1)", [OTHER])]),
         ("Scan reports  (1)", [("acme  (1)", [SCAN])]),
     ]
 
 
-def test_catalog_detail_says_kind_and_destination(tmp_path, tui_size):
+def test_catalog_detail_says_kind_and_destination(tmp_path, run_tui):
     root = _stage_root(tmp_path)
 
     async def body(app, pilot):
@@ -184,7 +173,7 @@ def test_catalog_detail_says_kind_and_destination(tmp_path, tui_size):
                     shown[_label(leaf)] = _plain(detail.content)
         return shown
 
-    shown = _run(body, root, _manifest(root, [EVIDENCE]), tui_size)
+    shown = run_tui(body, _manifest(root, [EVIDENCE]), root)
     assert "kind: scan report" in shown[SCAN]
     assert "a vulnerability assessment, chosen per manifest" in shown[SCAN]
     assert "csv" in shown[SCAN] and "never enveloped" in shown[SCAN]
@@ -198,7 +187,7 @@ def test_catalog_detail_says_kind_and_destination(tmp_path, tui_size):
 # add picker
 # --------------------------------------------------------------------------- #
 
-def test_add_picker_groups_by_kind_and_lists_picks_under_their_kind(tmp_path, tui_size):
+def test_add_picker_groups_by_kind_and_lists_picks_under_their_kind(tmp_path, run_tui):
     root = _stage_root(tmp_path)
 
     async def body(app, pilot):
@@ -216,7 +205,7 @@ def test_add_picker_groups_by_kind_and_lists_picks_under_their_kind(tmp_path, tu
         chosen = _plain(app.screen.query_one("#multi-pick-chosen", Static).content)
         return headings, under_scan, sorted(app.screen._chosen), chosen
 
-    headings, under_scan, picked, chosen = _run(body, root, _manifest(root, [EVIDENCE]), tui_size)
+    headings, under_scan, picked, chosen = run_tui(body, _manifest(root, [EVIDENCE]), root)
     assert headings == ["Evidence  (1)", "Scan reports  (1)"]
     assert under_scan == ["acme  (1)"]
     assert picked == [SCAN], "enter in the filter did not pick the lone match"
@@ -236,7 +225,7 @@ def _rows(app) -> dict:
     }
 
 
-def test_manifest_table_says_kind_and_flags_a_scan_report_with_no_assessment(tmp_path, tui_size):
+def test_manifest_table_says_kind_and_flags_a_scan_report_with_no_assessment(tmp_path, run_tui):
     root = _stage_root(tmp_path)
 
     async def body(app, pilot):
@@ -244,7 +233,7 @@ def test_manifest_table_says_kind_and_flags_a_scan_report_with_no_assessment(tmp
         await pilot.pause()
         return _rows(app)
 
-    rows = _run(body, root, _manifest(root, [EVIDENCE, SCAN]), tui_size)
+    rows = run_tui(body, _manifest(root, [EVIDENCE, SCAN]), root)
     assert rows[EVIDENCE]["kind"] == "evidence"
     assert rows[EVIDENCE]["sends to"] == "EVD-ACME-SETTINGS"
     assert rows[SCAN]["kind"] == "scan report"
@@ -252,7 +241,7 @@ def test_manifest_table_says_kind_and_flags_a_scan_report_with_no_assessment(tmp
     assert "mode" not in rows[SCAN]
 
 
-def test_manifest_table_shows_the_assessment_and_close_policy(tmp_path, tui_size):
+def test_manifest_table_shows_the_assessment_and_close_policy(tmp_path, run_tui):
     root = _stage_root(tmp_path)
     config = {
         ASSESSMENT_ID_FIELD: "11111111-1111-1111-1111-111111111111",
@@ -269,13 +258,13 @@ def test_manifest_table_shows_the_assessment_and_close_policy(tmp_path, tui_size
         detail = _plain(app.screen.query_one("#manifest-detail", Static).content)
         return _rows(app), detail
 
-    rows, detail = _run(body, root, _manifest(root, [SCAN], config), tui_size)
+    rows, detail = run_tui(body, _manifest(root, [SCAN], config), root)
     assert rows[SCAN]["sends to"] == "Acme Vulns · after_run"
     assert any("assessment" in line and "Acme Vulns" in line for line in detail.splitlines())
     assert "after each complete run" in detail
 
 
-def test_a_on_evidence_explains_where_evidence_goes(tmp_path, tui_size):
+def test_a_on_evidence_explains_where_evidence_goes(tmp_path, run_tui):
     root = _stage_root(tmp_path)
 
     async def body(app, pilot):
@@ -285,5 +274,5 @@ def test_a_on_evidence_explains_where_evidence_goes(tmp_path, tui_size):
         await pilot.pause()
         return [str(n.message) for n in app._notifications]
 
-    messages = _run(body, root, _manifest(root, [EVIDENCE]), tui_size)
+    messages = run_tui(body, _manifest(root, [EVIDENCE]), root)
     assert any("Only scan reports go to an assessment" in m for m in messages), messages

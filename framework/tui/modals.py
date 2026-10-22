@@ -21,7 +21,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Input, Label, OptionList, Static, Tree
+from textual.widgets import Button, Input, Label, OptionList, Static, Tree
 from textual.widgets.option_list import Option
 
 from framework.tui.components.forms import FieldRow
@@ -31,6 +31,7 @@ from framework.tui.components.keys import (
     ButtonRowNav,
     FilterListNav,
 )
+from framework.tui.components.table import DataTable
 
 
 class FormModal(ButtonRowNav, ModalScreen[dict]):

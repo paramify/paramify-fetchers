@@ -7,7 +7,8 @@ name: CI
 #   smoke     — the CLI discovery surface works across all fetchers, and the
 #               demo run / validate / upload --dry-run output matches its goldens
 #   tui       — the terminal UI on the lowest and latest textual 8: pilot tests,
-#               SVG snapshots, the end-to-end demo flow, and a real pty launch
+#               SVG snapshots, the end-to-end demo flow, a 160x50 layout check,
+#               and a real pty launch
 #   lint      — the framework's own code passes ruff + mypy
 #   secrets   — no credentials in the tree or its full git history
 # Fetchers can't be integration-tested here (no live tenants); that signal comes
@@ -165,7 +166,8 @@ jobs:
       # failed install would otherwise pass as a page of skips.
       - name: assert textual and the snapshot plugin actually installed
         run: python -c "import textual, pytest_textual_snapshot; from importlib.metadata import version; print('textual', version('textual'))"
-      # Pilot suites, SVG snapshots, the end-to-end demo flow and the pty launch.
+      # Pilot suites, SVG snapshots, the end-to-end demo flow, the 160x50 layout
+      # check and the pty launch.
       # --fail-on-skip (tests/conftest.py) fails the job if any of them skipped.
       - name: pytest (TUI)
         run: >-

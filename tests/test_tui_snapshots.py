@@ -11,7 +11,7 @@ import pytest
 pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
 pytest.importorskip("pytest_textual_snapshot", reason="snapshot tests need the 'snapshots' extra")
 
-from textual.widgets import DataTable, Input  # noqa: E402
+from textual.widgets import Input  # noqa: E402
 
 from framework import api  # noqa: E402
 from framework.tui.app import FetcherApp  # noqa: E402
@@ -31,7 +31,9 @@ class _Frozen(datetime):
 
 @pytest.fixture
 def shot(snap_compare, demo_workspace, no_network, monkeypatch, tui_size):
-    """Open the app on MANIFEST (or the welcome screen for None), press keys, compare."""
+    """Open the app on MANIFEST (or the welcome screen for None), press keys, compare.
+
+    Each step is a key, or a tuple of keys typed in one go and settled once."""
     monkeypatch.setattr(chrome, "datetime", _Frozen)
     monkeypatch.setattr(welcome, "datetime", _Frozen)
     clock = SimpleNamespace(now=0.0)
@@ -40,36 +42,25 @@ def shot(snap_compare, demo_workspace, no_network, monkeypatch, tui_size):
     async def settle(pilot) -> None:
         app = pilot.app
         await asyncio.wait_for(app.workers.wait_for_complete(), 30)
-        # Workers post their events, so drain those before checking what they changed.
-        await pilot._wait_for_screen()
+        # Workers post their results; pause() drains them, then idle sizes the tables.
         await pilot.pause()
-        # A DataTable sizes columns on idle but keeps rows drawn before then, so wait, then redraw.
-        for _ in range(600):
-            tables = [t for screen in app.screen_stack for t in screen.query(DataTable)]
-            if not any(t._require_update_dimensions or t._updated_cells for t in tables):
-                break
-            await pilot.pause(0.05)
-        else:
-            raise AssertionError("a DataTable never finished sizing its columns")
-        for table in tables:
-            table._clear_caches()
-            table.refresh()
-        # Jump the welcome animation to its settled frame.
-        clock.now = 10.0
+        await pilot.pause()
+        # Jump each welcome animation to its settled frame, however late it mounted.
         for screen in app.screen_stack:
             if isinstance(screen, welcome.WelcomeScreen):
+                clock.now = screen._t0 + 10.0
                 screen._tick()
         for field in app.screen.query(Input):
             field.cursor_blink = False
         await pilot.pause()
 
-    def compare(*keys: str, manifest: str | None = MANIFEST) -> bool:
+    def compare(*steps: str | tuple, manifest: str | None = MANIFEST) -> bool:
         app = FetcherApp(manifest_path=manifest, root_override=str(demo_workspace.root))
 
         async def run_before(pilot) -> None:
             await settle(pilot)
-            for key in keys:
-                await pilot.press(key)
+            for step in steps:
+                await pilot.press(*((step,) if isinstance(step, str) else step))
                 await settle(pilot)
 
         return snap_compare(app, terminal_size=tui_size, run_before=run_before)
@@ -94,7 +85,7 @@ def test_workspace_switch_manifest_picker(shot):
 
 
 def test_catalog_fetcher_contract(shot):
-    assert shot("slash", *"demo_hello", "down", "down", "down", "escape")
+    assert shot("slash", tuple("demo_hello"), "down", "down", "down", "escape")
 
 
 def test_manifest(shot):
@@ -104,7 +95,7 @@ def test_manifest(shot):
 def test_manifest_add_fetchers_picker(shot, demo_workspace):
     root = demo_workspace.root
     api.dump_manifest(api.init_manifest(), root / "manifests" / "empty.yaml", root)
-    assert shot("2", "a", *"demo_hello", "enter", manifest="manifests/empty.yaml")
+    assert shot("2", "a", tuple("demo_hello"), "enter", manifest="manifests/empty.yaml")
 
 
 def test_manifest_remove_confirm(shot):

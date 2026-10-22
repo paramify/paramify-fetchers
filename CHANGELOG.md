@@ -21,7 +21,8 @@ schemas and the `paramify` CLI — not the internal code.
   `pytest tests/test_tui_snapshots.py --snapshot-update` refreshes them, and a
   mismatch uploads a side-by-side report), one end-to-end pilot flow (open the
   demo manifest, add `demo_hello`, run it, read its evidence, upload dry-run,
-  with the network blocked), and a real launch of `paramify tui` and
+  with the network blocked for the app and the fetcher it runs), a check that every
+  page fits a 160x50 terminal, and a real launch of `paramify tui` and
   `python -m framework.tui` in a pseudo-terminal that presses `q` and expects a
   clean exit. The smoke job now also compares `paramify run`, `validate` and
   `upload --dry-run` on `examples/demo.yaml` with committed goldens
@@ -617,9 +618,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
-- **python-dotenv 1.2.0 or later is required.** It is the first release that
-  honours `PYTHON_DOTENV_DISABLED=1`, which the TUI and CLI regression tests set
-  so a developer's `.env` cannot reach the commands they run.
 - **`azure_policy_compliance` 0.2.0: what was evaluated, whether remediation took,
   and what keeps coming back.**
   - Each listed non-compliant state now carries `evaluation_details`: the
@@ -950,6 +948,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **The TUI's Paramify tab fits a 160x50 terminal.** Below 242 columns the
+  scripts-sync panel was squeezed to its border, its buttons drawn over the log,
+  and a missing-token preflight error ran off the evidence panel behind a
+  horizontal scrollbar. The scripts and log panels now share the space left
+  under the evidence and scan-report panels, each with a minimum height, and
+  preflight errors and warnings wrap under their table.
+- **TUI tables no longer keep a cut-off row.** A row that arrived from a worker
+  could be drawn before its table widened the column, and Textual kept that
+  drawing (`demo_he` for `demo_hello` in the scripts plan) until a hover or a
+  resize. Every table now redraws once its columns are sized.
 - **`checkov_bicep` passes its list settings to checkov intact** (0.2.0 →
   0.2.1). `checks`, `skip_checks`, `skip_paths` and `skip_resources` take
   entries separated by commas or newlines, each trimmed. `checks` and

@@ -16,13 +16,14 @@ from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, DataTable, Input, Static
+from textual.widgets import Button, Input, Static
 
 from framework import api
 from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
 from framework.tui import kinds, palette, render
 from framework.tui.components.forms import env_name_from_ref
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
+from framework.tui.components.table import DataTable
 from framework.tui.modals import (
     ConfirmModal,
     FormModal,

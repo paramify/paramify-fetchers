@@ -25,10 +25,11 @@ from textual.binding import Binding
 from textual.containers import Center, Container, Vertical
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import DataTable, Static
+from textual.widgets import Static
 
 from framework import api
 from framework.tui import palette
+from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal, FormModal
 
 # PARAMIFY block logo (from the Go prototype's app.LogoLines()).
