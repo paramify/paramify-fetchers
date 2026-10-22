@@ -1,0 +1,42 @@
+name: servicenow_after_action_reports
+version: 0.1.0
+description: Pulls incident after action reports from the ServiceNow Paramify ITSM API and writes the raw JSON response as evidence.
+category: servicenow
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: servicenow_after_action_reports.json
+
+secrets:
+- name: username
+  env: SERVICENOW_USERNAME
+  description: ServiceNow username for basic auth.
+- name: password
+  env: SERVICENOW_PASSWORD
+  description: ServiceNow password for basic auth.
+- name: api_url
+  env: SERVICENOW_AFTER_ACTION_REPORTS_API_URL
+  description: >-
+    Full URL of the after action reports endpoint, including the scoped-app
+    path — the path is not assumed, because the scope prefix differs per
+    instance. For example
+    https://<instance>.example.com/api/<scope>/paramify_itsm/after_action_reports
+
+ksis:
+- KSI-INR-AAR
+
+config_schema:
+  last_run:
+    type: string
+    required: false
+    env: SERVICENOW_AFTER_ACTION_REPORTS_LAST_RUN
+    description: >-
+      Watermark timestamp (YYYY-MM-DD HH:MM:SS). When set, only reports modified
+      since this time are returned. Omit for a full pull — the fetcher persists
+      no watermark of its own, so an incremental pull yields partial evidence.

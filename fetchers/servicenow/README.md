@@ -1,6 +1,6 @@
 # ServiceNow Fetchers
 
-Two fetchers pull evidence from ServiceNow REST APIs using basic auth with a
+Three fetchers pull evidence from ServiceNow REST APIs using basic auth with a
 shared service-account credential.
 
 Each fetcher takes the **full endpoint URL**, path included. The path is not
@@ -15,8 +15,8 @@ scope prefix differs per instance — there is no path that is correct everywher
 
 | Variable | Required | Description |
 |---|---|---|
-| `SERVICENOW_USERNAME` | Yes | Service-account username. Shared by both fetchers. |
-| `SERVICENOW_PASSWORD` | Yes | Service-account password. Shared by both fetchers. |
+| `SERVICENOW_USERNAME` | Yes | Service-account username. Shared by all fetchers. |
+| `SERVICENOW_PASSWORD` | Yes | Service-account password. Shared by all fetchers. |
 
 ### `servicenow_cases`
 
@@ -38,6 +38,16 @@ scope prefix differs per instance — there is no path that is correct everywher
 |---|---|---|
 | `last_run` | No | Watermark timestamp in `YYYY-MM-DD HH:MM:SS` format, sent as `sysparm_last_run`. When set, the API returns only changes modified since that time. Omit for a full pull. |
 
+### `servicenow_after_action_reports`
+
+| Variable | Required | Description |
+|---|---|---|
+| `SERVICENOW_AFTER_ACTION_REPORTS_API_URL` | Yes | Full URL of the after action reports endpoint, e.g. `https://<instance>.example.com/api/<scope>/paramify_itsm/after_action_reports` |
+
+| Config key | Required | Description |
+|---|---|---|
+| `last_run` | No | Watermark timestamp in `YYYY-MM-DD HH:MM:SS` format, sent as `sysparm_last_run`. When set, the API returns only reports modified since that time. Omit for a full pull. |
+
 `last_run` is manifest **config**, not a secret — a timestamp is not a
 credential, and declaring it as an optional secret made it impossible to omit
 (the runner honors `required: false` on a secret only when the manifest leaves
@@ -45,7 +55,7 @@ the key out, but the TUI wires every declared secret to a `${env:VAR}`
 reference). It also reads from the env var `SERVICENOW_<FETCHER>_LAST_RUN` when
 the runner injects it.
 
-Neither fetcher persists a watermark of its own, so an incremental pull is only
+No fetcher persists a watermark of its own, so an incremental pull is only
 as correct as the value you pass it. Evidence is normally a point-in-time full
 set; a delta yields partial evidence that a completeness validator cannot
 meaningfully assert against.
@@ -58,8 +68,9 @@ meaningfully assert against.
 |---|---|
 | `servicenow_cases` | `$EVIDENCE_DIR/servicenow_cases.json` |
 | `servicenow_changes` | `$EVIDENCE_DIR/servicenow_changes.json` |
+| `servicenow_after_action_reports` | `$EVIDENCE_DIR/servicenow_after_action_reports.json` |
 
-Both fetchers write the raw JSON response from the API without any
+All fetchers write the raw JSON response from the API without any
 transformation. The runner wraps each file in an evidence envelope.
 
 ---
@@ -83,6 +94,11 @@ run:
     # optional — omit for a full pull
     # config:
     #   last_run: '2026-08-01 00:00:00'
+  - use: servicenow_after_action_reports
+    secrets:
+      username: ${env:SERVICENOW_USERNAME}
+      password: ${env:SERVICENOW_PASSWORD}
+      api_url: ${env:SERVICENOW_AFTER_ACTION_REPORTS_API_URL}
 ```
 
 The framework is secret-source-agnostic: populate the runner's environment by
