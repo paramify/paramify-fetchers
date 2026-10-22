@@ -1,0 +1,97 @@
+name: zendesk_help_center_section
+version: 0.1.0
+description: >-
+  Lists the public articles in one Zendesk Help Center section through the
+  Help Center API, read anonymously, with each article's dates, body and text,
+  and whether its page loads without signing in. Credential-free.
+
+category: zendesk
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: zendesk_help_center_section.json
+  aggregation: per_target
+
+target_schema:
+  # One target per section.
+  name:
+    type: string
+    required: true
+    env: ZENDESK_TARGET_NAME
+    description: >
+      Label for this section, used as the discriminator in the evidence
+      filename (sanitized to [A-Za-z0-9_-]).
+  section_url:
+    type: string
+    required: true
+    env: ZENDESK_SECTION_URL
+    description: >
+      The section's Help Center URL, e.g.
+      https://support.example.com/hc/en-us/sections/123456789-Secure-Configuration.
+      The host, locale and section id are read from it. A bare section id also
+      works, together with base_url.
+  base_url:
+    type: string
+    required: false
+    env: ZENDESK_BASE_URL
+    description: >
+      Help Center origin, e.g. https://support.example.com. Used only when
+      section_url is a bare section id.
+  locale:
+    type: string
+    required: false
+    env: ZENDESK_LOCALE
+    description: >
+      Help Center locale, e.g. en-us. Used only when section_url is a bare
+      section id; defaults to en-us.
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: ZENDESK_VERIFY_SSL
+    description: Verify TLS certificates. Defaults to true and should stay true.
+
+secrets: []
+
+evidence_set:
+  reference_id: EVD-ZENDESK-HELP-CENTER-SECTION
+  name: Zendesk Help Center Section Articles
+  instructions: >
+    Script: fetcher.py. Anonymous GETs, no credential (`anonymous: true`), so
+    only public articles are visible. GET
+    /api/v2/help_center/<locale>/sections/<id>.json for the section, then
+    /api/v2/help_center/<locale>/sections/<id>/articles.json?per_page=100,
+    following next_page to the end. The run fails on any API error, or when
+    the number of articles collected differs from the API's own `count`.
+
+    Each article keeps Zendesk's fields as returned (id, title, html_url,
+    created_at, updated_at, edited_at, draft, promoted, position, label_names,
+    locale, outdated, author_id, section_id) and its `body` HTML, plus `text`
+    (the body as plain text), text_length, text_sha256, a `last_updated` date
+    copied from the text if it states one, and `public_page_status`: an
+    anonymous GET of html_url with its status, final URL, whether it was sent
+    to a sign-in page, and whether Cloudflare answered with a bot challenge
+    (`cf-mitigated: challenge`). A failing page GET is recorded, not fatal.
+
+    Fixed fields first: the section, article_count (an empty section is
+    recorded as 0, not a failure), the newest and oldest updated_at,
+    days_since_last_update, all_articles_public (false if any page redirects
+    to sign-in or fails; null when there are no articles or a bot challenge
+    left a page unverified), public_page_challenges (pages that met a
+    challenge), and all_user_segments_everyone (every article's
+    user_segment_id is null, Zendesk's "visible to everyone").
+
+    `mentions_top_level_admin` and `scg_terms` are Paramify-specific keyword
+    heuristics for a Secure Configuration Guide. `scg_terms.<term>` is true
+    when one article mentions admin/administrator/top-level and also the term
+    (access, configur-, operat-, decommission). They are keyword presence only,
+    not proof that the guidance is adequate.
+
+    This does not show that the guidance is adequate or correct, or that
+    agencies were given the link.

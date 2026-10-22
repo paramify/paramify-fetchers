@@ -1,0 +1,80 @@
+name: web_page_text
+version: 0.1.0
+description: >-
+  Fetches one public web page and records the text it served: the visible
+  text of an HTML page, a JSON document parsed and verbatim, or plain text as
+  served. Credential-free.
+
+category: web
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: web_page_text.json
+  aggregation: per_target
+
+target_schema:
+  # One target per URL.
+  name:
+    type: string
+    required: true
+    env: WEB_TARGET_NAME
+    description: >
+      Label for this page, used as the discriminator in the evidence filename
+      (sanitized to [A-Za-z0-9_-]). Two targets must carry different names.
+  url:
+    type: string
+    required: true
+    env: WEB_PAGE_URL
+    description: >
+      The page to fetch, e.g. https://www.example.com/legal/terms. Must be http
+      or https.
+  verify_ssl:
+    type: boolean
+    required: false
+    default: true
+    env: WEB_VERIFY_SSL
+    description: >
+      Verify the site's TLS certificate. Defaults to true and should stay true;
+      set it false only behind a TLS-inspecting proxy whose CA is not in the
+      runner's trust store.
+
+secrets: []
+
+evidence_set:
+  reference_id: EVD-WEB-PAGE-TEXT
+  name: Public Web Page Text
+  instructions: >
+    Script: fetcher.py. One anonymous GET of the target URL: 30s timeout, at
+    most 5 redirects, body capped at 5 MB, TLS verified. Records the final URL
+    and each redirect, the HTTP status and Content-Type, `sha256` of the body
+    (after gzip is removed) and `text_sha256` of `text` (UTF-8).
+    `text_sha256` is the stable change signal: `sha256` also changes when only
+    markup, scripts or per-request tokens change.
+
+    For HTML, `text` is the visible text, one line per block element (table
+    cells on a row joined by a space). Script, style, noscript, template, svg
+    and head are dropped; navigation and footer are kept. Entities are decoded
+    and whitespace, including non-breaking spaces, collapses to one space.
+    Quotes and dashes are kept as written. `title` is the <title>. For JSON,
+    `json` is the parsed document and `text` the body as served. Plain text is
+    kept as served.
+
+    `last_updated` is the date from the first line reading "Last updated",
+    "Last modified", "Last revised", "Effective date", "Effective as of" or
+    "Updated" plus a date, or the line right after such a label standing
+    alone, copied as written. Null if there is none.
+
+    This is what the URL served at `collected_at`, not proof that it is the
+    agreement in force or the version a customer signed. Pages that render
+    their text with JavaScript are out of scope.
+
+    The run fails on a network or TLS error, a status other than 200, more than
+    5 redirects, a body over 5 MB, a type other than HTML, JSON or plain text,
+    JSON that does not parse, or a page with no text (how a JavaScript-rendered
+    page shows up).
