@@ -907,9 +907,9 @@ def test_waf_coverage_drops_host_routes_on_excluded_hosts():
     assert summary["serving_host_routes"] == 4 and summary["unprotected_host_routes"] == 4
 
 
-def run_origins(monkeypatch, tmp_path, patterns):
+def run_origins(monkeypatch, tmp_path, patterns, collected=None, configs=None, public="Disabled"):
     reads, config_reads = [], []
-    sites = {origins.arm_key(SITE.format(n)): site_row(n, "eastus", "plan") for n in ("app-core", "app-qa")}
+    sites = {origins.arm_key(SITE.format(n)): site_row(n, "eastus", "plan", public=public) for n in ("app-core", "app-qa")}
     by_host = {"core-eastus.azurewebsites.net": origins.arm_key(SITE.format("app-core")),
                "qa-eastus.azurewebsites.net": origins.arm_key(SITE.format("app-qa"))}
     point = {"time": "2026-10-08T03:00:00Z", "average": 100.0, "minimum": 100.0, "total": 5.0}
@@ -921,7 +921,7 @@ def run_origins(monkeypatch, tmp_path, patterns):
 
     def collect_profiles(subscription_id, cred, collector, read_domains=False):
         reads.append(read_domains)
-        return [topology(read_domains)], {}
+        return collected or [topology(read_domains)], {}
 
     for name, fake in {
         "resolve_subscription": lambda c: {"subscription_id": "s", "subscription_source": "env"},
@@ -932,7 +932,7 @@ def run_origins(monkeypatch, tmp_path, patterns):
         "lookup_regions": lambda *a: ({}, REGIONS),
         "lookup_sites": lambda *a: (sites, by_host),
         "lookup_plans": lambda *a: {},
-        "read_site_configs": lambda cred, collector, sites: config_reads.append(sorted(s["name"] for s in sites)) or {},
+        "read_site_configs": lambda cred, collector, sites: config_reads.append(sorted(s["name"] for s in sites)) or configs or {},
         "collect_origin_metrics": lambda *a: metrics,
         "load_dotenv": lambda: None,
     }.items():
@@ -971,6 +971,30 @@ def test_origins_with_patterns_leave_qa_groups_apps_and_health_out(monkeypatch, 
     assert summary["scope_exclusion_patterns_unmatched"] == ["nothing.example.com"]
     assert summary["total_origin_groups"] == 4 and results["profiles"][0]["origin_group_count"] == 4
     assert {r["origin_group"] for r in results["app_service_origins"]} == {"core"}
+
+
+def test_an_out_of_scope_profile_does_not_vouch_for_an_app(monkeypatch, tmp_path):
+    """A QA profile reaches the production app only through excluded routes; the app admits its Front Door id."""
+    prod = topology()
+    prod["profile"]["front_door_id"] = OWN_FDID
+    qa = json.loads(json.dumps(topology()).replace("/profiles/p/", "/profiles/pq/").replace("/profiles/p\"", "/profiles/pq\""))
+    qa["profile"].update(name="pq", front_door_id=OTHER_FDID)
+    qa["endpoints"][0]["routes"] = [r for r in qa["endpoints"][0]["routes"] if r["name"] == "qa"]
+    qa["origin_groups"] = [g for g in qa["origin_groups"] if g["name"] == "qa"]
+    qa["origin_groups"][0]["origins_projected"][0]["host_name"] = "core-eastus.azurewebsites.net"
+    configs = {origins.arm_key(SITE.format("app-core")): config(fd_rule(OWN_FDID, OTHER_FDID))}
+
+    def core_record(patterns):
+        _, evidence = run_origins(monkeypatch, tmp_path, patterns, [prod, qa], configs, public="Enabled")
+        return next(r for r in evidence["results"]["app_service_origins"]
+                    if r["profile"] == "p" and r["origin_group"] == "core")
+
+    unscoped = core_record(None)
+    assert (unscoped["locked_to_front_door"], unscoped["fronting_front_door_ids"]) == (True, [OTHER_FDID])
+    scoped = core_record(",".join(PATTERNS))
+    assert scoped["locked_to_front_door"] is False
+    assert scoped["lockdown_gaps"] == ["other_front_door_id_allowed"]
+    assert (scoped["fronting_front_door_ids"], scoped["other_front_door_ids_allowed"]) == ([], [OTHER_FDID])
 
 
 def with_secrets(c):

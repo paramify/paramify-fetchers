@@ -1250,8 +1250,10 @@ def main() -> int:
         })
 
     profile_fdids = {arm_key(p["id"]): p.get("front_door_id") for p in profiles}
+    # Only an in-scope group's profile has its WAF judged, so only it can vouch for admitting its Front Door id.
     all_app_origins = app_service_origin_records(all_groups, profile_fdids, sites_by_key, sites_by_host, plans_by_key,
-                                                 configs_by_key, subscription_id)
+                                                 configs_by_key, subscription_id,
+                                                 fronting_profiles(groups, profile_fdids, sites_by_host))
     app_origins = [r for r in all_app_origins if arm_key(r["origin_group_id"]) not in excluded_groups]
     production_tag = (os.environ.get(PRODUCTION_TAG_ENV) or "").strip() or None
     apps, excluded_apps = exclude_apps(production_apps(sites_by_key, subscription_id, production_tag, groups, app_origins,
