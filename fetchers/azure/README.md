@@ -12,6 +12,14 @@ Use a dedicated read-only identity for evidence collection. `DefaultAzureCredent
 tries a service principal, workload identity, managed identity and then a cached
 `az login`, and uses the first that works. The full order and the variables the
 runner lets through are in [`_categories/azure.yaml`](../_categories/azure.yaml).
+When no service principal, workload or managed identity variable is set, 11 fetchers
+try a cached `az login` first (the four `azure_sentinel_*`,
+`azure_log_analytics_query_audit`, `azure_log_analytics_deletion_rights`,
+`azure_log_storage_immutability`, `azure_app_service_backups`,
+`azure_change_provenance`, `azure_residual_resources` and
+`azure_devops_audit_streams`), so on a VM using its managed identity, set
+`AZURE_CLIENT_ID` for a user-assigned identity or don't leave an `az login` on the
+runner.
 
 ### Option A: Managed or workload identity (recommended on Azure)
 
@@ -124,6 +132,10 @@ paramify manifest add-target azure_devops_pipelines organization_url=https://dev
 # Sentinel and Log Analytics: optionally limit to some workspaces
 paramify manifest add-target azure_sentinel_incidents subscription_id=<subscription id> workspaces=<workspace name>
 ```
+
+Multi-tenant Entra targets need a service principal or workload identity per tenant:
+a managed identity or `az login` collects its own tenant whatever `tenant_id` says,
+and still names the file after the target.
 
 `workspaces` is accepted by the four `azure_sentinel_*` fetchers,
 `azure_log_analytics_query_audit` and `azure_log_analytics_deletion_rights`, and
