@@ -64,6 +64,7 @@ from oci_common import (  # noqa: E402
     build_payload,
     coverage_percentage,
     finish,
+    is_past,
     iso,
     list_all,
     load_config,
@@ -183,6 +184,11 @@ def version_facts(version, *, now=None) -> dict:
     # is called and what every threshold below compares against.
     ago = age_in_days(not_after, now=now)
     days_until_expiry = -ago if ago is not None else None
+    # Decided on the instants, not the day count: age_in_days truncates to
+    # whole days, so a certificate that lapsed this morning read as 0 days
+    # and "not expired" until the next day. days_until_expiry stays the
+    # legible whole-day number beside it.
+    expired = is_past(not_after, now=now)
 
     return {
         "version_number": version.get("version_number"),
@@ -190,13 +196,13 @@ def version_facts(version, *, now=None) -> dict:
         "valid_from": iso(validity.get("time_of_validity_not_before")),
         "valid_until": iso(not_after),
         "days_until_expiry": days_until_expiry,
-        "is_expired": days_until_expiry < 0 if days_until_expiry is not None else None,
+        "is_expired": expired,
         "expires_within_30_days": (
-            0 <= days_until_expiry <= EXPIRY_URGENT_DAYS
+            expired is False and days_until_expiry <= EXPIRY_URGENT_DAYS
             if days_until_expiry is not None else None
         ),
         "expires_within_90_days": (
-            0 <= days_until_expiry <= EXPIRY_WARNING_DAYS
+            expired is False and days_until_expiry <= EXPIRY_WARNING_DAYS
             if days_until_expiry is not None else None
         ),
         # A revoked certificate still listed ACTIVE is worth seeing.

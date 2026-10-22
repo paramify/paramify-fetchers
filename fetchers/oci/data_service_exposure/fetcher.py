@@ -290,7 +290,11 @@ def summarize(databases, db_systems, file_systems, integrations, *, api_readable
         "internet_writable_unsquashed_exports": sum(
             f["internet_writable_unsquashed_exports"] for f in read_exports
         ),
-        "mount_targets_without_nsg": sum(f["mount_targets_without_nsg"] for f in live_fs),
+        # Distinct targets: one mount target carries every file system in its
+        # export set, so summing per file system counted it once per share.
+        "mount_targets_without_nsg": len({
+            t["id"] for f in live_fs for t in f["mount_targets"] if not t["nsg_ids"]
+        }),
         # Integration.
         "total_integration_instances": len(live_integrations),
         "integration_instances_publicly_reachable": sum(
@@ -345,6 +349,24 @@ def collect(auth: dict, scope: dict, collector: Collector, *, include_sub: bool)
         default=[],
     ) or []
 
+    # Mount targets are gathered across the whole scope before any file system
+    # is joined, keyed by export set: a mount target serves the export set it
+    # was created with, and that export set is what a file system's exports
+    # name. Joined per compartment and without the export set, every mount
+    # target in a compartment was attached to every file system in it.
+    targets_by_export_set: dict[str, list] = {}
+    for comp in compartments:
+        cid, cname = comp["id"], comp["name"]
+        for domain in domains:
+            for target in collector.guard(
+                f"file_storage.list_mount_targets ({cname}, {domain.name})",
+                lambda c=cid, d=domain.name: list_all(file_storage.list_mount_targets, c, d),
+                default=[], tolerate=service_not_subscribed,
+            ) or []:
+                plain = to_plain(target)
+                targets_by_export_set.setdefault(plain.get("export_set_id"), []).append(
+                    mount_target_record(plain))
+
     for comp in compartments:
         cid, cname = comp["id"], comp["name"]
 
@@ -372,18 +394,6 @@ def collect(auth: dict, scope: dict, collector: Collector, *, include_sub: bool)
         ) or []:
             integrations.append(integration_instance_record(to_plain(instance)))
 
-
-        targets_by_export_set: dict[str, list] = {}
-        for domain in domains:
-            for target in collector.guard(
-                f"file_storage.list_mount_targets ({cname}, {domain.name})",
-                lambda c=cid, d=domain.name: list_all(file_storage.list_mount_targets, c, d),
-                default=[], tolerate=service_not_subscribed,
-            ) or []:
-                plain = to_plain(target)
-                targets_by_export_set.setdefault(plain.get("export_set_id"), []).append(
-                    mount_target_record(plain))
-
         for domain in domains:
             for raw in collector.guard(
                 f"file_storage.list_file_systems ({cname}, {domain.name})",
@@ -407,8 +417,10 @@ def collect(auth: dict, scope: dict, collector: Collector, *, include_sub: bool)
                         )
                         exports.append(export_record(to_plain(detail if detail is not None else summary)))
 
-                targets = [t for export_set, group in targets_by_export_set.items()
-                           for t in group if export_set]
+                # The mount targets that actually carry this file system's
+                # exports; a file system with no exports is mounted nowhere.
+                export_sets = sorted({e["export_set_id"] for e in exports or [] if e.get("export_set_id")})
+                targets = [t for export_set in export_sets for t in targets_by_export_set.get(export_set, [])]
                 file_systems.append(file_system_record(plain, exports=exports, mount_targets=targets))
 
     if compartments and unreadable == len(compartments):

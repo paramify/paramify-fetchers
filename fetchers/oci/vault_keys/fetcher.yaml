@@ -70,7 +70,8 @@ evidence_set:
     Script: fetcher.py. Ported from Prowler's OCI kms service (Apache-2.0). OCI
     Python SDK calls: key_management.list_vaults() per compartment with
     get_vault() per vault (the summary omits time_of_deletion), then against
-    each ACTIVE vault's own management endpoint list_keys(), get_key() per key
+    each ACTIVE vault's own management endpoint list_keys() for every
+    compartment in scope (a key may live outside its vault's compartment), get_key() per key
     (the summary omits auto_key_rotation_details and current_key_version),
     get_key_version() for the version in use and list_key_versions() for the
     count. One evidence file per target.

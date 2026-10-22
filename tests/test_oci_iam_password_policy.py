@@ -86,3 +86,20 @@ def test_scim_paging_follows_total_results():
     client = Client()
     assert len(pw._all_password_policies(client)) == 120
     assert client.calls == [1, 51, 101]
+
+
+def test_password_policy_paging_continues_without_total_results():
+    """Reading a missing totalResults as zero stopped after the first page."""
+    from types import SimpleNamespace
+
+    records = [f"p{i}" for i in range(75)]
+    calls = []
+
+    class Client:
+        def list_password_policies(self, *, start_index, count):
+            calls.append(start_index)
+            page = records[start_index - 1:start_index - 1 + count]
+            return SimpleNamespace(data=SimpleNamespace(resources=page, total_results=None))
+
+    assert pw._all_password_policies(Client()) == records
+    assert calls == [1, 51, 76]

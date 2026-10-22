@@ -400,6 +400,25 @@ def collect(auth: dict, scope: dict, collector: Collector, *, include_sub: bool,
     topics: list[dict] = []
     raw_rules: list[dict] = []
 
+    # Subscriptions are gathered across the whole scope before any topic is
+    # joined. A subscription is created in a compartment of its own choosing,
+    # not necessarily the topic's, so listing per topic in the topic's
+    # compartment read a topic subscribed from a security compartment as
+    # having nobody, and every rule routed to it as notifying nobody.
+    subscriptions_by_topic: dict[str, list] = {}
+    subscriptions_complete = True
+    for comp in compartments:
+        found = collector.guard(
+            f"ons.list_subscriptions ({comp['name']})",
+            lambda c=comp["id"]: list_all(subscriptions_client.list_subscriptions, c),
+        )
+        if found is None:
+            subscriptions_complete = False
+            continue
+        for subscription in found:
+            plain = to_plain(subscription)
+            subscriptions_by_topic.setdefault(plain.get("topic_id"), []).append(plain)
+
     for comp in compartments:
         cid, cname = comp["id"], comp["name"]
 
@@ -422,14 +441,11 @@ def collect(auth: dict, scope: dict, collector: Collector, *, include_sub: bool,
             default=[],
         ) or []:
             plain = to_plain(topic)
-            subscriptions = collector.guard(
-                f"ons.list_subscriptions ({plain.get('name')})",
-                lambda c=cid, t=plain["topic_id"]: list_all(
-                    subscriptions_client.list_subscriptions, c, topic_id=t),
-            )
+            found = subscriptions_by_topic.get(plain.get("topic_id"), [])
+            # A failed listing anywhere means "none found" cannot be told
+            # apart from "could not look", so an empty answer reads unknown.
             topics.append(topic_record(
-                plain,
-                subscriptions=[to_plain(s) for s in subscriptions] if subscriptions is not None else None,
+                plain, subscriptions=found if found or subscriptions_complete else None,
             ))
 
         for rule in collector.guard(

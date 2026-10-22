@@ -146,6 +146,28 @@ def age_in_days(value: Any, *, now: Optional[datetime] = None) -> Optional[int]:
     return (reference - value).days
 
 
+def is_past(value: Any, *, now: Optional[datetime] = None) -> Optional[bool]:
+    """True when `value` is before now, False when not, None when unparseable.
+
+    `age_in_days` truncates to whole days, so on the day something lapses it
+    reads 0 days and "not yet" for up to 24 hours. Anything that decides
+    expired / locked / lapsed compares the instants with this instead, and
+    keeps the whole-day number beside it for a reader.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value < (now or datetime.now(timezone.utc))
+
+
 def _one_line(text: Any, limit: int = 800) -> str:
     """Collapse to a single bounded line: an OCI ServiceError carries an opc-request-id
     and a docs URL on their own lines, and the status file's `error` does not.
@@ -154,32 +176,51 @@ def _one_line(text: Any, limit: int = 800) -> str:
     return collapsed if len(collapsed) <= limit else collapsed[: limit - 1] + "…"
 
 
-# Substrings mapping a recorded failure onto a STATUS_CODES category, matched
-# against "<exception type> <status> <code> <message>" lowercased. First hit
-# wins, so the order is deliberate: a signing failure is auth, not a bad request.
+# The HTTP status decides the category when the SDK gave one. Matching it as a
+# substring of the whole message did not: an opc-request-id or a docs URL in the
+# text can contain "401" or "404", so the category reported to the runner
+# depended on incidental characters.
+_STATUS_TO_CODE = {
+    401: "auth_failed",
+    403: "not_authorized",
+    429: "rate_limited",
+    # 404 is OCI's answer for "no permission on this compartment" as well as a
+    # genuinely absent resource, so it lands in bad_config rather than
+    # not_authorized — the ledger carries the detail either way.
+    400: "bad_config",
+    404: "bad_config",
+    409: "bad_config",
+    502: "target_unreachable",
+    503: "target_unreachable",
+    504: "target_unreachable",
+}
+
+# Substrings deciding a failure that carries no status — a config error, a
+# connection failure, a wrapped SDK error — matched against
+# "<exception type> <code> <message>" lowercased. First hit wins, so the order
+# is deliberate: the 404 shape is named before the bare "notauthorized" it
+# contains, and a signing failure is auth, not a bad request.
 _FAILURE_SIGNATURES = (
+    ("bad_config", (
+        "notauthorizedornotfound", "authorization failed or requested resource not found",
+    )),
     ("auth_failed", (
         "invalidconfig", "configfilenotfound", "profilenotfound", "invalidkeyfilepath",
         "missingprivatekeypassphrase", "invalidprivatekey", "notauthenticated",
         "could not find config file", "no such file or directory: '~/.oci",
         "the required information to complete authentication was not provided",
-        "401",
     )),
     ("not_authorized", (
-        "notauthorizedorunauthorized", "notauthorized", "forbidden", "403",
-        "notallowed", "cannotparserequest.*policy",
+        "notauthorizedorunauthorized", "notauthorized", "forbidden", "notallowed",
+        "cannotparserequest",
     )),
-    ("rate_limited", ("toomanyrequests", "429", "ratelimit", "quotaexceeded")),
+    ("rate_limited", ("toomanyrequests", "ratelimit", "quotaexceeded")),
     ("target_unreachable", (
         "requestexception", "connectionerror", "connecttimeout", "readtimeout",
-        "timeout", "timed out", "name resolution", "getaddrinfo", "502", "503", "504",
+        "timeout", "timed out", "name resolution", "getaddrinfo",
     )),
-    # 404 is OCI's answer for "no permission on this compartment" as well as a
-    # genuinely absent resource, so it lands in bad_config rather than
-    # not_authorized — the ledger carries the detail either way.
     ("bad_config", (
-        "invalidparameter", "badrequest", "notfound", "limitexceeded",
-        "missingparameter", "400", "404", "409",
+        "invalidparameter", "badrequest", "notfound", "limitexceeded", "missingparameter",
     )),
 )
 
@@ -189,9 +230,17 @@ _MAX_REPORTED_MESSAGE_CHARS = 200
 
 
 def _failure_code(failure: Dict[str, str]) -> str:
-    blob = " ".join(
-        str(failure.get(k, "")) for k in ("type", "status", "code", "message")
-    ).lower()
+    status = failure.get("status")
+    if status not in (None, ""):
+        try:
+            number = int(str(status))
+        except ValueError:
+            number = None
+        if number in _STATUS_TO_CODE:
+            return _STATUS_TO_CODE[number]
+        if number is not None and number >= 500:
+            return "internal_error"
+    blob = " ".join(str(failure.get(k, "")) for k in ("type", "code", "message")).lower()
     for code, signatures in _FAILURE_SIGNATURES:
         if any(sig in blob for sig in signatures):
             return code

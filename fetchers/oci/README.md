@@ -269,6 +269,17 @@ responses only, as its module docstring says. The same holds for
 Exadata resources, which no trial tenancy can create, so its request shapes are
 live-verified and its record fields are checked against the SDK models.
 
+**Changed after the live runs, not yet re-verified against a tenancy:** three
+behaviours were corrected in review and are covered by the recorded-response
+and unit tests only until the next live run. `oci_vault_keys` now lists keys
+for every compartment in scope against each vault, since a key may live in a
+different compartment from its vault. `oci_audit_logging_events` lists
+subscriptions per compartment and joins them to topics by `topic_id`, since a
+subscription is created in a compartment of its own choosing.
+`oci_data_service_exposure` joins mount targets to file systems by export set
+across the whole scope. Re-record the cassettes (`python tools/oci_capture.py`)
+on the next tenancy that is available.
+
 Application Dependency Management IS verified live, against three real Maven
 audits (Log4Shell, Text4Shell, a vulnerable jackson-databind): one plain, one
 with an exclusion that hides a finding but not the headline, and one whose CVSS

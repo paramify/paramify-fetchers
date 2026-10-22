@@ -87,6 +87,6 @@ evidence_set:
     rule-to-topic-to-subscriber join, and subscription state. OCI Python SDK
     calls: audit.get_configuration() on the tenancy, then per compartment
     logging.list_log_groups()/list_logs(), ons.list_topics() with
-    list_subscriptions() per topic, and events.list_rules() with get_rule() per
+    list_subscriptions() per compartment joined to topics by topic_id, and events.list_rules() with get_rule() per
     rule because the list summary carries no actions. One evidence file per
     target.

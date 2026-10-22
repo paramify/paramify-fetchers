@@ -169,17 +169,29 @@ def summarize(domains: list[dict], legacy) -> dict:
 
 # --- collection ---
 
+# Bounds the SCIM walk on a server that ignores start_index and serves the same
+# page forever: 2,000 pages of 50 is 100,000 records, far above any domain.
+SCIM_MAX_PAGES = 2000
+
+
 def _all_password_policies(client) -> list:
-    """Every SCIM page — Prowler reads only the first."""
+    """Every SCIM page — Prowler reads only the first.
+
+    `total_results` ends the walk when the server reports it; without it the
+    walk goes on until a page comes back empty, so a missing total can never
+    truncate the list to its first page.
+    """
     found: list = []
     start = 1
-    while True:
+    for _ in range(SCIM_MAX_PAGES):
         page = client.list_password_policies(start_index=start, count=SCIM_PAGE).data
-        found.extend(page.resources or [])
-        total = page.total_results or 0
-        if not page.resources or len(found) >= total:
+        resources = page.resources or []
+        found.extend(resources)
+        total = page.total_results
+        if not resources or (total is not None and len(found) >= total):
             return found
-        start += len(page.resources)
+        start += len(resources)
+    return found
 
 
 def collect(auth: dict, collector: Collector):

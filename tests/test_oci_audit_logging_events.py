@@ -138,3 +138,70 @@ def test_audit_retention_and_log_inventory():
     assert out["audit_meets_365_day_retention"] is False
     assert out["logged_services"] == ["flowlogs"] and out["shortest_log_retention_days"] == 30
     assert out["enabled_logs"] == 1 and out["disabled_logs"] == 0
+
+
+def test_a_subscription_in_another_compartment_still_counts(monkeypatch):
+    """A subscription is created in a compartment of its own choosing. Listed
+    per topic in the topic's compartment, a topic subscribed from the security
+    compartment read as having nobody, and every rule routed to it as
+    notifying nobody."""
+    import logging
+    from types import SimpleNamespace
+
+    import pytest
+    pytest.importorskip("oci")
+
+    class M(dict):
+        __getattr__ = dict.__getitem__
+
+    def resp(data):
+        return SimpleNamespace(data=data)
+
+    topic = M(topic_id=TOPIC, name="alerts", compartment_id="notifications", lifecycle_state="ACTIVE")
+    subscription = M(id="s", topic_id=TOPIC, protocol="EMAIL", lifecycle_state="ACTIVE",
+                     compartment_id="security", created_time=None)
+    rule = M(id="r", display_name="iam", compartment_id="notifications", lifecycle_state="ACTIVE",
+             is_enabled=True, condition=json.dumps({"eventType": ["com.oraclecloud.identitycontrolplane.createuser"]}),
+             actions={"actions": [{"action_type": "ONS", "is_enabled": True, "lifecycle_state": "ACTIVE",
+                                   "topic_id": TOPIC}]})
+
+    class Topics:
+        def list_topics(self, c):
+            return resp([topic] if c == "notifications" else [])
+
+    class Subscriptions:
+        def list_subscriptions(self, c):
+            return resp([subscription] if c == "security" else [])
+
+    class Events:
+        def list_rules(self, c):
+            return resp([rule] if c == "notifications" else [])
+
+        def get_rule(self, r):
+            return resp(rule)
+
+    class Audit:
+        def get_configuration(self, tenancy):
+            return resp(M(retention_period_days=365))
+
+    class Empty:
+        def __getattr__(self, name):
+            return lambda *a, **k: resp([])
+
+    def fake_client(client_class, auth, **kwargs):
+        return {"NotificationControlPlaneClient": Topics(), "NotificationDataPlaneClient": Subscriptions(),
+                "EventsClient": Events(), "AuditClient": Audit()}.get(client_class.__name__, Empty())
+
+    monkeypatch.setattr(al, "make_client", fake_client)
+    monkeypatch.setattr(al, "walk_compartments",
+                        lambda *a, **k: [{"id": "notifications", "name": "n"}, {"id": "security", "name": "s"}])
+    monkeypatch.setattr(al, "list_all", lambda fn, *a, **k: fn(*a, **k).data)
+    monkeypatch.setattr(al, "to_plain", dict)
+
+    collector = al.Collector(logging.getLogger("test"))
+    audit, log_groups, rules, topics, scanned = al.collect({"tenancy": "T"}, {"compartment_id": "T"}, collector,
+                                                           include_sub=True)
+    assert collector.ok and scanned == 2
+    assert topics[0]["has_subscriber"] is True and topics[0]["active_subscriptions"] == 1
+    assert rules[0]["notifying"] is True
+    assert al.summarize(audit, log_groups, rules, topics)["active_rules_notifying_nobody"] == 0

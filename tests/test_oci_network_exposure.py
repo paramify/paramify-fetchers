@@ -128,3 +128,28 @@ def test_flow_logging_percentage_and_unreadable_route_tables():
     out = net.summarize([], [logged, unlogged, unknown], [], [])
     assert out["flow_logging_percentage"] == 33
     assert out["subnets_with_unreadable_route_table"] == 1
+
+
+def test_unknown_reachability_is_counted_apart_never_as_unreachable():
+    """A route table outside the walked scope leaves internet_routable None. Read as
+    False, an open rule on that subnet vanished from the reachable count and a
+    validator asserting zero passed on a run that never looked."""
+    rule = _ingress()
+    unknown = _subnet("u", routable=None)
+    sl = _list("open", ingress=[rule], subnets=[unknown["id"]])
+    out = net.summarize([], [unknown], [sl], [])
+    assert out["internet_ingress_rules"] == 1
+    assert out["reachable_internet_ingress_rules"] == 0
+    assert out["internet_ingress_rules_with_unknown_reachability"] == 1
+
+    # Attached to one unknown subnet and one routable one: the rule IS reachable.
+    routable = _subnet("r", routable=True)
+    both = _list("open", ingress=[rule], subnets=[unknown["id"], routable["id"]])
+    out = net.summarize([], [unknown, routable], [both], [])
+    assert out["reachable_internet_ingress_rules"] == 1
+    assert out["internet_ingress_rules_with_unknown_reachability"] == 0
+
+    # prohibit_internet_ingress settles it without a route table.
+    closed = _subnet("c", routable=None, prohibit=True)
+    out = net.summarize([], [closed], [_list("open", ingress=[rule], subnets=[closed["id"]])], [])
+    assert out["internet_ingress_rules_with_unknown_reachability"] == 0

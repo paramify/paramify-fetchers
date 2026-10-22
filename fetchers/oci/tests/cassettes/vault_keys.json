@@ -146,6 +146,38 @@
     "Content-Type": "application/json"
    },
    "body": "[{\"regionKey\": \"PHX\", \"regionName\": \"us-phoenix-1\", \"status\": \"READY\", \"isHomeRegion\": true}]"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET efvktjccaac6k-management/20180608/keys?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
   }
  ]
 }

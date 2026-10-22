@@ -93,3 +93,68 @@ def test_protection_mode_is_reported_and_percentaged():
 
 def test_an_unreadable_vault_service_is_not_no_vaults():
     assert kms.summarize([], [], api_readable=False)["vault_service_readable"] is False
+
+
+def test_a_key_outside_its_vaults_compartment_is_still_collected(monkeypatch):
+    """OCI lets a key live in a different compartment from its vault, and
+    list_keys answers for one compartment at a time. Asked about the vault's
+    own compartment only, such a key — rotated or not — was absent from the
+    evidence and keys_not_rotated_within_window read clean."""
+    import logging
+    from types import SimpleNamespace
+
+    pytest = __import__("pytest")
+    pytest.importorskip("oci")
+
+    class M(dict):
+        __getattr__ = dict.__getitem__
+
+    def resp(data):
+        return SimpleNamespace(data=data)
+
+    vault = M(id="v", display_name="vault", lifecycle_state="ACTIVE", vault_type="VIRTUAL_PRIVATE",
+              management_endpoint="https://v-management.kms.example", compartment_id="A", time_of_deletion=None)
+    stale = M(id="k-stale", display_name="stale", lifecycle_state="ENABLED", protection_mode="HSM",
+              is_auto_rotation_enabled=False, auto_key_rotation_details=None, time_of_deletion=None,
+              key_shape={"algorithm": "AES", "length": 32}, current_key_version="kv", compartment_id="B")
+    listed = []
+
+    class VaultClient:
+        def list_vaults(self, c):
+            return resp([vault] if c == "A" else [])
+
+        def get_vault(self, v):
+            return resp(vault)
+
+    class Management:
+        def list_keys(self, c):
+            listed.append(c)
+            # The key sits in compartment B, against the vault in A. Listed
+            # twice on purpose: once per compartment that can see it.
+            return resp([stale] if c in ("B", "C") else [])
+
+        def get_key(self, k):
+            return resp(stale)
+
+        def get_key_version(self, key_id, key_version_id):
+            return resp(M(time_created=NOW - timedelta(days=800), is_auto_rotated=False, origin="INTERNAL"))
+
+        def list_key_versions(self, k):
+            return resp([M(id="kv")])
+
+    def fake_client(client_class, auth, **kwargs):
+        return {"KmsVaultClient": VaultClient(), "KmsManagementClient": Management()}.get(
+            client_class.__name__, SimpleNamespace())
+
+    monkeypatch.setattr(kms, "make_client", fake_client)
+    monkeypatch.setattr(kms, "walk_compartments",
+                        lambda *a, **k: [{"id": "A", "name": "a"}, {"id": "B", "name": "b"}, {"id": "C", "name": "c"}])
+    monkeypatch.setattr(kms, "list_all", lambda fn, *a, **k: fn(*a, **k).data)
+    monkeypatch.setattr(kms, "to_plain", dict)
+
+    collector = kms.Collector(logging.getLogger("test"))
+    vaults, keys, scanned = kms.collect({"tenancy": "T"}, {"compartment_id": "T"}, collector, include_sub=True)
+    assert collector.ok and scanned == 3
+    assert sorted(listed) == ["A", "B", "C"], "every compartment in scope is asked about every vault"
+    assert [k["id"] for k in keys] == ["k-stale"], "listed from two compartments, recorded once"
+    assert kms.summarize(vaults, keys)["keys_not_rotated_within_window"] == 1

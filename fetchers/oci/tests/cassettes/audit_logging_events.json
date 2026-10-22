@@ -82,14 +82,6 @@
    "body": "[]"
   },
   {
-   "key": "GET notification/20181201/subscriptions?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq&topicId=ocid1.onstopic.oc1.phx.amaaaaaajt3ioqqaq57ckpcyqlotnq764bgghw75amsjvjfvzc77dzi76dkq",
-   "status": 200,
-   "headers": {
-    "Content-Type": "application/json"
-   },
-   "body": "[]"
-  },
-  {
    "key": "GET events/20181201/rules?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
    "status": 200,
    "headers": {
@@ -184,6 +176,46 @@
     "Content-Type": "application/json"
    },
    "body": "[{\"regionKey\": \"PHX\", \"regionName\": \"us-phoenix-1\", \"status\": \"READY\", \"isHomeRegion\": true}]"
+  },
+  {
+   "key": "GET notification/20181201/subscriptions?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET notification/20181201/subscriptions?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET notification/20181201/subscriptions?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET notification/20181201/subscriptions?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET notification/20181201/subscriptions?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
   }
  ]
 }

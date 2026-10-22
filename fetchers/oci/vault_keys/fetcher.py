@@ -230,6 +230,7 @@ def collect(auth: dict, scope: dict, collector: Collector, *, include_sub: bool)
     vaults: list[dict] = []
     keys: list[dict] = []
     unreadable = 0
+    active_vaults: list[dict] = []
 
     for comp in compartments:
         cid, cname = comp["id"], comp["name"]
@@ -252,24 +253,37 @@ def collect(auth: dict, scope: dict, collector: Collector, *, include_sub: bool)
             )
             plain = to_plain(detail if detail is not None else summary)
             vaults.append(vault_record(plain))
+            if plain.get("lifecycle_state") == "ACTIVE" and plain.get("management_endpoint"):
+                active_vaults.append(plain)
 
-            if plain.get("lifecycle_state") != "ACTIVE" or not plain.get("management_endpoint"):
-                continue
-            management = make_client(
-                oci.key_management.KmsManagementClient, auth,
-                service_endpoint=plain["management_endpoint"],
-            )
+    # A key need not sit in its vault's compartment: OCI lets a key be created
+    # in any compartment against a vault elsewhere, and list_keys answers for
+    # one compartment at a time. Asking each vault about its own compartment
+    # only left such a key out of the evidence entirely — rotated or not — so
+    # every active vault is asked about every compartment in scope, and a key
+    # is recorded once however many times it is listed.
+    seen_keys: set = set()
+    for plain in active_vaults:
+        management = make_client(
+            oci.key_management.KmsManagementClient, auth,
+            service_endpoint=plain["management_endpoint"],
+        )
+        vault_label = plain.get("display_name")
+        for comp in compartments:
             for key_summary in collector.guard(
-                f"kms_management.list_keys ({plain.get('display_name')})",
-                lambda c=cid: list_all(management.list_keys, c),
+                f"kms_management.list_keys ({vault_label}, {comp['name']})",
+                lambda c=comp["id"], m=management: list_all(m.list_keys, c),
                 default=[],
             ) or []:
+                if key_summary.id in seen_keys:
+                    continue
+                seen_keys.add(key_summary.id)
                 label = short_ocid(key_summary.id)
                 # Mandatory second call: auto_key_rotation_details and
                 # current_key_version are absent from KeySummary.
                 key_detail = collector.guard(
                     f"kms_management.get_key ({label})",
-                    lambda k=key_summary.id: management.get_key(k).data,
+                    lambda k=key_summary.id, m=management: m.get_key(k).data,
                 )
                 key = to_plain(key_detail if key_detail is not None else key_summary)
 
@@ -277,12 +291,12 @@ def collect(auth: dict, scope: dict, collector: Collector, *, include_sub: bool)
                 if key.get("current_key_version"):
                     version = collector.guard(
                         f"kms_management.get_key_version ({label})",
-                        lambda k=key["id"], v=key["current_key_version"]:
-                            management.get_key_version(key_id=k, key_version_id=v).data,
+                        lambda k=key["id"], v=key["current_key_version"], m=management:
+                            m.get_key_version(key_id=k, key_version_id=v).data,
                     )
                 versions = collector.guard(
                     f"kms_management.list_key_versions ({label})",
-                    lambda k=key["id"]: list_all(management.list_key_versions, k),
+                    lambda k=key["id"], m=management: list_all(m.list_key_versions, k),
                 )
                 keys.append(key_record(
                     key, vault=plain,

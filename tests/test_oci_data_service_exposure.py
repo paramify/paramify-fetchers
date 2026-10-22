@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 FETCHER = Path(__file__).resolve().parent.parent / "fetchers" / "oci" / "data_service_exposure" / "fetcher.py"
 KEY = "ocid1.key.oc1..cmk"
@@ -139,3 +143,80 @@ def test_publicly_reachable_resources_counts_every_service():
         [ds.integration_instance_record({"id": "i", "display_name": "i", "lifecycle_state": "ACTIVE"})])
     assert out["publicly_reachable_resources"] == 3
     assert ds.summarize([], [], [], [], api_readable=False)["data_services_readable"] is False
+
+
+def _mount_target(name, *, export_set, nsgs=()):
+    return ds.mount_target_record({"id": f"ocid1.mounttarget.oc1..{name}", "display_name": name,
+                                   "export_set_id": export_set, "nsg_ids": list(nsgs), "lifecycle_state": "ACTIVE"})
+
+
+def test_a_mount_target_shared_by_two_file_systems_is_counted_once():
+    unguarded = _mount_target("mt", export_set="es1")
+
+    def fs(name):
+        return ds.file_system_record({"id": name, "display_name": name, "lifecycle_state": "ACTIVE"},
+                                     exports=[], mount_targets=[unguarded])
+
+    assert ds.summarize([], [], [fs("a"), fs("b")], [])["mount_targets_without_nsg"] == 1
+
+
+def test_mount_targets_are_joined_by_export_set_across_compartments(monkeypatch):
+    """Every mount target in a compartment was attached to every file system in it,
+    and a target in another compartment was never seen at all."""
+    pytest.importorskip("oci")
+
+    class M(dict):
+        __getattr__ = dict.__getitem__
+
+    def resp(data):
+        return SimpleNamespace(data=data)
+
+    comp_a, comp_b = {"id": "A", "name": "a"}, {"id": "B", "name": "b"}
+    mt_a = M(id="mt-a", display_name="mt-a", export_set_id="es-a", nsg_ids=[], lifecycle_state="ACTIVE")
+    mt_b = M(id="mt-b", display_name="mt-b", export_set_id="es-b", nsg_ids=["nsg"], lifecycle_state="ACTIVE")
+    fs_a = M(id="fs-a", display_name="fs-a", lifecycle_state="ACTIVE", kms_key_id=None)
+    fs_b = M(id="fs-b", display_name="fs-b", lifecycle_state="ACTIVE", kms_key_id=None)
+
+    class FileStorage:
+        def list_mount_targets(self, c, d):
+            return resp({"A": [mt_a], "B": [mt_b]}[c])
+
+        def list_file_systems(self, c, d):
+            # Both file systems live in A; fs-b's export set is served from B.
+            return resp([fs_a, fs_b] if c == "A" else [])
+
+        def list_exports(self, file_system_id):
+            return resp([M(id=f"exp-{file_system_id}", file_system_id=file_system_id,
+                           export_set_id="es-a" if file_system_id == "fs-a" else "es-b",
+                           path="/data", lifecycle_state="ACTIVE")])
+
+        def get_export(self, e):
+            return resp(M(id=e, file_system_id=e[4:], export_set_id="es-a" if e.endswith("fs-a") else "es-b",
+                          path="/data", lifecycle_state="ACTIVE",
+                          export_options=[{"source": "10.0.0.0/8", "access": "READ_ONLY", "identity_squash": "ROOT"}]))
+
+    class Empty:
+        def __getattr__(self, name):
+            return lambda *a, **k: resp([])
+
+    class Identity:
+        def list_availability_domains(self, compartment_id):
+            return resp([M(name="AD-1")])
+
+    def fake_client(client_class, auth, **kwargs):
+        return {"FileStorageClient": FileStorage(), "IdentityClient": Identity()}.get(client_class.__name__, Empty())
+
+    monkeypatch.setattr(ds, "make_client", fake_client)
+    monkeypatch.setattr(ds, "walk_compartments", lambda *a, **k: [comp_a, comp_b])
+    monkeypatch.setattr(ds, "list_all", lambda fn, *a, **k: fn(*a, **k).data)
+    monkeypatch.setattr(ds, "to_plain", dict)
+
+    collector = ds.Collector(logging.getLogger("test"))
+    _, _, file_systems, _, scanned = ds.collect({"tenancy": "T"}, {"compartment_id": "T"}, collector,
+                                                include_sub=True)
+    assert collector.ok and scanned == 2
+    by_name = {f["display_name"]: f for f in file_systems}
+    assert [t["id"] for t in by_name["fs-a"]["mount_targets"]] == ["mt-a"]
+    assert [t["id"] for t in by_name["fs-b"]["mount_targets"]] == ["mt-b"], "joined across compartments"
+    assert by_name["fs-a"]["mount_targets_without_nsg"] == 1
+    assert by_name["fs-b"]["mount_targets_without_nsg"] == 0

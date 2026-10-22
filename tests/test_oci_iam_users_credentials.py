@@ -6,6 +6,7 @@ import importlib.util
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 FETCHER = Path(__file__).resolve().parent.parent / "fetchers" / "oci" / "iam_users_credentials" / "fetcher.py"
 NOW = datetime(2026, 9, 15, tzinfo=timezone.utc)
@@ -131,3 +132,42 @@ def test_a_scim_api_key_has_no_status_and_counts_as_active():
                              credentials={"api_keys": [key], "auth_tokens": [token]})
     assert record["active_credential_count"] == 1
     assert record["active_credentials_older_than_rotation_window"] == 1
+
+
+class _ScimPage:
+    def __init__(self, resources, total=None):
+        self.resources, self.total_results = resources, total
+
+
+def _scim_server(records, *, report_total):
+    """A SCIM list that honours start_index/count; totalResults optional."""
+    calls = []
+
+    def list_fn(*, start_index, count, **kwargs):
+        calls.append(start_index)
+        page = records[start_index - 1:start_index - 1 + count]
+        return SimpleNamespace(data=_ScimPage(page, len(records) if report_total else None))
+    return list_fn, calls
+
+
+def test_scim_paging_continues_without_total_results():
+    """Reading a missing totalResults as zero stopped after the first fifty."""
+    records = [f"u{i}" for i in range(120)]
+    list_fn, calls = _scim_server(records, report_total=False)
+    assert iam._scim_all(list_fn) == records
+    assert calls == [1, 51, 101, 121], "walks until a page comes back empty"
+
+
+def test_scim_paging_stops_at_total_results_when_reported():
+    records = [f"u{i}" for i in range(120)]
+    list_fn, calls = _scim_server(records, report_total=True)
+    assert iam._scim_all(list_fn) == records
+    assert calls == [1, 51, 101], "no extra round trip once the total is reached"
+    assert iam._scim_all(_scim_server([], report_total=True)[0]) == []
+
+
+def test_scim_paging_is_bounded_on_a_server_that_ignores_start_index():
+    def stuck(**kwargs):
+        return SimpleNamespace(data=_ScimPage(["same"] * 50, None))
+
+    assert len(iam._scim_all(stuck)) == 50 * iam.SCIM_MAX_PAGES

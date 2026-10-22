@@ -113,3 +113,23 @@ def test_locked_retention_and_replication_destinations_are_surfaced():
     out = ob.summarize([bucket])
     assert out["buckets_with_locked_retention_rules"] == 1
     assert out["replication_destination_regions"] == ["us-ashburn-1"]
+
+
+def test_a_par_that_lapsed_earlier_today_grants_nothing():
+    """Whole-day truncation read a PAR that expired this morning as still live."""
+    par = ob.par_record({"name": "p", "access_type": "AnyObjectRead", "bucket_listing_action": "ListObjects",
+                         "time_expires": NOW - timedelta(hours=6)}, now=NOW)
+    assert par["expired"] is True
+    bucket = ob.bucket_record(_bucket("b"), pars=[par])
+    assert bucket["reachable_by_par"] is False and bucket["active_par_count"] == 0
+    live = ob.par_record({"name": "q", "access_type": "AnyObjectRead", "bucket_listing_action": "Deny",
+                          "time_expires": NOW + timedelta(hours=6)}, now=NOW)
+    assert live["expired"] is False
+
+
+def test_a_retention_rule_locked_earlier_today_is_locked():
+    rule = ob.retention_rule_record({"id": "r", "display_name": "r", "duration": {"time_amount": 7, "time_unit": "YEARS"},
+                                     "time_rule_locked": NOW - timedelta(hours=1)}, now=NOW)
+    assert rule["is_locked"] is True
+    pending = ob.retention_rule_record({"id": "s", "display_name": "s", "time_rule_locked": NOW + timedelta(hours=1)}, now=NOW)
+    assert pending["is_locked"] is False

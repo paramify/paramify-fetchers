@@ -334,16 +334,29 @@ def collect(auth: dict, collector: Collector) -> list | None:
     return users
 
 
+# Bounds the SCIM walk on a server that ignores start_index and serves the same
+# page forever: 2,000 pages of 50 is 100,000 records, far above any domain.
+SCIM_MAX_PAGES = 2000
+
+
 def _scim_all(list_fn, **kwargs) -> list:
-    """Every SCIM page. SCIM pages by start_index/count, not opc-next-page."""
+    """Every SCIM page. SCIM pages by start_index/count, not opc-next-page.
+
+    `total_results` ends the walk when the server reports it. When it does
+    not, the walk goes on until a page comes back empty — reading a missing
+    total as zero stopped after the first fifty records with no error.
+    """
     found: list = []
     start = 1
-    while True:
+    for _ in range(SCIM_MAX_PAGES):
         page = list_fn(start_index=start, count=SCIM_PAGE, **kwargs).data
-        found.extend(page.resources or [])
-        if not page.resources or len(found) >= (page.total_results or 0):
+        resources = page.resources or []
+        found.extend(resources)
+        total = page.total_results
+        if not resources or (total is not None and len(found) >= total):
             return found
-        start += len(page.resources)
+        start += len(resources)
+    return found
 
 
 def _secondary_domain_users(auth: dict, identity, collector: Collector) -> list:

@@ -96,3 +96,22 @@ def test_a_missing_version_summary_leaves_expiry_unknown_not_expired():
     assert record["days_until_expiry"] is None
     assert record["is_expired"] is None
     assert certs.summarize([record], [])["expired_certificates"] == 0
+
+
+def test_a_certificate_that_lapsed_earlier_today_is_expired():
+    """age_in_days truncates to whole days, so the day a certificate lapses it read
+    as 0 days away and "not expired" for up to 24 hours. Decided on the instant."""
+    gone = certs.certificate_record({
+        "id": "c", "name": "c", "config_type": "ISSUED_BY_INTERNAL_CA", "lifecycle_state": "ACTIVE",
+        "current_version_summary": {"validity": {"time_of_validity_not_after": NOW - timedelta(hours=10)}},
+    }, now=NOW)
+    assert gone["is_expired"] is True
+    assert gone["expires_within_30_days"] is False and gone["expires_within_90_days"] is False
+    later_today = certs.certificate_record({
+        "id": "d", "name": "d", "config_type": "ISSUED_BY_INTERNAL_CA", "lifecycle_state": "ACTIVE",
+        "current_version_summary": {"validity": {"time_of_validity_not_after": NOW + timedelta(hours=10)}},
+    }, now=NOW)
+    assert later_today["is_expired"] is False and later_today["expires_within_30_days"] is True
+    out = certs.summarize([gone, later_today], [])
+    assert out["expired_certificates"] == 1
+    assert out["certificates_expiring_within_30_days"] == 1

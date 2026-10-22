@@ -277,19 +277,33 @@ def summarize(vcns, subnets, security_lists, nsgs, *, gateways=(), api_readable:
 
     subnets_by_id = {s["id"]: s for s in live_subnets}
 
-    def reachable(security_list):
-        """Attached to at least one subnet that is actually internet-facing."""
-        return any(
-            subnets_by_id[sid]["internet_routable"] and not subnets_by_id[sid]["prohibit_internet_ingress"]
-            for sid in security_list["attached_subnet_ids"] if sid in subnets_by_id
-        )
+    def reachability(security_list):
+        """True when attached to a subnet that is actually internet-facing.
+
+        None when that could not be decided: the list is attached to a subnet
+        permitting ingress whose route table was not read (unreadable, or in
+        a compartment outside this target). Read as False, a rule on such a
+        subnet dropped out of the reachable count and a validator asserting
+        zero passed on a run that never looked.
+        """
+        verdict = False
+        for sid in security_list["attached_subnet_ids"]:
+            subnet = subnets_by_id.get(sid)
+            if subnet is None or subnet["prohibit_internet_ingress"]:
+                continue
+            if subnet["internet_routable"]:
+                return True
+            if subnet["internet_routable"] is None:
+                verdict = None
+        return verdict
 
     list_ingress = [(sl, r) for sl in live_lists for r in sl["ingress_rules"]]
     list_egress = [(sl, r) for sl in live_lists for r in sl["egress_rules"]]
     nsg_rules = [(n, r) for n in live_nsgs for r in n["rules"] or []]
 
     internet_ingress = [(sl, r) for sl, r in list_ingress if r["is_internet"]]
-    reachable_ingress = [(sl, r) for sl, r in internet_ingress if reachable(sl)]
+    reachable_ingress = [(sl, r) for sl, r in internet_ingress if reachability(sl) is True]
+    unknown_ingress = [(sl, r) for sl, r in internet_ingress if reachability(sl) is None]
     internet_egress = [(sl, r) for sl, r in list_egress if r["is_internet"]]
     nsg_internet_ingress = [(n, r) for n, r in nsg_rules if r["direction"] == "INGRESS" and r["is_internet"]]
 
@@ -307,6 +321,10 @@ def summarize(vcns, subnets, security_lists, nsgs, *, gateways=(), api_readable:
         # INGRESS — configuration, then actual exposure.
         "internet_ingress_rules": len(internet_ingress),
         "reachable_internet_ingress_rules": len(reachable_ingress),
+        # Rules whose reachability depends on a route table this run did not
+        # read. Non-zero means the reachable count above is a floor, not an
+        # answer; oci_network_reachability_resolved asserts it is zero.
+        "internet_ingress_rules_with_unknown_reachability": len(unknown_ingress),
         "internet_ingress_rules_on_unattached_lists": sum(
             1 for sl, _ in internet_ingress if not sl["is_attached"]
         ),

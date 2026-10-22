@@ -53,6 +53,7 @@ from oci_common import (  # noqa: E402
     build_payload,
     coverage_percentage,
     finish,
+    is_past,
     iso,
     list_all,
     load_config,
@@ -99,7 +100,9 @@ def par_record(par: dict, *, now=None) -> dict:
         "time_expires": iso(expires),
         # age_in_days on a future date is negative; flip it to days remaining.
         "days_until_expiry": -days_left if days_left is not None else None,
-        "expired": days_left is not None and days_left > 0,
+        # On the instant, not the day count: a PAR that lapsed this morning
+        # read as 0 days old and still live until the next day.
+        "expired": is_past(expires, now=now) is True,
     }
 
 
@@ -120,7 +123,6 @@ def log_record(log: dict) -> dict:
 def retention_rule_record(rule: dict, *, now=None) -> dict:
     duration = rule.get("duration") or {}
     locked = rule.get("time_rule_locked")
-    lock_age = age_in_days(locked, now=now)
     return {
         "id": rule.get("id"),
         "display_name": rule.get("display_name"),
@@ -128,7 +130,7 @@ def retention_rule_record(rule: dict, *, now=None) -> dict:
         "duration_unit": duration.get("time_unit"),
         "time_rule_locked": iso(locked),
         # A lock time in the past means the rule can no longer be shortened.
-        "is_locked": lock_age is not None and lock_age > 0,
+        "is_locked": is_past(locked, now=now) is True,
     }
 
 
