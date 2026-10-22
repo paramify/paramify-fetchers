@@ -1152,7 +1152,7 @@ def run(
     run_dir = parsed.output_dir.resolve() / f"run-{run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # Comparators run after their inputs; everything else keeps manifest order.
+    # Two phases: every fetcher in manifest order, then every comparator.
     entries = dependency_graph.order(parsed.entries, fetchers)
     in_manifest = {e.use for e in entries}
     pending = Counter(e.use for e in entries)

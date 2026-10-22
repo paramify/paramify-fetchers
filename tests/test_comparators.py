@@ -145,18 +145,19 @@ def _f(build_fetcher_fn, tmp_path, name, deps=(), **kw):
     return build_fetcher_fn(tmp_path, name=name, depends_on=list(deps), **kw)
 
 
-def test_order_moves_a_comparator_after_its_inputs_and_keeps_the_rest(build_fetcher_fn, tmp_path):
-    fx = {n: _f(build_fetcher_fn, tmp_path, n) for n in ("a", "b", "x")}
-    fx["c"] = _f(build_fetcher_fn, tmp_path, "c", ["a", "b"])
-    entries = [ManifestEntry(use=u) for u in ("c", "b", "x", "a")]
-    assert [e.use for e in dependency_graph.order(entries, fx)] == ["b", "x", "a", "c"]
+def test_order_runs_every_fetcher_then_every_comparator(build_fetcher_fn, tmp_path):
+    fx = {n: _f(build_fetcher_fn, tmp_path, n) for n in ("a", "b", "c")}
+    fx["cmp1"] = _f(build_fetcher_fn, tmp_path, "cmp1", ["a", "b"])
+    fx["cmp2"] = _f(build_fetcher_fn, tmp_path, "cmp2", ["c"])
+    entries = [ManifestEntry(use=u) for u in ("cmp1", "a", "b", "cmp2", "c")]
+    assert [e.use for e in dependency_graph.order(entries, fx)] == ["a", "b", "c", "cmp1", "cmp2"]
 
 
-def test_order_leaves_a_comparator_in_place_when_its_inputs_already_ran(build_fetcher_fn, tmp_path):
+def test_order_moves_a_comparator_after_fetchers_listed_after_it(build_fetcher_fn, tmp_path):
     fx = {n: _f(build_fetcher_fn, tmp_path, n) for n in ("a", "x")}
     fx["c"] = _f(build_fetcher_fn, tmp_path, "c", ["a"])
-    entries = [ManifestEntry(use=u) for u in ("a", "c", "x")]
-    assert [e.use for e in dependency_graph.order(entries, fx)] == ["a", "c", "x"]
+    entries = [ManifestEntry(use=u) for u in ("a", "c", "x", "unknown")]
+    assert [e.use for e in dependency_graph.order(entries, fx)] == ["a", "x", "unknown", "c"]
 
 
 def test_order_chains_comparators_and_ignores_inputs_outside_the_manifest(build_fetcher_fn, tmp_path):
