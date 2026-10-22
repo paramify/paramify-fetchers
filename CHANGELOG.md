@@ -356,7 +356,7 @@ schemas and the `paramify` CLI — not the internal code.
   reported as unknown, never as deleted or stale, and a resource whose
   subscription or resource group the credential cannot read is reported as not
   visible rather than deleted. Shared Resource Graph paging and the readable-scope
-  check live in `_shared/azure_common.py`.
+  check live in `_shared/resource_graph.py`.
 
 - **Four Azure fetchers for the network edge and cache tier**, read-only on
   the built-in Reader role. `azure_managed_redis_configuration` reports each
