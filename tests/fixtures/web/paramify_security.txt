@@ -1,0 +1,6 @@
+Contact: mailto:infosec@paramify.com
+Encryption: https://paramify.com/.well-known/pgp-key.txt
+Policy: https://trust.paramify.com/paramify/paramify-cloud/deliverables
+Expires: 2027-06-15T21:00:19Z
+Preferred-Languages: en
+Canonical: https://paramify.com/.well-known/security.txt

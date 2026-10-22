@@ -115,7 +115,7 @@ examples/                       # sample run manifests
 tests/                          # framework test suite (pytest)
 example_manifest.yaml           # worked reference manifest
 run_and_upload.sh               # example collect→upload glue
-docs/                           # contract, design, and reference guides
+docs/                           # guides and reference pages
 ```
 
 Directories that start with `_` are not fetchers, and the runner skips them.
