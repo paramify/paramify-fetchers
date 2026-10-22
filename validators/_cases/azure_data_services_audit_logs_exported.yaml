@@ -1,0 +1,33 @@
+validator: azure_data_services_audit_logs_exported
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_audit_logs_exported":2,"data_explorer_clusters_audit_logs_unknown":0,"event_hub_namespaces_audit_logs_exported":2,"event_hub_namespaces_audit_logs_unknown":0,"mongo_clusters_audit_logs_exported":2,"mongo_clusters_audit_logs_unknown":0,"total_data_explorer_clusters":2,"total_event_hub_namespaces":2,"total_mongo_clusters":2}}}'
+
+  - name: data_explorer_clusters_audit_logs_exported_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_audit_logs_exported":1,"data_explorer_clusters_audit_logs_unknown":0,"event_hub_namespaces_audit_logs_exported":2,"event_hub_namespaces_audit_logs_unknown":0,"mongo_clusters_audit_logs_exported":2,"mongo_clusters_audit_logs_unknown":0,"total_data_explorer_clusters":2,"total_event_hub_namespaces":2,"total_mongo_clusters":2}}}'
+
+  - name: data_explorer_clusters_audit_logs_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_audit_logs_exported":2,"data_explorer_clusters_audit_logs_unknown":1,"event_hub_namespaces_audit_logs_exported":2,"event_hub_namespaces_audit_logs_unknown":0,"mongo_clusters_audit_logs_exported":2,"mongo_clusters_audit_logs_unknown":0,"total_data_explorer_clusters":2,"total_event_hub_namespaces":2,"total_mongo_clusters":2}}}'
+
+  - name: event_hub_namespaces_audit_logs_exported_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_audit_logs_exported":2,"data_explorer_clusters_audit_logs_unknown":0,"event_hub_namespaces_audit_logs_exported":1,"event_hub_namespaces_audit_logs_unknown":0,"mongo_clusters_audit_logs_exported":2,"mongo_clusters_audit_logs_unknown":0,"total_data_explorer_clusters":2,"total_event_hub_namespaces":2,"total_mongo_clusters":2}}}'
+
+  - name: event_hub_namespaces_audit_logs_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_audit_logs_exported":2,"data_explorer_clusters_audit_logs_unknown":0,"event_hub_namespaces_audit_logs_exported":2,"event_hub_namespaces_audit_logs_unknown":1,"mongo_clusters_audit_logs_exported":2,"mongo_clusters_audit_logs_unknown":0,"total_data_explorer_clusters":2,"total_event_hub_namespaces":2,"total_mongo_clusters":2}}}'
+
+  - name: mongo_clusters_audit_logs_exported_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_audit_logs_exported":2,"data_explorer_clusters_audit_logs_unknown":0,"event_hub_namespaces_audit_logs_exported":2,"event_hub_namespaces_audit_logs_unknown":0,"mongo_clusters_audit_logs_exported":1,"mongo_clusters_audit_logs_unknown":0,"total_data_explorer_clusters":2,"total_event_hub_namespaces":2,"total_mongo_clusters":2}}}'
+
+  - name: mongo_clusters_audit_logs_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_audit_logs_exported":2,"data_explorer_clusters_audit_logs_unknown":0,"event_hub_namespaces_audit_logs_exported":2,"event_hub_namespaces_audit_logs_unknown":0,"mongo_clusters_audit_logs_exported":2,"mongo_clusters_audit_logs_unknown":1,"total_data_explorer_clusters":2,"total_event_hub_namespaces":2,"total_mongo_clusters":2}}}'
+
+  - name: data_explorer_clusters_audit_logs_exported_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_audit_logs_exported_renamed":2,"data_explorer_clusters_audit_logs_unknown":0,"event_hub_namespaces_audit_logs_exported":2,"event_hub_namespaces_audit_logs_unknown":0,"mongo_clusters_audit_logs_exported":2,"mongo_clusters_audit_logs_unknown":0,"total_data_explorer_clusters":2,"total_event_hub_namespaces":2,"total_mongo_clusters":2}}}'

@@ -1,0 +1,25 @@
+validator: azure_container_workload_logs_exported
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_groups_logs_exported":2,"container_groups_logs_unknown":0,"environments_audit_logs_exported":2,"environments_audit_logs_unknown":0,"total_container_groups":2,"total_environments":2}}}'
+
+  - name: container_groups_logs_exported_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_groups_logs_exported":1,"container_groups_logs_unknown":0,"environments_audit_logs_exported":2,"environments_audit_logs_unknown":0,"total_container_groups":2,"total_environments":2}}}'
+
+  - name: container_groups_logs_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_groups_logs_exported":2,"container_groups_logs_unknown":1,"environments_audit_logs_exported":2,"environments_audit_logs_unknown":0,"total_container_groups":2,"total_environments":2}}}'
+
+  - name: environments_audit_logs_exported_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_groups_logs_exported":2,"container_groups_logs_unknown":0,"environments_audit_logs_exported":1,"environments_audit_logs_unknown":0,"total_container_groups":2,"total_environments":2}}}'
+
+  - name: environments_audit_logs_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_groups_logs_exported":2,"container_groups_logs_unknown":0,"environments_audit_logs_exported":2,"environments_audit_logs_unknown":1,"total_container_groups":2,"total_environments":2}}}'
+
+  - name: container_groups_logs_exported_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_groups_logs_exported_renamed":2,"container_groups_logs_unknown":0,"environments_audit_logs_exported":2,"environments_audit_logs_unknown":0,"total_container_groups":2,"total_environments":2}}}'

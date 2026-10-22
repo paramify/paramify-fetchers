@@ -1,0 +1,25 @@
+key: azure_private_endpoint_targets_public_access_disabled
+name: Azure Private Endpoint Targets Public Access Disabled
+type: AUTOMATED
+role: configuration
+statement: >
+  Every resource reached through a private endpoint that the collector found has publicNetworkAccess
+  Disabled (summary target_resources_public_access_not_disabled is 0), so the backend cannot be
+  reached by a public path that bypasses the private connection. Enabled and unset both count as not
+  disabled; a firewall with default action Deny is NOT credited as disabled. Does not assert
+  anything about targets that could not be looked up (see the target lookup validator). Supports
+  Coverage rows 74 (Internal Connections), 84 (Policy Enforcement Point Exceptions) and 104 (Trusted
+  Connection Review) / KSI-CNA-RNT (proposed mapping, not yet audited).
+
+regex: '"target_resources_public_access_not_disabled":\s*(?<target_resources_public_access_not_disabled>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-PRIVATE-ENDPOINT-CONFIG

@@ -1,0 +1,25 @@
+key: azure_redis_cache_all_audit_logging
+name: Azure Cache for Redis All Caches Audit Logs Exported
+type: AUTOMATED
+role: configuration
+statement: >
+  Every classic Azure Cache for Redis cache in the evidence has a diagnostic setting with a
+  destination that exports the connection (ConnectedClientList) or Entra sign-in
+  (MSEntraAuthenticationAuditLog) audit category (summary audit_logging_enabled_caches equals
+  total_caches, with at least one cache), and summary.exceptions.unknown_state is empty so unknown
+  is never compliant. Supports Coverage rows 10 (Audit Logging Criteria) and 76 (Logged Event Type
+  Inventory) / KSI-MLA-LET. Does NOT assert that records arrive at the sink, their content or
+  retention, that the logging inventory is reviewed, or logging for any other resource type.
+
+regex: '"audit_logging_enabled_caches":\s*(?<audit_logging_enabled_caches>\d+)[\s\S]*?"unknown_state":\s*\[\s*\][\s\S]*?"total_caches":\s*(?<total_caches>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+
+evidence_sets:
+  - EVD-AZURE-REDIS-CACHE-CONFIG

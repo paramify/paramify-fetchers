@@ -1,0 +1,17 @@
+validator: azure_apim_gateway_logs_exported
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_audit_logs_exported":2,"services_audit_logs_unknown":0,"total_services":2}}}'
+
+  - name: services_audit_logs_exported_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_audit_logs_exported":1,"services_audit_logs_unknown":0,"total_services":2}}}'
+
+  - name: services_audit_logs_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_audit_logs_exported":2,"services_audit_logs_unknown":1,"total_services":2}}}'
+
+  - name: services_audit_logs_exported_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_audit_logs_exported_renamed":2,"services_audit_logs_unknown":0,"total_services":2}}}'

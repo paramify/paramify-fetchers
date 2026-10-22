@@ -1,0 +1,9 @@
+evidence_set: EVD-AZURE-NETWORK-FLOW-LOGS
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"enabled_flow_logs":2,"enabled_flow_logs_with_traffic_analytics":2,"legacy_nsg_flow_logs":0,"total_virtual_networks":2,"virtual_networks_coverage_unknown":0,"virtual_networks_fully_covered":2}}}'
+
+  - name: failed_collection
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{},"summary":{"enabled_flow_logs":2,"enabled_flow_logs_with_traffic_analytics":2,"legacy_nsg_flow_logs":0,"total_virtual_networks":2,"virtual_networks_coverage_unknown":0,"virtual_networks_fully_covered":2}}}'

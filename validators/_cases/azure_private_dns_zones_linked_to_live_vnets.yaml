@@ -1,0 +1,21 @@
+validator: azure_private_dns_zones_linked_to_live_vnets
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"links_not_completed":0,"links_to_deleted_virtual_networks":0,"zones_without_virtual_network_links":0}}}'
+
+  - name: links_not_completed_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"links_not_completed":1,"links_to_deleted_virtual_networks":0,"zones_without_virtual_network_links":0}}}'
+
+  - name: links_to_deleted_virtual_networks_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"links_not_completed":0,"links_to_deleted_virtual_networks":1,"zones_without_virtual_network_links":0}}}'
+
+  - name: zones_without_virtual_network_links_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"links_not_completed":0,"links_to_deleted_virtual_networks":0,"zones_without_virtual_network_links":1}}}'
+
+  - name: links_not_completed_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"links_not_completed_renamed":0,"links_to_deleted_virtual_networks":0,"zones_without_virtual_network_links":0}}}'

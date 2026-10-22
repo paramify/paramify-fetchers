@@ -1,0 +1,25 @@
+key: azure_data_services_no_local_auth
+name: Azure Event Hubs And Mongo No Local Auth
+type: AUTOMATED
+role: configuration
+statement: >
+  No Event Hubs namespace accepts shared access keys (disableLocalAuth is true on every namespace)
+  and no MongoDB vCore cluster allows native username/password sign-in, so services authenticate
+  with Entra ID. Does not assert Data Explorer role assignments or who holds Entra access. Supports
+  Coverage row 5 (Application Access / KSI-IAM-SNU) (proposed mapping, not yet audited).
+
+regex: '"event_hub_namespaces_local_auth_enabled":\s*(?<event_hub_namespaces_local_auth_enabled>\d+)[\s\S]*?"mongo_clusters_native_auth_enabled":\s*(?<mongo_clusters_native_auth_enabled>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DATA-SERVICES-CONFIG

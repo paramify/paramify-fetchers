@@ -1,0 +1,24 @@
+key: azure_redis_cache_all_maintenance_window
+name: Azure Cache for Redis All Caches Maintenance Window Set
+type: AUTOMATED
+role: configuration
+statement: >
+  Every classic Azure Cache for Redis cache in the evidence has a configured patch schedule (summary
+  maintenance_window_caches equals total_caches, with at least one cache), so Azure patches it only
+  inside a defined maintenance window rather than at a time it picks itself;
+  summary.exceptions.unknown_state must be empty so unknown is never compliant. Supports Coverage
+  row 82 (Patch Management / KSI-SVC-PRR). Does NOT assert that patches were applied, the Redis
+  version is supported, or anything about other infrastructure.
+
+regex: '"unknown_state":\s*\[\s*\][\s\S]*?"maintenance_window_caches":\s*(?<maintenance_window_caches>\d+)[\s\S]*?"total_caches":\s*(?<total_caches>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+
+evidence_sets:
+  - EVD-AZURE-REDIS-CACHE-CONFIG

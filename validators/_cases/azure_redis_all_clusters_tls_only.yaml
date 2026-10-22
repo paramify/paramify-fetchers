@@ -1,0 +1,21 @@
+validator: azure_redis_all_clusters_tls_only
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"databases_unread_clusters":0,"tls_only_clusters":2,"total_clusters":2}}}'
+
+  - name: tls_only_clusters_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"databases_unread_clusters":0,"tls_only_clusters":1,"total_clusters":2}}}'
+
+  - name: databases_unread_clusters_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"databases_unread_clusters":1,"tls_only_clusters":2,"total_clusters":2}}}'
+
+  - name: no_total_clusters
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"databases_unread_clusters":0,"tls_only_clusters":0,"total_clusters":0}}}'
+
+  - name: databases_unread_clusters_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"databases_unread_clusters_renamed":0,"tls_only_clusters":2,"total_clusters":2}}}'

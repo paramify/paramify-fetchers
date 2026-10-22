@@ -1,0 +1,25 @@
+validator: azure_private_dns_records_and_links_fully_readable
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"links_to_unreadable_virtual_networks":0,"links_virtual_network_unknown":0,"privatelink_records_unknown":0,"privatelink_records_unverified":0}}}'
+
+  - name: links_to_unreadable_virtual_networks_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"links_to_unreadable_virtual_networks":1,"links_virtual_network_unknown":0,"privatelink_records_unknown":0,"privatelink_records_unverified":0}}}'
+
+  - name: links_virtual_network_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"links_to_unreadable_virtual_networks":0,"links_virtual_network_unknown":1,"privatelink_records_unknown":0,"privatelink_records_unverified":0}}}'
+
+  - name: privatelink_records_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"links_to_unreadable_virtual_networks":0,"links_virtual_network_unknown":0,"privatelink_records_unknown":1,"privatelink_records_unverified":0}}}'
+
+  - name: privatelink_records_unverified_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"links_to_unreadable_virtual_networks":0,"links_virtual_network_unknown":0,"privatelink_records_unknown":0,"privatelink_records_unverified":1}}}'
+
+  - name: links_to_unreadable_virtual_networks_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"links_to_unreadable_virtual_networks_renamed":0,"links_virtual_network_unknown":0,"privatelink_records_unknown":0,"privatelink_records_unverified":0}}}'

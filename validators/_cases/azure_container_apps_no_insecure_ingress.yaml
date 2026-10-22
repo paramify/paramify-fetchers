@@ -1,0 +1,13 @@
+validator: azure_container_apps_no_insecure_ingress
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_apps_allow_insecure":0}}}'
+
+  - name: container_apps_allow_insecure_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_apps_allow_insecure":1}}}'
+
+  - name: container_apps_allow_insecure_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_apps_allow_insecure_renamed":0}}}'

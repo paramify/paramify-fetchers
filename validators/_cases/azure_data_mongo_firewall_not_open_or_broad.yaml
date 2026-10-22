@@ -1,0 +1,21 @@
+validator: azure_data_mongo_firewall_not_open_or_broad
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"mongo_clusters_firewall_allow_all":0,"mongo_clusters_firewall_broad":0,"mongo_clusters_public_access_unknown":0}}}'
+
+  - name: mongo_clusters_firewall_allow_all_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"mongo_clusters_firewall_allow_all":1,"mongo_clusters_firewall_broad":0,"mongo_clusters_public_access_unknown":0}}}'
+
+  - name: mongo_clusters_firewall_broad_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"mongo_clusters_firewall_allow_all":0,"mongo_clusters_firewall_broad":1,"mongo_clusters_public_access_unknown":0}}}'
+
+  - name: mongo_clusters_public_access_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"mongo_clusters_firewall_allow_all":0,"mongo_clusters_firewall_broad":0,"mongo_clusters_public_access_unknown":1}}}'
+
+  - name: mongo_clusters_firewall_allow_all_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"mongo_clusters_firewall_allow_all_renamed":0,"mongo_clusters_firewall_broad":0,"mongo_clusters_public_access_unknown":0}}}'

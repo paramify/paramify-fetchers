@@ -1,0 +1,23 @@
+key: azure_redis_all_databases_geo_replicated
+name: Azure Managed Redis All Databases Geo Replicated
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Azure Managed Redis database in the evidence is in an active geo-replication group with at
+  least one other database: no database has a null geo_replication_group, and none lists fewer than
+  two ids in geo_replication_linked_databases (Azure lists the database itself, so one id means no
+  partner). Counted per database. Supports Coverage row 2 (Alternate Processing Sites /
+  KSI-CNA-OFA), whose capability claims active-active operation in two locations; active
+  geo-replication is active-active. Does NOT assert that the partner is in a different region,
+  replication health, or a tested failover within the one-hour RTO. Paired with
+  azure_redis_geo_replication_field_present so a renamed key cannot read as zero violations.
+
+regex: '"geo_replication_group":\s*null|"geo_replication_linked_databases":\s*\[\s*(?:"[^"]*"\s*)?\]'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-MANAGED-REDIS-CONFIG

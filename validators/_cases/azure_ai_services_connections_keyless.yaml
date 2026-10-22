@@ -1,0 +1,25 @@
+validator: azure_ai_services_connections_keyless
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"connections_auth_type_unrecognized":0,"connections_unauthenticated":0,"connections_unknown_accounts":0,"connections_using_stored_secrets":0}}}'
+
+  - name: connections_auth_type_unrecognized_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"connections_auth_type_unrecognized":1,"connections_unauthenticated":0,"connections_unknown_accounts":0,"connections_using_stored_secrets":0}}}'
+
+  - name: connections_unauthenticated_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"connections_auth_type_unrecognized":0,"connections_unauthenticated":1,"connections_unknown_accounts":0,"connections_using_stored_secrets":0}}}'
+
+  - name: connections_unknown_accounts_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"connections_auth_type_unrecognized":0,"connections_unauthenticated":0,"connections_unknown_accounts":1,"connections_using_stored_secrets":0}}}'
+
+  - name: connections_using_stored_secrets_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"connections_auth_type_unrecognized":0,"connections_unauthenticated":0,"connections_unknown_accounts":0,"connections_using_stored_secrets":1}}}'
+
+  - name: connections_auth_type_unrecognized_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"connections_auth_type_unrecognized_renamed":0,"connections_unauthenticated":0,"connections_unknown_accounts":0,"connections_using_stored_secrets":0}}}'

@@ -1,0 +1,22 @@
+key: azure_dns_signed_zones_have_ds_records
+name: Azure DNS Signed Zones Have DS Records
+type: AUTOMATED
+role: configuration
+statement: >
+  No DNSSEC-signed public zone reports zero delegation signer (DS) records, read per zone, so every
+  signed zone has the DS material a parent zone needs to anchor the chain of trust that lets
+  resolvers validate its answers. Counts zones where delegation_signer_records is 0 and
+  dnssec_enabled is true. Does NOT assert that the registrar actually publishes the DS records at
+  the parent, and passes trivially when no zone is signed (azure_dns_public_zones_dnssec_coverage
+  fails in that case). Paired with azure_dns_ds_record_count_present. Supports Coverage row 15
+  (Authorized Cryptographic Modules / KSI-SVC-VCM).
+
+regex: '"delegation_signer_records":\s*0\s*,\s*"dnssec_enabled":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DNS-CONFIG

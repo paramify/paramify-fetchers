@@ -1,0 +1,25 @@
+key: azure_apim_no_plaintext_http
+name: Azure API Management No Plain HTTP APIs Or Backends
+type: AUTOMATED
+role: configuration
+statement: >
+  No API accepts plain HTTP or unencrypted WebSocket (ws) calls, and no backend is reached over a
+  plain HTTP URL. Does not assert TLS versions or certificate validation; zero APIs and zero
+  backends pass vacuously (nothing is exposed yet). Supports Coverage row 14 (Authorized
+  Cryptographic Modules / KSI-SVC-SIN) (proposed mapping, not yet audited).
+
+regex: '"apis_accepting_http":\s*(?<apis_accepting_http>\d+)[\s\S]*?"backends_using_http":\s*(?<backends_using_http>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-API-MANAGEMENT-CONFIG

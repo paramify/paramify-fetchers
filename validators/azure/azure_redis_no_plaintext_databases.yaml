@@ -1,0 +1,20 @@
+key: azure_redis_no_plaintext_databases
+name: Azure Managed Redis No Plaintext Databases
+type: AUTOMATED
+role: configuration
+statement: >
+  No Azure Managed Redis database in the evidence has client_protocol Plaintext, read per database
+  from the raw API value rather than the fetcher's rollup. Supports Coverage row 14 (Authorized
+  Cryptographic Modules / KSI-SVC-SIN). Does NOT assert the cluster TLS floor (see
+  azure_redis_all_clusters_tls_only) or FIPS validation. Paired with
+  azure_redis_client_protocol_present so a renamed key cannot read as zero violations.
+
+regex: '"client_protocol":\s*"Plaintext"'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-MANAGED-REDIS-CONFIG

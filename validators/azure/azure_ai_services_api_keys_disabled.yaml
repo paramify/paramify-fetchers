@@ -1,0 +1,25 @@
+key: azure_ai_services_api_keys_disabled
+name: Azure AI Services API Keys Disabled
+type: AUTOMATED
+role: configuration
+statement: >
+  No AI services account and no AI Search service still accepts API keys, so every caller must sign
+  in with Microsoft Entra ID. Does not assert how Foundry connections sign in (see
+  azure_ai_services_connections_keyless) or role assignments; zero accounts passes vacuously.
+  Supports Coverage row 5 (Application Access / KSI-IAM-SNU) (proposed mapping, not yet audited).
+
+regex: '"accounts_with_api_keys_enabled":\s*(?<accounts_with_api_keys_enabled>\d+)[\s\S]*?"search_services_with_api_keys_enabled":\s*(?<search_services_with_api_keys_enabled>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-AI-SERVICES-CONFIG

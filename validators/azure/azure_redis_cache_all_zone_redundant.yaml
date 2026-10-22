@@ -1,0 +1,26 @@
+key: azure_redis_cache_all_zone_redundant
+name: Azure Cache for Redis All Caches Zone Redundant
+type: AUTOMATED
+role: configuration
+statement: >
+  Every classic Azure Cache for Redis cache in the evidence is zone redundant (summary
+  zone_redundant_caches equals total_caches, with at least one cache): it lists more than one
+  availability zone, or its zonal_allocation_policy is Automatic. summary.exceptions.unknown_state
+  must be empty, so unknown is never compliant. Supports Coverage row 40 (Contingency Plan /
+  KSI-CNA-OFA), whose capability claims the system uses multiple availability zones; fails any
+  single-zone cache. Does NOT assert cross-region replication (see
+  azure_redis_cache_all_geo_replicated), replication health or a tested failover; zone redundancy
+  under Automatic allocation is inferred by the fetcher, not listed by Azure.
+
+regex: '"unknown_state":\s*\[\s*\][\s\S]*?"total_caches":\s*(?<total_caches>[1-9]\d*)[\s\S]*?"zone_redundant_caches":\s*(?<zone_redundant_caches>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS MATCH_GROUP[1]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 1 }
+
+evidence_sets:
+  - EVD-AZURE-REDIS-CACHE-CONFIG

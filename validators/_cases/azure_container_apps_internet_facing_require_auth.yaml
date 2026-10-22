@@ -1,0 +1,17 @@
+validator: azure_container_apps_internet_facing_require_auth
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_apps_auth_unknown":0,"container_apps_internet_facing_without_auth":0}}}'
+
+  - name: container_apps_auth_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_apps_auth_unknown":1,"container_apps_internet_facing_without_auth":0}}}'
+
+  - name: container_apps_internet_facing_without_auth_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_apps_auth_unknown":0,"container_apps_internet_facing_without_auth":1}}}'
+
+  - name: container_apps_auth_unknown_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_apps_auth_unknown_renamed":0,"container_apps_internet_facing_without_auth":0}}}'

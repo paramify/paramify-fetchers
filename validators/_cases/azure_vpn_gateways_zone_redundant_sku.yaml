@@ -1,0 +1,22 @@
+validator: azure_vpn_gateways_zone_redundant_sku
+cases:
+  - name: all_az_skus
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"active_active":true,"gateway_type":"Vpn","sku_name":"VpnGw1AZ"},{"active_active":true,"gateway_type":"Vpn","sku_name":"VpnGw3AZ"}]},"summary":{"vpn_gateways":2}}}'
+
+  - name: one_non_az_sku
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"active_active":true,"gateway_type":"Vpn","sku_name":"VpnGw1AZ"},{"active_active":true,"gateway_type":"Vpn","sku_name":"VpnGw2"}]},"summary":{"vpn_gateways":2}}}'
+
+  - name: basic_sku
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"active_active":true,"gateway_type":"Vpn","sku_name":"Basic"}]},"summary":{"vpn_gateways":1}}}'
+
+  - name: expressroute_not_judged
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"active_active":true,"gateway_type":"Vpn","sku_name":"VpnGw1AZ"},{"gateway_type":"ExpressRoute","sku_name":"Standard"}]},"summary":{"vpn_gateways":2}}}'
+
+  - name: key_renamed_reads_as_zero_alone
+    expect: PASS
+    note: 'Form B cannot guard itself; its integrity partner fails here, as the set-level case shows.'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"gateway_type":"Vpn","skuName":"VpnGw2"}]},"summary":{"vpn_gateways":1}}}'

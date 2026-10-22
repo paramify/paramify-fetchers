@@ -1,0 +1,17 @@
+validator: azure_vpn_all_tunnels_ikev2
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"ikev2_connections":2,"ipsec_connections":2}}}'
+
+  - name: ikev2_connections_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"ikev2_connections":1,"ipsec_connections":2}}}'
+
+  - name: no_ipsec_connections
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"ikev2_connections":0,"ipsec_connections":0}}}'
+
+  - name: ikev2_connections_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"ikev2_connections_renamed":2,"ipsec_connections":2}}}'

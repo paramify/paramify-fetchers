@@ -1,0 +1,33 @@
+key: azure_container_workload_logs_exported
+name: Azure Container Workload Logs Exported
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Container Apps environment exports its logs (log destination log-analytics, or azure-monitor
+  with a diagnostic setting enabling system, console, audit or allLogs categories) and every
+  Container Instances group exports ContainerInstanceLog, ContainerEvent, audit or allLogs to a
+  destination; no diagnostic settings were unreadable. Does not assert the destination workspace,
+  retention, or that the logs are reviewed. Supports Coverage row 76 (Logged Event Type Inventory /
+  KSI-MLA-LET) (proposed mapping, not yet audited).
+
+regex: '"container_groups_logs_exported":\s*(?<container_groups_logs_exported>\d+)[\s\S]*?"container_groups_logs_unknown":\s*(?<container_groups_logs_unknown>\d+)[\s\S]*?"environments_audit_logs_exported":\s*(?<environments_audit_logs_exported>\d+)[\s\S]*?"environments_audit_logs_unknown":\s*(?<environments_audit_logs_unknown>\d+)[\s\S]*?"total_container_groups":\s*(?<total_container_groups>\d+)[\s\S]*?"total_environments":\s*(?<total_environments>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[5]; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS MATCH_GROUP[6]; MATCH_GROUP[4] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 5 }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 6 }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-CONTAINER-WORKLOADS-CONFIG

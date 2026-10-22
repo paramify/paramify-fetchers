@@ -1,0 +1,13 @@
+validator: azure_apim_no_legacy_tls_protocols
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_with_legacy_tls_or_ssl_enabled":0}}}'
+
+  - name: services_with_legacy_tls_or_ssl_enabled_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_with_legacy_tls_or_ssl_enabled":1}}}'
+
+  - name: services_with_legacy_tls_or_ssl_enabled_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_with_legacy_tls_or_ssl_enabled_renamed":0}}}'

@@ -1,0 +1,26 @@
+key: azure_private_endpoint_nsg_enforced
+name: Azure Private Endpoints NSG Enforced
+type: AUTOMATED
+role: configuration
+statement: >
+  Every private endpoint's traffic is filtered by a network security group (summary
+  endpoints_nsg_enforced equals total_private_endpoints): its subnet has an NSG attached and the
+  private endpoint network policy set to Enabled or NetworkSecurityGroupEnabled. Azure leaves this
+  policy Disabled by default, which lets traffic reach the endpoint without the subnet NSG applying.
+  endpoints_subnet_lookup_not_read must be 0, so unknown is never compliant. Does NOT assert what
+  the NSG rules allow. Zero private endpoints passes vacuously. Supports Coverage rows 74 (Internal
+  Connections), 84 (Policy Enforcement Point Exceptions) and 104 (Trusted Connection Review) /
+  KSI-CNA-RNT (proposed mapping, not yet audited).
+
+regex: '"endpoints_nsg_enforced":\s*(?<endpoints_nsg_enforced>\d+)[\s\S]*?"endpoints_subnet_lookup_not_read":\s*0(?!\d)[\s\S]*?"total_private_endpoints":\s*(?<total_private_endpoints>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+
+evidence_sets:
+  - EVD-AZURE-PRIVATE-ENDPOINT-CONFIG

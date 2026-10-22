@@ -1,0 +1,13 @@
+validator: azure_private_endpoint_all_connections_approved
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"not_approved_endpoints":0}}}'
+
+  - name: not_approved_endpoints_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"not_approved_endpoints":1}}}'
+
+  - name: not_approved_endpoints_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"not_approved_endpoints_renamed":0}}}'

@@ -1,0 +1,25 @@
+key: azure_redis_all_clusters_tls_only
+name: Azure Managed Redis All Clusters TLS Only
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Azure Managed Redis cluster in the evidence is TLS-only (summary tls_only_clusters equals
+  total_clusters, with at least one cluster): the cluster minimum TLS version is 1.2 or higher and
+  every database uses the Encrypted client protocol. Also requires databases_unread_clusters to be
+  0, so a cluster whose databases could not be read is never counted as compliant. Supports Coverage
+  row 14 (Authorized Cryptographic Modules / KSI-SVC-SIN). Does NOT assert FIPS validation of the
+  cryptographic module, encryption at rest, access-key or network posture, or anything about classic
+  Azure Cache for Redis.
+
+regex: '"databases_unread_clusters":\s*0(?!\d)[\s\S]*?"tls_only_clusters":\s*(?<tls_only_clusters>\d+)[\s\S]*?"total_clusters":\s*(?<total_clusters>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+
+evidence_sets:
+  - EVD-AZURE-MANAGED-REDIS-CONFIG

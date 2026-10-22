@@ -1,0 +1,28 @@
+key: azure_managed_identity_no_broad_federated_subjects
+name: Azure Managed Identity Federated Credentials Narrowly Scoped
+type: AUTOMATED
+role: configuration
+statement: >
+  No federated credential on a user-assigned managed identity has a broad subject (any pull request,
+  a wildcard claims-matching expression, or a '*' in the subject) or a missing or non-standard
+  audience, so only the specific outside workload intended can sign in as the identity without a
+  secret. Does not assert that workloads use managed identity rather than secrets elsewhere; zero
+  federated credentials passes vacuously. Supports Coverage rows 5 (Application Access /
+  KSI-IAM-SNU) and 15 (Authorized Cryptographic Modules / KSI-SVC-VCM) (proposed mapping, not yet
+  audited).
+
+regex: '"federated_credentials_broad_subject":\s*(?<federated_credentials_broad_subject>\d+)[\s\S]*?"federated_credentials_nonstandard_audience":\s*(?<federated_credentials_nonstandard_audience>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-MANAGED-IDENTITY-CONFIG

@@ -1,0 +1,26 @@
+key: azure_ai_hub_endpoints_no_public_key_auth
+name: Azure AI Hub Endpoints No Public Key Auth
+type: AUTOMATED
+role: configuration
+statement: >
+  No online or serverless model endpoint is both reachable from the public network and authenticated
+  with a key, and every workspace's endpoints were read. Passes with zero endpoints. Does not assert
+  that private endpoints avoid key auth (endpoints_key_auth is not read), nor anything about who
+  holds the keys. Supports Coverage row 5 (Application Access / KSI-IAM-SNU) (proposed mapping, not
+  yet audited).
+
+regex: '"endpoints_public_with_key_auth":\s*(?<endpoints_public_with_key_auth>\d+)[\s\S]*?"workspaces_endpoints_unknown":\s*(?<workspaces_endpoints_unknown>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-AI-HUB-CONFIG

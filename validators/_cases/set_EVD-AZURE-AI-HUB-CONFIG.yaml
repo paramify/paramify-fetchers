@@ -1,0 +1,9 @@
+evidence_set: EVD-AZURE-AI-HUB-CONFIG
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"connections_auth_type_unrecognized":0,"connections_unauthenticated":0,"connections_using_stored_secrets":0,"datastores_credentials_unknown":0,"datastores_with_stored_credentials":0,"endpoints_public_with_key_auth":0,"total_workspaces":2,"workspaces_connections_unknown":0,"workspaces_datastores_unknown":0,"workspaces_diagnostic_logs_exported":2,"workspaces_diagnostic_logs_unknown":0,"workspaces_endpoints_unknown":0,"workspaces_identity_based_datastore_access":2,"workspaces_open_to_all_networks":0}}}'
+
+  - name: failed_collection
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{},"summary":{"connections_auth_type_unrecognized":0,"connections_unauthenticated":0,"connections_using_stored_secrets":0,"datastores_credentials_unknown":0,"datastores_with_stored_credentials":0,"endpoints_public_with_key_auth":0,"total_workspaces":2,"workspaces_connections_unknown":0,"workspaces_datastores_unknown":0,"workspaces_diagnostic_logs_exported":2,"workspaces_diagnostic_logs_unknown":0,"workspaces_endpoints_unknown":0,"workspaces_identity_based_datastore_access":2,"workspaces_open_to_all_networks":0}}}'

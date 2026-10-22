@@ -1,0 +1,13 @@
+validator: azure_data_explorer_no_any_tenant_trust
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_trusting_any_tenant":0}}}'
+
+  - name: data_explorer_clusters_trusting_any_tenant_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_trusting_any_tenant":1}}}'
+
+  - name: data_explorer_clusters_trusting_any_tenant_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_trusting_any_tenant_renamed":0}}}'

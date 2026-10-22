@@ -1,0 +1,28 @@
+key: azure_private_endpoint_target_lookups_resolved
+name: Azure Private Endpoint Target Lookups Resolved
+type: AUTOMATED
+role: configuration
+statement: >
+  The collector could read every private endpoint target it looked up: summary
+  target_resources_lookup_unknown (lookup call failed) and target_resources_not_visible (target
+  scope unreadable by the credential) are both 0. Unknown is never compliant, so this guards the
+  public-access validator against counting only the targets it happened to see. Does not fail on
+  targets reported not_found (deleted resources behind a disconnected endpoint). Supports Coverage
+  rows 74 (Internal Connections), 84 (Policy Enforcement Point Exceptions) and 104 (Trusted
+  Connection Review) / KSI-CNA-RNT (proposed mapping, not yet audited).
+
+regex: '"target_resources_lookup_unknown":\s*(?<target_resources_lookup_unknown>\d+)[\s\S]*?"target_resources_not_visible":\s*(?<target_resources_not_visible>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-PRIVATE-ENDPOINT-CONFIG

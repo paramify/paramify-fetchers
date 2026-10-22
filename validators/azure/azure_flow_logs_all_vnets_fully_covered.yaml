@@ -1,0 +1,29 @@
+key: azure_flow_logs_all_vnets_fully_covered
+name: Azure Flow Logs Cover Every Virtual Network
+type: AUTOMATED
+role: configuration
+statement: >
+  Every virtual network in the subscription is fully covered by an enabled, unfiltered flow log
+  (every subnet logged by a VNet flow log or an NSG flow log on its network security group), and no
+  virtual network has unknown coverage. Does not assert that Traffic Analytics is on, the retention
+  period, or which networks are production; a subscription with zero virtual networks passes
+  vacuously. Supports Coverage rows 8 (Audit Log Collection and Alerts / KSI-MLA-OSM), 10 (Audit
+  Logging Criteria / KSI-MLA-LET), 76 (Logged Event Type Inventory / KSI-MLA-LET), 75 (Internal
+  Connections / KSI-CNA-ULN) and 105 (Trusted Connection Review / KSI-CNA-ULN) (proposed mapping,
+  not yet audited).
+
+regex: '"total_virtual_networks":\s*(?<total_virtual_networks>\d+)[\s\S]*?"virtual_networks_coverage_unknown":\s*(?<virtual_networks_coverage_unknown>\d+)[\s\S]*?"virtual_networks_fully_covered":\s*(?<virtual_networks_fully_covered>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[3] EQUALS MATCH_GROUP[1]; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 1 }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-NETWORK-FLOW-LOGS

@@ -1,0 +1,25 @@
+key: azure_vpn_no_weak_ipsec_algorithms
+name: Azure VPN No Weak IPsec Algorithms
+type: AUTOMATED
+role: configuration
+statement: >
+  No IPsec tunnel, Virtual WAN site link or point-to-site server configuration negotiates with DES,
+  3DES, MD5, SHA1, DH group 1/2 or PFS None: every weak_ipsec_algorithms list in the evidence is
+  empty. A tunnel with no custom IPsec policy is judged on Azure's default policy, which offers DH
+  Group 2 (and on Virtual WAN also SHA1 and PFS None), so only a custom policy with strong
+  algorithms passes. Does NOT prove CMVP (FIPS) validation of the gateway modules or cover other
+  traffic or data at rest. Paired with azure_vpn_weak_algorithms_field_present. Supports Coverage
+  row 14 (Authorized Cryptographic Modules / KSI-SVC-SIN) for both the VPN gateway and Virtual WAN
+  evidence sets, and the IPsec security requirements of boundary links in rows 104 (Trusted
+  Connection Review / KSI-CNA-RNT) and 74 (Internal Connections / KSI-CNA-RNT).
+
+regex: '"weak_ipsec_algorithms":\s*\[\s*"'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VPN-GATEWAY-CONFIG
+  - EVD-AZURE-VIRTUAL-WAN-CONFIG

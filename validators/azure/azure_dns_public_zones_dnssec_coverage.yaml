@@ -1,0 +1,25 @@
+key: azure_dns_public_zones_dnssec_coverage
+name: Azure DNS Public Zones DNSSEC Coverage Complete
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Azure DNS public zone in the subscription is DNSSEC-signed (a Succeeded DNSSEC config with
+  at least one signing key), no zone's DNSSEC state is unknown, and at least one public zone exists,
+  so resolvers can validate the authenticity and integrity of the system's DNS answers. Reads the
+  summary rollups dnssec_enabled_public_zones = total_public_zones and dnssec_unknown_public_zones =
+  0. Does NOT assert that the parent zone or registrar publishes the DS records, does not cover
+  private zones (Azure does not sign them) or application traffic, and does not show FIPS
+  validation. Supports Coverage row 15 (Authorized Cryptographic Modules / KSI-SVC-VCM).
+
+regex: '"dnssec_enabled_public_zones":\s*(?<dnssec_enabled_public_zones>\d+)[\s\S]*?"dnssec_unknown_public_zones":\s*0\s*[,}][\s\S]*?"total_public_zones":\s*(?<total_public_zones>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+
+evidence_sets:
+  - EVD-AZURE-DNS-CONFIG

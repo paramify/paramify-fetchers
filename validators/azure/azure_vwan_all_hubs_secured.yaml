@@ -1,0 +1,25 @@
+key: azure_vwan_all_hubs_secured
+name: Azure Virtual WAN All Hubs Secured
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Virtual WAN hub in the subscription is a secured hub (an Azure Firewall or security partner
+  provider is deployed in it), and at least one hub exists. Reads the summary rollups secured_hubs =
+  total_virtual_hubs. Does NOT assert that hub traffic is actually routed through that firewall
+  (routing intent), that its rules restrict traffic, or that each interconnection was approved or
+  reviewed monthly. Supports Coverage rows 104 (Trusted Connection Review / KSI-CNA-RNT), 105
+  (Trusted Connection Review / KSI-CNA-ULN), 74 (Internal Connections / KSI-CNA-RNT) and 75
+  (Internal Connections / KSI-CNA-ULN).
+
+regex: '"secured_hubs":\s*(?<secured_hubs>\d+)[\s\S]*?"total_virtual_hubs":\s*(?<total_virtual_hubs>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+
+evidence_sets:
+  - EVD-AZURE-VIRTUAL-WAN-CONFIG

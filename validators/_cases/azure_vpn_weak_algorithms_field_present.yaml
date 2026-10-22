@@ -1,0 +1,17 @@
+validator: azure_vpn_weak_algorithms_field_present
+cases:
+  - name: field_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[{"weak_ipsec_algorithms":[]}],"virtual_network_gateways":[]},"summary":{"vpn_gateways":0}}}'
+
+  - name: field_present_even_if_weak
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[{"weak_ipsec_algorithms":["pfs_group=None"]}],"virtual_network_gateways":[]},"summary":{"vpn_gateways":0}}}'
+
+  - name: field_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[{"weakAlgorithms":[]}],"virtual_network_gateways":[]},"summary":{"vpn_gateways":0}}}'
+
+  - name: no_connections
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[]},"summary":{"vpn_gateways":0}}}'

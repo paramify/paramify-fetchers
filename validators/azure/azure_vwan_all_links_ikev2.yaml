@@ -1,0 +1,24 @@
+key: azure_vwan_all_links_ikev2
+name: Azure Virtual WAN All Site Links IKEv2
+type: AUTOMATED
+role: configuration
+statement: >
+  Every site-link connection on the Virtual WAN hubs' site-to-site VPN gateways negotiates with
+  IKEv2, and at least one link exists. Reads the summary rollups ikev2_link_connections =
+  total_vpn_link_connections, which also leaves no IKEv1 or unknown-version link. Does NOT assert
+  the IPsec algorithms or CMVP validation; classic VNet gateway tunnels are covered by
+  azure_vpn_all_tunnels_ikev2. Supports Coverage row 14 (Authorized Cryptographic Modules /
+  KSI-SVC-SIN).
+
+regex: '"ikev2_link_connections":\s*(?<ikev2_link_connections>\d+)[\s\S]*?"total_vpn_link_connections":\s*(?<total_vpn_link_connections>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
+
+evidence_sets:
+  - EVD-AZURE-VIRTUAL-WAN-CONFIG

@@ -1,0 +1,26 @@
+key: azure_managed_identity_no_privileged_graph_roles
+name: Azure Managed Identity No Privileged Graph Permissions
+type: AUTOMATED
+role: configuration
+statement: >
+  Microsoft Graph was read (or there were no identities to look up), no identity's Graph permissions
+  are unknown, and no managed identity holds a privileged Graph application permission (any
+  ReadWrite or FullControl permission, Mail.Send or Mail.Send.Shared). Does not assert anything
+  about read-only Graph permissions. Supports Coverage rows 78 (Logical Access Review / KSI-IAM-ELP)
+  and 5 (Application Access / KSI-IAM-SNU) (proposed mapping, not yet audited).
+
+regex: '"graph_access":\s*"(?<graph_access>read|not_read)"[\s\S]*?"identities_graph_roles_unknown":\s*(?<identities_graph_roles_unknown>\d+)[\s\S]*?"identities_with_privileged_graph_roles":\s*(?<identities_with_privileged_graph_roles>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-MANAGED-IDENTITY-CONFIG

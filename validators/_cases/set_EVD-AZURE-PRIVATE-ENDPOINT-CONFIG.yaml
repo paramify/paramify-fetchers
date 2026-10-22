@@ -1,0 +1,9 @@
+evidence_set: EVD-AZURE-PRIVATE-ENDPOINT-CONFIG
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"endpoints_nsg_enforced":2,"endpoints_subnet_lookup_not_read":0,"endpoints_without_private_dns_zone_group":0,"not_approved_endpoints":0,"target_resources_lookup_unknown":0,"target_resources_not_visible":0,"target_resources_public_access_not_disabled":0,"total_private_endpoints":2}}}'
+
+  - name: failed_collection
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{},"summary":{"endpoints_nsg_enforced":2,"endpoints_subnet_lookup_not_read":0,"endpoints_without_private_dns_zone_group":0,"not_approved_endpoints":0,"target_resources_lookup_unknown":0,"target_resources_not_visible":0,"target_resources_public_access_not_disabled":0,"total_private_endpoints":2}}}'

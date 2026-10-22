@@ -1,0 +1,19 @@
+key: azure_redis_client_protocol_present
+name: Azure Managed Redis Client Protocol Field Present
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one Azure Managed Redis database in the evidence carries a client_protocol value, so the
+  zero-Plaintext count in azure_redis_no_plaintext_databases reflects posture rather than a renamed
+  or missing field. Supports Coverage row 14 (KSI-SVC-SIN) as the integrity partner. Fails on a
+  subscription with no Managed Redis databases.
+
+regex: '"client_protocol":\s*"'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-MANAGED-REDIS-CONFIG

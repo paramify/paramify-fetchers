@@ -1,0 +1,26 @@
+key: azure_apim_gateway_logs_exported
+name: Azure API Management Gateway Logs Exported
+type: AUTOMATED
+role: configuration
+statement: >
+  Every API Management service has a diagnostic setting with a destination that exports gateway logs
+  (GatewayLogs, or the audit or allLogs category group), and no service's diagnostic settings are
+  unknown. Does not assert which destination or its retention; zero API Management services passes
+  vacuously. Supports Coverage row 76 (Logged Event Type Inventory / KSI-MLA-LET) (proposed mapping,
+  not yet audited).
+
+regex: '"services_audit_logs_exported":\s*(?<services_audit_logs_exported>\d+)[\s\S]*?"services_audit_logs_unknown":\s*(?<services_audit_logs_unknown>\d+)[\s\S]*?"total_services":\s*(?<total_services>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[3]; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 3 }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-API-MANAGEMENT-CONFIG

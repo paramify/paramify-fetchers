@@ -1,0 +1,20 @@
+key: azure_redis_geo_replication_field_present
+name: Azure Managed Redis Geo Replication Field Present
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one Azure Managed Redis database in the evidence carries a
+  geo_replication_linked_databases list, so the zero-violation count in
+  azure_redis_all_databases_geo_replicated reflects posture rather than a renamed or missing field.
+  Integrity partner supporting Coverage row 2 (Alternate Processing Sites / KSI-CNA-OFA). Fails on a
+  subscription with no Managed Redis databases.
+
+regex: '"geo_replication_linked_databases":\s*\['
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-MANAGED-REDIS-CONFIG

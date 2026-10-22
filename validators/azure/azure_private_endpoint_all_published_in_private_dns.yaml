@@ -1,0 +1,24 @@
+key: azure_private_endpoint_all_published_in_private_dns
+name: Azure Private Endpoints All Published In Private DNS
+type: AUTOMATED
+role: configuration
+statement: >
+  Every private endpoint has a private DNS zone group (summary
+  endpoints_without_private_dns_zone_group is 0), so clients resolve the service name to the private
+  IP rather than falling through to its public address. Does not assert that the zone is linked to
+  the client VNets or that its records are current (see the private DNS zone validators). Supports
+  Coverage rows 74 (Internal Connections), 84 (Policy Enforcement Point Exceptions) and 104 (Trusted
+  Connection Review) / KSI-CNA-RNT (proposed mapping, not yet audited).
+
+regex: '"endpoints_without_private_dns_zone_group":\s*(?<endpoints_without_private_dns_zone_group>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-PRIVATE-ENDPOINT-CONFIG

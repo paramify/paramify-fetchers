@@ -1,0 +1,13 @@
+validator: azure_private_endpoint_targets_public_access_disabled
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"target_resources_public_access_not_disabled":0}}}'
+
+  - name: target_resources_public_access_not_disabled_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"target_resources_public_access_not_disabled":1}}}'
+
+  - name: target_resources_public_access_not_disabled_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"target_resources_public_access_not_disabled_renamed":0}}}'

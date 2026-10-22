@@ -1,0 +1,13 @@
+validator: azure_dns_ds_record_count_present
+cases:
+  - name: field_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"public_zones":[{"delegation_signer_records":0,"dnssec_enabled":false}]},"summary":{"total_public_zones":1}}}'
+
+  - name: field_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"public_zones":[{"dnssec_enabled":true,"ds_records":0}]},"summary":{"total_public_zones":1}}}'
+
+  - name: no_public_zones
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"public_zones":[]},"summary":{"total_public_zones":0}}}'

@@ -1,0 +1,31 @@
+key: azure_private_dns_no_stale_privatelink_records
+name: Azure Private DNS No Stale Privatelink Records
+type: AUTOMATED
+role: configuration
+statement: >
+  No privatelink A record points somewhere other than a live private endpoint serving that name:
+  summary privatelink_records_ip_mismatch (IP held by an endpoint serving a different name),
+  privatelink_records_partially_backed (some IPs not backed) and privatelink_records_stale (IP in a
+  readable VNet with no private endpoint behind it) are all 0. Does not assert anything about
+  records the collector could not verify (see the readability validator). Supports Coverage rows 74
+  (Internal Connections), 84 (Policy Enforcement Point Exceptions) and 104 (Trusted Connection
+  Review) / KSI-CNA-RNT (proposed mapping, not yet audited).
+
+regex: '"privatelink_records_ip_mismatch":\s*(?<privatelink_records_ip_mismatch>\d+)[\s\S]*?"privatelink_records_partially_backed":\s*(?<privatelink_records_partially_backed>\d+)[\s\S]*?"privatelink_records_stale":\s*(?<privatelink_records_stale>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-PRIVATE-DNS-ZONE-CONFIG

@@ -1,0 +1,13 @@
+evidence_set: EVD-AZURE-VIRTUAL-WAN-CONFIG
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[{"weak_ipsec_algorithms":[]},{"weak_ipsec_algorithms":[]}],"virtual_network_gateways":[]},"summary":{"ikev2_link_connections":2,"secured_hubs":2,"total_virtual_hubs":2,"total_virtual_wans":1,"total_vpn_link_connections":2,"vpn_encryption_disabled_wans":0}}}'
+
+  - name: failed_collection
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{"connections":[{"weak_ipsec_algorithms":[]},{"weak_ipsec_algorithms":[]}],"virtual_network_gateways":[]},"summary":{"ikev2_link_connections":2,"secured_hubs":2,"total_virtual_hubs":2,"total_virtual_wans":1,"total_vpn_link_connections":2,"vpn_encryption_disabled_wans":0}}}'
+
+  - name: weak_ipsec_algorithms_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[{"weakAlgorithms":[]},{"weakAlgorithms":[]}],"virtual_network_gateways":[]},"summary":{"ikev2_link_connections":2,"secured_hubs":2,"total_virtual_hubs":2,"total_virtual_wans":1,"total_vpn_link_connections":2,"vpn_encryption_disabled_wans":0}}}'

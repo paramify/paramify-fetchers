@@ -1,0 +1,17 @@
+validator: azure_managed_identity_no_broad_federated_subjects
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"federated_credentials_broad_subject":0,"federated_credentials_nonstandard_audience":0}}}'
+
+  - name: federated_credentials_broad_subject_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"federated_credentials_broad_subject":1,"federated_credentials_nonstandard_audience":0}}}'
+
+  - name: federated_credentials_nonstandard_audience_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"federated_credentials_broad_subject":0,"federated_credentials_nonstandard_audience":1}}}'
+
+  - name: federated_credentials_broad_subject_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"federated_credentials_broad_subject_renamed":0,"federated_credentials_nonstandard_audience":0}}}'

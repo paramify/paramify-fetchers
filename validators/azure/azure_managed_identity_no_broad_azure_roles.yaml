@@ -1,0 +1,30 @@
+key: azure_managed_identity_no_broad_azure_roles
+name: Azure Managed Identity No Owner Or Contributor Grants
+type: AUTOMATED
+role: configuration
+statement: >
+  No managed identity holds Owner, Contributor, User Access Administrator or Role Based Access
+  Control Administrator anywhere visible from the subscription, every identity's role assignments
+  were read, and every role assigned to an identity resolved to a known definition. An approved
+  exception still fails here and must be justified outside this evidence. Does not assert narrower
+  over-grants (key-reading or full data roles). Supports Coverage row 78 (Logical Access Review /
+  KSI-IAM-ELP) (proposed mapping, not yet audited).
+
+regex: '"identities_role_assignments_unknown":\s*(?<identities_role_assignments_unknown>\d+)[\s\S]*?"identities_with_broad_role":\s*(?<identities_with_broad_role>\d+)[\s\S]*?"role_assignments_unresolved_role":\s*(?<role_assignments_unresolved_role>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-MANAGED-IDENTITY-CONFIG

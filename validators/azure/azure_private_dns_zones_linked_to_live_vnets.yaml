@@ -1,0 +1,30 @@
+key: azure_private_dns_zones_linked_to_live_vnets
+name: Azure Private DNS Zones Linked To Live VNets
+type: AUTOMATED
+role: configuration
+statement: >
+  Every private DNS zone is linked to at least one virtual network and every link is healthy:
+  summary links_not_completed, links_to_deleted_virtual_networks and
+  zones_without_virtual_network_links are all 0. Does not assert which VNets should be linked, and
+  does not judge registrationEnabled (auto-registration) on links. Supports Coverage rows 74
+  (Internal Connections), 84 (Policy Enforcement Point Exceptions) and 104 (Trusted Connection
+  Review) / KSI-CNA-RNT (proposed mapping, not yet audited).
+
+regex: '"links_not_completed":\s*(?<links_not_completed>\d+)[\s\S]*?"links_to_deleted_virtual_networks":\s*(?<links_to_deleted_virtual_networks>\d+)[\s\S]*?"zones_without_virtual_network_links":\s*(?<zones_without_virtual_network_links>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-PRIVATE-DNS-ZONE-CONFIG

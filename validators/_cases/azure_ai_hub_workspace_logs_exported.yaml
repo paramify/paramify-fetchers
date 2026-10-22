@@ -1,0 +1,17 @@
+validator: azure_ai_hub_workspace_logs_exported
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"total_workspaces":2,"workspaces_diagnostic_logs_exported":2,"workspaces_diagnostic_logs_unknown":0}}}'
+
+  - name: workspaces_diagnostic_logs_exported_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"total_workspaces":2,"workspaces_diagnostic_logs_exported":1,"workspaces_diagnostic_logs_unknown":0}}}'
+
+  - name: workspaces_diagnostic_logs_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"total_workspaces":2,"workspaces_diagnostic_logs_exported":2,"workspaces_diagnostic_logs_unknown":1}}}'
+
+  - name: total_workspaces_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"total_workspaces_renamed":2,"workspaces_diagnostic_logs_exported":2,"workspaces_diagnostic_logs_unknown":0}}}'

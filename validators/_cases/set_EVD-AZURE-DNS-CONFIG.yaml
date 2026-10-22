@@ -1,0 +1,13 @@
+evidence_set: EVD-AZURE-DNS-CONFIG
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"public_zones":[{"delegation_signer_records":0,"dnssec_enabled":false},{"delegation_signer_records":2,"dnssec_enabled":true}]},"summary":{"dnssec_enabled_public_zones":2,"dnssec_unknown_public_zones":0,"total_public_zones":2}}}'
+
+  - name: failed_collection
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{"public_zones":[{"delegation_signer_records":0,"dnssec_enabled":false},{"delegation_signer_records":2,"dnssec_enabled":true}]},"summary":{"dnssec_enabled_public_zones":2,"dnssec_unknown_public_zones":0,"total_public_zones":2}}}'
+
+  - name: delegation_signer_records_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"public_zones":[{"dnssec_enabled":false,"ds_records":0},{"dnssec_enabled":true,"ds_records":2}]},"summary":{"dnssec_enabled_public_zones":2,"dnssec_unknown_public_zones":0,"total_public_zones":2}}}'

@@ -1,0 +1,17 @@
+validator: azure_ai_services_api_keys_disabled
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"accounts_with_api_keys_enabled":0,"search_services_with_api_keys_enabled":0}}}'
+
+  - name: accounts_with_api_keys_enabled_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"accounts_with_api_keys_enabled":1,"search_services_with_api_keys_enabled":0}}}'
+
+  - name: search_services_with_api_keys_enabled_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"accounts_with_api_keys_enabled":0,"search_services_with_api_keys_enabled":1}}}'
+
+  - name: accounts_with_api_keys_enabled_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"accounts_with_api_keys_enabled_renamed":0,"search_services_with_api_keys_enabled":0}}}'

@@ -1,0 +1,22 @@
+validator: azure_redis_all_clusters_zone_redundant
+cases:
+  - name: all_zone_redundant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"},{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"}]},"summary":{"total_clusters":2}}}'
+
+  - name: one_locally_redundant
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"},{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"LR"}]},"summary":{"total_clusters":2}}}'
+
+  - name: high_availability_disabled
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Disabled","redundancy_mode":"ZR"}]},"summary":{"total_clusters":1}}}'
+
+  - name: redundancy_mode_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":null}]},"summary":{"total_clusters":1}}}'
+
+  - name: keys_renamed_reads_as_zero_alone
+    expect: PASS
+    note: 'Form B cannot guard itself; its integrity partner fails here, as the set-level case shows.'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"highAvailability":"Enabled","redundancyMode":"ZR"}]},"summary":{"total_clusters":1}}}'

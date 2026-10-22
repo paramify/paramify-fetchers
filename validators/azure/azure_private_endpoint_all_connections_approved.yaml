@@ -1,0 +1,25 @@
+key: azure_private_endpoint_all_connections_approved
+name: Azure Private Endpoints All Connections Approved
+type: AUTOMATED
+role: configuration
+statement: >
+  Every private endpoint in the subscription has all of its Private Link connections in the Approved
+  state (summary not_approved_endpoints is 0), so no endpoint sits Pending, Rejected, Disconnected
+  or Mixed. Does not assert that the approved target is itself private (see the target public-access
+  validator) or that a documented change record exists for the connection. An empty population (no
+  private endpoints) reads as 0 and passes. Supports Coverage rows 74 (Internal Connections), 84
+  (Policy Enforcement Point Exceptions) and 104 (Trusted Connection Review) / KSI-CNA-RNT (proposed
+  mapping, not yet audited).
+
+regex: '"not_approved_endpoints":\s*(?<not_approved_endpoints>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-PRIVATE-ENDPOINT-CONFIG

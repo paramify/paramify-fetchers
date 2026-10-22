@@ -1,0 +1,13 @@
+validator: azure_flow_logs_no_legacy_nsg_flow_logs
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs":0}}}'
+
+  - name: legacy_nsg_flow_logs_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs":1}}}'
+
+  - name: legacy_nsg_flow_logs_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs_renamed":0}}}'

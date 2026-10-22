@@ -1,0 +1,13 @@
+validator: azure_apim_no_public_network_access
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_with_public_network_access":0}}}'
+
+  - name: services_with_public_network_access_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_with_public_network_access":1}}}'
+
+  - name: services_with_public_network_access_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_with_public_network_access_renamed":0}}}'

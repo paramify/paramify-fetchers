@@ -1,0 +1,17 @@
+validator: azure_vpn_gateway_sku_present
+cases:
+  - name: sku_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"active_active":true,"gateway_type":"Vpn","sku_name":"VpnGw1AZ"}]},"summary":{"vpn_gateways":1}}}'
+
+  - name: sku_present_non_az
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"active_active":true,"gateway_type":"Vpn","sku_name":"VpnGw2"}]},"summary":{"vpn_gateways":1}}}'
+
+  - name: sku_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"gateway_type":"Vpn","skuName":"VpnGw2AZ"}]},"summary":{"vpn_gateways":1}}}'
+
+  - name: no_vpn_gateways
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"connections":[],"virtual_network_gateways":[{"gateway_type":"ExpressRoute","sku_name":"Standard"}]},"summary":{"vpn_gateways":1}}}'
