@@ -74,7 +74,7 @@ evidence_set:
   reference_id: EVD-CORNERSTONE-SECURE-DEVELOPMENT-TRAINING
   name: Cornerstone Secure Development Training
   instructions: >-
-    Script: fetchers/cornerstone/secure_development_training/fetcher.py. Read-only Cornerstone Reporting API calls: POST
+    Script: cornerstone/secure_development_training/fetcher.py. Read-only Cornerstone Reporting API calls: POST
     /services/api/oauth2/token (client credentials), then GET
     /services/api/x/odata/api/views/vw_rpt_training (resolve the configured
     courses), vw_rpt_transcript (every registration for those courses), and vw_rpt_user when a population filter is set.

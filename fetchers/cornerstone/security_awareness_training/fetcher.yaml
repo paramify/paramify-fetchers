@@ -74,7 +74,7 @@ evidence_set:
   reference_id: EVD-CORNERSTONE-SECURITY-AWARENESS-TRAINING
   name: Cornerstone Security Awareness Training
   instructions: >-
-    Script: fetchers/cornerstone/security_awareness_training/fetcher.py. Read-only Cornerstone Reporting API calls: POST
+    Script: cornerstone/security_awareness_training/fetcher.py. Read-only Cornerstone Reporting API calls: POST
     /services/api/oauth2/token (client credentials), then GET
     /services/api/x/odata/api/views/vw_rpt_training (resolve the configured
     courses), vw_rpt_transcript (every registration for those courses), and optionally vw_rpt_user (the user population).
