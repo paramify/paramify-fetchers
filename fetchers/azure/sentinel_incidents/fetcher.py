@@ -15,9 +15,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import dig  # noqa: E402
 from azure_rest import (  # noqa: E402
-    LAW_API,
     SI_API,
-    ArmError,
     QueryError,
     discover_workspaces,
     int_config,
@@ -26,6 +24,7 @@ from azure_rest import (  # noqa: E402
     requested_workspaces,
     run_subscription,
     table_missing,
+    table_retention,
     workspace_identity,
 )
 
@@ -581,17 +580,6 @@ def query_since(client, ws: Dict[str, Any], kql: str, cutoff: datetime, part: tu
     return query_since(client, ws, kql, cutoff, (k, 2 * n)) + query_since(client, ws, kql, cutoff, (k + n, 2 * n))
 
 
-def security_incident_table(client, ws: Dict[str, Any]) -> tuple:
-    """(exists, interactive retention days) of SecurityIncident, from ARM; older rows are gone, not absent."""
-    try:
-        days = dig(client.get(f"{ws['id']}/tables/SecurityIncident", LAW_API), "properties", "retentionInDays")
-    except ArmError as exc:
-        if exc.status == 404:
-            return False, ws.get("retention_in_days")
-        raise
-    return True, days if isinstance(days, int) and days > 0 else ws.get("retention_in_days")
-
-
 def security_incident_query(
     client, ws: Dict[str, Any], kql: str, cutoff: datetime, label: str, missing: Optional[str], collector, notes: List[str]
 ) -> Optional[List[Dict[str, Any]]]:
@@ -631,7 +619,8 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     if listed is None:
         return {"lookback_days": days, "incidents": None, "notes": notes, "limitations": list(LIMITATIONS)}
     table = collector.guard(
-        f"operationalinsights.tables.get(SecurityIncident, {ws['name']})", lambda: security_incident_table(client, ws)
+        f"operationalinsights.tables.get(SecurityIncident, {ws['name']})",
+        lambda: table_retention(client, ws["id"], "SecurityIncident", ws.get("retention_in_days")),
     )
     exists, retention = table or (None, None)
     ingested_by = now - INGESTION_LAG
