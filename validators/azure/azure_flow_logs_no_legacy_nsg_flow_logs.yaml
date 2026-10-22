@@ -3,14 +3,15 @@ name: Azure Flow Logs Use VNet Flow Logs Not Legacy NSG
 type: AUTOMATED
 role: configuration
 statement: >
-  No flow log targets a network security group: traffic is recorded with virtual network flow logs,
-  the type the Coverage row names, rather than legacy NSG flow logs, which Microsoft is retiring.
-  Does not assert coverage or Traffic Analytics. Supports Coverage rows 8 (Audit Log Collection and
+  No flow log targets a network security group, and every flow log is a virtual network flow log
+  (vnet_flow_logs equals total_flow_logs): traffic is recorded with virtual network flow logs, the
+  type the Coverage row names, rather than legacy NSG flow logs, which Microsoft is retiring. A
+  subscription with no flow logs passes vacuously. Does not assert coverage or Traffic Analytics. Supports Coverage rows 8 (Audit Log Collection and
   Alerts / KSI-MLA-OSM), 10 (Audit Logging Criteria / KSI-MLA-LET) and 76 (Logged Event Type
   Inventory / KSI-MLA-LET) (proposed mapping, not yet audited).
 
-regex: '"legacy_nsg_flow_logs":\s*(?<legacy_nsg_flow_logs>\d+)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+regex: '"legacy_nsg_flow_logs":\s*(?<legacy_nsg_flow_logs>\d+)[\s\S]*?"total_flow_logs":\s*(?<total_flow_logs>\d+)[\s\S]*?"vnet_flow_logs":\s*(?<vnet_flow_logs>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[3] EQUALS MATCH_GROUP[2]
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
@@ -18,6 +19,9 @@ validation_rules:
   - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }
 
 evidence_sets:
   - EVD-AZURE-NETWORK-FLOW-LOGS

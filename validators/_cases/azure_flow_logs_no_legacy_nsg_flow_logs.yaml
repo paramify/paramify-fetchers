@@ -2,12 +2,28 @@ validator: azure_flow_logs_no_legacy_nsg_flow_logs
 cases:
   - name: compliant
     expect: PASS
-    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs":0}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs":0,"total_flow_logs":2,"vnet_flow_logs":2}}}'
+
+  - name: no_flow_logs_passes_vacuously
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs":0,"total_flow_logs":0,"vnet_flow_logs":0}}}'
 
   - name: legacy_nsg_flow_logs_nonzero
     expect: FAIL
-    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs":1}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs":1,"total_flow_logs":2,"vnet_flow_logs":1}}}'
+
+  - name: vnet_flow_logs_short_of_total
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs":0,"total_flow_logs":3,"vnet_flow_logs":2}}}'
 
   - name: legacy_nsg_flow_logs_renamed
     expect: FAIL
-    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs_renamed":0}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs_renamed":0,"total_flow_logs":2,"vnet_flow_logs":2}}}'
+
+  - name: total_flow_logs_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs":0,"total_flow_logs_renamed":2,"vnet_flow_logs":2}}}'
+
+  - name: vnet_flow_logs_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"legacy_nsg_flow_logs":0,"total_flow_logs":2,"vnet_flow_logs_renamed":2}}}'
