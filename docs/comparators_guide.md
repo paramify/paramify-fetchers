@@ -65,48 +65,51 @@ paramify describe <category>_<short_name>
 
 ## 3. Write the comparison
 
-`load_inputs()` reads each input's files in place, and `build_payload()` applies
-the [input policy](comparators.md#failed-partial-and-missing-inputs). Write
-verdicts, not copies of the input records. The template's `main()` does the
-rest:
+Write only `check`: it gets each input's payloads and returns verdicts, not
+copies of the input records. The shared `run()` reads the inputs, applies the
+[input policy](comparators.md#failed-partial-and-missing-inputs), and always
+writes the file:
 
 ```python
-inputs = load_inputs()
-results, summary, error = [], dict.fromkeys(SUMMARY_KEYS), None
-if not inputs.missing:
-    try:
-        results, summary = check(inputs["demo_hello"].payloads)
-    except Exception as exc:
-        error = f"cannot check the input: {exc.__class__.__name__}: {exc}"
-# writes build_payload(inputs, results, summary, error) to EVIDENCE_DIR, then:
-if error:
-    report_failure(error, "internal_error")
-    return 1
-if not inputs.complete:
-    report_failure(inputs.reason(), "input_failed")
-    return 1
+def check(inputs):
+    results = [
+        {"policy": p.get("policy"),
+         "verdict": "enforced" if p.get("enabled") and p.get("applies_to") == "all-users" else "not_enforced"}
+        for payload in inputs["demo_hello"].payloads
+        for p in payload.get("results", [])
+    ]
+    enforced = sum(1 for r in results if r["verdict"] == "enforced")
+    summary = {
+        "policies": len(results),
+        "policies_enforced": enforced,
+        "policies_not_enforced": len(results) - enforced,
+        "percent_enforced": enforced * 100 // len(results) if results else 0,
+    }
+    return results, summary
+
+if __name__ == "__main__":
+    raise SystemExit(run(check, output="demo_policy_check.json", summary_keys=SUMMARY_KEYS))
 ```
 
 ## 4. Add it and its inputs to a manifest
 
-`validate` names any input the manifest doesn't run, and the fix
+Adding the comparator adds its inputs too
 ([manifest commands](cli_guide.md#building-a-manifest)).
 
-![paramify manifest init, add demo_policy_check reporting that demo_hello is not in the manifest, add demo_hello, and validate reporting OK](img/comparators/04-manifest.png)
+![paramify manifest init, add demo_policy_check adding demo_policy_check and demo_hello as its input, and validate reporting OK](img/comparators/04-manifest.png)
 
 <details><summary>Copy the commands</summary>
 
 ```bash
 paramify manifest init
 paramify manifest add <category>_<short_name>
-paramify manifest add <each input>
 paramify validate manifest.yaml
 ```
 </details>
 
 ## 5. Run it
 
-The comparator was added first, but it runs after its input.
+Every fetcher runs first, then every comparator.
 
 ![paramify run: demo_hello runs first, then demo_policy_check (reads demo_hello), both OK](img/comparators/05-run.png)
 
@@ -154,9 +157,9 @@ paramify upload --dry-run
 
 | Symptom | Fix |
 |---|---|
-| `left out of the catalog: … depends_on names an unknown fetcher` | A copied template still lists `<input_fetcher_a>`. Name real fetchers in `depends_on`. |
-| `declares depends_on, which now makes it a comparator` | Move the directory to `comparators/<category>/<short_name>/`, or delete `depends_on` if it collects from a source. |
+| `depends_on names an unknown fetcher` | A copied template still lists `<input_fetcher_a>`. Name real fetchers in `depends_on`. |
 | `which writes no JSON evidence` | An input is an issue report, a discovery fetcher, or writes CSV or HTML. Compare a JSON evidence fetcher instead. |
+| `comparators (depends_on) belong under comparators/` in the contract tests | Move the directory to `comparators/<category>/<short_name>/`, or delete `depends_on` if it collects from a source. |
 | The comparator shows `[FAIL]` with `input_failed` | Open the evidence of the input its `error` names; that file holds the cause. |
 | Every summary value is `null` | An input is missing: not in the manifest, not run, or no complete file. `metadata.error` says which. |
 | `COMPARATOR_INPUTS is not set` | You ran `fetcher.py` by hand. Run it with `paramify run`. |

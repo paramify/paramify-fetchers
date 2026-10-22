@@ -80,8 +80,9 @@ their checks.
 
 2. **Comparator inputs:** a comparator (`describe` shows `depends_on`) reads
    only its inputs' evidence from the same run, so every input must be in the
-   manifest too. `validate` reports each missing one as
-   `reads <input>, which is not in the manifest`. A comparator takes no secrets,
+   manifest too. `manifest add <comparator>` adds them; `validate` reports one
+   still missing as `reads <input>, which is not in the manifest`, and a bad
+   input (unknown, a cycle, not JSON evidence) as `<comparator>: depends_on …`. A comparator takes no secrets,
    targets or category config. Its only other gap is a required field in its own
    `config_schema`, set on its entry with `paramify manifest set-config <name>
    key=value` (never under `platforms.<category>.config`, which it ignores). Its
@@ -110,7 +111,8 @@ Build the exact command sequence from the gaps. Map each gap to one command:
 | Gap | Command |
 |-----|---------|
 | Fetcher absent | `manifest add <fetcher>` |
-| Comparator input absent | `manifest add <input>` (order doesn't matter; the runner runs inputs first) |
+| Comparator absent | `manifest add <comparator>` (adds its inputs too; the runner runs every fetcher before any comparator) |
+| Comparator input absent | `manifest add <input>` |
 | Missing secret | `manifest set-secret <fetcher> <secret_name> <ENV_VAR>` |
 | Missing per-fetcher config | `manifest set-config <fetcher> key=value` |
 | Missing platform config | `manifest set-platform-config <category> key=value` |

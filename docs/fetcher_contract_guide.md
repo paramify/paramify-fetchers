@@ -57,7 +57,9 @@ grep -nE 'os\.environ|get_env\("' fetchers/gitlab/ci_cd_pipeline_config/fetcher.
 
 Every read is declared or set by the runner except `LOG_LEVEL`, which never
 arrives, so under the runner this fetcher always logs at `INFO`. Grep any
-`_shared/` module a script imports the same way.
+`_shared/` module a script imports the same way. A
+[comparator](comparators.md#how-the-runner-runs-one) gets none of its category's
+env, plus `COMPARATOR_INPUTS`.
 
 ## 3. Run it with fake credentials
 

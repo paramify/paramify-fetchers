@@ -1,9 +1,10 @@
 # Comparators — Design
 
 **Status:** Decided. Decisions were recorded on 2026-10-16 and 2026-10-19, and
-the framework support is built (§7, slice 1). Only the Q4 checks that need an
-Azure DevOps organisation are still open.
-**Date:** 2026-10-16, updated 2026-10-19
+the framework support is built (§7, slice 1) and was simplified after review on
+2026-10-22. Only the Q4 checks that need an Azure DevOps organisation are still
+open.
+**Date:** 2026-10-16, updated 2026-10-22
 
 The reference for what was built is [`comparators.md`](comparators.md), and the
 walkthrough is [`comparators_guide.md`](comparators_guide.md).
@@ -11,7 +12,8 @@ walkthrough is [`comparators_guide.md`](comparators_guide.md).
 A comparator is a fetcher whose source is earlier fetchers' evidence files instead
 of an external API. It declares `depends_on`, reconciles records across those
 sources, and writes one ordinary evidence file. The runner runs it after its
-inputs, tells it where their files are, and wraps its output like any other.
+fetchers, tells it where its inputs' files are, and wraps its output like any
+other.
 
 ## Decided
 
@@ -20,7 +22,8 @@ inputs, tells it where their files are, and wraps its output like any other.
 | Q1 | **Add `input_failed`** as a status code. A comparator reports it when an input failed, so triage looks at that input's evidence. See [Q1](#q1-failure-code-for-a-bad-input). |
 | Q2 | **Same run only, permanently.** A comparator reads only inputs collected in the same run. No stored-run inputs and no `max_age_hours`, now or later. Inputs are read in place: nothing is copied, and the comparator writes verdicts only. |
 | Q3 | The runner records the inputs in the comparator's envelope as `metadata.inputs`. |
-| Runner | The runner runs a comparator after its inputs, and checks explicitly that every input has finished before starting it. It does not skip a comparator when an input failed. |
+| Runner | The runner runs every fetcher, then every comparator (two phases), and checks explicitly that every input has finished before starting a comparator. It does not skip a comparator when an input failed. |
+| Review (2026-10-22) | Four simplifications, same design: the two-phase order; `paramify manifest add` adds a comparator's inputs; `validate` and `run` report a comparator's bad inputs on its entry instead of discovery leaving it out; and one shared `run()` in `comparator_inputs.py`, so a comparator is only its comparison. |
 | Placement | **A separate top-level `comparators/` folder**, not inside `fetchers/`. See [§4](#4-placement-decided). |
 | Q4 (a) | **Measured on the sandbox, 2026-10-19:** Resource Graph `changedBy` for a service principal is its app (client) id. See [Q4](#q4-sandbox-checks). |
 | Q5 | Production is the `environment` label on `azure_change_provenance` targets, picked by an `environments` setting on the comparator. |
@@ -47,17 +50,17 @@ happen in code before upload, and its result has to be in one file.
 
 | Principle | Where it lives | Consequence |
 |---|---|---|
-| Same contract as fetchers; no special runtime or data store | `docs/design.md` § Layer 2 | `fetcher.yaml` + `fetcher.py`, env-only input, raw dict to `EVIDENCE_DIR`, runner wraps it |
-| Files on disk are the only link between stages; intermediate data lives in the run folder | `docs/design.md`, `docs/architecture_guide.md` | Inputs are the fetchers' own files in the run folder, read in place |
-| The runner never reads inside a payload; the exit code is the only failure signal | `docs/fetcher_contract.md` | The runner passes statuses; reading `partial_failure` is the comparator's job |
+| Same contract as fetchers; no special runtime or data store | `docs/architecture.md` | `fetcher.yaml` + `fetcher.py`, env-only input, raw dict to `EVIDENCE_DIR`, runner wraps it |
+| Files on disk are the only link between stages; intermediate data lives in the run folder | `docs/architecture.md`, `docs/architecture_guide.md` | Inputs are the fetchers' own files in the run folder, read in place |
+| The runner never reads inside a payload; the exit code is the only failure signal | `docs/fetcher_contract_guide.md` | The runner passes statuses; reading `partial_failure` is the comparator's job |
 | Failure codes are a closed set | `fetchers/_lib/fetcher_status.py`, `fetchers/_lib/status.sh` | Q1 |
-| Partial evidence goes in the payload as `partial_failure` + `api_failures[]` | `docs/fetcher_contract.md` | Input problems go in that ledger |
-| Only fetchers retry; comparator failures are logical | `docs/design.md` | No retry; `retry.py` and `logger.py` stay out of scope |
+| Partial evidence goes in the payload as `partial_failure` + `api_failures[]` | `docs/fetcher_contract_guide.md` | Input problems go in that ledger |
+| Only fetchers retry; comparator failures are logical | `framework/runner/` (`retry.py` is a stub) | No retry; `retry.py` and `logger.py` stay out of scope |
 | One facade | `framework/api.py` | Ordering and handoff live in `api.run` |
 | A failed file still uploads | `docs/architecture_guide.md`, `uploaders/paramify_evidence/uploader.py` | A comparator always writes a file |
-| One validator reads one file; a rule that reads nothing passes | `validators/README.md`, `docs/validators_design.md` | Summary counts are `null` when inputs are missing, never 0 |
+| One validator reads one file; a rule that reads nothing passes | `validators/README.md`, `docs/validators_guide.md` | Summary counts are `null` when inputs are missing, never 0 |
 | `_lib` is stdlib-only and never imports `framework/` | `fetchers/_lib/fetcher_status.py` | The input reader is a stdlib module, `comparators/_lib/comparator_inputs.py` |
-| Other kinds (inventory, issue reports, discovery) live in `fetchers/` with their own `_template_*` | `fetchers/_template_*`, `docs/fetcher_contract.md` | Comparators deliberately don't: they get their own tree (§4) |
+| Other kinds (inventory, issue reports, discovery) live in `fetchers/` with their own `_template_*` | `fetchers/_template_*`, `docs/authoring_fetcher_guide.md` | Comparators deliberately don't: they get their own tree (§4) |
 | A category's secrets and passthrough env reach every fetcher in it | `fetchers/_categories/azure.yaml`, `framework/runner/executor.py` | A comparator is given none |
 | No new validators in the public repo | repo rule | Validators for comparator evidence go in a client's private copy |
 
@@ -75,16 +78,20 @@ secrets: []
   makes a fetcher a comparator. There is no new `kind`.
 - Every input is required.
 - The schema rejects a comparator that declares targets or secrets.
-- As built, discovery leaves out the one comparator, rather than failing the
-  catalog, when an input:
+- Discovery keeps every comparator. `validate` reports one that can't run on its
+  manifest entry, and `run` skips that entry with the same reason, when an
+  input:
   - has an unknown name;
   - is part of a cycle;
   - is `kind: issue_report` or `discovery`, or has output that isn't JSON (only
-    JSON is enveloped);
-  - is itself left out.
+    JSON is enveloped).
 
-  It also leaves out a comparator outside `comparators/` and a non-comparator
-  inside it. `validate`, `run` and `doctor` report each one with its reason.
+  So a private mirror that drops an input fetcher fails only the entries that
+  read it. Which tree a comparator is filed in is this repo's layout rule, a
+  contract test.
+- `paramify manifest add` adds a comparator's inputs, and theirs, that the
+  manifest lacks. It does this when the manifest is edited, never during a run:
+  an input can need its own targets and secrets.
 - The schema also requires a comparator to be `kind: evidence` with JSON output
   and an `evidence_set`, since its one job is an uploadable file.
 - A comparator gets no credentials: no category secrets and no passthrough env.
@@ -93,8 +100,9 @@ secrets: []
 
 ## 2. Run order and handoff
 
-**Order.** `framework/runner/dependency_graph.py` keeps manifest order, except
-that a comparator moves after its inputs.
+**Order.** `framework/runner/dependency_graph.py` runs two phases: every
+fetcher in manifest order, then every comparator, each after any comparator it
+reads and otherwise in manifest order.
 
 **Guarantee that inputs have finished.** Three things together make it certain
 that a comparator never starts while an input is still running:
@@ -141,8 +149,11 @@ policy:
 | missing: not run, no file, unreadable, a payload that isn't a JSON object, or an inventory with `records_included: false` | writes its file with every summary count `null` | 1, `input_failed` |
 
 As built, an input with several targets is missing when any one of them wrote
-no readable file: counts over a subset of the scope would read as complete. If
-the comparison itself raises, the template still writes its file with null
+no readable file: counts over a subset of the scope would read as complete.
+
+`comparator_inputs.run(check, output, summary_keys)` is every comparator's
+main(), so the policy changes in one place. If the index can't be read, the
+comparison raises, or its result isn't JSON, it still writes the file with null
 counts and exits 1 with `internal_error`.
 
 ## 3. Output
@@ -168,8 +179,7 @@ counts and exits 1 with `internal_error`.
 ## 4. Placement (decided)
 
 **Decided: a separate top-level `comparators/<category>/<name>/` folder** (option
-A below), matching `docs/design.md`. It's obvious which scripts call APIs and
-which only read files.
+A below). It's obvious which scripts call APIs and which only read files.
 
 | Option | For | Against |
 |---|---|---|
@@ -178,13 +188,14 @@ which only read files.
 
 What A took, as built:
 
-- **Discovery** walks both trees into one namespace, and rejects a fetcher in
-  the wrong one (`framework/config_loader.py`).
-- **`comparators/_lib/`** holds the reader. A comparator also puts
-  `fetchers/_lib` on its path for `report_failure`, so there is still one
-  failure helper.
-- **`tests/test_contracts.py`** and `tests/test_failure_reporting_contract.py`
-  walk both trees; **`tools/gen_ksi_mapping.py`** links either tree.
+- **Discovery** walks both trees into one namespace
+  (`framework/config_loader.py`).
+- **`comparators/_lib/`** holds the reader and the shared `run()`, which imports
+  `report_failure` from `fetchers/_lib`, so there is still one failure helper.
+- **`tests/test_contracts.py`** checks that a comparator is under `comparators/`
+  and a collector under `fetchers/`. It and
+  `tests/test_failure_reporting_contract.py` walk both trees;
+  **`tools/gen_ksi_mapping.py`** links either tree.
 - **`tools/generate_chart.py`** is unchanged: the coverage chart counts fetchers
   per category, and a comparator adds no source.
 
@@ -193,7 +204,9 @@ A cross-platform comparator still picks one category folder.
 ## 5. Tests, docs and skills
 
 - **Tests** (`tests/test_comparators.py`):
-  - ordering, including the completion check (comparator listed first, starts last);
+  - the two-phase order, and the completion check (ordering patched out, the
+    comparator isn't started);
+  - `manifest add` adding inputs;
   - cycles and unknown names;
   - the contract checks;
   - the runner handoff: index, no credentials, `metadata.inputs`, `validate`;
@@ -201,7 +214,7 @@ A cross-platform comparator still picks one category folder.
   - a comparator scaffolded from the template, on synthetic payloads.
 - **Docs:** [`comparators.md`](comparators.md) and
   [`comparators_guide.md`](comparators_guide.md), plus updates to the fetcher
-  contract, the manifest reference, the envelope design and `docs/design.md`.
+  contract, run manifest, config and envelope guides and `docs/architecture.md`.
 - **Skills:**
   - `create-fetcher` has a comparator route.
   - `wire-manifest` treats a missing input as a gap.
@@ -311,18 +324,18 @@ KSI-CMT-VTD.
 
    Both are fetcher work.
 1. **First ship**, in two parts:
-   - **The framework (built):** ordering with the completion check, the
+   - **The framework (built):** two-phase ordering with the completion check, the
      same-run input index, the credential-free env, `metadata.inputs`,
-     `input_failed`, the `validate` checks, the shared reader, the template,
-     discovery of `comparators/`, the CLI and docs, and a credential-free demo
-     comparator (`demo_policy_check`).
+     `input_failed`, the `validate` checks, `manifest add` adding inputs, the
+     shared reader and `run()`, the template, discovery of `comparators/`, the
+     CLI and docs, and a credential-free demo comparator (`demo_policy_check`).
    - **`azure_change_pipeline_runs` 0.1.0**, with docs and tests. It waits on
      per-run records and the service-connection fetcher.
 
    The proof for the second part is a sandbox run in which the pipeline's own
    changes come out `traced`, and a CLI change made with the same service
    principal comes out `pipeline_identity_without_run`.
-2. **Polish:** `manifest add --with-deps`, TUI touches, and the guide.
+2. **Polish:** TUI touches.
 3. **Later, only if a second comparator needs it:** optional inputs, one run per
    target, and inputs passed by reference.
 
@@ -337,8 +350,7 @@ other with a warning. Adding `input_failed` meant:
 
 - adding it to `STATUS_CODES` in `fetchers/_lib/fetcher_status.py`;
 - adding it to the bash twin `fetchers/_lib/status.sh`;
-- updating the code list in `docs/fetcher_contract.md` and
-  `docs/fetcher_contract_guide.md`;
+- updating the code list in the fetcher contract docs;
 - updating `tests/test_fetcher_status_lib.py`, which pins the set.
 
 Nothing else changes, because nothing branches on a code's value. The runner,
@@ -399,7 +411,9 @@ Decided: a separate `comparators/` folder. See §4.
 | Comparator searches the run folder itself | Depends on file naming, misses targets that wrote nothing, reads undeclared files |
 | Copy inputs into a separate store or the comparator's own folder | A second copy of collected evidence; files are read in place instead |
 | Inputs from an earlier stored run | Decided against (Q2): stale data, and a race with a run still writing |
-| Auto-add missing inputs | The manifest is intent; `validate` and `--with-deps` instead |
+| Add missing inputs during a run | An input can need targets and secrets a run can't supply; `manifest add` adds them when the manifest is edited instead |
+| Leave a comparator with bad inputs out of discovery | Built first, dropped in review: `validate` is the one place for "this entry can't run", and only that entry fails |
+| Move each comparator only as far as its last input | Built first, dropped in review: fetchers and comparators took turns, which is harder to explain than two phases |
 | Retry a comparator | Its failures are logical |
 | Give comparators credentials | It would become a hidden second fetcher |
 | Time-only matching via `pipeline_principals` | Overlapping runs can't be told apart |

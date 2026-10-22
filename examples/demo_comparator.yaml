@@ -3,8 +3,8 @@
 #     paramify run examples/demo_comparator.yaml
 #     paramify evidence evidence/run-*/demo_policy_check.json
 #
-# demo_policy_check is listed first on purpose: the runner moves a comparator
-# after the fetchers it reads, so demo_hello still runs first.
+# demo_policy_check is listed first on purpose: a run takes every fetcher
+# before any comparator, so demo_hello still runs first.
 
 run:
   output_dir: ./evidence

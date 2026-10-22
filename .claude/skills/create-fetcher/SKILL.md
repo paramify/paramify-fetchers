@@ -89,11 +89,12 @@ this one cannot reach (Phase 4).
      `comparators/_template/` to `comparators/<category>/<short_name>/` (not
      under `fetchers/`) and follow `docs/comparators_guide.md`. Its inputs must
      be JSON evidence fetchers that already exist. `secrets: []`, no targets,
-     and an `evidence_set`; the runner gives it no credentials. Read inputs with
-     `comparators/_lib/comparator_inputs.py` (`load_inputs`, `build_payload`),
-     never by globbing the run dir, and report a bad input with
-     `report_failure(inputs.reason(), "input_failed")`. Results hold verdicts,
-     not copies of input records. The Phase 2 auth and fanout questions don't
+     and an `evidence_set`; the runner gives it no credentials. Write only a
+     `check(inputs)` returning `(results, summary)` and end with
+     `raise SystemExit(run(check, output=..., summary_keys=...))` from
+     `comparators/_lib/comparator_inputs.py`: `run()` reads the inputs (never
+     glob the run dir), writes the file and reports `input_failed` or
+     `internal_error`. Results hold verdicts, not copies of input records. The Phase 2 auth and fanout questions don't
      apply; ask only which inputs, the join key, and the evidence set. Test the
      policy with a missing input (summary all `null`) and a failed one (still
      compared, exit 1), not only the happy path.

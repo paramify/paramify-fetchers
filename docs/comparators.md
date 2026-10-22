@@ -30,22 +30,21 @@ Comparators share one namespace with fetchers (`<category>_<short_name>`), and
 `paramify list`, `describe`, `catalog`, `ksi`, the TUI and uploads see them like
 any fetcher. `list` adds `reads=<inputs>`, and `describe` shows `depends_on`.
 
-Discovery leaves a `fetcher.yaml` out of the catalog, and the rest still runs,
-when:
+Discovery takes every comparator into the catalog. As for any fetcher, only a
+schema-invalid `fetcher.yaml` or a duplicate name stops it. A comparator that
+can't run is reported on its manifest entry by `paramify validate`, and `run`
+skips that entry with the same reason and runs the rest:
 
-- one under `fetchers/` declares `depends_on`, or one under `comparators/`
-  declares none. A fetcher that kept `depends_on` from before comparators is told
-  to move or delete it.
-- a `depends_on` entry names an unknown fetcher, or an input writes no JSON
-  evidence (see [Inputs](#inputs)).
+- a `depends_on` entry names an unknown fetcher
+  (`demo_policy_check: depends_on names an unknown fetcher: demo_hello`), or an
+  input writes no JSON evidence (see [Inputs](#inputs));
 - the inputs form a cycle, including a comparator that lists itself
   (`dependency cycle: a -> b -> a`).
-- an input is itself left out.
 
-Each reason starts with the file's path. `paramify list` prints it to stderr,
-`doctor` lists it under "Left out of the catalog", and `validate` and `run` give
-it for any manifest entry that uses the fetcher. A schema-invalid `fetcher.yaml`
-or a duplicate name still stops discovery, as for any fetcher.
+So a private mirror that drops an input fetcher fails only the entries that read
+it. Filing a fetcher with `depends_on` under `comparators/`, and one without
+under `fetchers/`, is this repo's layout rule, checked by
+`tests/test_contracts.py`.
 
 ## `fetcher.yaml`
 
@@ -69,17 +68,28 @@ from. Issue reports and discovery documents are rejected.
 
 **Same run only, permanently.** A comparator reads only what its inputs wrote
 earlier in the same run. It never reads a stored or earlier run, and there is no
-age setting. Every input must be in the same manifest; `paramify validate`
-reports one that isn't, with the fix (`paramify manifest add <input>`).
+age setting. Every input must be in the same manifest, so adding a comparator
+adds its inputs, and theirs, that the manifest lacks:
+
+```
+$ paramify manifest add demo_policy_check
+added demo_policy_check
+added demo_hello (input of demo_policy_check)
+```
+
+The console's add picker does the same. Inputs are added only when the manifest
+is edited, never during a run, because an input can need its own targets and
+secrets. `paramify validate` still reports an input that isn't in the manifest,
+with the fix (`paramify manifest add <input>`).
 
 **Read in place.** Nothing is copied. The comparator opens the inputs' own files
 in the run directory, and writes only its verdicts.
 
 ## How the runner runs one
 
-1. **Order.** The run keeps manifest order, except that each comparator moves
-   after every input the manifest holds (`framework/runner/dependency_graph.py`).
-   The run stays serial.
+1. **Two phases.** The run takes every fetcher in manifest order, then every
+   comparator, each after any comparator it reads and otherwise in manifest
+   order (`framework/runner/dependency_graph.py`). The run stays serial.
 2. **Completion check.** Before starting a comparator, the runner confirms that
    every input in the manifest has a finished record in this run: succeeded,
    failed, or failed to start. If one doesn't, the comparator isn't started. It
@@ -123,7 +133,21 @@ manifest doesn't run has `in_manifest: false` and no invocations.
 ## Failed, partial and missing inputs
 
 `comparators/_lib/comparator_inputs.py` applies one policy, so every comparator
-treats a bad input the same way. `load_inputs()` puts each input in one state:
+treats a bad input the same way. A comparator is only its comparison; the
+shared `run()` does the rest:
+
+```python
+def check(inputs):
+    ...  # inputs["<input>"].payloads: what each file holds
+    return results, summary
+
+if __name__ == "__main__":
+    raise SystemExit(run(check, output="<category>_<short_name>.json", summary_keys=SUMMARY_KEYS))
+```
+
+`run()` reads the index, calls `check` unless an input is missing, always writes
+the file, and then reports the outcome. `load_inputs()` puts each input in one
+state:
 
 | State | When | The comparator |
 |---|---|---|
@@ -138,15 +162,16 @@ the cause (for example `not_authorized`).
 
 ## Output
 
-The payload is `{metadata, results, summary}`, built by `build_payload()`:
+The payload is `{metadata, results, summary}`, built by `run()`:
 
 - `metadata` holds `datetime`, `partial_failure` and `api_failures`, one entry
   per input that isn't complete (`operation: read input <name>`,
   `type: input_<state>`).
-- If the comparison itself raises (a failed input can hold a shape the code
-  never expected), the template still writes its file: `api_failures` gains
-  `operation: compare inputs`, `type: internal_error`, every summary value is
-  `null`, and the comparator exits 1 with `internal_error`.
+- The file is written even when there is nothing to compare. If the index
+  can't be read, `check` raises (a failed input can hold a shape the code never
+  expected), or its result isn't JSON, `api_failures` gains an `internal_error`
+  entry, `results` is empty, every value in `summary_keys` is `null`, and the
+  comparator exits 1 with `internal_error`.
 - `results` holds verdicts only: enough to read each one, and never a copy of
   the input records. Those stay in their own files and evidence sets.
 - `summary` always carries `inputs_complete`. Counts follow the fetchers'
