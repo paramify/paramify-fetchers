@@ -163,6 +163,7 @@ def main() -> int:
                 "GET", "/rest/api/3/auditing/record", "GET /rest/api/3/auditing/record", params=params
             )
             if page is None:
+                fetch_complete = False  # a later page failed: the window was not fully read
                 break
             batch = page.get("records") or []
             fetch_complete = True
@@ -180,6 +181,9 @@ def main() -> int:
                 break
     except Abort:
         pass
+    except Exception as e:  # unexpected response shape: keep what was collected and say why
+        client.fail("collection", type(e).__name__, str(e)[:200], "internal_error")
+        fetch_complete = False
 
     evidence = {
         "metadata": {
@@ -196,7 +200,14 @@ def main() -> int:
             "api_failures": client.api_failures,
         },
         "collector": collector,
-        "summary": _summarize(records, fetch_complete and not (reported_total is not None and len(records) < reported_total)),
+        # Null, not zero, when the window was not fully read: a failed or short
+        # paging, a truncated read ("total: 5000" would read as the population).
+        "summary": _summarize(
+            records,
+            fetch_complete
+            and not truncated
+            and not (reported_total is not None and len(records) < reported_total),
+        ),
         "records": records,
     }
     incomplete = ""

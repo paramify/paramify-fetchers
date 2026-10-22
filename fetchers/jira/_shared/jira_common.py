@@ -251,12 +251,16 @@ class JiraClient:
     def bulk_changelogs(self, issue_ids: list, field_ids: list):
         """Full change history per issue id via POST /rest/api/3/changelog/bulkfetch.
 
-        Returns ({issue_id: [history, ...]}, complete). Histories are de-duplicated
-        by id because the endpoint has repeated entries across pages before.
+        Returns ({issue_id: [history, ...]}, complete, unknown_ids). Histories are
+        de-duplicated by id because the endpoint has repeated entries across pages
+        before. unknown_ids holds every issue id of a chunk whose read failed or
+        stopped early: their history may be missing or partial, so a caller must
+        treat anything derived from it as unknown rather than absent.
         """
         out: dict = {}
         seen: set = set()
         complete = True
+        unknown_ids: set = set()
         # The endpoint takes at most 10 field ids, so more are fetched in groups and
         # the items of a history that several groups return are merged.
         field_groups = [field_ids[i : i + CHANGELOG_FIELD_BATCH] for i in range(0, len(field_ids), CHANGELOG_FIELD_BATCH)]
@@ -278,6 +282,7 @@ class JiraClient:
                     )
                     if page is None:
                         complete = False
+                        unknown_ids.update(chunk)
                         break
                     for log in page.get("issueChangeLogs") or []:
                         issue_id = str(log.get("issueId"))
@@ -302,9 +307,10 @@ class JiraClient:
                             "the server repeated a nextPageToken; history may be incomplete", "partial_failure",
                         )
                         complete = False
+                        unknown_ids.update(chunk)
                         break
                     tokens_seen.add(token)
-        return out, complete
+        return out, complete, unknown_ids
 
 
 def error_message(resp: requests.Response) -> str:
@@ -616,7 +622,8 @@ def validate_base_url(raw: str):
     if host in _GATEWAY_HOSTS and _GATEWAY_PATH.fullmatch(path):
         return f"https://{host}{path}", None
     return None, (
-        "JIRA_BASE_URL must be a Jira Cloud site (https://<site>.atlassian.net) or the "
+        "JIRA_BASE_URL must be a Jira Cloud site (https://<site>.atlassian.net, "
+        "https://<site>.jira.com or https://<site>.atlassian-us-gov-mod.net) or the "
         "API gateway for a scoped token (https://api.atlassian.com/ex/jira/<cloudId>); "
         f"got host {host or '(none)'!r}"
     )
@@ -662,7 +669,23 @@ def null_summary(summary):
 
 
 def is_date_only(value) -> bool:
-    return isinstance(value, str) and len(value.strip()) == 10
+    """True for a parseable YYYY-MM-DD value (a date field), not for any 10-character text."""
+    return isinstance(value, str) and len(value.strip()) == 10 and parse_ts(value.strip()) is not None
+
+
+def in_offset_of(value, reference):
+    """`value` (a timestamp, or epoch milliseconds) rendered in the UTC offset that
+    `reference` carries. Jira renders issue fields in the collector's profile
+    timezone but changelog/bulkfetch gives epoch milliseconds (UTC), so a history
+    time is moved into the issue's own offset before it is compared with a
+    date-only field such as duedate."""
+    ts = parse_ts(iso_ts(value))
+    ref = parse_ts(reference) if isinstance(reference, str) and len(reference) > 10 else None
+    if ts is None:
+        return iso_ts(value)
+    if ref is None:
+        return ts.isoformat(timespec="milliseconds")
+    return ts.astimezone(ref.tzinfo).isoformat(timespec="milliseconds")
 
 
 def utc_now() -> datetime:

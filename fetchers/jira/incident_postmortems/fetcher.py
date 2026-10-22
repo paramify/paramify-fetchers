@@ -23,6 +23,7 @@ from jira_common import (  # noqa: E402
     disabled_roles,
     fetch_issues,
     field_problem_reason,
+    in_offset_of,
     int_env,
     invalid_roles,
     is_date_only,
@@ -110,13 +111,15 @@ def _category_target(category, targets: dict):
     return lowered[max(matches, key=len)] if matches else None
 
 
-def _history(histories: list, phase_ids: set) -> tuple:
+def _history(histories: list, phase_ids: set, reference=None) -> tuple:
+    """(status moves, phase changes) oldest first, times in the issue's own UTC offset."""
     moves, phases = [], []
     for h in histories:
+        at = in_offset_of(h.get("created"), reference)
         for item in h.get("items") or []:
             fid = item.get("fieldId") or item.get("field")
             entry = {
-                "at": h.get("created"),
+                "at": at,
                 "by": name_of(h.get("author"), "displayName"),
                 "from": item.get("fromString"),
                 "to": item.get("toString"),
@@ -165,14 +168,19 @@ def _action_record(issue: dict, now) -> dict:
     }
 
 
-def _incident_record(issue, histories, ids, cfg, postmortems: dict, actions: dict, hidden: set) -> dict:
+def _incident_record(
+    issue, histories, ids, cfg, postmortems: dict, actions: dict, hidden: set, history_known: bool = True
+) -> dict:
     f = issue.get("fields") or {}
     status = f.get("status") or {}
     resolved = name_of(status.get("statusCategory"), "key") == "done"
     resolution = name_of(f.get("resolution"))
     no_review = resolved and (resolution or "").strip().lower() in cfg["no_review"]
     custom = role_values(f, ids)
-    moves, phase_changes = _history(histories, set(ids.get("phase") or []))
+    moves, phase_changes = _history(histories, set(ids.get("phase") or []), f.get("created"))
+    # Checks that could not run because a read failed go to `unknown`, never to
+    # `findings`: a refused call is not evidence that something is missing.
+    unknown = []
 
     detected = custom.get("detected_at")
     reported = custom.get("reported_at") or f.get("created")
@@ -222,16 +230,20 @@ def _incident_record(issue, histories, ids, cfg, postmortems: dict, actions: dic
             findings.append("category_without_target")
     missing_phases = [p for p in cfg["required_phases"] if p.lower() not in {x.lower() for x in phases_seen}]
     if "phase" in ids and resolved and not no_review and missing_phases:
-        findings.append("phases_missing")
+        # Past phases live in the history; without it only the current phase is seen.
+        (findings if history_known else unknown).append("phases_missing" if history_known else "phases_unknown")
     if required and not pm_keys:
-        findings.append("postmortem_not_visible" if pm_hidden else "resolved_without_postmortem")
+        if pm_hidden:
+            unknown.append("postmortem_not_visible")
+        else:
+            findings.append("resolved_without_postmortem")
     # A post-mortem lists its sub-tasks even when they could not be read, so an
     # unreadable action item is "not visible", never "no action items".
     expected_actions = sum(p["action_item_count"] for p in pm_records)
     if pm_keys and expected_actions == 0:
         findings.append("postmortem_without_action_items")
     elif pm_keys and len(action_items) < expected_actions:
-        findings.append("action_items_not_visible")
+        unknown.append("action_items_not_visible")
     if any(a["is_open"] and not a["assignee"] for a in action_items):
         findings.append("unassigned_action_items")
     if any(a["overdue"] for a in action_items):
@@ -258,17 +270,19 @@ def _incident_record(issue, histories, ids, cfg, postmortems: dict, actions: dic
         "category_target_minutes": target,
         "current_phase": custom.get("phase"),
         "phases_seen": phases_seen,
-        "phases_missing": missing_phases if resolved else [],
+        "phases_missing": (missing_phases if resolved else []) if history_known else None,
+        "status_history_known": history_known,
         "postmortem_required": required,
         "postmortems": pm_records,
         "action_items": action_items,
         "status_transitions": moves,
         "phase_changes": phase_changes,
         "findings": findings,
+        "unknown": unknown,
     }
 
 
-def _summarize(incidents: list, complete: bool = True) -> dict:
+def _summarize(incidents: list, complete: bool = True, related_complete: bool = True) -> dict:
     actions = [a for i in incidents for a in i["action_items"]]
     timed = [i["minutes_to_report"] for i in incidents if i["minutes_to_report"] is not None]
     resolved = [i for i in incidents if i["resolved"]]
@@ -309,7 +323,12 @@ def _summarize(incidents: list, complete: bool = True) -> dict:
             "overdue": sum(1 for a in actions if a["overdue"]),
         },
         "findings": counts(f for i in incidents for f in i["findings"]),
+        "unknown": counts(u for i in incidents for u in i["unknown"]),
+        "incidents_with_unknown_checks": sum(1 for i in incidents if i["unknown"]),
     }
+    if not related_complete:
+        # A refused post-mortem or action-item read must not read as "0 action items".
+        summary["action_items"] = null_summary(summary["action_items"])
     # When the incident search did not finish, every count would read as "none found".
     return summary if complete else null_summary(summary)
 
@@ -418,7 +437,7 @@ def main() -> int:
             jql, INCIDENT_FIELDS + all_field_ids(ids), cfg["max_items"]
         )
         history_fields = ["status"] + list(ids.get("phase") or [])
-        histories, history_complete = client.bulk_changelogs(
+        histories, history_complete, unknown_ids = client.bulk_changelogs(
             [str(i.get("id")) for i in raw if i.get("id")], history_fields
         )
 
@@ -458,7 +477,8 @@ def main() -> int:
 
         incidents = [
             _incident_record(
-                i, histories.get(str(i.get("id")), []), ids, cfg, postmortems, actions, set(missing_pm)
+                i, histories.get(str(i.get("id")), []), ids, cfg, postmortems, actions, set(missing_pm),
+                history_known=str(i.get("id")) not in unknown_ids,
             )
             for i in raw
         ]
@@ -466,6 +486,7 @@ def main() -> int:
         pass
     except Exception as e:  # unexpected response shape: keep what was collected and say why
         client.fail("collection", type(e).__name__, str(e)[:200], "internal_error")
+        search_complete = False  # the collection did not finish, so no count is trusted
 
     evidence = {
         "metadata": {
@@ -494,7 +515,12 @@ def main() -> int:
             "api_failures": client.api_failures,
         },
         "collector": collector,
-        "summary": _summarize(incidents, search_complete),
+        # A capped search is also unfinished: its totals would read as the population.
+        # Hidden or unread post-mortems and action items make every action-item
+        # count low, so that block is null when any related issue was not read.
+        "summary": _summarize(
+            incidents, search_complete and not truncated, related_complete and not missing_related
+        ),
         "incidents": incidents,
     }
     incomplete = ""

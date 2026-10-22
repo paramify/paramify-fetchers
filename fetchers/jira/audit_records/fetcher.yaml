@@ -65,9 +65,10 @@ evidence_set:
     nothing are reported in summary.unclassified_categories. Summary: total,
     oldest_record, newest_record (shows retention covers the window),
     distinct_authors, by_category, by_object_type, by_author,
-    sensitive_changes and unclassified_categories. Issue edits are not in this
-    log; organization-level audit is not collected. Output:
-    jira_audit_records.json
+    sensitive_changes and unclassified_categories; counts are null, not zero,
+    when the window was not fully read (a failed or short page, or the cap).
+    Issue edits are not in this log; organization-level audit is not
+    collected. Output: jira_audit_records.json
   description: >-
     The Jira site's own record of administrative and configuration changes,
     evidencing that privileged activity on the change and incident tracking

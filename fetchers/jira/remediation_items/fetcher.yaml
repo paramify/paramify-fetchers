@@ -50,10 +50,15 @@ evidence_set:
     components, parent and issuelinks, then reads every ticket's full status
     history with POST /rest/api/3/changelog/bulkfetch (fieldIds=status, 1000
     issues per call, de-duplicated by history id). Per item: is_open, overdue
-    (open and due date passed), days_open, days_to_close and status_transitions
-    (at, by, from, to). Summary: total, open, closed, open_overdue,
-    open_unassigned, open_without_due_date, closed_after_due_date, days_to_close
-    and open_age_days stats. Output: jira_remediation_items.json
+    (open and due date passed), closed_at with closed_at_source (resolutiondate,
+    else the last move into the current status from the history rendered in the
+    ticket's own UTC offset, else unknown when the history read failed),
+    days_open, days_to_close and status_transitions (at, by, from, to).
+    Summary: total, open, closed, open_overdue, open_unassigned,
+    open_without_due_date, closed_after_due_date, closed_without_close_time,
+    closed_close_time_unknown, days_to_close and open_age_days stats; counts
+    are null, not zero, when the search did not finish or hit the cap. Output:
+    jira_remediation_items.json
   description: >-
     Findings recorded as Jira tickets, each with an owner and a due date, and
     their movement to closure, evidencing that test and assessment findings are

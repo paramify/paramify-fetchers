@@ -133,10 +133,15 @@ evidence_set:
     and comment counts show visibility, not who was notified),
     exception_without_approval, exception_review_overdue,
     exception_open_past_expiry. A finding is produced only when the field it
-    reads is turned on; metadata.checks_disabled lists the rest.
-    metadata.partial_failure is true whenever the run is incomplete (a failed
-    call, a hit cap or an unresolved field). Comment bodies are not collected.
-    Output: jira_change_requests.json
+    reads is turned on; metadata.checks_disabled lists the rest. A ticket whose
+    history read failed lists approval_unknown under unknown (never
+    deployed_without_approval) when approval is status-based, and
+    status_history_known is false. Changelog times are rendered in the
+    ticket's own UTC offset so they compare with date-only fields the way
+    field timestamps do. Summary counts are null, not zero, when the search
+    did not finish or hit the cap. metadata.partial_failure is true whenever
+    the run is incomplete (a failed call, a hit cap or an unresolved field).
+    Comment bodies are not collected. Output: jira_change_requests.json
   description: >-
     Change, internal connection and exception tickets with their CCB approval,
     deployment, testing and review trail, evidencing that changes are approved

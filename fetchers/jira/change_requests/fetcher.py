@@ -20,6 +20,7 @@ from jira_common import (  # noqa: E402
     counts,
     disabled_roles,
     field_problem_reason,
+    in_offset_of,
     int_env,
     invalid_roles,
     is_date_only,
@@ -93,17 +94,22 @@ def _lower_set(values) -> set:
     return {v.strip().lower() for v in values if v and v.strip()}
 
 
-def _transitions(histories: list, field_ids: dict) -> tuple:
-    """Return (status_moves, field_changes) from changelog histories, oldest first."""
+def _transitions(histories: list, field_ids: dict, reference=None) -> tuple:
+    """Return (status_moves, field_changes) from changelog histories, oldest first.
+
+    Times are rendered in the issue's own UTC offset (see in_offset_of) so a move
+    compares with a date-only field the same way a field timestamp does.
+    """
     moves, changes = [], []
     watched = {fid: role for role, fids in field_ids.items() for fid in fids}
     for h in histories:
+        at = in_offset_of(h.get("created"), reference)
         for item in h.get("items") or []:
             fid = item.get("fieldId") or item.get("field")
             if fid == "status":
                 moves.append(
                     {
-                        "at": h.get("created"),
+                        "at": at,
                         "by": name_of(h.get("author"), "displayName"),
                         "from": item.get("fromString"),
                         "to": item.get("toString"),
@@ -114,7 +120,7 @@ def _transitions(histories: list, field_ids: dict) -> tuple:
             elif fid in watched:
                 changes.append(
                     {
-                        "at": h.get("created"),
+                        "at": at,
                         "by": name_of(h.get("author"), "displayName"),
                         "field": watched[fid],
                         "to": item.get("toString"),
@@ -170,13 +176,24 @@ def _links(f: dict) -> list:
     return out
 
 
-def _record(issue: dict, histories: list, ids: dict, cfg: dict, now, catalog=(set(), set(), False)) -> dict:
+def _record(
+    issue: dict,
+    histories: list,
+    ids: dict,
+    cfg: dict,
+    now,
+    catalog=(set(), set(), False),
+    history_known: bool = True,
+) -> dict:
     f = issue.get("fields") or {}
     status = f.get("status") or {}
     category = name_of(status.get("statusCategory"), "key")
     issue_type = name_of(f.get("issuetype"))
     custom = role_values(f, ids)
-    moves, changes = _transitions(histories, ids)
+    moves, changes = _transitions(histories, ids, f.get("created"))
+    # When this ticket's history read failed, nothing derived from it is known:
+    # a status-based approval, the first move into done, who recorded the approval.
+    unknown = []
 
     approved_status_move = next(
         (m for m in moves if (m["to"] or "").strip().lower() in cfg["approved_statuses"]), None
@@ -230,11 +247,17 @@ def _record(issue: dict, histories: list, ids: dict, cfg: dict, now, catalog=(se
     watches = f.get("watches") if isinstance(f.get("watches"), dict) else {}
     comments = f.get("comment") if isinstance(f.get("comment"), dict) else {}
 
+    # A status-based approval lives in the history; with the history unknown an
+    # absent approval is unknown, not missing.
+    approval_unknown = bool(not history_known and not approval_source and cfg["approved_statuses"])
+
     findings = []
     if approval_time_unparseable:
         findings.append("approval_time_unparseable")
     if done and not is_exception:
-        if not approval_source and not preapproved:
+        if approval_unknown and not preapproved:
+            unknown.append("approval_unknown")
+        elif not approval_source and not preapproved:
             findings.append("deployed_without_approval")
         if approved_before_deploy is False:
             findings.append("approved_after_deploy")
@@ -271,7 +294,9 @@ def _record(issue: dict, histories: list, ids: dict, cfg: dict, now, catalog=(se
             "open_past_expiry": (not closed) and bool(expiry) and str(expiry)[:10] < today,
             "closed_at": f.get("resolutiondate") if closed else None,
         }
-        if not approval_source:
+        if approval_unknown:
+            unknown.append("approval_unknown")
+        elif not approval_source:
             findings.append("exception_without_approval")
         if exception["review_overdue"]:
             findings.append("exception_review_overdue")
@@ -300,7 +325,8 @@ def _record(issue: dict, histories: list, ids: dict, cfg: dict, now, catalog=(se
         "deployed": done and not is_exception,
         "deployed_at": deployed_at if not is_exception else None,
         "last_done_at": last_done_at if not is_exception else None,
-        "reopened": len(done_moves) > 1,
+        "reopened": len(done_moves) > 1 if history_known else None,
+        "status_history_known": history_known,
         "approved_before_deploy": approved_before_deploy,
         "approval_order_granularity": approval_granularity if approved_ts and deployed_ts else None,
         "test_results": custom.get("test_results"),
@@ -314,6 +340,7 @@ def _record(issue: dict, histories: list, ids: dict, cfg: dict, now, catalog=(se
         "status_transitions": moves,
         "field_changes": changes,
         "findings": findings,
+        "unknown": unknown,
     }
 
 
@@ -345,6 +372,8 @@ def _summarize(records: list, complete: bool = True) -> dict:
         "exceptions_closed": len(exceptions) - len(open_ex),
         "findings": counts(all_findings),
         "tickets_with_findings": sum(1 for r in records if r["findings"]),
+        "unknown": counts(u for r in records for u in r["unknown"]),
+        "tickets_with_unknown_checks": sum(1 for r in records if r["unknown"]),
     }
     # When the ticket search did not finish, every count would read as "none found".
     return summary if complete else null_summary(summary)
@@ -446,17 +475,22 @@ def main() -> int:
         raw, truncated, search_complete = client.search_issues(
             jql, BASE_FIELDS + all_field_ids(ids), cfg["max_items"]
         )
-        histories, history_complete = client.bulk_changelogs(
+        histories, history_complete, unknown_ids = client.bulk_changelogs(
             [str(i.get("id")) for i in raw if i.get("id")],
             ["status"] + all_field_ids(ids),
         )
         records = [
-            _record(i, histories.get(str(i.get("id")), []), ids, cfg, now, catalog) for i in raw
+            _record(
+                i, histories.get(str(i.get("id")), []), ids, cfg, now, catalog,
+                history_known=str(i.get("id")) not in unknown_ids,
+            )
+            for i in raw
         ]
     except Abort:
         pass
     except Exception as e:  # unexpected response shape: keep what was collected and say why
         client.fail("collection", type(e).__name__, str(e)[:200], "internal_error")
+        search_complete = False  # the collection did not finish, so no count is trusted
 
     evidence = {
         "metadata": {
@@ -482,7 +516,8 @@ def main() -> int:
             "api_failures": client.api_failures,
         },
         "collector": collector,
-        "summary": _summarize(records, search_complete),
+        # A capped search is also unfinished: its totals would read as the population.
+        "summary": _summarize(records, search_complete and not truncated),
         "tickets": records,
     }
     incomplete = ""

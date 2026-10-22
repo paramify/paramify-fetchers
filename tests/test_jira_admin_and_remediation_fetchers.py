@@ -747,7 +747,9 @@ def test_incident_hidden_postmortem_is_not_reported_as_missing(run):
         raise AssertionError(path)
 
     code, out, _, status = run("incident_postmortems", router, {"JIRA_INCIDENT_JQL": "project = IR"})
-    assert out["incidents"][0]["findings"] == ["postmortem_not_visible"]
+    assert out["incidents"][0]["findings"] == []
+    assert out["incidents"][0]["unknown"] == ["postmortem_not_visible"]
+    assert out["summary"]["findings"] == {} and out["summary"]["unknown"] == {"postmortem_not_visible": 1}
     assert out["metadata"]["related_issues_not_visible"] == ["IR-99"]
     assert code == 1 and status["code"] == "partial_failure"
 
@@ -944,9 +946,15 @@ def test_incident_failed_bulkfetch_is_not_visible_not_missing(run):
         "incident_postmortems",
         _ir_router([inc], bulk=lambda body: (403, {"errorMessages": ["no permission"]})),
         {"JIRA_INCIDENT_JQL": "project = IR"})
-    assert out["incidents"][0]["findings"] == ["postmortem_not_visible"]
+    assert out["incidents"][0]["findings"] == []
+    assert out["incidents"][0]["unknown"] == ["postmortem_not_visible"]
     assert out["metadata"]["related_issues_not_visible"] == ["IR-99"]
     assert out["metadata"]["related_issues_complete"] is False
+    # A refused read is not "0 action items": that block is null, the rest stays measured.
+    assert out["summary"]["action_items"] == {
+        "total": None, "open": None, "done": None, "open_unassigned": None, "overdue": None
+    }
+    assert out["summary"]["incidents"] == 1
     assert code == 1 and out["metadata"]["partial_failure"] is True
     assert out["summary"]["resolved_without_postmortem"] == 0
 
@@ -986,7 +994,8 @@ def test_incident_unreadable_action_items_are_not_reported_as_none(run):
 
     code, out, _, _ = run("incident_postmortems", _ir_router([inc], bulk=bulk), {"JIRA_INCIDENT_JQL": "project = IR"})
     i = out["incidents"][0]
-    assert i["findings"] == ["action_items_not_visible"]
+    assert i["findings"] == [] and i["unknown"] == ["action_items_not_visible"]
+    assert out["summary"]["action_items"]["total"] is None
     assert i["postmortems"][0]["action_item_count"] == 2 and i["action_items"] == []
     assert out["metadata"]["related_issues_not_visible"] == ["IR-10", "IR-11"]
     assert code == 1 and out["metadata"]["partial_failure"] is True
@@ -1268,7 +1277,8 @@ def test_bulk_changelogs_merges_items_of_one_history_across_field_groups():
             {"id": "h1", "created": 1767571200000, "items": [{"fieldId": fid, "toString": "x"}]}]}]}
 
     client.request = fake
-    out, complete = client.bulk_changelogs(["1"], [f"f{i}" for i in range(12)])
+    out, complete, unknown = client.bulk_changelogs(["1"], [f"f{i}" for i in range(12)])
+    assert unknown == set()
     assert complete and len(pages) == 2 and [len(p) for p in pages] == [10, 2]
     assert len(out["1"]) == 1, "one history, not one per field group"
     assert [i["fieldId"] for i in out["1"][0]["items"]] == ["f0", "f10"]
@@ -1350,7 +1360,8 @@ def test_bulk_changelogs_stops_on_a_repeated_page_token():
         return {"issueChangeLogs": [], "nextPageToken": "same"}
 
     client.request = fake
-    out, complete = client.bulk_changelogs(["1"], ["status"])
+    out, complete, unknown = client.bulk_changelogs(["1"], ["status"])
+    assert unknown == {"1"}
     assert complete is False and calls == [None, "same"]
     assert client.api_failures[0]["type"] == "RepeatedPageToken"
 
@@ -1640,3 +1651,329 @@ def test_incident_date_only_detected_time_is_not_measurable_not_late(run):
     i = out["incidents"][0]
     assert i["minutes_to_report"] is None and i["findings"] == ["report_time_not_measurable"]
     assert out["summary"]["reported_late"] == 0 and out["summary"]["incidents_without_report_timing"] == 1
+
+
+# ---------- third review round: a refused read is unknown, never a finding or a zero ----------
+
+def test_change_requests_failed_history_makes_status_approval_unknown_not_a_finding(run):
+    # Approval is a status move; the history read fails, so the approval is unknown.
+    t = _ticket(1, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}, "cf6": {"value": "Passed"}})
+    pre = _ticket(2, "Change Request", "Done", "done", {"cf1": {"value": "Standard"}, "cf6": {"value": "Passed"}})
+    ex = _ticket(3, "Configuration Exception", "Backlog", "new", {"cf8": "2099-01-01", "cf9": "2026-10-01"})
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 503, {"errorMessages": ["down"]}
+        return _cr_router([t, pre, ex])(method, path, params, body)
+
+    env = {"JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_APPROVED_STATUSES": "Approved"}
+    code, out, _, status = run("change_requests", router, env)
+    by_key = {r["key"]: r for r in out["tickets"]}
+    assert by_key["CCB-1"]["findings"] == [] and by_key["CCB-1"]["unknown"] == ["approval_unknown"]
+    assert by_key["CCB-1"]["status_history_known"] is False and by_key["CCB-1"]["reopened"] is None
+    assert by_key["CCB-2"]["unknown"] == [], "a pre-approved change needs no approval"
+    assert by_key["CCB-3"]["findings"] == [] and by_key["CCB-3"]["unknown"] == ["approval_unknown"]
+    assert out["summary"]["findings"] == {} and out["summary"]["unknown"] == {"approval_unknown": 2}
+    assert out["summary"]["tickets_with_unknown_checks"] == 2
+    assert out["metadata"]["status_history_complete"] is False
+    assert code == 1 and status["code"] == "partial_failure"
+
+
+def test_change_requests_history_times_are_compared_in_the_ticket_offset(run):
+    # The approval date field is 2026-10-06; the deployment move happened at
+    # 2026-10-05 20:00 -0700, which bulkfetch reports as epoch ms (03:00 UTC on the 6th).
+    # Rendered in the ticket's own offset (-0700) it is the 5th: approval after deploy.
+    t = _ticket(1, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}, "cf3": APPROVER,
+                "cf4": "2026-10-06", "cf6": {"value": "Passed"}})
+    t["fields"]["created"] = "2026-10-01T00:00:00.000-0700"
+    t["fields"]["resolutiondate"] = "2026-10-05T20:00:00.000-0700"
+    epoch_ms = 1791255600000  # 2026-10-06T03:00:00Z
+    hist = [{"issueId": "501", "changeHistories": [{"id": "h1", "created": epoch_ms, "author": {"displayName": "Dev"},
+             "items": [{"fieldId": "status", "fromString": "In Progress", "from": "3", "toString": "Done", "to": "10001"}]}]}]
+    code, out, _, _ = run("change_requests", _cr_router([t], hist), {"JIRA_CHANGE_JQL": "project = CCB"})
+    r = out["tickets"][0]
+    assert r["deployed_at"] == "2026-10-05T20:00:00.000-07:00"
+    assert r["approved_before_deploy"] is False and "approved_after_deploy" in r["findings"]
+
+
+def test_change_requests_capped_search_has_a_null_summary(run):
+    tickets = [_ticket(i, "Change Request", "Done", "done", {"cf1": {"value": "Standard"}}) for i in range(1, 4)]
+    code, out, _, status = run("change_requests", _cr_router(tickets), {"JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_MAX_ITEMS": "2"})
+    assert out["metadata"]["items_truncated"] is True and out["metadata"]["items_collected"] == 2
+    assert out["summary"]["total"] is None and out["summary"]["by_kind"] is None
+    assert code == 1 and status["code"] == "partial_failure"
+
+
+def test_change_requests_unexpected_shape_has_a_null_summary(run):
+    bad = _ticket(1, "Change Request", "Done", "done", {})
+    bad["fields"]["status"] = "Done"
+    code, out, _, status = run("change_requests", _cr_router([bad]), {"JIRA_CHANGE_JQL": "project = CCB"})
+    assert status["code"] == "internal_error" and out["summary"]["total"] is None
+
+
+def test_incident_failed_history_makes_phases_unknown_not_missing(run):
+    inc = _incident(1, {"cf10": {"value": "SEV 2"}, "cf11": {"value": "CAT 7"},
+                        "cf12": "2026-10-05T12:00:00.000+0000", "cf13": "2026-10-05T12:30:00.000+0000",
+                        "cf14": {"value": "Lessons Learned"}}, links=["IR-7"])
+    pm = {"id": "707", "key": "IR-7", "fields": {"issuetype": {"name": "Post-mortem"}, "summary": "pm",
+          "status": {"name": "Done"}, "created": "2026-10-06T00:00:00.000+0000", "subtasks": []}}
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 503, {"errorMessages": ["down"]}
+        if path == "/rest/api/3/issue/bulkfetch":
+            return 200, {"issues": [pm], "issueErrors": []}
+        return _ir_router([inc])(method, path, params, body)
+
+    env = {"JIRA_INCIDENT_JQL": "project = IR", "JIRA_INCIDENT_REQUIRED_PHASES": "Identification,Containment,Lessons Learned"}
+    code, out, _, status = run("incident_postmortems", router, env)
+    i = out["incidents"][0]
+    assert "phases_missing" not in i["findings"] and "phases_unknown" in i["unknown"]
+    assert i["phases_missing"] is None and i["status_history_known"] is False
+    assert out["summary"]["unknown"]["phases_unknown"] == 1
+    assert code == 1 and status["code"] == "partial_failure"
+
+
+def test_incident_capped_search_has_a_null_summary(run):
+    incs = [_incident(n, {"cf10": {"value": "SEV 4"}}, cat="new") for n in range(1, 4)]
+    code, out, _, status = run("incident_postmortems", _ir_router(incs), {"JIRA_INCIDENT_JQL": "project = IR", "JIRA_INCIDENT_MAX_ITEMS": "2"})
+    assert out["metadata"]["incidents_truncated"] is True and out["summary"]["incidents"] is None
+    assert code == 1 and status["code"] == "partial_failure"
+
+
+def test_remediation_failed_history_makes_the_close_time_unknown_not_absent(run):
+    done = _issue(1, "Done", "done", due="2026-01-10")  # no resolutiondate
+    done["fields"]["issuelinks"] = []
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [done], "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 503, {"errorMessages": ["down"]}
+        raise AssertionError(path)
+
+    code, out, _, status = run("remediation_items", router, {"JIRA_REMEDIATION_JQL": "project = OPS"})
+    item = out["items"][0]
+    assert item["closed_at"] is None and item["closed_at_source"] == "unknown"
+    assert item["status_history_known"] is False and item["status_change_count"] is None
+    assert out["summary"]["closed_without_close_time"] == 0
+    assert out["summary"]["closed_close_time_unknown"] == 1
+    assert out["summary"]["closed_after_due_date"] == 0
+    assert code == 1 and status["code"] == "partial_failure"
+
+
+def test_remediation_history_close_time_is_compared_in_the_ticket_offset(run):
+    # Due 2026-01-05; closed 2026-01-05 20:00 -0700 (= 03:00Z on the 6th, as epoch ms).
+    # In the ticket's own offset that is the due day, so it is not late.
+    done = _issue(1, "Done", "done", due="2026-01-05")
+    done["fields"]["created"] = "2026-01-01T00:00:00.000-0700"
+    epoch_ms = 1767668400000  # 2026-01-06T03:00:00Z
+    hist = {"id": "h1", "created": epoch_ms, "author": {"displayName": "Ann"},
+            "items": [{"fieldId": "status", "fromString": "In Progress", "toString": "Done"}]}
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [done], "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": [{"issueId": "101", "changeHistories": [hist]}]}
+        raise AssertionError(path)
+
+    code, out, _, _ = run("remediation_items", router, {"JIRA_REMEDIATION_JQL": "project = OPS"})
+    item = out["items"][0]
+    assert item["closed_at"] == "2026-01-05T20:00:00.000-07:00" and item["closed_at_source"] == "status_history"
+    assert out["summary"]["closed_after_due_date"] == 0 and code == 0
+
+
+def test_remediation_capped_search_and_bad_shape_have_null_summaries(run):
+    def capped(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [_issue(i, "To Do", "new") for i in range(body["maxResults"])],
+                         "nextPageToken": "more"}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        raise AssertionError(path)
+
+    code, out, _, status = run("remediation_items", capped, {"JIRA_REMEDIATION_JQL": "x", "JIRA_REMEDIATION_MAX_ITEMS": "3"})
+    assert out["metadata"]["items_truncated"] is True and out["summary"]["total"] is None
+
+    bad = _issue(1, "Done", "done")
+    bad["fields"]["issuelinks"] = [None]
+
+    def odd(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [bad], "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        raise AssertionError(path)
+
+    code, out, _, status = run("remediation_items", odd, {"JIRA_REMEDIATION_JQL": "x"})
+    assert code == 1 and status["code"] == "internal_error"
+    assert out["summary"]["total"] is None and out["metadata"]["complete"] is False
+
+
+def test_audit_records_truncated_or_failed_later_page_has_a_null_summary(run):
+    def truncated(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        start = params["offset"]
+        batch = [{"id": i, "created": "2026-10-01T00:00:00.000+0000", "category": "permissions"}
+                 for i in range(start, min(start + 1000, 2000))]
+        return 200, {"offset": start, "limit": 1000, "total": 2000, "records": batch}
+
+    code, out, _, _ = run("audit_records", truncated, {"JIRA_AUDIT_MAX_RECORDS": "1500"})
+    assert out["metadata"]["records_collected"] == 1500 and out["summary"]["total"] is None
+
+    def later_page_fails(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if params["offset"] == 0:
+            batch = [{"id": i, "created": "2026-10-01T00:00:00.000+0000", "category": "permissions"} for i in range(1000)]
+            return 200, {"offset": 0, "limit": 1000, "records": batch}  # no total key
+        return 503, {"errorMessages": ["down"]}
+
+    code, out, _, status = run("audit_records", later_page_fails)
+    assert out["metadata"]["records_collected"] == 1000 and out["summary"]["total"] is None
+    assert code == 1 and status["code"] == "partial_failure"
+
+    def odd(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        return 200, {"offset": 0, "total": 1, "records": [None]}
+
+    code, out, _, status = run("audit_records", odd)
+    assert status["code"] == "internal_error" and out["summary"]["total"] is None
+
+
+def test_access_roles_failed_role_read_nulls_the_project_section_only(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/project/CCB/role/10002":
+            return 403, {"errorMessages": ["no permission"]}
+        return _access_router(role_index_allowed=False)(method, path, params, body)
+
+    code, out, _, status = run("access_roles", router)
+    assert out["summary"]["admin_groups"] == 1 and out["summary"]["distinct_admin_users"] == 1
+    assert out["summary"]["distinct_project_admin_users"] is None
+    assert out["summary"]["privileged_users_per_project"] is None
+    assert out["summary"]["projects_scanned"] is None
+    assert out["projects"][0]["roles_read_completely"] is False
+    assert out["metadata"]["projects_with_unread_roles"] == 1
+    assert code == 1 and status["code"] == "not_authorized"
+
+
+def test_access_roles_failed_role_index_nulls_the_project_section(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/project/CCB/role":
+            return 503, {"errorMessages": ["down"]}
+        return _access_router(role_index_allowed=True)(method, path, params, body)
+
+    code, out, _, _ = run("access_roles", router, {"JIRA_ACCESS_ALL_ROLES": "true"})
+    assert out["summary"]["distinct_project_admin_users"] is None and out["summary"]["admin_groups"] == 1
+
+
+def test_access_roles_failed_project_group_membership_nulls_only_the_project_section(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/project/CCB/permissionscheme":
+            return 200, {"id": 1, "name": "Default", "permissions": [
+                {"permission": "ADMINISTER_PROJECTS", "holder": {"type": "group", "parameter": "proj-admins",
+                                                                  "group": {"name": "proj-admins", "groupId": "g-proj"}}},
+            ]}
+        if path == "/rest/api/3/group/member" and params["groupId"] == "g-proj":
+            return 503, {"errorMessages": ["down"]}
+        return _access_router(role_index_allowed=False)(method, path, params, body)
+
+    code, out, _, status = run("access_roles", router)
+    assert out["summary"]["admin_groups"] == 1 and out["summary"]["distinct_admin_users"] == 1
+    assert out["summary"]["distinct_project_admin_users"] is None
+    assert out["metadata"]["groups_with_incomplete_membership"] == ["proj-admins"]
+    assert code == 1 and status["code"] == "partial_failure"
+
+
+def test_access_roles_failed_admin_group_membership_nulls_only_the_admin_section(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/group/member" and params["groupId"] == "g-adm":
+            return 503, {"errorMessages": ["down"]}
+        return _access_router(role_index_allowed=False)(method, path, params, body)
+
+    code, out, _, _ = run("access_roles", router)
+    assert out["summary"]["admin_groups"] is None and out["summary"]["distinct_admin_users"] is None
+    assert out["summary"]["distinct_project_admin_users"] == 1 and out["summary"]["projects_scanned"] == 1
+
+
+def test_access_roles_partly_listed_admin_groups_are_not_the_admin_population(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/group/bulk" and params.get("applicationKey") == "jira-software" and params["accessType"] == "admin":
+            return 503, {"errorMessages": ["down"]}
+        return _access_router(role_index_allowed=False)(method, path, params, body)
+
+    code, out, _, status = run("access_roles", router)
+    assert out["summary"]["admin_groups"] is None and out["summary"]["distinct_admin_users"] is None
+    assert out["summary"]["projects_scanned"] == 1
+    assert code == 1 and status["code"] == "partial_failure"
+
+    def named_fails(method, path, params, body):
+        if path == "/rest/api/3/group/bulk" and params.get("groupName") == "ops-admins":
+            return 503, {"errorMessages": ["down"]}
+        return _access_router(role_index_allowed=False)(method, path, params, body)
+
+    code, out, _, _ = run("access_roles", named_fails, {"JIRA_ADMIN_GROUPS": "ops-admins"})
+    assert out["summary"]["admin_groups"] is None
+
+
+def test_access_roles_unexpected_shape_midway_nulls_both_sections(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/project/search":
+            return 200, {"isLast": True, "values": [
+                {"key": "P1", "name": "One", "projectTypeKey": "software", "lead": {}},
+                {"key": "P2", "name": "Two", "projectTypeKey": "software", "lead": {}},
+            ]}
+        if path == "/rest/api/3/project/P1/permissionscheme":
+            return 200, {"id": 1, "name": "Default", "permissions": []}
+        if path == "/rest/api/3/project/P2/permissionscheme":
+            return 200, ["not", "a", "scheme"]  # truthy, wrong shape
+        return _access_router(role_index_allowed=False)(method, path, params, body)
+
+    code, out, _, status = run("access_roles", router)
+    assert status["code"] == "internal_error"
+    assert out["summary"]["projects_scanned"] is None and out["summary"]["admin_groups"] is None
+    assert [p["key"] for p in out["projects"]] == ["P1"]
+
+
+def test_is_date_only_needs_a_real_date():
+    import jira_common as jc
+    assert jc.is_date_only("2026-10-05") is True
+    assert jc.is_date_only("10/05/2026") is False
+    assert jc.is_date_only("2026-10-05T00:00:00.000+0000") is False
+    assert jc.in_offset_of(1791255600000, "2026-10-01T00:00:00.000-0700") == "2026-10-05T20:00:00.000-07:00"
+    assert jc.in_offset_of("2026-10-06T03:00:00.000+0000", None) == "2026-10-06T03:00:00.000+00:00"
+    assert jc.in_offset_of("garbage", "2026-10-01T00:00:00.000-0700") == "garbage"
+
+
+def test_incident_unparseable_ten_character_time_is_unparseable_not_unmeasurable(run):
+    inc = _incident(1, {"cf10": {"value": "SEV 3"}, "cf11": {"value": "CAT 3"},
+                        "cf12": "10/05/2026", "cf13": "2026-10-05T15:00:00.000+0000"}, cat="new")
+    code, out, _, _ = run("incident_postmortems", _ir_router([inc]), {"JIRA_INCIDENT_JQL": "project = IR"})
+    assert out["incidents"][0]["findings"] == ["detected_or_reported_time_unparseable"]
+
+
+def test_search_issues_stops_on_a_repeated_token(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [_issue(len([1]), "To Do", "new")], "nextPageToken": "t1"}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        raise AssertionError(path)
+
+    code, out, calls, status = run("remediation_items", router, {"JIRA_REMEDIATION_JQL": "labels = x"})
+    assert len([c for c in calls if c[1] == "/rest/api/3/search/jql"]) == 2
+    assert out["metadata"]["api_failures"][0]["type"] == "BadPaging"
+    assert out["metadata"]["items_collected"] == 2 and out["summary"]["total"] is None

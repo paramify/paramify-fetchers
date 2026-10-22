@@ -82,6 +82,23 @@ schemas and the `paramify` CLI — not the internal code.
   no `resolutiondate` from its status history and counts
   `closed_without_close_time`. `jira_change_requests` claims only KSI-CMT-LMC
   (CNA-RNT and CNA-ULN dropped). `search_issues` stops on a repeated page token.
+- **All Jira fetchers** (third round, from an adversarial review of the second):
+  a check that could not run because a read failed is listed per ticket under
+  `unknown`, never under `findings` (`approval_unknown` when a status-based
+  approval's history read failed; `phases_unknown`, `postmortem_not_visible`,
+  `action_items_not_visible`; a remediation ticket's `closed_at_source:
+  unknown`), and `bulk_changelogs` now says which issues' history it failed to
+  read. A capped search, a stopped collection (an unexpected response shape)
+  and, in `jira_access_roles`, a failed role, role-index, admin-group listing or
+  membership read null the summary section they belong to and no other.
+  `summary.action_items` is null when any post-mortem or action item was not
+  read. Changelog times are rendered in the ticket's own UTC offset before they
+  are compared with a date-only field (bulkfetch gives epoch milliseconds, which
+  is UTC), so a closure at 20:00 local on the due day is no longer "after the due
+  date". `is_date_only` requires a parseable date, so `10/05/2026` is
+  unparseable, not unmeasurable. `jira_remediation_items` and
+  `jira_audit_records` now survive an unexpected response shape (`internal_error`
+  with the evidence written) like the other four.
 - **`jira_site_inventory` behaviour change** (from the base URL allowlist above):
   `JIRA_BASE_URL` now accepts `https://<site>.atlassian.net`,
   `https://<site>.jira.com`, the Government Cloud domain and the scoped-token

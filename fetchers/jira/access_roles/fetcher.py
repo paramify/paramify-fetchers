@@ -14,6 +14,7 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from jira_common import (  # noqa: E402
     NOT_FOUND,
     Abort,
+    Counts,
     JiraClient,
     collector_info,
     connection_settings,
@@ -76,9 +77,14 @@ def _group_members(client: JiraClient, group_id: str, label: str):
     return [_user(u) for u in values], complete
 
 
-def _admin_groups(client: JiraClient) -> dict:
-    """{group_id: {name, access_types}} for groups with site-admin or admin access."""
+def _admin_groups(client: JiraClient):
+    """({group_id: {name, access_types}} for groups with site-admin or admin access, complete).
+
+    complete is False when any listing failed, so a partial list is never
+    reported as the whole admin population.
+    """
     found: dict = {}
+    complete = True
     for access_type in ADMIN_ACCESS_TYPES:
         page = client.request(
             "GET",
@@ -91,37 +97,42 @@ def _admin_groups(client: JiraClient) -> dict:
             # The API refused accessType without an applicationKey; ask per product.
             for app_key in APPLICATION_KEYS:
                 # A product the site does not have may answer 400 or 404: not a failure.
-                values, _ = client.paged_values(
+                values, ok = client.paged_values(
                     "/rest/api/3/group/bulk",
                     f"GET /rest/api/3/group/bulk (accessType={access_type}, applicationKey={app_key})",
                     params={"accessType": access_type, "applicationKey": app_key},
                     quiet_400=True,
                     allow_404=True,
                 )
+                complete = complete and ok
                 for g in values:
                     found.setdefault(g.get("groupId"), {"name": g.get("name"), "access_types": set()})[
                         "access_types"
                     ].add(access_type)
             continue
         if page is None:
+            complete = False
             continue
         values = list(page.get("values") or [])
         if not page.get("isLast", True) and values:
-            more, _ = client.paged_values(
+            more, ok = client.paged_values(
                 "/rest/api/3/group/bulk",
                 f"GET /rest/api/3/group/bulk (accessType={access_type})",
                 params={"accessType": access_type},
             )
+            complete = complete and ok
             values = more
         for g in values:
             found.setdefault(g.get("groupId"), {"name": g.get("name"), "access_types": set()})[
                 "access_types"
             ].add(access_type)
-    return found
+    return found, complete
 
 
-def _named_groups(client: JiraClient, names: list) -> dict:
+def _named_groups(client: JiraClient, names: list):
+    """({group_id: {...}} for the configured admin groups, complete)."""
     found: dict = {}
+    complete = True
     for name in names:
         page = client.request(
             "GET",
@@ -129,6 +140,8 @@ def _named_groups(client: JiraClient, names: list) -> dict:
             f"GET /rest/api/3/group/bulk (groupName={name})",
             params={"groupName": name},
         )
+        if page is None:
+            complete = False
         for g in (page or {}).get("values") or []:
             found[g.get("groupId")] = {"name": g.get("name"), "access_types": {"configured"}}
         if page is not None and not (page.get("values") or []):
@@ -138,7 +151,7 @@ def _named_groups(client: JiraClient, names: list) -> dict:
                 f"configured admin group {name!r} does not exist or is not visible",
                 "bad_config",
             )
-    return found
+    return found, complete
 
 
 def _holder(h: dict) -> dict:
@@ -169,17 +182,21 @@ def _role_actor(a: dict) -> dict:
     return {"type": "user", "account_id": user.get("accountId"), "display_name": a.get("displayName")}
 
 
-def _project_roles(client: JiraClient, key: str, role_ids=None) -> list:
-    """Roles of a project with their actors.
+def _project_roles(client: JiraClient, key: str, role_ids=None):
+    """(roles of a project with their actors, complete).
 
     By default only the roles in `role_ids` (those named in a privileged grant) are
     read, one call each. With role_ids=None the role index is read and every role
-    follows, which is 2 + R calls per project.
+    follows, which is 2 + R calls per project. complete is False when the index or
+    any role could not be read: the project's privileged users are then unknown.
     """
+    complete = True
     if role_ids is None:
         index = client.request(
             "GET", f"/rest/api/3/project/{key}/role", f"GET /rest/api/3/project/{key}/role"
         )
+        if index is None:
+            complete = False
         wanted = {str(url).rstrip("/").rsplit("/", 1)[-1]: name for name, url in (index or {}).items()}
     else:
         wanted = {rid: None for rid in role_ids if rid}
@@ -191,6 +208,7 @@ def _project_roles(client: JiraClient, key: str, role_ids=None) -> list:
             f"GET /rest/api/3/project/{key}/role/{role_id}",
         )
         if role is None:
+            complete = False
             continue
         roles.append(
             {
@@ -199,7 +217,7 @@ def _project_roles(client: JiraClient, key: str, role_ids=None) -> list:
                 "actors": [_role_actor(a) for a in role.get("actors") or []],
             }
         )
-    return roles
+    return roles, complete
 
 
 def _privileged_users(grants: list, roles: list, lead_id, group_members: dict) -> list:
@@ -270,26 +288,32 @@ def main() -> int:
     schemes: dict = {}
     group_members: dict = {}
     group_names: dict = {}
-    incomplete_groups: list = []
+    group_complete: dict = {}
+    # Groups whose membership read failed, by the summary section that uses them:
+    # a failed project-grant group leaves the admin counts valid, and the reverse.
+    incomplete_groups: dict = {"admin": set(), "projects": set()}
     projects_truncated = False
     admin_section_ok = False
     project_search_complete = False
     schemes_unread = 0
+    roles_unread = 0
+    collection_finished = False
 
-    def members_of(group_id, label):
-        if not group_id or group_id in group_members:
+    def members_of(group_id, label, section):
+        if not group_id:
             return
-        members, complete = _group_members(client, group_id, label)
-        group_members[group_id] = members
-        group_names[group_id] = label
-        if not complete:
-            incomplete_groups.append(label)
+        if group_id not in group_members:
+            members, complete = _group_members(client, group_id, label)
+            group_members[group_id] = members
+            group_names[group_id] = label
+            group_complete[group_id] = complete
+        if not group_complete[group_id]:
+            incomplete_groups[section].add(label or group_id)
 
     try:
         collector = collector_info(client)
 
-        groups = _admin_groups(client)
-        admin_section_ok = bool(groups)
+        groups, groups_complete = _admin_groups(client)
         if not groups:
             # Every Jira Cloud site has at least one admin group; none read means the
             # calls were refused or the API changed, never that nobody is an admin.
@@ -297,9 +321,12 @@ def main() -> int:
                 "GET /rest/api/3/group/bulk", "NoAdminGroups",
                 "no site-admin or admin group could be read for any product", "partial_failure",
             )
-        groups.update(_named_groups(client, extra_admin_groups))
+        named, named_complete = _named_groups(client, extra_admin_groups)
+        groups.update(named)
+        # A partly read admin list is not the admin population.
+        admin_section_ok = bool(groups) and groups_complete and named_complete
         for gid, g in sorted(groups.items(), key=lambda kv: kv[1]["name"] or ""):
-            members_of(gid, g["name"])
+            members_of(gid, g["name"], "admin")
             members = group_members.get(gid) or []
             admin_groups.append(
                 {
@@ -368,7 +395,9 @@ def main() -> int:
                     if g.get("permission") in PRIVILEGED_PERMISSIONS
                 ]
             granted_roles = sorted({g["holder"].get("role_id") for g in grants if g["holder"]["type"] == "projectRole"})
-            roles = _project_roles(client, key, None if all_roles else granted_roles)
+            roles, roles_complete = _project_roles(client, key, None if all_roles else granted_roles)
+            if not roles_complete:
+                roles_unread += 1
             unresolved = [
                 {"permission": g["permission"], "holder_type": g["holder"]["type"], "parameter": g["holder"].get("parameter")}
                 for g in grants
@@ -376,11 +405,11 @@ def main() -> int:
             ]
             for g in grants:
                 if g["holder"]["type"] == "group":
-                    members_of(g["holder"].get("group_id"), g["holder"].get("group_name"))
+                    members_of(g["holder"].get("group_id"), g["holder"].get("group_name"), "projects")
             for r in roles:
                 for a in r["actors"]:
                     if a["type"] == "group":
-                        members_of(a.get("group_id"), a.get("group_name"))
+                        members_of(a.get("group_id"), a.get("group_name"), "projects")
             lead = p.get("lead") or {}
             projects.append(
                 {
@@ -394,16 +423,27 @@ def main() -> int:
                     "unresolved_privileged_grants": unresolved,
                     "roles": roles,
                     "privileged_users": _privileged_users(grants, roles, lead.get("accountId"), group_members),
+                    "roles_read_completely": roles_complete,
                 }
             )
+        collection_finished = True
     except Abort:
         pass
     except Exception as e:  # unexpected response shape: keep what was collected and say why
         client.fail("collection", type(e).__name__, str(e)[:200], "internal_error")
 
     # A section whose fetch failed is reported as not measured (null), never as a
-    # zero that would read as "no admins" or "no privileged grants".
-    projects_section_ok = project_search_complete and schemes_unread == 0 and not projects_truncated
+    # zero that would read as "no admins" or "no privileged grants". An unexpected
+    # error stopped the collection somewhere, so then neither section is trusted.
+    admin_section_ok = admin_section_ok and collection_finished and not incomplete_groups["admin"]
+    projects_section_ok = (
+        collection_finished
+        and project_search_complete
+        and schemes_unread == 0
+        and roles_unread == 0
+        and not projects_truncated
+        and not incomplete_groups["projects"]
+    )
     admin_users = {m["account_id"]: m for g in admin_groups for m in g["members"] if m["account_id"]}
     project_admins = {
         u["account_id"]
@@ -423,13 +463,14 @@ def main() -> int:
             "projects_truncated": projects_truncated,
             "project_search_complete": project_search_complete,
             "permission_schemes_unread": schemes_unread,
-            "groups_with_incomplete_membership": sorted(incomplete_groups),
+            "projects_with_unread_roles": roles_unread,
+            "groups_with_incomplete_membership": sorted(incomplete_groups["admin"] | incomplete_groups["projects"]),
             "partial_failure": bool(client.api_failures),
             "api_failures": client.api_failures,
         },
         "collector": collector,
         "summary": {
-            **_section(admin_section_ok and not incomplete_groups, {
+            **_section(admin_section_ok, {
                 "admin_groups": len(admin_groups),
                 "distinct_admin_users": len(admin_users),
                 "inactive_admin_users": sum(1 for u in admin_users.values() if u["active"] is False),
@@ -445,7 +486,7 @@ def main() -> int:
                     p["key"] for p in projects if p["unresolved_privileged_grants"]
                 ),
                 "distinct_project_admin_users": len(project_admins),
-                "privileged_users_per_project": {p["key"]: len(p["privileged_users"]) for p in projects},
+                "privileged_users_per_project": Counts((p["key"], len(p["privileged_users"])) for p in projects),
             }),
         },
         "admin_groups": admin_groups,
@@ -459,8 +500,11 @@ def main() -> int:
     incomplete = ""
     if projects_truncated:
         incomplete = f"projects truncated at JIRA_ACCESS_MAX_PROJECTS={max_projects}"
-    elif incomplete_groups:
-        incomplete = f"membership incomplete for {len(incomplete_groups)} group(s)"
+    elif incomplete_groups["admin"] or incomplete_groups["projects"]:
+        n = len(incomplete_groups["admin"] | incomplete_groups["projects"])
+        incomplete = f"membership incomplete for {n} group(s)"
+    elif roles_unread:
+        incomplete = f"project roles could not be read for {roles_unread} project(s)"
     return write_and_finish(logger, client, evidence, OUTPUT_FILE, incomplete)
 
 

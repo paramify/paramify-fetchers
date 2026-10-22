@@ -120,9 +120,12 @@ evidence_set:
     without Browse disappears from issuelinks and from bulkfetch without an
     issueErrors entry), so the collector must hold Browse Projects on the
     post-mortem project or the incident is reported as resolved_without_postmortem.
-    A linked issue the bulk call failed to read is reported as
-    postmortem_not_visible or action_items_not_visible, never as absent, and
-    fails the run as partial.
+    A check that could not run because a read failed is listed per incident
+    under unknown, never under findings: postmortem_not_visible and
+    action_items_not_visible (a linked issue the bulk call failed to read) and
+    phases_unknown (the history read failed, so past phases are unseen); such a
+    run fails as partial and summary.action_items is null whenever any
+    post-mortem or action item was not read.
     A detected or reported value that is a date without a time cannot measure
     minutes, so it is report_time_not_measurable, never late or on time.
     Findings: missing_detected_time, report_time_not_measurable,
@@ -130,13 +133,13 @@ evidence_set:
     reported_before_detected, reported_late,
     category_notification_target_missed, missing_severity, missing_category,
     category_without_target, phases_missing, resolved_without_postmortem,
-    postmortem_not_visible, postmortem_without_action_items,
-    action_items_not_visible, unassigned_action_items, overdue_action_items. A
-    finding is produced only when the field it reads is turned on;
-    metadata.checks_disabled lists the rest, and
+    postmortem_without_action_items, unassigned_action_items,
+    overdue_action_items. A finding is produced only when the field it reads
+    is turned on; metadata.checks_disabled lists the rest, and
     summary.incidents_without_report_timing counts incidents whose report time
-    could not be measured. metadata.partial_failure is true whenever the run is
-    incomplete. Descriptions and comments are not collected. Output:
+    could not be measured. Summary counts are null, not zero, when the search
+    did not finish or hit the cap. metadata.partial_failure is true whenever
+    the run is incomplete. Descriptions and comments are not collected. Output:
     jira_incident_postmortems.json
   description: >-
     Incident tickets with their reporting times, response phases and linked

@@ -17,6 +17,7 @@ from jira_common import (  # noqa: E402
     collector_info,
     connection_settings,
     counts,
+    in_offset_of,
     int_env,
     name_of,
     null_summary,
@@ -62,14 +63,15 @@ def _links(f: dict) -> list:
     return out
 
 
-def _status_transitions(histories: list) -> list:
+def _status_transitions(histories: list, reference=None) -> list:
+    """Status moves oldest first, with times in the issue's own UTC offset (see in_offset_of)."""
     moves = []
     for h in histories:
         for item in h.get("items") or []:
             if item.get("fieldId") == "status" or item.get("field") == "status":
                 moves.append(
                     {
-                        "at": h.get("created"),
+                        "at": in_offset_of(h.get("created"), reference),
                         "by": name_of(h.get("author"), "displayName"),
                         "from": item.get("fromString"),
                         "to": item.get("toString"),
@@ -78,7 +80,7 @@ def _status_transitions(histories: list) -> list:
     return sorted(moves, key=lambda m: m["at"] or "")
 
 
-def _item_record(issue: dict, histories: list, now) -> dict:
+def _item_record(issue: dict, histories: list, now, history_known: bool = True) -> dict:
     f = issue.get("fields") or {}
     status = f.get("status") or {}
     status_category = name_of(status.get("statusCategory"), "key")
@@ -86,15 +88,16 @@ def _item_record(issue: dict, histories: list, now) -> dict:
     created = parse_ts(f.get("created"))
     due = f.get("duedate")
     overdue = bool(is_open and due and due < now.date().isoformat())
-    transitions = _status_transitions(histories)
+    transitions = _status_transitions(histories, f.get("created"))
     # A ticket can be done without a resolutiondate (a status moved to the done
     # category with no resolution set). Fall back to the last move into its
     # current status so a late closure is still measured, and say which was used.
+    # When the history read failed the close time is unknown, not absent.
     closed_at, closed_at_source = f.get("resolutiondate"), "resolutiondate"
     if not is_open and not closed_at:
         done_move = next((m for m in reversed(transitions) if m["to"] == status.get("name") and m["at"]), None)
         closed_at = done_move["at"] if done_move else None
-        closed_at_source = "status_history" if done_move else None
+        closed_at_source = "status_history" if done_move else ("unknown" if not history_known else None)
     resolved = parse_ts(closed_at)
     return {
         "key": issue.get("key"),
@@ -124,7 +127,8 @@ def _item_record(issue: dict, histories: list, now) -> dict:
         "parent": name_of(f.get("parent"), "key"),
         "linked_issues": _links(f),
         "status_transitions": transitions,
-        "status_change_count": len(transitions),
+        "status_change_count": len(transitions) if history_known else None,
+        "status_history_known": history_known,
     }
 
 
@@ -143,7 +147,10 @@ def _summarize(items: list, complete: bool = True) -> dict:
             for i in closed
             if i["due_date"] and i["closed_at"] and i["closed_at"][:10] > i["due_date"]
         ),
-        "closed_without_close_time": sum(1 for i in closed if not i["closed_at"]),
+        "closed_without_close_time": sum(
+            1 for i in closed if not i["closed_at"] and i["closed_at_source"] != "unknown"
+        ),
+        "closed_close_time_unknown": sum(1 for i in closed if i["closed_at_source"] == "unknown"),
         "days_to_close": number_stats([i["days_to_close"] for i in closed if i["days_to_close"] is not None]),
         "open_age_days": number_stats([i["days_open"] for i in open_items if i["days_open"] is not None]),
         "by_status": counts(i["status"] for i in items),
@@ -192,12 +199,18 @@ def main() -> int:
     try:
         collector = collector_info(client)
         raw, truncated, search_complete = client.search_issues(jql, ISSUE_FIELDS, max_items)
-        histories, history_complete = client.bulk_changelogs(
+        histories, history_complete, unknown_ids = client.bulk_changelogs(
             [str(i.get("id")) for i in raw if i.get("id")], ["status"]
         )
-        items = [_item_record(i, histories.get(str(i.get("id")), []), now) for i in raw]
+        items = [
+            _item_record(i, histories.get(str(i.get("id")), []), now, str(i.get("id")) not in unknown_ids)
+            for i in raw
+        ]
     except Abort:
         pass
+    except Exception as e:  # unexpected response shape: keep what was collected and say why
+        client.fail("collection", type(e).__name__, str(e)[:200], "internal_error")
+        search_complete = False  # the collection did not finish, so no count is trusted
 
     evidence = {
         "metadata": {
@@ -213,7 +226,9 @@ def main() -> int:
             "api_failures": client.api_failures,
         },
         "collector": collector,
-        "summary": _summarize(items, search_complete),
+        # A capped search is also unfinished: "total: 2000" of a larger population
+        # would read as the population.
+        "summary": _summarize(items, search_complete and not truncated),
         "items": items,
     }
     incomplete = ""

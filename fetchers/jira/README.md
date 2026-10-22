@@ -25,7 +25,7 @@ Declared once on the category ([`_categories/jira.yaml`](../_categories/jira.yam
 
 | Variable | Kind | Required | Description |
 |---|---|---|---|
-| `JIRA_BASE_URL` | config `base_url` | Yes | `https://<site>.atlassian.net` (classic token) or `https://api.atlassian.com/ex/jira/<cloudId>` (scoped token). Other hosts are refused and redirects are not followed |
+| `JIRA_BASE_URL` | config `base_url` | Yes | `https://<site>.atlassian.net`, `https://<site>.jira.com` or `https://<site>.atlassian-us-gov-mod.net` (classic token), or `https://api.atlassian.com/ex/jira/<cloudId>` (scoped token). Any other host, and a URL with a path, port, query or userinfo, is refused as `bad_config`; redirects are not followed |
 | `JIRA_EMAIL` | secret `email` | Yes | Email of the Atlassian account the token belongs to |
 | `JIRA_API_TOKEN` | secret `api_token` | Yes | API token from [id.atlassian.com → Security → API tokens](https://id.atlassian.com/manage-profile/security/api-tokens) |
 
@@ -178,6 +178,30 @@ checked against the site's field list, so a mistyped id fails the run instead of
 reading an always-empty field.
 
 The same field rules apply to `JIRA_INCIDENT_FIELDS` below.
+
+### Unknown is not a finding, and null is not zero
+
+A refused or failed read is never reported as evidence that something is
+missing. Each ticket carries `findings` (what the data shows) and `unknown`
+(checks that could not run because a read failed): `approval_unknown` when a
+status-based approval's history could not be read, `phases_unknown`,
+`postmortem_not_visible`, `action_items_not_visible`, and a remediation
+ticket's `closed_at_source: unknown`. `bulk_changelogs` reports which issues'
+history it failed to read, so only those tickets are affected.
+
+Summary counts are `null`, not `0`, for a section whose fetch failed, did not
+finish or hit its cap: the whole summary when the ticket search or the audit
+window was not fully read, `summary.action_items` when any post-mortem or
+action item was not read, and in `jira_access_roles` the admin section or the
+project section separately (a failed role, role-index, admin-group listing or
+group-membership read nulls only the section that used it). An unexpected
+response shape stops the collection with `internal_error` and nulls every
+count, since the run did not finish.
+
+Changelog times from `POST /rest/api/3/changelog/bulkfetch` arrive as epoch
+milliseconds (UTC) while issue fields arrive in the collector's profile
+timezone, so a history time is rendered in the ticket's own UTC offset before it
+is compared with a date-only field such as a due date or an approval date.
 
 ### `jira_incident_postmortems`
 
