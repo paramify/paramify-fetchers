@@ -17,6 +17,7 @@ start to finish.
 **Platform setup.** Most platforms have a guide for their credentials and
 permissions:
 [AWS](../fetchers/aws/README.md) ·
+[Azure](../fetchers/azure/README.md) ·
 [GCP](../fetchers/gcp/README.md) ·
 [Wiz](../fetchers/wiz/README.md) ·
 [Datadog](../fetchers/datadog/README.md) ·

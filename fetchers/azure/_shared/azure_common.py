@@ -168,6 +168,8 @@ def diagnostic_setting_record(setting) -> Dict[str, Any]:
         "workspace_id": model_attr(setting, "workspace_id"),
         "event_hub_authorization_rule_id": model_attr(setting, "event_hub_authorization_rule_id"),
         "event_hub_name": model_attr(setting, "event_hub_name"),
+        # Marketplace partner destinations (Datadog, Elastic, New Relic...) count as a destination too.
+        "marketplace_partner_id": model_attr(setting, "marketplace_partner_id"),
         "logs": [
             {
                 "category": model_attr(log, "category"),

@@ -10,7 +10,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Breaking
+
+- **Python 3.11 is now the minimum version.** Python 3.10 reached end of life
+  in October 2026 and gets no more security fixes. `requires-python` is now
+  `>=3.11`, so `pip install` refuses a 3.10 interpreter. `paramify doctor` also
+  reports 3.10 as too old. To upgrade, make a new virtual environment on Python
+  3.11 or later and install again. The ruff and mypy targets move to 3.11 too.
+
 ### Added
+
+- **CI runs the tests on Python 3.15.** The test matrix is now 3.11 to 3.15.
+  The 3.10 row is gone.
 
 - **`azure_devops_audit_streams`** (`EVD-AZURE-DEVOPS-AUDIT-STREAMS`): whether an
   Azure DevOps organization exports its audit log, which it otherwise keeps for
@@ -212,6 +223,72 @@ schemas and the `paramify` CLI — not the internal code.
   Also every DDoS
   protection plan and the VNets that use it. Virtual WAN hub firewall addresses are
   not public IP resources and are not listed.
+
+- **Four Azure fetchers: flow logs, AI services, managed identities and API
+  Management**, read-only on the built-in Reader role. `azure_network_flow_logs`
+  reports every Network Watcher and flow log (target, retention, storage
+  destination, Traffic Analytics) and works out which virtual networks and
+  subnets have their traffic logged, counting subnets with workloads apart from
+  empty ones and those Azure allows no NSG on; legacy NSG flow logs are marked,
+  since Microsoft retires them in September 2027. A flow log with no retention
+  policy keeps records indefinitely, and a filtered VNet flow log is not full
+  coverage. `azure_ai_services_configuration`
+  reports each Azure AI services account (Foundry, OpenAI, Language, Speech,
+  Document Intelligence) and AI Search service: network exposure, whether API
+  keys still work, customer-managed keys, managed identity and whether audit
+  logs are exported; every model deployment with its publisher, where it may
+  process data (global, data zone or regional) and its content filter and
+  Prompt Shields protection, judged on the four harm categories because
+  Microsoft's own default annotates some filters rather than blocking them;
+  custom filter policies weaker than the default; and every Foundry connection
+  agents use, with whether it holds a stored secret. `azure_managed_identity_configuration` reports every user-
+  and system-assigned identity with what it is attached to, its federated
+  credentials (GitHub subject breadth, flexible matching expressions,
+  audiences), its Microsoft Graph application permissions, and its role
+  assignments judged by what each role's permissions allow (full control,
+  granting access, reading keys, full data access) rather than by name.
+  `azure_api_management_configuration` reports each API Management service's
+  network exposure, legacy TLS and every switchable cipher (unset switches
+  follow Azure's documented defaults, which leave the CBC and RSA-key-exchange
+  suites on), whether legacy management API versions are blocked, certificate
+  expiry, developer portal sign-up, its subscriptions including the built-in
+  all-access one, which security policies apply at global, product, API and
+  operation level, how each API is protected, its backends and whether gateway
+  logs are exported; policy XML, named-value contents and subscription keys are
+  never written to the evidence. Adds
+  azure-mgmt-cognitiveservices, azure-mgmt-msi and azure-mgmt-apimanagement.
+- **Three Azure fetchers: AI hubs, container workloads and the data tier**,
+  read-only on the built-in Reader role. `azure_ai_hub_configuration` reports
+  each AI hub, AI project and Machine Learning workspace: network exposure,
+  managed virtual network isolation and outbound rules, high business impact,
+  customer-managed keys, whether system datastores are reached with the storage
+  key or an identity, every datastore's credential type, every model endpoint's
+  authentication mode and public access, compute public IPs and SSH, diagnostic
+  log export, and every connection with whether it holds a stored secret. It
+  reads ARM JSON because the Machine Learning SDK predates hubs.
+  `azure_container_workloads_configuration` reports Container Apps environments
+  (internal-only or public, mTLS and peer traffic encryption, log destination),
+  apps and jobs (secrets stored in the app rather than Key Vault, password-based
+  registry pulls, plain environment variables with secret-looking names,
+  internet-facing ingress and whether Easy Auth stops an unauthenticated caller
+  (AllowAnonymous does not), images running a
+  mutable tag rather than pinned by digest) and Container Instances
+  container groups (public IP, VNet placement, registry credentials, Azure
+  Files volumes, logging). `azure_data_services_configuration` reports MongoDB
+  vCore clusters (firewall rules judged on how many addresses they admit
+  together, native versus Entra authentication,
+  high availability), Data Explorer clusters (open allow-lists, trust of any
+  external tenant, purge rights, callout policies, principal assignments) and
+  Event Hubs namespaces (minimum TLS, network rules, shared keys with Manage
+  rights while local auth is on at namespace and hub level, geo-replication,
+  event hub retention and capture), each with customer-managed keys and audit
+  log export. ARM JSON is read through the shared `arm_rest` client and log export
+  through `_shared/diagnostics.py`. New shared modules: `foundry_connections.py`
+  (connection auth types, also used by `azure_ai_services_configuration`) and
+  `ip_ranges.py` (firewall-range width). Adds
+  azure-mgmt-appcontainers, azure-mgmt-containerinstance, azure-mgmt-mongocluster,
+  azure-mgmt-kusto and azure-mgmt-eventhub.
+
 - **Default custom tags on everything the uploaders create.** Every evidence
   set, script and validator that `paramify upload`, `paramify scripts sync`
   and `paramify validators sync` create or maintain now carries two custom
@@ -719,6 +796,12 @@ schemas and the `paramify` CLI — not the internal code.
   covers those paths against modelled gateways.
 
 ### Changed
+
+- **New evidence sets start their collection schedule on the day they are
+  created.** Both uploaders (`paramify_evidence` and `paramify_scripts`) now send
+  `startDate` (today, `YYYY-MM-DD`) alongside `frequency` when they create an
+  evidence set, so the TUI and `paramify upload` no longer leave it unset.
+  Existing sets are reused unchanged.
 
 - **`azure_policy_compliance` 0.2.0: what was evaluated, whether remediation took,
   and what keeps coming back.**

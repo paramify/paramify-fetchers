@@ -58,7 +58,7 @@ evidence_set:
   reference_id: EVD-AZURE-POLICY-ASSIGN
   name: Azure Policy Assignments
   instructions: >
-    Script: fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Authorization"),
+    Script: azure/policy_assignments/fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Authorization"),
     then azure-mgmt-resource-policy PolicyClient policy_assignments.list() and, per
     distinct definition, policy_definitions / policy_set_definitions get_built_in(), get()
     or get_at_management_group(). For initiatives, policy_definitions.list_built_in() once
