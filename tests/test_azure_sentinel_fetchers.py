@@ -971,6 +971,46 @@ def test_incident_entities_are_capped_per_kind():
     assert kinds.count("file") == 25 and "host" in kinds and "ip" in kinds and out["entities_truncated"] is True
 
 
+def test_incident_entities_query_reads_only_the_incidents_alerts():
+    kql = MODS["sentinel_incidents"].ENTITIES_QUERY
+    alerts = kql[kql.index("SecurityAlert"):]
+    # SecurityAlert is cut to the incidents' alert ids before anything is aggregated or joined.
+    assert alerts.index("| where SystemAlertId in (") < alerts.index("summarize") < alerts.index("join")
+
+
+# The Log Analytics API's answer to a result over 64 MB or 500,000 rows: the rows so far, flagged partial.
+RESULT_TOO_LARGE = Resp(200, {"tables": [], "error": {
+    "code": "PartialError", "message": "There were some errors when processing your query.",
+    "details": [{"code": "EngineError", "innererror": {
+        "code": "E_QUERY_RESULT_SET_TOO_LARGE",
+        "message": "Query result set has exceeded the internal data size limit 67108864 bytes"}}]}})
+
+
+def history_posts(azure):
+    return [c[2] for c in azure.calls if c[0] == "POST" and HISTORY_ROUTE in c[2]]
+
+
+def test_incidents_query_too_large_is_read_in_halves_by_incident(azure, tmp_path):
+    rows = history_table(incident_history())["tables"][0]["rows"]
+    # Every i-closed row hashes to one half and the i-new row to the other.
+    azure.queries.insert(0, (HISTORY_ROUTE, [RESULT_TOO_LARGE, table(HISTORY_COLUMNS, rows[:3]),
+                                             table(HISTORY_COLUMNS, rows[3:])]))
+    code, ev = run("sentinel_incidents", tmp_path)
+    closed = next(i for i in ws_a(ev)["incidents"] if i["name"] == "i-closed")
+    assert code == 0 and closed["hours_to_acknowledge"] == pytest.approx(12, abs=0.01) and closed["updates_retained"] == 3
+    whole, *halves = history_posts(azure)
+    assert "hash(" not in whole and len(halves) == 2
+    assert [q.count("hash(IncidentName)") for q in halves] == [1, 1] and halves[0] != halves[1]
+
+
+def test_incidents_query_still_too_large_when_split_fails_the_history(azure, tmp_path):
+    azure.queries.insert(0, (HISTORY_ROUTE, RESULT_TOO_LARGE))
+    code, ev = run("sentinel_incidents", tmp_path)
+    # One query at each split down to the most parts, then the history is unknown rather than short.
+    assert code == 1 and ws_a(ev)["acknowledged_incidents"] is None
+    assert len(history_posts(azure)) == MODS["sentinel_incidents"].MAX_QUERY_PARTS.bit_length()
+
+
 SECURITY_ALERT_MISSING = Resp(400, {"error": {"code": "BadArgumentError", "innererror": {
     "message": "'join' operator: Failed to resolve table or column expression named 'SecurityAlert'"}}})
 

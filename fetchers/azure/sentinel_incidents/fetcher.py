@@ -18,6 +18,7 @@ from azure_rest import (  # noqa: E402
     LAW_API,
     SI_API,
     ArmError,
+    QueryError,
     discover_workspaces,
     int_config,
     iso_duration_days,
@@ -37,6 +38,8 @@ MAX_ENTITIES_PER_KIND = 25
 MAX_RECURRING = 25
 # How long a new update can take to reach SecurityIncident.
 INGESTION_LAG = timedelta(hours=1)
+# A query result over 64 MB or 500,000 rows is read again in halves of its incidents, down to this many shares.
+MAX_QUERY_PARTS = 64
 NO_TIME = datetime.max.replace(tzinfo=timezone.utc)
 # Written into each workspace's evidence, since the results around them are built by the shared runner.
 LIMITATIONS = [
@@ -55,11 +58,12 @@ SYSTEM_MODIFIER_PREFIXES = ("automation rule", "playbook", "microsoft xdr", "mic
 OWNER_FIELDS = ("owner_user_principal_name", "owner_assigned_to", "owner_email", "owner_object_id")
 
 # The ARM incident has no close time or change history; SecurityIncident holds one row per update.
-# Bounded by an explicit time so the rows read start exactly where the lookback does.
+# Bounded by an explicit time so the rows read start exactly where the lookback does. {part} keeps one share of the
+# incidents when query_since splits a result too large for one response.
 # The latest row is picked by update_order's key as one string, its parts joined by U+0001 so a shorter one sorts first.
 CLOSED_TIME_QUERY = (
     "SecurityIncident "
-    "| where TimeGenerated > datetime({since}) "
+    "| where TimeGenerated > datetime({since}){part} "
     "| extend Order = strcat_delim(unicode_codepoints_to_string(1), "
     "format_datetime(coalesce(LastModifiedTime, TimeGenerated), 'yyyy-MM-dd HH:mm:ss.fffffff'), "
     "format_datetime(TimeGenerated, 'yyyy-MM-dd HH:mm:ss.fffffff'), ModifiedBy, Status, "
@@ -67,22 +71,26 @@ CLOSED_TIME_QUERY = (
     "| summarize arg_max(Order, Status, ClosedTime, CreatedTime, Tasks) by IncidentName "
     "| project IncidentName, Status, ClosedTime, CreatedTime, Tasks"
 )
-# Every update row. Keeping only rows that change status, severity or owner (serialize, prev()) would shrink it
-# on busy workspaces, but needs checking on a real workspace first.
+# Every update row; on a busy workspace query_since reads it in shares of the incidents.
 HISTORY_QUERY = (
     "SecurityIncident "
-    "| where TimeGenerated > datetime({since}) "
+    "| where TimeGenerated > datetime({since}){part} "
     "| project TimeGenerated, IncidentName, Status, Severity, ClosedTime, ModifiedBy, CreatedTime, LastModifiedTime, "
     "OwnerId = tostring(Owner.objectId), "
     "Owner = coalesce(tostring(Owner.userPrincipalName), tostring(Owner.assignedTo), tostring(Owner.email))"
 )
+# SecurityAlert is cut to the incidents' alert ids (in() takes the first column) before it is aggregated and joined.
 ENTITIES_QUERY = (
-    "SecurityIncident "
-    "| where TimeGenerated > datetime({since}) "
+    "let alerts = materialize(SecurityIncident "
+    "| where TimeGenerated > datetime({since}){part} "
     "| summarize arg_max(TimeGenerated, AlertIds) by IncidentName "
     "| mv-expand AlertId = AlertIds to typeof(string) "
-    "| join kind=inner (SecurityAlert | where TimeGenerated > datetime({since}) "
-    "| summarize arg_max(TimeGenerated, Entities) by SystemAlertId) on $left.AlertId == $right.SystemAlertId "
+    "| project AlertId, IncidentName); "
+    "SecurityAlert "
+    "| where TimeGenerated > datetime({since}) "
+    "| where SystemAlertId in (alerts) "
+    "| summarize arg_max(TimeGenerated, Entities) by SystemAlertId "
+    "| join kind=inner (alerts) on $left.SystemAlertId == $right.AlertId "
     "| project IncidentName, AlertId, Entities"
 )
 
@@ -558,10 +566,19 @@ def incident_summary(
     }
 
 
-def query_since(client, ws: Dict[str, Any], kql: str, cutoff: datetime) -> List[Dict[str, Any]]:
-    """The query's own datetime() bound is cutoff; the API timespan only has to cover it."""
+def query_since(client, ws: Dict[str, Any], kql: str, cutoff: datetime, part: tuple = (0, 1)) -> List[Dict[str, Any]]:
+    """The query's own datetime() bound is cutoff; the API timespan only has to cover it. Share `part` (k of n) holds
+    the incidents whose name hashes to k mod n; a partial result reads shares k and k + n of 2n instead."""
+    k, n = part
     days = (datetime.now(timezone.utc) - cutoff).days + 1
-    return client.query(ws["customer_id"], kql.format(since=cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")), iso_duration_days(days))
+    share = f" | where (hash(IncidentName) % {n} + {n}) % {n} == {k}" if n > 1 else ""
+    text = kql.format(since=cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"), part=share)
+    try:
+        return client.query(ws["customer_id"], text, iso_duration_days(days))
+    except QueryError as exc:
+        if exc.code != "PartialError" or n >= MAX_QUERY_PARTS:
+            raise
+    return query_since(client, ws, kql, cutoff, (k, 2 * n)) + query_since(client, ws, kql, cutoff, (k + n, 2 * n))
 
 
 def security_incident_table(client, ws: Dict[str, Any]) -> tuple:

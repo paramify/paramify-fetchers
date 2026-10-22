@@ -945,7 +945,10 @@ schemas and the `paramify` CLI — not the internal code.
   exits 1, and close times and history are unknown. In a workspace that lists
   none, or only incidents under an hour old that may not be ingested yet, it
   reads as empty, with a note. SecurityAlert is treated the same way when an
-  incident over an hour old has alerts.
+  incident over an hour old has alerts. SecurityAlert is cut to the incidents'
+  alert ids before it is aggregated and joined, and a query whose result is too
+  large for one response (over 64 MB or 500,000 rows) is read again in halves
+  of the incidents, down to 64 shares, rather than failing the run.
   The summary's counts, existing ones included, are `null` when any workspace's
   incident list failed, the workspace list or a check for Sentinel failed, or a
   workspace named in `SENTINEL_WORKSPACES` wasn't found, and the counts that
