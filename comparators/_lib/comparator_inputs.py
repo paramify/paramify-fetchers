@@ -13,20 +13,34 @@ Stdlib-only, like fetchers/_lib: the runner execs a comparator with no PYTHONPAT
 All but missing are compared; anything but complete makes the result partial
 (exit 1). A missing input, or a comparison that raised, makes every summary
 value null, never 0.
+
+`run` is a comparator's whole main(), so a comparator is only its comparison:
+
+    def check(inputs):
+        ...
+        return results, summary
+
+    if __name__ == "__main__":
+        raise SystemExit(run(check, output="<category>_<short_name>.json", summary_keys=SUMMARY_KEYS))
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple, Union
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "fetchers" / "_lib"))
+from fetcher_status import report_failure  # noqa: E402
 
 __all__ = [
     "COMPLETE", "PARTIAL", "FAILED", "MISSING", "INPUTS_ENV",
-    "Input", "InputFile", "Inputs", "build_payload", "load_inputs",
+    "Input", "InputFile", "Inputs", "build_payload", "load_inputs", "run",
 ]
 
 INPUTS_ENV = "COMPARATOR_INPUTS"
@@ -69,7 +83,8 @@ class Inputs:
 
     @property
     def complete(self) -> bool:
-        return all(i.state == COMPLETE for i in self)
+        # A comparator always has an input, so none means the index couldn't be read.
+        return bool(self._inputs) and all(i.state == COMPLETE for i in self)
 
     @property
     def missing(self) -> List[str]:
@@ -126,6 +141,56 @@ def build_payload(
         "results": results,
         "summary": {**summary, "inputs_complete": inputs.complete},
     }
+
+
+def run(
+    check: Callable[[Inputs], Tuple[List[Any], Dict[str, Any]]],
+    output: str,
+    summary_keys: Sequence[str],
+) -> int:
+    """Read the inputs, call `check(inputs)` unless one is missing, always write `output`
+    under EVIDENCE_DIR, then report what went wrong. Returns the exit code.
+
+    `summary_keys` are every key `check`'s summary has; each is null when there is no
+    comparison to count.
+    """
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    output_path = Path(os.environ.get("EVIDENCE_DIR", "./evidence")) / output
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    error = None
+    try:
+        inputs = load_inputs()
+    except (RuntimeError, OSError, ValueError) as exc:
+        inputs, error = Inputs({}), f"cannot read the comparator input index: {exc}"
+    results: List[Any] = []
+    summary: Dict[str, Any] = dict.fromkeys(summary_keys)
+    if error is None and not inputs.missing:
+        try:
+            results, summary = check(inputs)
+        except Exception as exc:  # a failed input can hold a shape check() never expected
+            error = f"cannot compare the inputs: {exc.__class__.__name__}: {exc}"
+
+    # Serialized before the file is opened, so a result that isn't JSON leaves no half-written file.
+    try:
+        text = json.dumps(build_payload(inputs, results, summary, error), indent=2, sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        error = f"cannot write the comparison: {exc.__class__.__name__}: {exc}"
+        text = json.dumps(build_payload(inputs, [], dict.fromkeys(summary_keys), error), indent=2, sort_keys=True)
+    output_path.write_text(text)
+    logging.getLogger(output_path.stem).info("Evidence saved to %s", output_path)
+
+    # After the "saved" line, so the reason is the last thing on stderr.
+    if error:
+        report_failure(error, "internal_error")
+        return 1
+    if not inputs.complete:
+        report_failure(inputs.reason(), "input_failed")
+        return 1
+    return 0
 
 
 def _classify(name: str, entry: dict, run_id: Optional[str]) -> Input:

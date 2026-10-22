@@ -790,6 +790,55 @@ def test_build_payload_records_a_comparison_that_raised(tmp_path):
                                                     "message": "cannot compare the inputs: KeyError: 'id'"}]
 
 
+@pytest.fixture
+def comparator_env(tmp_path, monkeypatch):
+    """The env `run` reads, outside the runner; returns (evidence dir, status file)."""
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path / "evidence"))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    return tmp_path / "evidence", tmp_path / "status.json"
+
+
+def _written(evidence_dir: Path, status: Path):
+    return json.loads((evidence_dir / "out.json").read_text()), json.loads(status.read_text())
+
+
+def test_run_compares_and_writes_the_file(tmp_path, monkeypatch, comparator_env):
+    monkeypatch.setenv(ci.INPUTS_ENV, str(_index(tmp_path, _inv([_envelope_file(tmp_path / "a.json")]))))
+    code = ci.run(lambda inputs: ([{"id": "a"}], {"records": 1}), output="out.json", summary_keys=("records",))
+    payload = json.loads((comparator_env[0] / "out.json").read_text())
+    assert code == 0 and payload["summary"] == {"records": 1, "inputs_complete": True}
+    assert not comparator_env[1].exists()
+
+
+def test_run_does_not_call_check_when_an_input_is_missing(tmp_path, monkeypatch, comparator_env):
+    monkeypatch.setenv(ci.INPUTS_ENV, str(_index(tmp_path, in_manifest=False)))
+    called = []
+    code = ci.run(lambda inputs: called.append(1), output="out.json", summary_keys=("records",))
+    payload, status = _written(*comparator_env)
+    assert code == 1 and not called
+    assert payload["summary"] == {"records": None, "inputs_complete": False}
+    assert status["code"] == "input_failed" and "not in the manifest" in status["error"]
+
+
+def test_run_still_writes_the_file_when_the_index_cannot_be_read(tmp_path, monkeypatch, comparator_env):
+    monkeypatch.setenv(ci.INPUTS_ENV, str(tmp_path / "gone.json"))
+    code = ci.run(lambda inputs: ([], {}), output="out.json", summary_keys=("records", "matched"))
+    payload, status = _written(*comparator_env)
+    assert code == 1
+    assert payload["results"] == [] and payload["summary"] == {"records": None, "matched": None, "inputs_complete": False}
+    assert payload["metadata"]["api_failures"][0]["type"] == "internal_error"
+    assert status["code"] == "internal_error" and "cannot read the comparator input index" in status["error"]
+
+
+def test_run_writes_a_whole_file_when_the_result_is_not_json(tmp_path, monkeypatch, comparator_env):
+    monkeypatch.setenv(ci.INPUTS_ENV, str(_index(tmp_path, _inv([_envelope_file(tmp_path / "a.json")]))))
+    code = ci.run(lambda inputs: ([{"seen": {"a set"}}], {"records": 1}), output="out.json", summary_keys=("records",))
+    payload, status = _written(*comparator_env)
+    assert code == 1
+    assert payload["results"] == [] and payload["summary"] == {"records": None, "inputs_complete": True}
+    assert status["code"] == "internal_error" and "cannot write the comparison: TypeError" in status["error"]
+
+
 def test_reader_needs_the_index(monkeypatch):
     monkeypatch.delenv(ci.INPUTS_ENV, raising=False)
     with pytest.raises(RuntimeError, match="COMPARATOR_INPUTS"):
