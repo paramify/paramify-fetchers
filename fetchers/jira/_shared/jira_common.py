@@ -213,6 +213,7 @@ class JiraClient:
         """Page POST /rest/api/3/search/jql. Returns (issues, truncated, complete)."""
         issues: list = []
         token = None
+        tokens_seen: set = set()
         while True:
             body = {
                 "jql": jql,
@@ -226,9 +227,19 @@ class JiraClient:
             )
             if page is None:
                 return issues, False, False
-            issues.extend(page.get("issues") or [])
+            batch = page.get("issues") or []
+            issues.extend(batch)
             token = page.get("nextPageToken")
             more = bool(token) and not page.get("isLast", False)
+            if more and (token in tokens_seen or not batch):
+                # A repeated token, or an empty page that still points onward, would
+                # loop forever; stop and say the result is not complete.
+                self.fail(
+                    "POST /rest/api/3/search/jql", "BadPaging",
+                    "the server repeated a nextPageToken or sent an empty page with one", "partial_failure",
+                )
+                return issues[:max_issues], len(issues) > max_issues, False
+            tokens_seen.add(token)
             if len(issues) > max_issues:
                 # The server returned more than maxResults asked for.
                 return issues[:max_issues], True, True
@@ -340,8 +351,12 @@ def parse_ts(value):
     return None
 
 
+class Counts(dict):
+    """A {value: count} rollup with data-driven keys (see null_summary)."""
+
+
 def counts(values) -> dict:
-    return dict(Counter(NONE_LABEL if v is None else v for v in values).most_common())
+    return Counts(Counter(NONE_LABEL if v is None else v for v in values).most_common())
 
 
 def number_stats(values: list) -> dict:
@@ -635,6 +650,19 @@ def collector_info(client: JiraClient):
         "account_type": me.get("accountType"),
         "active": me.get("active"),
     }
+
+
+def null_summary(summary):
+    """The same shape as `summary` with every value null: for a section whose fetch failed,
+    so a reader sees "not measured", never a zero that looks like "none found".
+    Fixed-shape dicts keep their keys; a rollup keyed by data (Counts) becomes null."""
+    if isinstance(summary, dict) and not isinstance(summary, Counts):
+        return {k: null_summary(v) for k, v in summary.items()}
+    return None
+
+
+def is_date_only(value) -> bool:
+    return isinstance(value, str) and len(value.strip()) == 10
 
 
 def utc_now() -> datetime:

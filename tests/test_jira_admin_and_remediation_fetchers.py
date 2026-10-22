@@ -42,6 +42,7 @@ def load(name: str):
 def run(monkeypatch, tmp_path):
     def _run(name: str, router, env: dict | None = None):
         calls = []
+        monkeypatch.setattr("time.sleep", lambda s: None)  # retries must not wait offline
 
         def fake_request(self, method, url, params=None, json=None, timeout=None, **kw):
             assert kw.get("allow_redirects") is False, "redirects must never be followed"
@@ -1433,7 +1434,10 @@ def test_access_roles_zero_admin_groups_is_a_failure(run):
 
     code, out, _, status = run("access_roles", router)
     assert code == 1 and status["code"] == "partial_failure"
-    assert out["summary"]["admin_groups"] == 0 and out["metadata"]["partial_failure"] is True
+    assert out["summary"]["admin_groups"] is None, "a failed section is null, never 0"
+    assert out["summary"]["distinct_admin_users"] is None
+    assert out["summary"]["projects_scanned"] == 0, "the project section succeeded and stays a number"
+    assert out["metadata"]["partial_failure"] is True
     assert out["metadata"]["api_failures"][0]["type"] == "NoAdminGroups"
 
 
@@ -1468,3 +1472,142 @@ def test_incident_duplicate_links_and_missing_parent_are_handled(run):
     assert len(i["postmortems"]) == 1 and len(i["action_items"]) == 1
     assert i["action_items"][0]["postmortem"] == "IR-7"
     assert out["summary"]["action_items"]["total"] == 1
+
+
+# ---------- Bruce's review: null not zero on failure, paging, failures partway ----------
+
+def test_summary_is_null_when_the_ticket_search_fails_partway(run):
+    """Page 1 succeeds, page 2 fails: the counts would be low, so they are not measured."""
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, FIELD_LIST
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
+        if path == "/rest/api/3/search/jql":
+            if not body.get("nextPageToken"):
+                return 200, {"issues": [_ticket(1, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}})], "nextPageToken": "p2"}
+            return 503, {"errorMessages": ["down"]}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": []}
+        raise AssertionError(path)
+
+    code, out, _, status = run("change_requests", router, {"JIRA_CHANGE_JQL": "project = CCB"})
+    assert code == 1 and status["code"] == "partial_failure"
+    assert out["metadata"]["search_complete"] is False and out["metadata"]["items_collected"] == 1
+    assert out["tickets"][0]["key"] == "CCB-1", "what was read is still in the file"
+    assert out["summary"]["total"] is None and out["summary"]["changes_deployed"] is None
+    assert out["summary"]["findings"] is None and out["summary"]["by_kind"] is None
+
+
+def test_audit_summary_is_null_when_the_endpoint_is_refused(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        return 403, {"errorMessages": ["no permission"]}
+
+    code, out, _, status = run("audit_records", router)
+    assert code == 1 and status["code"] == "not_authorized"
+    assert out["summary"]["total"] is None and out["summary"]["sensitive_changes"]["total"] is None
+
+
+def test_incident_and_remediation_summaries_are_null_on_a_failed_search(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, FIELD_LIST
+        if path == "/rest/api/3/search/jql":
+            return 403, {"errorMessages": ["no browse"]}
+        raise AssertionError(path)
+
+    code, out, _, _ = run("incident_postmortems", router, {"JIRA_INCIDENT_JQL": "project = IR"})
+    assert code == 1 and out["summary"]["incidents"] is None and out["summary"]["action_items"]["total"] is None
+    code, out, _, _ = run("remediation_items", router, {"JIRA_REMEDIATION_JQL": "labels = x"})
+    assert code == 1 and out["summary"]["total"] is None and out["summary"]["open_overdue"] is None
+
+
+def test_paged_values_follows_start_at_until_is_last_and_stops_on_a_failed_page(run):
+    pages = {0: ([{"key": "P1"}, {"key": "P2"}], False), 2: ([{"key": "P3"}], True)}
+    seen = []
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/group/bulk":
+            return 200, {"isLast": True, "values": [{"groupId": "g", "name": "jira-admins"}]}
+        if path == "/rest/api/3/group/member":
+            return 200, {"isLast": True, "values": []}
+        if path == "/rest/api/3/applicationrole":
+            return 200, []
+        if path == "/rest/api/3/project/search":
+            seen.append(params["startAt"])
+            values, last = pages[params["startAt"]]
+            return 200, {"isLast": last, "values": [{"key": v["key"], "name": v["key"], "projectTypeKey": "software"} for v in values]}
+        if path.endswith("/permissionscheme"):
+            if "P3" in path:
+                return 503, {"errorMessages": ["down"]}
+            return 200, {"id": 1, "name": "Default", "permissions": []}
+        raise AssertionError(path)
+
+    code, out, _, status = run("access_roles", router)
+    assert seen == [0, 2], "startAt advances by the page size received until isLast"
+    assert [p["key"] for p in out["projects"]] == ["P1", "P2", "P3"]
+    assert code == 1 and out["metadata"]["permission_schemes_unread"] == 1
+    assert out["summary"]["projects_scanned"] is None, "one unread scheme makes the project section not measured"
+    assert out["summary"]["admin_groups"] == 1, "the admin section succeeded and keeps its number"
+
+
+def test_search_issues_stops_on_a_repeated_token_or_an_empty_page_with_a_token(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [], "nextPageToken": "again"}
+        raise AssertionError(path)
+
+    code, out, calls, status = run("remediation_items", router, {"JIRA_REMEDIATION_JQL": "labels = x"})
+    assert len([c for c in calls if c[1] == "/rest/api/3/search/jql"]) == 1
+    assert code == 1 and out["metadata"]["api_failures"][0]["type"] == "BadPaging"
+    assert out["summary"]["total"] is None
+
+
+def test_access_roles_unexpected_shape_still_writes_evidence(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/group/bulk":
+            return 200, "not an object"
+        raise AssertionError(path)
+
+    code, out, _, status = run("access_roles", router)
+    assert code == 1 and status["code"] == "internal_error"
+    assert out["metadata"]["complete"] is False and out["summary"]["admin_groups"] is None
+
+
+def test_remediation_done_without_resolutiondate_uses_the_status_history(run):
+    done = _issue(1, "Done", "done", due="2026-01-05")
+    done["fields"]["resolutiondate"] = None
+    hist = {"id": "h1", "created": "2026-01-20T00:00:00.000+00:00", "author": {"displayName": "Ann"},
+            "items": [{"fieldId": "status", "fromString": "In Progress", "toString": "Done"}]}
+    no_hist = _issue(2, "Done", "done", due="2026-01-05")
+    no_hist["fields"]["resolutiondate"] = None
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": [done, no_hist], "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": [{"issueId": "101", "changeHistories": [hist]}]}
+        raise AssertionError(path)
+
+    code, out, _, _ = run("remediation_items", router, {"JIRA_REMEDIATION_JQL": "labels = x"})
+    by_key = {i["key"]: i for i in out["items"]}
+    assert by_key["OPS-1"]["closed_at"] == "2026-01-20T00:00:00.000+00:00"
+    assert by_key["OPS-1"]["closed_at_source"] == "status_history" and by_key["OPS-1"]["days_to_close"] == 19.0
+    assert by_key["OPS-2"]["closed_at"] is None and by_key["OPS-2"]["closed_at_source"] is None
+    s = out["summary"]
+    assert s["closed_after_due_date"] == 1, "the late closure is no longer hidden"
+    assert s["closed_without_close_time"] == 1 and s["days_to_close"]["count"] == 1

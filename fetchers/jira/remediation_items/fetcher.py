@@ -19,6 +19,7 @@ from jira_common import (  # noqa: E402
     counts,
     int_env,
     name_of,
+    null_summary,
     number_stats,
     parse_ts,
     report_failure,
@@ -83,10 +84,18 @@ def _item_record(issue: dict, histories: list, now) -> dict:
     status_category = name_of(status.get("statusCategory"), "key")
     is_open = status_category != "done"
     created = parse_ts(f.get("created"))
-    resolved = parse_ts(f.get("resolutiondate"))
     due = f.get("duedate")
     overdue = bool(is_open and due and due < now.date().isoformat())
     transitions = _status_transitions(histories)
+    # A ticket can be done without a resolutiondate (a status moved to the done
+    # category with no resolution set). Fall back to the last move into its
+    # current status so a late closure is still measured, and say which was used.
+    closed_at, closed_at_source = f.get("resolutiondate"), "resolutiondate"
+    if not is_open and not closed_at:
+        done_move = next((m for m in reversed(transitions) if m["to"] == status.get("name") and m["at"]), None)
+        closed_at = done_move["at"] if done_move else None
+        closed_at_source = "status_history" if done_move else None
+    resolved = parse_ts(closed_at)
     return {
         "key": issue.get("key"),
         "summary": f.get("summary"),
@@ -102,6 +111,8 @@ def _item_record(issue: dict, histories: list, now) -> dict:
         "updated": f.get("updated"),
         "due_date": due,
         "resolved": f.get("resolutiondate"),
+        "closed_at": closed_at if not is_open else None,
+        "closed_at_source": closed_at_source if not is_open else None,
         "resolution": name_of(f.get("resolution")),
         "overdue": overdue,
         "days_open": round(((resolved or now) - created).total_seconds() / 86400, 2) if created else None,
@@ -117,10 +128,10 @@ def _item_record(issue: dict, histories: list, now) -> dict:
     }
 
 
-def _summarize(items: list) -> dict:
+def _summarize(items: list, complete: bool = True) -> dict:
     open_items = [i for i in items if i["is_open"]]
     closed = [i for i in items if not i["is_open"]]
-    return {
+    summary = {
         "total": len(items),
         "open": len(open_items),
         "closed": len(closed),
@@ -130,14 +141,18 @@ def _summarize(items: list) -> dict:
         "closed_after_due_date": sum(
             1
             for i in closed
-            if i["due_date"] and i["resolved"] and i["resolved"][:10] > i["due_date"]
+            if i["due_date"] and i["closed_at"] and i["closed_at"][:10] > i["due_date"]
         ),
+        "closed_without_close_time": sum(1 for i in closed if not i["closed_at"]),
         "days_to_close": number_stats([i["days_to_close"] for i in closed if i["days_to_close"] is not None]),
         "open_age_days": number_stats([i["days_open"] for i in open_items if i["days_open"] is not None]),
         "by_status": counts(i["status"] for i in items),
         "by_priority": counts(i["priority"] for i in items),
         "by_project": counts(i["project"] for i in items),
     }
+    # When the ticket search did not finish, every count would be too low and read
+    # as "none found", so the summary is reported as not measured instead.
+    return summary if complete else null_summary(summary)
 
 
 def main() -> int:
@@ -172,10 +187,11 @@ def main() -> int:
     items: list = []
     truncated = False
     history_complete = True
+    search_complete = False
 
     try:
         collector = collector_info(client)
-        raw, truncated, _ = client.search_issues(jql, ISSUE_FIELDS, max_items)
+        raw, truncated, search_complete = client.search_issues(jql, ISSUE_FIELDS, max_items)
         histories, history_complete = client.bulk_changelogs(
             [str(i.get("id")) for i in raw if i.get("id")], ["status"]
         )
@@ -191,12 +207,13 @@ def main() -> int:
             "max_items": max_items,
             "items_collected": len(items),
             "items_truncated": truncated,
+            "search_complete": search_complete,
             "status_history_complete": history_complete,
             "partial_failure": bool(client.api_failures),
             "api_failures": client.api_failures,
         },
         "collector": collector,
-        "summary": _summarize(items),
+        "summary": _summarize(items, search_complete),
         "items": items,
     }
     incomplete = ""

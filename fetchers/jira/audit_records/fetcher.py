@@ -19,6 +19,7 @@ from jira_common import (  # noqa: E402
     connection_settings,
     counts,
     int_env,
+    null_summary,
     report_failure,
     utc_now,
     write_and_finish,
@@ -97,10 +98,10 @@ def _record(r: dict) -> dict:
     }
 
 
-def _summarize(records: list) -> dict:
+def _summarize(records: list, complete: bool = True) -> dict:
     created = sorted(r["created"] for r in records if r["created"])
     sensitive = [r for r in records if r["sensitive"]]
-    return {
+    summary = {
         "total": len(records),
         "oldest_record": created[0] if created else None,
         "newest_record": created[-1] if created else None,
@@ -114,6 +115,8 @@ def _summarize(records: list) -> dict:
         },
         "unclassified_categories": counts(r["category"] for r in records if not r["sensitive"]),
     }
+    # A failed or short page means every count is low; report "not measured", not 0.
+    return summary if complete else null_summary(summary)
 
 
 def main() -> int:
@@ -147,6 +150,7 @@ def main() -> int:
     records: list = []
     reported_total = None
     truncated = False
+    fetch_complete = False
 
     try:
         collector = collector_info(client)
@@ -161,6 +165,7 @@ def main() -> int:
             if page is None:
                 break
             batch = page.get("records") or []
+            fetch_complete = True
             reported_total = page.get("total", reported_total)
             records.extend(_record(r) for r in batch)
             offset += len(batch)
@@ -191,7 +196,7 @@ def main() -> int:
             "api_failures": client.api_failures,
         },
         "collector": collector,
-        "summary": _summarize(records),
+        "summary": _summarize(records, fetch_complete and not (reported_total is not None and len(records) < reported_total)),
         "records": records,
     }
     incomplete = ""

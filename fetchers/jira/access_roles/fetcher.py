@@ -21,6 +21,7 @@ from jira_common import (  # noqa: E402
     int_env,
     list_env,
     name_of,
+    null_summary,
     report_failure,
     utc_now,
     write_and_finish,
@@ -51,6 +52,10 @@ BROAD_HOLDERS = {"anyone", "applicationRole"}
 # (reporter, assignee, userCustomField, groupCustomField, ...) is listed per
 # project as an unresolved grant so the summary never silently undercounts.
 RESOLVABLE_HOLDERS = {"user", "group", "projectRole", "projectLead"}
+
+
+def _section(ok: bool, values: dict) -> dict:
+    return values if ok else null_summary(values)
 
 
 def _user(u: dict) -> dict:
@@ -267,6 +272,9 @@ def main() -> int:
     group_names: dict = {}
     incomplete_groups: list = []
     projects_truncated = False
+    admin_section_ok = False
+    project_search_complete = False
+    schemes_unread = 0
 
     def members_of(group_id, label):
         if not group_id or group_id in group_members:
@@ -281,6 +289,7 @@ def main() -> int:
         collector = collector_info(client)
 
         groups = _admin_groups(client)
+        admin_section_ok = bool(groups)
         if not groups:
             # Every Jira Cloud site has at least one admin group; none read means the
             # calls were refused or the API changed, never that nobody is an admin.
@@ -317,13 +326,15 @@ def main() -> int:
         ]
 
         raw_projects = []
+        project_search_complete = True
         # project/search takes at most 50 keys per call.
         for chunk in [project_keys[i : i + 50] for i in range(0, len(project_keys), 50)] or [[]]:
-            values, _ = client.paged_values(
+            values, ok = client.paged_values(
                 "/rest/api/3/project/search",
                 "GET /rest/api/3/project/search",
                 params={"expand": "lead", **({"keys": chunk} if chunk else {})},
             )
+            project_search_complete = project_search_complete and ok
             raw_projects.extend(values)
         if project_keys:
             missing = sorted(set(project_keys) - {p.get("key") for p in raw_projects})
@@ -347,6 +358,8 @@ def main() -> int:
                 params={"expand": "all"},
             )
             grants = []
+            if not scheme:
+                schemes_unread += 1
             if scheme:
                 schemes.setdefault(scheme.get("id"), {"id": scheme.get("id"), "name": scheme.get("name")})
                 grants = [
@@ -385,7 +398,12 @@ def main() -> int:
             )
     except Abort:
         pass
+    except Exception as e:  # unexpected response shape: keep what was collected and say why
+        client.fail("collection", type(e).__name__, str(e)[:200], "internal_error")
 
+    # A section whose fetch failed is reported as not measured (null), never as a
+    # zero that would read as "no admins" or "no privileged grants".
+    projects_section_ok = project_search_complete and schemes_unread == 0 and not projects_truncated
     admin_users = {m["account_id"]: m for g in admin_groups for m in g["members"] if m["account_id"]}
     project_admins = {
         u["account_id"]
@@ -403,26 +421,32 @@ def main() -> int:
             "organization_admins_included": False,
             "projects_collected": len(projects),
             "projects_truncated": projects_truncated,
+            "project_search_complete": project_search_complete,
+            "permission_schemes_unread": schemes_unread,
             "groups_with_incomplete_membership": sorted(incomplete_groups),
             "partial_failure": bool(client.api_failures),
             "api_failures": client.api_failures,
         },
         "collector": collector,
         "summary": {
-            "admin_groups": len(admin_groups),
-            "distinct_admin_users": len(admin_users),
-            "inactive_admin_users": sum(1 for u in admin_users.values() if u["active"] is False),
-            "admin_users_by_account_type": counts(u["account_type"] for u in admin_users.values()),
-            "projects_scanned": len(projects),
-            "permission_schemes": len(schemes),
-            "projects_with_broad_privileged_grants": sorted(
-                p["key"] for p in projects if p["broad_privileged_grants"]
-            ),
-            "projects_with_unresolved_privileged_grants": sorted(
-                p["key"] for p in projects if p["unresolved_privileged_grants"]
-            ),
-            "distinct_project_admin_users": len(project_admins),
-            "privileged_users_per_project": {p["key"]: len(p["privileged_users"]) for p in projects},
+            **_section(admin_section_ok and not incomplete_groups, {
+                "admin_groups": len(admin_groups),
+                "distinct_admin_users": len(admin_users),
+                "inactive_admin_users": sum(1 for u in admin_users.values() if u["active"] is False),
+                "admin_users_by_account_type": counts(u["account_type"] for u in admin_users.values()),
+            }),
+            **_section(projects_section_ok, {
+                "projects_scanned": len(projects),
+                "permission_schemes": len(schemes),
+                "projects_with_broad_privileged_grants": sorted(
+                    p["key"] for p in projects if p["broad_privileged_grants"]
+                ),
+                "projects_with_unresolved_privileged_grants": sorted(
+                    p["key"] for p in projects if p["unresolved_privileged_grants"]
+                ),
+                "distinct_project_admin_users": len(project_admins),
+                "privileged_users_per_project": {p["key"]: len(p["privileged_users"]) for p in projects},
+            }),
         },
         "admin_groups": admin_groups,
         "application_roles": application_roles,

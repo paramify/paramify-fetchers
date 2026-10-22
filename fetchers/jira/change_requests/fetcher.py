@@ -25,6 +25,7 @@ from jira_common import (  # noqa: E402
     json_env,
     list_env,
     name_of,
+    null_summary,
     parse_ts,
     report_failure,
     resolve_fields,
@@ -306,13 +307,13 @@ def _record(issue: dict, histories: list, ids: dict, cfg: dict, now, catalog=(se
     }
 
 
-def _summarize(records: list) -> dict:
+def _summarize(records: list, complete: bool = True) -> dict:
     changes = [r for r in records if r["kind"] != "exception"]
     deployed = [r for r in changes if r["deployed"]]
     exceptions = [r for r in records if r["kind"] == "exception"]
     open_ex = [r for r in exceptions if r["exception"]["open"]]
     all_findings = [f for r in records for f in r["findings"]]
-    return {
+    summary = {
         "total": len(records),
         "by_kind": counts(r["kind"] for r in records),
         "by_change_type": counts(r["change_type"] for r in changes),
@@ -332,6 +333,8 @@ def _summarize(records: list) -> dict:
         "findings": counts(all_findings),
         "tickets_with_findings": sum(1 for r in records if r["findings"]),
     }
+    # When the ticket search did not finish, every count would read as "none found".
+    return summary if complete else null_summary(summary)
 
 
 def _config():
@@ -421,13 +424,13 @@ def main() -> int:
     records: list = []
     truncated = False
     history_complete = True
-
+    search_complete = False
     catalog = (set(), set(), False)
     try:
         collector = collector_info(client)
         ids, problems, candidates = resolve_fields(client, cfg["fields"])
         catalog = _status_catalog(client)
-        raw, truncated, _ = client.search_issues(
+        raw, truncated, search_complete = client.search_issues(
             jql, BASE_FIELDS + all_field_ids(ids), cfg["max_items"]
         )
         histories, history_complete = client.bulk_changelogs(
@@ -459,13 +462,14 @@ def main() -> int:
             "max_items": cfg["max_items"],
             "items_collected": len(records),
             "items_truncated": truncated,
+            "search_complete": search_complete,
             "status_history_complete": history_complete,
             "done_statuses_known": catalog[2],
             "partial_failure": bool(client.api_failures),
             "api_failures": client.api_failures,
         },
         "collector": collector,
-        "summary": _summarize(records),
+        "summary": _summarize(records, search_complete),
         "tickets": records,
     }
     incomplete = ""

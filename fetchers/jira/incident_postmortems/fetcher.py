@@ -28,6 +28,7 @@ from jira_common import (  # noqa: E402
     json_env,
     list_env,
     name_of,
+    null_summary,
     number_stats,
     parse_ts,
     report_failure,
@@ -261,11 +262,11 @@ def _incident_record(issue, histories, ids, cfg, postmortems: dict, actions: dic
     }
 
 
-def _summarize(incidents: list) -> dict:
+def _summarize(incidents: list, complete: bool = True) -> dict:
     actions = [a for i in incidents for a in i["action_items"]]
     timed = [i["minutes_to_report"] for i in incidents if i["minutes_to_report"] is not None]
     resolved = [i for i in incidents if i["resolved"]]
-    return {
+    summary = {
         "incidents": len(incidents),
         "open": len(incidents) - len(resolved),
         "resolved": len(resolved),
@@ -303,6 +304,8 @@ def _summarize(incidents: list) -> dict:
         },
         "findings": counts(f for i in incidents for f in i["findings"]),
     }
+    # When the incident search did not finish, every count would read as "none found".
+    return summary if complete else null_summary(summary)
 
 
 def _config():
@@ -398,13 +401,14 @@ def main() -> int:
     incidents: list = []
     truncated = False
     history_complete = True
+    search_complete = False
     related_complete = True
     missing_related: list = []
 
     try:
         collector = collector_info(client)
         ids, problems, candidates = resolve_fields(client, cfg["fields"])
-        raw, truncated, _ = client.search_issues(
+        raw, truncated, search_complete = client.search_issues(
             jql, INCIDENT_FIELDS + all_field_ids(ids), cfg["max_items"]
         )
         history_fields = ["status"] + list(ids.get("phase") or [])
@@ -476,6 +480,7 @@ def main() -> int:
             "max_items": cfg["max_items"],
             "incidents_collected": len(incidents),
             "incidents_truncated": truncated,
+            "search_complete": search_complete,
             "status_history_complete": history_complete,
             "related_issues_complete": related_complete,
             "related_issues_not_visible": missing_related,
@@ -483,7 +488,7 @@ def main() -> int:
             "api_failures": client.api_failures,
         },
         "collector": collector,
-        "summary": _summarize(incidents),
+        "summary": _summarize(incidents, search_complete),
         "incidents": incidents,
     }
     incomplete = ""
