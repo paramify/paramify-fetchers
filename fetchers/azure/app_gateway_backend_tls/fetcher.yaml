@@ -1,0 +1,77 @@
+name: azure_app_gateway_backend_tls
+version: 0.1.0
+description: >
+  Every Azure Application Gateway in the subscription and each of its backend
+  settings, layer 7 (HTTP/HTTPS) and layer 4 (TCP/TLS): whether traffic from the
+  gateway to the backend is encrypted, whether the backend's certificate chain,
+  expiry and server name are validated, which trusted root certificates are
+  pinned, the health probe's protocol, and which routing rules actually send
+  traffic through the setting. The gateway count is checked against Resource
+  Graph, and the collection fails on a mismatch.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_app_gateway_backend_tls.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-VCM   # gateway-to-backend connections are TLS and the backend certificate is validated
+  - KSI-SVC-SIN   # traffic to backends is encrypted in transit
+
+evidence_set:
+  reference_id: EVD-AZURE-APPGW-BACKEND-TLS
+  name: Azure Application Gateway Backend TLS
+  instructions: >
+    Script: azure/app_gateway_backend_tls/fetcher.py. Azure SDK calls: azure-mgmt-network
+    application_gateways.list_all() and a Resource Graph count of
+    microsoft.network/applicationgateways; the run fails if the two differ
+    (results.completeness.match false). Reader at subscription scope is
+    sufficient.
+    Resource Graph can lag behind list_all around a create or delete, so a
+    mismatch is checked once more after 30 seconds (results.completeness.recounted).
+
+    One record per backend setting in results.backend_settings, from the
+    gateway's backendHttpSettingsCollection (layer "L7", protocol Http/Https)
+    and backendSettingsCollection (layer "L4", protocol Tcp/Tls). used_by_rules
+    lists the request routing rules, URL path map defaults and path rules, and
+    L4 routing rules that reference the setting; in_use is true when any do.
+
+    certificate_validation, for an encrypted setting: "enabled" when
+    validateCertChainAndExpiry is true, "disabled" when it is false, and
+    "default_enabled" when the API omits it (Microsoft documents the default as
+    true). "not_configurable" for L4 Tls settings, which have no such toggle,
+    and "not_applicable" for Http and Tcp. validate_sni is the raw value; null
+    means not returned. trusted_root_certificates names the roots pinned on the
+    setting; with none, a v2 gateway validates against its built-in store of
+    well-known CAs.
+
+    secure_backend is true when the protocol is Https or Tls, certificate
+    validation is not disabled, and validate_sni is not false.
+    summary.insecure_backend_settings_in_use counts in-use settings where it is
+    false; summary.plaintext_in_use counts in-use Http/Tcp settings.

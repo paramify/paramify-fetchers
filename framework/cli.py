@@ -16,6 +16,11 @@ Read / discover:
   paramify manifests [--json]                  # discovered run manifests
   paramify runs [--output-dir DIR] [--json]    # past runs under an output dir
     paramify evidence <path> [--json]            # read one evidence file (or issue-report sidecar)
+    paramify samples status [--json]             # which fetchers have a committed evidence sample
+    paramify samples show <fetcher> [--json]     # one fetcher's sample: one record + field coverage
+    paramify samples backfill [--evidence DIR] [--fetcher NAME ...] [--scrub WORD ...]
+                              [--force] [--dry-run] [--json]
+                             # build samples from local evidence (sanitized, leak-checked)
   paramify upload [run-dir] [--dry-run] [--json]
 
 Paramify workspace (live lookups; needs PARAMIFY_API_TOKEN with read scope):
@@ -51,19 +56,23 @@ every subcommand accepts --json, emitting {"ok", "path", "errors"}):
 Validate / run / launch:
   paramify validate <manifest> [--json]
   paramify run <manifest> [--json]
-  paramify upload [run-dir] [--output-dir DIR] [--config PATH] [--dry-run] [--json]
-  paramify issues upload [run-dir] [--output-dir DIR] [--config PATH] [--dry-run] [--json]
+  paramify upload [run-dir] [-f MANIFEST] [--output-dir DIR] [--config PATH] [--dry-run] [--json]
+  paramify issues upload [run-dir] [-f MANIFEST] [--output-dir DIR] [--config PATH] [--dry-run] [--no-wait] [--json]
+  paramify issues jobs [--assessment ID] [--retry JOB | --cancel JOB] [--json]
+  paramify issues close <assessment-id> [--yes] [--json]
   paramify tui [--manifest PATH] [--at ROOT]   # interactive terminal UI
 
 Secrets are referenced as ${env:VAR} — set-secret / add-target take the ENV VAR
 NAME, never the secret value. The runner resolves refs from its own environment.
 Outputs land in <output_dir>/run-<timestamp>/ with a _run_metadata.json.
 
-Two collection kinds, two upload commands: evidence fetchers write enveloped JSON
-that `paramify upload` attaches to evidence sets, while `kind: issue_report`
-fetchers write raw scan files to <run>/issue-reports/ that `paramify issues
-upload` posts to assessment intake. A run of both needs both commands. See
-docs/issue_report_fetchers.md.
+Two upload commands: evidence fetchers write enveloped JSON that `paramify
+upload` attaches to evidence sets, while `kind: issue_report` fetchers write raw
+scan files to <run>/issue-reports/ that `paramify issues upload` sends into the
+assessment's pipeline and processes. A run of both needs both commands. See
+docs/issue_report_fetchers_guide.md. `kind: inventory` fetchers are evidence whose
+records an inventory pipeline turns into Inventory; `paramify upload` sends one
+only when the run collected all of it. See docs/inventory_fetchers_guide.md.
 """
 
 from __future__ import annotations
@@ -81,7 +90,11 @@ import typer
 
 from framework import api, paramify_auth
 from framework import cli_style as style
-from framework.issue_reports import ISSUE_REPORTS_DIR
+from framework.issue_reports import (
+    CLOSE_CYCLE_FIELD,
+    CLOSE_CYCLE_VALUES,
+    ISSUE_REPORTS_DIR,
+)
 
 _DEFAULT_MANIFEST = "manifest.yaml"
 
@@ -147,9 +160,16 @@ app.add_typer(artifacts_app, name="artifacts")
 issues_app = typer.Typer(
     no_args_is_help=True,
     context_settings=_HELP_OPTS,
-    help="Upload issue reports (scan results) into Paramify assessment intake.",
+    help="Send issue reports (scan results) into Paramify pipelines, and manage their jobs.",
 )
 app.add_typer(issues_app, name="issues")
+
+samples_app = typer.Typer(
+    no_args_is_help=True,
+    context_settings=_HELP_OPTS,
+    help="Evidence samples: one sanitized record per fetcher, to show what it collects.",
+)
+app.add_typer(samples_app, name="samples")
 
 
 @app.callback()
@@ -330,7 +350,37 @@ def _human_upload_printer(noun: str = "file", log_name: str = "upload_log.json")
             suffix = f"  {reason}" if reason else ""
             typer.echo(
                 f"        [{style.mark(mark)}] {ev.get('file', '?')}"
-                f"{style.env(ref)}{style.dim(suffix)}"
+                f"{style.env(ref)}{style.dim(_tags_suffix(ev) + suffix)}"
+            )
+        elif kind == "process_plan":
+            if ev.get("operation"):
+                why = f"  {ev['close_skipped']}" if ev.get("close_skipped") else ""
+                typer.echo(
+                    f"        [{style.mark('DRY')}] would {ev['operation']} "
+                    f"{ev['artifacts']} artifact(s){style.env('  assessment=' + ev['assessment_id'])}"
+                    f"{style.dim(why)}"
+                )
+        elif kind == "job_queued":
+            why = f"  {ev['close_skipped']}" if ev.get("close_skipped") else ""
+            typer.echo(
+                f"        [{style.mark('OK')}] queued {ev['operation']} job {ev['job_id']}"
+                f"{style.env('  assessment=' + ev['assessment_id'])}{style.dim(why)}"
+            )
+            if ev.get("cycle_name"):
+                typer.echo(f"             cycle: {ev['cycle_name']}")
+            if ev.get("newer_cycles"):
+                typer.echo(
+                    f"        [{style.mark('WARN')}] {ev['newer_cycles']} newer cycle(s) exist. "
+                    f"Uploads land on the oldest open cycle, so look for these issues on "
+                    f"{ev['cycle_name']!r}; newer cycles show nothing until it is closed."
+                )
+        elif kind == "job_complete":
+            typer.echo("        " + _job_line(ev))
+        elif kind == "process_skipped":
+            typer.echo(
+                f"        [{style.mark('SKIP')}] nothing new to process"
+                f"{style.env('  assessment=' + ev['assessment_id'])}"
+                f"{style.dim('  ' + ev['reason'])}"
             )
         elif kind == "upload_complete":
             typer.echo(
@@ -339,18 +389,55 @@ def _human_upload_printer(noun: str = "file", log_name: str = "upload_log.json")
                 f"skipped_duplicate={ev['skipped_duplicate']} "
                 f"skipped_failed={ev['skipped_failed']} "
                 f"errors={ev['errors']}"
+                + (f" jobs_failed={ev['jobs_failed']}" if "jobs_failed" in ev else "")
             )
             if ev.get("halted"):
                 typer.echo(f"\nStopped early: {ev['halted']}")
+            for line in _tags_done_lines(ev.get("tags")):
+                typer.echo(line)
             if ev.get("log_path"):
                 typer.echo(f"{log_name} → {ev['log_path']}")
     return on_event
 
 
+_COUNT_LABELS = (
+    ("recordsProcessed", "records"),
+    ("issuesCreated", "created"),
+    ("issuesUpdated", "updated"),
+    ("issuesSeenClosed", "seen-closed"),
+    ("issuesCreatedAndClosed", "created-closed"),
+    ("issuesExcuseClosed", "excuse-closed"),
+    ("issuesAutoClosed", "auto-closed"),
+)
+
+
+def _job_line(job: dict) -> str:
+    """One pipeline job as a line: status, id, and what it did or why it stopped."""
+    status = job.get("status") or "?"
+    mark = {"COMPLETED": "OK", "FAILED": "FAIL", "CANCELLED": "SKIP"}.get(status, "WAIT")
+    parts = [f"[{style.mark(mark)}] job {job.get('job_id')} {status}"]
+    counts = job.get("counts") or {}
+    shown = [f"{counts[k]} {label}" for k, label in _COUNT_LABELS if counts.get(k) is not None]
+    if shown:
+        parts.append(", ".join(shown))
+    if job.get("blocked_by"):
+        parts.append(
+            f"blocked by failed job {job['blocked_by']} — retry it with "
+            f"`paramify issues jobs --retry {job['blocked_by']}`"
+        )
+    if job.get("timed_out"):
+        parts.append("still running; check it later with `paramify issues jobs`")
+    if job.get("error"):
+        parts.append(style.dim(str(job["error"])))
+    if job.get("poll_error"):
+        parts.append(style.dim(job["poll_error"]))
+    return "  ".join(parts)
+
+
 def _upload_stage(
     *,
     run_dir: Optional[str],
-    output_dir: str,
+    output_dir: Optional[str],
     config: Optional[str],
     dry_run: bool,
     json_out: bool,
@@ -361,6 +448,8 @@ def _upload_stage(
     upload_kwargs: Optional[dict] = None,
     after_upload: Optional[Callable[[Path, Path, Optional[Path], bool], dict]] = None,
     after_upload_key: str = "after_upload",
+    kind: Optional[str] = None,
+    manifest: Optional[str] = None,
 ) -> NoReturn:
     """Resolve a run directory, preflight it, and upload — the whole flow for one
     upload stage.
@@ -374,15 +463,31 @@ def _upload_stage(
     if run_dir:
         resolved_run_dir = Path(run_dir).resolve()
     else:
-        runs = api.list_runs(output_dir)
-        if not runs:
-            msg = f"No runs found under {output_dir}."
+        # The newest run with something of this stage's kind — not simply the
+        # newest run: evidence and pipeline manifests usually share an
+        # output_dir, and each command would otherwise pick up the other's run.
+        manifest_path = None
+        if manifest:
+            try:
+                manifest_path = api.resolve_manifest_path(root, manifest)
+            except api.ManifestNotFound as e:
+                _fail(None, str(e), json_out)
+            if output_dir is None:
+                m_run = (api.read_manifest(manifest_path).get("run") or {})
+                output_dir = m_run.get("output_dir")
+        output_dir = output_dir or "./evidence"
+        latest = api.latest_run(output_dir, kind=kind, manifest_path=manifest_path, root=root)
+        if latest is None:
+            what = {"evidence": "collected evidence", "issue_report": "collected issue reports"}
+            scope = f" produced by {manifest}" if manifest else ""
+            has = f" that {what[kind]}" if kind else ""
+            msg = f"No run{scope} under {output_dir}{has}."
             if json_out:
                 typer.echo(json.dumps({"ok": False, "errors": [msg]}, indent=2))
             else:
                 _err(msg)
             raise typer.Exit(1)
-        resolved_run_dir = Path(runs[0]["dir"]).resolve()
+        resolved_run_dir = Path(latest["dir"]).resolve()
 
     config_path = Path(config).resolve() if config else None
     try:
@@ -461,6 +566,27 @@ def _upload_stage(
     raise typer.Exit(0 if ok else 1)
 
 
+def _tags_suffix(ev: dict) -> str:
+    """`  tags=A,B` for a per-item line, or nothing when none were applied."""
+    tags = ev.get("tags")
+    return f"  tags={','.join(tags)}" if tags else ""
+
+
+def _tags_done_lines(summary: Optional[dict]) -> List[str]:
+    """The default-custom-tags lines of a stage's Done block; empty when tags are off."""
+    if not summary:
+        return []
+    if summary.get("enabled") is False:
+        return [f"tags: off ({summary.get('reason') or 'switched off'})"]
+    line = f"tags: applied={summary.get('applied', 0)} failed={summary.get('failed', 0)}"
+    if summary.get("provenance"):
+        line += f"  provenance={summary['provenance']!r}"
+    lines = [line]
+    if summary.get("disabled"):
+        lines.append(f"  WARN  {summary['disabled']}")
+    return lines
+
+
 def _human_validator_printer():
     """Return an on_event callback for Paramify validator-sync progress."""
     def on_event(ev: dict) -> None:
@@ -481,6 +607,7 @@ def _human_validator_printer():
                 extra += f"  associated={','.join(ev['associated'])}"
             if ev.get("set_not_found"):
                 extra += f"  set_not_found={','.join(ev['set_not_found'])}"
+            extra += _tags_suffix(ev)
             if ev.get("error"):
                 extra += f"  {ev['error']}"
             typer.echo(f"        [{mark}] {ev.get('key', '?')}  {outcome}{extra}")
@@ -491,6 +618,8 @@ def _human_validator_printer():
                 f"associated={ev['associated']} set_not_found={ev['set_not_found']} "
                 f"errors={ev['errors']}"
             )
+            for line in _tags_done_lines(ev.get("tags")):
+                typer.echo(line)
             if not ev.get("dry_run"):
                 typer.echo(f"lock → {ev['lock_path']}")
     return on_event
@@ -912,6 +1041,132 @@ def evidence_cmd(
 
 
 # --------------------------------------------------------------------------- #
+# Evidence samples
+# --------------------------------------------------------------------------- #
+
+@samples_app.command("status")
+def samples_status(
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Which evidence fetchers have a committed sample, and which still need one.
+
+    A sample is `sample.json` beside the fetcher's fetcher.yaml. UNREVIEWED means
+    a backfill wrote it and nobody has read it yet; OLD means it was captured
+    from an earlier fetcher version, whose fields may have changed.
+    """
+    rows = api.sample_status(api.find_repo_root())
+    if json_out:
+        typer.echo(json.dumps({"ok": True, "fetchers": rows}, indent=2))
+        return
+    have = [r for r in rows if r["has_sample"]]
+    width = max(len(r["fetcher"]) for r in rows)
+    for r in rows:
+        if not r["has_sample"]:
+            typer.echo(f"  {style.dim('—')}  {style.dim(r['fetcher'])}")
+            continue
+        notes = []
+        if not r["reviewed"]:
+            notes.append(style.warn("UNREVIEWED"))
+        if not r["current"]:
+            notes.append(style.warn(f"OLD v{r['sample_version']}"))
+        counts = ", ".join(f"{p} ×{n}" for p, n in r["records"].items() if n)
+        typer.echo(
+            f"  {style.ok('✓')}  {r['fetcher']:<{width}}  "
+            + style.dim(f"{r['source']} {r['captured_on'] or ''}  {counts}")
+            + (("  " + " ".join(notes)) if notes else "")
+        )
+    unreviewed = sum(1 for r in have if not r["reviewed"])
+    typer.echo(
+        f"\n{len(have)} of {len(rows)} evidence fetchers have a sample"
+        + (f"; {unreviewed} unreviewed" if unreviewed else "") + "."
+    )
+
+
+@samples_app.command("show")
+def samples_show(
+    fetcher: str = typer.Argument(..., help="Fetcher name"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Show one fetcher's sample: how many records were seen, how often each
+    field was filled in, and the one record kept."""
+    try:
+        doc = api.read_sample(api.find_repo_root(), fetcher)
+    except ValueError as e:
+        if json_out:
+            typer.echo(json.dumps({"error": str(e)}, indent=2))
+        else:
+            _err(str(e))
+        raise typer.Exit(1)
+    if json_out:
+        typer.echo(json.dumps(doc, indent=2, ensure_ascii=False))
+        return
+    typer.echo(
+        f"{style.name(doc['fetcher_name'])}  v{doc.get('fetcher_version')}  "
+        + style.dim(f"{doc.get('source')} sample, captured {doc.get('captured_on')}")
+        + ("" if doc.get("reviewed") else "  " + style.warn("UNREVIEWED"))
+    )
+    for c in doc.get("collections") or []:
+        n = c["records"]
+        typer.echo(style.head(f"\n{c['path']}") + style.dim(f"  — {n} seen, 1 kept"))
+        for field_name, present in c["fields"].items():
+            typer.echo(f"  {field_name:<40} " + style.dim(f"{present}/{n}"))
+    typer.echo(style.head("\npayload:"))
+    typer.echo(style.highlight_json(json.dumps(doc["payload"], indent=2, ensure_ascii=False)))
+
+
+@samples_app.command("backfill")
+def samples_backfill(
+    evidence: str = typer.Option(
+        "./evidence", "--evidence", "-e",
+        help="Directory of past runs to draw from (searched recursively)",
+    ),
+    only: Optional[List[str]] = typer.Option(
+        None, "--fetcher", help="Only this fetcher (repeatable)"
+    ),
+    scrub: Optional[List[str]] = typer.Option(
+        None, "--scrub",
+        help="A word to replace with 'example' wherever it appears, any case "
+             "(repeatable) — an org or tenant name the rules cannot know",
+    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite samples that already exist"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report what would be written"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Build `sample.json` for every fetcher with records in local evidence.
+
+    For each fetcher it picks the best past file (has records, current version,
+    succeeded, shows the most), keeps the most filled-in record of each
+    repeated collection, and replaces identifiers (emails, names, account ids,
+    UUIDs, IPs, target values) with stable fakes. A sample in which any known
+    identifier survives is not written. Free text (descriptions, resource
+    names) is not rewritten, so every sample starts unreviewed: read it before
+    you commit it.
+    """
+    result = api.backfill_samples(
+        api.find_repo_root(), evidence, only=only, scrub=scrub, force=force, dry_run=dry_run,
+    )
+    if json_out:
+        typer.echo(json.dumps({"ok": not result["blocked"], **result}, indent=2))
+        raise typer.Exit(1 if result["blocked"] else 0)
+    verb = "would write" if dry_run else "wrote"
+    for r in result["written"]:
+        old = "" if r["current"] else "  " + style.warn(f"OLD v{r['sample_version']}")
+        counts = ", ".join(f"{p} ×{n}" for p, n in r["records"].items() if n)
+        typer.echo(f"  {style.ok('✓')}  {r['fetcher']}  " + style.dim(counts) + old)
+    for r in result["blocked"]:
+        _err(f"  {style.fail('✗')}  {r['fetcher']}  leaked: {', '.join(r['leaks'])}")
+    typer.echo(
+        f"\n{verb} {len(result['written'])}; "
+        f"{len(result['skipped'])} already had a sample; "
+        f"{len(result['no_records'])} had only empty evidence; "
+        f"{len(result['blocked'])} blocked."
+    )
+    if result["written"] and not dry_run:
+        typer.echo(style.dim("Read each sample before committing: paramify samples show <fetcher>"))
+    raise typer.Exit(1 if result["blocked"] else 0)
+
+
+# --------------------------------------------------------------------------- #
 # Validate / run
 # --------------------------------------------------------------------------- #
 
@@ -1007,11 +1262,20 @@ def run_cmd(
 
 @app.command("upload")
 def upload_cmd(
-    run_dir: Optional[str] = typer.Argument(None, help="Run directory to upload (default: latest under --output-dir)"),
-    output_dir: str = typer.Option("./evidence", "-o", "--output-dir", help="Base dir to find latest run"),
+    run_dir: Optional[str] = typer.Argument(
+        None, help="Run directory to upload (default: the newest run that collected evidence)"
+    ),
+    output_dir: Optional[str] = typer.Option(
+        None, "-o", "--output-dir",
+        help="Base dir to find the run in (default: the -f manifest's output_dir, else ./evidence)",
+    ),
+    file: Optional[str] = typer.Option(
+        None, "-f", "--file", help="Only runs this manifest produced",
+    ),
     config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and report what would upload; no API calls"),
     with_validators: bool = typer.Option(False, "--with-validators", help="After upload, sync validators for the sets this run produced (create-or-skip)"),
+    no_tags: bool = typer.Option(False, "--no-tags", help="Skip the default custom tags for this run (PARAMIFY_CUSTOM_TAGS=off does the same from the environment)"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
     """Upload one evidence run to Paramify.
@@ -1026,6 +1290,7 @@ def upload_cmd(
             config_path=config_path,
             dry_run=dry,
             on_event=None if json_out else _human_validator_printer(),
+            custom_tags=not no_tags,
         )
 
     _upload_stage(
@@ -1038,8 +1303,11 @@ def upload_cmd(
         upload_fn=api.upload_run,
         noun="file",
         log_name="upload_log.json",
+        upload_kwargs={"custom_tags": not no_tags},
         after_upload=_sync_after if with_validators else None,
         after_upload_key="validators",
+        kind="evidence",
+        manifest=file,
     )
 
 
@@ -1100,6 +1368,7 @@ def validators_sync_cmd(
     lock: Optional[str] = typer.Option(None, "--lock", help="Lock file path (default ./.paramify/validators-sync.lock.json)"),
     update: bool = typer.Option(False, "--update", help="Also PATCH existing validators (overwrites customer tuning)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Report planned actions; make no writes"),
+    no_tags: bool = typer.Option(False, "--no-tags", help="Skip the default custom tags for this run (PARAMIFY_CUSTOM_TAGS=off does the same from the environment)"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
     """Create/associate registry validators in Paramify. Create-or-skip by default."""
@@ -1117,6 +1386,7 @@ def validators_sync_cmd(
             update=update,
             lock_path=lock,
             on_event=None if json_out else _human_validator_printer(),
+            custom_tags=not no_tags,
         )
     except Exception as e:  # noqa: BLE001 — surface setup errors to CLI users
         if json_out:
@@ -1150,7 +1420,7 @@ def _human_scripts_printer():
             mark = _marks.get(ev.get("outcome"), "?")
             assoc = " +assoc" if ev.get("associated") else ""
             reason = ev.get("reason") or ev.get("error")
-            suffix = f"  {reason}" if reason else ""
+            suffix = _tags_suffix(ev) + (f"  {reason}" if reason else "")
             typer.echo(f"        [{mark}] {ev.get('fetcher', '?')}  set={ev.get('reference_id')}{assoc}{suffix}")
         elif kind == "sync_complete":
             typer.echo(
@@ -1158,6 +1428,8 @@ def _human_scripts_printer():
                 f"created={ev['created']} updated={ev['updated']} drift={ev['drift']} "
                 f"noop={ev['noop']} associated={ev['associated']} errors={ev['errors']}"
             )
+            for line in _tags_done_lines(ev.get("tags")):
+                typer.echo(line)
     return on_event
 
 
@@ -1169,6 +1441,7 @@ def scripts_sync_cmd(
     force: bool = typer.Option(False, "--force", help="Push scripts whose code drifted without a version bump"),
     reassociate: bool = typer.Option(False, "--reassociate", help="Ensure the association for every fetcher, not just changed ones"),
     all_fetchers: bool = typer.Option(False, "--all", help="Sync every fetcher in the repo, not just the manifest's"),
+    no_tags: bool = typer.Option(False, "--no-tags", help="Skip the default custom tags for this run (PARAMIFY_CUSTOM_TAGS=off does the same from the environment)"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
     """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
@@ -1213,6 +1486,7 @@ def scripts_sync_cmd(
             reassociate=reassociate,
             include=include,
             on_event=None if json_out else _human_scripts_printer(),
+            custom_tags=not no_tags,
         )
     except Exception as e:  # noqa: BLE001
         if json_out:
@@ -1943,9 +2217,17 @@ def assessments_select(
         help="Manifest to edit. A bare name resolves under manifests/. Omit to "
              "choose from the discovered manifests.",
     ),
+    close_cycle: Optional[str] = typer.Option(
+        None, "--close-cycle",
+        help="after_run: close the cycle after each complete run (one report per "
+             "cycle). never: process only; close in Paramify or with `paramify "
+             "issues close`. Omit to be asked.",
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Point issue-report fetchers at a Paramify assessment."""
+    if close_cycle is not None and close_cycle not in CLOSE_CYCLE_VALUES:
+        _fail(None, f"--close-cycle must be {' or '.join(CLOSE_CYCLE_VALUES)}", json_out)
     root = api.find_repo_root()
     discovered = api.discover(root)
     path = _manifest_for_edit(root, file, json_out, discovered["fetchers"])
@@ -2025,11 +2307,33 @@ def assessments_select(
             )
         chosen = assessments[choice - 1]
 
+    # The close policy is asked here, beside the assessment, because it is a fact
+    # about how this customer fills that assessment's cycles. Not prompted when the
+    # entries already carry one — re-pointing at a new assessment keeps it.
+    view = api.effective_config(m, uses, root, discovered["fetchers"])
+    unset = [
+        u for u in uses
+        if not next((d["value"] for d in view.get(u, []) if d["name"] == CLOSE_CYCLE_FIELD), None)
+    ]
+    if close_cycle is None and unset and _can_prompt(json_out):
+        typer.echo(
+            "\nHow is this assessment's cycle closed?\n"
+            "  1. after_run  one report per cycle: close after each complete run\n"
+            "  2. never      several files per cycle: close in Paramify or with "
+            "`paramify issues close`\n"
+            "Closing auto-closes open issues the cycle never saw.\n"
+        )
+        pick = typer.prompt("Select", type=int)
+        if pick not in (1, 2):
+            _fail(path, f"Invalid selection: {pick}", json_out)
+        close_cycle = CLOSE_CYCLE_VALUES[pick - 1]
+
     for use in uses:
-        api.set_assessment(m, use, chosen)
+        api.set_assessment(m, use, chosen, close_cycle)
         if not json_out:
+            policy = f"  close_cycle={close_cycle}" if close_cycle else ""
             typer.echo(
-                f"  + {use}  ->  {api.assessment_display_name(chosen)} ({chosen['id']})"
+                f"  + {use}  ->  {api.assessment_display_name(chosen)} ({chosen['id']}){policy}"
             )
     _save_and_report(m, path, root, json_out, verb="Updated")
 
@@ -2305,24 +2609,41 @@ def artifacts_pull(
 
 
 # --------------------------------------------------------------------------- #
-# Issues — upload raw issue reports into assessment intake
+# Issues — send raw issue reports into assessment pipelines
 # --------------------------------------------------------------------------- #
 
 @issues_app.command("upload")
 def issues_upload_cmd(
     run_dir: Optional[str] = typer.Argument(
-        None, help="Run directory to upload (default: latest under --output-dir)"
+        None, help="Run directory to upload (default: the newest run that collected issue reports)"
     ),
-    output_dir: str = typer.Option("./evidence", "-o", "--output-dir", help="Base dir to find latest run"),
+    output_dir: Optional[str] = typer.Option(
+        None, "-o", "--output-dir",
+        help="Base dir to find the run in (default: the -f manifest's output_dir, else ./evidence)",
+    ),
+    file: Optional[str] = typer.Option(
+        None, "-f", "--file", help="Only runs this manifest produced",
+    ),
     config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and report what would upload; no API calls"),
     force: bool = typer.Option(
         False, "--force",
-        help="Re-intake reports already in this run's _intake_log.json (duplicates issues)",
+        help="Re-send and re-process reports already in this run's _intake_log.json",
+    ),
+    no_wait: bool = typer.Option(
+        False, "--no-wait", help="Queue processing and exit without waiting for the job",
+    ),
+    wait_timeout: Optional[float] = typer.Option(
+        None, "--wait-timeout", help="Seconds to wait for each job (default 900)",
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON summary"),
 ):
-    """Upload a run's issue reports into Paramify assessment intake.
+    """Send a run's issue reports into their assessments' Paramify pipelines.
+
+    Per assessment: upload every report, then one process call over exactly
+    those files, then wait for the job. The cycle is closed in the same call only
+    when the assessment's close_cycle is after_run and every target in the run
+    succeeded — closing auto-closes open issues the cycle never saw.
 
     The counterpart to `paramify upload`, which handles evidence. A run
     containing both kinds needs both commands.
@@ -2337,8 +2658,103 @@ def issues_upload_cmd(
         upload_fn=api.issues_upload_run,
         noun="report",
         log_name="_intake_log.json",
-        upload_kwargs={"force": force},
+        upload_kwargs={"force": force, "wait": not no_wait, "wait_timeout": wait_timeout},
+        kind="issue_report",
+        manifest=file,
     )
+
+
+@issues_app.command("jobs")
+def issues_jobs_cmd(
+    assessment: Optional[str] = typer.Option(
+        None, "--assessment", "-a", help="Only this assessment's jobs (id)"
+    ),
+    status: Optional[str] = typer.Option(
+        None, "--status", help="Only jobs in this status (QUEUED, IN_PROGRESS, COMPLETED, FAILED, CANCELLED)"
+    ),
+    limit: int = typer.Option(20, "--limit", help="How many jobs, newest first"),
+    retry: Optional[str] = typer.Option(None, "--retry", help="Retry this failed job"),
+    cancel: Optional[str] = typer.Option(
+        None, "--cancel",
+        help="Cancel this job — and every unfinished job queued behind it on the assessment",
+    ),
+    config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """List pipeline jobs, or retry / cancel one.
+
+    A failed job blocks every job queued behind it on the same assessment until
+    it is retried or cancelled. Neither happens automatically: which is right
+    depends on why it failed.
+    """
+    root = api.find_repo_root()
+    config_path = Path(config).resolve() if config else None
+    if retry and cancel:
+        _fail(None, "pass --retry or --cancel, not both", json_out)
+    try:
+        if retry or cancel:
+            job_id, action = (retry, "retry") if retry else (cancel or "", "cancel")
+            job = api.issues_job_action(root, job_id, action, config_path)
+            if json_out:
+                typer.echo(json.dumps({"ok": True, "job": job}, indent=2))
+            else:
+                typer.echo(f"{action}: {_job_line(job)}")
+            raise typer.Exit(0)
+        jobs = api.issues_jobs(
+            root, config_path, assessment_id=assessment, status=status, limit=limit
+        )
+    except typer.Exit:
+        raise
+    except Exception as e:  # noqa: BLE001 — surface API errors to CLI users
+        _fail(None, str(e), json_out)
+    if json_out:
+        typer.echo(json.dumps({"ok": True, "jobs": jobs}, indent=2))
+        return
+    if not jobs:
+        typer.echo("No pipeline jobs found.")
+        return
+    for job in jobs:
+        typer.echo(
+            f"{style.dim((job.get('created_at') or '')[:19])}  {job.get('type') or '?':<13} "
+            f"{style.env(job.get('assessment_id') or '')}\n    {_job_line(job)}"
+        )
+
+
+@issues_app.command("close")
+def issues_close_cmd(
+    assessment: str = typer.Argument(..., help="Assessment (pipeline) id whose current cycle to close"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask for confirmation"),
+    no_wait: bool = typer.Option(False, "--no-wait", help="Queue the close and exit"),
+    config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Close an assessment's current cycle.
+
+    For assessments filled by several runs (close_cycle: never), once the last
+    file has been processed. Closing auto-closes every open issue the cycle never
+    saw, and the pipeline's next upload opens a new cycle.
+    """
+    root = api.find_repo_root()
+    config_path = Path(config).resolve() if config else None
+    if not yes:
+        if not _can_prompt(json_out):
+            _fail(None, "closing a cycle needs confirmation: pass --yes", json_out)
+        typer.echo(
+            f"Close the current cycle of assessment {assessment}?\n"
+            "Every open issue the cycle never saw will be auto-closed as resolved."
+        )
+        if not typer.confirm("Close it", default=False):
+            raise typer.Exit(1)
+    try:
+        job = api.issues_close(root, assessment, config_path, wait=not no_wait)
+    except Exception as e:  # noqa: BLE001
+        _fail(None, str(e), json_out)
+    ok = no_wait or job.get("status") == "COMPLETED"
+    if json_out:
+        typer.echo(json.dumps({"ok": ok, "job": job}, indent=2))
+    else:
+        typer.echo(_job_line(job))
+    raise typer.Exit(0 if ok else 1)
 
 
 if __name__ == "__main__":

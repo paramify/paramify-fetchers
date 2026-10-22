@@ -4,8 +4,8 @@
 
 ## What it speaks to
 
-<Which KSI / control / capability this evidence supports. Per design.md,
-compliance mapping is a Paramify-side configuration concern, not a fetcher
+<Which KSI / control / capability this evidence supports.
+Compliance mapping is a Paramify-side configuration concern, not a fetcher
 concern. This section is informational, not authoritative.>
 
 ## Required env vars

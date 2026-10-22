@@ -376,6 +376,11 @@ API_TO_CLI = {
     "issues_upload_run": "issues upload",
     "list_assessments": "assessments list",
     "set_assessment": "assessments select",
+    "set_close_cycle": "assessments select",  # --close-cycle
+    "issues_jobs": "issues jobs",
+    "issues_job_action": "issues jobs",  # --retry / --cancel
+    "issues_close": "issues close",
+    "latest_run": "upload",  # and `issues upload`: the run picked with no run-dir
     # Read-only label helper: how an assessment is named in the picker. The CLI
     # applies the same function to its own list output.
     "assessment_display_name": "<implicit: assessment label>",
@@ -1775,3 +1780,19 @@ def test_pull_artifact_refuses_a_link_artifact():
             {"id": "d" * 8, "is_url": True, "download_url": "https://example.test/page"},
             "/tmp",
         )
+
+
+# --------------------------------------------------------------------------- #
+# Default custom tags — the off switch is on every command that writes them
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("path", [["upload"], ["scripts", "sync"], ["validators", "sync"]])
+def test_no_tags_flag_on_every_tagging_command(path):
+    # Read the command's declared options rather than its rendered help: with
+    # colour forced (CI), rich styles the option name in pieces, so the literal
+    # "--no-tags" is not a substring of the output.
+    cmd = get_command(app)
+    for part in path:
+        cmd = cmd.commands[part]
+    opts = {opt for param in cmd.params for opt in getattr(param, "opts", [])}
+    assert "--no-tags" in opts

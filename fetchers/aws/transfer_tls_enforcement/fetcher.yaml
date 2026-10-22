@@ -1,5 +1,5 @@
 name: aws_transfer_tls_enforcement
-version: 0.1.0
+version: 0.2.0
 description: Collects AWS Transfer Family server protocols (SFTP/FTPS/FTP/AS2) and the assigned security policy name to evidence TLS enforcement on file-transfer endpoints.
 category: aws
 
@@ -34,7 +34,7 @@ evidence_set:
   reference_id: EVD-TRANSFER-TLS
   name: AWS Transfer Family TLS Enforcement
   instructions: >-
-    For each region, run `aws transfer list-servers` to enumerate Transfer Family
+    Script: aws/transfer_tls_enforcement/fetcher.sh. For each region, run `aws transfer list-servers` to enumerate Transfer Family
     servers, then `aws transfer describe-server --server-id <id>` to capture each
     server's Protocols (SFTP/FTPS/FTP/AS2) and SecurityPolicyName. Review that
     only TLS-protected protocols are enabled and that the security policy enforces

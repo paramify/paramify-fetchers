@@ -46,44 +46,50 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": []}' \
   > "$OUTPUT_JSON"
 
-sg_ids=$(aws ec2 describe-security-groups --query 'SecurityGroups[*].GroupId' --output text 2>/dev/null)
+# One describe for every group's rules. The list call already carries
+# IpPermissions and IpPermissionsEgress; re-describing each group once per
+# direction cost two CLI processes per group.
+_SG_JSON="$(mktemp -t aws_security_groups_list.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_SG_JSON"' EXIT
+aws ec2 describe-security-groups --query 'SecurityGroups[*].{GroupId:GroupId,GroupName:GroupName,VpcId:VpcId,IpPermissions:IpPermissions,IpPermissionsEgress:IpPermissionsEgress}' --output json > "$_SG_JSON" 2>/dev/null
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     echo "aws ec2 describe-security-groups (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list security groups"
 else
-    for sg_id in $sg_ids; do
-        group_data=$(jq -n --arg id "$sg_id" '{"GroupId": $id, "Rules": []}')
-
-        for direction in inbound outbound; do
-            if [ "$direction" == "inbound" ]; then
-                query_path='IpPermissions'
-                label="INBOUND RULES"
-            else
-                query_path='IpPermissionsEgress'
-                label="OUTBOUND RULES"
-            fi
-
-            rules=$(aws ec2 describe-security-groups \
-                --group-ids "$sg_id" \
-                --query "SecurityGroups[0].$query_path[*].[IpProtocol,FromPort,ToPort,join(', ', IpRanges[*].CidrIp)]" \
-                --output text 2>/dev/null)
-            rules_exit=$?
-            if [ $rules_exit -ne 0 ]; then
-                echo "aws ec2 describe-security-groups ($sg_id $direction) failed" >> "$_FAILURE_LOG"
-                continue
-            fi
-
-            if [ -n "$rules" ]; then
-                while IFS=$'\t' read -r protocol from to cidrs; do
-                    group_data=$(echo "$group_data" | jq --arg dir "$label" --arg p "$protocol" --arg f "${from:-null}" --arg t "${to:-null}" --arg c "${cidrs:-}" \
-                        '.Rules += [{"Direction":$dir, "Protocol":$p, "FromPort":($f|tonumber?), "ToPort":($t|tonumber?), "CIDRs":$c}]')
-                done <<< "$rules"
-            fi
-        done
-
-        jq --argjson data "$group_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # Validators match on this rule shape by key order, so keys are only ever
+    # appended: Direction, Protocol, FromPort, ToPort, CIDRs (IPv4 ranges joined
+    # with ", "), IPv6CIDRs (IPv6 ranges, joined the same way), then
+    # SecurityGroupIds and PrefixListIds. The group record is likewise GroupId,
+    # Rules, then GroupName and VpcId.
+    #
+    # A rule with no ports -- protocol -1, "All traffic" -- is kept with FromPort
+    # and ToPort null. Before 0.3.0 it was dropped, which hid an inbound
+    # all-traffic rule from 0.0.0.0/0 and every default allow-all egress rule.
+    # Before 0.3.0 IPv6 ranges were not read at all, so a rule open to ::/0
+    # looked closed.
+    #
+    # Before 0.4.0 a rule whose source (outbound: destination) is another
+    # security group (UserIdGroupPairs) or a managed prefix list (PrefixListIds)
+    # appeared with empty CIDRs and nothing else, as if it allowed nothing.
+    # SecurityGroupIds lists the referenced groups joined with ", "; a group
+    # owned by another account is written <account-id>/<group-id>, as the
+    # console shows it. PrefixListIds lists the prefix lists the same way.
+    jq --slurpfile groups "$_SG_JSON" --arg account "$ACCOUNT_ID" '
+        def group_ref:
+            if (.UserId // $account) == $account then .GroupId else "\(.UserId)/\(.GroupId)" end;
+        def rules($perms; $label):
+            [$perms[]?
+             | {"Direction": $label, "Protocol": (.IpProtocol | if . == null then "None" else tostring end),
+                "FromPort": .FromPort, "ToPort": .ToPort,
+                "CIDRs": ([.IpRanges[]?.CidrIp | select(. != null)] | join(", ")),
+                "IPv6CIDRs": ([.Ipv6Ranges[]?.CidrIpv6 | select(. != null)] | join(", ")),
+                "SecurityGroupIds": ([.UserIdGroupPairs[]? | select(.GroupId != null) | group_ref] | join(", ")),
+                "PrefixListIds": ([.PrefixListIds[]?.PrefixListId | select(. != null)] | join(", "))}];
+        .results += [$groups[0][]? | {"GroupId": .GroupId,
+            "Rules": (rules(.IpPermissions; "INBOUND RULES") + rules(.IpPermissionsEgress; "OUTBOUND RULES")),
+            "GroupName": .GroupName, "VpcId": .VpcId}]
+    ' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

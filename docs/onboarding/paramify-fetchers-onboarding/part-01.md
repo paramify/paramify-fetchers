@@ -12,7 +12,7 @@ A traced, inspected run. You'll install the CLI from this repo, build a scratch 
 
 ## Prerequisites
 
-- **Python 3.10+** — `pyproject.toml` requires `>=3.10`; this guide was written and verified against Python 3.14.5.
+- **Python 3.11+** — `pyproject.toml` requires `>=3.11`; this guide was written and verified against Python 3.14.5.
 - A clone of `paramify-fetchers`, on `main`.
 - A virtualenv. Commands below assume it's activated.
 - **No credentials.** Deliberately. Everything in this part runs with `RIPPLING_API_TOKEN=fake`.
@@ -130,7 +130,7 @@ config_schema:
     env: RIPPLING_PAGE_SIZE
 ```
 
-The runner injects these as env vars for any fetcher with `category: rippling`; a manifest's `platforms:` block can override them per run. Config flows one way — category defaults, then platform values from the manifest, then per-fetcher config, later values winning (`docs/config_injection_design.md`).
+The runner injects these as env vars for any fetcher with `category: rippling`; a manifest's `platforms:` block can override them per run. Config flows one way — category defaults, then platform values from the manifest, then per-fetcher config, later values winning (`docs/config_injection_guide.md`, step 2).
 
 Now the script. Here's the tempting way to write a fetcher's error handling, and the reason this repo's README devotes its sternest paragraph to forbidding it:
 
@@ -343,7 +343,7 @@ This part was researched directly from the repository working tree (branch `main
 **Repository docs**
 
 1. `README.md` — the four-piece architecture, the strictness rationale, and the smoke-test pattern.
-2. `docs/design.md` / `docs/config_injection_design.md` — design rationale and the config/auth flow (referenced; read the originals for depth).
+2. [`docs/design.md`](https://github.com/paramify/paramify-fetchers/blob/1f690ac/docs/design.md) / [`docs/config_injection_design.md`](https://github.com/paramify/paramify-fetchers/blob/1f690ac/docs/config_injection_design.md) — design rationale and the config/auth flow (referenced; read the originals for depth).
 
 **Code read directly**
 

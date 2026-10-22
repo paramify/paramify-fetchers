@@ -53,7 +53,7 @@ evidence_set:
   reference_id: EVD-AZURE-MYSQL-CONFIG
   name: Azure MySQL Flexible Server Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-rdbms mysql_flexibleservers
+    Script: azure/mysql_configuration/fetcher.py. Azure SDK calls (azure-mgmt-rdbms mysql_flexibleservers
     MySQLManagementClient): servers.list(), configurations.list_by_server(). Records
     each server's engine version, durability settings and every server parameter as a
     name-to-value map.

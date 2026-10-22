@@ -6,10 +6,17 @@ Who holds what, where: each assignment with its scope classified, its principal,
 role definition with the NAME resolved from the GUID, flagged for the four over-broad
 built-ins.
 
+Two sets, kept apart. `role_assignments` is the subscription scope and above — the
+`atScope()` list every existing summary key is computed over, unchanged. Grants made on
+a resource group or a single resource are in `role_assignments_below_subscription`,
+with their own `below_subscription_*` / `all_scopes_*` summary keys, so a count a
+validator already reads never changes meaning.
+
 Projections ported from Prowler's
 prowler/providers/azure/services/iam/iam_service.py `_get_role_assignments` and
 `_get_roles` (Apache-2.0) — same SDK, same two calls, same `atScope()` filter. The
-four role GUIDs are theirs verbatim, from prowler/providers/azure/config.py.
+below-subscription listing is ours. The four role GUIDs are theirs verbatim, from
+prowler/providers/azure/config.py.
 """
 
 import logging
@@ -78,6 +85,17 @@ SCOPE_RESOURCE_GROUP = "resource_group"
 SCOPE_RESOURCE = "resource"
 SCOPE_ROOT = "root"
 SCOPE_UNKNOWN = "unknown"
+
+# Every level `scope_level` can return, widest first — the keys of the by-level counts,
+# always all present so a zero reads as zero rather than as a missing key.
+SCOPE_LEVELS = (
+    SCOPE_ROOT,
+    SCOPE_MANAGEMENT_GROUP,
+    SCOPE_SUBSCRIPTION,
+    SCOPE_RESOURCE_GROUP,
+    SCOPE_RESOURCE,
+    SCOPE_UNKNOWN,
+)
 
 
 # --- projections: the only code here that touches an azure-mgmt model ---
@@ -280,10 +298,69 @@ def summarize(assignments: list[dict]) -> dict:
     }
 
 
+def assignments_by_scope_level(assignments: list[dict]) -> dict[str, int]:
+    """Count per scope level, every level present."""
+    counts = {level: 0 for level in SCOPE_LEVELS}
+    for assignment in assignments:
+        level = assignment.get("scope_level") or SCOPE_UNKNOWN
+        counts[level] = counts.get(level, 0) + 1
+    return counts
+
+
+def summarize_all_scopes(at_scope: list[dict], below: list[dict]) -> dict:
+    """The keys that count resource-group and resource grants too.
+
+    New keys rather than a widened `summarize`: every key it returns has always meant
+    "at the subscription scope or above", and a validator comparing
+    `total_role_assignments` or `over_broad_builtin_assignments` must keep reading that.
+    A resource-scoped Owner is the same escalation path as a subscription-scoped one,
+    only over less, which is why the over-broad and role-granting counts are repeated
+    for this set.
+    """
+    everything = at_scope + below
+    below_over_broad = [a for a in below if a["is_over_broad_builtin"]]
+    by_type: dict[str, int] = {}
+    for assignment in below:
+        key = assignment["principal_type"] or "Unknown"
+        by_type[key] = by_type.get(key, 0) + 1
+
+    def _principals(records: list[dict]) -> int:
+        return len({a["principal_id"] for a in records if a["principal_id"]})
+
+    return {
+        # --- the widened set ---
+        "all_scopes_total_role_assignments": len(everything),
+        "all_scopes_distinct_principals": _principals(everything),
+        "all_scopes_over_broad_builtin_assignments": sum(
+            1 for a in everything if a["is_over_broad_builtin"]
+        ),
+        "all_scopes_role_granting_assignments": sum(1 for a in everything if a["can_grant_roles"]),
+        "all_scopes_assignments_by_scope_level": assignments_by_scope_level(everything),
+        # --- below the subscription only ---
+        "below_subscription_role_assignments": len(below),
+        "below_subscription_distinct_principals": _principals(below),
+        "below_subscription_resource_group_assignments": sum(
+            1 for a in below if a["scope_level"] == SCOPE_RESOURCE_GROUP
+        ),
+        "below_subscription_resource_assignments": sum(
+            1 for a in below if a["scope_level"] == SCOPE_RESOURCE
+        ),
+        "below_subscription_over_broad_builtin_assignments": len(below_over_broad),
+        "below_subscription_role_granting_assignments": sum(1 for a in below if a["can_grant_roles"]),
+        "below_subscription_custom_role_assignments": sum(1 for a in below if a["is_custom_role"]),
+        "below_subscription_unresolved_role_definitions": sum(
+            1 for a in below if not a["role_name_resolved"]
+        ),
+        "below_subscription_assignments_by_principal_type": by_type,
+    }
+
+
 # --- collection (lazy azure imports) ---
 
-def collect_role_assignments(subscription_id, cred, collector: Collector) -> tuple[list[dict], dict]:
-    """One role_definitions.list() to name the roles, one role_assignments.list().
+def collect_role_assignments(
+    subscription_id, cred, collector: Collector
+) -> tuple[list[dict], list[dict], dict]:
+    """One role_definitions.list() to name the roles, two role_assignments lists.
 
     The definitions call comes first because an assignment references its role only by
     GUID. Prowler builds the same lookup.
@@ -292,6 +369,14 @@ def collect_role_assignments(subscription_id, cred, collector: Collector) -> tup
     returns every assignment made at every resource group and individual resource,
     burying the subscription-wide grants this evidence is about. With it, the response
     is the assignments applying at the subscription scope and above.
+
+    Those buried grants are evidence too — a resource-level Owner on a Key Vault or a
+    Log Analytics workspace is exactly who can read or change it — so a second,
+    UNFILTERED list collects them. It returns the atScope() set again as well; the
+    second set is what it returns minus the first, by assignment id, rather than a
+    re-classification by scope string, so the two sets partition the listing exactly
+    whatever a scope string looks like. Returns (at_scope, below_subscription,
+    role_names).
     """
     from azure.mgmt.authorization import AuthorizationManagementClient
 
@@ -300,7 +385,7 @@ def collect_role_assignments(subscription_id, cred, collector: Collector) -> tup
 
     client = collector.guard("authorization.AuthorizationManagementClient (init)", _client)
     if client is None:
-        return [], {}
+        return [], [], {}
 
     scope = f"/subscriptions/{subscription_id}"
 
@@ -329,13 +414,39 @@ def collect_role_assignments(subscription_id, cred, collector: Collector) -> tup
     assignments = collector.guard(
         "authorization.role_assignments.list_for_subscription", _list_assignments, default=[]
     )
+
+    at_scope_ids = {str(a.get("id") or "").lower() for a in assignments}
+
+    def _list_below_subscription():
+        # ItemPaged, like the call above. No filter: every assignment in the
+        # subscription, down to individual resources.
+        return [
+            record
+            for record in (
+                assignment_record(project_role_assignment(a), role_names)
+                for a in client.role_assignments.list_for_subscription()
+            )
+            if str(record.get("id") or "").lower() not in at_scope_ids
+        ]
+
+    below = collector.guard(
+        "authorization.role_assignments.list_for_subscription(unfiltered)",
+        _list_below_subscription,
+        default=[],
+    )
     logger.info(
-        "Collected %d role assignment(s) against %d role definition(s)",
+        "Collected %d role assignment(s) at subscription scope or above and %d below it, "
+        "against %d role definition(s)",
         len(assignments),
+        len(below),
         len(role_names),
     )
     # Sorted by ARM id so a re-run against unchanged access is byte-stable.
-    return sorted(assignments, key=lambda a: a.get("id") or ""), role_names
+    return (
+        sorted(assignments, key=lambda a: a.get("id") or ""),
+        sorted(below, key=lambda a: a.get("id") or ""),
+        role_names,
+    )
 
 
 def main() -> int:
@@ -356,6 +467,7 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     assignments: list[dict] = []
+    below_subscription: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list calls: Azure returns an empty list, not an error, for an
@@ -369,7 +481,9 @@ def main() -> int:
                 "reporting status not_registered",
                 subscription_id,
             )
-        assignments, _ = collect_role_assignments(subscription_id, cred, collector)
+        assignments, below_subscription, _ = collect_role_assignments(
+            subscription_id, cred, collector
+        )
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -385,12 +499,19 @@ def main() -> int:
         collector=collector,
         results={
             "role_assignments": assignments,
+            # Resource-group and resource grants: the unfiltered listing minus the
+            # atScope() set above. Same record shape.
+            "role_assignments_below_subscription": below_subscription,
             "provider_registration_status": registration,
             # In the evidence so a reader knows which GUIDs decided the flags.
             "over_broad_builtin_roles_checked": dict(sorted(OVER_BROAD_BUILTIN_ROLES.items())),
             "assignment_scope_filter": "atScope()",
         },
-        summary={**summarize(assignments), "provider_registration_status": registration},
+        summary={
+            **summarize(assignments),
+            **summarize_all_scopes(assignments, below_subscription),
+            "provider_registration_status": registration,
+        },
     )
 
     filename = (

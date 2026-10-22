@@ -1,0 +1,10 @@
+display_name: Zendesk
+description: >-
+  Zendesk Help Center, read anonymously. Lists the public articles in a Help
+  Center section through the Help Center API, with each article's text and
+  dates, and checks each article page loads without signing in.
+
+# No secrets and no `auth:` block: these fetchers call the Help Center API as
+# an anonymous user, which sees only public content, and that is the claim they
+# support. No `requires:` block: `requests` is a core dependency and HTML is
+# parsed by fetchers/_lib/html_text.py (standard library).

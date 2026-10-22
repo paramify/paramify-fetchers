@@ -62,25 +62,24 @@ if [ -z "$snapshots" ] || ! echo "$snapshots" | jq . >/dev/null 2>&1; then
     snapshots='[]'
 fi
 
-# Determine public snapshots: Prowler _determine_public_snapshots checks
-# describe_snapshot_attribute createVolumePermission for a Group == "all".
-snapshots_enriched='[]'
-while read -r snap; do
-    [ -z "$snap" ] && continue
-    snap_id=$(echo "$snap" | jq -r '.SnapshotId')
-
-    is_public="false"
-    perms=$(aws ec2 describe-snapshot-attribute --attribute createVolumePermission --snapshot-id "$snap_id" --query 'CreateVolumePermissions' --output json 2>/dev/null)
+# Public snapshots, in ONE call. Prowler's _determine_public_snapshots asks
+# describe_snapshot_attribute per snapshot whether createVolumePermission has
+# Group == "all"; --restorable-by-user-ids all is that same predicate evaluated
+# server-side, so an account with thousands of snapshots costs one paginated call
+# instead of one CLI process per snapshot (which ran past the runner's timeout).
+# Skipped when there are no snapshots to mark, as the per-snapshot loop was.
+public_ids='[]'
+if [ "$(echo "$snapshots" | jq 'length')" -gt 0 ]; then
+    public_ids=$(aws ec2 describe-snapshots --owner-ids self --restorable-by-user-ids all --query 'Snapshots[].SnapshotId' --output json 2>/dev/null)
     ec=$?
     if [ $ec -ne 0 ]; then
-        echo "aws ec2 describe-snapshot-attribute ($snap_id) failed (exit=$ec)" >> "$_FAILURE_LOG"
-    elif echo "${perms:-[]}" | jq -e 'any(.[]?; .Group == "all")' >/dev/null 2>&1; then
-        is_public="true"
+        echo "aws ec2 describe-snapshots (public) failed (exit=$ec)" >> "$_FAILURE_LOG"
+        public_ids='[]'
     fi
-
-    snapshots_enriched=$(echo "$snapshots_enriched" | jq --argjson snap "$snap" --arg public "$is_public" \
-        '. += [$snap + {"Public": ($public == "true")}]')
-done < <(echo "$snapshots" | jq -c '.[]')
+    if [ -z "$public_ids" ] || ! echo "$public_ids" | jq . >/dev/null 2>&1; then
+        public_ids='[]'
+    fi
+fi
 
 # Volumes in the region, with whether each has at least one owned snapshot.
 # Prowler: _describe_volumes (id, encrypted) + volumes_with_snapshots map.
@@ -94,18 +93,22 @@ if [ -z "$volumes" ] || ! echo "$volumes" | jq . >/dev/null 2>&1; then
     volumes='[]'
 fi
 
-while read -r vol; do
-    [ -z "$vol" ] && continue
-    vol_id=$(echo "$vol" | jq -r '.VolumeId')
+# One jq pass joins volumes, snapshots and the public set. The inputs go through
+# files, not --argjson: thousands of snapshots overflow the argv limit.
+_SNAPS_JSON="$(mktemp -t aws_ebs_snapshot_status_snaps.XXXXXX.json)"
+_VOLS_JSON="$(mktemp -t aws_ebs_snapshot_status_vols.XXXXXX.json)"
+_PUBLIC_JSON="$(mktemp -t aws_ebs_snapshot_status_public.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_SNAPS_JSON" "$_VOLS_JSON" "$_PUBLIC_JSON"' EXIT
+printf '%s' "$snapshots" > "$_SNAPS_JSON"
+printf '%s' "$volumes" > "$_VOLS_JSON"
+printf '%s' "$public_ids" > "$_PUBLIC_JSON"
 
-    vol_snapshots=$(echo "$snapshots_enriched" | jq -c --arg vid "$vol_id" '[.[] | select(.VolumeId == $vid)]')
-    has_snapshot=$(echo "$vol_snapshots" | jq 'length > 0')
-
-    jq --argjson vol "$vol" \
-       --argjson snaps "$vol_snapshots" \
-       --argjson has_snapshot "$has_snapshot" \
-       '.results += [{"VolumeId": $vol.VolumeId, "Encrypted": $vol.Encrypted, "HasSnapshot": $has_snapshot, "Snapshots": $snaps}]' \
-       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-done < <(echo "$volumes" | jq -c '.[]')
+jq --slurpfile snaps "$_SNAPS_JSON" --slurpfile vols "$_VOLS_JSON" --slurpfile pub "$_PUBLIC_JSON" '
+    (reduce $pub[0][] as $id ({}; .[$id] = true)) as $public
+    | (reduce $snaps[0][] as $s ({};
+        .[$s.VolumeId | tostring] += [$s + {"Public": ($public[$s.SnapshotId] // false)}])) as $by_vol
+    | .results = [$vols[0][] | ($by_vol[.VolumeId | tostring] // []) as $vs
+        | {"VolumeId": .VolumeId, "Encrypted": .Encrypted, "HasSnapshot": ($vs | length > 0), "Snapshots": $vs}]
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

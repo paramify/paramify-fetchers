@@ -47,48 +47,32 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": {"file_systems": [], "summary": {"total_file_systems": 0, "encrypted_file_systems": 0, "encryption_percentage": 0}}}' \
   > "$OUTPUT_JSON"
 
-total_file_systems=0
-encrypted_file_systems=0
 service_status="enabled"
 
 _ERR="$(mktemp -t aws_fsx_encryption_status_err.XXXXXX)"
-file_systems=$(aws fsx describe-file-systems --query 'FileSystems[*].FileSystemId' --output text 2>"$_ERR")
+# One describe returns every file system's KMS key and type; the per-id
+# describe this replaced re-fetched them one CLI process at a time.
+file_systems=$(aws fsx describe-file-systems --query 'FileSystems[*].{FileSystemId:FileSystemId,FileSystemType:FileSystemType,KmsKeyId:KmsKeyId}' --output json 2>"$_ERR")
 list_exit=$?
 if [ $list_exit -ne 0 ] && aws_service_unavailable "$_ERR"; then
     log_info "FSx not in use for this account/region (not subscribed / not enabled); recording not-enabled status"
     service_status="not-enabled"
-    rm -f "$_ERR"
+    file_systems='[]'
 elif [ $list_exit -ne 0 ]; then
     echo "aws fsx describe-file-systems (list) failed (exit=$list_exit): $(tr '\n\r\t' '   ' < "$_ERR" | tr -s ' ' | cut -c1-500)" >> "$_FAILURE_LOG"
     log_error "Failed to list FSx file systems"
-    rm -f "$_ERR"
-else
-    rm -f "$_ERR"
-    for fs_id in $(aws_text_list "$file_systems"); do
-        total_file_systems=$((total_file_systems + 1))
-        fs_details=$(aws fsx describe-file-systems --file-system-ids "$fs_id" 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws fsx describe-file-systems ($fs_id) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-        kms_key_id=$(echo "$fs_details" | jq -r '.FileSystems[0].KmsKeyId // "None"')
-        fs_type=$(echo "$fs_details" | jq -r '.FileSystems[0].FileSystemType // "unknown"')
-        encrypted=false
-        [ "$kms_key_id" != "None" ] && encrypted=true
-
-        fs_data=$(jq -n --arg id "$fs_id" --arg type "$fs_type" \
-            --argjson enc "$encrypted" --arg kms "$kms_key_id" \
-            '{id: $id, type: $type, encrypted: $enc, kms_key_id: $kms}')
-        jq --argjson data "$fs_data" '.results.file_systems += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-        [ "$encrypted" = "true" ] && encrypted_file_systems=$((encrypted_file_systems + 1))
-    done
+    file_systems='[]'
 fi
+rm -f "$_ERR"
 
-percentage=0
-[ $total_file_systems -gt 0 ] && percentage=$(( (encrypted_file_systems * 100) / total_file_systems ))
-
-jq --arg total "$total_file_systems" --arg encrypted "$encrypted_file_systems" --arg percentage "$percentage" --arg status "$service_status" \
-    '.results.summary = {status: $status, total_file_systems: ($total | tonumber), encrypted_file_systems: ($encrypted | tonumber), encryption_percentage: ($percentage | tonumber)}' \
-    "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+printf '%s' "$file_systems" | jq --slurpfile fss /dev/stdin --arg status "$service_status" '
+    [$fss[0][]? | (.KmsKeyId // "None") as $kms
+        | {id: .FileSystemId, type: (.FileSystemType // "unknown"), encrypted: ($kms != "None"), kms_key_id: $kms}] as $rows
+    | ($rows | length) as $total
+    | ([$rows[] | select(.encrypted)] | length) as $encrypted
+    | .results.file_systems += $rows
+    | .results.summary = {status: $status, total_file_systems: $total, encrypted_file_systems: $encrypted,
+        encryption_percentage: (if $total > 0 then ($encrypted * 100 / $total | floor) else 0 end)}
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

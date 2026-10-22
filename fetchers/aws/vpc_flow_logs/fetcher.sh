@@ -47,38 +47,35 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": []}' \
   > "$OUTPUT_JSON"
 
-vpc_ids=$(aws ec2 describe-vpcs --query 'Vpcs[*].VpcId' --output text 2>/dev/null)
+# Two calls for the region: every VPC, then every flow log grouped by the VPC it
+# is attached to. The per-VPC describe-vpcs + describe-flow-logs pair this
+# replaced cost two CLI processes per VPC.
+_VPCS_JSON="$(mktemp -t aws_vpc_flow_logs_vpcs.XXXXXX.json)"
+_FLOW_LOGS_JSON="$(mktemp -t aws_vpc_flow_logs_fl.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_VPCS_JSON" "$_FLOW_LOGS_JSON"' EXIT
+
+aws ec2 describe-vpcs --query "Vpcs[*].{Id:VpcId,IsDefault:IsDefault,CidrBlock:CidrBlock,Name:Tags[?Key=='Name']|[0].Value}" --output json > "$_VPCS_JSON" 2>/dev/null
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     echo "aws ec2 describe-vpcs (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list VPCs"
+elif [ "$(jq 'length' "$_VPCS_JSON" 2>/dev/null || echo 0)" -eq 0 ]; then
+    :  # no VPCs: no flow logs to look up
+elif ! aws ec2 describe-flow-logs \
+        --query "FlowLogs[*].{ResourceId:ResourceId,Destination:LogDestinationType,LogDestination:LogDestination,TrafficType:TrafficType,Status:FlowLogStatus}" \
+        --output json > "$_FLOW_LOGS_JSON" 2>/dev/null; then
+    # Without it no VPC's logging is known -- as when every per-VPC call failed,
+    # which skipped that VPC.
+    echo "aws ec2 describe-flow-logs failed" >> "$_FAILURE_LOG"
 else
-    for vpc_id in $(aws_text_list "$vpc_ids"); do
-        vpc_attrs=$(aws ec2 describe-vpcs \
-            --vpc-ids "$vpc_id" \
-            --query "Vpcs[0].{Id:VpcId,IsDefault:IsDefault,CidrBlock:CidrBlock,Name:Tags[?Key=='Name']|[0].Value}" \
-            --output json 2>/dev/null)
-        attrs_exit=$?
-        if [ $attrs_exit -ne 0 ]; then
-            echo "aws ec2 describe-vpcs ($vpc_id attrs) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-
-        flow_logs=$(aws ec2 describe-flow-logs \
-            --filter "Name=resource-id,Values=$vpc_id" \
-            --query "FlowLogs[*].{Destination:LogDestinationType,LogDestination:LogDestination,TrafficType:TrafficType,Status:FlowLogStatus}" \
-            --output json 2>/dev/null)
-        fl_exit=$?
-        if [ $fl_exit -ne 0 ]; then
-            echo "aws ec2 describe-flow-logs ($vpc_id) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-
-        vpc_data=$(jq -n --argjson attrs "$vpc_attrs" --argjson fl "$flow_logs" \
-            '{"Id": $attrs.Id, "Name": ($attrs.Name // ""), "Default": $attrs.IsDefault, "CidrBlock": $attrs.CidrBlock, "FlowLogsEnabled": (($fl | length) > 0), "FlowLogs": $fl}')
-
-        jq --argjson data "$vpc_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    jq --slurpfile vpcs "$_VPCS_JSON" --slurpfile fls "$_FLOW_LOGS_JSON" '
+        (reduce $fls[0][]? as $f ({}; .[$f.ResourceId | tostring] += [{
+            "Destination": $f.Destination, "LogDestination": $f.LogDestination,
+            "TrafficType": $f.TrafficType, "Status": $f.Status}])) as $by_vpc
+        | .results += [$vpcs[0][] | ($by_vpc[.Id] // []) as $fl
+            | {"Id": .Id, "Name": (.Name // ""), "Default": .IsDefault, "CidrBlock": .CidrBlock,
+               "FlowLogsEnabled": (($fl | length) > 0), "FlowLogs": $fl}]
+    ' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

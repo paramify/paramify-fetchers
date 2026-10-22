@@ -1,5 +1,5 @@
 name: azure_entra_mfa_status
-version: 0.1.0
+version: 0.2.0
 description: >
   For every user in the Microsoft Entra ID tenant, reports whether the account is
   enabled, when it last signed in, and whether it is MFA-capable — joining the
@@ -7,6 +7,9 @@ description: >
   Coverage is reported over ENABLED users (the accounts that can actually sign in)
   as well as over all users, and broken out for administrators, members and guests,
   with passwordless (phishing-resistant) capability alongside plain MFA.
+  Administrators are the holders of privileged directory roles (directly or through
+  a role-assignable group), so an administrator with no registration record counts
+  as an administrator without MFA.
 category: azure
 
 supports_targets: true
@@ -52,6 +55,18 @@ target_schema:
 
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
+# Microsoft Graph permissions (application permissions, admin consent):
+#   Directory.Read.All     — users, directory roles and their members, and the
+#                            transitive members of a role-assignable group
+#                            (User.Read.All + RoleManagement.Read.Directory +
+#                            GroupMember.Read.All is the narrower equivalent)
+#   Reports.Read.All       — the authentication-methods registration report
+#   AuditLog.Read.All      — signInActivity on users (silently null without it)
+# A denied read is recorded as an API failure and the run exits non-zero. When
+# directory-role membership cannot be read, the admin figures in the summary read
+# null rather than falling back to the registration report's own admin flag, which
+# misses every admin without a registration record.
+
 ksis:
   - KSI-IAM-APM
 
@@ -59,7 +74,9 @@ evidence_set:
   reference_id: EVD-AZURE-ENTRA-MFA
   name: Microsoft Entra ID MFA Coverage
   instructions: >
-    Script: fetcher.py. Microsoft Graph calls: GET /users with
+    Script: azure/entra_mfa_status/fetcher.py. Microsoft Graph calls: GET /users with
     $select=id,displayName,userPrincipalName,accountEnabled,userType,signInActivity;
-    GET /reports/authenticationMethods/userRegistrationDetails; GET /organization.
-    Both collections paged via @odata.nextLink.
+    GET /reports/authenticationMethods/userRegistrationDetails; GET /directoryRoles,
+    then GET /directoryRoles/{id}/members per privileged role and
+    GET /groups/{id}/transitiveMembers per role-assignable group holding one;
+    GET /organization. Collections paged via @odata.nextLink.

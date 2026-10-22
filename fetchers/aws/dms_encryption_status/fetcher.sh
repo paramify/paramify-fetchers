@@ -53,10 +53,10 @@ if [ $inst_exit -ne 0 ]; then
     echo "aws dms describe-replication-instances failed (exit=$inst_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to describe DMS replication instances"
 else
-    while IFS= read -r instance; do
-        [ -z "$instance" ] && continue
-        jq --argjson data "$instance" '.results.replication_instances += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done < <(echo "$instances" | jq -c '.ReplicationInstances[] | {id: .ReplicationInstanceIdentifier, arn: .ReplicationInstanceArn, status: .ReplicationInstanceStatus, kms_key_id: (.KmsKeyId // "None"), publicly_accessible: .PubliclyAccessible, multi_az: .MultiAZ}')
+    # One pass, fed on stdin: appending per item rewrote the file N times.
+    printf '%s' "$instances" | jq --slurpfile d /dev/stdin \
+        '.results.replication_instances += [$d[0].ReplicationInstances[]? | {id: .ReplicationInstanceIdentifier, arn: .ReplicationInstanceArn, status: .ReplicationInstanceStatus, kms_key_id: (.KmsKeyId // "None"), publicly_accessible: .PubliclyAccessible, multi_az: .MultiAZ}]' \
+        "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 endpoints=$(aws dms describe-endpoints --output json 2>/dev/null)
@@ -65,10 +65,9 @@ if [ $ep_exit -ne 0 ]; then
     echo "aws dms describe-endpoints failed (exit=$ep_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to describe DMS endpoints"
 else
-    while IFS= read -r endpoint; do
-        [ -z "$endpoint" ] && continue
-        jq --argjson data "$endpoint" '.results.endpoints += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done < <(echo "$endpoints" | jq -c '.Endpoints[] | {id: .EndpointIdentifier, arn: .EndpointArn, engine_name: .EngineName, ssl_mode: (.SslMode // "none"), kms_key_id: (.KmsKeyId // "None")}')
+    printf '%s' "$endpoints" | jq --slurpfile d /dev/stdin \
+        '.results.endpoints += [$d[0].Endpoints[]? | {id: .EndpointIdentifier, arn: .EndpointArn, engine_name: .EngineName, ssl_mode: (.SslMode // "none"), kms_key_id: (.KmsKeyId // "None")}]' \
+        "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

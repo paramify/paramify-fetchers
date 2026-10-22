@@ -50,7 +50,7 @@ evidence_set:
   reference_id: EVD-AZURE-SQL-ENC
   name: Azure SQL Transparent Data Encryption
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-sql SqlManagementClient):
+    Script: azure/sql_encryption_status/fetcher.py. Azure SDK calls (azure-mgmt-sql SqlManagementClient):
     servers.list(), encryption_protectors.get(), databases.list_by_server(),
     transparent_data_encryptions.get(). Records each server's TDE key source and
     every database's TDE state.

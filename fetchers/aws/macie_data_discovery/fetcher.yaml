@@ -1,5 +1,5 @@
 name: aws_macie_data_discovery
-version: 0.1.0
+version: 0.2.0
 description: Reports Amazon Macie data-discovery posture in a region — the Macie session enabled status, automated sensitive-data discovery status, classification (discovery) jobs, and a sensitive-data findings summary. A disabled session is valid evidence that Macie is not enabled.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-MACIE
   name: Macie Data Discovery
-  instructions: 'Script: fetcher.sh. Commands executed: aws macie2 get-macie-session, aws macie2 get-automated-discovery-configuration, aws macie2 list-classification-jobs, aws macie2 get-finding-statistics.'
+  instructions: 'Script: aws/macie_data_discovery/fetcher.sh. Commands executed: aws macie2 get-macie-session, aws macie2 get-automated-discovery-configuration, aws macie2 list-classification-jobs, aws macie2 get-finding-statistics.'

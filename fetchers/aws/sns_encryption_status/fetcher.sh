@@ -27,7 +27,9 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_sns_encryption_status_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_sns_encryption_status.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_sns_encryption_status_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_ARNS_TXT="$(mktemp -t aws_sns_encryption_status_arns.XXXXXX)"
+_ITEMS_JSON="$(mktemp -t aws_sns_encryption_status_attributes.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ARNS_TXT" "$_ITEMS_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_sns_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_sns_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -56,37 +58,39 @@ if [ $list_exit -ne 0 ]; then
     echo "aws sns list-topics (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list SNS topics"
 else
+    # get-topic-attributes is genuinely one call per topic (no batch form). Each
+    # response is appended raw, with its ARN to a parallel list, and the records
+    # and summary are built in the one jq pass below -- not two jq processes and
+    # an output rewrite per topic. A topic whose attributes fail to read still
+    # counts in total_topics, as before.
     for topic_arn in $(aws_text_list "$topic_arns"); do
         total_topics=$((total_topics + 1))
-        name="${topic_arn##*:}"
 
         attributes=$(aws sns get-topic-attributes --topic-arn "$topic_arn" 2>/dev/null)
         if [ $? -ne 0 ]; then
             echo "aws sns get-topic-attributes ($topic_arn) failed" >> "$_FAILURE_LOG"
             continue
         fi
-
-        kms_key_id=$(echo "$attributes" | jq -r '.Attributes.KmsMasterKeyId // "None"')
-        if [ "$kms_key_id" = "None" ]; then
-            encrypted=false
-        else
-            encrypted=true
-            encrypted_topics=$((encrypted_topics + 1))
-        fi
-
-        topic_data=$(jq -n --arg name "$name" --arg arn "$topic_arn" \
-            --argjson enc "$encrypted" --arg kms "$kms_key_id" \
-            '{name: $name, arn: $arn, encrypted: $enc, kms_master_key_id: $kms}')
-
-        jq --argjson data "$topic_data" '.results.topics += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+        [ -n "$attributes" ] || attributes='{}'  # keeps the two lists aligned
+        printf '%s\n' "$topic_arn" >> "$_ARNS_TXT"
+        printf '%s\n' "$attributes" >> "$_ITEMS_JSON"
     done
 fi
 
-percentage=0
-[ $total_topics -gt 0 ] && percentage=$(( (encrypted_topics * 100) / total_topics ))
-
-jq --arg total "$total_topics" --arg encrypted "$encrypted_topics" --arg percentage "$percentage" \
-    '.results.summary = {total_topics: ($total | tonumber), encrypted_topics: ($encrypted | tonumber), encryption_percentage: ($percentage | tonumber)}' \
+# `raw` reproduces the old `jq -r` -> --arg read of the key id.
+jq --rawfile arns "$_ARNS_TXT" --slurpfile attrs "$_ITEMS_JSON" --argjson total "$total_topics" '
+    def raw: (if type == "string" then . else tojson end) | sub("\n+$"; "");
+    ($arns | split("\n")) as $a
+    | [range(0; $attrs | length) as $i | ($attrs[$i].Attributes.KmsMasterKeyId // "None" | raw) as $kms | {
+        name: ($a[$i] | sub("^.*:"; "")),
+        arn: $a[$i],
+        encrypted: ($kms != "None"),
+        kms_master_key_id: $kms
+      }] as $topics
+    | ([$topics[] | select(.encrypted)] | length) as $encrypted
+    | .results.topics += $topics
+    | .results.summary = {total_topics: $total, encrypted_topics: $encrypted,
+        encryption_percentage: (if $total > 0 then ($encrypted * 100 / $total | floor) else 0 end)}' \
     "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

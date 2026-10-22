@@ -16,13 +16,13 @@ A complete new fetcher at `fetchers/tls/certificate_expiry/`: a `fetcher.yaml` w
 ## Prerequisites
 
 - **Part 1 completed** — the `paramify` CLI installed (`pip install -e .`), the repo cloned, and the mental model: four pieces, one contract, envelope at the end.
-- Same toolchain as Part 1: Python 3.10+ (verified against 3.14.5).
+- Same toolchain as Part 1: Python 3.11+ (verified against 3.14.5).
 - Network egress to `paramify.com:443`.
 - Still no credentials. That's the point of this particular fetcher.
 
 ## Name first, code later
 
-The naming scheme carries real weight here, so settle it before touching files (`docs/authoring_a_fetcher.md`, "Scaffolding"). The **category** is the source-system family: this evidence comes from public TLS endpoints, so the category is `tls`. The **short name** is the specific evidence: `certificate_expiry`. The globally unique fetcher name joins them: `tls_certificate_expiry`. And the *directory* is the short name only — `fetchers/tls/certificate_expiry/`, not `fetchers/tls/tls_certificate_expiry/`. The porting playbook calls naming the directory with the long form a convention violation: discovery would still find it, but every reference fetcher in the repo uses short-name directories, and the next reader's expectations matter more than the glob.
+The naming scheme carries real weight here, so settle it before touching files (`docs/porting_guide.md`, step 1). The **category** is the source-system family: this evidence comes from public TLS endpoints, so the category is `tls`. The **short name** is the specific evidence: `certificate_expiry`. The globally unique fetcher name joins them: `tls_certificate_expiry`. And the *directory* is the short name only — `fetchers/tls/certificate_expiry/`, not `fetchers/tls/tls_certificate_expiry/`. The porting playbook calls naming the directory with the long form a convention violation: discovery would still find it, but every reference fetcher in the repo uses short-name directories, and the next reader's expectations matter more than the glob.
 
 Check for a collision, then scaffold — the category directory and its `_categories` entry are both new, because no `tls` category exists yet:
 
@@ -85,13 +85,13 @@ config_schema:
     description: TLS port to connect to.
 ```
 
-One block remains. Every fetcher carries an `evidence_set` identity — one fetcher, one evidence set (`docs/authoring_a_fetcher.md`): the runner copies it into the envelope's metadata, and the uploader uses `reference_id` as its get-or-create idempotency key. Note what stays *out* of this block: no control mappings, no pass/fail linkage — that lives on the Paramify side, per the collect-facts principle from Part 1.
+One block remains. Every fetcher carries an `evidence_set` identity — one fetcher, one evidence set (`docs/authoring_fetcher_guide.md`, step 2): the runner copies it into the envelope's metadata, and the uploader uses `reference_id` as its get-or-create idempotency key. Note what stays *out* of this block: no control mappings, no pass/fail linkage — that lives on the Paramify side, per the collect-facts principle from Part 1.
 
 ```yaml
 evidence_set:
   reference_id: EVD-TLS-CERTIFICATE-EXPIRY
   name: TLS Certificate Expiry
-  instructions: 'Script: fetcher.py. Opens a verified TLS connection to the
+  instructions: 'Script: tls/certificate_expiry/fetcher.py. Opens a verified TLS connection to the
     configured host and records the peer certificate: subject, issuer,
     validity window, SANs, and computed days remaining.'
 ```
@@ -339,9 +339,9 @@ This part was researched from the repository working tree (branch `main`, June 1
 
 **Repository docs and code**
 
-1. `docs/authoring_a_fetcher.md` — the new-vs-port decision, scaffolding steps, and the `evidence_set` identity block (one fetcher = one evidence set; no control linkage in the fetcher).
-2. `docs/porting_playbook.md` — the collision pre-flight, the short-name directory convention, and where new dependencies go.
-3. `docs/fetcher_contract.md` — the runtime contract this part writes against: minimal env, stderr logging, exit codes 0 / non-zero / reserved 124.
+1. [`docs/authoring_a_fetcher.md`](https://github.com/paramify/paramify-fetchers/blob/80fc0f0/docs/authoring_a_fetcher.md) — the new-vs-port decision, scaffolding steps, and the `evidence_set` identity block (one fetcher = one evidence set; no control linkage in the fetcher).
+2. [`docs/porting_playbook.md`](https://github.com/paramify/paramify-fetchers/blob/80fc0f0/docs/porting_playbook.md) — the collision pre-flight, the short-name directory convention, and where new dependencies go.
+3. [`docs/fetcher_contract.md`](https://github.com/paramify/paramify-fetchers/blob/80fc0f0/docs/fetcher_contract.md) — the runtime contract this part writes against: minimal env, stderr logging, exit codes 0 / non-zero / reserved 124.
 4. `fetchers/_template/fetcher.yaml` and `fetcher.py` — the skeleton, including the deliberately blank failure detection this part fills in.
 5. `framework/schemas/fetcher_schema.json` — `secrets` as a required key with no minimum length, which is what makes `secrets: []` legal.
 6. `fetchers/_categories/rippling.yaml` and `fetchers/rippling/current_employees/fetcher.py` — Part 1's controlling example, reused here as the pattern for category config and the failure-ledger ending.

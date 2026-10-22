@@ -1,5 +1,5 @@
 name: aws_access_analyzer_findings
-version: 0.1.0
+version: 0.2.0
 description: Lists AWS IAM Access Analyzer analyzers and their status, plus the active external-access findings reported by each ACTIVE analyzer (finding id, status, resource, resource type, and external principal). No analyzers or no active findings is valid evidence.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-ACCESS-ANALYZER
   name: IAM Access Analyzer Findings
-  instructions: 'Script: fetcher.sh. Commands executed: aws accessanalyzer list-analyzers, aws accessanalyzer list-findings (filtered to ACTIVE findings, per ACTIVE analyzer).'
+  instructions: 'Script: aws/access_analyzer_findings/fetcher.sh. Commands executed: aws accessanalyzer list-analyzers, aws accessanalyzer list-findings (filtered to ACTIVE findings, per ACTIVE analyzer).'

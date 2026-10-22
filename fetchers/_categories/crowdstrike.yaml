@@ -1,4 +1,5 @@
 ---
+display_name: CrowdStrike
 description: >
   CrowdStrike Falcon endpoint protection platform. Collects managed host
   inventory, Spotlight vulnerability findings, detection alerts, prevention

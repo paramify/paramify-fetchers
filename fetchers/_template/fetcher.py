@@ -17,7 +17,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 # The shared failure-reporting helper. Import it, never paste a copy: printing
 # the nine-line version in this template is how 26 private copies under three
-# different names happened. See docs/fetcher_contract.md § Output.
+# different names happened. See docs/fetcher_contract_guide.md, step 6.
 sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
 
 # If this fetcher relies on a category-shared module, uncomment:

@@ -40,76 +40,50 @@ ACCOUNT_ID=$(echo "$CALLER_IDENTITY" | jq -r '.Account // "unknown"')
 ARN=$(echo "$CALLER_IDENTITY" | jq -r '.Arn // "unknown"')
 DATETIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-total_databases=0
-encrypted_databases=0
-rds_results=()
-aurora_results=()
+# One describe per resource type. The per-id describe-db-instances /
+# describe-db-clusters calls this replaced re-fetched fields the list calls
+# already return, one CLI process per database. The join reads its inputs from
+# files: the old final --argjson carried every row on the command line, which
+# Linux caps at 128 KiB per argument.
+_INSTANCES_JSON="$(mktemp -t aws_rds_encryption_status_instances.XXXXXX.json)"
+_CLUSTERS_JSON="$(mktemp -t aws_rds_encryption_status_clusters.XXXXXX.json)"
+trap 'rm -f "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_INSTANCES_JSON" "$_CLUSTERS_JSON"' EXIT
 
-instances=$(aws rds describe-db-instances --query "DBInstances[*].DBInstanceIdentifier" --output text 2>/dev/null)
+aws rds describe-db-instances --query "DBInstances[*].{Id:DBInstanceIdentifier,StorageEncrypted:StorageEncrypted,KmsKeyId:KmsKeyId,Engine:Engine}" --output json > "$_INSTANCES_JSON" 2>/dev/null
 inst_list_exit=$?
 if [ $inst_list_exit -ne 0 ]; then
     echo "aws rds describe-db-instances (list) failed (exit=$inst_list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list RDS instances"
-else
-    for instance in $instances; do
-        total_databases=$((total_databases + 1))
-        instance_details=$(aws rds describe-db-instances --db-instance-identifier "$instance" 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws rds describe-db-instances ($instance) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-        encrypted=$(echo "$instance_details" | jq -r '.DBInstances[0].StorageEncrypted')
-        kms_key_id=$(echo "$instance_details" | jq -r '.DBInstances[0].KmsKeyId // "None"')
-        engine=$(echo "$instance_details" | jq -r '.DBInstances[0].Engine')
-
-        rds_results+=("$(jq -n --arg name "$instance" --arg type "rds_instance" \
-            --argjson enc "$encrypted" --arg kms "$kms_key_id" --arg eng "$engine" \
-            '{name: $name, type: $type, encrypted: $enc, kms_key_id: $kms, engine: $eng}')")
-        [ "$encrypted" = "true" ] && encrypted_databases=$((encrypted_databases + 1))
-    done
+    echo '[]' > "$_INSTANCES_JSON"
 fi
 
-clusters=$(aws rds describe-db-clusters --query "DBClusters[*].DBClusterIdentifier" --output text 2>/dev/null)
+aws rds describe-db-clusters --query "DBClusters[*].{Id:DBClusterIdentifier,StorageEncrypted:StorageEncrypted,KmsKeyId:KmsKeyId,Engine:Engine}" --output json > "$_CLUSTERS_JSON" 2>/dev/null
 clus_list_exit=$?
 if [ $clus_list_exit -ne 0 ]; then
     echo "aws rds describe-db-clusters (list) failed (exit=$clus_list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list RDS Aurora clusters"
-else
-    for cluster in $clusters; do
-        total_databases=$((total_databases + 1))
-        cluster_details=$(aws rds describe-db-clusters --db-cluster-identifier "$cluster" 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws rds describe-db-clusters ($cluster) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-        encrypted=$(echo "$cluster_details" | jq -r '.DBClusters[0].StorageEncrypted')
-        kms_key_id=$(echo "$cluster_details" | jq -r '.DBClusters[0].KmsKeyId // "None"')
-        engine=$(echo "$cluster_details" | jq -r '.DBClusters[0].Engine')
-
-        aurora_results+=("$(jq -n --arg name "$cluster" --arg type "rds_aurora" \
-            --argjson enc "$encrypted" --arg kms "$kms_key_id" --arg eng "$engine" \
-            '{name: $name, type: $type, encrypted: $enc, kms_key_id: $kms, engine: $eng}')")
-        [ "$encrypted" = "true" ] && encrypted_databases=$((encrypted_databases + 1))
-    done
+    echo '[]' > "$_CLUSTERS_JSON"
 fi
 
-percentage=0
-[ $total_databases -gt 0 ] && percentage=$(( (encrypted_databases * 100) / total_databases ))
-
+# engine is `tostring`d because the old code read it with jq -r into --arg,
+# so a missing engine was the string "null".
 jq -n \
     --arg profile "$PROFILE" --arg region "$REGION" --arg datetime "$DATETIME" \
     --arg account_id "$ACCOUNT_ID" --arg arn "$ARN" \
-    --argjson rds "[$(IFS=,; echo "${rds_results[*]}")]" \
-    --argjson aurora "[$(IFS=,; echo "${aurora_results[*]}")]" \
-    --arg total "$total_databases" --arg encrypted "$encrypted_databases" --arg percentage "$percentage" \
-    '{
+    --slurpfile instances "$_INSTANCES_JSON" --slurpfile clusters "$_CLUSTERS_JSON" \
+    'def row($type): {name: .Id, type: $type, encrypted: .StorageEncrypted, kms_key_id: (.KmsKeyId // "None"), engine: (.Engine | tostring)};
+    [$instances[0][]? | row("rds_instance")] as $rds
+    | [$clusters[0][]? | row("rds_aurora")] as $aurora
+    | (($rds + $aurora) | length) as $total
+    | ([($rds + $aurora)[] | select(.encrypted == true)] | length) as $encrypted
+    | {
         metadata: {profile: $profile, region: $region, datetime: $datetime, account_id: $account_id, arn: $arn},
         results: {
             storage_inventory: {instances: $rds, clusters: $aurora},
             summary: {
-                total_storage: ($total | tonumber),
-                encrypted_storage: ($encrypted | tonumber),
-                encryption_percentage: ($percentage | tonumber)
+                total_storage: $total,
+                encrypted_storage: $encrypted,
+                encryption_percentage: (if $total > 0 then ($encrypted * 100 / $total | floor) else 0 end)
             }
         }
     }' > "$OUTPUT_JSON"

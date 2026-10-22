@@ -26,7 +26,9 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_auto_scaling_high_availability_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_auto_scaling_high_availability.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_auto_scaling_high_availability_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_ASGS_JSON="$(mktemp -t aws_auto_scaling_high_availability_asgs.XXXXXX.json)"
+_INSTANCES_JSON="$(mktemp -t aws_auto_scaling_high_availability_instances.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ASGS_JSON" "$_INSTANCES_JSON"' EXIT
 
 log_info() { printf '%s INFO aws_auto_scaling_high_availability %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_auto_scaling_high_availability %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -46,27 +48,31 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": []}' \
   > "$OUTPUT_JSON"
 
-asgs=$(aws autoscaling describe-auto-scaling-groups --query 'AutoScalingGroups[*]' --output json 2>/dev/null)
+aws autoscaling describe-auto-scaling-groups --query 'AutoScalingGroups[*]' --output json > "$_ASGS_JSON" 2>/dev/null
 asg_exit=$?
 if [ $asg_exit -ne 0 ]; then
     echo "aws autoscaling describe-auto-scaling-groups failed (exit=$asg_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to describe Auto Scaling groups"
 else
-    echo "$asgs" | jq -c '.[]' | while read -r asg; do
-        asg_name=$(echo "$asg" | jq -r '.AutoScalingGroupName')
-
-        asg_instances=$(aws autoscaling describe-auto-scaling-instances \
-            --query "AutoScalingInstances[?AutoScalingGroupName=='$asg_name'][*]" --output json 2>/dev/null)
-        inst_exit=$?
-        if [ $inst_exit -ne 0 ]; then
-            echo "aws autoscaling describe-auto-scaling-instances ($asg_name) failed" >> "$_FAILURE_LOG"
-            asg_instances='[]'
+    # Every ASG instance in the region, in one paginated call, grouped by group
+    # name below. This replaced a per-ASG call whose filter,
+    # AutoScalingInstances[?AutoScalingGroupName=='X'][*], projected [*] over
+    # objects and so always returned [] -- every ASG reported no instances. It
+    # also re-read the whole region's instance list once per ASG.
+    if [ "$(jq 'length' "$_ASGS_JSON")" -gt 0 ]; then
+        if ! aws autoscaling describe-auto-scaling-instances --query 'AutoScalingInstances[*]' --output json > "$_INSTANCES_JSON" 2>/dev/null; then
+            echo "aws autoscaling describe-auto-scaling-instances failed" >> "$_FAILURE_LOG"
+            echo '[]' > "$_INSTANCES_JSON"
         fi
+    else
+        echo '[]' > "$_INSTANCES_JSON"
+    fi
 
-        jq --argjson asg "$asg" --argjson instances "$asg_instances" \
-           '.results += [{"Type": "AutoScalingGroup", "ASGInfo": $asg, "Instances": $instances}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    jq --slurpfile asgs "$_ASGS_JSON" --slurpfile instances "$_INSTANCES_JSON" '
+        (reduce ($instances[0] // [])[] as $i ({}; .[$i.AutoScalingGroupName] += [$i])) as $by_group
+        | .results += [($asgs[0] // [])[]
+            | {"Type": "AutoScalingGroup", "ASGInfo": ., "Instances": ($by_group[.AutoScalingGroupName] // [])}]
+    ' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

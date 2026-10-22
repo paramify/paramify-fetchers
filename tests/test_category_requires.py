@@ -19,6 +19,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -66,24 +67,8 @@ def _core_dependencies() -> set[str]:
     the package installs them, so doctor checking for them would be theatre.
     """
     text = (REPO_ROOT / "pyproject.toml").read_text()
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        # 3.11+ only, and the framework supports 3.10 — where there is no stdlib
-        # TOML parser and no reason to take a dependency on one for a single
-        # array. The fallback reads that array directly.
-        return _dependencies_without_toml(text)
     deps = tomllib.loads(text)["project"]["dependencies"]
     return {canonicalize_name(Requirement(d).name) for d in deps}
-
-
-def _dependencies_without_toml(text: str) -> set:
-    """Pull [project] dependencies out of pyproject.toml without a TOML parser."""
-    match = re.search(r"^dependencies = \[(.*?)\]", text, re.DOTALL | re.MULTILINE)
-    assert match, "could not find [project] dependencies in pyproject.toml"
-    names = re.findall(r"""["']([^"']+)["']""", match.group(1))
-    assert names, "found no dependencies to parse in pyproject.toml"
-    return {canonicalize_name(Requirement(n).name) for n in names}
 
 
 def _categories() -> list[str]:
@@ -136,13 +121,6 @@ def _strip_comments(text: str) -> str:
     return "\n".join(re.sub(r"(?:^|\s)#.*$", "", line) for line in text.splitlines())
 
 
-def test_the_toml_free_dependency_parse_agrees_with_tomllib():
-    """The fallback is the path CI's oldest interpreter takes, so hold it to the
-    real parser's answer wherever both are available."""
-    pytest.importorskip("tomllib")
-    assert _dependencies_without_toml((REPO_ROOT / "pyproject.toml").read_text()) == _core_dependencies()
-
-
 @pytest.mark.parametrize("category", _categories())
 def test_python_imports_are_declared_or_core(category):
     """Every third-party import in a category's fetchers is declared or is core."""
@@ -152,6 +130,10 @@ def test_python_imports_are_declared_or_core(category):
 
     undeclared: dict[str, set[str]] = {}
     for py in (REPO_ROOT / "fetchers" / category).rglob("*.py"):
+        # A fetcher's own tests/ run in the developer's environment, not on a
+        # customer's runner, so their imports (pytest) are not runtime requirements.
+        if "tests" in py.relative_to(REPO_ROOT / "fetchers" / category).parts:
+            continue
         for root in _import_roots(py):
             if root in sys.stdlib_module_names or root in local or root == "__future__":
                 continue

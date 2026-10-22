@@ -25,7 +25,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import (  # noqa: E402
     Collector,           # accumulates API failures without crashing the run
-    build_payload,        # assembles the final evidence dict (metadata + results + summary)
+    arm_client_kwargs,   # sovereign-cloud ARM endpoint + credential scopes for SDK clients
+    build_payload,       # assembles the final evidence dict (metadata + results + summary)
     classify_failure_code,  # maps a failure onto a stable error "code" for the status file
     coverage_percentage,  # integer percentage helper, 0-safe on an empty denominator
     credential,            # returns azure.identity.DefaultAzureCredential()
@@ -36,6 +37,7 @@ from azure_common import (  # noqa: E402
     write_evidence,        # writes the evidence dict to disk as JSON
     report_failure,        # logs the reason AND writes $FETCHER_STATUS_FILE
 )
+from resource_graph import query_all, resource_graph_client  # noqa: E402
 
 logger = logging.getLogger("azure_defender_assessments")
 
@@ -81,8 +83,54 @@ def _enum_list(values: Any) -> list:
     return [v.value if hasattr(v, "value") else v for v in (values or [])]
 
 
-def project_assessment(assessment) -> dict:
+ASSESSMENT_ID_MARKER = "/providers/microsoft.security/assessments/"
+
+# Each assessment's own severity; the subscription's metadata catalogue can rate a check lower.
+SEVERITY_QUERY = (
+    "SecurityResources"
+    " | where type =~ 'microsoft.security/assessments'"
+    " | project id, severity = tostring(properties.metadata.severity)"
+    " | order by id asc"
+)
+FROM_ASSESSMENT = "assessment"
+FROM_CATALOGUE = "catalogue"
+
+
+def _id_key(assessment_id: Optional[str]) -> str:
+    return (assessment_id or "").strip().lower().rstrip("/")
+
+
+def _raw_detail(resource_details, key: str) -> Any:
+    """A `resource_details` field the SDK failed to deserialize.
+
+    The service returns resourceDetails with PascalCase keys (`Source`, `Id`), so
+    the SDK can't find its `source` discriminator, falls back to the base
+    `ResourceDetails` class, and parks every field in `additional_properties` —
+    leaving `.source`/`.id` None on every record.
+    """
+    extra = getattr(resource_details, "additional_properties", None) or {}
+    return extra.get(key)
+
+
+def _resource_id_from_assessment_id(assessment_id: Optional[str]) -> Optional[str]:
+    """The assessed resource is the ARM id in front of `/providers/Microsoft.Security/assessments/<guid>`."""
+    if not assessment_id:
+        return None
+    cut = assessment_id.lower().rfind(ASSESSMENT_ID_MARKER)
+    return assessment_id[:cut] if cut > 0 else None
+
+
+def project_assessment(
+    assessment, metadata_by_name: Optional[dict] = None, severity_by_id: Optional[dict] = None
+) -> dict:
     """Read one `SecurityAssessmentResponse` model's attributes into a flat dict.
+
+    `assessments.list` does not return `metadata` (only `get` takes
+    `expand=metadata`), so severity/categories/type would all be null. Severity
+    comes from `severity_by_id`, each assessment's own from Resource Graph keyed
+    by lowercased assessment id; the subscription's assessment definitions, keyed
+    by `name` (the GUID the assessment and its metadata share), fill in the other
+    fields and are the fallback severity. `severity_source` says which one it was.
 
     `resource_details`, `status`, and `metadata` are nested models (sub-objects),
     so each needs its own `model_attr` reads rather than one flat pass over
@@ -97,7 +145,15 @@ def project_assessment(assessment) -> dict:
     # dict below doesn't repeat the same three model_attr(assessment, ...) calls.
     resource_details = model_attr(assessment, "resource_details")
     status = model_attr(assessment, "status")
-    metadata = model_attr(assessment, "metadata")
+    own_metadata = model_attr(assessment, "metadata")
+    metadata = own_metadata or (metadata_by_name or {}).get(model_attr(assessment, "name"))
+    severity = model_attr(own_metadata, "severity") or (severity_by_id or {}).get(
+        _id_key(model_attr(assessment, "id"))
+    )
+    severity_source: Optional[str] = FROM_ASSESSMENT if severity else None
+    if not severity:
+        severity = model_attr(metadata, "severity")
+        severity_source = FROM_CATALOGUE if severity else None
 
     return {
         # --- identity: which check, on which resource ---
@@ -106,15 +162,20 @@ def project_assessment(assessment) -> dict:
         "display_name": model_attr(assessment, "display_name"),  # human-readable check name
 
         # --- what was assessed ---
-        "resource_source": model_attr(resource_details, "source"),  # "Azure" or "OnPremise"
+        "resource_source": (  # "Azure" or "OnPremise"
+            model_attr(resource_details, "source") or _raw_detail(resource_details, "Source")
+        ),
         # `id` only exists on the Azure-resource subtype of resource_details — the
         # OnPremise/OnPremiseSql subtypes (Arc-connected machines) have no `id` at
         # all, only machine_name/vmuuid/workspace_id. Without this fallback every
-        # on-prem assessment's resource_id would be silently null.
+        # on-prem assessment's resource_id would be silently null. The last two
+        # fallbacks cover the undeserialized PascalCase payload (see _raw_detail).
         "resource_id": (
             model_attr(resource_details, "id")
             or model_attr(resource_details, "machine_name")
             or model_attr(resource_details, "vmuuid")
+            or _raw_detail(resource_details, "Id")
+            or _resource_id_from_assessment_id(model_attr(assessment, "id"))
         ),
 
         # --- the pass/fail result itself ---
@@ -125,7 +186,8 @@ def project_assessment(assessment) -> dict:
         "first_evaluation_date": _iso(model_attr(status, "first_evaluation_date")),  # when Defender first checked this
 
         # --- static info about the check (severity, what it's checking for, how hard to fix) ---
-        "severity": model_attr(metadata, "severity"),                # "Low" / "Medium" / "High"
+        "severity": severity,                                         # "Low" / "Medium" / "High"
+        "severity_source": severity_source,  # "assessment" / "catalogue" / None when unknown
         "categories": _enum_list(model_attr(metadata, "categories")),  # e.g. ["Compute"], ["Networking"]
         "threats": _enum_list(model_attr(metadata, "threats")),        # e.g. ["dataExfiltration"]
         "assessment_type": model_attr(metadata, "assessment_type"),  # BuiltIn / CustomPolicy / etc.
@@ -150,6 +212,8 @@ def summarize(assessments: list[dict], registration_status: str) -> dict:
     unhealthy_severities = Counter(
         a["severity"] for a in assessments if a["status_code"] == "Unhealthy" and a["severity"]
     )
+    by_source = Counter(a.get("severity_source") for a in assessments)
+    unhealthy_by_source = Counter(a.get("severity_source") for a in assessments if a["status_code"] == "Unhealthy")
     return {
         "provider_registration_status": registration_status,
         "total_assessments": total,
@@ -158,6 +222,12 @@ def summarize(assessments: list[dict], registration_status: str) -> dict:
         "not_applicable_count": by_status.get("NotApplicable", 0),
         "healthy_percentage": coverage_percentage(by_status.get("Healthy", 0), total),
         "unhealthy_by_severity": dict(unhealthy_severities),
+        # Records whose own severity was not found, so the catalogue's (possibly lower) one or none is used.
+        "severity_from_catalogue_count": by_source.get(FROM_CATALOGUE, 0),
+        "severity_unknown_count": by_source.get(None, 0),
+        # The same for Unhealthy records only: an unknown one is missing from unhealthy_by_severity.
+        "unhealthy_severity_from_catalogue_count": unhealthy_by_source.get(FROM_CATALOGUE, 0),
+        "unhealthy_severity_unknown_count": unhealthy_by_source.get(None, 0),
     }
 
 
@@ -179,8 +249,14 @@ def is_provider_not_registered(exc: BaseException) -> bool:
     return PROVIDER_NOT_REGISTERED_MARKER in message
 
 
+def _own_severities(cred, subscription_id) -> dict:
+    """Each assessment's own severity, keyed by lowercased assessment id, paged to the end."""
+    rows = query_all(resource_graph_client(cred), subscription_id, SEVERITY_QUERY)["rows"]
+    return {_id_key(row.get("id")): row.get("severity") or None for row in rows}
+
+
 def collect_assessments(subscription_id, cred, collector: Collector) -> tuple[list[dict], str]:
-    """One assessments.list(scope=...) call; returns (assessments, registration_status)."""
+    """assessments.list, the metadata catalogue and one paged Resource Graph query; returns (assessments, status)."""
     from azure.mgmt.security import SecurityCenter
 
     # `collector.guard(...)` runs `_client()`, and if it raises, records the
@@ -203,10 +279,10 @@ def collect_assessments(subscription_id, cred, collector: Collector) -> tuple[li
     # keeps every record from the pages already fetched, instead of discarding
     # them all — this call can span many pages on a subscription with thousands
     # of assessment results, where a mid-pagination throttle/timeout is real.
-    assessments: list[dict] = []
+    raw: list = []
     try:
         for assessment in client.assessments.list(scope=f"subscriptions/{subscription_id}"):
-            assessments.append(project_assessment(assessment))
+            raw.append(assessment)
     except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
         if is_provider_not_registered(exc):
             # Deliberately NOT collector.record(): Defender not being in use is the
@@ -222,7 +298,26 @@ def collect_assessments(subscription_id, cred, collector: Collector) -> tuple[li
         # a real collection failure — record it so the run exits non-zero, but
         # keep whatever assessments earlier pages already yielded.
         collector.record("security.assessments.list", exc)
-        return assessments, UNKNOWN
+        return [project_assessment(a) for a in raw], UNKNOWN
+
+    # Fetched only after the list succeeded, so an unregistered subscription is
+    # still classified above instead of being recorded as a metadata failure. A
+    # failure here is recorded: without it categories and type are null and
+    # severity has no fallback.
+    metadata_by_name = collector.guard(
+        "security.assessments_metadata.list_by_subscription",
+        lambda: {model_attr(m, "name"): m for m in client.assessments_metadata.list_by_subscription()},
+        default={},
+    )
+    # Recorded too on failure: the catalogue's severities alone understate some checks.
+    severity_by_id: dict = {}
+    if raw:
+        severity_by_id = collector.guard(
+            "resourcegraph.resources (SecurityResources)",
+            lambda: _own_severities(cred, subscription_id),
+            default={},
+        )
+    assessments = [project_assessment(a, metadata_by_name, severity_by_id) for a in raw]
 
     # Sorted for a deterministic, diffable evidence file — otherwise the API's
     # own ordering (not guaranteed stable) would shuffle the JSON between runs.

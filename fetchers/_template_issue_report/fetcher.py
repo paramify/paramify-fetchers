@@ -6,7 +6,7 @@
 regenerates it.>
 
 THE ONE RULE: write the tool's bytes to disk exactly as received. No parsing, no
-re-serializing, no added fields. Paramify's assessment intake parses the vendor's
+re-serializing, no added fields. Paramify's file intake preset parses the vendor's
 own format, so a "helpful" normalization here is a broken import there. If you
 find yourself calling json.dump or csv.writer, this should probably be an
 evidence fetcher instead — see ../_template/.
@@ -26,7 +26,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 # The shared failure-reporting helper. Import it, never paste a copy: printing
 # the nine-line version in this template is how 26 private copies under three
-# different names happened. See docs/fetcher_contract.md § Output.
+# different names happened. See docs/fetcher_contract_guide.md, step 6.
 sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
 
 from fetcher_status import report_failure  # noqa: E402

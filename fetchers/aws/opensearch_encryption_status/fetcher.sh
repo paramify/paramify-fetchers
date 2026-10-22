@@ -48,30 +48,37 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": []}' \
   > "$OUTPUT_JSON"
 
-domains=$(aws opensearch list-domain-names --query 'DomainNames[*].DomainName' --output text 2>/dev/null)
+_DOMAINS_JSON="$(mktemp -t aws_opensearch_encryption_status_domains.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_DOMAINS_JSON"' EXIT
+
+domains=$(aws opensearch list-domain-names --query 'DomainNames[*].DomainName' --output json 2>/dev/null)
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     echo "aws opensearch list-domain-names (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list OpenSearch domains"
 else
-    for domain in $(aws_text_list "$domains"); do
-        domain_details=$(aws opensearch describe-domain --domain-name "$domain" 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws opensearch describe-domain ($domain) failed" >> "$_FAILURE_LOG"
-            continue
+    # describe-domains takes up to five names per call, so domains are described
+    # in batches rather than one describe-domain process each. A failed batch
+    # skips its domains, as a failed describe-domain skipped one.
+    while read -r batch; do
+        [ -z "$batch" ] && continue
+        # shellcheck disable=SC2086  # batch is space-separated domain names (no spaces allowed in them)
+        if ! aws opensearch describe-domains --domain-names $batch --query 'DomainStatusList' --output json >> "$_DOMAINS_JSON" 2>/dev/null; then
+            echo "aws opensearch describe-domains ($batch) failed" >> "$_FAILURE_LOG"
         fi
+    done < <(printf '%s' "$domains" | jq -r '[.[]?] | _nwise(5) | join(" ")')
 
-        domain_data=$(echo "$domain_details" | jq '{
-            name: .DomainStatus.DomainName,
-            arn: .DomainStatus.ARN,
-            engine_version: (.DomainStatus.EngineVersion // null),
-            encryption_at_rest: (.DomainStatus.EncryptionAtRestOptions.Enabled // false),
-            node_to_node_encryption: (.DomainStatus.NodeToNodeEncryptionOptions.Enabled // false),
-            enforce_https: (.DomainStatus.DomainEndpointOptions.EnforceHTTPS // false)
-        }')
-
-        jq --argjson data "$domain_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # Rows follow list-domain-names order, whatever order each batch came back in.
+    printf '%s' "$domains" | jq --slurpfile names /dev/stdin --slurpfile batches "$_DOMAINS_JSON" '
+        (reduce ($batches | add // [])[] as $d ({}; .[$d.DomainName] = $d)) as $by_name
+        | .results += [$names[0][]? | $by_name[.] | select(. != null) | {
+            name: .DomainName,
+            arn: .ARN,
+            engine_version: (.EngineVersion // null),
+            encryption_at_rest: (.EncryptionAtRestOptions.Enabled // false),
+            node_to_node_encryption: (.NodeToNodeEncryptionOptions.Enabled // false),
+            enforce_https: (.DomainEndpointOptions.EnforceHTTPS // false)
+        }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 aws_finish

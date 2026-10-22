@@ -1,0 +1,55 @@
+name: Coverage chart
+
+# docs/coverage-over-time*.svg plot the fetcher and service counts derived from
+# this repo's own git history, so they go stale the moment a fetcher merges.
+# Regenerate and commit them here rather than trusting anyone to remember (the
+# same "generate the rot-prone parts" pattern as tools/gen_ksi_coverage.py).
+
+on:
+  push:
+    branches: [main]
+    # Only a fetcher.yaml landing or leaving can move either count. No cron:
+    # the chart is a pure function of the history, so a nightly run would spend
+    # CI minutes to rewrite the identical file on every quiet day.
+    paths:
+      - "fetchers/**/fetcher.yaml"
+  workflow_dispatch:
+
+concurrency:
+  group: coverage-chart-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  chart:
+    name: regenerate (git history -> SVG)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Mandatory: the generator walks first-parent history commit by
+          # commit, and the default depth-1 clone would draw a one-point chart.
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # No install step — the generator is stdlib-only by design, so this job
+      # stays a git walk plus some string formatting (about a second in total).
+      - name: regenerate the chart
+        run: python tools/generate_chart.py
+      - name: commit if it moved
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- docs/coverage-over-time.svg docs/coverage-over-time-dark.svg; then
+            echo "chart unchanged — nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/coverage-over-time.svg docs/coverage-over-time-dark.svg
+          git commit -m "docs: regenerate the coverage-over-time chart"
+          # Pushed with the default GITHUB_TOKEN, which deliberately does not
+          # retrigger workflows — this job cannot loop on its own commit.
+          git push

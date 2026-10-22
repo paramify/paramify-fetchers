@@ -15,10 +15,10 @@ import sys
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 # One implementation per runtime lives in fetchers/_lib; a category-shared module
-# may RE-EXPORT it and must not reimplement it (docs/fetcher_contract.md § Output).
+# may RE-EXPORT it and must not reimplement it (docs/fetcher_contract_guide.md, step 6).
 # Same mechanism a fetcher uses, one directory further up: this file is
 # fetchers/azure/_shared/, so fetchers/_lib is parents[2] / "_lib".
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
@@ -58,6 +58,27 @@ def resource_group_from_id(resource_id: Optional[str]) -> Optional[str]:
         if part.lower() == "resourcegroups" and index + 1 < len(parts):
             return parts[index + 1] or None
     return None
+
+
+def arm_id_key(resource_id: Optional[str]) -> str:
+    """ARM ids are case-insensitive and Azure mixes spellings (seen live); compare on this."""
+    return str(resource_id or "").lower()
+
+
+# Subnets Azure itself routes and filters; their names are reserved, compared lower-cased.
+PLATFORM_SUBNET_NAMES = frozenset({
+    "gatewaysubnet",
+    "azurebastionsubnet",
+    "azurefirewallsubnet",
+    "azurefirewallmanagementsubnet",
+    "routeserversubnet",
+})
+
+
+def vnet_id_of(subnet_id: Optional[str]) -> str:
+    """Lower-cased VNet id from a subnet (or subnet child) id; empty when there is none."""
+    key = arm_id_key(subnet_id)
+    return key.split("/subnets/")[0] if "/subnets/" in key else ""
 
 
 def dig(obj: Any, *path: str) -> Any:
@@ -121,6 +142,76 @@ class Collector:
     @property
     def ok(self) -> bool:
         return not self.failures
+
+
+def monitor_client(subscription_id, cred):
+    """Microsoft.Insights client; azure-mgmt-monitor 7.0.0 dropped diagnostic_settings."""
+    from azure.mgmt.monitor import MonitorManagementClient  # lazy
+
+    client = MonitorManagementClient(
+        credential=cred, subscription_id=subscription_id, **arm_client_kwargs()
+    )
+    if getattr(client, "diagnostic_settings", None) is None:
+        raise RuntimeError(
+            "installed azure-mgmt-monitor has no diagnostic_settings operation group "
+            "(removed in 7.0.0) — pin azure-mgmt-monitor>=6.0.2,<7"
+        )
+    return client
+
+
+def diagnostic_setting_record(setting) -> Dict[str, Any]:
+    """One resource diagnostic setting: its destinations and per-category log enables."""
+    return {
+        "id": model_attr(setting, "id"),
+        "name": model_attr(setting, "name") or basename(model_attr(setting, "id")),
+        "storage_account_id": model_attr(setting, "storage_account_id"),
+        "workspace_id": model_attr(setting, "workspace_id"),
+        "event_hub_authorization_rule_id": model_attr(setting, "event_hub_authorization_rule_id"),
+        "event_hub_name": model_attr(setting, "event_hub_name"),
+        # Marketplace partner destinations (Datadog, Elastic, New Relic...) count as a destination too.
+        "marketplace_partner_id": model_attr(setting, "marketplace_partner_id"),
+        "logs": [
+            {
+                "category": model_attr(log, "category"),
+                "category_group": model_attr(log, "category_group"),
+                "enabled": bool(model_attr(log, "enabled") or False),
+            }
+            for log in (model_attr(setting, "logs") or [])
+        ],
+    }
+
+
+def list_diagnostic_settings(monitor, resource_id: str) -> List[Dict[str, Any]]:
+    # resource_uri is substituted unquoted after a "/", so no leading slash.
+    return sorted(
+        (
+            diagnostic_setting_record(s)
+            for s in monitor.diagnostic_settings.list(resource_uri=resource_id.lstrip("/"))
+        ),
+        key=lambda r: r.get("id") or "",
+    )
+
+
+NOT_FOUND_MARKERS = ("(resourcenotfound)", "(404)", "was not found", "could not be found")
+
+
+def is_not_found(exc: BaseException) -> bool:
+    """Azure's 404 for an optional sub-resource that was never configured."""
+    if type(exc).__name__.lower() == "resourcenotfounderror":
+        return True
+    message = f"{getattr(exc, 'message', '') or ''} {exc}".lower()
+    return any(marker in message for marker in NOT_FOUND_MARKERS)
+
+
+def get_optional(collector: Collector, operation: str, fn: Callable[[], Any]) -> tuple:
+    """(value, found): found is False on a 404, None when the call failed and was recorded."""
+    try:
+        return fn(), True
+    except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
+        if is_not_found(exc):
+            return None, False
+        collector.record(operation, exc)
+        return None, None
 
 
 # --------------------------------------------------------------------------- #
@@ -272,6 +363,19 @@ def arm_client_kwargs() -> Dict[str, Any]:
     return {"base_url": endpoint, "credential_scopes": [f"{endpoint}/.default"]}
 
 
+def enabled_subscription_ids(cred) -> Iterator[str]:
+    """Every *enabled* subscription the credential can see, lazily."""
+    from azure.mgmt.subscription import SubscriptionClient  # lazy
+
+    client = SubscriptionClient(cred, **arm_client_kwargs())
+    for sub in client.subscriptions.list():
+        # SubscriptionState serializes as "Enabled", its repr as
+        # "SubscriptionState.ENABLED"; both contain "enabled", while "Disabled",
+        # "Warned", "PastDue" and "Deleted" do not.
+        if "enabled" in str(getattr(sub, "state", "")).lower() and getattr(sub, "subscription_id", None):
+            yield sub.subscription_id
+
+
 def resolve_subscription(collector: Collector) -> Dict[str, Optional[str]]:
     """Resolve the subscription to collect from.
 
@@ -282,19 +386,9 @@ def resolve_subscription(collector: Collector) -> Dict[str, Optional[str]]:
     if explicit:
         return {"subscription_id": explicit, "subscription_source": "target"}
 
-    def _discover() -> Optional[str]:
-        from azure.mgmt.subscription import SubscriptionClient  # lazy
-
-        client = SubscriptionClient(credential(), **arm_client_kwargs())
-        for sub in client.subscriptions.list():
-            # SubscriptionState serializes as "Enabled", its repr as
-            # "SubscriptionState.ENABLED"; both contain "enabled", while "Disabled",
-            # "Warned", "PastDue" and "Deleted" do not.
-            if "enabled" in str(getattr(sub, "state", "")).lower():
-                return getattr(sub, "subscription_id", None)
-        return None
-
-    subscription_id = collector.guard("subscription.subscriptions.list", _discover)
+    subscription_id = collector.guard(
+        "subscription.subscriptions.list", lambda: next(enabled_subscription_ids(credential()), None)
+    )
     return {
         "subscription_id": subscription_id,
         "subscription_source": "ambient_default" if subscription_id else "unresolved",
@@ -384,6 +478,54 @@ def write_evidence(output_dir: Path, filename: str, evidence: Dict[str, Any]) ->
     return path
 
 
+def sorted_counts(counter) -> Dict[str, int]:
+    """A Counter as a plain dict in key order, so evidence diffs stay stable."""
+    return {key: counter[key] for key in sorted(counter)}
+
+
 def coverage_percentage(covered: int, total: int) -> int:
     """Integer percentage, matching the AWS/GCP fetchers' summary math (0 when empty)."""
     return (covered * 100) // total if total > 0 else 0
+
+
+# --------------------------------------------------------------------------- #
+# Resource Graph
+# --------------------------------------------------------------------------- #
+
+# Paging lives in _shared/resource_graph.query_all, which also guards truncation and short counts.
+
+
+def subscription_of(resource_id: Optional[str]) -> Optional[str]:
+    """Lowercased subscription id from an ARM resource ID, or None."""
+    parts = (resource_id or "").split("/")
+    return parts[2].lower() if len(parts) > 2 and parts[1].lower() == "subscriptions" else None
+
+
+def resource_group_scope_of(resource_id: Optional[str]) -> Optional[str]:
+    """Lowercased `/subscriptions/<id>/resourcegroups/<rg>` prefix of an ARM resource ID, or None."""
+    sub = subscription_of(resource_id)
+    rg = resource_group_from_id(resource_id)
+    return f"/subscriptions/{sub}/resourcegroups/{rg.lower()}" if sub and rg else None
+
+
+def lookup_status(
+    resource_id: Optional[str], found: bool, lookup_ok: bool, scopes: Optional[Dict[str, set]]
+) -> str:
+    """found / not_found / not_visible / unknown for a resource looked up by id.
+
+    A failed lookup is `unknown`, never `not_found`: the evidence must not report a
+    resource deleted because the call that would have found it errored. A resource
+    whose subscription or resource group the credential cannot read is `not_visible`;
+    a resource group that was itself deleted also lands there, which understates
+    rather than overstates. `not_found` therefore means the credential can read the
+    resource group and the resource is not in it.
+    """
+    if found:
+        return "found"
+    if not lookup_ok or scopes is None:
+        return "unknown"
+    if subscription_of(resource_id) not in scopes["subscriptions"]:
+        return "not_visible"
+    if resource_group_scope_of(resource_id) not in scopes["resource_groups"]:
+        return "not_visible"
+    return "not_found"

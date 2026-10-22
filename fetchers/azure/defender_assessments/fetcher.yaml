@@ -1,14 +1,20 @@
 name: azure_defender_assessments
-version: 0.1.0
+version: 0.2.0
 description: >
   Every Microsoft Defender for Cloud security assessment result on the
   subscription — one record per (resource, check) pair, each with its
-  Healthy/Unhealthy/NotApplicable status and severity. This is the per-resource
+  Healthy/Unhealthy/NotApplicable status and the assessment's own severity, read
+  from Resource Graph because the subscription's metadata catalogue can rate a
+  check lower than the assessment does. The catalogue's severity is only the
+  fallback, for an assessment Resource Graph does not return (its index lags
+  ARM, or the identity cannot read that row): severity_source says which one a
+  record carries, and the summary counts the records, and the Unhealthy ones, on
+  the fallback or with no severity. This is the per-resource
   pass/fail detail behind the secure score, not the score itself: it shows
   exactly which resources fail which checks. A subscription that never
   registered the Microsoft.Security resource provider reports
   provider_registration_status: not_registered, which is valid evidence ("not
-  in use") rather than a collection failure.
+  in use") rather than a collection failure. Needs Reader (or Security Reader).
 category: azure
 
 supports_targets: true
@@ -48,6 +54,23 @@ evidence_set:
   reference_id: EVD-AZURE-DEFENDER-ASSESSMENTS
   name: Microsoft Defender for Cloud Security Assessments
   instructions: >
-    Script: fetcher.py. Azure SDK call (azure-mgmt-security SecurityCenter):
+    Script: azure/defender_assessments/fetcher.py. Azure SDK calls
+    (azure-mgmt-security SecurityCenter):
     assessments.list(scope="subscriptions/<subscription_id>") for every security
-    assessment result on the subscription.
+    assessment result on the subscription, and
+    assessments_metadata.list_by_subscription() for each check's categories,
+    threats, type, user impact, implementation effort and policy definition id
+    (the list call does not return metadata). Each assessment's own severity
+    comes from azure-mgmt-resourcegraph ResourceGraphClient
+    resources(QueryRequest(subscriptions=[<subscription_id>], query="SecurityResources
+    | where type =~ 'microsoft.security/assessments' | project id, severity =
+    tostring(properties.metadata.severity) | order by id asc",
+    options=QueryRequestOptions(top=1000, skip_token=<previous page's $skipToken>,
+    result_format="objectArray"))), repeated until no $skipToken is returned and
+    joined on the assessment id. The catalogue's severity, which can be lower than
+    the assessment's, is used only where Resource Graph has none, such as an
+    assessment its index has not caught up with or a row the identity cannot read:
+    severity_source is "assessment" or "catalogue" (null when neither has one),
+    and the summary gives severity_from_catalogue_count and severity_unknown_count,
+    and unhealthy_severity_from_catalogue_count and
+    unhealthy_severity_unknown_count for Unhealthy records only.

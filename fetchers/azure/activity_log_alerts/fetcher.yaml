@@ -1,13 +1,17 @@
 name: azure_activity_log_alerts
-version: 0.1.0
+version: 0.2.0
 description: >
   Every activity log alert rule in the subscription — enabled state, scopes,
   description, notification action groups and the decoded conditions each rule fires
   on — plus a derived map of which security-relevant control-plane operations those
   rules actually cover: create/update and delete of network security groups and their
   rules, public IP addresses, policy assignments, SQL server firewall rules and
-  security solutions, and whether a Service Health incident alert exists. One evidence
-  set answers all of it, rather than one fetcher per operation.
+  security solutions, and whether a Service Health incident alert exists. Each rule's
+  action groups are resolved to the receivers they notify and checked against alert
+  processing rules that suppress them, and a second map covers App Service changes
+  (create/update, configuration, deployment, slot swap) counting only alerts that
+  reach a person. One evidence set answers all of it, rather than one fetcher per
+  operation.
 category: azure
 
 supports_targets: true
@@ -47,5 +51,23 @@ evidence_set:
   reference_id: EVD-AZURE-ACTIVITY-ALERTS
   name: Azure Activity Log Alerts
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-monitor MonitorManagementClient):
-    activity_log_alerts.list_by_subscription_id().
+    Script: azure/activity_log_alerts/fetcher.py. Azure SDK calls (azure-mgmt-monitor MonitorManagementClient):
+    activity_log_alerts.list_by_subscription_id(). Then raw ARM GETs, following
+    nextLink: Microsoft.Insights/actionGroups (api 2023-01-01) and
+    Microsoft.AlertsManagement/actionRules — alert processing rules (2021-08-08);
+    action groups referenced from another subscription are fetched by id and stay in
+    unresolved_action_group_ids on 403/404; an id that is not an ARM action group path
+    is never fetched. action_groups keeps the rule's own id list; resolved_action_groups
+    adds each group's enabled state and enabled receivers (email and SMS count only with
+    status Enabled, so Disabled and NotSpecified send nothing; webhook host only, phone
+    numbers masked to the last four digits). Routing is decided as in
+    azure_alert_rules: a processing rule's scope_match is "full" or "partial" (narrower
+    than a subscription-scoped alert, for instance); suppressed is true only for a
+    full-scope, unconditional, active RemoveAllActionGroups rule and null for any other
+    matching one; routes_to_person counts email, SMS, voice, app push, ARM role and
+    ITSM receivers; reaches_human is true, false or null (unknown, never "no").
+    monitored_operation_coverage and its totals are unchanged from 0.1.0 (enabled
+    rules). monitored_operation_coverage_reaching_human and change_operation_coverage
+    (results.change_operations, site and slot operations) are true when an alert that
+    reaches a person covers the operation, null when only one that might, false
+    otherwise; change_operations_possibly_covered counts the nulls.

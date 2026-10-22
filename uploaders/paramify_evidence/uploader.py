@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """Upload enveloped evidence from a run directory to Paramify.
 
-A separate stage (per docs/design.md): reads a completed `run-<timestamp>/`
+A separate stage (docs/architecture_guide.md, step 5): reads a completed `run-<timestamp>/`
 directory of envelope-wrapped evidence files and pushes each to Paramify as an
 artifact on its evidence set. It reads nothing from fetcher source and needs only
 the run directory plus a Paramify API token, so it can be pointed at an old run to
-re-upload. See docs/uploader_design.md.
+re-upload. See docs/uploader_guide.md.
 
 Per evidence file the uploader:
   1. reads the envelope `metadata.evidence_set` (skips with a warning if absent),
-  2. applies any customer override (reference_id / name / instructions),
+  2. applies any customer override (reference_id / name / instructions / frequency),
   3. get-or-creates the evidence set by reference_id,
   4. picks the channel to upload through, where the set has any (see
      resolve_channel — artifacts uploaded outside a configured channel do not
      count toward the solution capability),
   5. attaches the evidence as an artifact (idempotent: skips if an artifact with
-     the same filename + run_id already exists on the set).
+     the same filename + run_id already exists on the set),
+  6. puts the default custom tags on the set — provenance + the category's
+     display name — additively, every run (framework/custom_tags.py).
 
 Auth: PARAMIFY_UPLOAD_API_TOKEN (source-agnostic env — .env, secret manager, CI).
 """
@@ -25,7 +27,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urlparse
@@ -38,14 +40,18 @@ from dotenv import load_dotenv
 # from any cwd, where only its own directory lands on sys.path. Its position in the
 # repo is fixed, so derive the root rather than duplicating the token-resolution
 # rule locally — duplicating it is what let the uploader and the fetchers disagree.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT))
 
+from framework.contract import DEFAULT_EVIDENCE_FREQUENCY  # noqa: E402
+from framework.custom_tags import ENTITY_EVIDENCE, build_tagger  # noqa: E402
 from framework.paramify_auth import (  # noqa: E402
     READ_TOKEN_ENV,
     UPLOAD_TOKEN_ENV,
     resolve_base_url,
     resolve_upload_token,
 )
+from framework.paramify_responses import already_present  # noqa: E402
 
 logger = logging.getLogger("paramify_evidence_uploader")
 
@@ -100,8 +106,21 @@ class ParamifyClient:
         return None
 
     def create_evidence_set(self, es: Dict) -> Optional[Dict]:
-        """Create the evidence set; on 'already exists' fall back to find (idempotent)."""
-        body = {"referenceId": es["reference_id"], "name": es["name"], "automated": True}
+        """Create the evidence set; when it already exists, fall back to find (idempotent).
+
+        The API refuses a repeat `referenceId` with a message rather than
+        returning the existing set; `already_present` is the shared reading of
+        that refusal (400 today, 409 permitted by spec 0.9.2).
+        """
+        body = {
+            "referenceId": es["reference_id"],
+            "name": es["name"],
+            "automated": True,
+            # Envelopes written before the field existed carry no frequency.
+            "frequency": es.get("frequency") or DEFAULT_EVIDENCE_FREQUENCY,
+            # The frequency schedule counts from the day the set is created.
+            "startDate": date.today().isoformat(),
+        }
         if es.get("description"):
             body["description"] = es["description"]
         if es.get("instructions"):
@@ -109,7 +128,7 @@ class ParamifyClient:
         r = self.session.post(f"{self.base_url}/evidence", json=body, timeout=self.timeout)
         if r.status_code in (200, 201):
             return r.json()
-        if r.status_code == 400 and "already exists" in r.text.lower():
+        if already_present(r.status_code, r.text):
             return self.find_evidence_set(es["reference_id"])
         raise ParamifyError(
             f"create evidence set {es['reference_id']} failed (HTTP {r.status_code}): {r.text[:300]}"
@@ -168,10 +187,12 @@ def is_enveloped(obj) -> bool:
 
 
 def find_latest_run(output_dir: Path) -> Optional[Path]:
+    """The newest run that holds evidence — not simply the newest run, which is
+    often a pipeline manifest's (issue reports only) sharing the same output dir."""
     if not output_dir.is_dir():
         return None
     runs = sorted((p for p in output_dir.glob("run-*") if p.is_dir()), reverse=True)
-    return runs[0] if runs else None
+    return next((r for r in runs if any(iter_evidence_files(r))), None)
 
 
 def iter_evidence_files(run_dir: Path):
@@ -193,7 +214,7 @@ def resolve_evidence_set(metadata: Dict, overrides: Dict) -> Optional[Dict]:
         return None
     ov = override_for(metadata, overrides)
     resolved = dict(es)
-    for key in ("reference_id", "name", "instructions", "description"):
+    for key in ("reference_id", "name", "instructions", "description", "frequency"):
         if key in ov:
             resolved[key] = ov[key]
     return resolved
@@ -301,8 +322,13 @@ def upload_run(
     base_url: Optional[str] = None,
     dry_run: bool = False,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> Dict:
     """Upload one completed run directory.
+
+    `custom_tags=False` is the `--no-tags` switch: no default custom tags for
+    this run, whatever the config says (PARAMIFY_CUSTOM_TAGS=off does the same
+    from the environment).
 
     The standalone CLI still logs to stderr, while front-ends can pass on_event
     to render upload_start / upload_file / upload_complete in their own UI.
@@ -324,6 +350,17 @@ def upload_run(
         msg = f"artifact_payload must be 'envelope' or 'payload', got {artifact_payload!r}"
         logger.error(msg)
         raise ValueError(msg)
+    # Default custom tags for every set this run touches. Resolved up front so a
+    # malformed `tags:` block fails like any other config mistake; the client's
+    # session is attached below (a dry run keeps it write-less).
+    try:
+        tagger = build_tagger(
+            None, base_url, config=config, root=_REPO_ROOT,
+            override_off=None if custom_tags else "--no-tags",
+        )
+    except ValueError as e:
+        logger.error(str(e))
+        raise
 
     run_dir = Path(run_dir)
     if not run_dir.is_dir():
@@ -351,6 +388,8 @@ def upload_run(
     })
 
     client = None if dry_run else ParamifyClient(token, base_url)
+    if client is not None:
+        tagger.session = client.session
     results: List[Dict] = []
     uploaded = skipped_dup = skipped_failed = errors = seen = 0
 
@@ -388,6 +427,20 @@ def upload_run(
                 add_result({"file": path.name, "outcome": "error", "reason": "missing/incomplete evidence_set"})
                 continue
 
+            # An inventory pipeline reads the artifact as the whole estate, so a
+            # partial or empty one would read as assets that are gone. The runner
+            # judged completeness when it enveloped the file (framework/inventory.py);
+            # this is not optional the way skip_failed is.
+            inventory = metadata.get("inventory")
+            if isinstance(inventory, dict) and inventory.get("complete") is not True:
+                why = "; ".join(inventory.get("incomplete_because") or ["not marked complete"])
+                reason = f"incomplete inventory not sent: {why}"
+                logger.warning("%s: %s", path.name, reason)
+                skipped_failed += 1
+                add_result({"file": path.name, "outcome": "skipped_failed",
+                            "reference_id": es["reference_id"], "reason": reason})
+                continue
+
             if metadata.get("status") == "failed" and skip_failed:
                 logger.info("%s: status=failed and skip_failed set; skipping", path.name)
                 skipped_failed += 1
@@ -402,7 +455,12 @@ def upload_run(
                     path.name, es["reference_id"], es["name"],
                     build_artifact_meta(metadata, es["name"])["title"],
                 )
-                add_result({"file": path.name, "outcome": "would_upload", "reference_id": es["reference_id"]})
+                add_result({
+                    "file": path.name,
+                    "outcome": "would_upload",
+                    "reference_id": es["reference_id"],
+                    "tags": tagger.plan(metadata.get("category")),
+                })
                 continue
 
             record = client.get_or_create_evidence_set(es)
@@ -412,6 +470,11 @@ def upload_run(
                 errors += 1
                 add_result({"file": path.name, "outcome": "error", "reference_id": es["reference_id"]})
                 continue
+
+            # Tag before the dedup check: a set is tagged once per run whether or
+            # not this file is new, which is what backfills sets from older runs.
+            tag_info = tagger.tag(ENTITY_EVIDENCE, evidence_id, metadata.get("category"))
+            tags = tag_info["tags"] if tag_info["outcome"] in ("applied", "already") else []
 
             try:
                 channel = resolve_channel(
@@ -440,6 +503,7 @@ def upload_run(
                     "outcome": "skipped_duplicate",
                     "reference_id": es["reference_id"],
                     "evidence_id": evidence_id,
+                    "tags": tags,
                 })
                 continue
             content = artifact_content(envelope, artifact_payload)
@@ -466,6 +530,7 @@ def upload_run(
                 "artifact_id": art.get("id"),
                 "channel": (channel.get("referenceId") if channel else None),
                 "channel_id": (channel.get("id") if channel else None),
+                "tags": tags,
             })
         except Exception as e:
             logger.error("%s: upload failed: %s", path.name, e)
@@ -487,6 +552,7 @@ def upload_run(
             "skipped_duplicate": skipped_dup,
             "skipped_failed": skipped_failed,
             "errors": errors,
+            "tags": tagger.summary(),
             "results": results,
         }
         log_path = run_dir / "upload_log.json"
@@ -505,6 +571,7 @@ def upload_run(
         "skipped_failed": skipped_failed,
         "errors": errors,
         "files": seen,
+        "tags": tagger.summary(),
         "results": results,
         "log_path": str(log_path) if log_path else None,
         "ok": errors == 0,
@@ -530,7 +597,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Upload enveloped evidence to Paramify")
     parser.add_argument("run_dir", nargs="?", help="Run directory to upload (default: latest under --output-dir)")
     parser.add_argument("--output-dir", default="./evidence", help="Base dir to find the latest run in (default ./evidence)")
-    parser.add_argument("--config", help="Uploader config YAML (base_url, overrides, skip_failed, artifact_payload)")
+    parser.add_argument("--config", help="Uploader config YAML (base_url, overrides, skip_failed, artifact_payload, tags)")
     parser.add_argument("--dry-run", action="store_true", help="Resolve and report what would upload; no API calls")
     args = parser.parse_args(argv)
 

@@ -43,11 +43,12 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 ksis:
   - KSI-MLA-LET
+  - KSI-MLA-OSM
   - KSI-CMT-LMC
 
 evidence_set:
   reference_id: EVD-AZURE-DIAG-SETTINGS
   name: Azure Activity Log Diagnostic Settings
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-monitor<7 MonitorManagementClient):
+    Script: azure/diagnostic_settings/fetcher.py. Azure SDK calls (azure-mgmt-monitor<7 MonitorManagementClient):
     diagnostic_settings.list(resource_uri="subscriptions/<id>/"), at subscription scope.

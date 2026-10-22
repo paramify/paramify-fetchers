@@ -4,13 +4,14 @@ Fetchers write raw evidence dicts; the runner calls `wrap_outputs()` after each
 invocation to add the `{schema_version, metadata, payload}` wrapper so every
 evidence file is self-describing and the uploader has one shape to read. This
 keeps the v0.x "fetchers write raw dicts" interim clause true — the framework
-adds the envelope, not the fetcher. See docs/envelope_design.md.
+adds the envelope, not the fetcher. See docs/envelope_guide.md.
 """
 
 import json
 import logging
 from pathlib import Path
 
+from framework import inventory
 from framework.contract import Fetcher, InvocationResult
 
 logger = logging.getLogger("framework.envelope")
@@ -45,7 +46,7 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
         # heuristic — it assumes the last thing logged is why the run failed, which
         # is false for any fetcher whose final log line is an INFO message — so it
         # is the second choice, not the first. The payload is never consulted: it
-        # is fetcher-shaped and unredacted. See docs/fetcher_contract.md.
+        # is fetcher-shaped and unredacted. See docs/fetcher_contract_guide.md, step 4.
         error = result.error or (result.stderr[-_ERROR_TAIL_CHARS:] if result.stderr else None)
         if error:
             meta["error"] = error
@@ -53,7 +54,7 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
             meta["error_code"] = result.error_code
     if fetcher.evidence_set:
         es = fetcher.evidence_set
-        es_meta = {"reference_id": es.reference_id, "name": es.name}
+        es_meta = {"reference_id": es.reference_id, "name": es.name, "frequency": es.frequency}
         if es.instructions is not None:
             es_meta["instructions"] = es.instructions
         if es.description is not None:
@@ -71,10 +72,14 @@ def wrap_outputs(
     wrap a single file is logged and skipped — it never aborts the run.
 
     An issue-report fetcher is skipped entirely. Its output is the source tool's
-    own file, which Paramify's assessment intake parses directly, so wrapping it
+    own file, which Paramify's file intake preset parses directly, so wrapping it
     would break the parse. The guard is on `kind` rather than the file extension
     because a JSON scan report is still a scan report — its identity lives in the
     sidecar index instead (see framework/issue_reports.py).
+
+    An inventory output is also checked against the inventory contract, and the
+    verdict goes in `metadata.inventory` (see framework/inventory.py). The
+    payload is left as the fetcher wrote it.
     """
     if fetcher.is_issue_report:
         return
@@ -91,9 +96,17 @@ def wrap_outputs(
             continue
         if is_enveloped(raw):
             continue
+        file_meta = meta
+        if fetcher.is_inventory:
+            file_meta = {**meta, "inventory": inventory.check(raw, result.exit_code)}
+            if file_meta["inventory"].get("problems"):
+                logger.warning(
+                    "envelope: %s breaks the inventory contract: %s",
+                    name, "; ".join(file_meta["inventory"]["problems"]),
+                )
         envelope = {
             "schema_version": ENVELOPE_SCHEMA_VERSION,
-            "metadata": meta,
+            "metadata": file_meta,
             "payload": raw,
         }
         # default=str for the same reason api.py uses it on _run_metadata.json:

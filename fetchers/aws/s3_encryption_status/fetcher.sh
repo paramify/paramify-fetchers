@@ -42,9 +42,14 @@ ACCOUNT_ID=$(echo "$CALLER_IDENTITY" | jq -r '.Account // "unknown"')
 ARN=$(echo "$CALLER_IDENTITY" | jq -r '.Arn // "unknown"')
 DATETIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-total_buckets=0
-encrypted_buckets=0
-s3_results=()
+# get-bucket-encryption has no batch form, so each bucket still costs one call.
+# What the loop no longer does is spawn jq: each bucket's name and raw response
+# (or null when the call failed) are appended in order, and one jq pass below
+# builds every record. That pass reads files, not --argjson: every bucket on
+# one command line overflows Linux's 128 KiB argv limit at around 700 buckets.
+_BUCKET_NAMES="$(mktemp -t aws_s3_encryption_status_names.XXXXXX)"
+_BUCKET_RESPONSES="$(mktemp -t aws_s3_encryption_status_responses.XXXXXX.json)"
+trap 'rm -f "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_BUCKET_NAMES" "$_BUCKET_RESPONSES"' EXIT
 
 bucket_names=$(aws s3api list-buckets --query "Buckets[*].Name" --output text 2>/dev/null)
 list_exit=$?
@@ -53,46 +58,41 @@ if [ $list_exit -ne 0 ]; then
     log_error "Failed to list S3 buckets"
 else
     for bucket in $bucket_names; do
-        total_buckets=$((total_buckets + 1))
-
-        if encryption_config=$(aws s3api get-bucket-encryption --bucket "$bucket" 2>/dev/null); then
-            sse_algorithm=$(echo "$encryption_config" | jq -r '.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.SSEAlgorithm // "None"')
-            kms_key_id=$(echo "$encryption_config" | jq -r '.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.KMSMasterKeyID // "None"')
-            bucket_key_enabled=$(echo "$encryption_config" | jq -r '.ServerSideEncryptionConfiguration.Rules[0].BucketKeyEnabled // false')
-
-            s3_results+=("$(jq -n \
-                --arg name "$bucket" --arg type "s3" \
-                --arg sse "$sse_algorithm" --arg kms "$kms_key_id" \
-                --argjson key_enabled "$bucket_key_enabled" \
-                '{name: $name, type: $type, encrypted: true, encryption_type: $sse, kms_key_id: $kms, bucket_key_enabled: $key_enabled}')")
-            encrypted_buckets=$((encrypted_buckets + 1))
-        else
-            # Note: a bucket with no encryption configured is the data point, not a failure.
-            s3_results+=("$(jq -n \
-                --arg name "$bucket" --arg type "s3" \
-                '{name: $name, type: $type, encrypted: false, encryption_type: "None", kms_key_id: "None", bucket_key_enabled: false}')")
+        # Note: a bucket with no encryption configured is the data point, not a
+        # failure -- it is recorded as unencrypted (null here).
+        if ! encryption_config=$(aws s3api get-bucket-encryption --bucket "$bucket" 2>/dev/null) || [ -z "$encryption_config" ]; then
+            encryption_config='null'
         fi
+        printf '%s\n' "$bucket" >> "$_BUCKET_NAMES"
+        printf '%s\n' "$encryption_config" >> "$_BUCKET_RESPONSES"
     done
-fi
-
-percentage=0
-if [ $total_buckets -gt 0 ]; then
-    percentage=$(( (encrypted_buckets * 100) / total_buckets ))
 fi
 
 jq -n \
     --arg profile "$PROFILE" --arg region "$REGION" --arg datetime "$DATETIME" \
     --arg account_id "$ACCOUNT_ID" --arg arn "$ARN" \
-    --argjson buckets "[$(IFS=,; echo "${s3_results[*]}")]" \
-    --arg total "$total_buckets" --arg encrypted "$encrypted_buckets" --arg percentage "$percentage" \
-    '{
+    --rawfile names "$_BUCKET_NAMES" --slurpfile responses "$_BUCKET_RESPONSES" \
+    '($names | split("\n")) as $names
+    | [range(0; $responses | length) as $i | $responses[$i] as $config
+        | if $config == null then
+            {name: $names[$i], type: "s3", encrypted: false, encryption_type: "None", kms_key_id: "None", bucket_key_enabled: false}
+          else
+            $config.ServerSideEncryptionConfiguration.Rules[0] as $rule
+            | {name: $names[$i], type: "s3", encrypted: true,
+               encryption_type: ($rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm // "None" | tostring),
+               kms_key_id: ($rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID // "None" | tostring),
+               bucket_key_enabled: ($rule.BucketKeyEnabled // false)}
+          end] as $buckets
+    | ($buckets | length) as $total
+    | ([$buckets[] | select(.encrypted)] | length) as $encrypted
+    | {
         metadata: {profile: $profile, region: $region, datetime: $datetime, account_id: $account_id, arn: $arn},
         results: {
             storage_inventory: {object: $buckets},
             summary: {
-                total_storage: ($total | tonumber),
-                encrypted_storage: ($encrypted | tonumber),
-                encryption_percentage: ($percentage | tonumber)
+                total_storage: $total,
+                encrypted_storage: $encrypted,
+                encryption_percentage: (if $total > 0 then ($encrypted * 100 / $total | floor) else 0 end)
             }
         }
     }' > "$OUTPUT_JSON"

@@ -30,8 +30,7 @@ Copy [`_template/validator.yaml`](_template/validator.yaml) to
 (like `_template`) are not part of the registry.
 
 Three rules for the `regex` of an AUTOMATED validator — each guards a failure
-mode that is otherwise silent (full rationale in
-[`docs/validators_design.md`](../docs/validators_design.md)):
+mode that is otherwise silent:
 
 - **Write ECMAScript, not Python.** Paramify's engine is JavaScript. It applies
   `g` and `s` automatically but never `m`, so span lines with `[\s\S]*?`. Named

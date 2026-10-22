@@ -30,6 +30,7 @@ from framework.contract import Fetcher, InvocationResult, IssueReport
 from framework.envelope import wrap_outputs
 from framework.issue_reports import (
     ASSESSMENT_ID_FIELD,
+    CLOSE_CYCLE_FIELD,
     ISSUE_REPORTS_DIR,
     build_record,
     read_index,
@@ -93,7 +94,10 @@ def make_result(outputs, **overrides) -> InvocationResult:
     return InvocationResult(**defaults)
 
 
-def write_issue_report_fetcher(root: Path, *, output="scan.csv", fmt="csv", body=RAW_CSV) -> None:
+def write_issue_report_fetcher(
+    root: Path, *, output="scan.csv", fmt="csv", body=RAW_CSV,
+    exit_code: int = 0, write_file: bool = True,
+) -> None:
     """Stage a runnable issue-report fetcher in a temp repo root."""
     fdir = root / "fetchers" / "testcat" / "vuln_scan"
     fdir.mkdir(parents=True, exist_ok=True)
@@ -112,7 +116,8 @@ def write_issue_report_fetcher(root: Path, *, output="scan.csv", fmt="csv", body
         "import os\n"
         "from pathlib import Path\n"
         f"body = {body!r}\n"
-        f'Path(os.environ["EVIDENCE_DIR"], {output!r}).write_bytes(body)\n'
+        + (f'Path(os.environ["EVIDENCE_DIR"], {output!r}).write_bytes(body)\n' if write_file else "")
+        + (f"raise SystemExit({exit_code})\n" if exit_code else "")
     )
     _stage_schemas(root)
 
@@ -343,7 +348,7 @@ def test_sidecar_carries_identity_and_assessment(tmp_path):
     summary = api.run(manifest, tmp_path)
     index = read_index(Path(summary["run_dir"]))
 
-    assert index["schema_version"] == "1.0"
+    assert index["schema_version"] == "1.1"
     assert len(index["reports"]) == 1
     rec = index["reports"][0]
     assert rec["file"] == "scan.csv"
@@ -550,14 +555,103 @@ def test_one_unwired_report_does_not_block_the_others(tmp_path):
 def test_validate_passes_once_an_assessment_is_set(tmp_path):
     write_issue_report_fetcher(tmp_path)
     manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
-        {"use": "t_vuln_scan", "config": {ASSESSMENT_ID_FIELD: "abc-123"}}
+        {"use": "t_vuln_scan",
+         "config": {ASSESSMENT_ID_FIELD: "abc-123", CLOSE_CYCLE_FIELD: "never"}}
     ]}}
     assert api.validate(manifest, tmp_path) == []
 
 
+def test_validate_asks_for_a_close_policy(tmp_path):
+    """No default: closing auto-closes the issues a cycle never saw, so whether a
+    run closes is a fact about the customer, not something to guess."""
+    write_issue_report_fetcher(tmp_path)
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
+        {"use": "t_vuln_scan", "config": {ASSESSMENT_ID_FIELD: "abc-123"}}
+    ]}}
+    errors = api.validate(manifest, tmp_path)
+    assert any(CLOSE_CYCLE_FIELD in e and "--close-cycle" in e for e in errors), errors
+
+
+def test_validate_rejects_an_unknown_close_policy(tmp_path):
+    write_issue_report_fetcher(tmp_path)
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
+        {"use": "t_vuln_scan",
+         "config": {ASSESSMENT_ID_FIELD: "abc-123", CLOSE_CYCLE_FIELD: "always"}}
+    ]}}
+    errors = api.validate(manifest, tmp_path)
+    assert any("'always'" in e for e in errors), errors
+
+
+def test_validate_reads_platform_level_assessment_and_policy(tmp_path):
+    """validate reads the same merged config the runner does, so values set once
+    for the category count for every entry that inherits them."""
+    write_issue_report_fetcher(tmp_path)
+    manifest = {"run": {
+        "output_dir": str(tmp_path / "out"),
+        "platforms": {"testcat": {"config": {
+            ASSESSMENT_ID_FIELD: "abc-123", CLOSE_CYCLE_FIELD: "after_run",
+        }}},
+        "fetchers": [{"use": "t_vuln_scan"}],
+    }}
+    assert api.validate(manifest, tmp_path) == []
+
+
+# --------------------------------------------------------------------------- #
+# Invocation records: what lets the uploader tell a complete run from a partial one
+# --------------------------------------------------------------------------- #
+
+def _run_one(tmp_path, config=None):
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
+        {"use": "t_vuln_scan", "config": config or {
+            ASSESSMENT_ID_FIELD: "A-1", CLOSE_CYCLE_FIELD: "after_run"}},
+    ]}}
+    summary = api.run(manifest, tmp_path)
+    return read_index(Path(summary["run_dir"]))
+
+
+def test_a_successful_invocation_is_recorded_with_its_policy(tmp_path):
+    write_issue_report_fetcher(tmp_path)
+    index = _run_one(tmp_path)
+    [inv] = index["invocations"]
+    assert inv["status"] == "success"
+    assert inv["files"] == ["scan.csv"]
+    assert inv["assessment_id"] == "A-1"
+    assert inv["close_cycle"] == "after_run"
+    assert index["reports"][0]["close_cycle"] == "after_run"
+
+
+def test_a_failed_invocation_that_wrote_nothing_is_still_recorded(tmp_path):
+    """The case that made invocations necessary: no file means no report record,
+    and without this entry the run would look complete."""
+    write_issue_report_fetcher(tmp_path, exit_code=1, write_file=False)
+    index = _run_one(tmp_path)
+    assert index["reports"] == []
+    [inv] = index["invocations"]
+    assert inv["status"] == "failed"
+    assert inv["files"] == []
+    assert inv["assessment_id"] == "A-1"
+
+
+def test_an_entry_that_raises_before_running_is_recorded(tmp_path, monkeypatch):
+    write_issue_report_fetcher(tmp_path)
+
+    def boom(*a, **k):
+        raise RuntimeError("secret could not be resolved")
+
+    monkeypatch.setattr("framework.runner.executor.run_entry", boom)
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
+        {"use": "t_vuln_scan",
+         "config": {ASSESSMENT_ID_FIELD: "A-1", CLOSE_CYCLE_FIELD: "after_run"}},
+    ]}}
+    summary = api.run(manifest, tmp_path)
+    [inv] = read_index(Path(summary["run_dir"]))["invocations"]
+    assert inv["status"] == "failed"
+    assert "secret could not be resolved" in inv["error"]
+
+
 def test_assessment_is_configurable_but_not_required_to_collect(tmp_path):
     """A missing assessment must not stop collection: the framework is supposed to
-    run with no Paramify connection at all (docs/design.md). If assessment_id were
+    run with no Paramify connection at all (docs/architecture_guide.md, step 3). If assessment_id were
     a required config field, this run would raise instead."""
     write_issue_report_fetcher(tmp_path)
     manifest = {"run": {"output_dir": str(tmp_path / "out"),
@@ -712,5 +806,193 @@ def test_describe_exposes_kind_and_issue_report_and_reserved_config(tmp_path):
     assert d["issue_report"] == {
         "assessment_type": "VULNERABILITY",
         "title": "Test Scan",
+        "format": "csv",
     }
     assert {c["name"] for c in d["config"]} >= {"assessment_id", "assessment_name"}
+
+
+def _sidecar(tmp_path, *, close_cycle, failed_target=False):
+    reports = tmp_path / ISSUE_REPORTS_DIR
+    reports.mkdir(parents=True)
+    (reports / "a.csv").write_bytes(RAW_CSV)
+    invocations = [{"fetcher_name": "fa", "status": "success", "files": ["a.csv"],
+                    "assessment_id": "A-1", "close_cycle": close_cycle}]
+    if failed_target:
+        invocations.append({"fetcher_name": "fa", "status": "failed", "files": [],
+                            "assessment_id": "A-1", "close_cycle": close_cycle})
+    (reports / "_issue_reports.json").write_text(json.dumps({
+        "schema_version": "1.1", "run_id": "r1",
+        "reports": [{"file": "a.csv", "fetcher_name": "fa", "run_id": "r1",
+                     "status": "success", "format": "csv", "assessment_id": "A-1",
+                     "assessment_name": "Monthly", "close_cycle": close_cycle}],
+        "invocations": invocations,
+    }))
+
+
+def test_preflight_plans_the_close_per_assessment(tmp_path):
+    """What the TUI shows before the confirm: the close is the row to read."""
+    _sidecar(tmp_path, close_cycle="after_run")
+    pf = api.issues_upload_preflight(tmp_path, REPO_ROOT, None, dry_run=True)
+    [plan] = pf["assessments"]
+    assert plan["operation"] == "PROCESS_CLOSE"
+    assert plan["assessment_name"] == "Monthly"
+
+
+def test_preflight_plan_shows_why_a_close_is_skipped(tmp_path):
+    _sidecar(tmp_path, close_cycle="after_run", failed_target=True)
+    pf = api.issues_upload_preflight(tmp_path, REPO_ROOT, None, dry_run=True)
+    [plan] = pf["assessments"]
+    assert plan["operation"] == "PROCESS"
+    assert "failed" in plan["close_skipped"]
+
+
+def test_preflight_warns_on_a_missing_close_policy(tmp_path):
+    _sidecar(tmp_path, close_cycle=None)
+    pf = api.issues_upload_preflight(tmp_path, REPO_ROOT, None, dry_run=True)
+    assert pf["ok"], pf["errors"]
+    assert pf["assessments"][0]["error"]
+    assert any("close_cycle" in w for w in pf["warnings"]), pf["warnings"]
+
+
+def test_upload_reads_close_cycle_from_the_producing_manifest(tmp_path):
+    """A run collected before close_cycle was set recorded none; setting it in the
+    manifest afterwards must be enough, not a reason to collect again."""
+    import yaml
+
+    write_issue_report_fetcher(tmp_path)
+    (tmp_path / "uploaders").symlink_to(REPO_ROOT / "uploaders")
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [
+        {"use": "t_vuln_scan", "config": {ASSESSMENT_ID_FIELD: "A-1"}},
+    ]}}
+    path = tmp_path / "pipelines.yaml"
+    path.write_text(yaml.safe_dump(manifest))
+    summary = api.run(manifest, tmp_path, manifest_path=path)
+    run_dir = Path(summary["run_dir"])
+    assert read_index(run_dir)["reports"][0]["close_cycle"] is None
+
+    before = api.issues_upload_preflight(run_dir, tmp_path, None, dry_run=True)
+    assert before["assessments"][0]["error"]
+
+    manifest["run"]["fetchers"][0]["config"][CLOSE_CYCLE_FIELD] = "after_run"
+    path.write_text(yaml.safe_dump(manifest))
+    after = api.issues_upload_preflight(run_dir, tmp_path, None, dry_run=True)
+    [plan] = after["assessments"]
+    assert plan["error"] is None
+    assert plan["operation"] == "PROCESS_CLOSE"
+
+
+# --------------------------------------------------------------------------- #
+# Sidecar integrity
+# --------------------------------------------------------------------------- #
+
+def _record(tmp_path, name, **result_overrides):
+    reports = tmp_path / ISSUE_REPORTS_DIR
+    reports.mkdir(exist_ok=True)
+    (reports / name).write_bytes(RAW_CSV)
+    fetcher = make_issue_report_fetcher(tmp_path)
+    return record_outputs(
+        make_result([f"{ISSUE_REPORTS_DIR}/{name}"], **result_overrides), fetcher, "run-1", tmp_path,
+        {ASSESSMENT_ID_FIELD: "assess-uuid", CLOSE_CYCLE_FIELD: "after_run"},
+    )
+
+
+def test_sidecar_is_written_atomically_via_a_temp_file_and_replace(tmp_path, monkeypatch):
+    import os
+
+    from framework import issue_reports
+
+    calls = []
+    real = os.replace
+    monkeypatch.setattr(issue_reports.os, "replace",
+                        lambda src, dst: (calls.append((Path(src).name, Path(dst).name)), real(src, dst))[1])
+    _record(tmp_path, "a.csv")
+    assert ("_issue_reports.json.tmp", "_issue_reports.json") in calls
+    assert not (tmp_path / ISSUE_REPORTS_DIR / "_issue_reports.json.tmp").exists()
+
+
+def test_a_failed_write_leaves_the_previous_sidecar_intact(tmp_path, monkeypatch):
+    from framework import issue_reports
+
+    _record(tmp_path, "a.csv")
+    path = tmp_path / ISSUE_REPORTS_DIR / "_issue_reports.json"
+    before = path.read_bytes()
+
+    def boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(issue_reports.os, "replace", boom)
+    assert _record(tmp_path, "b.csv") == []          # reported as not recorded
+    assert path.read_bytes() == before, "a half-finished write must not touch the index"
+    assert not (tmp_path / ISSUE_REPORTS_DIR / "_issue_reports.json.tmp").exists()
+
+
+def test_a_corrupt_sidecar_is_kept_and_the_new_index_cannot_close(tmp_path):
+    reports = tmp_path / ISSUE_REPORTS_DIR
+    reports.mkdir()
+    (reports / "_issue_reports.json").write_text('{"reports": [ {"file": "a.csv", TRUNC')
+
+    added = _record(tmp_path, "b.csv")
+
+    assert [r["file"] for r in added] == ["b.csv"], "this invocation is still recorded"
+    index = read_index(tmp_path)
+    assert index["cannot_close"] and "unreadable" in index["cannot_close"]
+    assert (reports / "_issue_reports.json.corrupt").read_text().endswith("TRUNC")
+
+
+def test_cannot_close_survives_later_invocations(tmp_path):
+    reports = tmp_path / ISSUE_REPORTS_DIR
+    reports.mkdir()
+    (reports / "_issue_reports.json").write_text("not json at all")
+    _record(tmp_path, "b.csv")
+    _record(tmp_path, "c.csv")
+    index = read_index(tmp_path)
+    assert index["cannot_close"]
+    assert [r["file"] for r in index["reports"]] == ["b.csv", "c.csv"]
+
+
+def test_a_healthy_sidecar_is_never_marked_cannot_close(tmp_path):
+    _record(tmp_path, "a.csv")
+    _record(tmp_path, "b.csv")
+    assert "cannot_close" not in read_index(tmp_path)
+
+
+def test_run_emits_the_recorded_error_for_a_failed_issue_report(tmp_path):
+    """The Run tab's info column reads this: the reason the fetcher reported via
+    $FETCHER_STATUS_FILE, with its code, on the fetcher_result event."""
+    write_issue_report_fetcher(tmp_path, exit_code=1, write_file=False)
+    fetcher_py = tmp_path / "fetchers" / "testcat" / "vuln_scan" / "fetcher.py"
+    fetcher_py.write_text(
+        "import json, os\n"
+        "open(os.environ['FETCHER_STATUS_FILE'], 'w').write(json.dumps("
+        "{'error': 'Wiz rejected the client credentials (HTTP 401)', 'code': 'auth_failed'}))\n"
+        "raise SystemExit(1)\n"
+    )
+    events = []
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [{"use": "t_vuln_scan"}]}}
+    api.run(manifest, tmp_path, on_event=events.append)
+    [result] = [e for e in events if e["event"] == "fetcher_result"]
+    assert result["exit_code"] == 1
+    assert result["error"] == "Wiz rejected the client credentials (HTTP 401)"
+    assert result["error_code"] == "auth_failed"
+
+
+def test_run_falls_back_to_the_last_stderr_line_when_no_status_was_reported(tmp_path):
+    write_issue_report_fetcher(tmp_path, exit_code=1, write_file=False)
+    (tmp_path / "fetchers" / "testcat" / "vuln_scan" / "fetcher.py").write_text(
+        "import sys\nprint('starting', file=sys.stderr)\nprint('boom: no route to host', file=sys.stderr)\n"
+        "raise SystemExit(1)\n"
+    )
+    events = []
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [{"use": "t_vuln_scan"}]}}
+    api.run(manifest, tmp_path, on_event=events.append)
+    [result] = [e for e in events if e["event"] == "fetcher_result"]
+    assert result["error"] == "boom: no route to host"
+
+
+def test_a_successful_run_event_carries_no_error(tmp_path):
+    write_issue_report_fetcher(tmp_path)
+    events = []
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "fetchers": [{"use": "t_vuln_scan"}]}}
+    api.run(manifest, tmp_path, on_event=events.append)
+    [result] = [e for e in events if e["event"] == "fetcher_result"]
+    assert "error" not in result

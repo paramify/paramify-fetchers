@@ -5,7 +5,7 @@ call ONLY this module. They never re-implement discovery, validation, manifest
 editing, or execution; they differ only in how they render the JSON-able values
 these functions return.
 
-Design constraints (see docs/config_injection_design.md, CLAUDE.md):
+Design constraints:
 - The editable artifact is the manifest (customer-side values). Declarations
   (fetcher.yaml, fetchers/_categories/*.yaml) are read-only — they generate the
   form via catalog(); we never write into fetchers/.
@@ -36,14 +36,19 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 
+from framework import samples as _samples
 from framework import yaml_io
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import ConfigField, Secret, TargetField, effective_secrets
+from framework.custom_tags import category_display_names
 from framework.envelope import ENVELOPE_KEYS, is_enveloped, wrap_outputs
 from framework.issue_reports import (
     ASSESSMENT_ID_FIELD,
     ASSESSMENT_NAME_FIELD,
+    CLOSE_CYCLE_FIELD,
+    CLOSE_CYCLE_VALUES,
     ISSUE_REPORTS_DIR,
+    record_failed_entry,
 )
 from framework.issue_reports import read_index as read_issue_report_index
 from framework.issue_reports import record_outputs as record_issue_reports
@@ -140,12 +145,23 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
         "secrets": [_secret_descriptor(s) for s in effective_secrets(f, platform_spec)],
         "target_schema": [_target_descriptor(t) for t in f.target_schema.values()],
     }
+    # Where the output goes, so a front-end can say so before anything runs.
+    # Evidence names its destination in fetcher.yaml; an issue report names only
+    # the kind of assessment it fits, and the manifest picks which one.
+    if f.evidence_set is not None:
+        d["evidence_set"] = {
+            "reference_id": f.evidence_set.reference_id,
+            "name": f.evidence_set.name,
+            "frequency": f.evidence_set.frequency,
+        }
     if f.issue_report is not None:
         # What kind of assessment this report can go to, so a front-end can
-        # filter the assessment picker without re-reading fetcher.yaml.
+        # filter the assessment picker without re-reading fetcher.yaml. The
+        # format is the tool's own (csv, nessus, …), never one we convert to.
         d["issue_report"] = {
             "assessment_type": f.issue_report.assessment_type,
             "title": f.issue_report.title,
+            "format": f.output_type,
         }
     return d
 
@@ -186,6 +202,7 @@ def catalog(root: Path) -> dict:
         categories.append({
             "name": name,
             "description": spec.description if spec else None,
+            "display_name": spec.display_name if spec else None,
             "platform": platform_block,
             "fetchers": [
                 _fetcher_descriptor(f, spec)
@@ -428,8 +445,8 @@ def doctor(
     py = sys.version_info
     python = {
         "version": f"{py.major}.{py.minor}.{py.micro}",
-        "required": "3.10",
-        "ok": (py.major, py.minor) >= (3, 10),
+        "required": "3.11",
+        "ok": (py.major, py.minor) >= (3, 11),
     }
 
     fetchers = discover_fetchers(root)
@@ -929,13 +946,30 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
         # intaken, so the gap is reported here rather than at upload time — after
         # someone has already paid for a scan. It is deliberately NOT a required
         # config field: making it one would block collecting without a Paramify
-        # connection, which the framework is supposed to allow (docs/design.md).
+        # connection, which the framework is supposed to allow (docs/architecture_guide.md, step 3).
         if fetcher.is_issue_report:
-            in_platform = platform_cfg and ASSESSMENT_ID_FIELD in platform_cfg.config
-            if not (ASSESSMENT_ID_FIELD in entry.config or in_platform):
+            from framework.runner.executor import merged_config  # lazy: import cycle
+
+            _, values = merged_config(fetcher, spec, platform_cfg, entry)
+            if not values.get(ASSESSMENT_ID_FIELD):
                 errors.append(
                     f"{entry.use}: no {ASSESSMENT_ID_FIELD} set, so its report cannot be "
-                    f"intaken (fix: paramify assessments select {entry.use})"
+                    f"sent to Paramify (fix: paramify assessments select {entry.use})"
+                )
+            # Same reasoning as assessment_id: not a required field (collecting
+            # needs no Paramify decision), but the uploader will not guess it.
+            close_cycle = values.get(CLOSE_CYCLE_FIELD)
+            if close_cycle is None:
+                errors.append(
+                    f"{entry.use}: no {CLOSE_CYCLE_FIELD} set — say whether the "
+                    f"assessment's cycle closes after each run "
+                    f"({' or '.join(CLOSE_CYCLE_VALUES)}; fix: paramify assessments "
+                    f"select {entry.use} --close-cycle after_run|never)"
+                )
+            elif close_cycle not in CLOSE_CYCLE_VALUES:
+                errors.append(
+                    f"{entry.use}: {CLOSE_CYCLE_FIELD} is {close_cycle!r}; expected "
+                    f"{' or '.join(CLOSE_CYCLE_VALUES)}"
                 )
 
         # effective_secrets, and skip the optional ones: the runner resolves a
@@ -991,6 +1025,14 @@ def _manifest_id(path, root: Path) -> str:
         return str(p.relative_to(Path(root).resolve()))
     except ValueError:
         return str(p)
+
+
+def _last_line(text: Optional[str]) -> str:
+    """Last non-blank line of `text`, or ''."""
+    for line in reversed((text or "").splitlines()):
+        if line.strip():
+            return line.strip()
+    return ""
 
 
 def run(
@@ -1064,6 +1106,25 @@ def run(
         def on_note(note: str, _use=entry.use) -> None:
             emit({"event": "fetcher_note", "fetcher": _use, "note": note})
 
+        # Which assessment an issue report is destined for, and whether its cycle
+        # closes after the run, are resolved from the manifest but injected into
+        # no env var — the fetcher has no use for them, only the uploader does.
+        # Read them off the same merged config the runner builds so the ladder
+        # can't drift.
+        assessment = None
+        if fetcher.is_issue_report:
+            _, values = merged_config(
+                fetcher,
+                platforms.get(fetcher.category or ""),
+                parsed.platforms.get(fetcher.category or ""),
+                entry,
+            )
+            assessment = {
+                ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
+                ASSESSMENT_NAME_FIELD: values.get(ASSESSMENT_NAME_FIELD),
+                CLOSE_CYCLE_FIELD: values.get(CLOSE_CYCLE_FIELD),
+            }
+
         try:
             results = run_entry(
                 fetcher,
@@ -1077,24 +1138,11 @@ def run(
         except (RuntimeError, ValueError) as e:
             emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
             overall_ok = False
+            if fetcher.is_issue_report:
+                # No invocation ran, so nothing else records it — and a cycle
+                # must not close on a run this entry was part of.
+                record_failed_entry(fetcher, run_id, run_dir, str(e), assessment)
             continue
-
-        # Which assessment an issue report is destined for is resolved from the
-        # manifest but injected into no env var — the fetcher has no use for it,
-        # only the uploader does. Read it off the same merged config the runner
-        # built so the ladder can't drift.
-        assessment = None
-        if fetcher.is_issue_report:
-            _, values = merged_config(
-                fetcher,
-                platforms.get(fetcher.category or ""),
-                parsed.platforms.get(fetcher.category or ""),
-                entry,
-            )
-            assessment = {
-                ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
-                ASSESSMENT_NAME_FIELD: values.get(ASSESSMENT_NAME_FIELD),
-            }
 
         for r in results:
             # Exactly one of these applies: an issue report is never enveloped
@@ -1105,14 +1153,24 @@ def run(
                 record_issue_reports(r, fetcher, run_id, run_dir, assessment)
             if r.exit_code != 0:
                 overall_ok = False
-            emit({
+            result_event = {
                 "event": "fetcher_result",
                 "fetcher": entry.use,
                 "exit_code": r.exit_code,
                 "duration_sec": r.duration_sec,
                 "target": r.target,
                 "outputs": r.outputs,
-            })
+            }
+            if r.exit_code != 0:
+                # Why it failed, for a front-end to show next to the status: what
+                # the fetcher reported via $FETCHER_STATUS_FILE, else the last
+                # line it wrote to stderr (the same precedence the sidecar uses).
+                reason = r.error or _last_line(r.stderr)
+                if reason:
+                    result_event["error"] = reason
+                if r.error_code:
+                    result_event["error_code"] = r.error_code
+            emit(result_event)
         all_results.extend(results)
 
     completed_at = _iso_now()
@@ -1247,6 +1305,7 @@ def sync_validators(
     update: bool = False,
     lock_path: Optional[str] = None,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> dict:
     """Sync registry validators to Paramify and associate them to evidence sets.
 
@@ -1257,6 +1316,9 @@ def sync_validators(
     """
     syncer = _load_paramify_validator_syncer(root)
     validators = syncer.collect_validators(root, manifest_path, reference_ids)
+    # The same default config as the other stages (<root>/upload.yaml), so the
+    # base URL and the default tags do not depend on which stage is running.
+    config_path = _upload_config(root, config_path)
     config: dict = {}
     if config_path:
         config = yaml_io.load_path(Path(config_path)) or {}
@@ -1267,6 +1329,8 @@ def sync_validators(
         update=update,
         lock_path=lock_path,
         on_event=on_event,
+        display_names=category_display_names(root),
+        custom_tags=custom_tags,
     )
 
 
@@ -1326,6 +1390,7 @@ def upload_run(
     *,
     dry_run: bool = False,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> dict:
     """Upload one run directory to Paramify.
 
@@ -1341,6 +1406,7 @@ def upload_run(
         config=config,
         dry_run=dry_run,
         on_event=on_event,
+        custom_tags=custom_tags,
     )
 
 
@@ -1360,6 +1426,52 @@ def _load_paramify_issues_uploader(root: Path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _with_manifest_close_cycles(run_dir: Path, root: Path, config: dict, index: Optional[dict]) -> dict:
+    """Fill in close_cycle for fetchers whose run recorded none, from the
+    manifest that produced the run as it stands now.
+
+    The runner records each entry's close_cycle in the sidecar, so a run
+    collected before the policy was set — or before the key existed — carries
+    none, and setting it in the manifest afterwards changed nothing: the upload
+    stayed refused until the scan was collected again. The run's metadata names
+    its manifest, so its current value is the fallback. An explicit uploader
+    override and a value the run did record both still win.
+    """
+    if not index:
+        return config
+    items = list(index.get("reports") or []) + list(index.get("invocations") or [])
+    names = sorted({i.get("fetcher_name") for i in items if i.get("fetcher_name")})
+    unset = [
+        n for n in names
+        if all(i.get(CLOSE_CYCLE_FIELD) is None for i in items if i.get("fetcher_name") == n)
+    ]
+    if not unset:
+        return config
+    try:
+        meta = json.loads((Path(run_dir) / "_run_metadata.json").read_text())
+        manifest_id = meta.get("manifest")
+    except (OSError, json.JSONDecodeError):
+        return config
+    if not manifest_id:
+        return config
+    path = Path(manifest_id)
+    path = path if path.is_absolute() else Path(root) / path
+    if not path.is_file():
+        return config
+    try:
+        view = effective_config(read_manifest(path), unset, root)
+    except Exception:  # noqa: BLE001 — a fallback; the uploader reports what is still missing
+        return config
+    overrides = {k: dict(v or {}) for k, v in (config.get("overrides") or {}).items()}
+    for name in unset:
+        value = next(
+            (d["value"] for d in view.get(name, []) if d["name"] == CLOSE_CYCLE_FIELD), None
+        )
+        if value is not None:
+            overrides.setdefault(name, {}).setdefault(CLOSE_CYCLE_FIELD, value)
+    return {**config, "overrides": overrides}
 
 
 def issues_upload_preflight(
@@ -1389,6 +1501,10 @@ def issues_upload_preflight(
     warnings: List[str] = []
     file_count = 0
     missing_assessment: List[str] = []
+    # Per assessment: what the upload will send, computed without the network.
+    # A report that fails to upload at run time can still downgrade a planned
+    # PROCESS_CLOSE to PROCESS; this is the plan when every upload succeeds.
+    plan: List[dict] = []
     if not run_path.is_dir():
         errors.append(f"No run directory to upload: {run_path}")
     else:
@@ -1410,13 +1526,42 @@ def issues_upload_preflight(
             missing_assessment = sorted({
                 r.get("fetcher_name") or "?" for r in reports if not r.get("assessment_id")
             })
+            config = _with_manifest_close_cycles(run_path, root, config, index)
+            overrides = config.get("overrides") or {}
+            for aid, group in uploader.plan_assessments(index, overrides).items():
+                if not aid:
+                    continue
+                files_ok = all(r.get("status") == "success" for r in group["records"])
+                operation, close_skipped = uploader.close_decision(group, files_ok)
+                bad = sorted({
+                    str(p) for p in group["policies"] if p not in CLOSE_CYCLE_VALUES
+                })
+                plan.append({
+                    "assessment_id": aid,
+                    "assessment_name": group["name"],
+                    "files": len(group["records"]),
+                    "operation": None if bad else operation,
+                    "close_skipped": close_skipped,
+                    "error": (
+                        f"{CLOSE_CYCLE_FIELD} is {', '.join(bad)}; set after_run or never"
+                        if bad else None
+                    ),
+                })
+                if bad:
+                    # A warning for the same reason as a missing assessment: the
+                    # uploader holds back only this assessment's reports.
+                    warnings.append(
+                        f"assessment {group['name'] or aid}: no valid {CLOSE_CYCLE_FIELD} "
+                        f"({', '.join(bad)}), so its reports will not be sent "
+                        f"(fix: paramify assessments select --close-cycle after_run|never)"
+                    )
             for name in missing_assessment:
                 # A warning, not an error. upload_run already isolates this per
                 # file and sends the rest, so gating the batch on it stranded
                 # reports that were correctly wired — and blocked --dry-run from
                 # showing what would have gone.
                 warnings.append(
-                    f"{name}: no assessment_id, so its report cannot be intaken "
+                    f"{name}: no assessment_id, so its report cannot be sent "
                     f"(fix: paramify assessments select {name})"
                 )
 
@@ -1438,6 +1583,7 @@ def issues_upload_preflight(
         "config_path": str(config_path) if config_path else None,
         "file_count": file_count,
         "missing_assessment": missing_assessment,
+        "assessments": plan,
         "warnings": warnings,
         "token_present": token_present,
         "token_source": token_source,
@@ -1453,23 +1599,117 @@ def issues_upload_run(
     *,
     dry_run: bool = False,
     force: bool = False,
+    wait: bool = True,
+    wait_timeout: Optional[float] = None,
     on_event: Optional[Callable[[dict], None]] = None,
 ) -> dict:
-    """Intake one run directory's issue reports into Paramify assessments.
+    """Send one run directory's issue reports into their Paramify pipelines.
 
     Fires the same upload_start / upload_file / upload_complete events as
-    upload_run, so a front-end renders both with one code path.
+    upload_run, so a front-end renders both with one code path, plus the
+    pipeline's own: process_plan (dry-run), job_queued, job_status,
+    job_complete, process_skipped.
     """
     uploader = _load_paramify_issues_uploader(root)
     config_path = _upload_config(root, config_path)
     config = uploader.load_config(str(config_path)) if config_path else {}
+    try:
+        index = read_issue_report_index(Path(run_dir))
+    except ValueError:
+        index = None  # upload_run reports the unreadable index itself
+    config = _with_manifest_close_cycles(Path(run_dir), root, config, index)
     return uploader.upload_run(
         Path(run_dir),
         config=config,
         dry_run=dry_run,
         force=force,
+        wait=wait,
+        wait_timeout=wait_timeout,
         on_event=on_event,
     )
+
+
+def _issues_client(root: Path, config_path: Optional[Path] = None):
+    """(uploader module, client) for the pipeline commands that act on Paramify
+    directly rather than on a run: jobs, retry, cancel, close."""
+    uploader = _load_paramify_issues_uploader(root)
+    uploader.load_dotenv()
+    config_path = _upload_config(root, config_path)
+    config = uploader.load_config(str(config_path)) if config_path else {}
+    base_url, _ = resolve_base_url((config.get("paramify") or {}).get("base_url"))
+    url_error = uploader._base_url_error(base_url)
+    if url_error:
+        raise RuntimeError(url_error)
+    token, _ = resolve_upload_token()
+    if not token:
+        raise RuntimeError(_missing_token_error())
+    return uploader, uploader.ParamifyClient(token, base_url)
+
+
+def issues_jobs(
+    root: Path,
+    config_path: Optional[Path] = None,
+    *,
+    assessment_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+) -> List[dict]:
+    """Recent pipeline jobs, newest first, as job_summary dicts plus timestamps."""
+    uploader, client = _issues_client(root, config_path)
+    out = []
+    for job in client.list_jobs(assessment_id=assessment_id, status=status, limit=limit):
+        out.append({
+            **uploader.job_summary(job),
+            "assessment_id": job.get("assessmentId"),
+            "created_at": job.get("createdAt"),
+            "completed_at": job.get("completedAt"),
+        })
+    return out
+
+
+def issues_job_action(
+    root: Path, job_id: str, action: str, config_path: Optional[Path] = None
+) -> dict:
+    """Retry or cancel one pipeline job. Cancelling also cancels every unfinished
+    job queued behind it on the same assessment — that is Paramify's rule."""
+    uploader, client = _issues_client(root, config_path)
+    if action == "retry":
+        job = client.retry_job(job_id)
+    elif action == "cancel":
+        job = client.cancel_job(job_id)
+    else:
+        raise ValueError(f"unknown job action {action!r}")
+    return uploader.job_summary(job)
+
+
+def issues_close(
+    root: Path,
+    assessment_id: str,
+    config_path: Optional[Path] = None,
+    *,
+    wait: bool = True,
+    wait_timeout: Optional[float] = None,
+    on_event: Optional[Callable[[dict], None]] = None,
+) -> dict:
+    """Close an assessment's current cycle on its own, and report what it closed.
+
+    For assessments whose cycle is filled by several runs (`close_cycle: never`):
+    closing auto-closes every open issue the cycle never saw, so it belongs after
+    the last file has landed, which only a person knows.
+    """
+    uploader, client = _issues_client(root, config_path)
+    job = uploader.job_summary(client.close(assessment_id))
+    if on_event:
+        on_event({"event": "job_queued", "assessment_id": assessment_id,
+                  "job_id": job["job_id"], "operation": "CLOSE"})
+    if not wait:
+        return job
+    timeout = wait_timeout or uploader.DEFAULT_WAIT_TIMEOUT
+    final, timed_out = uploader.wait_for_job(client, job["job_id"], timeout=timeout)
+    result = uploader.job_summary(final)
+    if timed_out:
+        result["timed_out"] = True
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -1552,6 +1792,7 @@ def scripts_sync(
     reassociate: bool = False,
     include: Optional[set] = None,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> dict:
     """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
 
@@ -1572,6 +1813,7 @@ def scripts_sync(
         reassociate=reassociate,
         include=include,
         on_event=on_event,
+        custom_tags=custom_tags,
     )
 
 
@@ -1613,7 +1855,10 @@ def _run_summary(run_dir: Path) -> dict:
             })
     # Any JSON outputs not recorded in the metadata (e.g. legacy/direct runs).
     for p in sorted(run_dir.glob("*.json")):
-        if p.name == "_run_metadata.json" or p.name in seen:
+        # upload_log.json is the evidence uploader's own record, not evidence:
+        # counted, a scan-only run someone once ran `paramify upload` on looked
+        # like an evidence run and was picked as one.
+        if p.name in ("_run_metadata.json", "upload_log.json") or p.name in seen:
             continue
         files.append({"name": p.name, "path": str(p), "fetcher": None, "target": None,
                       "exit_code": None, "kind": "evidence"})
@@ -1673,6 +1918,42 @@ def list_runs(output_dir) -> List[dict]:
     return runs
 
 
+RUN_KINDS = ("evidence", "issue_report")
+
+
+def run_has(run: dict, kind: str) -> bool:
+    """Whether a list_runs entry holds anything for this kind's upload."""
+    if kind == "issue_report":
+        return bool(run.get("issue_reports"))
+    if kind == "evidence":
+        return any(f.get("kind") == "evidence" for f in run.get("files") or [])
+    raise ValueError(f"unknown run kind {kind!r}; expected one of {RUN_KINDS}")
+
+
+def latest_run(
+    output_dir,
+    *,
+    kind: Optional[str] = None,
+    manifest_path=None,
+    root: Optional[Path] = None,
+) -> Optional[dict]:
+    """The newest run under output_dir worth uploading, or None.
+
+    `kind` skips runs with nothing of that kind: an evidence manifest and a
+    pipeline manifest usually share an output_dir, and "the newest run" alone
+    handed `paramify issues upload` an evidence-only run while the scan run sat
+    beside it. `manifest_path` keeps only runs that manifest produced (its
+    _manifest_id in the run metadata), for two manifests of the same kind.
+    """
+    runs = list_runs(output_dir)
+    if manifest_path is not None:
+        mid = _manifest_id(manifest_path, root or find_repo_root())
+        runs = [r for r in runs if r.get("manifest") == mid]
+    if kind is not None:
+        runs = [r for r in runs if run_has(r, kind)]
+    return runs[0] if runs else None
+
+
 def read_evidence(path) -> dict:
     """Read one evidence JSON file, normalized. Splits the standard envelope
     (schema_version/metadata/payload); a raw (un-enveloped) file comes back with
@@ -1712,6 +1993,109 @@ def read_issue_report(path) -> dict:
     if rec is None:
         raise ValueError(f"{p.name} is not listed in the issue-report index")
     return rec
+
+
+# --------------------------------------------------------------------------- #
+# Evidence samples — one representative record per fetcher (framework/samples.py)
+# --------------------------------------------------------------------------- #
+
+def sample_status(root: Path, fetchers: Optional[dict] = None) -> List[dict]:
+    """One row per evidence fetcher: whether it has a committed sample, and if
+    so where it came from, whether a person has reviewed it, and whether it was
+    captured from the fetcher's current version. Issue-report fetchers are left
+    out — their output is the vendor's own file, not an evidence payload."""
+    fetchers = fetchers if fetchers is not None else discover_fetchers(root)
+    rows = []
+    for name in sorted(fetchers):
+        f = fetchers[name]
+        if f.is_issue_report:
+            continue
+        doc = _samples.read_sample(f.path)
+        row = {"fetcher": name, "category": f.category, "version": f.version,
+               "has_sample": doc is not None}
+        if doc is not None:
+            row.update({
+                "source": doc.get("source"),
+                "reviewed": bool(doc.get("reviewed")),
+                "captured_on": doc.get("captured_on"),
+                "sample_version": doc.get("fetcher_version"),
+                "current": doc.get("fetcher_version") == f.version,
+                "records": {c["path"]: c["records"] for c in doc.get("collections") or []},
+            })
+        rows.append(row)
+    return rows
+
+
+def read_sample(root: Path, name: str, fetchers: Optional[dict] = None) -> dict:
+    """The committed sample for one fetcher. Raises ValueError if the fetcher is
+    unknown or has no sample yet."""
+    fetchers = fetchers if fetchers is not None else discover_fetchers(root)
+    f = fetchers.get(name)
+    if f is None:
+        raise ValueError(f"unknown fetcher: {name}")
+    doc = _samples.read_sample(f.path)
+    if doc is None:
+        raise ValueError(f"{name} has no sample yet ({_samples.SAMPLE_FILENAME} beside its fetcher.yaml)")
+    return doc
+
+
+def backfill_samples(
+    root: Path,
+    evidence_dir,
+    only: Optional[List[str]] = None,
+    scrub: Optional[List[str]] = None,
+    force: bool = False,
+    dry_run: bool = False,
+    fetchers: Optional[dict] = None,
+) -> dict:
+    """Build a sample for every fetcher that has evidence with records under
+    `evidence_dir` (searched recursively), from the best file it has: one with
+    records, from the current fetcher version, that succeeded, and showed the
+    most. Existing samples are kept unless `force`.
+
+    Sanitizing uses the identifiers of EVERY scanned file, not only the chosen
+    one, so an account id from one run is caught in another's sample. A sample
+    that still contains a known identifier after sanitizing is not written; it
+    is reported under "blocked" with what leaked.
+
+    Returns {"written": [...], "skipped": [...], "blocked": [...],
+    "no_records": [...], "unknown": [...]}, each a list of row dicts.
+    """
+    fetchers = fetchers if fetchers is not None else discover_fetchers(root)
+    candidates = _samples.scan_evidence(Path(evidence_dir))
+    extra = _samples.collect_all_needles(candidates)
+    out: Dict[str, List[dict]] = {
+        "written": [], "skipped": [], "blocked": [], "no_records": [], "unknown": [],
+    }
+    for name in sorted(candidates):
+        if only and name not in only:
+            continue
+        f = fetchers.get(name)
+        if f is None or f.is_issue_report:
+            out["unknown"].append({"fetcher": name})
+            continue
+        best = _samples.best_candidate(candidates[name], f.version)
+        if not _samples.has_records(best.profiled):
+            out["no_records"].append({"fetcher": name, "files": len(candidates[name])})
+            continue
+        if _samples.read_sample(f.path) is not None and not force:
+            out["skipped"].append({"fetcher": name, "reason": "sample exists (use --force)"})
+            continue
+        doc, leaks = _samples.build_sample(best, scrub=scrub or (), extra=extra)
+        row = {
+            "fetcher": name,
+            "source_file": str(best.path),
+            "sample_version": doc["fetcher_version"],
+            "current": doc["fetcher_version"] == f.version,
+            "records": {c["path"]: c["records"] for c in doc["collections"]},
+        }
+        if leaks:
+            out["blocked"].append({**row, "leaks": leaks})
+            continue
+        if not dry_run:
+            row["path"] = str(_samples.write_sample(f.path, doc))
+        out["written"].append(row)
+    return out
 
 
 def preview_issue_report(path) -> str:
@@ -2148,8 +2532,10 @@ def issue_report_fetchers(
     ]
 
 
-def set_assessment(m: dict, use: str, assessment: dict) -> dict:
-    """Point one manifest entry at an assessment.
+def set_assessment(
+    m: dict, use: str, assessment: dict, close_cycle: Optional[str] = None
+) -> dict:
+    """Point one manifest entry at an assessment, and optionally set its close policy.
 
     Writes the UUID (authoritative) and the display name (so the manifest reads
     as something a human recognises, and a UUID that no longer resolves can be
@@ -2160,6 +2546,19 @@ def set_assessment(m: dict, use: str, assessment: dict) -> dict:
     label = assessment_display_name(assessment)
     if label and label != assessment["id"]:
         set_fetcher_config(m, use, ASSESSMENT_NAME_FIELD, label)
+    if close_cycle is not None:
+        set_close_cycle(m, use, close_cycle)
+    return m
+
+
+def set_close_cycle(m: dict, use: str, close_cycle: str) -> dict:
+    """Set whether an issue-report entry's cycle closes after each run."""
+    if close_cycle not in CLOSE_CYCLE_VALUES:
+        raise ValueError(
+            f"{CLOSE_CYCLE_FIELD} must be {' or '.join(CLOSE_CYCLE_VALUES)}, "
+            f"got {close_cycle!r}"
+        )
+    set_fetcher_config(m, use, CLOSE_CYCLE_FIELD, close_cycle)
     return m
 
 

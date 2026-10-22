@@ -1,5 +1,5 @@
 name: aws_guard_duty_findings
-version: 0.1.0
+version: 0.2.0
 description: >
   Lists AWS GuardDuty findings updated within a configurable lookback window
   (list-findings + get-findings per detector) for downstream vulnerability
@@ -49,7 +49,7 @@ evidence_set:
   reference_id: EVD-GUARD-DUTY-FINDINGS
   name: GuardDuty Findings
   instructions: >
-    Script: fetcher.sh. Commands executed: aws guardduty list-detectors, aws
+    Script: aws/guard_duty_findings/fetcher.sh. Commands executed: aws guardduty list-detectors, aws
     guardduty list-findings (with a finding-criteria updatedAt >= now-lookback_days
     filter), aws guardduty get-findings (expands full finding detail: id,
     severity, type, title, description, createdAt, updatedAt, resource,

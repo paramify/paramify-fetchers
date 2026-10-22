@@ -48,11 +48,12 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": {"clusters": [], "summary": {}}}' \
   > "$OUTPUT_JSON"
 
-total_clusters=0
-encrypted_clusters=0
-
 _ERR="$(mktemp -t aws_redshift_encryption_status_err.XXXXXX)"
-clusters=$(aws redshift describe-clusters --query "Clusters[*].ClusterIdentifier" --output text 2>"$_ERR")
+_PG_SSL_TSV="$(mktemp -t aws_redshift_encryption_status_pg.XXXXXX)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ERR" "$_PG_SSL_TSV"' EXIT
+# The list call already returns Encrypted, KmsKeyId and ClusterParameterGroups
+# for every cluster, so the per-cluster describe it replaced is gone.
+clusters=$(aws redshift describe-clusters --query "Clusters[*].{ClusterIdentifier:ClusterIdentifier,Encrypted:Encrypted,KmsKeyId:KmsKeyId,ParameterGroupName:ClusterParameterGroups[0].ParameterGroupName}" --output json 2>"$_ERR")
 list_exit=$?
 service_not_in_use=false
 if [ $list_exit -ne 0 ]; then
@@ -63,51 +64,36 @@ if [ $list_exit -ne 0 ]; then
         echo "aws redshift describe-clusters (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
         log_error "Failed to list Redshift clusters"
     fi
+    clusters='[]'
 fi
 rm -f "$_ERR"
 
-if [ "$service_not_in_use" = "false" ] && [ $list_exit -eq 0 ]; then
-    for cluster in $(aws_text_list "$clusters"); do
-        total_clusters=$((total_clusters + 1))
-        cluster_details=$(aws redshift describe-clusters --cluster-identifier "$cluster" 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws redshift describe-clusters ($cluster) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-        encrypted=$(echo "$cluster_details" | jq -r '.Clusters[0].Encrypted // false')
-        kms_key_id=$(echo "$cluster_details" | jq -r '.Clusters[0].KmsKeyId // "None"')
-        parameter_group_name=$(echo "$cluster_details" | jq -r '.Clusters[0].ClusterParameterGroups[0].ParameterGroupName // ""')
+# require_ssl is a parameter-group setting, so it is read once per distinct
+# group rather than once per cluster (clusters commonly share one group). A
+# group whose parameters cannot be read gives require_ssl false, as before.
+while read -r parameter_group_name; do
+    [ -z "$parameter_group_name" ] && continue
+    param_details=$(aws redshift describe-cluster-parameters --parameter-group-name "$parameter_group_name" 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        echo "aws redshift describe-cluster-parameters ($parameter_group_name) failed" >> "$_FAILURE_LOG"
+        continue
+    fi
+    require_ssl=$(echo "$param_details" | jq -r '[.Parameters[]? | select((.ParameterName // "" | ascii_downcase) == "require_ssl") | .ParameterValue // ""] | (.[0] // "") | ascii_downcase == "true"')
+    printf '%s\t%s\n' "$parameter_group_name" "$require_ssl" >> "$_PG_SSL_TSV"
+done < <(printf '%s' "$clusters" | jq -r '[.[]? | .ParameterGroupName // empty] | unique[]')
 
-        require_ssl=false
-        if [ -n "$parameter_group_name" ]; then
-            param_details=$(aws redshift describe-cluster-parameters --parameter-group-name "$parameter_group_name" 2>/dev/null)
-            if [ $? -ne 0 ]; then
-                echo "aws redshift describe-cluster-parameters ($parameter_group_name) failed" >> "$_FAILURE_LOG"
-            else
-                ssl_value=$(echo "$param_details" | jq -r '.Parameters[] | select((.ParameterName | ascii_downcase) == "require_ssl") | .ParameterValue // ""' | head -n1)
-                [ "$(echo "${ssl_value}" | tr '[:upper:]' '[:lower:]')" = "true" ] && require_ssl=true
-            fi
-        fi
-
-        cluster_obj=$(jq -n --arg id "$cluster" --argjson enc "$encrypted" \
-            --arg kms "$kms_key_id" --arg pg "$parameter_group_name" --argjson ssl "$require_ssl" \
-            '{cluster_identifier: $id, encrypted: $enc, kms_key_id: $kms, parameter_group_name: $pg, require_ssl: $ssl}')
-
-        jq --argjson c "$cluster_obj" '.results.clusters += [$c]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-        [ "$encrypted" = "true" ] && encrypted_clusters=$((encrypted_clusters + 1))
-    done
-fi
-
-percentage=0
-[ $total_clusters -gt 0 ] && percentage=$(( (encrypted_clusters * 100) / total_clusters ))
-
-if [ "$service_not_in_use" = "true" ]; then
-    jq '.results.summary = {service_enabled: false, total_clusters: 0, encrypted_clusters: 0, encryption_percentage: 0}' \
-        "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-else
-    jq --arg total "$total_clusters" --arg encrypted "$encrypted_clusters" --arg percentage "$percentage" \
-        '.results.summary = {service_enabled: true, total_clusters: ($total | tonumber), encrypted_clusters: ($encrypted | tonumber), encryption_percentage: ($percentage | tonumber)}' \
-        "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-fi
+printf '%s' "$clusters" | jq --slurpfile clusters /dev/stdin --rawfile pg_ssl "$_PG_SSL_TSV" --arg not_in_use "$service_not_in_use" '
+    ($pg_ssl | split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] == "true")}) | add // {}) as $ssl
+    | [$clusters[0][]? | (.ParameterGroupName // "") as $pg
+        | {cluster_identifier: .ClusterIdentifier, encrypted: (.Encrypted // false), kms_key_id: (.KmsKeyId // "None"),
+           parameter_group_name: $pg, require_ssl: ($ssl[$pg] // false)}] as $rows
+    | ($rows | length) as $total
+    | ([$rows[] | select(.encrypted == true)] | length) as $encrypted
+    | .results.clusters += $rows
+    | .results.summary = (if $not_in_use == "true"
+        then {service_enabled: false, total_clusters: 0, encrypted_clusters: 0, encryption_percentage: 0}
+        else {service_enabled: true, total_clusters: $total, encrypted_clusters: $encrypted,
+              encryption_percentage: (if $total > 0 then ($encrypted * 100 / $total | floor) else 0 end)} end)
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

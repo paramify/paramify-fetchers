@@ -13,8 +13,8 @@
 #   source "$(dirname "$0")/../_shared/aws.sh"
 #   _TARGET_ID="$(aws_target_id)"
 
-# Failure reporting. Re-exported, NOT reimplemented (docs/fetcher_contract.md
-# § Output): every AWS fetcher already sources this file, so sourcing the shared
+# Failure reporting. Re-exported, NOT reimplemented (docs/fetcher_contract_guide.md,
+# step 6): every AWS fetcher already sources this file, so sourcing the shared
 # helper here gives all 80 `report_failure` without a per-fetcher source line.
 # BASH_SOURCE[0] is this file, so the path holds whatever the caller's cwd is.
 source "$(dirname "${BASH_SOURCE[0]}")/../../_lib/status.sh"
@@ -122,7 +122,7 @@ aws() {
 aws_classify_code() {
   local f="${1:-$_AWS_ERR_LOG}"
   [ -s "$f" ] || { printf 'partial_failure'; return 0; }
-  if grep -qiE 'ExpiredToken|InvalidClientTokenId|UnrecognizedClientException|SignatureDoesNotMatch|Unable to locate credentials|The security token included in the request is (expired|invalid)|NoCredentialProviders|sso session .* is expired' "$f"; then
+  if grep -qiE 'ExpiredToken|InvalidClientTokenId|UnrecognizedClientException|SignatureDoesNotMatch|Unable to locate credentials|The security token included in the request is (expired|invalid)|NoCredentialProviders|sso session .* is expired|Your session has expired' "$f"; then
     printf 'auth_failed'
   elif grep -qiE 'AccessDenied|UnauthorizedOperation|not authorized to perform|AuthorizationError|explicit deny|\(403\)' "$f"; then
     printf 'not_authorized'
@@ -151,7 +151,11 @@ aws_report_failures() {
         detail="$(head -n 3 "$_AWS_ERR_LOG" | awk '{printf "%s%s", sep, $0; sep=" | "}')"
         detail=" -- ${detail}"
     fi
-    report_failure "$count AWS API failure(s); first: ${reasons}${detail}" \
+    # report_failure names the fetcher after its caller's file, which from here
+    # is always this helper -- every AWS failure read "aws__shared". $0 is the
+    # fetcher.sh that sourced it.
+    FETCHER="${FETCHER:-$(_fetcher_label "$0")}" \
+        report_failure "$count AWS API failure(s); first: ${reasons}${detail}" \
         "$(aws_classify_code)"
 }
 

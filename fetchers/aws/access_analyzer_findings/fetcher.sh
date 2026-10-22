@@ -25,7 +25,8 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_access_analyzer_findings_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_access_analyzer_findings.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_access_analyzer_findings_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
+_ANALYZER_STREAM="$(mktemp -t aws_access_analyzer_findings_stream.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ANALYZER_STREAM"' EXIT
 
 log_info() { printf '%s INFO aws_access_analyzer_findings %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_access_analyzer_findings %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -66,14 +67,16 @@ if [ "$(echo "$analyzers" | jq 'length')" -eq 0 ]; then
 fi
 
 # For each analyzer, attach its active findings (only ACTIVE analyzers can be
-# queried for findings; upstream skips non-ACTIVE analyzers).
+# queried for findings; upstream skips non-ACTIVE analyzers). Each analyzer and
+# its findings are appended to a stream and merged once below: as --argjson, an
+# org analyzer's findings overflowed Linux's 128 KiB argv limit past a few
+# hundred, and that analyzer silently fell out of the evidence.
 while read -r analyzer; do
     [ -z "$analyzer" ] && continue
     analyzer_arn=$(echo "$analyzer" | jq -r '.arn')
     analyzer_status=$(echo "$analyzer" | jq -r '.status')
 
-    analyzer_data=$(echo "$analyzer" | jq '. + {"findings": []}')
-
+    findings='[]'
     if [ "$analyzer_status" = "ACTIVE" ]; then
         findings=$(aws accessanalyzer list-findings \
             --analyzer-arn "$analyzer_arn" \
@@ -88,10 +91,13 @@ while read -r analyzer; do
         if [ -z "$findings" ] || ! echo "$findings" | jq . >/dev/null 2>&1; then
             findings='[]'
         fi
-        analyzer_data=$(echo "$analyzer_data" | jq --argjson f "$findings" '.findings = $f')
     fi
 
-    jq --argjson data "$analyzer_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+    printf '%s\n%s\n' "$analyzer" "$findings" >> "$_ANALYZER_STREAM"
 done < <(echo "$analyzers" | jq -c '.[]')
+
+jq --slurpfile stream "$_ANALYZER_STREAM" '
+    .results += [range(0; ($stream | length) / 2) as $i | $stream[2 * $i] + {"findings": $stream[2 * $i + 1]}]
+' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
 aws_finish

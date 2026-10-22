@@ -25,4 +25,4 @@ ksis:
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-04
   name: Okta Just-in-Time Authorization
-  instructions: 'Script: okta_just_in_time_authorization.py. Uses Okta APIs to collect JIT authorization evidence (policies, rules, group-based access, activity). Output: okta_just_in_time_authorization.json'
+  instructions: 'Script: okta/just_in_time_authorization/fetcher.py. Uses Okta APIs to collect JIT authorization evidence (policies, rules, group-based access, activity). Output: okta_just_in_time_authorization.json'

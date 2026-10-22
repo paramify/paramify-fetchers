@@ -1,0 +1,85 @@
+name: azure_app_gateway_waf
+version: 0.1.0
+description: >
+  Web application firewall enforcement on every Azure Application Gateway in the
+  subscription: for each HTTP(S) listener, the WAF that actually applies to it
+  (per-path, per-listener or gateway WAF policy, or legacy WAF configuration) and
+  whether it is enabled in Prevention mode; every WAF policy with its managed rule
+  sets, disabled rules, exclusions, custom and rate-limit rules. The gateway
+  count is checked against Resource Graph, and the collection fails on a
+  mismatch.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_app_gateway_waf.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-RVP   # rate-limit rules and L7 filtering against DoS and other unwanted activity
+  - KSI-CNA-MAT   # si-10 / sc-7: L7 filtering in front of the application
+  - KSI-CNA-RNT   # inbound web traffic is filtered by policy
+
+evidence_set:
+  reference_id: EVD-AZURE-APPGW-WAF
+  name: Azure Application Gateway WAF
+  instructions: >
+    Script: azure/app_gateway_waf/fetcher.py. Azure SDK calls: azure-mgmt-network
+    application_gateways.list_all(), web_application_firewall_policies.list_all(),
+    and web_application_firewall_policies.get() for a referenced policy that
+    list_all did not return (another subscription). A Resource Graph count of
+    gateways must match list_all, or the run fails.
+    Resource Graph can lag behind list_all around a create or delete, so a
+    mismatch is checked once more after 30 seconds (results.completeness.recounted).
+    Reader on the gateway's subscription is sufficient. A referenced policy
+    in a subscription the identity cannot read (HTTP 401 or 403), or one that
+    no longer exists (404), does not fail the run. It is recorded with
+    resolved false, read_status "not_authorized" or "not_found" and
+    read_error, and every listener it applies to gets waf_enforcing null.
+    summary.unreadable_waf_policies counts these. Any other error reading the
+    policy fails the run.
+
+    One record per HTTP(S) listener in results.listeners; WAF does not apply to
+    layer-4 (Tcp/Tls) listeners, so they are not listed. waf_source is the WAF
+    that applies to the listener: "listener" (the listener's own firewallPolicy),
+    "gateway" (the gateway's firewallPolicy), "legacy_config" (the gateway's
+    webApplicationFirewallConfiguration, used only when no policy is
+    associated), or "none". waf_state and waf_mode come from that policy's
+    policySettings. For the legacy configuration, waf_state is null when the
+    API omits enabled; it is not read as Disabled. path_rule_policies lists WAF policies attached to URL path
+    rules served by the listener; they override the listener policy for those
+    paths. waf_enforcing is true only when the effective WAF and every
+    path-rule WAF are Enabled in Prevention mode, false when any is not or there
+    is no WAF, and null when a referenced policy could not be read.
+
+    results.waf_policies: one record per policy, with resolved, read_status
+    ("read" when the policy was read), state, mode, each managed
+    rule set's rule overrides, disabled_rules (overrides with state Disabled),
+    the service's computed_disabled_rules, exclusion_count, custom_rules, and
+    rate_limit_rules (enabled RateLimitRule custom rules).
+    rule_overrides_without_state counts overrides the API returned with no state.

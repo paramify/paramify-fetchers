@@ -12,14 +12,15 @@ from typing import Dict, List, Optional
 
 import yaml
 from rich.text import Text
-from textual import on
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, DataTable, Input, Static
 
 from framework import api
-from framework.tui import palette, render
+from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
+from framework.tui import kinds, palette, render
 from framework.tui.components.forms import env_name_from_ref
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
 from framework.tui.modals import (
@@ -92,7 +93,12 @@ class ManifestPage(ButtonRowNav, Vertical):
         dt = self.query_one("#manifest-entries", DataTable)
         dt.cursor_type = "row"
         dt.zebra_stripes = True
-        dt.add_columns("fetcher", "mode", "secrets", "config", "targets", "status")
+        # kind + sends to: the two kinds go to different places, and a scan
+        # report goes nowhere until the manifest names its assessment. Sends to
+        # is last because it is the widest: on a narrow terminal it is what runs
+        # off the edge, not status (the detail pane shows it in full). No mode
+        # column: targets already reads "—" for a fetcher that runs once.
+        dt.add_columns("fetcher", "kind", "secrets", "config", "targets", "status", "sends to")
         self.rebuild()
 
     # -- state access ----------------------------------------------------- #
@@ -169,11 +175,12 @@ class ManifestPage(ButtonRowNav, Vertical):
             status = palette.pill("✓", "ok") if not errs else palette.pill(f"⚠ {len(errs)}", "warn")
             dt.add_row(
                 use,
-                "fanout" if fanout else "single",
+                render.kind_pill(kinds.kind_of(d)) if d else "—",
                 f"{sset}/{stot}",
                 f"{cset}/{ctot}",
                 str(ntargets) if fanout else "—",
                 status,
+                render.destination_cell(d, self._config_view.get(use)) if d else "—",
                 key=use,
             )
             row_keys.append(use)
@@ -342,16 +349,16 @@ class ManifestPage(ButtonRowNav, Vertical):
             return
         existing = {e.get("use") for e in self._entries()}
         cat = getattr(self.app, "catalog_data", None)
-        groups = []
-        if cat:
-            for c in cat["categories"]:
-                # Pass every fetcher (not just addable ones): the picker shows the
-                # already-added ones greyed out so a fully-added category — e.g.
-                # datadog once all 13 are in — still appears instead of vanishing.
-                names = [f["name"] for f in c["fetchers"]]
-                if names:
-                    groups.append((c["name"], names))
-        if not groups:
+        # Grouped like the catalog, kind first: a platform that ships both kinds
+        # (wiz) would otherwise list its evidence and its scan reports as one.
+        # Every fetcher is passed (not just addable ones): the picker shows the
+        # already-added ones greyed out so a fully-added category — e.g. datadog
+        # once all 13 are in — still appears instead of vanishing.
+        sections = [
+            (kinds.heading(kind), [(c, [f["name"] for f in fs]) for c, fs in groups])
+            for kind, groups in kinds.sections(cat)
+        ]
+        if not sections:
             self.notify("No fetchers discovered.")
             return
 
@@ -385,7 +392,7 @@ class ManifestPage(ButtonRowNav, Vertical):
         self.app.push_screen(
             MultiPickerModal(
                 "Add fetchers",
-                groups,
+                sections,
                 subtitle="enter/space opens a platform or toggles a fetcher · ✓ = already in manifest · type to filter",
                 disabled=existing,
             ),
@@ -603,19 +610,40 @@ class ManifestPage(ButtonRowNav, Vertical):
         """
         use, m = self._selected, self._manifest
         if not use or m is None:
+            # Silence here read as a broken key on a new, empty manifest.
+            self.notify("Add a scan report first (a), then select it.",
+                        severity="warning")
             return
         d = self._descriptors().get(use)
-        if not d or d.get("kind") != "issue_report":
+        if not d or kinds.kind_of(d) != kinds.SCAN_REPORT:
             self.notify(
-                "Only issue-report fetchers go to an assessment.", severity="warning"
+                "Only scan reports go to an assessment; evidence goes to the "
+                "evidence set its fetcher names.", severity="warning"
             )
             return
 
         assessment_type = (d.get("issue_report") or {}).get("assessment_type")
+        self.notify("Loading assessments…")
+        self._assessments_worker(use, assessment_type)
+
+    @work(thread=True, exclusive=True, group="assessments")
+    def _assessments_worker(self, use: str, assessment_type: Optional[str]) -> None:
+        # Off the UI thread: listing assessments is a network call, and a slow or
+        # unreachable workspace froze the whole app while it ran.
         try:
             assessments = api.list_assessments(assessment_type)
         except (RuntimeError, ValueError) as exc:
-            self.notify(f"Cannot list assessments: {exc}", severity="error", timeout=12)
+            self.app.call_from_thread(
+                self.notify, f"Cannot list assessments: {exc}", severity="error", timeout=12
+            )
+            return
+        self.app.call_from_thread(self._show_assessment_picker, use, assessment_type, assessments)
+
+    def _show_assessment_picker(
+        self, use: str, assessment_type: Optional[str], assessments: List[dict]
+    ) -> None:
+        m = self._manifest
+        if m is None:
             return
         if not assessments:
             scope = f" of type {assessment_type}" if assessment_type else ""
@@ -632,18 +660,50 @@ class ManifestPage(ButtonRowNav, Vertical):
         def done(chosen_id: Optional[str]) -> None:
             if chosen_id is None:
                 return
-            api.set_assessment(m, use, by_id[chosen_id])
+            chosen = by_id[chosen_id]
+            api.set_assessment(m, use, chosen)
             self._autosave()
             self.rebuild()
-            self.notify(
-                f"{use} → {api.assessment_display_name(by_id[chosen_id])}"
-            )
+            # Asked right after the assessment because it is a fact about how
+            # that assessment's cycles are filled, and the uploader will not
+            # guess it. Escape keeps the assessment and leaves the policy as it was.
+            self._pick_close_cycle(use, api.assessment_display_name(chosen))
 
         self.app.push_screen(
             PickerModal(
                 f"Assessment for {use}",
                 options,
-                subtitle=f"{assessment_type or 'any type'} — its reports are intaken here",
+                subtitle=f"{assessment_type or 'any type'} — the scan report is sent to this assessment's pipeline",
+            ),
+            done,
+        )
+
+    def _pick_close_cycle(self, use: str, assessment_label: str) -> None:
+        m = self._manifest
+        if m is None:
+            return
+        options = [
+            (CLOSE_AFTER_RUN,
+             "after_run — one report per cycle: close after each complete run"),
+            (CLOSE_NEVER,
+             "never — several files per cycle: close in Paramify or with "
+             "`paramify issues close`"),
+        ]
+
+        def done(policy: Optional[str]) -> None:
+            if policy is None:
+                self.notify(f"{use} → {assessment_label}")
+                return
+            api.set_close_cycle(m, use, policy)
+            self._autosave()
+            self.rebuild()
+            self.notify(f"{use} → {assessment_label}, close_cycle={policy}")
+
+        self.app.push_screen(
+            PickerModal(
+                f"How is {assessment_label}'s cycle closed?",
+                options,
+                subtitle="Closing auto-closes every open issue the cycle never saw",
             ),
             done,
         )

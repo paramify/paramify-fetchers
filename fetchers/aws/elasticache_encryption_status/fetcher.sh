@@ -51,51 +51,45 @@ jq -n \
 # --- Cache clusters (Memcached + standalone Redis nodes): at-rest, in-transit, auth token ---
 clusters=$(aws elasticache describe-cache-clusters \
     --query 'CacheClusters[*].[CacheClusterId,Engine,AtRestEncryptionEnabled,TransitEncryptionEnabled,AuthTokenEnabled]' \
-    --output text 2>/dev/null)
+    --output json 2>/dev/null)
 cl_exit=$?
 if [ $cl_exit -ne 0 ]; then
     echo "aws elasticache describe-cache-clusters failed (exit=$cl_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list ElastiCache cache clusters"
 else
-    if [ -n "$clusters" ]; then
-        while IFS=$'\t' read -r id engine at_rest in_transit auth_token; do
-            [ -z "$id" ] && continue
-            jq --arg id "$id" --arg engine "$engine" \
-               --arg at_rest "$at_rest" --arg in_transit "$in_transit" --arg auth_token "$auth_token" \
-               '.results.cache_clusters += [{
-                   id: $id,
-                   engine: $engine,
-                   at_rest_encryption_enabled: ($at_rest == "True"),
-                   transit_encryption_enabled: ($in_transit == "True"),
-                   auth_token_enabled: ($auth_token == "True")
-               }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-        done <<< "$clusters"
-    fi
+    # One pass over the list, fed on stdin; appending per row rewrote the file
+    # N times. The field rules are the --output text read's, kept exactly: a
+    # null field rendered as the string "None", and only a literal True counted
+    # as enabled (null/absent reads false).
+    printf '%s' "$clusters" | jq --slurpfile rows /dev/stdin '
+        def text: if . == null then "None" else tostring end;
+        .results.cache_clusters += [$rows[0][]? | select(.[0] != "") | {
+            id: (.[0] | text),
+            engine: (.[1] | text),
+            at_rest_encryption_enabled: (.[2] == true),
+            transit_encryption_enabled: (.[3] == true),
+            auth_token_enabled: (.[4] == true)
+        }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 # --- Replication groups (Redis clusters): at-rest, in-transit, auth token ---
 repl_groups=$(aws elasticache describe-replication-groups \
     --query 'ReplicationGroups[*].[ReplicationGroupId,Status,AtRestEncryptionEnabled,TransitEncryptionEnabled,AuthTokenEnabled]' \
-    --output text 2>/dev/null)
+    --output json 2>/dev/null)
 rg_exit=$?
 if [ $rg_exit -ne 0 ]; then
     echo "aws elasticache describe-replication-groups failed (exit=$rg_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list ElastiCache replication groups"
 else
-    if [ -n "$repl_groups" ]; then
-        while IFS=$'\t' read -r id status at_rest in_transit auth_token; do
-            [ -z "$id" ] && continue
-            jq --arg id "$id" --arg status "$status" \
-               --arg at_rest "$at_rest" --arg in_transit "$in_transit" --arg auth_token "$auth_token" \
-               '.results.replication_groups += [{
-                   id: $id,
-                   status: $status,
-                   at_rest_encryption_enabled: ($at_rest == "True"),
-                   transit_encryption_enabled: ($in_transit == "True"),
-                   auth_token_enabled: ($auth_token == "True")
-               }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-        done <<< "$repl_groups"
-    fi
+    printf '%s' "$repl_groups" | jq --slurpfile rows /dev/stdin '
+        def text: if . == null then "None" else tostring end;
+        .results.replication_groups += [$rows[0][]? | select(.[0] != "") | {
+            id: (.[0] | text),
+            status: (.[1] | text),
+            at_rest_encryption_enabled: (.[2] == true),
+            transit_encryption_enabled: (.[3] == true),
+            auth_token_enabled: (.[4] == true)
+        }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 # --- Encryption-coverage summary (a resource counts as encrypted only when both at-rest and in-transit are enabled) ---

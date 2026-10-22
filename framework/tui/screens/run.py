@@ -209,7 +209,7 @@ class RunPage(Vertical):
             self._paint_row(use)
 
         elif etype == "run_complete":
-            self._finalize(ev.get("ok"), ev.get("metadata_path", ""))
+            self._finalize(ev.get("ok"), ev.get("metadata_path", ""), ev.get("issue_reports") or 0)
 
         elif etype == "_run_failed":
             log.write(Text(f"✗ run failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
@@ -222,6 +222,10 @@ class RunPage(Vertical):
             st["ok"] += 1
         else:
             st["fail"] += 1
+            # Keep the first reason: for a fanout the rest usually repeat it, and
+            # the log has every one.
+            if ev.get("error") and not st.get("reason"):
+                st["reason"] = ev["error"]
 
         total = st.get("total") or 1
         if not st.get("fanout") and total <= 1:
@@ -247,12 +251,19 @@ class RunPage(Vertical):
         log.write(line)
         self._paint_row(ev["fetcher"])
 
-    def _finalize(self, ok, metadata_path: str) -> None:
+    def _finalize(self, ok, metadata_path: str, issue_reports: int = 0) -> None:
         self._running = False
         self.query_one("#btn-run", Button).disabled = False
         icon = "✓" if ok else "✗"
         style = palette.OK if ok else palette.FAIL
         msg = Text(f"{icon} run complete — ok={ok}", style=style)
+        if issue_reports:
+            # Reports go through their own upload, so a run that collected any is
+            # not finished after the evidence upload. Say where to send them.
+            msg.append(
+                f"   {issue_reports} scan report(s) ready — Paramify tab, i to send",
+                style=palette.WARN,
+            )
         if metadata_path:
             msg.append(f"   {metadata_path}", style="dim")
         self._set_banner(msg)
@@ -275,12 +286,15 @@ class RunPage(Vertical):
         done = st.get("ok", 0) + st.get("fail", 0)
         if status == "running" and total:
             return f"{done}/{total}…"
+        info = ""
         if total and total > 1:
             info = f"{st.get('ok', 0)}/{total} ok"
             if st.get("fail"):
                 info += f"  · {st['fail']} failed"
-            return info
-        return ""
+        # A failed invocation says why, so the table is enough to see what to fix.
+        if st.get("reason") and status in ("failed", "partial", "timeout"):
+            info = f"{info}  · {st['reason']}" if info else st["reason"]
+        return info
 
     def _paint_row(self, use: str) -> None:
         """Update (or create) one status row in place — preserves cursor/scroll."""
