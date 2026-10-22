@@ -720,6 +720,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **New evidence sets start their collection schedule on the day they are
+  created.** Both uploaders (`paramify_evidence` and `paramify_scripts`) now send
+  `startDate` (today, `YYYY-MM-DD`) alongside `frequency` when they create an
+  evidence set, so the TUI and `paramify upload` no longer leave it unset.
+  Existing sets are reused unchanged.
+
 - **`azure_policy_compliance` 0.2.0: what was evaluated, whether remediation took,
   and what keeps coming back.**
   - Each listed non-compliant state now carries `evaluation_details`: the
