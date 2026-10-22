@@ -1,9 +1,10 @@
 name: gcp_compute_instance_configuration
-version: 0.1.0
+version: 0.1.1
 description: >
   For each Compute Engine instance in the project, reports the per-instance
   hardening posture: Shielded VM (secure boot, vTPM, integrity monitoring),
-  Confidential Computing, OS Login and its 2FA, serial-port access, IP
+  Confidential Computing, OS Login and its 2FA (counted as enabled only where
+  OS Login is on, since the 2FA flag does nothing without it), serial-port access, IP
   forwarding, block-project-ssh-keys, the attached service account and its OAuth
   scopes (the default service account with cloud-platform being the classic
   finding), public-IP presence, and deletion protection. Also reports the

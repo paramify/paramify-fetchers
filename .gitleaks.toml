@@ -106,3 +106,53 @@ condition = "AND"
 paths = ['''fetchers/azure/entra_authentication_policy/fetcher\.py$''']
 regexes = ['''(?m)^PASSWORD_RULE_TEMPLATE_ID = "5cf42378-d67d-4f36-ba46-e8b86229381d"\s*$''']
 regexTarget = "line"
+
+# --- False positive: base64 placeholder keys in Azure DevOps audit-stream tests #
+# tests/test_azure_devops_audit_streams.py defines two fixture "keys" that the
+# fetcher must never write into evidence; the tests assert they are absent from
+# the output. They are base64 of plain-English placeholders, not credentials:
+#   GRID_KEY = base64("secret-key-do-not-write")
+#   LAW_KEY  = base64("law-shared-key-do-not-write")
+#
+# generic-api-key fires because the names end in `_KEY` and base64 clears the
+# rule's entropy threshold — name-plus-entropy, not a leak.
+#
+# Scoped to that one test path and the two exact literals, so any other value
+# assigned to these names, or a real key elsewhere in the file, is still
+# reported. `(?m)` is required for the reason documented on the Service
+# Management API entry.
+[[allowlists]]
+description = "Base64 placeholder keys in the Azure DevOps audit-stream tests are not credentials"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''tests/test_azure_devops_audit_streams\.py$''']
+regexes = [
+    '''(?m)^GRID_KEY = "c2VjcmV0LWtleS1kby1ub3Qtd3JpdGU="\s*$''',
+    '''(?m)^LAW_KEY = "bGF3LXNoYXJlZC1rZXktZG8tbm90LXdyaXRl"\s*$''',
+]
+regexTarget = "line"
+
+# --- False positive: canary secret in the Cornerstone fetcher tests ---------- #
+# tests/test_cornerstone_fetchers.py (branch feat/cornerstone-training-fetchers,
+# commit 5bcb762) defines a deliberate canary:
+#   SECRET = "csod-s3cr3t-that-must-never-appear-91ab"
+# It is a made-up client secret the tests feed to the fetcher and then assert is
+# ABSENT from the evidence it writes. It never authenticated to anything; its
+# whole job is to be recognisable if it leaks into output.
+#
+# generic-api-key fires because the name is `SECRET` and the value clears the
+# rule's entropy threshold — name-plus-entropy, not a leak. CI's `gitleaks git`
+# walks every ref the checkout fetches, so this branch's commit turns the scan
+# red on unrelated PRs; this entry unblocks that all-refs scan.
+#
+# Scoped to that one test path and the exact literal, so any other value
+# assigned to SECRET, or a real credential elsewhere in the file, is still
+# reported. `(?m)` is required for the reason documented on the Service
+# Management API entry.
+[[allowlists]]
+description = "Canary client secret in the Cornerstone tests is asserted absent from evidence, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''tests/test_cornerstone_fetchers\.py$''']
+regexes = ['''(?m)^SECRET = "csod-s3cr3t-that-must-never-appear-91ab"\s*$''']
+regexTarget = "line"

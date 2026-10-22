@@ -489,6 +489,20 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list"],
         "azure/virtual_wan_configuration — P2S protocols and auth types",
     ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "application_gateways",
+        ["list_all"],
+        "azure/app_gateway_tls_listeners, azure/app_gateway_backend_tls, azure/app_gateway_waf",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "web_application_firewall_policies",
+        ["list_all", "get"],
+        "azure/app_gateway_waf",
+    ),
     # --- backup: PR #58 widens this to <12 ----------------------------------
     (
         "azure.mgmt.recoveryservices",
@@ -560,7 +574,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "SecurityCenter",
         "assessments_metadata",
         ["list_by_subscription"],
-        "azure/defender_assessments — the only source of severity; "
+        "azure/defender_assessments — categories, type and fallback severity; "
         "assessments.list returns no metadata",
     ),
     (
@@ -885,7 +899,9 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         None,
         ["resources"],
         "azure/resource_inventory, azure/front_door_origins (origin regions), "
-        "azure/resource_diagnostic_settings, azure/change_provenance, azure/residual_resources",
+        "azure/resource_diagnostic_settings, azure/change_provenance, azure/residual_resources, "
+        "azure/app_service_backups, "
+        "azure/defender_assessments (each assessment's own severity)",
     ),
     # --- deployment history: left azure-mgmt-resource for its own distribution -
     (
@@ -910,6 +926,14 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ],
         "azure/app_service_configuration, azure/function_app_configuration, "
         "azure/app_service_plans",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "web_apps",
+        ["get", "list_snapshots", "list_backups", "get_backup_configuration"],
+        "azure/app_service_backups — automatic backups, custom backup history and "
+        "schedule, and apps Resource Graph lists that web_apps.list() did not",
     ),
     (
         "azure.mgmt.web",
@@ -953,15 +977,18 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure.mgmt.policyinsights",
         "PolicyInsightsClient",
         "policy_states",
-        ["summarize_for_subscription", "list_query_results_for_subscription"],
-        "azure/policy_compliance",
+        ["summarize_for_subscription", "list_query_results_for_subscription",
+         "list_query_results_for_resource"],
+        "azure/policy_compliance — evaluation details need the per-resource query",
     ),
     (
         "azure.mgmt.policyinsights",
         "PolicyInsightsClient",
         "remediations",
-        ["list_for_subscription"],
-        "azure/policy_compliance",
+        ["list_for_subscription", "list_deployments_at_subscription",
+         "list_deployments_at_resource_group", "list_deployments_at_resource",
+         "list_deployments_at_management_group"],
+        "azure/policy_compliance — per-resource remediation deployments",
     ),
     # --- Front Door WAF ------------------------------------------------------
     (
@@ -1485,6 +1512,37 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/app_service_plans — server_farm_id is how sites join their plan",
     ),
     (
+        "azure.mgmt.web.models",
+        "SiteProperties",
+        ["sku"],
+        "azure/app_service_backups — a renamed sku reads as an unknown plan tier",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SnapshotProperties",
+        ["time"],
+        "azure/app_service_backups — automatic backup times",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "BackupItemProperties",
+        ["name", "status", "scheduled", "created", "finished_time_stamp", "last_restore_time_stamp",
+         "storage_account_url", "log"],
+        "azure/app_service_backups — custom backup history; a renamed created reads as 'no restore point'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "BackupRequestProperties",
+        ["enabled", "storage_account_url", "backup_schedule", "databases"],
+        "azure/app_service_backups — a renamed field reads as 'no custom backup configured'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "BackupSchedule",
+        ["frequency_interval", "frequency_unit", "retention_period_in_days", "keep_at_least_one_backup"],
+        "azure/app_service_backups — custom backup interval and retention",
+    ),
+    (
         "azure.mgmt.network.models",
         "NetworkInterfacePropertiesFormat",
         ["network_security_group", "virtual_machine", "ip_configurations"],
@@ -1616,6 +1674,151 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["ip_configurations", "application_gateway_ip_configurations"],
         "azure/ddos_protection — the back-references that place a public IP in a VNet",
     ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayPropertiesFormat",
+        [
+            "http_listeners", "listeners", "ssl_policy", "default_predefined_ssl_policy",
+            "ssl_profiles", "enable_fips", "frontend_ports", "frontend_ip_configurations",
+            "request_routing_rules", "routing_rules", "url_path_maps", "redirect_configurations",
+            "operational_state", "sku",
+        ],
+        "azure/app_gateway_tls_listeners — a missing listener list reads as "
+        "'no plaintext listeners'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayHttpListenerPropertiesFormat",
+        ["protocol", "frontend_port", "frontend_ip_configuration", "ssl_profile", "ssl_certificate", "host_names"],
+        "azure/app_gateway_tls_listeners",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayListenerPropertiesFormat",
+        ["protocol", "frontend_port", "frontend_ip_configuration", "ssl_profile"],
+        "azure/app_gateway_tls_listeners — L4 listeners",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewaySslPolicy",
+        ["policy_type", "policy_name", "min_protocol_version", "cipher_suites", "disabled_ssl_protocols"],
+        "azure/app_gateway_tls_listeners — a renamed field reads as "
+        "'default_not_reported' instead of the real minimum TLS version",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewaySslProfilePropertiesFormat",
+        ["ssl_policy"],
+        "azure/app_gateway_tls_listeners — per-listener policy override",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayRequestRoutingRulePropertiesFormat",
+        ["rule_type", "http_listener", "redirect_configuration", "url_path_map"],
+        "azure/app_gateway_tls_listeners — redirect-only detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayUrlPathMapPropertiesFormat",
+        ["default_redirect_configuration", "path_rules"],
+        "azure/app_gateway_tls_listeners — redirect-only detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayPathRulePropertiesFormat",
+        ["redirect_configuration"],
+        "azure/app_gateway_tls_listeners — redirect-only detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayRedirectConfigurationPropertiesFormat",
+        ["target_listener", "target_url"],
+        "azure/app_gateway_tls_listeners — redirect target is HTTPS",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayFrontendIPConfigurationPropertiesFormat",
+        ["public_ip_address"],
+        "azure/app_gateway_tls_listeners — public vs private frontend",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayPropertiesFormat",
+        ["backend_http_settings_collection", "backend_settings_collection", "probes", "trusted_root_certificates", "firewall_policy", "web_application_firewall_configuration"],
+        "azure/app_gateway_backend_tls, azure/app_gateway_waf",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayBackendHttpSettingsPropertiesFormat",
+        ["protocol", "port", "validate_cert_chain_and_expiry", "validate_sni", "sni_name", "trusted_root_certificates", "probe"],
+        "azure/app_gateway_backend_tls — a renamed toggle reads as 'default_enabled' on a backend whose validation is off",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayBackendSettingsPropertiesFormat",
+        ["protocol", "port", "trusted_root_certificates"],
+        "azure/app_gateway_backend_tls — L4 backend settings",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayProbePropertiesFormat",
+        ["protocol"],
+        "azure/app_gateway_backend_tls — probe protocol",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayUrlPathMapPropertiesFormat",
+        ["default_backend_http_settings"],
+        "azure/app_gateway_backend_tls — which settings are in use",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayPathRulePropertiesFormat",
+        ["backend_http_settings", "firewall_policy"],
+        "azure/app_gateway_backend_tls, azure/app_gateway_waf — per-path settings and WAF",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayHttpListenerPropertiesFormat",
+        ["firewall_policy"],
+        "azure/app_gateway_waf — per-listener WAF policy",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "WebApplicationFirewallPolicyPropertiesFormat",
+        ["policy_settings", "managed_rules", "custom_rules", "application_gateways", "http_listeners", "path_based_rules"],
+        "azure/app_gateway_waf",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "PolicySettings",
+        ["state", "mode"],
+        "azure/app_gateway_waf — a renamed mode reads every WAF as not enforcing",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ManagedRuleSet",
+        ["rule_set_type", "rule_set_version", "rule_group_overrides", "computed_disabled_rules"],
+        "azure/app_gateway_waf",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ManagedRuleOverride",
+        ["rule_id", "state", "action"],
+        "azure/app_gateway_waf — disabled managed rules",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "WebApplicationFirewallCustomRule",
+        ["name", "priority", "rule_type", "action", "state", "rate_limit_threshold", "rate_limit_duration"],
+        "azure/app_gateway_waf — rate-limit rules",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayWebApplicationFirewallConfiguration",
+        ["enabled", "firewall_mode", "rule_set_type", "rule_set_version", "disabled_rule_groups", "exclusions"],
+        "azure/app_gateway_waf — legacy in-gateway WAF",
+    ),
     # --- policy effects: a missing field reads as an unresolved effect ------
     # The model_base generation declares these on the *Properties models and
     # flattens them onto PolicyDefinition / PolicySetDefinition for attribute
@@ -1644,6 +1847,15 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "ParameterDefinitionsValue",
         ["default_value"],
         "azure/policy_assignments — the default an unset effect parameter falls back to",
+    ),
+    # --- Defender plans: a renamed field reads as "no sub-plan" or "not inherited" ---
+    (
+        "azure.mgmt.security.models",
+        "Pricing",
+        ["pricing_tier", "sub_plan", "free_trial_remaining_time", "enablement_time",
+         "enforce", "inherited", "inherited_from", "resources_coverage_status",
+         "deprecated", "replaced_by", "extensions"],
+        "azure/defender_plans",
     ),
     # --- Defender regulatory compliance: a renamed count reads as 0 failed ---
     (
@@ -1713,6 +1925,44 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/policy_compliance",
     ),
     (
+        "azure.mgmt.policyinsights.models",
+        "QueryOptions",
+        ["filter", "top", "expand", "apply", "from_property", "to", "select", "order_by"],
+        "azure/policy_compliance — a dropped option silently widens or empties a query",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyState",
+        ["policy_evaluation_details", "policy_definition_reference_id", "additional_properties"],
+        "azure/policy_compliance — evaluation details, and the grouped history count",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyEvaluationDetails",
+        ["evaluated_expressions", "if_not_exists_details"],
+        "azure/policy_compliance — expected vs actual values",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "ExpressionEvaluationDetails",
+        ["expression", "expression_kind", "path", "operator", "expression_value",
+         "target_value", "result"],
+        "azure/policy_compliance — expected vs actual values",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "IfNotExistsEvaluationDetails",
+        ["resource_id", "total_resources"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "RemediationDeployment",
+        ["remediated_resource_id", "deployment_id", "status", "resource_location", "error",
+         "created_on", "last_updated_on"],
+        "azure/policy_compliance — per-resource remediation deployments",
+    ),
+    (
         "msgraph.generated.models.service_principal",
         "ServicePrincipal",
         [
@@ -1750,6 +2000,13 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "AuthenticationMethodConfiguration",
         ["state", "exclude_targets"],
         "azure/entra_authentication_policy — `state` is the enabled/disabled fact",
+    ),
+    (
+        "msgraph.generated.models.x509_certificate_authentication_mode_configuration",
+        "X509CertificateAuthenticationModeConfiguration",
+        ["x509_certificate_authentication_default_mode"],
+        "azure/entra_authentication_policy — without the default mode no X.509 "
+        "method is counted as phishing-resistant",
     ),
     (
         "msgraph.generated.models.identity_security_defaults_enforcement_policy",
@@ -2526,7 +2783,8 @@ GRAPH_BUILDERS = [
     ("organization", "_shared/entra_graph — tenant name resolution; azure/residual_resources — tenant check"),
     ("applications", "azure/entra_app_registrations"),
     ("users", "azure/entra_mfa_status"),
-    ("directory_roles", "azure/entra_privileged_roles"),
+    ("directory_roles", "azure/entra_privileged_roles, azure/entra_mfa_status — admins"),
+    ("groups", "azure/entra_mfa_status — users holding an admin role through a group"),
     ("identity", "azure/entra_conditional_access_policies"),
     ("service_principals", "azure/entra_service_principals"),
     ("policies", "azure/entra_authentication_policy"),
@@ -2547,6 +2805,21 @@ def test_graph_request_builders_present(builder: str, affects: str) -> None:
         f"GraphServiceClient.{builder} is gone.\n"
         f"  affected fetchers: {affects}\n"
         f"  msgraph-sdk is pinned <2; a major bump restructures the builders."
+    )
+
+
+def test_graph_admin_membership_builders_present() -> None:
+    """The per-item builders azure/entra_mfa_status walks to find every admin."""
+    client = _build("msgraph", "GraphServiceClient")
+    role = client.directory_roles.by_directory_role_id("00000000-0000-0000-0000-000000000000")
+    group = client.groups.by_group_id("00000000-0000-0000-0000-000000000000")
+    assert getattr(role, "members", None) is not None, (
+        "directory_roles.by_directory_role_id(...).members is gone.\n"
+        "  affected fetchers: azure/entra_privileged_roles, azure/entra_mfa_status"
+    )
+    assert getattr(group, "transitive_members", None) is not None, (
+        "groups.by_group_id(...).transitive_members is gone.\n"
+        "  affected fetchers: azure/entra_mfa_status — admins via a group would be missed"
     )
 
 

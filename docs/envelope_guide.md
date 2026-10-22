@@ -67,7 +67,7 @@ paramify evidence evidence/run-<run_id>/<file>.json
 ## 4. Preview the upload
 
 `--dry-run` names the evidence set each file goes to, without calling Paramify.
-Drop the flag to upload ([upload details](../README.md#collect-then-upload)).
+Drop the flag to upload ([upload details](cli_guide.md#collect-then-upload)).
 The demo creates a *Demo — Synthetic MFA Policy* set in your workspace.
 
 ![paramify upload --dry-run: demo_hello.json would go to set EVD-DEMO-HELLO on production](img/envelope/04-upload-dry-run.png)
