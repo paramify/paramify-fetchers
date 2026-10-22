@@ -67,6 +67,8 @@ LOOKBACK_ENV = "AZURE_FRONT_DOOR_METRICS_LOOKBACK_DAYS"
 SCOPE_EXCLUSIONS_ENV = "AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS"
 EXCLUDED_KINDS = ("custom_domain", "endpoint", "route", "origin_group", "app")
 DEFAULT_LOOKBACK_DAYS = 7
+# "Last hour" must fall in the window's last this-many hours; older data leaves it unknown.
+LAST_HOUR_BUCKETS = 3
 MAX_LOOKBACK_DAYS = 30
 # The metrics API returns only 10 dimension series unless asked for more.
 METRICS_TOP = 1000
@@ -455,6 +457,7 @@ def lockdown(public_network_access, config: dict | None, profile_fdid: str | Non
     fd_rules = [r for r in allows if is_front_door_rule(r)]
     allowed_fdids = sorted({v for r in fd_rules for v in header_values(r, FDID_HEADER)})
     own = str(profile_fdid or "").lower() or None
+    fronting = {str(f).lower() for f in fronting_fdids}
     record = {
         "public_network_access_disabled": str(public_network_access or "").lower() == "disabled",
         "access_restrictions_read": config is not None,
@@ -466,7 +469,9 @@ def lockdown(public_network_access, config: dict | None, profile_fdid: str | Non
         "allowed_front_door_ids": allowed_fdids,
         "profile_front_door_id": profile_fdid,
         "profile_front_door_id_allowed": None if own is None or config is None else own in allowed_fdids,
-        "other_front_door_ids_allowed": [f for f in allowed_fdids if f != own],
+        # Ids of other profiles that also serve the app are judged on those profiles' own records.
+        "fronting_front_door_ids": [f for f in allowed_fdids if f != own and f in fronting],
+        "other_front_door_ids_allowed": [f for f in allowed_fdids if f != own and f not in fronting],
     }
     if record["public_network_access_disabled"]:
         return {**record, "locked_to_front_door": True, "lockdown_basis": "public_network_access_disabled", "lockdown_gaps": []}
@@ -483,7 +488,7 @@ def lockdown(public_network_access, config: dict | None, profile_fdid: str | Non
         if set(allowed_fdids) - known_fdids - {own}:
             gaps.append("unknown_front_door_id_allowed")
         # Another profile in the subscription may lack the serving profile's WAF, so it is a way around it.
-        if (set(allowed_fdids) & known_fdids) - {own} - {str(f).lower() for f in fronting_fdids}:
+        if (set(allowed_fdids) & known_fdids) - {own} - fronting:
             gaps.append("other_front_door_id_allowed")
         # Over private link Front Door skips access restrictions, so only a public origin needs its own id admitted.
         if not private_link and not set(gaps) - {"other_front_door_id_allowed"}:
@@ -497,10 +502,8 @@ def lockdown(public_network_access, config: dict | None, profile_fdid: str | Non
     return {**record, "locked_to_front_door": not gaps, "lockdown_basis": basis, "lockdown_gaps": gaps}
 
 
-def app_service_origin_records(groups: list[dict], profile_fdids: dict, sites_by_key: dict, sites_by_host: dict,
-                               plans_by_key: dict, configs_by_key: dict, subscription_id) -> list[dict]:
-    known = {str(f).lower() for f in profile_fdids.values() if f}
-    own_sub = f"/subscriptions/{str(subscription_id or '').lower()}/"
+def fronting_profiles(groups: list[dict], profile_fdids: dict, sites_by_host: dict) -> dict:
+    """Per app, the Front Door ids of the profiles whose serving groups reach it through an enabled origin."""
     fronting: dict = {}
     for group in groups:
         for origin in group["origins"]:
@@ -508,6 +511,17 @@ def app_service_origin_records(groups: list[dict], profile_fdids: dict, sites_by
             fdid = profile_fdids.get(profile_key(group["id"]))
             if site_id and fdid and group["serving"] and origin["effective_enabled_state"] == "Enabled":
                 fronting.setdefault(site_id, set()).add(fdid)
+    return fronting
+
+
+def app_service_origin_records(groups: list[dict], profile_fdids: dict, sites_by_key: dict, sites_by_host: dict,
+                               plans_by_key: dict, configs_by_key: dict, subscription_id,
+                               fronting: dict | None = None) -> list[dict]:
+    """Each App Service origin with its lockdown; `fronting` (default: from `groups`) exempts profiles that also serve the app."""
+    known = {str(f).lower() for f in profile_fdids.values() if f}
+    own_sub = f"/subscriptions/{str(subscription_id or '').lower()}/"
+    if fronting is None:
+        fronting = fronting_profiles(groups, profile_fdids, sites_by_host)
     records = []
     for group in groups:
         for origin in group["origins"]:
@@ -771,16 +785,20 @@ def traffic_shifts(hours: list[str], region_hours: dict) -> list[dict]:
     return shifts
 
 
-def newest_hour_with_data(metrics: dict) -> str | None:
-    """The newest hour in which any of the profile's series has a health value or requests; ingestion lags per profile."""
-    hours = [p["time"] for s in metrics["health"] for p in s["points"] if p["average"] is not None]
-    hours += [p["time"] for s in metrics["requests"] for p in s["points"] if (p["total"] or 0) > 0]
-    return max(hours, default=None)
+def last_hours(metrics: dict, window_end: str) -> tuple[str | None, str | None]:
+    """The profile's newest hour with requests and newest hour with a health value, each taken separately (ingestion lags
+    per profile and per metric), or None when it falls before the window's last LAST_HOUR_BUCKETS hours."""
+    end = datetime.strptime(window_end, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    floor = (end - timedelta(hours=LAST_HOUR_BUCKETS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    requests = max((p["time"] for s in metrics["requests"] for p in s["points"] if (p["total"] or 0) > 0), default=None)
+    health = max((p["time"] for s in metrics["health"] for p in s["points"] if p["average"] is not None), default=None)
+    return tuple(h if h is not None and h >= floor else None for h in (requests, health))
 
 
 def group_health_record(profile_key_: str, group: dict, health: list[dict], requests: list[dict], shared_hosts: dict,
-                        last_hour: str | None) -> dict:
-    """A group's health and traffic; "last hour" is the profile's newest hour with data, so a group silent then isn't serving."""
+                        last_request_hour: str | None, last_health_hour: str | None) -> dict:
+    """A group's health and traffic. "Last hour" is the profile's newest recent hour with requests (for serving) or with
+    health data (for health); a group silent then isn't serving, and with no recent hour both are unknown."""
     threshold = health_threshold(group)
     group_name = str(group["name"] or "").lower()
     origin_rows, origin_hours, region_hours = [], [], {}
@@ -820,24 +838,25 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
             slot["requests"] += h["requests"] or 0
     hours = sorted({t for by_hour in region_hours.values() for t in by_hour})
     for row, by_hour in zip(origin_rows, origin_hours):
-        row["last_hour_health_avg"] = by_hour.get(last_hour, {}).get("health_avg")
+        row["last_hour_health_avg"] = by_hour.get(last_health_hour, {}).get("health_avg") if last_health_hour else None
     group_requests = sum(s["requests"] for by_hour in region_hours.values() for s in by_hour.values())
     regions = []
     for name, by_hour in sorted(region_hours.items()):
         with_health = [s for s in by_hour.values() if s["health"]]
         total = sum(s["requests"] for s in by_hour.values())
-        last = by_hour.get(last_hour, {}) if last_hour else {}
+        health_slot = by_hour.get(last_health_hour, {}) if last_health_hour else {}
+        request_slot = by_hour.get(last_request_hour, {}) if last_request_hour else {}
         regions.append({
             "region": name,
             "origins": sorted(r["origin"] for r in origin_rows if (r["region"] or "unresolved") == name),
             "health_avg": mean(v for s in with_health for v in s["health"]),
             "hours_with_health_data": len(with_health),
             "hours_healthy": sum(1 for s in with_health if s["healthy"]),
-            "healthy_last_hour": bool(last.get("healthy")) if last.get("health") else None,
+            "healthy_last_hour": bool(health_slot.get("healthy")) if health_slot.get("health") else None,
             "requests": total,
             "request_share_percentage": round(100 * total / group_requests, 2) if group_requests else None,
             "hours_serving": sum(1 for s in by_hour.values() if s["requests"] > 0),
-            "serving_last_hour": (last.get("requests") or 0) > 0,
+            "serving_last_hour": (request_slot.get("requests") or 0) > 0 if last_request_hour else None,
         })
     resolved = [r for r in regions if r["region"] != "unresolved"]
     with_health = [r for r in resolved if r["healthy_last_hour"] is not None]
@@ -854,12 +873,13 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
         "has_health_data": any(r["hours_with_health_data"] for r in regions),
         "has_traffic": group_requests > 0,
         "requests": group_requests,
-        "last_hour": last_hour,
+        "last_request_hour": last_request_hour,
+        "last_health_hour": last_health_hour,
         "origins": origin_rows,
         "regions": regions,
         "all_regions_healthy_last_hour": all(r["healthy_last_hour"] for r in with_health) if with_health else None,
         "regions_serving_last_hour": [r["region"] for r in resolved if r["serving_last_hour"]],
-        "all_enabled_regions_serving_last_hour": bool(group["enabled_regions"]) and all(
+        "all_enabled_regions_serving_last_hour": None if last_request_hour is None else bool(group["enabled_regions"]) and all(
             any(r["region"] == e and r["serving_last_hour"] for r in resolved) for e in group["enabled_regions"]),
         "traffic_shift_count": len(shifts),
         "traffic_shifts": shifts[-MAX_TRAFFIC_SHIFTS:],
@@ -872,7 +892,7 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
     }
 
 
-def origin_health_records(groups: list[dict], metrics_by_profile: dict) -> tuple[list[dict], list[dict]]:
+def origin_health_records(groups: list[dict], metrics_by_profile: dict, window_end: str) -> tuple[list[dict], list[dict]]:
     """Each group's health and traffic per origin and region, and the metric series matching no origin."""
     hosts_by_profile: dict = {}
     for g in groups:
@@ -884,7 +904,7 @@ def origin_health_records(groups: list[dict], metrics_by_profile: dict) -> tuple
         key = profile_key(g["id"])
         metrics = metrics_by_profile.get(key) or {"health": [], "requests": []}
         records.append(group_health_record(key, g, metrics["health"], metrics["requests"], hosts_by_profile,
-                                           newest_hour_with_data(metrics)))
+                                           *last_hours(metrics, window_end)))
     unmatched = [
         {"profile_id": key, "metric": metric, "origin": s["origin"], "origin_group": s["origin_group"],
          "total": sum(p["total"] or 0 for p in s["points"]) if metric == "OriginRequestCount" else None}
@@ -1238,7 +1258,7 @@ def main() -> int:
                                                        plans_by_key), all_app_origins, app_origins)
     excluded += excluded_apps
     # Metric series are matched against every group, so an out-of-scope group's series don't read as unmatched.
-    all_health, unmatched = origin_health_records(all_groups, metrics_by_profile)
+    all_health, unmatched = origin_health_records(all_groups, metrics_by_profile, window[1])
     health = [r for r in all_health if arm_key(r["origin_group_id"]) not in excluded_groups]
 
     evidence = build_payload(

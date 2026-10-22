@@ -320,7 +320,8 @@ def test_app_fronted_by_two_profiles_is_locked_on_both():
     records = origins.app_service_origin_records(groups, profile_fdids, sites, {}, {}, configs, "s")
     assert [(r["profile"], r["locked_to_front_door"], r["lockdown_gaps"]) for r in records] == [
         ("p1", True, []), ("p2", True, [])]
-    assert [r["other_front_door_ids_allowed"] for r in records] == [[OTHER_FDID], [OWN_FDID]]
+    assert [r["other_front_door_ids_allowed"] for r in records] == [[], []]
+    assert [r["fronting_front_door_ids"] for r in records] == [[OTHER_FDID], [OWN_FDID]]
 
 
 def test_unknown_profile_front_door_id_is_a_gap():
@@ -511,6 +512,11 @@ def test_lookup_queries_project_id_and_order_by_it():
 # --- live origin health and traffic ---
 
 HOURS = [f"2026-10-08T{h:02d}:00:00Z" for h in range(6)]
+WINDOW_END = "2026-10-08T06:00:00Z"
+
+
+def origin_health(groups, metrics, window_end=WINDOW_END):
+    return origins.origin_health_records(groups, metrics, window_end)
 
 
 def series(origin, values, key="total", group=None):
@@ -555,7 +561,7 @@ def test_health_threshold(load_balancing, threshold):
 
 
 def test_failover_between_regions():
-    [record], unmatched = origins.origin_health_records([health_group()], {fd.arm_key(health_group()["id"]).split(
+    [record], unmatched = origin_health([health_group()], {fd.arm_key(health_group()["id"]).split(
         "/origingroups/")[0]: failover_metrics()})
     assert unmatched == []
     regions = {r["region"]: r for r in record["regions"]}
@@ -575,7 +581,7 @@ def test_failover_between_regions():
 def test_requests_match_the_origin_host_header():
     group = health_group(west_header="www.contoso.example")
     key = origins.profile_key(group["id"])
-    [record], unmatched = origins.origin_health_records([group], {key: failover_metrics("www.contoso.example")})
+    [record], unmatched = origin_health([group], {key: failover_metrics("www.contoso.example")})
     assert unmatched == []
     assert next(o for o in record["origins"] if o["origin"] == "west")["requests"] == 45
 
@@ -584,7 +590,7 @@ def test_series_for_no_known_origin_is_reported():
     group = health_group()
     key = origins.profile_key(group["id"])
     metrics = failover_metrics("gone.azurewebsites.net")
-    [record], unmatched = origins.origin_health_records([group], {key: metrics})
+    [record], unmatched = origin_health([group], {key: metrics})
     assert [(u["metric"], u["origin"], u["total"]) for u in unmatched] == [
         ("OriginRequestCount", "gone.azurewebsites.net", 45)]
     assert next(o for o in record["origins"] if o["origin"] == "west")["requests"] is None
@@ -593,7 +599,7 @@ def test_series_for_no_known_origin_is_reported():
 def test_single_region_group_has_no_hourly_breakdown_or_shifts():
     group = health_group(regions=("eastus", "eastus"))
     key = origins.profile_key(group["id"])
-    [record], _ = origins.origin_health_records([group], {key: failover_metrics()})
+    [record], _ = origin_health([group], {key: failover_metrics()})
     assert (record["multi_region"], record["hourly_by_region"], record["traffic_shift_count"]) == (False, [], 0)
     assert record["regions_serving_last_hour"] == ["eastus"]
 
@@ -607,8 +613,8 @@ def with_empty_final_hour(metrics):
 def test_last_hour_is_the_newest_hour_with_data():
     group = health_group()
     key = origins.profile_key(group["id"])
-    [record], _ = origins.origin_health_records([group], {key: with_empty_final_hour(failover_metrics())})
-    assert record["last_hour"] == HOURS[-1]
+    [record], _ = origin_health([group], {key: with_empty_final_hour(failover_metrics())})
+    assert (record["last_request_hour"], record["last_health_hour"]) == (HOURS[-1], HOURS[-1])
     assert record["regions_serving_last_hour"] == ["westus"]
     assert record["all_regions_healthy_last_hour"] is False
     assert len(record["hourly_by_region"]) == 7
@@ -623,9 +629,9 @@ def test_last_hour_is_the_profiles_newest_hour_with_data():
     metrics = failover_metrics()
     metrics["health"].append(series("old-east.azurewebsites.net", [100], "health", group="stale"))
     metrics["requests"].append(series("old-east.azurewebsites.net", [10]))
-    records, _ = origins.origin_health_records([group, stale], {origins.profile_key(group["id"]): metrics})
+    records, _ = origin_health([group, stale], {origins.profile_key(group["id"]): metrics})
     old = next(r for r in records if r["origin_group"] == "stale")
-    assert old["last_hour"] == HOURS[-1] and old["has_traffic"] is True
+    assert old["last_request_hour"] == HOURS[-1] and old["has_traffic"] is True
     assert (old["regions_serving_last_hour"], old["all_regions_healthy_last_hour"]) == ([], None)
     assert all(r["healthy_last_hour"] is None and r["serving_last_hour"] is False for r in old["regions"])
     summary = origins.summarize_health([old], [], 7, ("start", "end"))
@@ -633,16 +639,40 @@ def test_last_hour_is_the_profiles_newest_hour_with_data():
     assert summary["serving_multi_region_groups_all_regions_serving_last_hour"] == 0
 
 
+def test_last_hour_is_unknown_when_the_profile_has_no_recent_data():
+    group = health_group()
+    [record], _ = origin_health([group], {origins.profile_key(group["id"]): failover_metrics()},
+                                window_end="2026-10-08T12:00:00Z")
+    assert (record["last_request_hour"], record["last_health_hour"]) == (None, None)
+    assert all(r["serving_last_hour"] is None and r["healthy_last_hour"] is None for r in record["regions"])
+    assert (record["regions_serving_last_hour"], record["all_regions_healthy_last_hour"],
+            record["all_enabled_regions_serving_last_hour"]) == ([], None, None)
+    summary = origins.summarize_health([record], [], 7, ("start", "end"))
+    assert (summary["serving_groups_all_regions_healthy_last_hour"], summary["serving_groups_region_unhealthy_last_hour"],
+            summary["serving_multi_region_groups_all_regions_serving_last_hour"]) == (0, 0, 0)
+
+
+def test_requests_lagging_behind_health_are_judged_at_their_own_last_hour():
+    group = health_group()
+    metrics = failover_metrics()
+    for s in metrics["requests"]:
+        s["points"] = s["points"][:4]
+    [record], _ = origin_health([group], {origins.profile_key(group["id"]): metrics})
+    assert (record["last_request_hour"], record["last_health_hour"]) == (HOURS[3], HOURS[5])
+    assert record["regions_serving_last_hour"] == ["westus"]
+    assert record["all_regions_healthy_last_hour"] is False
+
+
 def test_health_data_counts_an_unresolved_region():
     group = health_group(regions=(None, None))
     key = origins.profile_key(group["id"])
-    [record], _ = origins.origin_health_records([group], {key: with_empty_final_hour(failover_metrics())})
+    [record], _ = origin_health([group], {key: with_empty_final_hour(failover_metrics())})
     assert [r["region"] for r in record["regions"]] == ["unresolved"]
     assert (record["has_health_data"], record["all_regions_healthy_last_hour"]) == (True, None)
 
 
 def test_group_without_metrics_has_no_data():
-    [record], _ = origins.origin_health_records([health_group()], {})
+    [record], _ = origin_health([health_group()], {})
     assert (record["has_health_data"], record["has_traffic"], record["all_regions_healthy_last_hour"]) == (
         False, False, None)
 
@@ -650,7 +680,7 @@ def test_group_without_metrics_has_no_data():
 def test_health_summary():
     group = health_group()
     key = origins.profile_key(group["id"])
-    records, unmatched = origins.origin_health_records([group], {key: failover_metrics()})
+    records, unmatched = origin_health([group], {key: failover_metrics()})
     summary = origins.summarize_health(records, unmatched, 7, ("start", "end"))
     assert summary["serving_multi_region_groups"] == 1
     assert summary["serving_multi_region_groups_with_traffic_shift"] == 1
