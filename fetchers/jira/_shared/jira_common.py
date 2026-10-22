@@ -585,7 +585,7 @@ def list_env(name: str) -> list:
 # One DNS label under the Atlassian domain, ASCII only: a looser check let
 # "evil.com\.atlassian.net" through, which requests sends to evil.com.
 _SITE_HOST = re.compile(
-    r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:atlassian\.net|atlassian-us-gov-mod\.net)$"
+    r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:atlassian\.net|jira\.com|atlassian-us-gov-mod\.net)$"
 )
 _GATEWAY_HOSTS = ("api.atlassian.com", "api.atlassian-us-gov-mod.com")
 _URL_CHARS = re.compile(r"^[A-Za-z0-9:/._-]+$")

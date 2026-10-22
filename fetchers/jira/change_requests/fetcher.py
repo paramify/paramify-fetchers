@@ -22,6 +22,7 @@ from jira_common import (  # noqa: E402
     field_problem_reason,
     int_env,
     invalid_roles,
+    is_date_only,
     json_env,
     list_env,
     name_of,
@@ -209,9 +210,17 @@ def _record(issue: dict, histories: list, ids: dict, cfg: dict, now, catalog=(se
         (c for c in reversed(changes) if c["field"] in ("approver", "approved_at")), None
     )
     approved_ts, deployed_ts = parse_ts(approved_at), parse_ts(deployed_at)
-    approved_before_deploy = (
-        approved_ts <= deployed_ts if approved_ts and deployed_ts else None
-    )
+    # A date-only value (an approval date field) has no time of day, so it is
+    # compared with the deployment at day granularity: an earlier day is before,
+    # a later day is after, and the same day is unknown rather than guessed.
+    approval_granularity = "day" if is_date_only(approved_at) or is_date_only(deployed_at) else "minute"
+    if not (approved_ts and deployed_ts):
+        approved_before_deploy = None
+    elif approval_granularity == "day":
+        a_day, d_day = approved_ts.date(), deployed_ts.date()
+        approved_before_deploy = None if a_day == d_day else a_day < d_day
+    else:
+        approved_before_deploy = approved_ts <= deployed_ts
 
     tests = (custom.get("test_results") or "").strip().lower()
     review = (custom.get("security_review") or "").strip().lower()
@@ -293,6 +302,7 @@ def _record(issue: dict, histories: list, ids: dict, cfg: dict, now, catalog=(se
         "last_done_at": last_done_at if not is_exception else None,
         "reopened": len(done_moves) > 1,
         "approved_before_deploy": approved_before_deploy,
+        "approval_order_granularity": approval_granularity if approved_ts and deployed_ts else None,
         "test_results": custom.get("test_results"),
         "security_review": custom.get("security_review"),
         "watch_count": watches.get("watchCount"),
@@ -322,6 +332,9 @@ def _summarize(records: list, complete: bool = True) -> dict:
         "changes_deployed": len(deployed),
         "changes_deployed_with_approval": sum(1 for r in deployed if r["approval_source"]),
         "changes_approved_before_deploy": sum(1 for r in deployed if r["approved_before_deploy"]),
+        "changes_approval_order_unknown": sum(
+            1 for r in deployed if r["approval_source"] and r["approved_before_deploy"] is None
+        ),
         "changes_deployed_preapproved": sum(
             1 for r in deployed if not r["approval_source"] and r["preapproved"]
         ),

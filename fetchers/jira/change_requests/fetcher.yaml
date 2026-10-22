@@ -120,9 +120,10 @@ evidence_set:
     approval_recorded_by). A change is deployed when its deployed-at field is
     set or it is done with a resolution other than the not-deployed list;
     deployment time is that field, else the first time it entered any
-    done-category status (last_done_at and reopened record a later move).
-    Date-only values
-    compare at midnight UTC. Findings per ticket:
+    done-category status (last_done_at and reopened record a later move). A
+    date-only approval date is compared at day granularity: a later day is
+    approved_after_deploy, the same day is recorded as unknown
+    (approval_order_granularity: day) and never a finding. Findings per ticket:
     approval_time_unparseable,
     deployed_without_approval (pre-approved change types excepted),
     approved_after_deploy, deployed_with_failed_tests,
@@ -142,9 +143,8 @@ evidence_set:
     before deployment, recorded and visible to the board, and that exceptions are
     approved, reviewed and closed when no longer needed.
 
-# Exceptions also support the CNA SolCaps that route exceptions through change
-# management; the mapping to those KSIs lives in Paramify.
+# The evidence supports change management (CMT-LMC). Exception and internal
+# connection tickets do not by themselves evidence the CNA KSIs about network
+# restriction, so those are not claimed here.
 ksis:
   - KSI-CMT-LMC
-  - KSI-CNA-RNT
-  - KSI-CNA-ULN

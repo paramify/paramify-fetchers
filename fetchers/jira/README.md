@@ -119,8 +119,12 @@ modify reporter; grants of those to `anyone` or an application role are flagged
 as `broad_privileged_grants`, and grants to holder types the fetcher cannot
 resolve to accounts (`reporter`, `assignee`, user or group custom fields) are
 listed per project as `unresolved_privileged_grants` so the counts are never
-silently low. Organization admins (Atlassian Administration) are not visible to
-these APIs and are not included.
+silently low. Two kinds of administrator are not included because no Jira Cloud
+REST endpoint lists them: organization admins (Atlassian Administration) and the
+holders of the Jira global permissions `ADMINISTER` and `SYSTEM_ADMIN`. The
+site-admin and admin groups are the closest readable signal, so an assessor who
+needs the full admin population should also export it from Atlassian
+Administration.
 
 ### `jira_change_requests`
 

@@ -7,9 +7,11 @@ description: >-
   project, delete issues and comments, issue security, modify reporter), project
   role members, the resolved list of privileged users, grants made to
   everyone, and grants to holder types that cannot be resolved to accounts
-  (reporter, assignee, user or group custom fields). Organization admins, who
-  manage the site from Atlassian Administration without a Jira admin group,
-  are not visible to these APIs and are not included. Requires an account
+  (reporter, assignee, user or group custom fields). Not included, because no
+  Jira Cloud REST endpoint lists them: organization admins (Atlassian
+  Administration) and the holders of the Jira global permissions ADMINISTER
+  and SYSTEM_ADMIN; the site-admin and admin groups are the closest readable
+  signal. Requires an account
   with the Administer Jira global permission; use a read-only scoped token
   (see fetchers/jira/README.md).
 category: jira
@@ -84,8 +86,10 @@ evidence_set:
     EDIT_ALL_COMMENTS, SET_ISSUE_SECURITY, MODIFY_REPORTER. Grants to `anyone`
     or `applicationRole` are listed as broad_privileged_grants; grants to
     reporter, assignee or custom-field holders cannot be resolved to accounts
-    and are listed as unresolved_privileged_grants. Organization admins
-    (Atlassian Administration) are not included. Summary: admin_groups,
+    and are listed as unresolved_privileged_grants. Not included (no REST
+    endpoint lists them): organization admins (Atlassian Administration) and
+    the holders of the ADMINISTER and SYSTEM_ADMIN global permissions. Summary
+    counts are null for a section whose fetch failed. Summary: admin_groups,
     distinct_admin_users, inactive_admin_users, admin_users_by_account_type,
     projects_scanned, projects_with_broad_privileged_grants,
     projects_with_unresolved_privileged_grants, distinct_project_admin_users

@@ -123,7 +123,10 @@ evidence_set:
     A linked issue the bulk call failed to read is reported as
     postmortem_not_visible or action_items_not_visible, never as absent, and
     fails the run as partial.
-    Findings: missing_detected_time, detected_or_reported_time_unparseable,
+    A detected or reported value that is a date without a time cannot measure
+    minutes, so it is report_time_not_measurable, never late or on time.
+    Findings: missing_detected_time, report_time_not_measurable,
+    detected_or_reported_time_unparseable,
     reported_before_detected, reported_late,
     category_notification_target_missed, missing_severity, missing_category,
     category_without_target, phases_missing, resolved_without_postmortem,

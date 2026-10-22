@@ -328,6 +328,7 @@ def test_base_url_rejects_hosts_that_could_receive_the_token(url):
     ("https://api.atlassian.com/ex/jira/eadac007-8666-4024-a026-0bfb4d34aa2e",
      "https://api.atlassian.com/ex/jira/eadac007-8666-4024-a026-0bfb4d34aa2e"),
     ("https://example.atlassian-us-gov-mod.net", "https://example.atlassian-us-gov-mod.net"),
+    ("https://example.jira.com", "https://example.jira.com"),
 ])
 def test_base_url_accepts_site_and_gateway(url, expected):
     sys.path.insert(0, str(JIRA / "_shared"))
@@ -1611,3 +1612,31 @@ def test_remediation_done_without_resolutiondate_uses_the_status_history(run):
     s = out["summary"]
     assert s["closed_after_due_date"] == 1, "the late closure is no longer hidden"
     assert s["closed_without_close_time"] == 1 and s["days_to_close"]["count"] == 1
+
+
+# ---------- Bruce's review: date-only values ----------
+
+def test_change_requests_date_only_approval_on_the_deployment_day_is_unknown_not_a_finding(run):
+    same_day = _ticket(1, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}, "cf3": APPROVER,
+                       "cf4": "2026-10-06", "cf6": {"value": "Passed"}, "cf7": "2026-10-06T15:00:00.000+0000"})
+    day_before = _ticket(2, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}, "cf3": APPROVER,
+                         "cf4": "2026-10-05", "cf6": {"value": "Passed"}, "cf7": "2026-10-06T15:00:00.000+0000"})
+    day_after = _ticket(3, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}, "cf3": APPROVER,
+                        "cf4": "2026-10-07", "cf6": {"value": "Passed"}, "cf7": "2026-10-06T15:00:00.000+0000"})
+    code, out, _, _ = run("change_requests", _cr_router([same_day, day_before, day_after]), {"JIRA_CHANGE_JQL": "project = CCB"})
+    by_key = {t["key"]: t for t in out["tickets"]}
+    assert by_key["CCB-1"]["approved_before_deploy"] is None and by_key["CCB-1"]["findings"] == []
+    assert by_key["CCB-1"]["approval_order_granularity"] == "day"
+    assert by_key["CCB-2"]["approved_before_deploy"] is True
+    assert by_key["CCB-3"]["approved_before_deploy"] is False and "approved_after_deploy" in by_key["CCB-3"]["findings"]
+    assert out["summary"]["changes_approval_order_unknown"] == 1
+    assert out["summary"]["changes_approved_before_deploy"] == 1
+
+
+def test_incident_date_only_detected_time_is_not_measurable_not_late(run):
+    inc = _incident(1, {"cf10": {"value": "SEV 3"}, "cf11": {"value": "CAT 3"},
+                        "cf12": "2026-10-05", "cf13": "2026-10-05T15:00:00.000+0000"}, cat="new")
+    code, out, _, _ = run("incident_postmortems", _ir_router([inc]), {"JIRA_INCIDENT_JQL": "project = IR"})
+    i = out["incidents"][0]
+    assert i["minutes_to_report"] is None and i["findings"] == ["report_time_not_measurable"]
+    assert out["summary"]["reported_late"] == 0 and out["summary"]["incidents_without_report_timing"] == 1

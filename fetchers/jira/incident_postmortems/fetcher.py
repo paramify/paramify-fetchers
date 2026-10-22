@@ -25,6 +25,7 @@ from jira_common import (  # noqa: E402
     field_problem_reason,
     int_env,
     invalid_roles,
+    is_date_only,
     json_env,
     list_env,
     name_of,
@@ -72,6 +73,7 @@ ACTION_FIELDS = ["summary", "status", "assignee", "duedate", "created", "resolut
 FINDINGS_BY_FIELD = {
     "detected_at": [
         "missing_detected_time",
+        "report_time_not_measurable",
         "detected_or_reported_time_unparseable",
         "reported_before_detected",
         "reported_late",
@@ -88,8 +90,10 @@ def _checks_disabled(disabled_fields) -> list:
 
 
 def _minutes_between(start, end):
+    """Minutes from start to end, or None when either is missing, unparseable or a
+    date without a time of day (a day has no minutes to measure)."""
     a, b = parse_ts(start), parse_ts(end)
-    if not a or not b:
+    if not a or not b or is_date_only(start) or is_date_only(end):
         return None
     return round((b - a).total_seconds() / 60, 1)
 
@@ -199,6 +203,8 @@ def _incident_record(issue, histories, ids, cfg, postmortems: dict, actions: dic
     if "detected_at" in ids:
         if not detected:
             findings.append("missing_detected_time")
+        elif minutes is None and (is_date_only(detected) or is_date_only(reported)):
+            findings.append("report_time_not_measurable")
         elif minutes is None:
             findings.append("detected_or_reported_time_unparseable")
         elif minutes < 0:
