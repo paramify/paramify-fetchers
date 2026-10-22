@@ -887,7 +887,8 @@ schemas and the `paramify` CLI — not the internal code.
   the lookback. Each incident gains:
   - `acknowledged_time_utc` and `hours_to_acknowledge`: the first update by a
     person that moves it to Active or Closed or gives it an owner or a different
-    one, up to its first close, so a reopen never counts and removing an owner
+    one (by object id when both updates have one, so a renamed owner isn't a
+    different one), up to its first close, so a reopen never counts and removing an owner
     doesn't either; a person creating it already Active or owned acknowledges
     it at creation. Updates with no modifier, and those by automation rules,
     playbooks, alert grouping, Fusion, incident creation or the Defender XDR

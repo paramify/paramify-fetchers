@@ -224,6 +224,13 @@ def owned(row: Dict[str, Any]) -> bool:
     return bool(row.get("OwnerId") or row.get("Owner"))
 
 
+def same_owner(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    """By object id when both rows have one, as is_current compares, so a renamed UPN is the same owner; else by name."""
+    if a.get("OwnerId") and b.get("OwnerId"):
+        return a["OwnerId"].lower() == b["OwnerId"].lower()
+    return (a.get("Owner") or a.get("OwnerId") or "").lower() == (b.get("Owner") or b.get("OwnerId") or "").lower()
+
+
 def incident_owner(incident: Dict[str, Any]) -> Optional[str]:
     """The owner as rows name it, else its object id; None only when no owner field is set."""
     return next((incident[k] for k in OWNER_FIELDS if incident.get(k)), None)
@@ -245,7 +252,7 @@ def acknowledged_time(rows: List[Dict[str, Any]]) -> Optional[str]:
     for before, row in zip(rows, rows[1:]):
         status = row.get("Status")
         moved = status != before.get("Status") and status in ("Active", "Closed")
-        assigned = owned(row) and (row.get("OwnerId"), row.get("Owner")) != (before.get("OwnerId"), before.get("Owner"))
+        assigned = owned(row) and not same_owner(before, row)
         if (moved or assigned) and by_person(row):
             return row_time(row)
         if status == "Closed":

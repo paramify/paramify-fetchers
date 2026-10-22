@@ -470,8 +470,11 @@ HISTORY_COLUMNS = ["TimeGenerated", "IncidentName", "Status", "Severity", "Close
                    "CreatedTime", "LastModifiedTime"]
 
 
-def update(name, at, status, severity, closed=None, owner="", by="Incident created from alert", created=None):
-    return [iso(at), name, status, severity, iso(closed) if closed else None, by, "u-1" if owner else "", owner,
+def update(name, at, status, severity, closed=None, owner="", by="Incident created from alert", created=None, owner_id=None):
+    """Each owner name has its own object id unless owner_id gives one."""
+    if owner_id is None:
+        owner_id = f"u-{owner.split('@')[0].lower()}" if owner else ""
+    return [iso(at), name, status, severity, iso(closed) if closed else None, by, owner_id, owner,
             iso(created) if created else None, iso(at)]
 
 
@@ -689,6 +692,20 @@ def test_incidents_created_by_a_person_active_or_owned_is_acknowledged(azure, tm
     assert ws_a(ev)["open_unacknowledged"] == (0 if acknowledged else 1)
 
 
+def test_incidents_owner_rename_is_not_an_assignment(azure, tmp_path):
+    created = NOW - timedelta(days=3)
+    _, _, by_name = run_with_history(azure, tmp_path, [
+        update("i-closed", created, "New", "High", owner="pat@contoso.com", by="Automation rule - assign"),
+        # The same object id under a new UPN: Pat's update hours later only renames the owner.
+        update("i-closed", created + timedelta(hours=2), "New", "High", owner="pat.doe@contoso.com", owner_id="u-pat",
+               by="pat.doe@contoso.com"),
+        update("i-closed", created + timedelta(hours=6), "Active", "High", owner="pat.doe@contoso.com", owner_id="u-pat",
+               by="pat.doe@contoso.com"),
+        update("i-closed", NOW - timedelta(days=2), "Closed", "High", NOW - timedelta(days=2), owner="pat.doe@contoso.com",
+               owner_id="u-pat", by="pat.doe@contoso.com")])
+    assert by_name["i-closed"]["hours_to_acknowledge"] == pytest.approx(6, abs=0.01)
+
+
 def test_incidents_older_than_the_history_have_no_acknowledgement(azure, tmp_path):
     old = NOW - timedelta(days=200)
     rows = incident_history()[:3] + [
@@ -759,10 +776,10 @@ def test_incidents_dropped_row_leaves_the_history_incomplete(azure, tmp_path):
 
 
 @pytest.mark.parametrize("arm_owner, row_owner", [
-    ({"email": "pat@contoso.com", "objectId": "u-1"}, "pat@contoso.com"),  # email only, matched by object id
+    ({"email": "pat@contoso.com", "objectId": "u-pat"}, "pat@contoso.com"),  # email only, matched by object id
     ({"email": "pat@contoso.com"}, "pat@contoso.com"),  # email only, no id on the ARM side: by name
     ({"userPrincipalName": "pat@contoso.com", "assignedTo": "Pat Doe"}, "Pat Doe"),  # display name vs UPN
-    ({"userPrincipalName": "renamed@contoso.com", "objectId": "u-1"}, "pat@contoso.com"),  # renamed, same id
+    ({"userPrincipalName": "renamed@contoso.com", "objectId": "u-pat"}, "pat@contoso.com"),  # renamed, same id
 ])
 def test_incident_owner_matches_by_id_then_any_name(arm_owner, row_owner):
     created = NOW - timedelta(days=2)
