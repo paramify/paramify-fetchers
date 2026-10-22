@@ -164,8 +164,7 @@ def fake(monkeypatch, tmp_path) -> FakeCsod:
     monkeypatch.setattr(csod_client.requests, "get", f.get)
     monkeypatch.setattr(csod_client.time, "sleep", lambda s: None)
     monkeypatch.setattr(csod_client, "load_dotenv", lambda *a, **k: False)
-    for name in ("CSOD_USER_POPULATION_FILTER", "CSOD_ALLOW_CUSTOM_ENDPOINTS"):
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("CSOD_ALLOW_CUSTOM_ENDPOINTS", raising=False)
     monkeypatch.setenv("CSOD_CLIENT_ID", "client-id")
     monkeypatch.setenv("CSOD_CLIENT_SECRET", SECRET)
     monkeypatch.setenv("CSOD_PORTAL_URL", PORTAL)
@@ -176,6 +175,12 @@ def fake(monkeypatch, tmp_path) -> FakeCsod:
     monkeypatch.setenv("CSOD_SECURE_DEVELOPMENT_COURSES", "SEC-DEV-101")
     monkeypatch.setenv("CSOD_ROLE_BASED_COURSES", "Annual Security Awareness")
     monkeypatch.setenv("CSOD_INCIDENT_RESPONSE_COURSES", "Annual Security Awareness")
+    monkeypatch.setenv("CSOD_USER_POPULATION_FILTER", "user_status_id eq 1")
+    for name in ("CSOD_SECURITY_AWARENESS_POPULATION_FILTER", "CSOD_ROLE_BASED_POPULATION_FILTER",
+                 "CSOD_SECURE_DEVELOPMENT_POPULATION_FILTER", "CSOD_INCIDENT_RESPONSE_POPULATION_FILTER",
+                 "CSOD_WITHDRAWN_STATUS_IDS", "CSOD_FAILED_STATUS_IDS"):
+        monkeypatch.delenv(name, raising=False)
+    f.users = [{"user_id": i} for i in range(1, 10)]
     f.trainings = [training(AWARENESS, "Annual Security Awareness", ref="SAT-2026"),
                    training(AWARENESS_OLD, "Annual Security Awareness", ref="SAT-2025", modified_days=500),
                    training(DEVSEC, "Secure Development", code="SEC-DEV-101")]
@@ -222,7 +227,9 @@ def test_awareness_statuses_and_summary(fake, tmp_path):
     course = ev["courses"][0]
     assert {t["object_id"] for t in course["trainings"]} == {AWARENESS, AWARENESS_OLD}
     u = users_by_id(ev)
-    assert set(u) == {1, 2, 3, 4, 5, 6, 8}, "removed registration must be excluded"
+    assert set(u) == set(range(1, 10))
+    assert u[7]["status"] == "not_assigned", "a removed registration leaves the user never-assigned"
+    assert u[9]["status"] == "not_assigned"
     assert u[1]["status"] == "completed" and u[1]["current"] is True
     assert u[2]["status"] == "completed" and u[2]["needs_retraining"] is True
     assert u[3]["status"] == "overdue" and u[3]["latest_registration"]["days_overdue"] >= 4
@@ -231,10 +238,10 @@ def test_awareness_statuses_and_summary(fake, tmp_path):
     # Latest registration is the new open one, but last year's completion is still inside 365 days.
     assert u[8]["status"] == "not_started" and u[8]["current"] is True and u[8]["registrations"] == 2
     s = course["summary"]
-    assert s["users_in_scope"] == 7 and s["current"] == 3 and s["needs_retraining"] == 4
-    assert s["overdue"] == 1 and s["removed_registrations_excluded"] == 1
-    assert s["completion_rate_pct"] == round(3 * 100 / 7, 2)
-    assert ev["summary"]["users_current_on_all_courses"] == 3
+    assert s["users_in_scope"] == 9 and s["current"] == 3 and s["needs_retraining"] == 6
+    assert s["overdue"] == 1 and s["not_assigned"] == 2 and s["removed_registrations_excluded"] == 1
+    assert s["completion_rate_pct"] == round(3 * 100 / 9, 2)
+    assert ev["summary"]["users_current_on_all_courses"] == 3 and ev["summary"]["population_size"] == 9
     old = next(t for t in course["trainings"] if t["object_id"] == AWARENESS_OLD)
     assert old["content_changed_within_review_interval"] is False
     assert ev["metadata"]["complete"] is True and ev["metadata"]["partial_failure"] is False
@@ -245,7 +252,7 @@ def test_token_request_and_scopes(fake, tmp_path):
     assert code == 0
     body = fake.token_bodies[0]
     assert body["clientId"] == "client-id" and body["clientSecret"] == SECRET
-    assert body["scope"].split() == ["vw_rpt_training:read", "vw_rpt_transcript:read"]
+    assert body["scope"].split() == ["vw_rpt_training:read", "vw_rpt_transcript:read", "vw_rpt_user:read"]
     assert ev["portal"]["environment"] == "production" and ev["portal"]["token_lifetime_seconds"] == 3600
 
 
@@ -263,11 +270,10 @@ def test_duplicates_across_pages_are_dropped(fake, tmp_path):
     assert code == 0
     stats = [c for c in ev["collection"] if c["view"] == "vw_rpt_transcript"][0]
     assert stats["duplicates_dropped"] >= 1 and stats["complete"] is True
-    assert ev["courses"][0]["summary"]["users_in_scope"] == 7
+    assert ev["courses"][0]["summary"]["users_in_scope"] == 9
 
 
-def test_population_adds_not_assigned_and_drops_outsiders(fake, tmp_path, monkeypatch):
-    monkeypatch.setenv("CSOD_USER_POPULATION_FILTER", "user_status_id eq 1")
+def test_population_adds_not_assigned_and_drops_outsiders(fake, tmp_path):
     fake.users = [{"user_id": i} for i in (1, 2, 3, 10, 11)]
     code, ev = run("security_awareness_training", tmp_path)
     assert code == 0
@@ -290,7 +296,7 @@ def test_all_four_fetchers_run_and_claim_ced_rat(fake, tmp_path):
         meta = yaml.safe_load((CSOD / short / "fetcher.yaml").read_text())
         assert meta["ksis"] == ["KSI-CED-RAT"] and meta["name"] == f"cornerstone_{short}"
     code, ev = run("secure_development_training", tmp_path)
-    assert set(users_by_id(ev)) == {9}
+    assert users_by_id(ev)[9]["status"] == "completed" and ev["courses"][0]["summary"]["completed"] == 1
 
 
 # --- null, not zero ---------------------------------------------------------
@@ -419,8 +425,9 @@ def test_bad_portal_is_bad_config_and_no_request_sent(fake, tmp_path, monkeypatc
 
 def test_client_refuses_paths_outside_views(fake):
     client = csod_client.build_client(["vw_rpt_training:read"])
-    with pytest.raises(ValueError):
-        client.get_json("x", PORTAL + "/services/api/x/users/v2/employees")
+    assert client.get_json("x", PORTAL + "/services/api/x/users/v2/employees") is None
+    assert client.api_failures[0]["type"] == "RefusedUrl"
+    assert all(g["view"] != "employees" for g in fake.gets)
 
 
 def test_odata_string_escaping():
@@ -455,13 +462,12 @@ def test_next_link_default_port_is_same_host():
 
 def test_get_json_refuses_dot_segments(fake):
     client = csod_client.build_client(["vw_rpt_training:read"])
-    with pytest.raises(ValueError):
-        client.get_json("x", VIEWS + "../../oauth2/token")
+    assert client.get_json("x", VIEWS + "../../oauth2/token") is None
+    assert client.api_failures[0]["type"] == "RefusedUrl" and len(fake.gets) == 0
 
 
 def test_unresolved_course_lists_no_users_even_with_population(fake, tmp_path, monkeypatch):
     monkeypatch.setenv("CSOD_SECURITY_AWARENESS_COURSES", "Typo Course")
-    monkeypatch.setenv("CSOD_USER_POPULATION_FILTER", "user_status_id eq 1")
     fake.users = [{"user_id": i} for i in (1, 2, 3)]
     code, ev = run("security_awareness_training", tmp_path)
     assert code == 0 and ev["courses"][0]["users"] == []
@@ -469,7 +475,6 @@ def test_unresolved_course_lists_no_users_even_with_population(fake, tmp_path, m
 
 
 def test_population_ids_match_across_int_and_string(fake, tmp_path, monkeypatch):
-    monkeypatch.setenv("CSOD_USER_POPULATION_FILTER", "user_status_id eq 1")
     fake.users = [{"user_id": "1"}, {"user_id": "3"}]
     code, ev = run("security_awareness_training", tmp_path)
     assert code == 0
@@ -491,16 +496,177 @@ def test_allowlist_bypass_is_recorded_in_evidence(fake, tmp_path, monkeypatch):
     assert code == 0 and ev["portal"]["custom_endpoint_override"] is True
 
 
-def test_capitalized_host_in_next_link_is_followed_not_crashed(fake):
-    client = csod_client.build_client(["vw_rpt_training:read"])
-    link = "https://ACME.csod.com/services/api/x/odata/api/views/vw_rpt_training"
-    assert client._check_next_link(link)
-    # get_json must accept what _check_next_link accepted, instead of raising.
-    payload = client.get_json("x", link, params={"$filter": "lo_title eq 'none'"})
-    assert payload is not None and payload["value"] == []
-
-
 def test_raw_cornerstone_status_id_is_exposed(fake, tmp_path):
     code, ev = run("security_awareness_training", tmp_path)
     assert code == 0
     assert users_by_id(ev)[1]["latest_registration"]["cornerstone_status_id"] == 1
+
+
+# --- Bruce's review (PR #175) ------------------------------------------------
+
+
+def test_no_population_means_null_rate_and_not_success(fake, tmp_path, monkeypatch):
+    monkeypatch.delenv("CSOD_USER_POPULATION_FILTER")
+    code, ev = run("security_awareness_training", tmp_path)
+    assert code == 0 and ev["status"] == "partial_or_empty"
+    assert "vw_rpt_user:read" not in fake.token_bodies[0]["scope"].split()
+    assert ev["summary"]["completion_rate_pct"] is None
+    assert ev["courses"][0]["summary"]["completion_rate_pct"] is None
+    assert ev["courses"][0]["summary"]["users_in_scope"] == 7, "counts are still reported"
+    assert "population" in ev["message"]
+
+
+def test_per_fetcher_population_override_wins(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("CSOD_ROLE_BASED_POPULATION_FILTER", "ou_id eq 42")
+    code, ev = run("role_based_training", tmp_path)
+    assert code == 0 and ev["config"]["user_population_filter"] == "ou_id eq 42"
+    pop = [g for g in fake.gets if g["view"] == "vw_rpt_user"]
+    assert pop and pop[0]["params"]["$filter"] == "ou_id eq 42"
+
+
+def test_failed_attempt_is_not_completed(fake, tmp_path):
+    fake.transcripts.append(tx(2, AWARENESS, reg=2, created=5, comp=2))
+    fake.transcripts[-1]["user_lo_pass"] = False
+    code, ev = run("security_awareness_training", tmp_path)
+    u = users_by_id(ev)[2]
+    assert u["status"] == "failed" and u["current"] is False
+    assert u["last_completed_at"] is not None and u["days_since_last_completion"] >= 399
+
+
+def test_withdrawn_status_id_from_config(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("CSOD_WITHDRAWN_STATUS_IDS", "7, 9")
+    fake.transcripts[0]["user_lo_status_id"] = 9  # user 1's completed row
+    code, ev = run("security_awareness_training", tmp_path)
+    u = users_by_id(ev)[1]
+    assert u["status"] == "withdrawn" and u["current"] is False
+    assert ev["config"]["withdrawn_status_ids"] == [7, 9]
+
+
+def test_bad_status_id_list_is_bad_config(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("CSOD_WITHDRAWN_STATUS_IDS", "Withdrawn")
+    code, ev = run("security_awareness_training", tmp_path)
+    assert code == 1 and ev["error_code"] == "bad_config"
+
+
+def test_exemption_ages_like_a_completion(fake, tmp_path):
+    fake.transcripts = [tx(6, AWARENESS, exempt=400, created=410)]
+    fake.users = [{"user_id": 6}]
+    code, ev = run("security_awareness_training", tmp_path)
+    u = users_by_id(ev)[6]
+    assert u["status"] == "exempt" and u["current"] is False and u["last_exempt_at"] is not None
+
+
+def test_overdue_assignment_beats_recent_completion(fake, tmp_path):
+    fake.transcripts = [tx(8, AWARENESS_OLD, comp=100, created=110), tx(8, AWARENESS, due=3, created=40)]
+    fake.users = [{"user_id": 8}]
+    code, ev = run("security_awareness_training", tmp_path)
+    u = users_by_id(ev)[8]
+    assert u["status"] == "overdue" and u["current"] is False and u["days_since_last_completion"] == 100
+
+
+def test_course_alternatives_count_as_one_course(fake, tmp_path, monkeypatch):
+    fake.trainings[1]["lo_title"] = "2025 Security Awareness"
+    monkeypatch.setenv("CSOD_SECURITY_AWARENESS_COURSES", "Annual Security Awareness | 2025 Security Awareness")
+    code, ev = run("security_awareness_training", tmp_path)
+    assert code == 0 and ev["status"] == "success"
+    course = ev["courses"][0]
+    assert course["name"] == "Annual Security Awareness|2025 Security Awareness"
+    assert {t["object_id"] for t in course["trainings"]} == {AWARENESS, AWARENESS_OLD}
+    assert users_by_id(ev)[8]["current"] is True, "last year's version still counts"
+    assert ev["config_resolution"]["matched"] == [course["name"]]
+
+
+def test_guid_case_mismatch_is_still_attributed(fake, tmp_path):
+    for t in fake.trainings:
+        t["object_id"] = t["object_id"].upper()
+    code, ev = run("security_awareness_training", tmp_path)
+    assert code == 0 and ev["courses"][0]["summary"]["completed"] == 2
+    assert ev["summary"]["transcript_rows_unattributed"] == 0
+
+
+def test_rows_read_but_none_attributed_is_a_failure(fake, tmp_path, monkeypatch):
+    real = fake._rows
+
+    def wrong_rows(view, flt):
+        rows = real(view, flt)
+        if view == "vw_rpt_transcript":
+            rows = [{**r, "transc_object_id": "99999999-9999-9999-9999-999999999999", "reg_num": i}
+                    for i, r in enumerate(rows)]
+        return rows
+    monkeypatch.setattr(fake, "_rows", wrong_rows)
+    code, ev = run("security_awareness_training", tmp_path)
+    assert code == 1 and "none belong" in ev["api_failures"][0]["message"]
+
+
+def test_explicit_443_next_link_goes_through_get_json(fake, tmp_path):
+    fake.next_link_override = VIEWS + "vw_rpt_transcript?f=unused&p=1"
+    client = csod_client.build_client(["vw_rpt_training:read"])
+    link = "https://ACME.csod.com:443/services/api/x/odata/api/views/vw_rpt_training"
+    assert client._check_next_link(link)
+    payload = client.get_json("x", link, params={"$filter": "lo_title eq 'none'"})
+    assert payload is not None and payload["value"] == [] and client.api_failures == []
+
+
+def test_url_outside_views_is_recorded_not_raised(fake):
+    client = csod_client.build_client(["vw_rpt_training:read"])
+    assert client.get_json("x", VIEWS + "../../oauth2/token") is None
+    assert client.api_failures[0]["type"] == "RefusedUrl"
+
+
+def test_401_on_last_retry_is_not_authorized(fake, tmp_path, monkeypatch):
+    calls = {"n": 0}
+    original = fake.get
+
+    def flaky(url, **kw):
+        calls["n"] += 1
+        if calls["n"] <= csod_client.MAX_RETRIES:
+            return FakeResponse(429, {}, {"Retry-After": "0"})
+        if calls["n"] == csod_client.MAX_RETRIES + 1:
+            return FakeResponse(401, {"error": {"message": "Unauthorized"}})
+        return original(url, **kw)
+    monkeypatch.setattr(csod_client.requests, "get", flaky)
+    code, ev = run("security_awareness_training", tmp_path)
+    assert code == 1 and ev["api_failures"][0]["status_code"] == 401
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
+
+
+def test_401_then_fresh_token_recovers(fake, tmp_path, monkeypatch):
+    seen = {"n": 0}
+    original = fake.get
+
+    def once_401(url, **kw):
+        seen["n"] += 1
+        if seen["n"] == 1:
+            return FakeResponse(401, {})
+        return original(url, **kw)
+    monkeypatch.setattr(csod_client.requests, "get", once_401)
+    code, ev = run("security_awareness_training", tmp_path)
+    assert code == 0 and fake.token_calls == 2
+
+
+def test_token_expiry_mid_run_renews(fake, tmp_path, monkeypatch):
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(csod_client.time, "monotonic", lambda: clock["t"])
+    original_post = fake.post
+
+    def short_token(url, **kw):
+        r = original_post(url, **kw)
+        r._body["expires_in"] = 90  # renewed 60 s early, so 30 s of use
+        return r
+    monkeypatch.setattr(csod_client.requests, "post", short_token)
+    original_get = fake.get
+
+    def ticking_get(url, **kw):
+        clock["t"] += 20
+        return original_get(url, **kw)
+    monkeypatch.setattr(csod_client.requests, "get", ticking_get)
+    code, ev = run("security_awareness_training", tmp_path)
+    assert code == 0 and fake.token_calls > 1
+    assert all(g["url"] for g in fake.gets)
+
+
+def test_expires_in_zero_is_not_an_hour(fake, tmp_path):
+    client = csod_client.build_client(["vw_rpt_training:read"])
+    client._token_expires_at = 0.0  # as a zero lifetime leaves it: already expired
+    client.get_json("x", VIEWS + "vw_rpt_training", params={"$filter": "lo_title eq 'none'"})
+    assert fake.token_calls == 2, "an expired token is renewed before the call"

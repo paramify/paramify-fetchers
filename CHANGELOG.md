@@ -211,7 +211,15 @@ schemas and the `paramify` CLI — not the internal code.
   The portal URL must be one label under `csod.com`, redirects are refused, and
   nextLinks are followed only on the same host under the views root. Covered
   offline by `tests/test_cornerstone_fetchers.py`; not yet run against a live
-  portal.
+  portal. Review (PR #175): the user population filter is shared by all four
+  fetchers with a per-fetcher override and, without one, the completion rate is
+  null and the run is `partial_or_empty`; failed attempts (`user_lo_pass` false)
+  and configured withdrawn/failed status ids never count as completed;
+  exemptions age like completions; an overdue assignment overrides an older
+  completion; `A|B` names alternatives for one course; GUIDs compare
+  case-insensitively and rows read but unattributed fail the run; a URL the
+  client refuses is a recorded failure, not a crash; paging and throttle
+  settings are declared on the category.
 
 
 - **CI runs the tests on Python 3.15.** The test matrix is now 3.11 to 3.15.

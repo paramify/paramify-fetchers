@@ -2,7 +2,8 @@
 
 Four fetchers measure security training completion in Cornerstone Learning
 (Cornerstone OnDemand) through the **Reporting API (RAPI)**: read-only OData
-views over Cornerstone's Real-time Data Warehouse. Each one evidences asks for general training for all employees,
+views over Cornerstone's Real-time Data Warehouse. Each one evidences one part
+of **KSI-CED-RAT**, which asks for general training for all employees,
 role-specific training for high-risk roles, secure software delivery training
 for engineers, and training for incident response and disaster recovery staff.
 
@@ -55,12 +56,21 @@ Per fetcher:
 | `courses` | see table above | none (required) | Comma-separated courses, matched **exactly** against the training title, the Training Reference Number or the Course Code, or given as the training object id |
 | `retraining_interval_days` | `CSOD_RETRAINING_INTERVAL_DAYS` | `365` | A user whose last completion is older than this (or who never completed) is `needs_retraining` |
 | `content_review_interval_days` | `CSOD_CONTENT_REVIEW_INTERVAL_DAYS` | `365` | Flags a course whose catalog entry has not changed within this many days |
-| `user_population_filter` (awareness only) | `CSOD_USER_POPULATION_FILTER` | unset | OData `$filter` over `vw_rpt_user` selecting everyone who must take the training, e.g. active employees. Confirm the column names in your portal's User RTDW spec |
+| `population_filter` | `CSOD_<GROUP>_POPULATION_FILTER` | unset | This fetcher's own population (an OU, group or job-title filter for high-risk roles, engineers, or IR staff). Overrides the shared `CSOD_USER_POPULATION_FILTER` |
 
-Tuning (optional, not normally needed): `CSOD_PAGE_SIZE` (default 1000, max
-10000), `CSOD_MAX_PAGES` (default 500 per view read), `CSOD_MIN_REQUEST_INTERVAL`
-(default 0.25 s; the RAPI throttle is 400 requests per minute per portal),
-`CSOD_HTTP_TIMEOUT` (default 120 s).
+Shared by all four (also on the category):
+
+| Config key | Env | Default | Description |
+|---|---|---|---|
+| `user_population_filter` | `CSOD_USER_POPULATION_FILTER` | unset | OData `$filter` over `vw_rpt_user` selecting everyone who must take security training, normally active employees. **Set it.** Without a population, users who were never assigned a course are invisible, `completion_rate_pct` is null and the run reports `partial_or_empty`. Confirm the column names in your portal's User RTDW spec |
+| `withdrawn_status_ids` | `CSOD_WITHDRAWN_STATUS_IDS` | unset | Transcript status ids (from the portal's transcript status lookup) that mean the user withdrew |
+| `failed_status_ids` | `CSOD_FAILED_STATUS_IDS` | unset | Transcript status ids that mean the attempt failed; a completion with `user_lo_pass` false is `failed` even without this |
+| `page_size`, `max_pages`, `http_timeout`, `min_request_interval` | `CSOD_PAGE_SIZE`, `CSOD_MAX_PAGES`, `CSOD_HTTP_TIMEOUT`, `CSOD_MIN_REQUEST_INTERVAL` | 1000, 500, 120, 0.25 | Paging and throttling. The RAPI throttle is about 400 requests per minute per portal |
+
+Course lists: a comma separates required courses; a `|` separates
+alternatives that satisfy one course, so an annual rollover
+(`"2025 Security Awareness|2026 Security Awareness"`) does not reset everyone
+to 0%.
 
 ---
 
@@ -88,9 +98,11 @@ repeated nextLink, an empty page that still links onward, or hitting
 
 | Field | Meaning |
 |---|---|
-| `status` | Of the latest registration: `exempt`, `completed`, `overdue` (due date passed, not completed), `in_progress`, `not_started`, or `not_assigned` (in the population, no transcript record) |
-| `last_completed_at`, `days_since_last_completion` | Most recent completion across all registrations, so last year's completion still counts while this year's re-assignment is open |
-| `current` / `needs_retraining` | Completed within `retraining_interval_days`, or exempt |
+| `status` | Of the latest registration: `withdrawn` or `failed` (configured status ids, or a completion with `user_lo_pass` false), `exempt`, `completed`, `overdue` (due date passed, not completed), `in_progress`, `not_started`, or `not_assigned` (in the population, no transcript record) |
+| `last_completed_at`, `days_since_last_completion` | Most recent **passed** completion across all registrations, so last year's completion still counts while this year's re-assignment is open and not yet due |
+| `last_exempt_at` | Most recent exemption; an exemption ages like a completion and must be renewed every interval |
+| `current` / `needs_retraining` | Not overdue, and a passed completion or an exemption within `retraining_interval_days`. An overdue assignment makes the user `needs_retraining` even if an older completion is still inside the window |
+| `latest_registration.cornerstone_status_id` | Cornerstone's own status code, so the derived status can be checked against it |
 | `latest_registration` | Assigned, due and completed dates, `days_overdue`, passed, required, archived, exempt date |
 
 Removed registrations are excluded and counted in
@@ -99,12 +111,18 @@ Removed registrations are excluded and counted in
 ### Summary
 
 Per course and overall: users in scope, counts by status, current,
-needs_retraining, `completion_rate_pct` (current / in scope), and the largest
-`days_overdue`. Each matched catalog entry also reports its version, last
+needs_retraining, `completion_rate_pct` (current / population; null when no
+population filter is set), and the largest `days_overdue`. Each matched catalog entry also reports its version, last
 modified date, version effective date and whether its content changed within
 `content_review_interval_days`.
 
+**null means not measured; 0 means measured and zero.** A course name that
+matches nothing reports its metrics, and the overall summary, as null;
+`config_resolution` lists what did not resolve. That run exits 0 so a typo shows
+up in the evidence instead of turning the nightly run red.
 
+No fetcher decides pass or fail. Whether a completion rate is acceptable is
+Paramify's call, downstream.
 
 ## Output
 
@@ -112,3 +130,22 @@ modified date, version effective date and whether its content changed within
 still written with `metadata.partial_failure: true`, `metadata.api_failures[]`,
 `metadata.complete: false` and `metadata.incomplete_reason`, and the run exits
 non-zero with the reason in the envelope's `metadata.error`.
+
+## Known limits
+
+- **Not yet run against a live portal.** The collect path is covered offline by
+  `tests/test_cornerstone_fetchers.py`; the first run against a pilot or stage
+  portal is still the gate for populated, complete evidence.
+- Population: without a population filter the counts cover only users who hold
+  the course on their transcript, the rate is null and the status is
+  `partial_or_empty`. Set `CSOD_USER_POPULATION_FILTER` (active employees) and,
+  for the role-based, secure development and incident response fetchers, their
+  own `population_filter` naming the role, OU or group.
+- Withdrawn and failed statuses: Cornerstone's status ids are portal lookup
+  values, so they are configured (`CSOD_WITHDRAWN_STATUS_IDS`,
+  `CSOD_FAILED_STATUS_IDS`) rather than hard-coded; `user_lo_pass` false is
+  always treated as failed.
+- Cornerstone recommends its Data Exporter API (DEAPI, `transcript_core`) over
+  RAPI where both cover the data and may deprecate RAPI views over time. The
+  client's read path is the same OData shape, so porting is a change of root and
+  view names.

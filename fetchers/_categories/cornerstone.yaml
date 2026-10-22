@@ -37,3 +37,62 @@ config_schema:
       Cornerstone portal URL, e.g. https://<corpname>.csod.com (use the pilot or
       stage portal host to test). Only https hosts directly under csod.com are
       accepted, so the client secret cannot be sent anywhere else.
+  user_population_filter:
+    type: string
+    required: false
+    env: CSOD_USER_POPULATION_FILTER
+    description: >-
+      OData $filter over the vw_rpt_user view selecting every user who must
+      take security training, normally active employees (confirm the column
+      names in the portal's User RTDW spec, e.g. "user_status_id eq 1" if that
+      is the active status). Shared by all four fetchers; each can override it
+      with its own population_filter. With a population, users who have no
+      transcript record are reported as not_assigned; without one, the
+      completion rate is null and runs report partial_or_empty, because users
+      who were never assigned a course are invisible in the transcript view.
+      Adds the vw_rpt_user:read scope.
+  withdrawn_status_ids:
+    type: string
+    required: false
+    env: CSOD_WITHDRAWN_STATUS_IDS
+    description: >-
+      Comma-separated transcript status ids that mean the user withdrew from
+      the training (from the portal's transcript status lookup). Rows in these
+      statuses are reported as withdrawn and never as current.
+  failed_status_ids:
+    type: string
+    required: false
+    env: CSOD_FAILED_STATUS_IDS
+    description: >-
+      Comma-separated transcript status ids that mean the attempt failed. A row
+      with a completion date and user_lo_pass false is reported as failed even
+      without this list.
+  page_size:
+    type: integer
+    required: false
+    default: 1000
+    env: CSOD_PAGE_SIZE
+    description: Rows requested per page (Prefer odata.maxpagesize), 1 to 10000.
+  max_pages:
+    type: integer
+    required: false
+    default: 500
+    env: CSOD_MAX_PAGES
+    description: >-
+      Pages allowed per view read before the run stops and reports PageCap.
+      Raise it (or page_size) for very large transcript views.
+  http_timeout:
+    type: integer
+    required: false
+    default: 120
+    env: CSOD_HTTP_TIMEOUT
+    description: Seconds to wait for each Reporting API response.
+  min_request_interval:
+    type: string
+    required: false
+    default: "0.25"
+    env: CSOD_MIN_REQUEST_INTERVAL
+    description: >-
+      Minimum seconds between requests (decimal allowed). The Reporting API
+      allows about 400 requests per minute per portal, shared with other
+      integrations.

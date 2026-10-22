@@ -81,7 +81,12 @@ USER_KEY = ["user_id"]
 _OBJECTS_PER_QUERY = 15
 _GUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
-STATUSES = ("completed", "exempt", "in_progress", "not_started", "overdue", "not_assigned")
+STATUSES = ("completed", "exempt", "in_progress", "not_started", "overdue", "failed", "withdrawn",
+            "not_assigned")
+# A course entry may list alternatives ("2025 Security Awareness|2026 Security Awareness"):
+# one logical course satisfied by any of them, so an annual version rollover does
+# not reset everyone to 0%.
+_ALTERNATIVE_SEP = "|"
 
 
 def scopes(with_population: bool) -> List[str]:
@@ -110,19 +115,60 @@ def _chunks(items: Sequence[str], size: int) -> List[List[str]]:
     return [list(items[i:i + size]) for i in range(0, len(items), size)]
 
 
-def _course_filter(name: str) -> str:
-    clauses = [f"lo_title eq {odata_string(name)}", f"lo_training_ref eq {odata_string(name)}",
-               f"course_code eq {odata_string(name)}"]
-    if _GUID.match(name):
-        clauses.append(f"object_id eq {name.lower()}")
+def _course_filter(names: Sequence[str]) -> str:
+    clauses: List[str] = []
+    for name in names:
+        clauses += [f"lo_title eq {odata_string(name)}", f"lo_training_ref eq {odata_string(name)}",
+                    f"course_code eq {odata_string(name)}"]
+        if _GUID.match(name):
+            clauses.append(f"object_id eq {name.lower()}")
     return " or ".join(clauses)
 
 
-def _status_of(row: Dict[str, Any], now: datetime) -> str:
+def parse_course_entries(names: Sequence[str]) -> List[Dict[str, Any]]:
+    """"A|B, C" -> [{label: "A|B", names: [A, B]}, {label: "C", names: [C]}]."""
+    entries = []
+    for raw in names:
+        alts = [a.strip() for a in raw.split(_ALTERNATIVE_SEP) if a.strip()]
+        if alts:
+            entries.append({"label": _ALTERNATIVE_SEP.join(alts), "names": alts})
+    return entries
+
+
+def _status_ids(env_name: str) -> set:
+    ids = set()
+    for part in os.environ.get(env_name, "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit():
+            raise CsodConfigError(f"{env_name} must be a comma-separated list of numeric status ids (got {part!r})")
+        ids.add(int(part))
+    return ids
+
+
+def _passed(row: Dict[str, Any], withdrawn_ids: set = frozenset(), failed_ids: set = frozenset()) -> bool:
+    """A completion counts only if it was not an explicit fail (user_lo_pass False) or a withdrawn/failed status."""
+    if not parse_ts(row.get("user_lo_comp_dt")):
+        return False
+    status_id = row.get("user_lo_status_id")
+    if isinstance(status_id, int) and not isinstance(status_id, bool) and status_id in (withdrawn_ids | failed_ids):
+        return False
+    pas = row.get("user_lo_pass")
+    return not (pas is False or (isinstance(pas, (int, str)) and not isinstance(pas, bool)
+                                 and str(pas).strip().lower() in {"0", "false", "n", "no"}))
+
+
+def _status_of(row: Dict[str, Any], now: datetime, withdrawn_ids: set, failed_ids: set) -> str:
+    status_id = row.get("user_lo_status_id")
+    if isinstance(status_id, int) and not isinstance(status_id, bool) and status_id in withdrawn_ids:
+        return "withdrawn"
+    if isinstance(status_id, int) and not isinstance(status_id, bool) and status_id in failed_ids:
+        return "failed"
     if parse_ts(row.get("exempt_dt")):
         return "exempt"
     if parse_ts(row.get("user_lo_comp_dt")):
-        return "completed"
+        return "completed" if _passed(row, withdrawn_ids, failed_ids) else "failed"
     due = parse_ts(row.get("user_lo_min_due_date"))
     if due and due < now:
         return "overdue"
@@ -138,14 +184,24 @@ def _registration_order(row: Dict[str, Any]) -> Tuple[Any, ...]:
     return (anchor, reg)
 
 
-def _user_record(user_id: Any, rows: List[Dict[str, Any]], now: datetime, retrain_days: int) -> Dict[str, Any]:
+def _user_record(user_id: Any, rows: List[Dict[str, Any]], now: datetime, retrain_days: int,
+                 withdrawn_ids: set, failed_ids: set) -> Dict[str, Any]:
     latest = max(rows, key=_registration_order)
-    status = _status_of(latest, now)
-    completions = [ts for ts in (parse_ts(r.get("user_lo_comp_dt")) for r in rows) if ts]
+    status = _status_of(latest, now, withdrawn_ids, failed_ids)
+    # Only passed completions count; a failed attempt never makes a user current.
+    completions = [ts for ts in (parse_ts(r.get("user_lo_comp_dt")) for r in rows
+                                 if _passed(r, withdrawn_ids, failed_ids)) if ts]
     last_completed = max(completions) if completions else None
     since = days_between(last_completed, now)
-    exempt = status == "exempt"
-    current = exempt or (since is not None and since <= retrain_days)
+    exemptions = [ts for ts in (parse_ts(r.get("exempt_dt")) for r in rows) if ts]
+    last_exempt = max(exemptions) if exemptions else None
+    since_exempt = days_between(last_exempt, now)
+    # An exemption ages like a completion: it has to be renewed every interval.
+    exempt_in_window = since_exempt is not None and since_exempt <= retrain_days
+    trained_in_window = since is not None and since <= retrain_days
+    # An overdue assignment is the organization's own verdict that the user is
+    # behind, so it wins over an older completion that is still inside the window.
+    current = status != "overdue" and (exempt_in_window or trained_in_window)
     due = parse_ts(latest.get("user_lo_min_due_date"))
     return {
         "user_id": user_id,
@@ -154,6 +210,7 @@ def _user_record(user_id: Any, rows: List[Dict[str, Any]], now: datetime, retrai
         "needs_retraining": not current,
         "last_completed_at": _iso(last_completed),
         "days_since_last_completion": since,
+        "last_exempt_at": _iso(last_exempt),
         "latest_registration": {
             "training_object_id": latest.get("transc_object_id"),
             "reg_num": latest.get("reg_num"),
@@ -176,11 +233,11 @@ def _user_record(user_id: Any, rows: List[Dict[str, Any]], now: datetime, retrai
 
 def _not_assigned(user_id: Any) -> Dict[str, Any]:
     return {"user_id": user_id, "status": "not_assigned", "current": False, "needs_retraining": True,
-            "last_completed_at": None, "days_since_last_completion": None, "latest_registration": None,
-            "registrations": 0}
+            "last_completed_at": None, "days_since_last_completion": None, "last_exempt_at": None,
+            "latest_registration": None, "registrations": 0}
 
 
-def _summary(users: List[Dict[str, Any]], measurable: bool) -> Dict[str, Any]:
+def _summary(users: List[Dict[str, Any]], measurable: bool, has_population: bool) -> Dict[str, Any]:
     def metric(value: Any) -> Any:
         return value if measurable else None
 
@@ -194,9 +251,33 @@ def _summary(users: List[Dict[str, Any]], measurable: bool) -> Dict[str, Any]:
         **{s: metric(counts[s]) for s in STATUSES},
         "current": metric(current),
         "needs_retraining": metric(total - current),
-        "completion_rate_pct": (None if not measurable or total == 0 else round(current * 100.0 / total, 2)),
+        # Without a population the denominator is only the users who were ever
+        # assigned, so a rate would overstate coverage; it is null, not a number.
+        "completion_rate_pct": (None if not measurable or not has_population or total == 0
+                                else round(current * 100.0 / total, 2)),
         "max_days_overdue": metric(max(overdue_days) if overdue_days else 0),
     }
+
+
+POPULATION_ENV = "CSOD_USER_POPULATION_FILTER"
+
+
+def resolve_population_filter(override_env: Optional[str]) -> Optional[str]:
+    """
+    The vw_rpt_user $filter naming who must take this training: the fetcher's
+    own override (a role, OU or group filter for high-risk roles) first, else
+    the shared CSOD_USER_POPULATION_FILTER (normally active employees).
+    """
+    for env_name in (override_env, POPULATION_ENV):
+        if env_name:
+            value = os.environ.get(env_name, "").strip()
+            if value:
+                return value
+    return None
+
+
+def scopes_for(override_env: Optional[str]) -> List[str]:
+    return scopes(resolve_population_filter(override_env) is not None)
 
 
 def collect_training_group(
@@ -209,36 +290,43 @@ def collect_training_group(
     """
     Collect and summarize one training group. ``group`` describes it for the
     evidence: ``key``, ``title`` and ``ksi_clause`` (the part of KSI-CED-RAT it
-    speaks to).
+    speaks to). ``population_env`` is this fetcher's population override; the
+    shared CSOD_USER_POPULATION_FILTER applies when it is unset.
     """
     now = datetime.now(timezone.utc)
     names = env_names(courses_env)
     if not names:
         raise CsodConfigError(f"{courses_env} is required: name the course(s) to measure, comma-separated")
+    entries = parse_course_entries(names)
+    labels = [e["label"] for e in entries]
     retrain_days = env_int("CSOD_RETRAINING_INTERVAL_DAYS", 365, minimum=1)
     review_days = env_int("CSOD_CONTENT_REVIEW_INTERVAL_DAYS", 365, minimum=1)
-    population_filter = (population_env and os.environ.get(population_env, "").strip()) or None
+    status_ids = {"withdrawn": _status_ids("CSOD_WITHDRAWN_STATUS_IDS"), "failed": _status_ids("CSOD_FAILED_STATUS_IDS")}
+    population_filter = resolve_population_filter(population_env)
     collection: List[Dict[str, Any]] = []
+    ctx = dict(client=client, group=group, labels=labels, retrain_days=retrain_days, review_days=review_days,
+               population_filter=population_filter, status_ids=status_ids, collection=collection, now=now)
 
-    # 1. Resolve courses.
+    # 1. Resolve courses (any alternative of an entry may match).
     resolved: Dict[str, List[Dict[str, Any]]] = {}
-    for name in names:
-        rows, stats = client.read_view(TRAINING_VIEW, TRAINING_SELECT, TRAINING_KEY, _course_filter(name))
-        collection.append({**stats, "purpose": f"resolve course {name!r}"})
+    for entry in entries:
+        rows, stats = client.read_view(TRAINING_VIEW, TRAINING_SELECT, TRAINING_KEY, _course_filter(entry["names"]))
+        collection.append({**stats, "purpose": f"resolve course {entry['label']!r}"})
         if rows is None:
-            return _finish(client, group, names, retrain_days, review_days, population_filter,
-                           None, collection, now)
-        resolved[name] = sorted(rows, key=lambda r: str(r.get("object_id")))
+            return _finish(data=None, **ctx)
+        for r in rows:
+            if r.get("object_id") is not None:
+                r["object_id"] = str(r["object_id"]).lower()
+        resolved[entry["label"]] = sorted(rows, key=lambda r: str(r.get("object_id")))
 
-    object_ids = sorted({str(r["object_id"]) for rows in resolved.values() for r in rows if r.get("object_id")})
+    object_ids = sorted({r["object_id"] for rows in resolved.values() for r in rows if r.get("object_id")})
     # Server-supplied ids go into the next $filter unquoted (OData v4 Guid
     # literals), so anything that is not a plain GUID is refused, not sent.
     bad_ids = [oid for oid in object_ids if not _GUID.match(oid)]
     if bad_ids:
         client._record(TRAINING_VIEW, "UnexpectedResponse",
                        f"{len(bad_ids)} training object_id value(s) were not GUIDs; not used in a filter", 200)
-        return _finish(client, group, names, retrain_days, review_days, population_filter,
-                       None, collection, now)
+        return _finish(data=None, **ctx)
 
     # 2. Transcript rows for every matched training, all registrations.
     transcript: List[Dict[str, Any]] = []
@@ -247,9 +335,19 @@ def collect_training_group(
         rows, stats = client.read_view(TRANSCRIPT_VIEW, TRANSCRIPT_SELECT, TRANSCRIPT_KEY, flt)
         collection.append({**stats, "purpose": f"transcripts for {len(chunk)} training object(s)"})
         if rows is None:
-            return _finish(client, group, names, retrain_days, review_days, population_filter,
-                           None, collection, now)
+            return _finish(data=None, **ctx)
+        for r in rows:
+            # GUIDs compare case-insensitively in OData but not in Python.
+            r["transc_object_id"] = str(r.get("transc_object_id") or "").lower()
         transcript.extend(rows)
+    # Rows that came back but match none of the trainings we asked for would
+    # otherwise vanish silently into users_in_scope: 0 with exit 0.
+    known = set(object_ids)
+    stray = sum(1 for r in transcript if r["transc_object_id"] not in known)
+    if transcript and stray == len(transcript):
+        client._record(TRANSCRIPT_VIEW, "UnexpectedResponse",
+                       f"{stray} transcript row(s) were read but none belong to a requested training", 200)
+        return _finish(data=None, **ctx)
 
     # 3. Optional population.
     population: Optional[List[Any]] = None
@@ -257,24 +355,23 @@ def collect_training_group(
         rows, stats = client.read_view(USER_VIEW, USER_SELECT, USER_KEY, population_filter)
         collection.append({**stats, "purpose": "user population"})
         if rows is None:
-            return _finish(client, group, names, retrain_days, review_days, population_filter,
-                           None, collection, now)
+            return _finish(data=None, **ctx)
         population = sorted({r.get("user_id") for r in rows if r.get("user_id") is not None},
-                            key=lambda v: (str(type(v)), v))
+                            key=lambda v: str(v))
 
-    data = {"resolved": resolved, "transcript": transcript, "population": population}
-    return _finish(client, group, names, retrain_days, review_days, population_filter, data, collection, now)
+    data = {"resolved": resolved, "transcript": transcript, "population": population, "stray_rows": stray}
+    return _finish(data=data, **ctx)
 
 
 def _course_entry(name: str, trainings: List[Dict[str, Any]], transcript: List[Dict[str, Any]],
                   population: Optional[List[Any]], now: datetime, retrain_days: int,
-                  review_days: int) -> Tuple[Dict[str, Any], Dict[Any, Dict[str, Any]]]:
-    ids = {str(t.get("object_id")) for t in trainings}
+                  review_days: int, status_ids: Dict[str, set]) -> Tuple[Dict[str, Any], Dict[Any, Dict[str, Any]]]:
+    ids = {str(t.get("object_id")).lower() for t in trainings}
     measurable = bool(trainings)
     by_user: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
     removed = 0
     for row in transcript:
-        if str(row.get("transc_object_id")) not in ids:
+        if str(row.get("transc_object_id")).lower() not in ids:
             continue
         if _truthy(row.get("is_removed")):
             removed += 1
@@ -284,8 +381,9 @@ def _course_entry(name: str, trainings: List[Dict[str, Any]], transcript: List[D
     # Keyed by str(user_id): the transcript and user views both document an int,
     # but a portal that serializes one as a string must not turn every user
     # into not_assigned. The original value is kept in the record.
-    users: Dict[str, Dict[str, Any]] = {str(uid): _user_record(uid, rows, now, retrain_days)
-                                         for uid, rows in by_user.items()}
+    users: Dict[str, Dict[str, Any]] = {
+        str(uid): _user_record(uid, rows, now, retrain_days, status_ids["withdrawn"], status_ids["failed"])
+        for uid, rows in by_user.items()}
     outside = 0
     if not measurable:
         # An unresolved course measures nobody; listing the population as
@@ -324,7 +422,7 @@ def _course_entry(name: str, trainings: List[Dict[str, Any]], transcript: List[D
         "name": name,
         "resolved": measurable,
         "trainings": catalog,
-        "summary": {**_summary(ordered, measurable),
+        "summary": {**_summary(ordered, measurable, population is not None),
                     "removed_registrations_excluded": removed if measurable else None,
                     "users_outside_population_excluded": (outside if measurable and population is not None
                                                           else None)},
@@ -333,10 +431,12 @@ def _course_entry(name: str, trainings: List[Dict[str, Any]], transcript: List[D
     return entry, users
 
 
-def _finish(client: CsodClient, group: Dict[str, str], names: List[str], retrain_days: int, review_days: int,
-            population_filter: Optional[str], data: Optional[Dict[str, Any]],
-            collection: List[Dict[str, Any]], now: datetime) -> Dict[str, Any]:
+def _finish(*, client: CsodClient, group: Dict[str, str], labels: List[str], retrain_days: int,
+            review_days: int, population_filter: Optional[str], status_ids: Dict[str, set],
+            data: Optional[Dict[str, Any]], collection: List[Dict[str, Any]], now: datetime) -> Dict[str, Any]:
+    names = labels
     failures = list(client.api_failures)
+    has_population = population_filter is not None
     base: Dict[str, Any] = {
         "retrieved_at": current_timestamp(),
         "portal": provenance(client),
@@ -348,6 +448,9 @@ def _finish(client: CsodClient, group: Dict[str, str], names: List[str], retrain
             "user_population_filter": population_filter,
             "population_source": ("vw_rpt_user rows matching user_population_filter" if population_filter
                                   else "users holding the course on their transcript (assigned or registered)"),
+            "withdrawn_status_ids": sorted(status_ids["withdrawn"]),
+            "failed_status_ids": sorted(status_ids["failed"]),
+            "course_entry_rule": "comma separates required courses; '|' separates alternatives that satisfy one course",
         },
         "collection": collection,
         "api_failures": failures,
@@ -365,7 +468,7 @@ def _finish(client: CsodClient, group: Dict[str, str], names: List[str], retrain
     per_course_users: List[Dict[Any, Dict[str, Any]]] = []
     for name in names:
         entry, users = _course_entry(name, resolved.get(name, []), data["transcript"], data["population"],
-                                     now, retrain_days, review_days)
+                                     now, retrain_days, review_days, status_ids)
         courses.append(entry)
         if entry["resolved"]:
             per_course_users.append(users)
@@ -388,9 +491,10 @@ def _finish(client: CsodClient, group: Dict[str, str], names: List[str], retrain
         "users_current_on_all_courses": metric(len(current_all)),
         "users_needing_retraining_on_any_course": metric(len(overall_users) - len(current_all)),
         "users_overdue_on_any_course": metric(len(overdue_any)),
-        "completion_rate_pct": (None if not measurable or not overall_users
+        "completion_rate_pct": (None if not measurable or not has_population or not overall_users
                                 else round(len(current_all) * 100.0 / len(overall_users), 2)),
         "transcript_rows_read": len(data["transcript"]),
+        "transcript_rows_unattributed": data.get("stray_rows", 0),
         "population_size": metric(len(data["population"])) if data["population"] is not None else None,
     }
     resolution_status = "resolved" if all_resolved else ("unresolved" if len(unmatched) == len(names) else "partial")
@@ -400,11 +504,15 @@ def _finish(client: CsodClient, group: Dict[str, str], names: List[str], retrain
                    + "; their metrics, and the overall summary, are null (not measured)")
     elif not has_rows:
         message = "the configured course(s) exist but no user holds them on a transcript"
+    elif not has_population:
+        message = ("no user population is configured (CSOD_USER_POPULATION_FILTER or this fetcher's override), "
+                   "so users who were never assigned the course are invisible and completion_rate_pct is null; "
+                   "counts cover only users holding the course on their transcript")
     else:
         message = None
     out = {
         **base,
-        "status": "success" if all_resolved and has_rows else "partial_or_empty",
+        "status": "success" if all_resolved and has_rows and has_population else "partial_or_empty",
         "config_resolution": {
             "status": resolution_status,
             "matched": [n for n in names if resolved.get(n)],

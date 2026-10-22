@@ -289,14 +289,16 @@ class CsodClient:
         if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in token):
             # requests would quote the whole header, token included, in its error.
             raise CsodAuthError(f"token response from {self.token_url} contained a malformed access_token")
+        raw_expiry = payload.get("expires_in")
         try:
-            expires_in = int(payload.get("expires_in") or 3600)
+            expires_in = 3600 if raw_expiry is None else int(raw_expiry)
         except (TypeError, ValueError):
             expires_in = 3600
         self.token_lifetime_seconds = expires_in
         self._token = token
         # Renew a minute early so a long paged read never sends an expired token.
-        self._token_expires_at = time.monotonic() + max(expires_in - 60, 30)
+        # A lifetime of 60 s or less (including 0) is renewed before every call.
+        self._token_expires_at = time.monotonic() + max(expires_in - 60, 0)
         logger.info("Authenticated to %s (token valid %ss)", self.portal_url, expires_in)
 
     def _headers(self, page_size: int) -> Dict[str, str]:
@@ -330,8 +332,14 @@ class CsodClient:
                 return max(0.0, min(delay, MAX_BACKOFF_SECONDS))
         return float(min(BACKOFF_BASE_SECONDS ** (attempt + 1), MAX_BACKOFF_SECONDS))
 
-    def _check_next_link(self, link: str) -> bool:
-        parsed = urlparse(link)
+    def _is_portal_views_url(self, url: str) -> bool:
+        """
+        One rule for every URL this client will send a token to: https, the
+        portal's host (case-insensitive, an explicit :443 allowed), no user
+        info, and a path under the views root with no dot segments. Both the
+        nextLink check and get_json use it, so they can never disagree.
+        """
+        parsed = urlparse(url)
         try:
             port = parsed.port
         except ValueError:
@@ -342,16 +350,18 @@ class CsodClient:
                 and not parsed.username and not parsed.password and "@" not in parsed.netloc
                 and _is_views_path(parsed.path))
 
+    def _check_next_link(self, link: str) -> bool:
+        return self._is_portal_views_url(link)
+
     def get_json(self, operation: str, url: str, params: Optional[Dict[str, str]] = None,
                  page_size: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """One read-only GET. Returns the JSON object, or None after recording the failure."""
-        parsed_url = urlparse(url)
-        # Compare the host case-insensitively (a nextLink may capitalize it) and
-        # the path exactly; a mismatch is a bug in the caller, not a run failure.
-        if not (parsed_url.scheme == "https" and parsed_url.netloc.lower() == self._host.lower()
-                and not parsed_url.username and not parsed_url.password
-                and _is_views_path(parsed_url.path)):
-            raise ValueError("csod_client only reads Reporting API views")
+        if not self._is_portal_views_url(url):
+            # Recorded, not raised: a raise here would escape read_view and
+            # turn the whole run into internal_error with the evidence lost.
+            self._record(operation, "RefusedUrl", "refused to send the token to a URL outside the portal's "
+                         "Reporting API views", None)
+            return None
         size = page_size or self.page_size
         last_response: Any = None
         last_error: Optional[str] = None
@@ -374,7 +384,7 @@ class CsodClient:
                     time.sleep(self._retry_delay(None, attempt))
                     continue
                 break
-            if response.status_code == 401 and not reauthed:
+            if response.status_code == 401 and not reauthed and attempt < MAX_RETRIES:
                 # Token expired or revoked: one fresh token, then give up. A 401
                 # that survives a fresh token means a missing scope or permission.
                 reauthed = True
@@ -451,7 +461,8 @@ class CsodClient:
         while True:
             if stats["pages"] >= self.max_pages:
                 self._record(operation, "PageCap",
-                             f"stopped after {self.max_pages} pages (CSOD_MAX_PAGES); evidence would be incomplete",
+                             f"stopped after {self.max_pages} pages; evidence would be incomplete. Raise CSOD_MAX_PAGES "
+                             f"(current {self.max_pages}) or CSOD_PAGE_SIZE (up to {MAX_PAGE_SIZE}) and rerun",
                              None)
                 return None, stats
             payload = self.get_json(operation, url, params=params)
@@ -603,6 +614,8 @@ def evidence_error(message: str, code: str = "internal_error") -> Dict[str, Any]
 def _failure_code(failure: Dict[str, Any]) -> str:
     status = failure.get("status_code")
     kind = failure.get("type")
+    if kind == "RefusedUrl":
+        return "partial_failure"
     if kind == "AuthError" or status == 401:
         # 401 after a fresh token: the scope or the 'Reporting API - Read Only'
         # permission is missing for this view.

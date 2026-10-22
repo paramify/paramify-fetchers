@@ -13,7 +13,6 @@ does not decide whether they are acceptable.
 """
 
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -21,13 +20,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 
 from csod_client import collect_guarded, run_fetcher  # type: ignore  # noqa: E402
-from training_completion import collect_training_group, scopes  # type: ignore  # noqa: E402
+from training_completion import collect_training_group, scopes_for  # type: ignore  # noqa: E402
 
 logger = logging.getLogger("cornerstone_security_awareness_training")
 
 OUTPUT = "cornerstone_security_awareness_training.json"
 COURSES_ENV = "CSOD_SECURITY_AWARENESS_COURSES"
-POPULATION_ENV = "CSOD_USER_POPULATION_FILTER"
+POPULATION_ENV = "CSOD_SECURITY_AWARENESS_POPULATION_FILTER"  # override of the shared CSOD_USER_POPULATION_FILTER
 GROUP = {
     "key": "security_awareness_training",
     "title": "General security awareness training",
@@ -37,9 +36,8 @@ GROUP = {
 
 
 def collect():
-    with_population = bool(POPULATION_ENV and os.environ.get(POPULATION_ENV, "").strip())
     body = collect_guarded(
-        scopes(with_population),
+        scopes_for(POPULATION_ENV),
         lambda client: collect_training_group(
             client, group=GROUP, courses_env=COURSES_ENV, population_env=POPULATION_ENV),
     )
