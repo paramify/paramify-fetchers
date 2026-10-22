@@ -57,7 +57,10 @@ evidence_set:
     /rest/api/3/issuetype, /rest/api/3/priority/search and /rest/api/3/status;
     lists service desks via GET /rest/servicedeskapi/servicedesk when Jira
     Service Management is present; and pages recent issues through
-    POST /rest/api/3/search/jql (nextPageToken). Output: jira_site_inventory.json
+    POST /rest/api/3/search/jql (nextPageToken). Summary counts are null, not
+    zero, for a section whose read failed or did not finish (projects, or the
+    issue sample when the search failed or hit the cap). Output:
+    jira_site_inventory.json
   description: >-
     The projects, issue schemes and recent ticket activity of a Jira site,
     evidencing that changes and incidents are tracked, assigned and resolved in a

@@ -38,6 +38,7 @@ from jira_common import (  # noqa: E402
     role_values,
     utc_now,
     write_and_finish,
+    zone_of,
 )
 
 logger = logging.getLogger("jira_incident_postmortems")
@@ -111,11 +112,11 @@ def _category_target(category, targets: dict):
     return lowered[max(matches, key=len)] if matches else None
 
 
-def _history(histories: list, phase_ids: set, reference=None) -> tuple:
-    """(status moves, phase changes) oldest first, times in the issue's own UTC offset."""
+def _history(histories: list, phase_ids: set, reference=None, zone=None) -> tuple:
+    """(status moves, phase changes) oldest first, times in the issue's own timezone."""
     moves, phases = [], []
     for h in histories:
-        at = in_offset_of(h.get("created"), reference)
+        at = in_offset_of(h.get("created"), reference, zone)
         for item in h.get("items") or []:
             fid = item.get("fieldId") or item.get("field")
             entry = {
@@ -169,7 +170,8 @@ def _action_record(issue: dict, now) -> dict:
 
 
 def _incident_record(
-    issue, histories, ids, cfg, postmortems: dict, actions: dict, hidden: set, history_known: bool = True
+    issue, histories, ids, cfg, postmortems: dict, actions: dict, hidden: set,
+    history_known: bool = True, zone=None,
 ) -> dict:
     f = issue.get("fields") or {}
     status = f.get("status") or {}
@@ -177,7 +179,7 @@ def _incident_record(
     resolution = name_of(f.get("resolution"))
     no_review = resolved and (resolution or "").strip().lower() in cfg["no_review"]
     custom = role_values(f, ids)
-    moves, phase_changes = _history(histories, set(ids.get("phase") or []), f.get("created"))
+    moves, phase_changes = _history(histories, set(ids.get("phase") or []), f.get("created"), zone)
     # Checks that could not run because a read failed go to `unknown`, never to
     # `findings`: a refused call is not evidence that something is missing.
     unknown = []
@@ -432,6 +434,7 @@ def main() -> int:
 
     try:
         collector = collector_info(client)
+        zone = zone_of((collector or {}).get("time_zone"))
         ids, problems, candidates = resolve_fields(client, cfg["fields"])
         raw, truncated, search_complete = client.search_issues(
             jql, INCIDENT_FIELDS + all_field_ids(ids), cfg["max_items"]
@@ -478,7 +481,7 @@ def main() -> int:
         incidents = [
             _incident_record(
                 i, histories.get(str(i.get("id")), []), ids, cfg, postmortems, actions, set(missing_pm),
-                history_known=str(i.get("id")) not in unknown_ids,
+                history_known=str(i.get("id")) not in unknown_ids, zone=zone,
             )
             for i in raw
         ]

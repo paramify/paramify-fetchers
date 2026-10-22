@@ -328,13 +328,16 @@ def main() -> int:
         for gid, g in sorted(groups.items(), key=lambda kv: kv[1]["name"] or ""):
             members_of(gid, g["name"], "admin")
             members = group_members.get(gid) or []
+            known = group_complete.get(gid, False)
             admin_groups.append(
                 {
                     "group_id": gid,
                     "name": g["name"],
                     "access_types": sorted(g["access_types"]),
-                    "member_count": len(members),
-                    "inactive_member_count": sum(1 for m in members if m["active"] is False),
+                    # Null, not zero, when the membership read failed or stopped early.
+                    "membership_complete": known,
+                    "member_count": len(members) if known else None,
+                    "inactive_member_count": sum(1 for m in members if m["active"] is False) if known else None,
                     "members": members,
                 }
             )
@@ -494,7 +497,8 @@ def main() -> int:
         "permission_schemes": sorted(schemes.values(), key=lambda s: str(s["id"])),
         "projects": projects,
         "group_memberships": {
-            group_names.get(gid) or gid: members for gid, members in sorted(group_members.items())
+            group_names.get(gid) or gid: {"complete": group_complete.get(gid, False), "members": members}
+            for gid, members in sorted(group_members.items())
         },
     }
     incomplete = ""

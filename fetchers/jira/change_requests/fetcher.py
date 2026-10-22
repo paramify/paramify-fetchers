@@ -19,6 +19,7 @@ from jira_common import (  # noqa: E402
     connection_settings,
     counts,
     disabled_roles,
+    done_entries,
     field_problem_reason,
     in_offset_of,
     int_env,
@@ -32,8 +33,10 @@ from jira_common import (  # noqa: E402
     report_failure,
     resolve_fields,
     role_values,
+    status_catalog,
     utc_now,
     write_and_finish,
+    zone_of,
 )
 
 logger = logging.getLogger("jira_change_requests")
@@ -94,7 +97,7 @@ def _lower_set(values) -> set:
     return {v.strip().lower() for v in values if v and v.strip()}
 
 
-def _transitions(histories: list, field_ids: dict, reference=None) -> tuple:
+def _transitions(histories: list, field_ids: dict, reference=None, zone=None) -> tuple:
     """Return (status_moves, field_changes) from changelog histories, oldest first.
 
     Times are rendered in the issue's own UTC offset (see in_offset_of) so a move
@@ -103,7 +106,7 @@ def _transitions(histories: list, field_ids: dict, reference=None) -> tuple:
     moves, changes = [], []
     watched = {fid: role for role, fids in field_ids.items() for fid in fids}
     for h in histories:
-        at = in_offset_of(h.get("created"), reference)
+        at = in_offset_of(h.get("created"), reference, zone)
         for item in h.get("items") or []:
             fid = item.get("fieldId") or item.get("field")
             if fid == "status":
@@ -130,41 +133,6 @@ def _transitions(histories: list, field_ids: dict, reference=None) -> tuple:
     return sorted(moves, key=key), sorted(changes, key=key)
 
 
-def _status_catalog(client: JiraClient):
-    """({status_id}, {status name lowercased}) of every status in the done category.
-
-    GET /rest/api/3/status lists all statuses with their category, so a past move
-    into a done status that was later renamed, or into a different done status
-    than the current one (Deployed, then Closed), is still recognised.
-    Returns (done_ids, done_names, complete).
-    """
-    raw = client.request("GET", "/rest/api/3/status", "GET /rest/api/3/status")
-    if not isinstance(raw, list):
-        return set(), set(), False
-    done = [st for st in raw if isinstance(st, dict) and name_of(st.get("statusCategory"), "key") == "done"]
-    return (
-        {str(st.get("id")) for st in done if st.get("id") is not None},
-        {st["name"].strip().lower() for st in done if isinstance(st.get("name"), str)},
-        True,
-    )
-
-
-def _done_entries(moves: list, status: dict, catalog) -> list:
-    """Moves that enter the done category from outside it, oldest first."""
-    done_ids, done_names, complete = catalog
-
-    def is_done(status_id, name):
-        if complete:
-            return (status_id in done_ids) or ((name or "").strip().lower() in done_names)
-        # Without the catalog only the current status is known to be done.
-        return bool(name) and name == status.get("name")
-
-    return [
-        m for m in moves
-        if is_done(m.get("to_id"), m.get("to")) and not is_done(m.get("from_id"), m.get("from"))
-    ]
-
-
 def _links(f: dict) -> list:
     out = []
     for link in f.get("issuelinks") or []:
@@ -184,13 +152,14 @@ def _record(
     now,
     catalog=(set(), set(), False),
     history_known: bool = True,
+    zone=None,
 ) -> dict:
     f = issue.get("fields") or {}
     status = f.get("status") or {}
     category = name_of(status.get("statusCategory"), "key")
     issue_type = name_of(f.get("issuetype"))
     custom = role_values(f, ids)
-    moves, changes = _transitions(histories, ids, f.get("created"))
+    moves, changes = _transitions(histories, ids, f.get("created"), zone)
     # When this ticket's history read failed, nothing derived from it is known:
     # a status-based approval, the first move into done, who recorded the approval.
     unknown = []
@@ -217,7 +186,7 @@ def _record(
     # done category. A ticket deployed on day 1, approved on day 3 and reopened
     # and closed again on day 10 was still approved late; using the last move
     # would hide that. Both moves are recorded so a reviewer can see a reopen.
-    done_moves = _done_entries(moves, status, catalog) if closed else []
+    done_moves = done_entries(moves, status, catalog) if closed else []
     first_done_at = done_moves[0]["at"] if done_moves else None
     last_done_at = done_moves[-1]["at"] if done_moves else None
     deployed_at = custom.get("deployed_at") or first_done_at or (
@@ -362,6 +331,10 @@ def _summarize(records: list, complete: bool = True) -> dict:
         "changes_approval_order_unknown": sum(
             1 for r in deployed if r["approval_source"] and r["approved_before_deploy"] is None
         ),
+        # Deployed changes whose approval could not be read (history read failed):
+        # they are in changes_deployed but in neither the approved nor the
+        # pre-approved count, so this names the difference.
+        "changes_approval_unknown": sum(1 for r in deployed if "approval_unknown" in r["unknown"]),
         "changes_deployed_preapproved": sum(
             1 for r in deployed if not r["approval_source"] and r["preapproved"]
         ),
@@ -471,7 +444,8 @@ def main() -> int:
     try:
         collector = collector_info(client)
         ids, problems, candidates = resolve_fields(client, cfg["fields"])
-        catalog = _status_catalog(client)
+        catalog = status_catalog(client)
+        zone = zone_of((collector or {}).get("time_zone"))
         raw, truncated, search_complete = client.search_issues(
             jql, BASE_FIELDS + all_field_ids(ids), cfg["max_items"]
         )
@@ -482,7 +456,7 @@ def main() -> int:
         records = [
             _record(
                 i, histories.get(str(i.get("id")), []), ids, cfg, now, catalog,
-                history_known=str(i.get("id")) not in unknown_ids,
+                history_known=str(i.get("id")) not in unknown_ids, zone=zone,
             )
             for i in raw
         ]

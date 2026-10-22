@@ -104,6 +104,8 @@ def test_remediation_items_paging_history_and_rollups(run):
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
             return 200, ME
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             assert body["jql"] == "labels = cp-test-finding"
             assert "duedate" in body["fields"]
@@ -396,6 +398,8 @@ def test_remediation_items_cap_is_reported(run):
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
             return 200, ME
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [_issue(i, "To Do", "new") for i in range(body["maxResults"])],
                          "nextPageToken": "more"}
@@ -413,6 +417,8 @@ def test_remediation_items_cap_holds_when_server_ignores_max_results(run):
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
             return 200, ME
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [_issue(i, "To Do", "new") for i in range(50)], "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -911,6 +917,8 @@ def test_partial_failure_is_true_whenever_the_run_is_incomplete(run):
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
             return 200, ME
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [_issue(i, "To Do", "new") for i in range(3)], "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -928,6 +936,8 @@ def test_partial_failure_is_true_whenever_the_run_is_incomplete(run):
     def router2(method, path, params, body):
         if path == "/rest/api/3/myself":
             return 200, ME
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/field":
             return 200, [{"id": "cf3", "name": "CCB Approver"}]
         if path == "/rest/api/3/search/jql":
@@ -1034,6 +1044,8 @@ def test_429_is_retried_after_the_retry_after_header(run_raw):
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
             return FakeResponse(200, ME)
+        if path == "/rest/api/3/status":
+            return FakeResponse(200, STATUS_LIST)
         if path == "/rest/api/3/search/jql":
             seen["search"] += 1
             if seen["search"] == 1:
@@ -1057,6 +1069,8 @@ def test_5xx_gives_up_after_backoff_and_is_recorded(run_raw):
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
             return FakeResponse(200, ME)
+        if path == "/rest/api/3/status":
+            return FakeResponse(200, STATUS_LIST)
         if path == "/rest/api/3/search/jql":
             calls["n"] += 1
             return FakeResponse(503, {"errorMessages": ["down"]})
@@ -1073,6 +1087,8 @@ def test_timeout_after_a_success_is_one_failed_call_not_an_abort(run_raw):
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
             return FakeResponse(200, ME)
+        if path == "/rest/api/3/status":
+            return FakeResponse(200, STATUS_LIST)
         if path == "/rest/api/3/search/jql":
             return FakeResponse(200, {"issues": [_issue(1, "To Do", "new")], "isLast": True})
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -1575,6 +1591,8 @@ def test_search_issues_stops_on_a_repeated_token_or_an_empty_page_with_a_token(r
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
             return 200, ME
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [], "nextPageToken": "again"}
         raise AssertionError(path)
@@ -1609,6 +1627,8 @@ def test_remediation_done_without_resolutiondate_uses_the_status_history(run):
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
             return 200, ME
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [done, no_hist], "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -1748,6 +1768,8 @@ def test_remediation_failed_history_makes_the_close_time_unknown_not_absent(run)
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
             return 200, ME
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [done], "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -1776,6 +1798,8 @@ def test_remediation_history_close_time_is_compared_in_the_ticket_offset(run):
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
             return 200, ME
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [done], "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -1792,6 +1816,8 @@ def test_remediation_capped_search_and_bad_shape_have_null_summaries(run):
     def capped(method, path, params, body):
         if path == "/rest/api/3/myself":
             return 200, ME
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [_issue(i, "To Do", "new") for i in range(body["maxResults"])],
                          "nextPageToken": "more"}
@@ -1808,6 +1834,8 @@ def test_remediation_capped_search_and_bad_shape_have_null_summaries(run):
     def odd(method, path, params, body):
         if path == "/rest/api/3/myself":
             return 200, ME
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [bad], "isLast": True}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -1947,6 +1975,7 @@ def test_access_roles_unexpected_shape_midway_nulls_both_sections(run):
 
 
 def test_is_date_only_needs_a_real_date():
+    sys.path.insert(0, str(JIRA / "_shared"))
     import jira_common as jc
     assert jc.is_date_only("2026-10-05") is True
     assert jc.is_date_only("10/05/2026") is False
@@ -1967,6 +1996,8 @@ def test_search_issues_stops_on_a_repeated_token(run):
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
             return 200, ME
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
         if path == "/rest/api/3/search/jql":
             return 200, {"issues": [_issue(len([1]), "To Do", "new")], "nextPageToken": "t1"}
         if path == "/rest/api/3/changelog/bulkfetch":
@@ -1977,3 +2008,152 @@ def test_search_issues_stops_on_a_repeated_token(run):
     assert len([c for c in calls if c[1] == "/rest/api/3/search/jql"]) == 2
     assert out["metadata"]["api_failures"][0]["type"] == "BadPaging"
     assert out["metadata"]["items_collected"] == 2 and out["summary"]["total"] is None
+
+
+# ---------- fourth pass: review of the third round ----------
+
+def _rem_router(items, histories=None, status=None):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, {**ME, "timeZone": "America/Los_Angeles"}
+        if path == "/rest/api/3/status":
+            return (200, STATUS_LIST) if status is None else status
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": items, "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": histories or []}
+        raise AssertionError(path)
+    return router
+
+
+def _rem_hist(issue_id, moves):
+    """Status histories from (created, from_name, from_id, to_name, to_id) tuples."""
+    return [{"issueId": issue_id, "changeHistories": [
+        {"id": f"h{i}", "created": at, "author": {"displayName": "Ann"},
+         "items": [{"fieldId": "status", "fromString": fn, "from": fi, "toString": tn, "to": ti}]}
+        for i, (at, fn, fi, tn, ti) in enumerate(moves)]}]
+
+
+def test_remediation_close_time_is_the_entry_into_the_done_category_not_the_current_status_name(run):
+    # Resolved (done) on Jan 8, swept Resolved -> Closed (also done) on Feb 1; due Jan 10.
+    swept = _issue(1, "Closed", "done", due="2026-01-10")
+    swept["fields"]["issuelinks"] = []
+    hist = _rem_hist("101", [
+        ("2026-01-08T10:00:00.000+00:00", "In Progress", "3", "Resolved", "8"),
+        ("2026-02-01T10:00:00.000+00:00", "Resolved", "8", "Closed", "7"),
+    ])
+    status_list = STATUS_LIST + [{"id": "8", "name": "Resolved", "statusCategory": {"key": "done"}}]
+    code, out, _, _ = run("remediation_items", _rem_router([swept], hist, (200, status_list)), {"JIRA_REMEDIATION_JQL": "x"})
+    item = out["items"][0]
+    assert item["closed_at"].startswith("2026-01-08") and item["closed_at_source"] == "status_history"
+    assert item["reopened"] is False and out["summary"]["closed_after_due_date"] == 0
+
+    # A status renamed after the move: the move's toString is the old name, its id is still done.
+    renamed = _issue(2, "Done", "done", due="2026-01-10")
+    renamed["fields"]["issuelinks"] = []
+    hist = _rem_hist("102", [("2026-01-12T10:00:00.000+00:00", "In Progress", "3", "Resolved (old name)", "5")])
+    code, out, _, _ = run("remediation_items", _rem_router([renamed], hist), {"JIRA_REMEDIATION_JQL": "x"})
+    item = out["items"][0]
+    assert item["closed_at"].startswith("2026-01-12") and out["summary"]["closed_after_due_date"] == 1
+
+    # Reopened and closed again: the current closure is the last entry into done.
+    again = _issue(3, "Done", "done", due="2026-01-10")
+    again["fields"]["issuelinks"] = []
+    hist = _rem_hist("103", [
+        ("2026-01-05T10:00:00.000+00:00", "In Progress", "3", "Done", "5"),
+        ("2026-01-06T10:00:00.000+00:00", "Done", "5", "In Progress", "3"),
+        ("2026-01-20T10:00:00.000+00:00", "In Progress", "3", "Done", "5"),
+    ])
+    code, out, _, _ = run("remediation_items", _rem_router([again], hist), {"JIRA_REMEDIATION_JQL": "x"})
+    item = out["items"][0]
+    assert item["closed_at"].startswith("2026-01-20") and item["reopened"] is True
+    assert out["summary"]["closed_after_due_date"] == 1
+
+
+def test_history_times_follow_the_collector_zone_across_dst(run):
+    # Collector zone America/Los_Angeles (from /myself). The ticket was created in
+    # January (-0800); it was closed on July 11 at 00:30 PDT (-0700), which Jira shows
+    # as the 11th. A fixed -0800 offset would put it on the 10th, the due day.
+    done = _issue(1, "Done", "done", due="2026-07-10")
+    done["fields"]["created"] = "2026-01-01T00:00:00.000-0800"
+    done["fields"]["issuelinks"] = []
+    july_11_0030_pdt = 1783755000000
+    hist = _rem_hist("101", [(july_11_0030_pdt, "In Progress", "3", "Done", "5")])
+    code, out, _, _ = run("remediation_items", _rem_router([done], hist), {"JIRA_REMEDIATION_JQL": "x"})
+    item = out["items"][0]
+    assert item["closed_at"] == "2026-07-11T00:30:00.000-07:00"
+    assert out["summary"]["closed_after_due_date"] == 1
+
+    # And the reverse: created in July (-0700), closed Jan 10 23:30 PST: the due day, not late.
+    done2 = _issue(2, "Done", "done", due="2026-01-10")
+    done2["fields"]["created"] = "2025-07-01T00:00:00.000-0700"
+    done2["fields"]["issuelinks"] = []
+    jan_10_2330_pst = 1768116600000
+    hist = _rem_hist("102", [(jan_10_2330_pst, "In Progress", "3", "Done", "5")])
+    code, out, _, _ = run("remediation_items", _rem_router([done2], hist), {"JIRA_REMEDIATION_JQL": "x"})
+    assert out["items"][0]["closed_at"] == "2026-01-10T23:30:00.000-08:00"
+    assert out["summary"]["closed_after_due_date"] == 0
+
+
+def test_change_requests_summary_counts_deployed_changes_with_unknown_approval(run):
+    t = _ticket(1, "Change Request", "Done", "done", {"cf1": {"value": "Normal"}, "cf6": {"value": "Passed"}})
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 503, {"errorMessages": ["down"]}
+        return _cr_router([t])(method, path, params, body)
+
+    env = {"JIRA_CHANGE_JQL": "project = CCB", "JIRA_CHANGE_APPROVED_STATUSES": "Approved"}
+    code, out, _, _ = run("change_requests", router, env)
+    s = out["summary"]
+    assert s["changes_deployed"] == 1 and s["changes_deployed_with_approval"] == 0
+    assert s["changes_approval_unknown"] == 1, "the gap between deployed and approved is named"
+
+
+def test_access_roles_group_record_is_null_not_empty_when_its_membership_read_failed(run):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/group/member" and params["groupId"] == "g-adm":
+            return 503, {"errorMessages": ["down"]}
+        return _access_router(role_index_allowed=False)(method, path, params, body)
+
+    code, out, _, _ = run("access_roles", router)
+    g = out["admin_groups"][0]
+    assert g["membership_complete"] is False and g["member_count"] is None and g["inactive_member_count"] is None
+    assert out["group_memberships"]["jira-admins"] == {"complete": False, "members": []}
+
+    code, out, _, _ = run("access_roles", _access_router(role_index_allowed=False))
+    assert out["admin_groups"][0]["membership_complete"] is True and out["admin_groups"][0]["member_count"] == 1
+
+
+def test_site_inventory_survives_an_odd_shape_and_nulls_a_failed_section(run):
+    def odd(method, path, params, body):
+        if path == "/rest/api/3/project/search":
+            return 200, {"isLast": True, "values": [None]}
+        return _inventory_router([])(method, path, params, body)
+
+    code, out, _, status = run("site_inventory", odd)
+    assert code == 1 and status["code"] == "internal_error"
+    assert out["summary"]["projects"]["total"] is None and out["summary"]["issues"]["total"] is None
+
+    def search_fails(method, path, params, body):
+        if path == "/rest/api/3/search/jql":
+            return 503, {"errorMessages": ["down"]}
+        return _inventory_router([])(method, path, params, body)
+
+    code, out, _, status = run("site_inventory", search_fails)
+    assert out["summary"]["projects"]["total"] == 1, "the project read succeeded and stays measured"
+    assert out["summary"]["issues"]["total"] is None and out["summary"]["change_issues"]["total"] is None
+    assert code == 1 and status["code"] == "partial_failure"
+
+    issues = [_issue(i, "To Do", "new") for i in range(3)]
+    code, out, _, _ = run("site_inventory", _inventory_router(issues), {"JIRA_MAX_ISSUES": "2"})
+    assert out["metadata"]["issues_truncated"] is True and out["summary"]["issues"]["total"] is None
+
+
+def test_iso_ts_leaves_an_absurd_epoch_alone():
+    sys.path.insert(0, str(JIRA / "_shared"))
+    import jira_common as jc
+    assert jc.iso_ts(10**20) == 10**20
+    assert jc.in_offset_of(10**20, "2026-01-01T00:00:00.000-0800") == 10**20
+    assert jc.zone_of("Not/AZone") is None and jc.zone_of(None) is None
+    assert jc.is_date_only(" 2026-10-05 ") is False

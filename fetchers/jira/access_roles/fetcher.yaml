@@ -89,7 +89,10 @@ evidence_set:
     and are listed as unresolved_privileged_grants. Not included (no REST
     endpoint lists them): organization admins (Atlassian Administration) and
     the holders of the ADMINISTER and SYSTEM_ADMIN global permissions. Summary
-    counts are null for a section whose fetch failed. Summary: admin_groups,
+    counts are null for a section whose fetch failed (a failed role, role
+    index, group listing or membership read nulls the admin or the project
+    section, whichever used it), and a group whose membership read failed has
+    membership_complete false and null counts. Summary: admin_groups,
     distinct_admin_users, inactive_admin_users, admin_users_by_account_type,
     projects_scanned, projects_with_broad_privileged_grants,
     projects_with_unresolved_privileged_grants, distinct_project_admin_users

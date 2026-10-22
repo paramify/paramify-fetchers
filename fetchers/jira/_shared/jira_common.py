@@ -12,6 +12,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 
@@ -336,7 +337,10 @@ def name_of(obj, key="name"):
 def iso_ts(value):
     """ISO 8601 UTC text for an epoch-millisecond number; other values pass through."""
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat(timespec="milliseconds")
+        try:
+            return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat(timespec="milliseconds")
+        except (OverflowError, OSError, ValueError):
+            return value  # an absurd epoch is left as it came, not a crash
     return value
 
 
@@ -656,6 +660,9 @@ def collector_info(client: JiraClient):
         "display_name": me.get("displayName"),
         "account_type": me.get("accountType"),
         "active": me.get("active"),
+        # Jira renders issue field timestamps in this zone (IANA name), so history
+        # times can be rendered in the same zone, DST included (see in_offset_of).
+        "time_zone": me.get("timeZone") if isinstance(me.get("timeZone"), str) else None,
     }
 
 
@@ -670,22 +677,72 @@ def null_summary(summary):
 
 def is_date_only(value) -> bool:
     """True for a parseable YYYY-MM-DD value (a date field), not for any 10-character text."""
-    return isinstance(value, str) and len(value.strip()) == 10 and parse_ts(value.strip()) is not None
+    return isinstance(value, str) and len(value) == 10 and parse_ts(value) is not None
 
 
-def in_offset_of(value, reference):
-    """`value` (a timestamp, or epoch milliseconds) rendered in the UTC offset that
-    `reference` carries. Jira renders issue fields in the collector's profile
-    timezone but changelog/bulkfetch gives epoch milliseconds (UTC), so a history
-    time is moved into the issue's own offset before it is compared with a
-    date-only field such as duedate."""
+def zone_of(name):
+    """A zoneinfo zone for an IANA name, or None when it is unknown or missing."""
+    if not isinstance(name, str) or not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+
+
+def in_offset_of(value, reference, zone=None):
+    """`value` (a timestamp, or epoch milliseconds) rendered in the issue's own
+    timezone. Jira renders issue fields in the collector's profile timezone but
+    changelog/bulkfetch gives epoch milliseconds (UTC), so a history time is
+    moved into that zone before it is compared with a date-only field such as
+    duedate. `zone` is the collector's IANA zone (from /myself), which follows
+    DST; without it the fixed UTC offset that `reference` (an issue field
+    timestamp) carries is used, and without that the value stays in UTC."""
     ts = parse_ts(iso_ts(value))
-    ref = parse_ts(reference) if isinstance(reference, str) and len(reference) > 10 else None
     if ts is None:
         return iso_ts(value)
+    if zone is not None:
+        return ts.astimezone(zone).isoformat(timespec="milliseconds")
+    ref = parse_ts(reference) if isinstance(reference, str) and len(reference) > 10 else None
     if ref is None:
         return ts.isoformat(timespec="milliseconds")
     return ts.astimezone(ref.tzinfo).isoformat(timespec="milliseconds")
+
+
+def status_catalog(client: JiraClient):
+    """({status_id}, {status name lowercased}) of every status in the done category.
+
+    GET /rest/api/3/status lists all statuses with their category, so a past move
+    into a done status that was later renamed, or into a different done status
+    than the current one (Resolved, then Closed), is still recognised.
+    Returns (done_ids, done_names, complete).
+    """
+    raw = client.request("GET", "/rest/api/3/status", "GET /rest/api/3/status")
+    if not isinstance(raw, list):
+        return set(), set(), False
+    done = [st for st in raw if isinstance(st, dict) and name_of(st.get("statusCategory"), "key") == "done"]
+    return (
+        {str(st.get("id")) for st in done if st.get("id") is not None},
+        {st["name"].strip().lower() for st in done if isinstance(st.get("name"), str)},
+        True,
+    )
+
+
+def done_entries(moves: list, status: dict, catalog) -> list:
+    """Moves (dicts with to, to_id, from, from_id) that enter the done category
+    from outside it, oldest first. `status` is the issue's current status."""
+    done_ids, done_names, complete = catalog
+
+    def is_done(status_id, name):
+        if complete:
+            return (status_id in done_ids) or ((name or "").strip().lower() in done_names)
+        # Without the catalog only the current status is known to be done.
+        return bool(name) and name == status.get("name")
+
+    return [
+        m for m in moves
+        if is_done(m.get("to_id"), m.get("to")) and not is_done(m.get("from_id"), m.get("from"))
+    ]
 
 
 def utc_now() -> datetime:

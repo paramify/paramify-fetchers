@@ -48,10 +48,10 @@ classic `manage:jira-configuration` scope: it can write.
 | Needed by | Scopes |
 |---|---|
 | every fetcher (`/myself`) | `read:user:jira`, `read:group:jira`, `read:application-role:jira`, `read:avatar:jira` |
-| `jira_remediation_items` | `read:issue-details:jira`, `read:field:jira`, `read:field.default-value:jira`, `read:field.option:jira`, `read:issue-meta:jira`, `read:issue.changelog:jira` |
+| `jira_remediation_items` | `read:issue-details:jira`, `read:field:jira`, `read:field.default-value:jira`, `read:field.option:jira`, `read:issue-meta:jira`, `read:issue.changelog:jira`, `read:status:jira` (for `GET /rest/api/3/status`) |
 | `jira_audit_records` | `read:audit-log:jira` |
 | `jira_access_roles` | `read:field:jira`, `read:project:jira`, `read:project-role:jira`, `read:permission-scheme:jira`, `read:permission:jira`, `read:project-category:jira`, `read:issue-type:jira`, `read:issue-type-hierarchy:jira`, `read:project.property:jira`, `read:project-version:jira`, `read:project.component:jira` |
-| `jira_change_requests` | the `jira_remediation_items` scopes, plus `read:field-configuration:jira`, `read:project:jira`, `read:project-category:jira`, `read:status:jira` (for `GET /rest/api/3/status`) |
+| `jira_change_requests` | the `jira_remediation_items` scopes, plus `read:field-configuration:jira`, `read:project:jira`, `read:project-category:jira` |
 | `jira_incident_postmortems` | the `jira_change_requests` scopes, plus `read:issue:jira`, `read:issue-security-level:jira`, `read:issue.vote:jira` (for `POST /rest/api/3/issue/bulkfetch`) |
 
 A scoped token only works through the API gateway. Find the site's `cloudId` at
@@ -200,8 +200,13 @@ count, since the run did not finish.
 
 Changelog times from `POST /rest/api/3/changelog/bulkfetch` arrive as epoch
 milliseconds (UTC) while issue fields arrive in the collector's profile
-timezone, so a history time is rendered in the ticket's own UTC offset before it
-is compared with a date-only field such as a due date or an approval date.
+timezone, so a history time is rendered in that timezone (the IANA zone from
+`GET /rest/api/3/myself`, which follows DST; failing that, the fixed offset the
+ticket's own `created` carries) before it is compared with a date-only field
+such as a due date or an approval date. A done ticket's close time, when it has
+no `resolutiondate`, is its last entry into the done category by status id (the
+status list from `GET /rest/api/3/status`), so a Resolved-then-Closed sweep or a
+renamed status does not move it.
 
 ### `jira_incident_postmortems`
 

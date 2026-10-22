@@ -21,6 +21,7 @@ from jira_common import (  # noqa: E402
     counts,
     int_env,
     name_of,
+    null_summary,
     number_stats,
     parse_ts,
     report_failure,
@@ -118,7 +119,10 @@ def _ticket_rollup(issues: list) -> dict:
     }
 
 
-def _summarize(projects: list, issues: list, service_desks) -> dict:
+def _summarize(
+    projects: list, issues: list, service_desks, projects_ok: bool = True, issues_ok: bool = True
+) -> dict:
+    """Null, not zero, for a section whose read failed or did not finish."""
     by_priority_hours: dict = {}
     for i in issues:
         if i["hours_to_resolve"] is not None:
@@ -127,13 +131,12 @@ def _summarize(projects: list, issues: list, service_desks) -> dict:
             )
     changes = [i for i in issues if (i["issue_type"] or "").lower() in CHANGE_TYPES]
     incidents = [i for i in issues if (i["issue_type"] or "").lower() in INCIDENT_TYPES]
-    return {
-        "projects": {
-            "total": len(projects),
-            "by_type": counts(p["project_type"] for p in projects),
-            "without_lead": sum(1 for p in projects if not p["lead"]),
-        },
-        "service_desks": len(service_desks) if isinstance(service_desks, list) else None,
+    projects_section = {
+        "total": len(projects),
+        "by_type": counts(p["project_type"] for p in projects),
+        "without_lead": sum(1 for p in projects if not p["lead"]),
+    }
+    issues_section = {
         "issues": {
             "total": len(issues),
             "open": sum(1 for i in issues if i["status_category"] != "done"),
@@ -156,6 +159,11 @@ def _summarize(projects: list, issues: list, service_desks) -> dict:
         },
         "change_issues": _ticket_rollup(changes),
         "incident_issues": _ticket_rollup(incidents),
+    }
+    return {
+        "projects": projects_section if projects_ok else null_summary(projects_section),
+        "service_desks": len(service_desks) if isinstance(service_desks, list) else None,
+        **(issues_section if issues_ok else null_summary(issues_section)),
     }
 
 
@@ -197,6 +205,8 @@ def main() -> int:
     jsm_available = None
     issues: list = []
     truncated = False
+    projects_ok = False
+    issues_ok = False
 
     try:
         # /myself first: serverInfo answers anonymously, so a bad token must be
@@ -211,7 +221,7 @@ def main() -> int:
                 "version": info.get("version"),
                 "build_number": info.get("buildNumber"),
             }
-        raw_projects, _ = client.paged_values(
+        raw_projects, projects_ok = client.paged_values(
             "/rest/api/3/project/search",
             "GET /rest/api/3/project/search",
             params={"expand": "lead,insight,issueTypes"},
@@ -276,10 +286,15 @@ def main() -> int:
             ]
             jsm_available = True
 
-        raw_issues, truncated, _ = client.search_issues(jql, ISSUE_FIELDS, max_issues)
+        raw_issues, truncated, search_complete = client.search_issues(jql, ISSUE_FIELDS, max_issues)
         issues = [_issue_record(i) for i in raw_issues]
+        # A capped search is also unfinished: its totals would read as the population.
+        issues_ok = search_complete and not truncated
     except Abort:
         pass  # already recorded in api_failures; write what was collected
+    except Exception as e:  # unexpected response shape: keep what was collected and say why
+        client.fail("collection", type(e).__name__, str(e)[:200], "internal_error")
+        projects_ok = issues_ok = False  # the collection did not finish, so no count is trusted
 
     evidence = {
         "metadata": {
@@ -295,7 +310,7 @@ def main() -> int:
         },
         "site": site,
         "collector": collector,
-        "summary": _summarize(projects, issues, service_desks),
+        "summary": _summarize(projects, issues, service_desks, projects_ok, issues_ok),
         "projects": projects,
         "issue_types": issue_types,
         "priorities": priorities,

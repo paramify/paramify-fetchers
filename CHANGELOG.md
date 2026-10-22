@@ -96,9 +96,18 @@ schemas and the `paramify` CLI — not the internal code.
   are compared with a date-only field (bulkfetch gives epoch milliseconds, which
   is UTC), so a closure at 20:00 local on the due day is no longer "after the due
   date". `is_date_only` requires a parseable date, so `10/05/2026` is
-  unparseable, not unmeasurable. `jira_remediation_items` and
-  `jira_audit_records` now survive an unexpected response shape (`internal_error`
-  with the evidence written) like the other four.
+  unparseable, not unmeasurable. `jira_remediation_items`, `jira_audit_records`
+  and `jira_site_inventory` now survive an unexpected response shape
+  (`internal_error` with the evidence written) like the other three, and
+  `jira_site_inventory` nulls its project or issue counts when that read failed
+  or the issue search hit its cap. History times follow the collector's IANA
+  timezone from `/myself` (DST included), not a fixed offset; a done
+  remediation ticket's close time is its last entry into the done category by
+  status id (`GET /rest/api/3/status`, so `jira_remediation_items` now needs
+  `read:status:jira` with a scoped token), with `reopened` recorded; summary
+  `changes_approval_unknown` names deployed changes whose approval could not be
+  read; `jira_access_roles` marks a group whose membership read failed with
+  `membership_complete: false` and null counts instead of "0 members".
 - **`jira_site_inventory` behaviour change** (from the base URL allowlist above):
   `JIRA_BASE_URL` now accepts `https://<site>.atlassian.net`,
   `https://<site>.jira.com`, the Government Cloud domain and the scoped-token

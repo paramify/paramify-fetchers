@@ -17,6 +17,7 @@ from jira_common import (  # noqa: E402
     collector_info,
     connection_settings,
     counts,
+    done_entries,
     in_offset_of,
     int_env,
     name_of,
@@ -24,8 +25,10 @@ from jira_common import (  # noqa: E402
     number_stats,
     parse_ts,
     report_failure,
+    status_catalog,
     utc_now,
     write_and_finish,
+    zone_of,
 )
 
 logger = logging.getLogger("jira_remediation_items")
@@ -63,24 +66,29 @@ def _links(f: dict) -> list:
     return out
 
 
-def _status_transitions(histories: list, reference=None) -> list:
-    """Status moves oldest first, with times in the issue's own UTC offset (see in_offset_of)."""
+def _status_transitions(histories: list, reference=None, zone=None) -> list:
+    """Status moves oldest first, with times in the issue's own timezone (see in_offset_of)."""
     moves = []
     for h in histories:
+        at = in_offset_of(h.get("created"), reference, zone)
         for item in h.get("items") or []:
             if item.get("fieldId") == "status" or item.get("field") == "status":
                 moves.append(
                     {
-                        "at": in_offset_of(h.get("created"), reference),
+                        "at": at,
                         "by": name_of(h.get("author"), "displayName"),
                         "from": item.get("fromString"),
                         "to": item.get("toString"),
+                        "from_id": str(item.get("from")) if item.get("from") is not None else None,
+                        "to_id": str(item.get("to")) if item.get("to") is not None else None,
                     }
                 )
-    return sorted(moves, key=lambda m: m["at"] or "")
+    return sorted(moves, key=lambda m: str(m["at"] or ""))
 
 
-def _item_record(issue: dict, histories: list, now, history_known: bool = True) -> dict:
+def _item_record(
+    issue: dict, histories: list, now, history_known: bool = True, catalog=(set(), set(), False), zone=None
+) -> dict:
     f = issue.get("fields") or {}
     status = f.get("status") or {}
     status_category = name_of(status.get("statusCategory"), "key")
@@ -88,14 +96,17 @@ def _item_record(issue: dict, histories: list, now, history_known: bool = True) 
     created = parse_ts(f.get("created"))
     due = f.get("duedate")
     overdue = bool(is_open and due and due < now.date().isoformat())
-    transitions = _status_transitions(histories, f.get("created"))
+    transitions = _status_transitions(histories, f.get("created"), zone)
     # A ticket can be done without a resolutiondate (a status moved to the done
-    # category with no resolution set). Fall back to the last move into its
-    # current status so a late closure is still measured, and say which was used.
-    # When the history read failed the close time is unknown, not absent.
+    # category with no resolution set). Fall back to the LAST entry into the
+    # done category (by status id and category, so Resolved-then-Closed sweeps
+    # and renamed statuses are handled) so a late closure is still measured,
+    # and say which was used. An earlier closure that was reopened is recorded
+    # as reopened. When the history read failed the close time is unknown.
+    done_moves = done_entries(transitions, status, catalog)
     closed_at, closed_at_source = f.get("resolutiondate"), "resolutiondate"
     if not is_open and not closed_at:
-        done_move = next((m for m in reversed(transitions) if m["to"] == status.get("name") and m["at"]), None)
+        done_move = next((m for m in reversed(done_moves) if m["at"]), None)
         closed_at = done_move["at"] if done_move else None
         closed_at_source = "status_history" if done_move else ("unknown" if not history_known else None)
     resolved = parse_ts(closed_at)
@@ -129,6 +140,7 @@ def _item_record(issue: dict, histories: list, now, history_known: bool = True) 
         "status_transitions": transitions,
         "status_change_count": len(transitions) if history_known else None,
         "status_history_known": history_known,
+        "reopened": len(done_moves) > 1 if history_known else None,
     }
 
 
@@ -195,15 +207,20 @@ def main() -> int:
     truncated = False
     history_complete = True
     search_complete = False
+    catalog = (set(), set(), False)
 
     try:
         collector = collector_info(client)
+        zone = zone_of((collector or {}).get("time_zone"))
+        catalog = status_catalog(client)
         raw, truncated, search_complete = client.search_issues(jql, ISSUE_FIELDS, max_items)
         histories, history_complete, unknown_ids = client.bulk_changelogs(
             [str(i.get("id")) for i in raw if i.get("id")], ["status"]
         )
         items = [
-            _item_record(i, histories.get(str(i.get("id")), []), now, str(i.get("id")) not in unknown_ids)
+            _item_record(
+                i, histories.get(str(i.get("id")), []), now, str(i.get("id")) not in unknown_ids, catalog, zone
+            )
             for i in raw
         ]
     except Abort:
@@ -222,6 +239,7 @@ def main() -> int:
             "items_truncated": truncated,
             "search_complete": search_complete,
             "status_history_complete": history_complete,
+            "done_statuses_known": catalog[2],
             "partial_failure": bool(client.api_failures),
             "api_failures": client.api_failures,
         },
