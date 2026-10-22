@@ -112,6 +112,9 @@ schemas and the `paramify` CLI — not the internal code.
   unparseable time, or the status catalog unread) has `closed_at_source:
   unknown` rather than a guessed date; an open ticket closed once before is
   `reopened`.
+- **`jira_site_inventory` scopes documented**: the README scope table had no row
+  for it. Found on the first scoped-token run: `GET /rest/api/3/priority/search`
+  needs `read:priority:jira`, which the other Jira fetchers do not use.
 - **`jira_site_inventory` behaviour change** (from the base URL allowlist above):
   `JIRA_BASE_URL` now accepts `https://<site>.atlassian.net`,
   `https://<site>.jira.com`, the Government Cloud domain and the scoped-token

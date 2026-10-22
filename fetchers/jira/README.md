@@ -53,6 +53,7 @@ classic `manage:jira-configuration` scope: it can write.
 | `jira_access_roles` | `read:field:jira`, `read:project:jira`, `read:project-role:jira`, `read:permission-scheme:jira`, `read:permission:jira`, `read:project-category:jira`, `read:issue-type:jira`, `read:issue-type-hierarchy:jira`, `read:project.property:jira`, `read:project-version:jira`, `read:project.component:jira` |
 | `jira_change_requests` | the `jira_remediation_items` scopes, plus `read:field-configuration:jira`, `read:project:jira`, `read:project-category:jira` |
 | `jira_incident_postmortems` | the `jira_change_requests` scopes, plus `read:issue:jira`, `read:issue-security-level:jira`, `read:issue.vote:jira` (for `POST /rest/api/3/issue/bulkfetch`) |
+| `jira_site_inventory` | the `jira_remediation_items` scopes, plus `read:project:jira`, `read:issue-type:jira`, `read:priority:jira` (for `GET /rest/api/3/priority/search`; without it the priorities section fails and the run is partial). On a Jira Service Management site the service desk list also needs a JSM read scope (not yet tested with a scoped token) |
 
 A scoped token only works through the API gateway. Find the site's `cloudId` at
 `https://<site>.atlassian.net/_edge/tenant_info` and set
