@@ -34,6 +34,7 @@ from jira_common import (  # noqa: E402
     resolve_fields,
     role_values,
     status_catalog,
+    ts_sort_key,
     utc_now,
     write_and_finish,
     zone_of,
@@ -129,7 +130,7 @@ def _transitions(histories: list, field_ids: dict, reference=None, zone=None) ->
                         "to": item.get("toString"),
                     }
                 )
-    key = lambda m: str(m["at"] or "")  # noqa: E731
+    key = lambda m: ts_sort_key(m["at"])  # noqa: E731
     return sorted(moves, key=key), sorted(changes, key=key)
 
 

@@ -15,6 +15,7 @@ from jira_common import (  # noqa: E402
     NONE_LABEL,
     NOT_FOUND,
     Abort,
+    Counts,
     JiraClient,
     collector_info,
     connection_settings,
@@ -152,9 +153,10 @@ def _summarize(
                 "overall": number_stats(
                     [i["hours_to_resolve"] for i in issues if i["hours_to_resolve"] is not None]
                 ),
-                "by_priority": {
-                    k: number_stats(v) for k, v in sorted(by_priority_hours.items())
-                },
+                # Keyed by data, so null_summary nulls it whole (see Counts).
+                "by_priority": Counts(
+                    (k, number_stats(v)) for k, v in sorted(by_priority_hours.items())
+                ),
             },
         },
         "change_issues": _ticket_rollup(changes),

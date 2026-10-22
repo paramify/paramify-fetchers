@@ -75,10 +75,14 @@ the admin collector account still needs Administer Jira.
 | `jql` | `JIRA_REMEDIATION_JQL` | (required) | JQL selecting the findings tickets, closed ones included |
 | `max_items` | `JIRA_REMEDIATION_MAX_ITEMS` | `2000` | Ticket cap; `metadata.items_truncated` records whether it was hit |
 
-Calls `POST /rest/api/3/search/jql` and `POST /rest/api/3/changelog/bulkfetch`
-(status field, full history, de-duplicated by history id). Summary: open,
-closed, open overdue, open unassigned, open without due date, closed after due
-date, days to close.
+Calls `GET /rest/api/3/status` (the done-category statuses), `POST
+/rest/api/3/search/jql` and `POST /rest/api/3/changelog/bulkfetch` (status
+field, full history, de-duplicated by history id). Summary: open, closed, open
+overdue, open unassigned, open without due date, closed after due date, closed
+without close time, closed close time unknown, days to close. A done ticket with
+no `resolutiondate` whose close time cannot be taken from the history (the
+history or the status catalog could not be read) has `closed_at_source:
+unknown`, never a guessed date.
 
 ### `jira_audit_records`
 

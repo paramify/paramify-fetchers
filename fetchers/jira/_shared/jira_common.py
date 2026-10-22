@@ -709,6 +709,12 @@ def in_offset_of(value, reference, zone=None):
     return ts.astimezone(ref.tzinfo).isoformat(timespec="milliseconds")
 
 
+def ts_sort_key(value):
+    """Sort key for a history time: by instant when it parses, else last and by text."""
+    ts = parse_ts(value)
+    return (0, ts.timestamp(), "") if ts else (1, 0.0, str(value or ""))
+
+
 def status_catalog(client: JiraClient):
     """({status_id}, {status name lowercased}) of every status in the done category.
 

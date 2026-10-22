@@ -36,6 +36,7 @@ from jira_common import (  # noqa: E402
     report_failure,
     resolve_fields,
     role_values,
+    ts_sort_key,
     utc_now,
     write_and_finish,
     zone_of,
@@ -129,7 +130,7 @@ def _history(histories: list, phase_ids: set, reference=None, zone=None) -> tupl
                 moves.append(entry)
             elif fid in phase_ids:
                 phases.append(entry)
-    key = lambda m: str(m["at"] or "")  # noqa: E731
+    key = lambda m: ts_sort_key(m["at"])  # noqa: E731
     return sorted(moves, key=key), sorted(phases, key=key)
 
 

@@ -2157,3 +2157,56 @@ def test_iso_ts_leaves_an_absurd_epoch_alone():
     assert jc.in_offset_of(10**20, "2026-01-01T00:00:00.000-0800") == 10**20
     assert jc.zone_of("Not/AZone") is None and jc.zone_of(None) is None
     assert jc.is_date_only(" 2026-10-05 ") is False
+
+
+def test_remediation_unparseable_or_absurd_history_time_is_not_a_close_time(run):
+    done = _issue(1, "Done", "done", due="2026-01-10")
+    done["fields"]["issuelinks"] = []
+    for bad in (10**20, "not a time"):
+        hist = _rem_hist("101", [(bad, "In Progress", "3", "Done", "5")])
+        code, out, _, status = run("remediation_items", _rem_router([done], hist), {"JIRA_REMEDIATION_JQL": "x"})
+        item = out["items"][0]
+        assert item["closed_at"] is None and item["closed_at_source"] is None, bad
+        assert item["status_transitions"][0]["at"] == bad
+        assert out["summary"]["closed_after_due_date"] == 0 and out["summary"]["closed_without_close_time"] == 1
+        assert code == 0 and status is None
+
+
+def test_remediation_open_ticket_that_was_closed_once_is_reopened(run):
+    back = _issue(1, "In Progress", "indeterminate", due="2026-01-10")
+    back["fields"]["issuelinks"] = []
+    hist = _rem_hist("101", [
+        ("2026-01-05T10:00:00.000+00:00", "In Progress", "3", "Done", "5"),
+        ("2026-01-06T10:00:00.000+00:00", "Done", "5", "In Progress", "3"),
+    ])
+    code, out, _, _ = run("remediation_items", _rem_router([back], hist), {"JIRA_REMEDIATION_JQL": "x"})
+    item = out["items"][0]
+    assert item["is_open"] is True and item["reopened"] is True and item["closed_at"] is None
+
+
+def test_remediation_unread_status_catalog_makes_a_history_close_time_unknown(run):
+    swept = _issue(1, "Closed", "done", due="2026-01-10")
+    swept["fields"]["issuelinks"] = []
+    hist = _rem_hist("101", [
+        ("2026-01-08T10:00:00.000+00:00", "In Progress", "3", "Resolved", "8"),
+        ("2026-02-01T10:00:00.000+00:00", "Resolved", "8", "Closed", "7"),
+    ])
+    forbidden = (403, {"errorMessages": ["no permission"]})
+    code, out, _, status = run("remediation_items", _rem_router([swept], hist, forbidden), {"JIRA_REMEDIATION_JQL": "x"})
+    item = out["items"][0]
+    assert item["closed_at"] is None and item["closed_at_source"] == "unknown"
+    assert out["summary"]["closed_after_due_date"] == 0 and out["summary"]["closed_close_time_unknown"] == 1
+    assert out["metadata"]["done_statuses_known"] is False
+    assert code == 1 and status["code"] == "not_authorized"
+
+    with_date = _issue(2, "Closed", "done", due="2026-01-10", resolved="2026-01-08T10:00:00.000+0000")
+    with_date["fields"]["issuelinks"] = []
+    code, out, _, _ = run("remediation_items", _rem_router([with_date], [], forbidden), {"JIRA_REMEDIATION_JQL": "x"})
+    assert out["items"][0]["closed_at_source"] == "resolutiondate", "a resolutiondate needs no catalog"
+
+
+def test_site_inventory_capped_summary_has_no_data_keys(run):
+    issues = [_issue(i, "Done", "done", resolved="2026-01-02T00:00:00.000+0000") for i in range(3)]
+    code, out, _, _ = run("site_inventory", _inventory_router(issues), {"JIRA_MAX_ISSUES": "2"})
+    assert out["summary"]["issues"]["resolution_hours"]["by_priority"] is None
+    assert out["summary"]["issues"]["by_priority"] is None

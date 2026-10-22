@@ -54,8 +54,9 @@ evidence_set:
     (open and due date passed), closed_at with closed_at_source (resolutiondate,
     else the last entry into the done category by status id from the history,
     rendered in the collector's timezone, else unknown when the history read
-    failed), reopened, days_open, days_to_close and status_transitions (at, by,
-    from, to).
+    failed or the status catalog could not be read, see
+    metadata.done_statuses_known), reopened, days_open, days_to_close and
+    status_transitions (at, by, from, from_id, to, to_id).
     Summary: total, open, closed, open_overdue, open_unassigned,
     open_without_due_date, closed_after_due_date, closed_without_close_time,
     closed_close_time_unknown, days_to_close and open_age_days stats; counts

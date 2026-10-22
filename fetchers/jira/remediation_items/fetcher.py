@@ -26,6 +26,7 @@ from jira_common import (  # noqa: E402
     parse_ts,
     report_failure,
     status_catalog,
+    ts_sort_key,
     utc_now,
     write_and_finish,
     zone_of,
@@ -83,7 +84,7 @@ def _status_transitions(histories: list, reference=None, zone=None) -> list:
                         "to_id": str(item.get("to")) if item.get("to") is not None else None,
                     }
                 )
-    return sorted(moves, key=lambda m: str(m["at"] or ""))
+    return sorted(moves, key=lambda m: ts_sort_key(m["at"]))
 
 
 def _item_record(
@@ -102,13 +103,17 @@ def _item_record(
     # done category (by status id and category, so Resolved-then-Closed sweeps
     # and renamed statuses are handled) so a late closure is still measured,
     # and say which was used. An earlier closure that was reopened is recorded
-    # as reopened. When the history read failed the close time is unknown.
+    # as reopened. When the history read failed, or the status catalog could not
+    # be read (so a Resolved-then-Closed sweep would be taken for the closure),
+    # the close time is unknown, never guessed.
     done_moves = done_entries(transitions, status, catalog)
     closed_at, closed_at_source = f.get("resolutiondate"), "resolutiondate"
     if not is_open and not closed_at:
-        done_move = next((m for m in reversed(done_moves) if m["at"]), None)
+        done_move = next((m for m in reversed(done_moves) if parse_ts(m["at"])), None) if catalog[2] else None
         closed_at = done_move["at"] if done_move else None
-        closed_at_source = "status_history" if done_move else ("unknown" if not history_known else None)
+        closed_at_source = (
+            "status_history" if done_move else ("unknown" if not (history_known and catalog[2]) else None)
+        )
     resolved = parse_ts(closed_at)
     return {
         "key": issue.get("key"),
@@ -140,7 +145,8 @@ def _item_record(
         "status_transitions": transitions,
         "status_change_count": len(transitions) if history_known else None,
         "status_history_known": history_known,
-        "reopened": len(done_moves) > 1 if history_known else None,
+        # Closed and reopened: for an open ticket one earlier closure is enough.
+        "reopened": len(done_moves) > (0 if is_open else 1) if history_known else None,
     }
 
 
@@ -157,7 +163,7 @@ def _summarize(items: list, complete: bool = True) -> dict:
         "closed_after_due_date": sum(
             1
             for i in closed
-            if i["due_date"] and i["closed_at"] and i["closed_at"][:10] > i["due_date"]
+            if i["due_date"] and isinstance(i["closed_at"], str) and i["closed_at"][:10] > i["due_date"]
         ),
         "closed_without_close_time": sum(
             1 for i in closed if not i["closed_at"] and i["closed_at_source"] != "unknown"

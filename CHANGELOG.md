@@ -107,7 +107,11 @@ schemas and the `paramify` CLI — not the internal code.
   `read:status:jira` with a scoped token), with `reopened` recorded; summary
   `changes_approval_unknown` names deployed changes whose approval could not be
   read; `jira_access_roles` marks a group whose membership read failed with
-  `membership_complete: false` and null counts instead of "0 members".
+  `membership_complete: false` and null counts instead of "0 members". A done
+  remediation ticket whose close time cannot be taken from the history (an
+  unparseable time, or the status catalog unread) has `closed_at_source:
+  unknown` rather than a guessed date; an open ticket closed once before is
+  `reopened`.
 - **`jira_site_inventory` behaviour change** (from the base URL allowlist above):
   `JIRA_BASE_URL` now accepts `https://<site>.atlassian.net`,
   `https://<site>.jira.com`, the Government Cloud domain and the scoped-token
