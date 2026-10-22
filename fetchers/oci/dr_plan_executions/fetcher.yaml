@@ -68,7 +68,7 @@ evidence_set:
   reference_id: EVD-OCI-DR-TESTS
   name: Disaster Recovery Plan Executions
   instructions: >
-    Script: fetcher.py. OCI Python SDK calls:
+    Script: oci/dr_plan_executions/fetcher.py. OCI Python SDK calls:
     disaster_recovery.list_dr_protection_groups(), list_dr_plans() and
     list_dr_plan_executions(), walked over every accessible compartment beneath
     the target. One evidence file per target.

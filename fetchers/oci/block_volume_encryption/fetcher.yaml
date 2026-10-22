@@ -65,7 +65,7 @@ evidence_set:
   reference_id: EVD-OCI-BLOCK-VOLUME-ENCRYPTION
   name: Volume Encryption Keys and In-Transit Encryption
   instructions: >
-    Script: fetcher.py. Ported from Prowler's OCI blockstorage service
+    Script: oci/block_volume_encryption/fetcher.py. Ported from Prowler's OCI blockstorage service
     (Apache-2.0), adding backups and in-transit encryption. OCI Python SDK
     calls per compartment: identity.list_availability_domains(),
     compute.list_volume_attachments() and list_boot_volume_attachments() per AD,

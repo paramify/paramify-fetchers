@@ -57,7 +57,7 @@ evidence_set:
   reference_id: EVD-OCI-IAM-POLICIES
   name: IAM Policy Least Privilege Review
   instructions: >
-    Script: fetcher.py. Ported from Prowler's OCI identity service (Apache-2.0),
+    Script: oci/iam_policies/fetcher.py. Ported from Prowler's OCI identity service (Apache-2.0),
     parsing statements rather than matching substrings. OCI Python SDK calls:
     identity.list_policies() per compartment beneath the target, and
     list_dynamic_groups() on the tenancy root. One evidence file per target.

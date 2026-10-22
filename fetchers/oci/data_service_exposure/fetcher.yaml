@@ -68,7 +68,7 @@ evidence_set:
   reference_id: EVD-OCI-DATA-SERVICE-EXPOSURE
   name: Managed Data Service Exposure and Encryption
   instructions: >
-    Script: fetcher.py. Ported from Prowler's OCI database, filestorage and
+    Script: oci/data_service_exposure/fetcher.py. Ported from Prowler's OCI database, filestorage and
     integration services (Apache-2.0), adding mTLS, NFS export options, DB
     systems and the ORACLE_MANAGED_KEY literal. OCI Python SDK calls per
     compartment: database.list_autonomous_databases() and list_db_systems(),

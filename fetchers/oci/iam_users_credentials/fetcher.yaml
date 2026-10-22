@@ -37,7 +37,7 @@ evidence_set:
   reference_id: EVD-OCI-IAM-USERS-CREDENTIALS
   name: User MFA and Standing Credentials
   instructions: >
-    Script: fetcher.py. Ported from Prowler's OCI identity service (Apache-2.0).
+    Script: oci/iam_users_credentials/fetcher.py. Ported from Prowler's OCI identity service (Apache-2.0).
     OCI Python SDK calls, all against the tenancy root: identity.list_groups(),
     list_users(), then per user list_user_group_memberships() and one list call
     per credential type (list_api_keys, list_auth_tokens,

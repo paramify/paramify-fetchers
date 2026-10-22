@@ -67,7 +67,7 @@ evidence_set:
   reference_id: EVD-OCI-CERTIFICATES
   name: Certificate Lifecycle and Automatic Renewal
   instructions: >
-    Script: fetcher.py. OCI Python SDK calls:
+    Script: oci/certificates/fetcher.py. OCI Python SDK calls:
     certificates_management.list_certificates() and
     list_certificate_authorities(), walked over every accessible compartment
     beneath the target. Metadata only — no certificate bundle is retrieved. One

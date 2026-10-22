@@ -30,7 +30,7 @@ evidence_set:
   reference_id: EVD-OCI-IAM-PASSWORD-POLICY
   name: Password Policy Strength
   instructions: >
-    Script: fetcher.py. Ported from Prowler's OCI identity service (Apache-2.0),
+    Script: oci/iam_password_policy/fetcher.py. Ported from Prowler's OCI identity service (Apache-2.0),
     adding lockout settings and SCIM paging. OCI Python SDK calls:
     identity.get_authentication_policy() on the tenancy, list_domains() per
     compartment, then identity_domains.list_password_policies() against each

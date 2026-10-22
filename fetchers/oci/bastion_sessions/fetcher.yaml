@@ -66,7 +66,7 @@ evidence_set:
   reference_id: EVD-OCI-BASTION-JIT
   name: Just-in-Time Administrative Access
   instructions: >
-    Script: fetcher.py. OCI Python SDK calls: bastion.list_bastions(), then
+    Script: oci/bastion_sessions/fetcher.py. OCI Python SDK calls: bastion.list_bastions(), then
     get_bastion() per bastion because the list summary omits the session-TTL and
     CIDR allow-list fields, then list_sessions() per bastion. Walked over every
     accessible compartment beneath the target. One evidence file per target.

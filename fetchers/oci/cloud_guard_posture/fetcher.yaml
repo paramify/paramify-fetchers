@@ -67,7 +67,7 @@ evidence_set:
   reference_id: EVD-OCI-CLOUD-GUARD
   name: Continuous Security Posture Assessment and Enforcement
   instructions: >
-    Script: fetcher.py. OCI Python SDK calls: cloud_guard.get_configuration() on
+    Script: oci/cloud_guard_posture/fetcher.py. OCI Python SDK calls: cloud_guard.get_configuration() on
     the tenancy, stopping there when Cloud Guard is disabled; otherwise, in the
     reporting region, list_security_recipes() and list_security_policies() once,
     then per compartment

@@ -67,7 +67,7 @@ evidence_set:
   reference_id: EVD-OCI-ZPR
   name: Zero Trust Network Flow Policy
   instructions: >
-    Script: fetcher.py. OCI Python SDK calls: zpr.get_configuration() on the
+    Script: oci/zpr_policies/fetcher.py. OCI Python SDK calls: zpr.get_configuration() on the
     tenancy; security_attribute.list_security_attribute_namespaces() across the
     tenancy and list_security_attributes() per namespace; then per compartment
     zpr.list_zpr_policies() and virtual_network.list_vcns(). Every policy

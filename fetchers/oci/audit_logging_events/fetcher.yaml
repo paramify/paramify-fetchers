@@ -82,7 +82,7 @@ evidence_set:
   reference_id: EVD-OCI-AUDIT-LOGGING-EVENTS
   name: Audit Retention, Logging Coverage and Change Monitoring
   instructions: >
-    Script: fetcher.py. Ported from Prowler's OCI audit, logging and events
+    Script: oci/audit_logging_events/fetcher.py. Ported from Prowler's OCI audit, logging and events
     services (Apache-2.0), adding wildcard event-type matching, the
     rule-to-topic-to-subscriber join, and subscription state. OCI Python SDK
     calls: audit.get_configuration() on the tenancy, then per compartment

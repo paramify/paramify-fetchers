@@ -67,7 +67,7 @@ evidence_set:
   reference_id: EVD-OCI-VAULT-KEYS
   name: Key Protection and Rotation
   instructions: >
-    Script: fetcher.py. Ported from Prowler's OCI kms service (Apache-2.0). OCI
+    Script: oci/vault_keys/fetcher.py. Ported from Prowler's OCI kms service (Apache-2.0). OCI
     Python SDK calls: key_management.list_vaults() per compartment with
     get_vault() per vault (the summary omits time_of_deletion), then against
     each ACTIVE vault's own management endpoint list_keys() for every

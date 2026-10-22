@@ -69,7 +69,7 @@ evidence_set:
   reference_id: EVD-OCI-NETWORK-EXPOSURE
   name: Network Traffic Rules and Internet Reachability
   instructions: >
-    Script: fetcher.py. Ported from Prowler's OCI network service (Apache-2.0),
+    Script: oci/network_exposure/fetcher.py. Ported from Prowler's OCI network service (Apache-2.0),
     adding IPv6, every port, egress, UDP and reachability. OCI Python SDK calls
     per compartment: virtual_network.list_vcns(), list_internet_gateways(),
     list_route_tables(), list_subnets(), list_security_lists(),

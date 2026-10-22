@@ -70,7 +70,7 @@ evidence_set:
   reference_id: EVD-OCI-OPERATOR-ACCESS
   name: Oracle Operator Access Controls
   instructions: >
-    Script: fetcher.py. OCI Python SDK calls:
+    Script: oci/operator_access_control/fetcher.py. OCI Python SDK calls:
     operator_access_control list_operator_controls(),
     list_operator_control_assignments() and list_access_requests() (last 365
     days), delegate_access_control list_delegation_controls() and

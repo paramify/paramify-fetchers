@@ -68,7 +68,7 @@ evidence_set:
   reference_id: EVD-OCI-COMPUTE-INSTANCES
   name: Instance Hardening and Exposure
   instructions: >
-    Script: fetcher.py. Ported from Prowler's OCI compute service (Apache-2.0),
+    Script: oci/compute_instances/fetcher.py. Ported from Prowler's OCI compute service (Apache-2.0),
     adding shape capability, measured boot / TPM / memory encryption, agent and
     plugin state, and VNIC exposure. OCI Python SDK calls per compartment:
     compute.list_instances(), compute.list_vnic_attachments() once, then
