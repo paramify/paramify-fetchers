@@ -613,6 +613,40 @@ def test_doctor_leaves_out_a_comparators_category(tmp_path):
     assert report["manifest"]["errors"] == []
 
 
+def test_add_entry_adds_a_comparators_inputs_and_theirs(build_fetcher_fn, tmp_path):
+    fx = {n: _f(build_fetcher_fn, tmp_path, n) for n in ("a", "b")}
+    fx["c1"] = _f(build_fetcher_fn, tmp_path, "c1", ["a", "unknown"])
+    fx["c2"] = _f(build_fetcher_fn, tmp_path, "c2", ["c1", "b", "c2"])
+    m = api.init_manifest()
+    api.add_entry(m, "b")
+
+    assert api.add_entry(m, "c2", fx) == {"c2": None, "c1": "c2", "a": "c1"}
+    assert [e["use"] for e in m["run"]["fetchers"]] == ["b", "c2", "c1", "a"]
+    assert api.add_entry(m, "c2", fx) == {}
+
+
+def test_add_entry_completes_a_comparator_already_in_the_manifest(build_fetcher_fn, tmp_path):
+    fx = {"a": _f(build_fetcher_fn, tmp_path, "a"), "c": _f(build_fetcher_fn, tmp_path, "c", ["a"])}
+    m = api.init_manifest()
+    api.add_entry(m, "c")
+    assert api.add_entry(m, "c", fx) == {"a": "c"}
+
+
+def test_manifest_add_adds_the_inputs(tmp_path, monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
+    path = tmp_path / "m.yaml"
+    api.dump_manifest(api.init_manifest(), path, REPO_ROOT)
+
+    result = CliRunner().invoke(app, ["manifest", "add", "demo_policy_check", "-f", str(path)])
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines()[:2] == ["added demo_policy_check", "added demo_hello (input of demo_policy_check)"]
+    assert [e["use"] for e in api.read_manifest(path)["run"]["fetchers"]] == ["demo_policy_check", "demo_hello"]
+    assert api.validate(api.read_manifest(path), REPO_ROOT) == []
+
+    again = CliRunner().invoke(app, ["manifest", "add", "demo_policy_check", "-f", str(path), "--json"])
+    assert json.loads(again.output)["added"] == []
+
+
 def test_list_and_describe_show_a_comparators_inputs(monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
     listed = CliRunner().invoke(app, ["list"])

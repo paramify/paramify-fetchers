@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from urllib.parse import urlparse
 
 import yaml
@@ -810,10 +810,25 @@ def set_output_dir(m: dict, output_dir: str) -> dict:
     return m
 
 
-def add_entry(m: dict, use: str) -> dict:
-    if _find_entry(m, use) is None:
-        _entries(m).append({"use": use})
-    return m
+def add_entry(m: dict, use: str, fetchers: Optional[Mapping[str, Any]] = None) -> Dict[str, Optional[str]]:
+    """Add `use` and, from `fetchers`, every input a comparator reads (and theirs) that the
+    manifest lacks. Done here, not at run time: an input can need targets and secrets a
+    run can't supply. Returns {each name added: the comparator it is an input of, or None}."""
+    fetchers = fetchers or {}
+    added: Dict[str, Optional[str]] = {}
+    todo: List[Tuple[str, Optional[str]]] = [(use, None)]
+    seen = set()
+    while todo:
+        name, reader = todo.pop(0)
+        if name in seen:
+            continue
+        seen.add(name)
+        if _find_entry(m, name) is None:
+            _entries(m).append({"use": name})
+            added[name] = reader
+        f = fetchers.get(name)
+        todo += [(dep, name) for dep in (f.depends_on if f else []) if dep in fetchers]
+    return added
 
 
 def remove_entry(m: dict, use: str) -> dict:

@@ -1525,7 +1525,9 @@ def _read_for_edit(path: Path, json_out: bool) -> dict:
         raise typer.Exit(1)
 
 
-def _save_and_report(manifest: dict, path: Path, root: Path, json_out: bool, *, verb: str = "Wrote") -> None:
+def _save_and_report(
+    manifest: dict, path: Path, root: Path, json_out: bool, *, verb: str = "Wrote", extra: Optional[dict] = None,
+) -> None:
     """Dump + validate, then report. Exit 0 even when not-yet-runnable (errors are
     surfaced) so a manifest can be built incrementally; exit 1 only if the dump is
     rejected as structurally invalid."""
@@ -1539,7 +1541,7 @@ def _save_and_report(manifest: dict, path: Path, root: Path, json_out: bool, *, 
         raise typer.Exit(1)
     errors = api.validate(manifest, root)
     if json_out:
-        typer.echo(json.dumps({"ok": not errors, "path": str(path), "errors": errors}, indent=2))
+        typer.echo(json.dumps({"ok": not errors, "path": str(path), "errors": errors, **(extra or {})}, indent=2))
         return
     typer.echo(f"{style.dim(verb)} {style.path(str(path))}")
     if errors:
@@ -1591,12 +1593,16 @@ def manifest_add(
     file: str = typer.Option(_DEFAULT_MANIFEST, "-f", "--file", help="Manifest path"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
-    """Add a fetcher entry to the manifest."""
+    """Add a fetcher entry to the manifest; for a comparator, its inputs too."""
     root = api.find_repo_root()
     path = _resolve_manifest_arg(root, file, json_out)
     m = _read_for_edit(path, json_out)
-    api.add_entry(m, fetcher)
-    _save_and_report(m, path, root, json_out)
+    added = api.add_entry(m, fetcher, api.discover(root)["fetchers"])
+    if not json_out:
+        for name, reader in added.items():
+            typer.echo(f"added {style.name(name)}" + (style.dim(f" (input of {reader})") if reader else ""))
+    _save_and_report(m, path, root, json_out,
+                     extra={"added": [{"name": n, "input_of": r} for n, r in added.items()]})
 
 
 @manifest_app.command("remove")
