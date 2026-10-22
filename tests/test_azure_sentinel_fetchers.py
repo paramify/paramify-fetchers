@@ -706,6 +706,23 @@ def test_incidents_owner_rename_is_not_an_assignment(azure, tmp_path):
     assert by_name["i-closed"]["hours_to_acknowledge"] == pytest.approx(6, abs=0.01)
 
 
+def test_incidents_owner_changes_follow_the_object_id(azure, tmp_path):
+    created = NOW - timedelta(days=3)
+    _, _, by_name = run_with_history(azure, tmp_path, [
+        update("i-closed", created, "New", "High"),
+        update("i-closed", created + timedelta(hours=1), "New", "High", owner="", owner_id="u-9", by="Automation rule - assign"),
+        update("i-closed", created + timedelta(hours=2), "New", "High", owner="pat@contoso.com", owner_id="u-9",
+               by="Microsoft XDR"),
+        update("i-closed", created + timedelta(hours=3), "New", "High", owner="pat.doe@contoso.com", owner_id="u-9",
+               by="Microsoft XDR"),
+        update("i-closed", created + timedelta(hours=4), "Active", "High", owner="sam@contoso.com", by="sam@contoso.com"),
+        update("i-closed", NOW - timedelta(days=2), "Closed", "High", NOW - timedelta(days=2), owner="", owner_id="",
+               by="sam@contoso.com")])
+    # Set by object id alone, then named and renamed under that id, then reassigned, then unassigned.
+    assert [(c["from"], c["to"]) for c in by_name["i-closed"]["owner_changes"]] == [
+        (None, "u-9"), ("pat.doe@contoso.com", "sam@contoso.com"), ("sam@contoso.com", None)]
+
+
 def test_incidents_older_than_the_history_have_no_acknowledgement(azure, tmp_path):
     old = NOW - timedelta(days=200)
     rows = incident_history()[:3] + [

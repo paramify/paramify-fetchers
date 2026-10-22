@@ -897,7 +897,9 @@ schemas and the `paramify` CLI — not the internal code.
     system included. Known only when the creation row was read; a later row
     missing doesn't undo one already found.
   - `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
-    who made it), and `tasks` with status and completion time. Times are each
+    who made it), and `tasks` with status and completion time. Owners compare
+    by object id when both updates have one, so a rename isn't an owner change,
+    and an owner known only by object id is named by it. Times are each
     update's LastModifiedTime, and rows written at the same instant always sort
     alike.
   - `hours_to_detect` (first activity to creation), `comments_count`,

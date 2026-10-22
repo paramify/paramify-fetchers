@@ -210,13 +210,24 @@ def update_order(row: Dict[str, Any]) -> tuple:
             str(row.get("ModifiedBy") or ""), str(row.get("Status") or ""), str(row.get("Owner") or ""))
 
 
+def field_value(row: Dict[str, Any], field: str) -> Optional[str]:
+    """A row's value; an owner known only by object id is named by it."""
+    if field == "Owner":
+        return row.get("Owner") or row.get("OwnerId") or None
+    return row.get(field) or None
+
+
 def changes(rows: List[Dict[str, Any]], field: str) -> List[Dict[str, Any]]:
-    """Each update that changed `field`, between consecutive retained rows."""
+    """Each update that changed `field`, between consecutive retained rows; the owner as same_owner compares it."""
     out = []
     for before, after in zip(rows, rows[1:]):
-        if (before.get(field) or None) != (after.get(field) or None):
-            out.append({"time": row_time(after), "from": before.get(field) or None,
-                        "to": after.get(field) or None, "modified_by": after.get("ModifiedBy")})
+        if field == "Owner":
+            changed = not same_owner(before, after)
+        else:
+            changed = field_value(before, field) != field_value(after, field)
+        if changed:
+            out.append({"time": row_time(after), "from": field_value(before, field),
+                        "to": field_value(after, field), "modified_by": after.get("ModifiedBy")})
     return out
 
 
@@ -422,8 +433,7 @@ def state_at(incident: Dict[str, Any], rows: List[Dict[str, Any]], at: datetime)
     before = [r for r in rows if (parse_time(row_time(r)) or at) <= at]
     if before:
         r = before[-1]
-        return {"open": r.get("Status") in OPEN_STATUSES, "severity": r.get("Severity"),
-                "owner": r.get("Owner") or r.get("OwnerId") or None}
+        return {"open": r.get("Status") in OPEN_STATUSES, "severity": r.get("Severity"), "owner": field_value(r, "Owner")}
     current = {"open": incident.get("status") in OPEN_STATUSES, "severity": incident.get("severity"),
                "owner": incident_owner(incident)}
     modified = parse_time(incident.get("last_modified_time_utc"))
