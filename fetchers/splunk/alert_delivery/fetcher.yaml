@@ -60,7 +60,7 @@ evidence_set:
   reference_id: EVD-SPLUNK-ALERT-DELIVERY
   name: Splunk Alert Delivery
   instructions: >-
-    Email action settings (`email_settings[]`: mail server, TLS, whether SMTP
+    Script: splunk/alert_delivery/fetcher.py. Email action settings (`email_settings[]`: mail server, TLS, whether SMTP
     credentials are set), every alert action (`alert_actions[]`), and for each
     alert action triggered in the last `lookback_days`, how many deliveries were
     attempted, succeeded and failed, with the last error (`deliveries[]`).

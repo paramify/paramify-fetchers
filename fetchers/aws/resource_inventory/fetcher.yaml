@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-RESOURCE-INVENTORY
   name: AWS Resource Inventory
-  instructions: 'Script: aws_resource_inventory.sh. Commands executed: aws resourceexplorer2 list-indexes, aws resourceexplorer2 list-views, aws resourceexplorer2 get-default-view, aws resourceexplorer2 search (resource count fallback when no index is enabled).'
+  instructions: 'Script: aws/resource_inventory/fetcher.sh. Commands executed: aws resourceexplorer2 list-indexes, aws resourceexplorer2 list-views, aws resourceexplorer2 get-default-view, aws resourceexplorer2 search (resource count fallback when no index is enabled).'

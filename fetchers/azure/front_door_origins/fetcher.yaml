@@ -48,7 +48,7 @@ evidence_set:
   reference_id: EVD-AZURE-FRONTDOOR-ORIGINS
   name: Azure Front Door Origins
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-cdn CdnManagementClient):
+    Script: azure/front_door_origins/fetcher.py. Azure SDK calls (azure-mgmt-cdn CdnManagementClient):
     profiles.list() kept to sku Standard_AzureFrontDoor / Premium_AzureFrontDoor
     (other CDN SKUs counted in skipped_profiles_by_sku); per profile
     afd_origin_groups.list_by_profile and per group afd_origins.list_by_origin_group on

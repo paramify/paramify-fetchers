@@ -54,7 +54,7 @@ evidence_set:
   reference_id: EVD-AZURE-CONTAINER-WORKLOADS-CONFIG
   name: Azure Container Workloads Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-appcontainers ContainerAppsAPIClient
+    Script: azure/container_workloads_configuration/fetcher.py. Azure SDK calls: azure-mgmt-appcontainers ContainerAppsAPIClient
     managed_environments.list_by_subscription(), container_apps.list_by_subscription() with
     container_apps_auth_configs.list_by_container_app per app, and jobs.list_by_subscription();
     azure-mgmt-containerinstance ContainerInstanceManagementClient

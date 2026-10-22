@@ -27,4 +27,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-INFRA-CHECKS
   name: Datadog Infrastructure Agent Checks
-  instructions: 'Calls GET /api/v1/hosts with pagination; extracts meta.agent_checks from each host. Reports check status (ok/warning/critical/unknown) per host. Writes JSON check results.'
+  instructions: 'Script: datadog/infra_agent_checks/fetcher.py. Calls GET /api/v1/hosts with pagination; extracts meta.agent_checks from each host. Reports check status (ok/warning/critical/unknown) per host. Writes JSON check results.'

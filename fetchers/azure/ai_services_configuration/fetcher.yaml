@@ -53,7 +53,7 @@ evidence_set:
   reference_id: EVD-AZURE-AI-SERVICES-CONFIG
   name: Azure AI Services Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-cognitiveservices CognitiveServicesManagementClient
+    Script: azure/ai_services_configuration/fetcher.py. Azure SDK calls: azure-mgmt-cognitiveservices CognitiveServicesManagementClient
     accounts.list(); for accounts of kind AIServices or OpenAI also deployments.list, rai_policies.list
     and projects.list (resource_group, account); azure-mgmt-monitor diagnostic_settings.list for each
     account and search service. Read as ARM JSON through the same authenticated client, because the SDK

@@ -48,7 +48,7 @@ evidence_set:
   reference_id: EVD-AZURE-MANAGED-IDENTITY-CONFIG
   name: Azure Managed Identity Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-msi ManagedServiceIdentityClient
+    Script: azure/managed_identity_configuration/fetcher.py. Azure SDK calls: azure-mgmt-msi ManagedServiceIdentityClient
     user_assigned_identities.list_by_subscription(); Azure Resource Graph
     (resources | where isnotnull(identity)) for every resource's identity block, paged to the end and
     checked against the reported total; azure-mgmt-authorization
