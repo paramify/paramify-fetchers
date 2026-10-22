@@ -1082,6 +1082,100 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["list"],
         "azure/front_door_waf_coverage — which log categories a profile emits, and their groups",
     ),
+    # --- container workloads ---------------------------------------------------
+    (
+        "azure.mgmt.appcontainers",
+        "ContainerAppsAPIClient",
+        "managed_environments",
+        ["list_by_subscription"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers",
+        "ContainerAppsAPIClient",
+        "container_apps",
+        ["list_by_subscription"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers",
+        "ContainerAppsAPIClient",
+        "jobs",
+        ["list_by_subscription"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers",
+        "ContainerAppsAPIClient",
+        "container_apps_auth_configs",
+        ["list_by_container_app"],
+        "azure/container_workloads_configuration — Easy Auth; a missing group reads every "
+        "app as unauthenticated-unknown, never as protected",
+    ),
+    (
+        "azure.mgmt.containerinstance",
+        "ContainerInstanceManagementClient",
+        "container_groups",
+        ["list"],
+        "azure/container_workloads_configuration",
+    ),
+    # --- data services -----------------------------------------------------------
+    (
+        "azure.mgmt.mongocluster",
+        "MongoClusterMgmtClient",
+        "mongo_clusters",
+        ["list"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.mongocluster",
+        "MongoClusterMgmtClient",
+        "firewall_rules",
+        ["list_by_mongo_cluster"],
+        "azure/data_services_configuration — allow-all firewall rules",
+    ),
+    (
+        "azure.mgmt.kusto",
+        "KustoManagementClient",
+        "clusters",
+        ["list", "list_callout_policies"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.kusto",
+        "KustoManagementClient",
+        "databases",
+        ["list_by_cluster"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.kusto",
+        "KustoManagementClient",
+        "cluster_principal_assignments",
+        ["list"],
+        "azure/data_services_configuration — who can administer the cluster",
+    ),
+    (
+        "azure.mgmt.kusto",
+        "KustoManagementClient",
+        "database_principal_assignments",
+        ["list"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.eventhub",
+        "EventHubManagementClient",
+        "namespaces",
+        ["list", "get_network_rule_set", "list_authorization_rules"],
+        "azure/data_services_configuration — a missing rule-set read makes exposure unknown",
+    ),
+    (
+        "azure.mgmt.eventhub",
+        "EventHubManagementClient",
+        "event_hubs",
+        ["list_by_namespace", "list_authorization_rules"],
+        "azure/data_services_configuration",
+    ),
 ]
 
 
@@ -2517,6 +2611,191 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "AFDOriginProperties",
         ["provisioning_state", "deployment_status"],
         "azure/front_door_origins",
+    ),
+    # --- container workloads: TypeSpec SDKs, so pin the *Properties models -----------
+    (
+        "azure.mgmt.appcontainers.models",
+        "ManagedEnvironmentProperties",
+        ["vnet_configuration", "public_network_access", "peer_authentication", "peer_traffic_configuration", "app_logs_configuration", "zone_redundant"],
+        "azure/container_workloads_configuration — a renamed vnet_configuration reads every "
+        "environment as public",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "VnetConfiguration",
+        ["internal", "infrastructure_subnet_id"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "JobProperties",
+        ["configuration", "template", "environment_id"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "ContainerAppProperties",
+        ["configuration", "template", "environment_id"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "Secret",
+        ["name", "key_vault_url", "identity"],
+        "azure/container_workloads_configuration — a renamed key_vault_url reads every secret as "
+        "stored in the app",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "RegistryCredentials",
+        ["server", "identity", "password_secret_ref"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "EnvironmentVar",
+        ["name", "secret_ref"],
+        "azure/container_workloads_configuration — secret-like plain variables",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "Ingress",
+        ["external", "allow_insecure", "ip_security_restrictions", "client_certificate_mode"],
+        "azure/container_workloads_configuration — internet-facing apps",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "AuthConfigProperties",
+        ["platform", "global_validation", "identity_providers"],
+        "azure/container_workloads_configuration — Easy Auth",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "AuthPlatform",
+        ["enabled"],
+        "azure/container_workloads_configuration — a renamed enabled reads every app as unauthenticated",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "GlobalValidation",
+        ["unauthenticated_client_action"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.containerinstance.models",
+        "ContainerGroupProperties",
+        ["ip_address", "subnet_ids", "containers", "image_registry_credentials", "encryption_properties", "diagnostics", "volumes"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.containerinstance.models",
+        "IpAddress",
+        ["type", "ports", "dns_name_label"],
+        "azure/container_workloads_configuration — a renamed type reads every group as private",
+    ),
+    (
+        "azure.mgmt.containerinstance.models",
+        "EnvironmentVariable",
+        ["name", "value", "secure_value"],
+        "azure/container_workloads_configuration — secure variables are told by the absence of both",
+    ),
+    (
+        "azure.mgmt.containerinstance.models",
+        "ImageRegistryCredential",
+        ["server", "username", "identity"],
+        "azure/container_workloads_configuration",
+    ),
+    # --- data services -------------------------------------------------------------
+    (
+        "azure.mgmt.mongocluster.models",
+        "MongoClusterProperties",
+        ["public_network_access", "auth_config", "high_availability", "encryption", "data_api", "private_endpoint_connections"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.mongocluster.models",
+        "AuthConfigProperties",
+        ["allowed_modes"],
+        "azure/data_services_configuration — native vs Entra authentication",
+    ),
+    (
+        "azure.mgmt.mongocluster.models",
+        "FirewallRuleProperties",
+        ["start_ip_address", "end_ip_address"],
+        "azure/data_services_configuration — a renamed range reads allow-all as restricted",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "ClusterProperties",
+        ["public_network_access", "allowed_ip_range_list", "restrict_outbound_network_access", "enable_disk_encryption", "enable_double_encryption", "key_vault_properties", "trusted_external_tenants", "virtual_network_configuration", "private_endpoint_connections", "enable_purge"],
+        "azure/data_services_configuration — a renamed trusted_external_tenants hides trust of any tenant",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "CalloutPolicy",
+        ["callout_type", "callout_uri_regex", "outbound_access"],
+        "azure/data_services_configuration — outbound callouts",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "TrustedExternalTenant",
+        ["value"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "ReadWriteDatabaseProperties",
+        ["soft_delete_period", "hot_cache_period"],
+        "azure/data_services_configuration — database retention",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "ClusterPrincipalProperties",
+        ["role", "principal_type", "principal_name", "principal_id"],
+        "azure/data_services_configuration — admin assignments",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "DatabasePrincipalProperties",
+        ["role", "principal_type", "principal_name", "principal_id"],
+        "azure/data_services_configuration — admin assignments",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "EHNamespaceProperties",
+        ["minimum_tls_version", "public_network_access", "disable_local_auth", "zone_redundant", "encryption", "private_endpoint_connections", "geo_data_replication"],
+        "azure/data_services_configuration — a renamed disable_local_auth reads every namespace as "
+        "accepting shared keys",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "GeoDataReplicationProperties",
+        ["locations"],
+        "azure/data_services_configuration — geo-replica regions",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "Encryption",
+        ["key_source", "require_infrastructure_encryption"],
+        "azure/data_services_configuration — customer-managed keys",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "NetworkRuleSetProperties",
+        ["default_action", "public_network_access", "trusted_service_access_enabled", "ip_rules", "virtual_network_rules"],
+        "azure/data_services_configuration — network exposure",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "AuthorizationRuleProperties",
+        ["rights"],
+        "azure/data_services_configuration — Manage rights on shared keys",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "EventhubProperties",
+        ["message_retention_in_days", "retention_description", "capture_description", "status", "partition_count"],
+        "azure/data_services_configuration",
     ),
 ]
 

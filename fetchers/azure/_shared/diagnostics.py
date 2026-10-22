@@ -78,7 +78,9 @@ def enabled_category_groups(logs: List[Dict[str, Any]]) -> List[str]:
 
 def diagnostic_setting_record(setting: Dict[str, Any], audit_categories: Iterable[str]) -> Dict[str, Any]:
     """A setting with no destination captures nothing, whatever its categories say."""
-    audit_categories = set(audit_categories)
+    # Matched case-insensitively ("allLogs" == "alllogs"); the captured names keep the caller's spelling.
+    canonical = {str(c).lower(): c for c in audit_categories}
+    groups = {g.lower() for g in AUDIT_CATEGORY_GROUPS}
     logs = [
         {
             "category": log.get("category"),
@@ -94,8 +96,8 @@ def diagnostic_setting_record(setting: Dict[str, Any], audit_categories: Iterabl
             for log in logs
             if log["enabled"]
             for category in (
-                audit_categories if log["category_group"] in AUDIT_CATEGORY_GROUPS
-                else ({log["category"]} & audit_categories)
+                canonical.values() if str(log["category_group"] or "").lower() in groups
+                else [canonical[c] for c in [str(log["category"] or "").lower()] if c in canonical]
             )
         }
     ) if destinations else []
@@ -139,6 +141,27 @@ def audit_logging_summary(settings: Optional[List[Dict[str, Any]]], audit_catego
                 if resource_id
             })
         ],
+    }
+
+
+def log_export_summary(settings: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """Whether any log category or category group reaches a destination, for resources with many categories.
+
+    `settings` None (read failed) gives logs_exported None — unknown, never "not exported".
+    """
+    if settings is None:
+        return {"logs_exported": None, "exported_log_categories": [], "exported_log_category_groups": [],
+                "log_destinations": []}
+    exporting = [s for s in settings if diagnostic_destinations(s)]
+    logs = [log for s in exporting for log in (s.get("logs") or []) if log.get("enabled")]
+    categories = sorted({log["category"] for log in logs if log.get("category")})
+    groups = sorted({log["category_group"] for log in logs if log.get("category_group")})
+    return {
+        "logs_exported": bool(categories or groups),
+        "exported_log_categories": categories,
+        "exported_log_category_groups": groups,
+        "log_destinations": sorted({kind for s in exporting for kind in diagnostic_destinations(s)
+                                    if any(log.get("enabled") for log in s.get("logs") or [])}),
     }
 
 

@@ -1,0 +1,106 @@
+name: azure_ai_hub_configuration
+version: 0.1.0
+description: >
+  Inventories Azure AI hubs, AI projects and the other Azure Machine Learning workspaces
+  (Microsoft.MachineLearningServices/workspaces) in the subscription. For every workspace: how
+  reachable it is from the internet (public network access, IP allow-list, private endpoints), its
+  managed virtual network isolation mode and outbound rules, whether it is marked high business
+  impact, customer-managed key encryption, whether its system datastores are reached with the storage
+  key or an identity, the resources it depends on (Key Vault, storage, container registry,
+  Application Insights), every datastore with how the workspace authenticates to it, every model
+  endpoint with its authentication mode and public access, every compute with its public IP and SSH
+  exposure, whether diagnostic logs are exported, and every connection to another service with
+  whether the connection holds a stored secret.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_ai_hub_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-MAT   # public network access, IP allow-lists and private endpoints on each workspace
+  - KSI-CNA-RNT   # managed virtual network isolation and approved outbound rules
+  - KSI-SVC-SIN   # customer-managed key encryption of workspace data
+  - KSI-IAM-SNU   # identity-based datastore access and connections without stored keys
+  - KSI-MLA-LET   # diagnostic logs exported from each workspace
+
+evidence_set:
+  reference_id: EVD-AZURE-AI-HUB-CONFIG
+  name: Azure AI Hub and Project Configuration
+  instructions: >
+    Script: fetcher.py. Read as ARM JSON through the shared ARM REST client (the token is only ever sent
+    to the cloud's ARM endpoint, and paging stops on a repeated next link), because azure-mgmt-machinelearningservices 1.x predates AI hubs, projects, managed
+    networks and connection auth types: GET /subscriptions/{id}/providers/Microsoft.MachineLearningServices/workspaces
+    and, per workspace, {workspace}/connections, /datastores, /onlineEndpoints, /serverlessEndpoints
+    and /computes, all on api-version 2024-10-01; azure-mgmt-monitor diagnostic_settings.list for each
+    workspace. No call reads keys, datastore credentials or connection credentials; connection targets
+    are recorded without credentials: URLs lose user:password@ and the query string and fragment, a
+    connection string keeps only the values of non-secret keys such as Server and Database (others read
+    <redacted>), and a bare user:password@host keeps only the host.
+    kind is Hub, Project, Default (a classic Machine Learning workspace) or FeatureStore; a Project's
+    hub_resource_id names its hub, and project_without_hub marks a project with none. network_exposure
+    is private when publicNetworkAccess is Disabled, restricted when it is not but ipAllowlist is set
+    and does not admit every IPv4 address, and open otherwise (Azure treats unset as Enabled; an
+    allow-list such as 0.0.0.0/0 reads open). private_endpoint_but_public_access marks a
+    workspace with a private endpoint that is still reachable publicly. A project inherits public
+    network access, managed-network isolation and encryption from its hub when it leaves them unset;
+    inherited_from_hub lists which (network_access, managed_network_isolation, encryption). A project
+    whose hub is not in the subscription keeps Azure's defaults.
+    managed_network_isolation_mode is Disabled (compute uses the public network), AllowInternetOutbound
+    (a managed VNet that may reach the internet) or AllowOnlyApprovedOutbound (only outbound_rules'
+    destinations; outbound_restricted is true); outbound_rules lists each rule's type (FQDN, PrivateEndpoint,
+    ServiceTag), category and destination. hbi_workspace is the high-business-impact flag, which reduces
+    the diagnostic data Microsoft collects. customer_managed_key is true when encryption.status is
+    Enabled and a Key Vault key identifier is set. system_datastores_auth_mode is accessKey (Azure's
+    default when unset), identity or userDelegationSAS; identity_based_datastore_access is true for the
+    last two. data_isolation_enabled and v1_legacy_mode are recorded as set.
+    Datastores: credentials_type is how the workspace reaches the store (AccountKey, Sas,
+    ServicePrincipal, Certificate, KerberosKeytab, KerberosPassword, or None for identity-based access);
+    stored_credentials is true for the first six, which keep a secret in the workspace even when
+    system_datastores_auth_mode is identity, false for None, and null for a missing or unrecognised type
+    (counted in datastores_credentials_unknown), never "no stored credential". Endpoints: kind is online (a managed online endpoint) or serverless (a pay-as-you-go
+    model); key_auth is true for authMode Key, as opposed to AMLToken or AADToken; public is false for an
+    online endpoint with publicNetworkAccess Disabled, and for a serverless endpoint (which has no
+    setting of its own) whose workspace is private; endpoints_public_with_key_auth counts the combination that lets anyone with the key
+    call the model. Computes: public_ip is enableNodePublicIp (true by default on AmlCompute and compute instances, null when
+    the type has no such setting); ssh_public is true when a compute instance's sshPublicAccess or an
+    AmlCompute cluster's remoteLoginPortPublicAccess is Enabled.
+    Connections: uses_stored_secret is true for auth types that keep a credential in the connection
+    (ApiKey, CustomKeys, PAT, UsernamePassword, AccessKey, SAS, AccountKey, ServicePrincipal, OAuth2),
+    false for Entra ID and managed identity types, and null for unrecognised types. A project lists the
+    connections it inherits from its hub, under its own project-scoped id, as well as its own; each such
+    repeat is marked repeats_hub_connection. summary.total_connections counts every listing;
+    distinct_connections and distinct_connections_using_stored_secrets leave out the repeats, so each
+    hub's connections and each project's own are counted once, and two hubs with identical connections
+    count as two. diagnostic_logs_exported is true when a diagnostic setting with a destination enables
+    any log category or category group (workspaces offer about 27), with exported_log_categories and
+    exported_log_category_groups naming them, and null when settings could not be read. A summary with total_endpoints or total_computes 0 proves
+    nothing about endpoint or compute exposure: there is nothing deployed yet. Lists that could not be read are null and set metadata.partial_failure.
+    provider_registration_status (registered / not_registered / unknown) is the
+    Microsoft.MachineLearningServices resource provider's state.

@@ -223,6 +223,39 @@ schemas and the `paramify` CLI — not the internal code.
   Also every DDoS
   protection plan and the VNets that use it. Virtual WAN hub firewall addresses are
   not public IP resources and are not listed.
+
+- **Three Azure fetchers: AI hubs, container workloads and the data tier**,
+  read-only on the built-in Reader role. `azure_ai_hub_configuration` reports
+  each AI hub, AI project and Machine Learning workspace: network exposure,
+  managed virtual network isolation and outbound rules, high business impact,
+  customer-managed keys, whether system datastores are reached with the storage
+  key or an identity, every datastore's credential type, every model endpoint's
+  authentication mode and public access, compute public IPs and SSH, diagnostic
+  log export, and every connection with whether it holds a stored secret. It
+  reads ARM JSON because the Machine Learning SDK predates hubs.
+  `azure_container_workloads_configuration` reports Container Apps environments
+  (internal-only or public, mTLS and peer traffic encryption, log destination),
+  apps and jobs (secrets stored in the app rather than Key Vault, password-based
+  registry pulls, plain environment variables with secret-looking names,
+  internet-facing ingress and whether Easy Auth stops an unauthenticated caller
+  (AllowAnonymous does not), images running a
+  mutable tag rather than pinned by digest) and Container Instances
+  container groups (public IP, VNet placement, registry credentials, Azure
+  Files volumes, logging). `azure_data_services_configuration` reports MongoDB
+  vCore clusters (firewall rules judged on how many addresses they admit
+  together, native versus Entra authentication,
+  high availability), Data Explorer clusters (open allow-lists, trust of any
+  external tenant, purge rights, callout policies, principal assignments) and
+  Event Hubs namespaces (minimum TLS, network rules, shared keys with Manage
+  rights while local auth is on at namespace and hub level, geo-replication,
+  event hub retention and capture), each with customer-managed keys and audit
+  log export. ARM JSON is read through the shared `arm_rest` client and log export
+  through `_shared/diagnostics.py`. New shared modules: `foundry_connections.py`
+  (connection auth types, also used by `azure_ai_services_configuration`) and
+  `ip_ranges.py` (firewall-range width). Adds
+  azure-mgmt-appcontainers, azure-mgmt-containerinstance, azure-mgmt-mongocluster,
+  azure-mgmt-kusto and azure-mgmt-eventhub.
+
 - **Default custom tags on everything the uploaders create.** Every evidence
   set, script and validator that `paramify upload`, `paramify scripts sync`
   and `paramify validators sync` create or maintain now carries two custom
