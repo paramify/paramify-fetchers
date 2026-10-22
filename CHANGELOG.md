@@ -584,9 +584,11 @@ schemas and the `paramify` CLI — not the internal code.
   origin host header. `origin_health` rolls them up per group and region: health,
   healthy hours (measured against the share of probes the group's load-balancing
   settings require), requests and request share, whether every region was healthy
-  and serving in the profile's newest hour with data (ingestion lags per profile,
-  so a group silent that hour reads as not serving), and `traffic_shifts`, each
-  hour the set of serving regions changed. Adds KSI-RPL-TRC. `production_tag` moves from `config_schema`
+  in the profile's newest hour with health data and serving in its newest hour
+  with requests (taken separately, since ingestion lags per profile and per
+  metric; a group silent that hour reads as not serving, and an hour older than
+  the window's last 3 leaves both unknown), and `traffic_shifts`, each hour the
+  set of serving regions changed. Adds KSI-RPL-TRC. `production_tag` moves from `config_schema`
   to `target_schema`, so each subscription target sets its own tag (same
   `AZURE_PRODUCTION_APP_TAG` variable). Existing fields are unchanged.
 - **`azure_front_door_origins` 0.2.0: App Service origin lockdown and regional
@@ -597,9 +599,10 @@ schemas and the `paramify` CLI — not the internal code.
   `locked_to_front_door`: public access is off, or the only public allow rules are
   `AzureFrontDoor.Backend` rules whose `X-Azure-FDID` value is the profile's own
   `frontDoorId` (read with `profiles.get`), or that of another profile in the
-  subscription that also serves the app. `lockdown_gaps` names what fails; the id
-  of a profile that doesn't serve the app is `other_front_door_id_allowed`, since
-  that profile may not have the serving profile's WAF. Resource Graph lookups page
+  subscription that also serves the app (listed in `fronting_front_door_ids`).
+  `lockdown_gaps` names what fails; the id of a profile that doesn't serve the app
+  is `other_front_door_id_allowed` (listed in `other_front_door_ids_allowed`),
+  since that profile may not have the serving profile's WAF. Resource Graph lookups page
   in a stable order and fail on a truncated result or a repeated skip token. Every app in the subscription (narrowed by the
   new optional `production_tag`) is listed in `production_apps`, flagged when no
   serving origin group reaches it, when no enabled origin in another region of its
