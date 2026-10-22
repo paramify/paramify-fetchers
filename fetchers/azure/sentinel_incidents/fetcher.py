@@ -236,9 +236,12 @@ def by_person(row: Dict[str, Any]) -> bool:
 
 def acknowledged_time(rows: List[Dict[str, Any]]) -> Optional[str]:
     """First update by a person that changes the status (to Active or Closed) or the owner, up to the first close,
-    so a reopen never counts. `rows` start at the creation row; a later row missing can't move one already found."""
+    so a reopen never counts; a person creating it already Active or owned counts at creation. `rows` start at the
+    creation row; a later row missing can't move one already found."""
     if not rows or rows[0].get("Status") == "Closed":
         return None
+    if by_person(rows[0]) and (rows[0].get("Status") == "Active" or owned(rows[0])):
+        return row_time(rows[0])
     for before, row in zip(rows, rows[1:]):
         status = row.get("Status")
         moved = status != before.get("Status") and status in ("Active", "Closed")

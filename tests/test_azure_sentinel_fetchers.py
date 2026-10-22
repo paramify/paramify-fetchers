@@ -669,6 +669,26 @@ def test_incidents_reopen_is_not_an_acknowledgement(azure, tmp_path):
     assert by_name["i-closed"]["acknowledged_time_utc"] is None
 
 
+@pytest.mark.parametrize("status, owner, by, acknowledged", [
+    ("Active", "pat@contoso.com", "pat@contoso.com", True),
+    ("New", "pat@contoso.com", "pat@contoso.com", True),
+    ("Active", "", "pat@contoso.com", True),
+    ("New", "", "pat@contoso.com", False),
+    ("Active", "tier1@contoso.com", "Automation rule - triage", False),
+])
+def test_incidents_created_by_a_person_active_or_owned_is_acknowledged(azure, tmp_path, status, owner, by, acknowledged):
+    created = NOW - timedelta(days=1)
+    manual = incident("i-manual", status, created)
+    manual["properties"]["owner"] = {"userPrincipalName": owner} if owner else {}
+    azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"].append(manual)
+    _, ev, by_name = run_with_history(azure, tmp_path, incident_history() + [
+        update("i-manual", created, status, "High", owner=owner, by=by)])
+    # A person creating an incident already Active or owned has taken it up; its creation row is the only row.
+    assert by_name["i-manual"]["history_complete"] is True
+    assert by_name["i-manual"]["acknowledged_time_utc"] == (iso(created) if acknowledged else None)
+    assert ws_a(ev)["open_unacknowledged"] == (0 if acknowledged else 1)
+
+
 def test_incidents_older_than_the_history_have_no_acknowledgement(azure, tmp_path):
     old = NOW - timedelta(days=200)
     rows = incident_history()[:3] + [
