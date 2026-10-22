@@ -339,24 +339,26 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **Two Azure fetchers for private connectivity**, read-only on the built-in
   Reader role. `azure_private_endpoint_configuration` reports each private
-  endpoint's connection status (Approved, Pending, Rejected or Disconnected),
-  subnet, private IPs and private DNS zone groups, and for its target resource
-  whether it still exists and whether public network access is disabled. An App
-  Service slot is checked on the slot, not its parent site. Per endpoint subnet
-  it reports whether the subnet's NSG and route table apply to endpoint traffic,
-  which Azure does only when the subnet's endpoint network policies are on.
+  endpoint's connection status (Approved, Pending, Rejected, Disconnected, or
+  Mixed when its connections differ), subnet, private IPs and private DNS zone
+  groups, and whether its target resource still exists and has public network
+  access disabled (SecuredByPerimeter counts as disabled). An App Service slot is
+  checked on the slot, not its parent site. Per endpoint subnet it reports
+  whether the subnet's NSG and route table apply to endpoint traffic, which Azure
+  does only when the subnet's endpoint network policies are on.
   `azure_private_dns_zone_configuration` reports each private DNS zone's virtual
   network links and record sets, and checks every IP of each `privatelink` A
-  record against the private endpoints that hold it: backed, ip_mismatch, stale
-  or unverified, with a record that has a dead IP next to a live one reported as
-  partially backed. The match is on the record's own name, because a public name
-  derived from the zone is wrong for Key Vault and AKS. Zone names that exist
-  more than once are found across every subscription the credential can read.
-  Both record whether Microsoft.Network is registered. A failed lookup is
-  reported as unknown, never as deleted or stale, and a resource whose
-  subscription or resource group the credential cannot read is reported as not
-  visible rather than deleted. Shared Resource Graph paging and the readable-scope
-  check live in `_shared/resource_graph.py`.
+  record against the private endpoints that hold it: backed, ip_mismatch,
+  endpoint_not_approved, stale, platform_managed, unverified or unknown. A record
+  with a dead IP next to a live one is partially_backed, and one with no IP is
+  no_addresses. An endpoint matches on the record's full name or its name under
+  the zone's public suffix (privatelink.vaultcore.azure.net maps to
+  vault.azure.net). Zone names that exist more than once are found across every
+  subscription the credential can read. Both record whether Microsoft.Network is
+  registered. A failed lookup is reported as unknown, never as deleted or stale,
+  and a resource the credential cannot read as not visible. Resource Graph
+  paging and the readable-scope listing live in `_shared/resource_graph.py`, the
+  found / not_found / not_visible / unknown decision in `_shared/azure_common.py`.
 
 - **Four Azure fetchers for the network edge and cache tier**, read-only on
   the built-in Reader role. `azure_managed_redis_configuration` reports each
