@@ -9,7 +9,8 @@ statement: >
   the close time) and the status part of KSI-MLA-RVL (Audit Log Collection and Alerts). Counts
   violations, so it relies on sentinel_incident_fields_present.
 
-regex: '"(?:severity|status|created_time_utc|last_modified_time_utc)":\s*null'
+# sentinel_incidents 0.2.0's task objects (the only objects with completed_time_utc) are skipped.
+regex: '(?<!"completed_time_utc":[^{}]*)"(?:severity|status|created_time_utc|last_modified_time_utc)":\s*null(?![^{}]*"completed_time_utc":)'
 rules_summary: MATCH_COUNT EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

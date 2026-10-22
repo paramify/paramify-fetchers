@@ -17,5 +17,5 @@ cases:
     note: >
       The standards list succeeded, so mcsb_state reads Failed and the benchmark
       validator alone passes, but a later controls call failed and the run exited 1.
-      Only collection_succeeded fails; detach it and this goes green.
+      Only azure_collection_succeeded fails; detach it and this goes green.
     artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"AuthorizationFailed"},"payload":{"metadata":{"partial_failure":true},"results":{"regulatory_compliance_status":"available","standards":[{"control_count":0,"controls":[],"is_microsoft_cloud_security_benchmark":true,"name":"Microsoft-cloud-security-benchmark","state":"Failed"}]},"summary":{"mcsb_standard_present":true,"mcsb_state":"Failed","mcsb_total_controls":0,"regulatory_compliance_status":"available"}}}'

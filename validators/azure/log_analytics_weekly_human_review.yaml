@@ -5,9 +5,11 @@ role: configuration
 statement: >
   In every week LAQueryLogs still holds, a person (an Entra user, not an application) ran at least one
   query against the workspace: weeks_without_human_queries is empty. Weekly is an assumed audit review
-  frequency for the organization to confirm. Counts violations, so it relies on
-  log_analytics_query_audit_weeks_evaluated, which also fails a workspace whose query audit could not
-  be read week by week.
+  frequency for the organization to confirm. Meant for a run at the end of the week (Saturday, UTC):
+  the fetcher's weeks include the current, unfinished one, so a FAIL from a mid-week run can be the
+  week in progress before its first human query rather than a missed review. Counts violations, so it
+  relies on log_analytics_query_audit_weeks_evaluated, which also fails a workspace whose query audit
+  could not be read week by week.
 
 regex: '"weeks_without_human_queries":\s*\[\s*"'
 rules_summary: MATCH_COUNT EQUALS 0

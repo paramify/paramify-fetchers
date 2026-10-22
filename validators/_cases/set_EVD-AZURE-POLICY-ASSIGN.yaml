@@ -37,7 +37,7 @@ cases:
 
   - name: run_failed_after_assignments_were_listed
     expect: FAIL
-    note: a later call failed (exit 1) but the summary is populated and compliant-looking; only collection_succeeded fails
+    note: a later call failed (exit 1) but the summary is populated and compliant-looking; only azure_collection_succeeded fails
     artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"AuthorizationFailed"},"payload":{"metadata":{"partial_failure":true},"results":{"policy_assignments":[{"actually_enforces":false,"effect_class":"audit_only","enforced":true,"enforcement_mode":"Default","enforcing_effects_not_enforced":false,"excluded_scope_count":0,"name":"SecurityCenterBuiltIn","parameters":{},"policy_definition":{"kind":"policy_set_definition"},"policy_definition_id":"/providers/Microsoft.Authorization/policySetDefinitions/1f3afdf9-d0c9-4c3d-847f-89da613e70a8","policy_effects":{"members":[]},"scope_kind":"subscription"}]},"summary":{"member_policy_effect_counts":{"audit":1,"deployIfNotExists":1,"unresolved":0},"disabled_effect_assignments":0,"actually_enforcing_assignments":6,"enforcing_effects_not_enforced_assignments":0,"total_policy_assignments":17,"unresolved_effect_assignments":0}}}'
 
   - name: enforcing_assignment_scoped_to_a_resource_group

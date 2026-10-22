@@ -34,7 +34,7 @@ cases:
 
   - name: remediations_list_failed_after_summary_read
     expect: FAIL
-    note: the summary read succeeded and looks compliant, but a later call failed (exit 1); only collection_succeeded fails
+    note: the summary read succeeded and looks compliant, but a later call failed (exit 1); only azure_collection_succeeded fails
     artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"AuthorizationFailed"},"payload":{"metadata":{"partial_failure":true},"results":{"assignment_compliance":[{"is_compliant":true,"non_compliant_member_policies":[],"non_compliant_policies":0,"non_compliant_resources":0}],"remediation_tasks":[]},"summary":{"history_collected":true,"history_truncated":false,"recurrence_pairs_truncated":false,"recurring_non_compliant_pairs":0,"remediated_resources_compliance_unknown":0,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_now_non_compliant":0,"remediation_deployments_truncated":false,"remediation_failed_deployments":0,"remediation_tasks_by_provisioning_state":{},"non_compliant_assignments":0,"provider_registration_status":"registered","resources_evaluated":40}}}'
 
   - name: remediated_and_revalidated

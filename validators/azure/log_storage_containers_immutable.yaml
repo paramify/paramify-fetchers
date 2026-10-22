@@ -8,10 +8,12 @@ statement: >
   and similar containers Azure Monitor writes) is tamper-resistant: a Locked time-based immutability
   policy or a legal hold, unprotected 0, and every Locked policy keeps at least 365 days (the assumed
   approved retention). An Unlocked policy counts for neither protection nor retention, so a leftover
-  short Unlocked policy on a container under legal hold does not fail it.
+  short Unlocked policy on a container under legal hold does not fail it. A legal hold protects its
+  container whatever the length of its time-based policy, so a short Locked policy fails only on a
+  container without one.
 
-# Form A on the container records (min_retention_days counts Unlocked policies); the layout lookahead stops a renamed key hiding a short Locked policy.
-regex: '^\s*\{(?=[\s\S]*?"log_containers":\s*[1-9]\d*,[^{}]*?"unprotected":\s*0\b)(?=[\s\S]*?"retention_days":\s*(?:null|\d+),\s*"time_based_policy_state":)(?![\s\S]*?"retention_days":\s*(?:null|\d{1,2}|[12]\d\d|3[0-5]\d|36[0-4])\b,\s*"time_based_policy_state":\s*"Locked")'
+# Form A on the container records (min_retention_days counts Unlocked policies); the layout lookahead stops a renamed key hiding a short Locked policy, and a held container is skipped.
+regex: '^\s*\{(?=[\s\S]*?"log_containers":\s*[1-9]\d*,[^{}]*?"unprotected":\s*0\b)(?=[\s\S]*?"retention_days":\s*(?:null|\d+),\s*"time_based_policy_state":)(?![\s\S]*?\{(?:(?!"legal_hold":\s*true)[^{}])*?"retention_days":\s*(?:null|\d{1,2}|[12]\d\d|3[0-5]\d|36[0-4])\b,\s*"time_based_policy_state":\s*"Locked"(?:(?!"legal_hold":\s*true)[^{}])*\})'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

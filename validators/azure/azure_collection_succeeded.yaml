@@ -1,0 +1,51 @@
+key: azure_collection_succeeded
+name: Azure Evidence Collection Succeeded
+type: AUTOMATED
+role: completeness
+statement: The fetcher run that produced this artifact completed successfully and the evidence envelope is intact.
+
+# Same check as common/collection_succeeded, kept separate because sync links a
+# validator to its sets only when it creates it: a workspace that already holds
+# "Evidence Collection Succeeded" would leave these sets without a completeness check.
+regex: '"exit_code":\s*(?<exit_code>-?\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # exit_code
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-CHANGE-PROVENANCE
+  - EVD-AZURE-RESOURCE-DIAG-SETTINGS
+  - EVD-AZURE-ALERT-RULES
+  - EVD-AZURE-NSG
+  - EVD-AZURE-VNET-EGRESS
+  - EVD-AZURE-APPSVC-CONFIG
+  - EVD-AZURE-APPSVC-PLANS
+  - EVD-AZURE-FRONTDOOR-ORIGINS
+  - EVD-AZURE-FRONTDOOR-TLS
+  - EVD-AZURE-FRONTDOOR-WAF
+  - EVD-AZURE-POLICY-ASSIGN
+  - EVD-AZURE-POLICY-COMPLIANCE
+  - EVD-AZURE-DEFENDER-REG-COMPLIANCE
+  - EVD-AZURE-DEFENDER
+  - EVD-AZURE-RESOURCE-INVENTORY
+  - EVD-AZURE-DEFENDER-ASSESSMENTS
+  - EVD-AZURE-ENTRA-CA-POLICIES
+  - EVD-AZURE-ENTRA-MFA
+  - EVD-AZURE-ENTRA-AUTH-METHODS-POLICY
+  - EVD-AZURE-ENTRA-SERVICE-PRINCIPALS
+  - EVD-AZURE-SQLMI-BACKUPS
+  - EVD-AZURE-SQLMI-CONFIG
+  - EVD-AZURE-SQLMI-ENCRYPTION
+  - EVD-AZURE-STORAGE-ENC
+  - EVD-AZURE-SENTINEL-ANALYTICS-RULES
+  - EVD-AZURE-SENTINEL-DATA-SOURCES
+  - EVD-AZURE-SENTINEL-INCIDENTS
+  - EVD-AZURE-LOG-ANALYTICS-QUERY-AUDIT
+  - EVD-AZURE-LOG-ANALYTICS-DELETION-RIGHTS
+  - EVD-AZURE-LOG-STORAGE-IMMUTABILITY
+  - EVD-AZURE-LOG-ANALYTICS

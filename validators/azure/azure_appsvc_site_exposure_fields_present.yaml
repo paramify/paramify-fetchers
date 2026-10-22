@@ -7,7 +7,7 @@ statement: >
   scm_site_allows_all_traffic and public_network_access in the shape
   azure_appsvc_no_public_allow_all_apps counts, so its zero means no open app
   rather than renamed fields. Per-app gaps (configuration not collected) fail
-  the run and are caught by collection_succeeded.
+  the run and are caught by azure_collection_succeeded.
 
 regex: '"main_site_allows_all_traffic":\s*(?:true|false)(?:(?!"authentication":)[\s\S])*?"scm_site_allows_all_traffic":\s*(?:true|false)(?:(?!"authentication":)[\s\S])*?"public_network_access":\s*(?:null|"[^"]*")'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

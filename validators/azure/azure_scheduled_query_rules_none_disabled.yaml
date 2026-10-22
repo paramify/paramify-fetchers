@@ -12,7 +12,7 @@ statement: >
   queries detect the right events, or that they reach anyone. Counts violations, so
   azure_scheduled_query_rules_enabled_present must pass alongside it.
 
-regex: '"enabled":\s*false,\s*"evaluation_frequency":\s*"[^"]*",\s*"id":\s*"[^"]*/[Mm]icrosoft\.[Ii]nsights/[Ss]cheduled[Qq]uery[Rr]ules/[^"]*",\s*"is_alerting_rule":\s*true'
+regex: '"enabled":\s*false,\s*"evaluation_frequency":\s*(?:null|"[^"]*"),\s*"id":\s*"[^"]*/[Mm]icrosoft\.[Ii]nsights/[Ss]cheduled[Qq]uery[Rr]ules/[^"]*",\s*"is_alerting_rule":\s*true'
 rules_summary: MATCH_COUNT EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

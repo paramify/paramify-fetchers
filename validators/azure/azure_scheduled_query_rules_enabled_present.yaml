@@ -10,7 +10,7 @@ statement: >
   Alerts); on its own it shows only that
   scheduled-query alerting is in use.
 
-regex: '"enabled":\s*true,\s*"evaluation_frequency":\s*"[^"]*",\s*"id":\s*"[^"]*/[Mm]icrosoft\.[Ii]nsights/[Ss]cheduled[Qq]uery[Rr]ules/[^"]*",\s*"is_alerting_rule":\s*true'
+regex: '"enabled":\s*true,\s*"evaluation_frequency":\s*(?:null|"[^"]*"),\s*"id":\s*"[^"]*/[Mm]icrosoft\.[Ii]nsights/[Ss]cheduled[Qq]uery[Rr]ules/[^"]*",\s*"is_alerting_rule":\s*true'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

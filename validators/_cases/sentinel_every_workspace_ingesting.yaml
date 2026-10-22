@@ -15,3 +15,22 @@ cases:
   - name: key_renamed
     expect: FAIL
     artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"data_connectors_total": 1,"name": "law-a","sentinel_onboarded": true,"source_tables": ["AuditLogs","AzureActivity","CommonSecurityLog","Syslog","SigninLogs","SecurityEvent"],"sources_ingesting": 6}]},"summary": {"min_sources": 6,"workspaces_collected": 1,"workspaces_with_no_sources": 0,"workspaces_without_sentinel": 0}}}'
+
+  - name: one_workspace_unreadable
+    expect: FAIL
+    note: the second workspace's ingestion query failed (null), so the minimum reads only the first
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"data_connectors_total": 1,"name": "law-a","sentinel_onboarded": true,"source_tables": ["AuditLogs","SigninLogs"],"sources_ingesting": 2},{"data_connectors_total": 1,"name": "law-b","sentinel_onboarded": true,"source_tables": null,"sources_ingesting": null}]},"summary": {"min_sources_ingesting": 2,"workspaces_collected": 2,"workspaces_with_no_sources": 0,"workspaces_without_sentinel": 0}}}'
+
+  - name: two_workspaces_ingesting_pretty_printed
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {"exit_code": 0, "status": "success"},
+        "payload": {
+          "results": {"workspaces": [
+            {"name": "law-a", "sentinel_onboarded": true, "source_tables": ["AuditLogs"], "sources_ingesting": 1},
+            {"name": "law-b", "sentinel_onboarded": true, "source_tables": ["SigninLogs", "Syslog"], "sources_ingesting": 2}
+          ]},
+          "summary": {"min_sources_ingesting": 1, "workspaces_collected": 2, "workspaces_with_no_sources": 0}
+        }
+      }

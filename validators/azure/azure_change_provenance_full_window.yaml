@@ -13,7 +13,7 @@ statement: >
 
 # Guards the population azure_no_direct_human_changes counts over. Both groups are
 # captured inside lookaheads, so the keys may appear in either order.
-regex: '"payload":\s*\{(?=[\s\S]*?"lookback_days":\s*(?<lookback_days>\d+))(?=[\s\S]*?"total_changes":\s*(?<total_changes>\d+))'
+regex: '^\s*\{(?=[\s\S]*?"lookback_days":\s*(?<lookback_days>\d+))(?=[\s\S]*?"total_changes":\s*(?<total_changes>\d+))'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 14; MATCH_GROUP[2] NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

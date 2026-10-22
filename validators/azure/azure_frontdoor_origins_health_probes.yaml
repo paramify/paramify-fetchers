@@ -11,8 +11,8 @@ statement: >
   that a second origin or region exists to fail over to. Unused origin groups
   are not evaluated, and every serving group is treated as production.
 
-# Violation count (partner: azure_frontdoor_origin_group_probe_fields_present); each sorted group record starts with "active_origins", which fences a match to one group.
-regex: '"health_probe_enabled":\s*false,(?:(?!"active_origins":)[\s\S])*?"serving":\s*true'
+# Violation count (partner: azure_frontdoor_origin_group_probe_fields_present); "active_origins" starts each sorted group record, fencing a match to one group, and origin_health (0.3.0) or production_apps (0.2.0) fences the last.
+regex: '"health_probe_enabled":\s*false,(?:(?!"active_origins":|"origin_health":|"production_apps":)[\s\S])*?"serving":\s*true'
 rules_summary: MATCH_COUNT EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

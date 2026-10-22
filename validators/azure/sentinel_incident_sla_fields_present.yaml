@@ -7,8 +7,8 @@ statement: >
   no closed or no open incident), so no SLA breach reflects the incidents rather than renamed fields.
   Integrity partner of sentinel_open_incidents_within_sla and sentinel_incidents_closed_within_sla.
 
-# The optional group crosses sentinel_incidents 0.2.0's monthly list (its month objects hold no lists).
-regex: '"max_hours_to_close":\s*(?:null|\d)[^{}]*?(?:"monthly":\s*\[[^\[\]]*\][^{}]*?)?"oldest_open_age_days":\s*(?:null|\d)'
+# The optional group crosses sentinel_incidents 0.2.0's monthly list (its month objects hold no lists), reading quoted strings whole so a bracket in an owner-tally key cannot end it.
+regex: '"max_hours_to_close":\s*(?:null|\d)[^{}]*?(?:"monthly":\s*\[(?:"(?:[^"\\]|\\.)*"|[^\[\]"])*\][^{}]*?)?"oldest_open_age_days":\s*(?:null|\d)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
