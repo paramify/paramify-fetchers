@@ -7,7 +7,7 @@ starts with `_` (e.g. _shared, _categories, _template).
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Dict, Optional
 
 from jsonschema import Draft202012Validator
 
@@ -24,10 +24,6 @@ from framework.contract import (
     TargetField,
 )
 from framework.issue_reports import reserved_config_schema
-from framework.runner import dependency_graph
-
-FETCHERS_DIR = "fetchers"
-COMPARATORS_DIR = "comparators"
 
 
 def _load_schema(repo_root: Path, name: str = "fetcher_schema.json") -> dict:
@@ -59,33 +55,19 @@ def _fetcher_dirs(tree_root: Path):
                 yield fetcher_dir
 
 
-class Catalog(Dict[str, Fetcher]):
-    """{fetcher_name: Fetcher}, plus `excluded`: {name: why} for each fetcher.yaml left out."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.excluded: Dict[str, str] = {}
-
-
-def excluded(fetchers: Mapping[str, Fetcher]) -> Dict[str, str]:
-    """What discovery left out, for a plain dict too."""
-    return getattr(fetchers, "excluded", {})
-
-
-def discover_fetchers(repo_root: Path) -> Catalog:
+def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
     """Walk fetchers/*/*/fetcher.yaml and comparators/*/*/fetcher.yaml into one namespace.
 
-    Raises ValueError on schema-invalid yaml or duplicate names. A fetcher in the
-    wrong tree, or a comparator whose inputs can't run, is left out instead and
-    recorded in `excluded`, so it can't take the rest of the catalog down with it.
+    Raises ValueError on schema-invalid yaml or duplicate names. A comparator's
+    inputs are checked by `validate` and `run`, not here.
     """
     schema = _load_schema(repo_root)
     validator = Draft202012Validator(schema)
 
-    fetchers = Catalog()
-    trees = [repo_root / FETCHERS_DIR]
-    if (repo_root / COMPARATORS_DIR).is_dir():
-        trees.append(repo_root / COMPARATORS_DIR)
+    fetchers: Dict[str, Fetcher] = {}
+    trees = [repo_root / "fetchers"]
+    if (repo_root / "comparators").is_dir():
+        trees.append(repo_root / "comparators")
 
     for tree_root in trees:
         for fetcher_dir in _fetcher_dirs(tree_root):
@@ -94,13 +76,6 @@ def discover_fetchers(repo_root: Path) -> Catalog:
                 continue
 
             data = yaml_io.load_path(yaml_path)
-            # Before the schema, whose comparator rules would bury this in a list of errors.
-            misplaced = _misplaced(data, tree_root.name == COMPARATORS_DIR)
-            if misplaced:
-                name = data.get("name") if isinstance(data, dict) else None
-                fetchers.excluded[name if isinstance(name, str) else str(yaml_path)] = f"{yaml_path}: {misplaced}"
-                continue
-
             errors = list(validator.iter_errors(data))
             if errors:
                 detail = "\n".join(f"  {e.message}" for e in errors)
@@ -114,25 +89,7 @@ def discover_fetchers(repo_root: Path) -> Catalog:
                 )
             fetchers[fetcher.name] = fetcher
 
-    for name, why in dependency_graph.invalid(fetchers, fetchers.excluded).items():
-        fetchers.excluded[name] = f"{fetchers.pop(name).path / 'fetcher.yaml'}: {why}"
     return fetchers
-
-
-def _misplaced(data: Any, in_comparators: bool) -> Optional[str]:
-    declares_inputs = isinstance(data, dict) and bool(data.get("depends_on"))
-    if declares_inputs and not in_comparators:
-        return (
-            f"declares depends_on, which now makes it a comparator. Move it to "
-            f"{COMPARATORS_DIR}/<category>/<name>/ if it compares other fetchers' evidence; "
-            f"otherwise delete depends_on, which fetchers never used"
-        )
-    if in_comparators and not declares_inputs:
-        return (
-            f"is under {COMPARATORS_DIR}/ but declares no depends_on; "
-            f"a fetcher that collects from a source belongs under {FETCHERS_DIR}/"
-        )
-    return None
 
 
 def _parse_secrets(raw) -> list:

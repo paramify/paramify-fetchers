@@ -29,6 +29,7 @@ from jsonschema import Draft202012Validator
 
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import DEFAULT_EVIDENCE_FREQUENCY, EVIDENCE_FREQUENCIES
+from framework.runner import dependency_graph
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHERS_ROOT = REPO_ROOT / "fetchers"
@@ -104,9 +105,21 @@ def test_discovery_does_not_raise() -> None:
     """The aggregate gate: discovery validates + dedupes, raising on violations."""
     fetchers = discover_fetchers(REPO_ROOT)
     assert fetchers, "discover_fetchers returned nothing"
-    # Users get a scoped exclusion; this repo ships none.
-    assert fetchers.excluded == {}, fetchers.excluded
     discover_platforms(REPO_ROOT)  # must not raise on any category file
+
+
+def test_comparators_live_under_comparators_and_can_run() -> None:
+    """A layout rule for this repo: `depends_on` makes a comparator, filed under
+    comparators/; every fetcher under fetchers/ collects. Each comparator's inputs exist,
+    write JSON evidence and form no cycle."""
+    fetchers = discover_fetchers(REPO_ROOT)
+    misfiled = [
+        f"{f.path.relative_to(REPO_ROOT)}: depends_on {f.depends_on}"
+        for f in fetchers.values()
+        if f.is_comparator != (COMPARATORS_ROOT in f.path.parents)
+    ]
+    assert not misfiled, "comparators (depends_on) belong under comparators/, collectors under fetchers/:\n" + "\n".join(misfiled)
+    assert dependency_graph.problems(fetchers) == {}
 
 
 def test_fetcher_names_unique_and_complete() -> None:

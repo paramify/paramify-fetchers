@@ -5,7 +5,7 @@ run, and reads the files they wrote. See docs/comparators.md.
 """
 
 from collections import Counter
-from typing import Dict, List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Sequence
 
 from framework.contract import Fetcher, ManifestEntry
 
@@ -13,27 +13,14 @@ from framework.contract import Fetcher, ManifestEntry
 INPUT_KINDS = ("evidence", "inventory")
 
 
-def invalid(fetchers: Mapping[str, Fetcher], left_out: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
-    """Each comparator that can't run, with why: an unknown input, one that writes no JSON
-    evidence, a cycle, or an input that is itself left out (`left_out` seeds those)."""
-    out: Dict[str, str] = {}
-    gone = dict(left_out or {})
-    while True:
-        found = _problems({n: f for n, f in fetchers.items() if n not in out}, gone)
-        if not found:
-            return out
-        out.update(found)
-        gone.update(found)
-
-
-def _problems(fetchers: Mapping[str, Fetcher], gone: Mapping[str, str]) -> Dict[str, str]:
+def problems(fetchers: Mapping[str, Fetcher]) -> Dict[str, str]:
+    """Each comparator that can't run, with why: an unknown input, one that writes no
+    JSON evidence, or a cycle. `validate` and `run` report these on the entry."""
     out: Dict[str, str] = {}
     for name in sorted(fetchers):
         for dep in fetchers[name].depends_on:
             src = fetchers.get(dep)
-            if dep in gone:
-                out[name] = f"depends_on {dep}, which is left out of the catalog"
-            elif src is None:
+            if src is None:
                 out[name] = f"depends_on names an unknown fetcher: {dep}"
             elif src.kind not in INPUT_KINDS or src.output_type != "json":
                 out[name] = (

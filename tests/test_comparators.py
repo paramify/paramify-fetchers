@@ -176,7 +176,7 @@ def test_order_appends_a_cycle_rather_than_looping(build_fetcher_fn, tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# What discovery rejects
+# Inputs a comparator can't run with
 # --------------------------------------------------------------------------- #
 
 
@@ -184,25 +184,24 @@ def test_order_appends_a_cycle_rather_than_looping(build_fetcher_fn, tmp_path):
     ("evidence", "json", True), ("inventory", "json", True),
     ("issue_report", "csv", False), ("discovery", "json", False), ("evidence", "csv", False),
 ])
-def test_invalid_accepts_only_json_evidence_inputs(build_fetcher_fn, tmp_path, kind, output, ok):
+def test_problems_accepts_only_json_evidence_inputs(build_fetcher_fn, tmp_path, kind, output, ok):
     fx = {"src": _f(build_fetcher_fn, tmp_path, "src", kind=kind, output_type=output),
           "c": _f(build_fetcher_fn, tmp_path, "c", ["src"])}
-    invalid = dependency_graph.invalid(fx)
-    assert (invalid == {}) is ok, invalid
+    problems = dependency_graph.problems(fx)
+    assert (problems == {}) is ok, problems
 
 
-def test_invalid_names_unknown_inputs_cycles_and_what_reads_them(build_fetcher_fn, tmp_path):
+def test_problems_names_unknown_inputs_and_cycles_on_the_comparator_itself(build_fetcher_fn, tmp_path):
     fx = {name: _f(build_fetcher_fn, tmp_path, name, deps) for name, deps in {
-        "c": ["nope"], "self": ["self"], "p": ["q"], "q": ["p"],
-        "reader": ["c"], "late": ["gone"], "fine": [],
+        "c": ["nope"], "self": ["self"], "p": ["q"], "q": ["p"], "reader": ["c"], "fine": [],
     }.items()}
-    assert dependency_graph.invalid(fx, {"gone": "misplaced"}) == {
+    # `reader` can run: c is a comparator that writes JSON evidence. If c is skipped, reader
+    # finds it missing at run time and writes null counts.
+    assert dependency_graph.problems(fx) == {
         "c": "depends_on names an unknown fetcher: nope",
         "self": "dependency cycle: self -> self",
         "p": "dependency cycle: p -> q -> p",
         "q": "dependency cycle: p -> q -> p",
-        "reader": "depends_on c, which is left out of the catalog",
-        "late": "depends_on gone, which is left out of the catalog",
     }
 
 
@@ -212,55 +211,65 @@ def test_discovery_finds_comparators_beside_fetchers(tmp_path):
     found = discover_fetchers(tmp_path)
     assert found[cmp].is_comparator and found[cmp].depends_on == [src]
     assert not found[src].is_comparator
-    assert found.excluded == {}
 
 
-def test_a_comparator_with_an_unknown_input_is_left_out_and_the_rest_still_runs(tmp_path):
+def test_discovery_keeps_a_comparator_with_an_unknown_input(tmp_path):
     src = input_fetcher(tmp_path, "src")
     cmp = comparator(tmp_path, "cmp", ["testcat_nope"], PROBE)
     reader = comparator(tmp_path, "reader", [cmp], PROBE)
-    found = discover_fetchers(tmp_path)
+    assert set(discover_fetchers(tmp_path)) == {src, cmp, reader}
+    assert {f["name"] for c in api.catalog(tmp_path)["categories"] for f in c["fetchers"]} == {src, cmp, reader}
 
-    assert set(found) == {src}
-    why = found.excluded[cmp]
-    assert why.endswith("cmp/fetcher.yaml: depends_on names an unknown fetcher: testcat_nope")
-    assert found.excluded[reader].endswith(f"depends_on {cmp}, which is left out of the catalog")
-    rows = [{"name": cmp, "reason": why}, {"name": reader, "reason": found.excluded[reader]}]
-    assert api.catalog(tmp_path)["excluded"] == rows
-    assert api.doctor(tmp_path)["excluded"] == rows
 
-    m = manifest(tmp_path, src, cmp)
-    assert api.validate(m, tmp_path) == [f"entry[1] uses {cmp}, which discovery left out: {why}"]
-    _, _, events = run(tmp_path, m)
+def _csv_fetcher(root: Path) -> str:
+    name = input_fetcher(root, "csv")
+    yaml_path = root / "fetchers" / "testcat" / "csv" / "fetcher.yaml"
+    yaml_path.write_text(yaml_path.read_text().replace("type: json\n  path: csv.json", "type: csv\n  path: csv.csv"))
+    return name
+
+
+@pytest.mark.parametrize("make,why", [
+    (lambda root: comparator(root, "cmp", ["testcat_nope"], PROBE),
+     "depends_on names an unknown fetcher: testcat_nope"),
+    (lambda root: comparator(root, "cmp", ["testcat_cmp"], PROBE),
+     "dependency cycle: testcat_cmp -> testcat_cmp"),
+    (lambda root: comparator(root, "cmp", [_csv_fetcher(root)], PROBE),
+     "depends_on testcat_csv, which writes no JSON evidence (kind evidence, output csv)"),
+], ids=["unknown", "cycle", "not-json"])
+def test_validate_and_run_report_a_bad_input_on_that_entry_and_the_rest_still_runs(tmp_path, make, why):
+    src = input_fetcher(tmp_path, "src")
+    cmp = make(tmp_path)
+    reader = comparator(tmp_path, "reader", [cmp], PROBE)
+    m = manifest(tmp_path, src, cmp, reader)
+
+    assert api.validate(m, tmp_path) == [f"{cmp}: {why}"]
+    summary, run_dir, events = run(tmp_path, m)
+
+    assert not summary["ok"]
     assert [(e["fetcher"], e["reason"]) for e in events if e["event"] == "fetcher_skip"] == [(cmp, why)]
-    assert any(e["event"] == "fetcher_result" and e["fetcher"] == src and e["exit_code"] == 0 for e in events)
+    assert started(events) == [src, reader]
+    assert not (run_dir / "cmp.json").exists()
+    assert envelope(run_dir, "reader.json")["metadata"]["inputs"][0]["status"] == "missing"
 
 
-def test_a_fetcher_with_a_leftover_depends_on_is_left_out_with_how_to_migrate(tmp_path):
+def test_discovery_does_not_judge_which_tree_a_fetcher_is_in(tmp_path):
+    """Where a comparator is filed is this repo's layout rule (tests/test_contracts.py)."""
     src = input_fetcher(tmp_path, "src")
-    # A collector with a secret: the comparator schema rules would otherwise bury the cause.
-    legacy = input_fetcher(tmp_path, "legacy", extra=f"depends_on:\n  - {src}\n")
-    yaml_path = tmp_path / "fetchers" / "testcat" / "legacy" / "fetcher.yaml"
-    yaml_path.write_text(yaml_path.read_text().replace("secrets: []", "secrets:\n  - name: token\n    env: T\n"))
-    found = discover_fetchers(tmp_path)
-
-    assert set(found) == {src}
-    assert found.excluded[legacy] == (
-        f"{yaml_path}: declares depends_on, which now makes it a comparator. Move it to "
-        "comparators/<category>/<name>/ if it compares other fetchers' evidence; "
-        "otherwise delete depends_on, which fetchers never used"
-    )
-
-
-def test_a_collector_under_comparators_is_left_out(tmp_path):
-    src = input_fetcher(tmp_path, "src")
+    filed_as_fetcher = input_fetcher(tmp_path, "cmp", extra=f"depends_on:\n  - {src}\n")
     d = tmp_path / "comparators" / "testcat" / "plain"
     d.mkdir(parents=True)
-    shutil.copy(tmp_path / "fetchers" / "testcat" / "src" / "fetcher.yaml", d / "fetcher.yaml")
-    (d / "fetcher.yaml").write_text((d / "fetcher.yaml").read_text().replace("testcat_src", "testcat_plain"))
+    (d / "fetcher.yaml").write_text(
+        (tmp_path / "fetchers" / "testcat" / "src" / "fetcher.yaml").read_text().replace("testcat_src", "testcat_plain")
+    )
     found = discover_fetchers(tmp_path)
-    assert set(found) == {src}
-    assert "declares no depends_on" in found.excluded["testcat_plain"]
+    assert found[filed_as_fetcher].is_comparator and not found["testcat_plain"].is_comparator
+
+
+def test_a_duplicate_name_across_the_two_trees_stops_discovery(tmp_path):
+    src = input_fetcher(tmp_path, "src")
+    comparator(tmp_path, "src", [src], PROBE)
+    with pytest.raises(ValueError, match="Duplicate fetcher name 'testcat_src'"):
+        discover_fetchers(tmp_path)
 
 
 def test_a_malformed_fetcher_yaml_still_stops_discovery(tmp_path):

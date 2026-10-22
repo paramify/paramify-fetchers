@@ -39,7 +39,7 @@ from packaging.utils import canonicalize_name
 
 from framework import samples as _samples
 from framework import yaml_io
-from framework.config_loader import discover_fetchers, discover_platforms, excluded
+from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
     ConfigField,
     InvocationResult,
@@ -223,11 +223,7 @@ def catalog(root: Path) -> dict:
             ],
         })
 
-    return {
-        "categories": categories,
-        "fetcher_count": len(fetchers),
-        "excluded": [{"name": n, "reason": why} for n, why in sorted(excluded(fetchers).items())],
-    }
+    return {"categories": categories, "fetcher_count": len(fetchers)}
 
 
 # --------------------------------------------------------------------------- #
@@ -606,8 +602,6 @@ def doctor(
         "upload": upload,
         "upload_required": require_upload,
         "probes": probes,
-        # Informational: a manifest that uses one fails validate, which gates `ok`.
-        "excluded": [{"name": n, "reason": why} for n, why in sorted(excluded(fetchers).items())],
         "ok": ok,
     }
 
@@ -926,24 +920,22 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
         platforms = discover_platforms(root)
     parsed = manifest_loader.parse_manifest(manifest)
     in_manifest = {e.use for e in parsed.entries}
+    problems = dependency_graph.problems(fetchers)
 
     for i, entry in enumerate(parsed.entries):
         if entry.use not in fetchers:
-            why = excluded(fetchers).get(entry.use)
-            errors.append(
-                f"entry[{i}] uses {entry.use}, which discovery left out: {why}" if why
-                else f"entry[{i}] uses unknown fetcher: {entry.use}"
-            )
+            errors.append(f"entry[{i}] uses unknown fetcher: {entry.use}")
             continue
         fetcher = fetchers[entry.use]
 
-        # Same run only: an input the manifest doesn't run is reported missing.
-        for dep in fetcher.depends_on:
-            if dep not in in_manifest:
-                errors.append(
-                    f"{entry.use}: reads {dep}, which is not in the manifest "
-                    f"(fix: paramify manifest add {dep})"
-                )
+        if entry.use in problems:
+            errors.append(f"{entry.use}: {problems[entry.use]}")
+        else:
+            # Same run only: an input the manifest doesn't run is reported missing.
+            errors.extend(
+                f"{entry.use}: reads {dep}, which is not in the manifest (fix: paramify manifest add {dep})"
+                for dep in fetcher.depends_on if dep not in in_manifest
+            )
 
         if fetcher.supports_targets and not entry.targets:
             # No targets[] is valid when every target field is optional — the runner
@@ -1165,6 +1157,7 @@ def run(
     in_manifest = {e.use for e in entries}
     pending = Counter(e.use for e in entries)
     collected: Dict[str, List[dict]] = {}
+    problems = dependency_graph.problems(fetchers)
 
     emit({
         "event": "run_start",
@@ -1178,8 +1171,8 @@ def run(
     started_at = _iso_now()
 
     for entry in entries:
-        if entry.use not in fetchers:
-            reason = excluded(fetchers).get(entry.use, "not discovered")
+        reason = "not discovered" if entry.use not in fetchers else problems.get(entry.use)
+        if reason:
             emit({"event": "fetcher_skip", "fetcher": entry.use, "reason": reason})
             overall_ok = False
             pending[entry.use] -= 1
