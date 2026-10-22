@@ -10,8 +10,100 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Breaking
+
+- **Python 3.11 is now the minimum version.** Python 3.10 reached end of life
+  in October 2026 and gets no more security fixes. `requires-python` is now
+  `>=3.11`, so `pip install` refuses a 3.10 interpreter. `paramify doctor` also
+  reports 3.10 as too old. To upgrade, make a new virtual environment on Python
+  3.11 or later and install again. The ruff and mypy targets move to 3.11 too.
+
 ### Added
 
+- **CI runs the tests on Python 3.15.** The test matrix is now 3.11 to 3.15.
+  The 3.10 row is gone.
+
+- **`azure_devops_audit_streams`** (`EVD-AZURE-DEVOPS-AUDIT-STREAMS`): whether an
+  Azure DevOps organization exports its audit log, which it otherwise keeps for
+  90 days. Records:
+  - whether auditing is on, from the Log Audit Events policy when the token can
+    read it, otherwise from the audit log: its newest change to that policy, else
+    its newest event (a scoped PAT gets 401 on the policy, and the run notes it;
+    signed in with Entra instead, the fetcher reads the policy itself);
+  - every audit stream's target, status, reason and last update;
+  - the newest audit event, not counting the fetcher's own reads of the log.
+
+  For an Azure Monitor Logs stream it counts this organization's
+  `AzureDevOpsAuditing` rows in the workspace over the window, and `missing_rows`
+  flags an enabled stream that delivered nothing while the organization was
+  active. The organization is matched on organization-level events and rows
+  only: project-level rows carry the project's id, so they are counted apart
+  rather than as other organizations, and a stream is only expected to have
+  delivered events newer than itself. Stream tokens and keys are never written.
+- **`azure_devops_pipelines`** (`EVD-AZURE-DEVOPS-PIPELINES`): the first Azure DevOps
+  fetcher, one target per organization, signed in with a PAT (`AZURE_DEVOPS_PAT`)
+  or, when none is set, the ambient Entra identity (az login, managed or workload
+  identity, or a service principal added to the organization). Each YAML
+  pipeline's final YAML comes from a preview run pinned to the default branch's
+  head commit, so templates are expanded and nothing is queued. If the preview is
+  refused, the file is read at that commit instead. `yaml_commit` and
+  `yaml_sha256` let an assessor fetch the same YAML and re-check it. Steps are
+  sorted into test, security scan, IaC validation, infrastructure and application
+  deploy, signing, signature verification and SBOM. `tests_gate_deploys` reports
+  whether a failing test would stop every deploy, following `continueOnError`,
+  conditions such as `always()` and `succeededOrFailed()`, and stage and job
+  `dependsOn`; `ungated_deploys` names the rest and why. The fetcher also collects:
+  - completed runs and published test runs over the lookback; test runs are queried
+    in 7-day slices, the most the API allows, and `not_passed_tests` comes from the
+    totals, so triaging failures doesn't change it;
+  - each environment's approvals, branch control, required-template and
+    artifact-evaluation checks, as configured at collection time;
+  - every deployment in the window, joined to its run's branch, commit and test
+    results;
+  - each repository's default-branch policies. `requires_review` doesn't count the
+    author's own vote, and `self_approval_satisfies_review` flags policies the
+    author can satisfy alone;
+  - the project's pipeline settings;
+  - a count of classic release pipelines and their deployments in the window.
+
+  `summary.not_collected` lists what is out of scope: approval decisions, policy
+  bypass permissions, and the content of classic pipelines. Signing steps are
+  framed as supporting evidence for KSI-SVC-VRI. A failed call names the PAT scope
+  it needs. With a PAT, environments need Environment (Read & manage), because
+  Azure DevOps has no read-only scope for them; an Entra identity needs only read
+  access, such as project Readers. The shared client
+  (`fetchers/azure/_shared/devops_rest.py`) handles PAT or Entra sign-in
+  (`metadata.auth_mode`) and continuation paging, and records the identity it
+  collected as (`metadata.collecting_identity`, from `_apis/connectionData`) for
+  every Azure DevOps fetcher. It sends credentials only to the host it paged from
+  and never follows a redirect, and it keeps the TF/VS error code on every
+  failure.
+- **`azure_app_service_backups`** (`EVD-AZURE-APPSVC-BACKUPS`, KSI-RPL-ABO). For
+  each App Service web app, whether it is actually
+  being backed up, judged from its restore points: automatic backups plus
+  successful custom backups.
+  - **Observed backups.** It reports `latest_restore_point_age_hours` at run time
+    and `largest_restore_point_gap_hours` inside `restore_point_window_hours`
+    (default 48). `backed_up` is true only when the newest restore point is inside
+    that window. `effective_backup_interval_hours` is the observed interval, and
+    `configured_backup_interval_hours` is kept separate.
+  - **Recovery point objective.** Set the optional `recovery_point_objective_hours`
+    and each app reports `meets_recovery_point_objective`.
+  - **Custom backups.** It also reports each app's custom backup configuration and
+    history, and restores made from custom backups within
+    `restore_test_window_days`.
+  - **Backup storage.** It reports the region, replication and version immutability
+    of the storage accounts custom backups go to.
+  - **Exclusions.** Function apps and deployment slots are listed in
+    `results.exclusions` with counts and the reason.
+  - **Permissions.** Reader is enough. The custom configuration needs the opt-in
+    `Microsoft.Web/sites/config/list/action`. Without it the configuration is
+    recorded as `not_authorized` (unknown), not as a collection failure.
+  - **Checks and limits.** The web app list is checked against Azure Resource
+    Graph, and `results.limitations` states what the evidence does not cover. SAS
+    tokens and database connection strings are never written.
+  - **Shared module.** `_shared/app_service.py` now holds the web-app client and
+    kind filter that `azure_app_service_configuration` also uses.
 - **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
   over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
   Code (Read). It records Bicep and ARM checks together, each tagged with its
@@ -38,6 +130,68 @@ schemas and the `paramify` CLI — not the internal code.
   `skip_resources` matches move to `skipped_checks`, the effective skip lists
   are recorded in `metadata`, `use_default_skip_checks` can drop the shipped
   defaults, and `metadata.branch` names the branch actually scanned.
+- **`web_vulnerability_disclosure`** (`EVD-WEB-VULNERABILITY-DISCLOSURE`), the
+  second `web` fetcher. Given a site or a security.txt URL, it fetches
+  `/.well-known/security.txt` and records it verbatim, with its fields parsed per
+  RFC 9116 and whether it carries an OpenPGP cleartext signature (not verified).
+  It then follows each `Policy:` link and extracts its text as `web_page_text`
+  does, and each https `Encryption:` link, where an ASCII-armored public key is
+  read with the standard library (fingerprint, creation, expiry, user IDs,
+  subkeys). Fixed fields come first for validators: `expires_in_days`,
+  `canonical_matches_url`, `contact_emails_in_key`,
+  `key_expires_after_security_txt`, `policies_all_ok` and `policy_placeholders`
+  (`[X]`-style blanks left in the policy). Missing REQUIRED fields, a wrong
+  content type and broken linked pages are recorded as findings. The run fails
+  only when security.txt itself cannot be collected or parsed. Tested with the
+  security.txt and key Paramify publishes, served locally; the key's facts match
+  `gpg --show-keys`. Also run live against paramify.com. Linked URLs and their
+  redirects may only reach public addresses; a link to a private, loopback or
+  link-local address is recorded as `blocked_address`. No KSI mapping.
+- **A `zendesk` category and its first fetcher, `zendesk_help_center_section`**
+  (`EVD-ZENDESK-HELP-CENTER-SECTION`). Given a Help Center section URL, it lists
+  the section's articles through the Help Center API as an anonymous user, so
+  only public articles count. It follows `next_page` to the end and fails the
+  run when the collected number differs from the API's `count` or any API call
+  fails. Each article keeps Zendesk's own fields and body HTML, plus plain
+  text, a text hash, any "Last updated" date in the text, and an anonymous GET
+  of its page recording whether it was sent to a sign-in page or met a
+  Cloudflare bot challenge (a challenge leaves `all_articles_public` null,
+  since public access could not be checked). Fixed fields
+  come first: article count, newest and oldest `updated_at`,
+  `days_since_last_update`, `all_articles_public`, and two Paramify-specific
+  keyword heuristics for a Secure Configuration Guide
+  (`mentions_top_level_admin`, `scg_terms`) that show keyword presence, not
+  adequate guidance, plus `all_user_segments_everyone` (no article is
+  restricted to a user segment). An empty section is recorded, not failed.
+  Run live against support.paramify.com's Recommended Secure Configuration
+  section (4 articles, matching the API's `count`). There, Cloudflare
+  challenged every anonymous article-page GET, so `all_articles_public`
+  read null. No KSI mapping. The README's supported services grid lists
+  Zendesk, using the Simple Icons `zendesk` mark (CC0) in light and dark
+  variants (`fetchers/logos/zendesk.svg` and `zendesk-dark.svg`).
+- **A `web` category and its first fetcher, `web_page_text`**
+  (`EVD-WEB-PAGE-TEXT`). It fetches one public URL per target, with no
+  credential, and records the text the page served. For HTML that is the
+  visible text, one line per block element, with script, style and head
+  dropped and navigation and footer kept. For JSON it is the parsed document
+  plus the body verbatim, and plain text is kept as served. Fixed fields come
+  first so a validator's first match lands on them: the final URL and each
+  redirect, the HTTP status and content type, the `<title>`, a `last_updated`
+  date copied verbatim from the first "Last updated" or "Effective date" line
+  (or the line after a bare label, as www.paramify.com lays it out),
+  the text length, the body's `sha256`, and `text_sha256` of the extracted text,
+  which is the stable change signal because markup and per-request tokens do
+  not move it. The run fails on a network or TLS
+  error, any status other than 200, more than 5 redirects, a body over 5 MB, an
+  unsupported content type, JSON that does not parse, or a page with no text,
+  which is how a page rendered by JavaScript shows up. The evidence shows what
+  the URL served when it was collected, not which version of a document is in
+  force. HTML parsing uses the standard library, so there is no new
+  dependency; the HTML-to-text and date capture live in `fetchers/_lib/html_text.py`
+  for any category to import. Tested with synthetic fixtures. Run live only against GitHub
+  pages, because www.paramify.com was not reachable from the test environment.
+  No KSI mapping. The README's supported services grid lists Web, with a globe
+  icon drawn for this repo (`fetchers/logos/web.svg` and `web-dark.svg`).
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
@@ -69,6 +223,39 @@ schemas and the `paramify` CLI — not the internal code.
   Also every DDoS
   protection plan and the VNets that use it. Virtual WAN hub firewall addresses are
   not public IP resources and are not listed.
+
+- **Three Azure fetchers: AI hubs, container workloads and the data tier**,
+  read-only on the built-in Reader role. `azure_ai_hub_configuration` reports
+  each AI hub, AI project and Machine Learning workspace: network exposure,
+  managed virtual network isolation and outbound rules, high business impact,
+  customer-managed keys, whether system datastores are reached with the storage
+  key or an identity, every datastore's credential type, every model endpoint's
+  authentication mode and public access, compute public IPs and SSH, diagnostic
+  log export, and every connection with whether it holds a stored secret. It
+  reads ARM JSON because the Machine Learning SDK predates hubs.
+  `azure_container_workloads_configuration` reports Container Apps environments
+  (internal-only or public, mTLS and peer traffic encryption, log destination),
+  apps and jobs (secrets stored in the app rather than Key Vault, password-based
+  registry pulls, plain environment variables with secret-looking names,
+  internet-facing ingress and whether Easy Auth stops an unauthenticated caller
+  (AllowAnonymous does not), images running a
+  mutable tag rather than pinned by digest) and Container Instances
+  container groups (public IP, VNet placement, registry credentials, Azure
+  Files volumes, logging). `azure_data_services_configuration` reports MongoDB
+  vCore clusters (firewall rules judged on how many addresses they admit
+  together, native versus Entra authentication,
+  high availability), Data Explorer clusters (open allow-lists, trust of any
+  external tenant, purge rights, callout policies, principal assignments) and
+  Event Hubs namespaces (minimum TLS, network rules, shared keys with Manage
+  rights while local auth is on at namespace and hub level, geo-replication,
+  event hub retention and capture), each with customer-managed keys and audit
+  log export. ARM JSON is read through the shared `arm_rest` client and log export
+  through `_shared/diagnostics.py`. New shared modules: `foundry_connections.py`
+  (connection auth types, also used by `azure_ai_services_configuration`) and
+  `ip_ranges.py` (firewall-range width). Adds
+  azure-mgmt-appcontainers, azure-mgmt-containerinstance, azure-mgmt-mongocluster,
+  azure-mgmt-kusto and azure-mgmt-eventhub.
+
 - **Default custom tags on everything the uploaders create.** Every evidence
   set, script and validator that `paramify upload`, `paramify scripts sync`
   and `paramify validators sync` create or maintain now carries two custom
@@ -598,6 +785,64 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **New evidence sets start their collection schedule on the day they are
+  created.** Both uploaders (`paramify_evidence` and `paramify_scripts`) now send
+  `startDate` (today, `YYYY-MM-DD`) alongside `frequency` when they create an
+  evidence set, so the TUI and `paramify upload` no longer leave it unset.
+  Existing sets are reused unchanged.
+
+- **`azure_policy_compliance` 0.2.0: what was evaluated, whether remediation took,
+  and what keeps coming back.**
+  - Each listed non-compliant state now carries `evaluation_details`: the
+    expressions Azure Policy evaluated, with field path, operator, actual value and
+    target value, plus any ifNotExists lookup.
+  - The service returns these only per resource, so they are read for at most
+    `max_evaluation_detail_resources` (default 100) of the listed resources. The
+    resources with the most listed states are read first.
+  - `evaluation_details_status` gives the reason a state has no details. It is
+    `collected` only when Azure returned an evaluated expression or an ifNotExists
+    lookup; a state returned without either is `not_returned`, as Resource Provider
+    mode policies (`Microsoft.KeyVault.Data` and the like) always are. A state the
+    resource's query did not return at all is `not_in_detail_result`. A
+    per-resource read that Azure refuses (a 403, or an AuthorizationFailed error
+    code, which Policy Insights has returned with a 409) is retried once, 5 s
+    later. A run makes at most 3 retries, and none after a retry is refused again,
+    since the refusal is then systematic. Still refused, that resource's states
+    are `not_authorized`, with the error code and refused action (never the
+    principal) in `evaluation_details_reason`, and it is counted in
+    `evaluation_details_not_authorized_resources`. It does not fail the run, since
+    the details only enrich the states; any other error on that read, a 404 or a
+    5xx included, still does.
+    `evaluation_details_truncated` says when not every listed resource was read.
+  - Each remediation task's per-resource deployments (status, error, times) are
+    listed in `remediation_deployments`, up to `max_remediation_deployments`
+    (default 1000), and each is checked against its resource's latest compliance
+    state, with `current_state_evaluated_at` and `reevaluated_since_deployment`.
+    The states are read only for the remediated resources. New summary keys count
+    remediated resources (`remediated_resources_listed`) and those now compliant,
+    now non-compliant, and whose succeeded remediation is now non-compliant. These
+    count each resource once, and its latest deployment decides; tasks re-run on
+    one resource add deployments, not resources. The non-compliant counts include
+    resources that were fixed and later drifted back; `non_compliance_recurrence`
+    shows the drift when that pair was read. `now_compliant` is null when the state
+    was evaluated before the deployment last changed, and that deployment counts as
+    `remediated_resources_not_yet_reevaluated` instead. When either time is
+    missing, `now_compliant` comes from the state. Azure deletes a task 60 days
+    after its last change, so this covers about the last 60 days at most.
+  - From 30 days of history, the summary counts (resource, policy) pairs
+    non-compliant throughout and pairs non-compliant only some of the time.
+    `history_truncated` is also set when fewer groups come back than the service
+    counts. When the history read fails, `history_collected` is false and these
+    counts are null rather than 0.
+  - For up to `max_recurrence_pairs` (default 100) of the part-time ones,
+    `non_compliance_recurrence` counts the separate non-compliant episodes and how
+    many times the pair fell back out of compliance. `recurring_non_compliant_pairs`
+    counts pairs with more than one episode.
+  - Every bounded list has a truncation flag; a limit of 0 skips that list and
+    leaves its flag false. Existing fields are unchanged. Still Reader-only. Also
+    mapped to `KSI-SVC-EIS`.
+  - `runtime.timeout` is 3600 seconds: the added queries run serially, and a
+    production run took about 8 minutes, near the runner's 600-second default.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`
@@ -874,7 +1119,78 @@ schemas and the `paramify` CLI — not the internal code.
   in the schema, marked deprecated, so that fetcher's data remains shape-checked
   until it migrates to the registry. New validators belong in `validators/`.
 
+### Removed
+
+- **The docs the illustrated guides replaced.** `docs/design.md`,
+  `authoring_a_fetcher.md`, `config_injection_design.md`, `envelope_design.md`,
+  `fetcher_contract.md`, `inventory_fetchers.md`, `issue_report_fetchers.md`,
+  `pipelines.md`, `platform_onboarding.md`, `private_mirror_workflow.md`,
+  `releasing.md`, `run_manifest_reference.md`, `uploader_design.md`,
+  `validators_design.md` and `versioning.md` are gone. Links now point at the
+  guides (`design.md`'s at `architecture_guide.md`); the onboarding source lists
+  keep pinned copies.
+
 ### Fixed
+
+- **`checkov_bicep` passes its list settings to checkov intact** (0.2.0 →
+  0.2.1). `checks`, `skip_checks`, `skip_paths` and `skip_resources` take
+  entries separated by commas or newlines, each trimmed. `checks` and
+  `skip_checks` also take spaces and tabs, since check ids never contain them,
+  and `_shared/skip-checks.default.txt` is read the same way, with `#`
+  starting a comment anywhere on a line. Configured values reach checkov as
+  `--flag=value`. Before:
+  - a `skip_paths` entry with a space (`My Templates/legacy`) became two skip
+    paths, and each piece could skip folders it was not meant to;
+  - a `skip_paths` entry with `*` or `?` was expanded against the files in the
+    fetcher's working directory, so `*.json` could reach checkov as
+    `--skip-path report.json`;
+  - `checks` failed the run if it had a space after a comma
+    (`CKV_AZURE_3, CKV_AZURE_44`), ids separated only by spaces, or one id
+    per line;
+  - `skip_checks` failed the run if its ids were separated only by spaces,
+    and read only its first line, so checks listed below it still ran;
+  - a line of `_shared/skip-checks.default.txt` holding several ids or a
+    trailing `#` comment failed the run;
+  - `skip_resources` patterns on separate lines became one pattern that
+    matched nothing;
+  - a `skip_paths` or `repo_id` value starting with `-` was read as an option,
+    and the run failed.
+
+  `skip_paths` entries are Python regular expressions, which is how checkov
+  reads them: it searches each file's path for every entry, so `.`, `*`, `?`,
+  `+`, `(`, `)`, `[` and `]` need a backslash to match literally. They are
+  not globs. An entry that is not a valid regular expression, such as
+  `*.json`, now fails the run with `bad_config` naming it, before anything
+  is fetched; checkov's Bicep scan crashed on one. The check needs `python3`
+  on PATH, which the checkov category now declares.
+
+  `metadata.skip_paths` now holds the entries checkov was given as
+  `--skip-path` values. It used to disagree in three cases:
+  - a path with a space was one entry, while checkov got two;
+  - a `*` pattern was listed as written, while checkov got the files it
+    matched;
+  - entries on separate lines with no comma between them were one entry,
+    while checkov got one per line.
+
+  New `metadata.checks` lists the `checks` allowlist, so a restricted scan no
+  longer reads as a full one. It is empty when every check ran.
+- **`azure_defender_assessments` reports each assessment's own severity**
+  (0.1.1 → 0.2.0). Severity came from the subscription's assessment metadata
+  catalogue, which can rate a check lower than the assessment itself does (App
+  Service authentication, for one, is High on the assessment and Low in the
+  catalogue), so `unhealthy_by_severity` undercounted High findings. Severity
+  now comes from each assessment's `properties.metadata.severity` in Resource
+  Graph (`SecurityResources`, one query paged to the end), with the catalogue
+  only as a fallback. Each record gains `severity_source` (`assessment`,
+  `catalogue`, or `null` when neither has one), and the summary gains
+  `severity_from_catalogue_count` and `severity_unknown_count`, and
+  `unhealthy_severity_from_catalogue_count` and
+  `unhealthy_severity_unknown_count` for Unhealthy records only, since an
+  Unhealthy record with no severity is missing from `unhealthy_by_severity`.
+  The catalogue still supplies categories, threats, type, user impact,
+  implementation effort and policy definition id. A failed
+  Resource Graph query is a collection failure (exit 1), and every record falls
+  back to the catalogue. Other fields are unchanged.
 
 - **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →
   0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
@@ -1694,7 +2010,7 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- [`docs/private_mirror_workflow.md`](docs/private_mirror_workflow.md) — keeping a
+- [`docs/private_mirror_workflow.md`](https://github.com/paramify/paramify-fetchers/blob/v0.3.1-beta/docs/private_mirror_workflow.md) — keeping a
   private copy of this repo that still receives upstream releases, for teams whose
   fetcher work can't be public.
 

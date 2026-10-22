@@ -1,0 +1,127 @@
+name: azure_devops_pipelines
+version: 0.1.0
+description: >
+  For every project in an Azure DevOps organization: each pipeline and what its
+  final YAML tests, scans, validates, deploys and signs, and whether a failing
+  test stops each deploy; its completed runs and published test results over the
+  lookback; each deployment environment's configured approvals and checks and the
+  deployments made to it, each traced to the run, branch and commit it came from
+  and the tests that run published; each repository's default-branch policies
+  (minimum reviewers net of self-approval, build validation); the project's
+  pipeline settings; and a count of classic release pipelines and their
+  deployments. This is evidence that changes reach production by redeploying
+  version-controlled code through pipelines whose tests can stop the deploy,
+  behind configured approvals.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: azure_devops_pipelines.json
+  aggregation: per_target
+
+target_schema:
+  organization_url:
+    type: string
+    required: true
+    env: AZURE_DEVOPS_ORG_URL
+    description: >
+      The Azure DevOps organization, as https://dev.azure.com/<org>,
+      https://<org>.visualstudio.com or just <org>. One target per organization.
+  projects:
+    type: string
+    required: false
+    env: AZURE_DEVOPS_PROJECTS
+    description: >
+      Comma-separated project names or ids to limit collection to. Optional:
+      omit to collect every project the identity can read. A named project that is
+      missing fails the run.
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    default: 30
+    env: AZURE_DEVOPS_LOOKBACK_DAYS
+    description: >
+      Pipeline runs, test runs and environment deployments from this many days
+      back are collected.
+
+secrets:
+  - name: pat
+    env: AZURE_DEVOPS_PAT
+    per_target: true
+    required: false
+    description: >
+      Personal access token for the organization with Build (Read), Code (Read),
+      Test Management (Read), Project and Team (Read), Release (Read) and
+      Environment (Read & manage). Azure DevOps has no read-only environment
+      scope; the fetcher only reads. Optional: without it the fetcher signs in as
+      the ambient Entra identity (az login, managed or workload identity, or the
+      category's service principal added to the organization), which needs only
+      read access, such as project Readers. Collection covers what the signed-in
+      identity can see, recorded as metadata.collecting_identity.
+
+ksis:
+  - KSI-CMT-RMV      # changes ship by pipeline redeployment from version control
+  - KSI-CMT-VTD      # tests that can stop the deploy, results per run and per deployment
+  - KSI-SVC-VRI      # supporting only: signing, verification and SBOM steps found in YAML; artifact-evaluation checks
+
+evidence_set:
+  reference_id: EVD-AZURE-DEVOPS-PIPELINES
+  name: Azure DevOps Pipelines
+  instructions: >
+    Script: fetcher.py. Azure DevOps REST 7.1 per project, every continuation
+    token followed. Population: the projects _apis/projects returns to the
+    identity in metadata.collecting_identity (from _apis/connectionData);
+    summary.not_collected lists what is out of scope. Pipelines:
+    build/definitions; each YAML pipeline's final YAML comes from a preview run
+    (pipelines/{id}/preview, previewRun true, nothing is queued) pinned to the
+    default branch's head commit, so templates are expanded
+    (`templates_expanded`). When the preview is refused (a 400: invalid YAML or a
+    parameter with no default) the YAML file is read at that commit instead,
+    unexpanded, and `yaml_error` says why. `yaml_commit` (and `yaml_object_id`
+    for a file read from the repository) with `yaml_sha256` let the YAML be
+    fetched again and the classification re-performed; templates from other
+    repositories are at the refs the YAML names. Classic build pipelines are
+    listed, not analysed. `analysis.steps` sorts steps into test, security_scan,
+    iac_validation, infrastructure_deploy, application_deploy, signing,
+    signature_verification and sbom by task name and inputs, or by the tools a
+    script runs; disabled steps are ignored. A test step is `gating` unless it
+    has continueOnError (or its job does), only publishes results
+    (PublishTestResults without failTaskOnFailedTests, coverage), or has a step,
+    job or stage condition that may skip it. `tests_gate_deploys` is true when
+    every deploy (deployment job or deploy step) would be skipped by a failing
+    gating test: through later steps of the same job, jobs that dependsOn it, or
+    stages that depend on its stage (by default the previous one), where each
+    has the default condition or one that keeps succeeded(); always(),
+    succeededOrFailed(), failed(), canceled(), or() and not() run after a
+    failure. `ungated_deploys` names each other deploy and why. Runs: completed
+    build/builds since the window start. Test runs: test/runs queried in 7-day
+    slices, attributed to a pipeline by build; `not_passed_tests` is total minus
+    passed minus not applicable, so it does not change as failures are triaged.
+    Environments: distributedtask/environments, their checks
+    (pipelines/checks/configurations, settings expanded) and deployment records
+    in the window, each joined to its run for branch, commit and that run's test
+    results. Approval evidence is configuration only: the checks as they are at
+    collection time, not who approved each deployment. Repositories:
+    git/repositories with the enabled policy configurations that apply to the
+    default branch. `requires_review` needs a blocking minimum-reviewers policy
+    with at least one approver other than the author (`independent_approvers`:
+    the minimum, less one when creatorVoteCounts);
+    `self_approval_satisfies_review` flags a blocking policy the author can
+    satisfy alone. Identities allowed to bypass branch policies are not
+    collected. Classic release pipelines (vsrm release/definitions and
+    release/deployments started in the window) are counted, not analysed.
+    Signing, signature-verification and SBOM steps are found by pattern in the
+    YAML: they show the pipeline is set up to sign or verify, not that integrity
+    is verified before each deploy, so they support KSI-SVC-VRI rather than
+    prove it. Pipeline general settings: build/generalsettings. Signs in with
+    the PAT, else the ambient Entra identity (metadata.auth_mode). A refused call
+    names the PAT scope it needs.

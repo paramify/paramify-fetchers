@@ -1,0 +1,109 @@
+name: azure_data_services_configuration
+version: 0.1.0
+description: >
+  Inventories three data services in the subscription: Azure DocumentDB / Cosmos DB for MongoDB
+  vCore clusters (Microsoft.DocumentDB/mongoClusters), Azure Data Explorer clusters (Microsoft.Kusto)
+  and Event Hubs namespaces (Microsoft.EventHub). For every one: how reachable it is from the internet
+  (public network access, firewall or IP rules with allow-all rules flagged, private endpoints), how
+  clients authenticate (native or shared-key authentication still enabled, or Microsoft Entra ID), the
+  minimum TLS version where the service has one, customer-managed key encryption, high availability or
+  zone redundancy, and whether audit logs are exported. For Data Explorer also: which external tenants
+  are trusted, purge rights, each database's retention, and every cluster and database principal
+  assignment with its role. For Event Hubs also: every shared access policy with its rights, and each
+  event hub's retention and capture.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_data_services_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # minimum TLS, disk and double encryption, customer-managed keys
+  - KSI-CNA-MAT   # public access, allow-all firewall rules and private endpoints
+  - KSI-IAM-SNU   # shared keys and native authentication versus Entra ID
+  - KSI-IAM-ELP   # Data Explorer principal assignments, admin roles flagged
+  - KSI-CNA-OFA   # high availability and zone redundancy
+  - KSI-MLA-LET   # audit logs exported from each service
+
+evidence_set:
+  reference_id: EVD-AZURE-DATA-SERVICES-CONFIG
+  name: Azure Data Services Configuration
+  instructions: >
+    Script: fetcher.py. Azure SDK calls: azure-mgmt-mongocluster MongoClusterMgmtClient
+    mongo_clusters.list() and firewall_rules.list_by_mongo_cluster per cluster; azure-mgmt-kusto
+    KustoManagementClient clusters.list(), cluster_principal_assignments.list, databases.list_by_cluster and
+    database_principal_assignments.list per cluster and database; azure-mgmt-eventhub
+    EventHubManagementClient namespaces.list(), namespaces.get_network_rule_set,
+    namespaces.list_authorization_rules, event_hubs.list_by_namespace and
+    event_hubs.list_authorization_rules per namespace and hub; azure-mgmt-monitor
+    diagnostic_settings.list for each cluster and namespace. No call reads a key, connection string or
+    administrator password.
+    MongoDB clusters: public_access is disabled when publicNetworkAccess is Disabled; otherwise only
+    firewall rules admit traffic, judged on the distinct addresses all rules admit together
+    (firewall_allowed_address_count and firewall_allowed_address_percentage, overlaps merged, the
+    Azure-services rule excluded): allow_all when that is every IPv4 address (so a range split into
+    halves counts), broad when it is wider than a /8 (16,777,216 addresses) or when the "allow Azure
+    services" rule is present (it admits every Azure-hosted client from any tenant), restricted when narrower,
+    and no_rules when there are none (nothing public can connect); null when the rules could not be
+    read. Each rule also carries its own address_count, so a validator can set a stricter threshold. allow_azure_services marks the 0.0.0.0-0.0.0.0 rule.
+    tls_enforced_by_platform is always true: MongoDB vCore accepts TLS 1.2 and above only and has no
+    setting to weaken it, so no TLS field is read. auth_modes lists the allowed authentication modes
+    (NativeAuth is username and password, MicrosoftEntraID is Entra). high_availability_enabled is true for any target mode other than
+    Disabled. customer_managed_key is true when customer-managed key encryption is set. data_api_enabled
+    is the Data API (HTTP access to the cluster). audit_logs_exported is true when a diagnostic setting
+    with a destination enables vCoreMongoRequests or the audit or allLogs group.
+    Data Explorer clusters: network_exposure is private when publicNetworkAccess is Disabled, restricted
+    when allowed_ip_ranges is set and does not admit every IPv4 address, and open otherwise (an empty
+    allow-list, or one such as 0.0.0.0/0, does not restrict). vnet_injected is true when the cluster has
+    a VNet configuration whose state is not Disabled (vnet_injection_state records it; Disabled means the
+    cluster has left the VNet).
+    trusts_any_tenant is true when trustedExternalTenants contains "*", which lets principals from any
+    Entra tenant be granted access. purge_enabled allows hard deletion of records. Each database records
+    soft_delete_days (retention) and hot_cache_days. callout_policies are the cluster's rules for
+    calling out to external services (SQL, web APIs, storage), read from the cluster itself (the
+    listCalloutPolicies action needs more than Reader; an empty list means none is set); allowed marks
+    those with outbound access Allow. Principal assignments at cluster and database level carry the role, principal type
+    (User, Group, App), name and id as Azure returns them (the name of a user principal includes the
+    sign-in address, as the portal shows it); admin is true for AllDatabasesAdmin and Admin. audit_logs_exported is true when a setting enables Command, Query,
+    Journal or the audit or allLogs group.
+    Event Hubs namespaces: tls_below_1_2 is true when minimumTlsVersion is 1.0 or 1.1.
+    network_exposure is private when the namespace's or the network rule set's publicNetworkAccess is
+    Disabled, restricted when the rule set's default action is Deny (open if an IP rule such as
+    0.0.0.0/0 then admits every IPv4 address), open otherwise, and null when the
+    rule set could not be read and the namespace does not disable public access. local_auth_enabled is
+    true unless disableLocalAuth is true (it defaults to false). authorization_rules lists each shared
+    access policy and its rights; shared_key_full_control is true when local auth is enabled and a
+    policy has Manage rights (full control of the namespace with one key). customer_managed_key is true
+    when encryption.keySource is Microsoft.KeyVault. geo_replica_regions counts secondary regions in
+    the namespace's geo-replication. Each event hub records retention, cleanup policy, capture and
+    its own authorization rules, with manage_rights_rules naming those that grant Manage. audit_logs_exported is true when a setting enables
+    RuntimeAuditLogs or the audit or allLogs group.
+    Lists that could not be read are null and set metadata.partial_failure.
+    provider_registration_status_mongo_clusters (Microsoft.DocumentDB), _data_explorer
+    (Microsoft.Kusto) and _event_hubs (Microsoft.EventHub) are reported separately.

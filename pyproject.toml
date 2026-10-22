@@ -7,7 +7,7 @@ name = "paramify-fetchers"
 version = "0.5.1"
 description = "Paramify evidence fetcher framework — discover, build, run, and inspect evidence fetchers."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "GPL-3.0-only" }
 classifiers = [
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
@@ -58,6 +58,11 @@ azure = [
     "azure-mgmt-redis>=14.5.0,<15",
     "azure-mgmt-dns>=9.0.0,<10",
     "azure-mgmt-privatedns>=2.0.0,<3",
+    "azure-mgmt-appcontainers>=5.1.0,<6",
+    "azure-mgmt-containerinstance>=10.1.0,<11",
+    "azure-mgmt-mongocluster>=1.2.0,<2",
+    "azure-mgmt-kusto>=4.0.0,<5",
+    "azure-mgmt-eventhub>=12.0.0,<13",
     "azure-mgmt-compute>=38.2.0,<39",
     "azure-mgmt-containerservice>=41.5.0,<42",
     "azure-mgmt-containerregistry>=15.0.0,<16",
@@ -131,7 +136,7 @@ addopts = "--import-mode=importlib"
 # fetchers/ are held to the schema contract (tests/test_contracts.py), not lint
 # rules (CLAUDE.md); CI runs `ruff check framework/` so only that tree is gated.
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 extend-exclude = ["fetchers", ".venv"]
 
 [tool.ruff.lint]
@@ -145,7 +150,7 @@ select = ["E4", "E7", "E9", "F", "I"]
 # pass, so it's suppressed here rather than gating CI. Third-party libs ship no
 # stubs, hence ignore_missing_imports.
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

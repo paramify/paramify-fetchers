@@ -597,7 +597,7 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "SecurityCenter",
         "assessments_metadata",
         ["list_by_subscription"],
-        "azure/defender_assessments — the only source of severity; "
+        "azure/defender_assessments — categories, type and fallback severity; "
         "assessments.list returns no metadata",
     ),
     (
@@ -923,6 +923,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ["resources"],
         "azure/resource_inventory, azure/front_door_origins (origin regions), "
         "azure/resource_diagnostic_settings, azure/change_provenance, azure/residual_resources, "
+        "azure/app_service_backups, "
+        "azure/defender_assessments (each assessment's own severity), "
         "azure/private_endpoint_configuration and azure/private_dns_zone_configuration lookups",
     ),
     # --- deployment history: left azure-mgmt-resource for its own distribution -
@@ -948,6 +950,14 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         ],
         "azure/app_service_configuration, azure/function_app_configuration, "
         "azure/app_service_plans",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "web_apps",
+        ["get", "list_snapshots", "list_backups", "get_backup_configuration"],
+        "azure/app_service_backups — automatic backups, custom backup history and "
+        "schedule, and apps Resource Graph lists that web_apps.list() did not",
     ),
     (
         "azure.mgmt.web",
@@ -991,15 +1001,18 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "azure.mgmt.policyinsights",
         "PolicyInsightsClient",
         "policy_states",
-        ["summarize_for_subscription", "list_query_results_for_subscription"],
-        "azure/policy_compliance",
+        ["summarize_for_subscription", "list_query_results_for_subscription",
+         "list_query_results_for_resource"],
+        "azure/policy_compliance — evaluation details need the per-resource query",
     ),
     (
         "azure.mgmt.policyinsights",
         "PolicyInsightsClient",
         "remediations",
-        ["list_for_subscription"],
-        "azure/policy_compliance",
+        ["list_for_subscription", "list_deployments_at_subscription",
+         "list_deployments_at_resource_group", "list_deployments_at_resource",
+         "list_deployments_at_management_group"],
+        "azure/policy_compliance — per-resource remediation deployments",
     ),
     # --- Front Door WAF ------------------------------------------------------
     (
@@ -1092,6 +1105,100 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "diagnostic_settings_category",
         ["list"],
         "azure/front_door_waf_coverage — which log categories a profile emits, and their groups",
+    ),
+    # --- container workloads ---------------------------------------------------
+    (
+        "azure.mgmt.appcontainers",
+        "ContainerAppsAPIClient",
+        "managed_environments",
+        ["list_by_subscription"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers",
+        "ContainerAppsAPIClient",
+        "container_apps",
+        ["list_by_subscription"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers",
+        "ContainerAppsAPIClient",
+        "jobs",
+        ["list_by_subscription"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers",
+        "ContainerAppsAPIClient",
+        "container_apps_auth_configs",
+        ["list_by_container_app"],
+        "azure/container_workloads_configuration — Easy Auth; a missing group reads every "
+        "app as unauthenticated-unknown, never as protected",
+    ),
+    (
+        "azure.mgmt.containerinstance",
+        "ContainerInstanceManagementClient",
+        "container_groups",
+        ["list"],
+        "azure/container_workloads_configuration",
+    ),
+    # --- data services -----------------------------------------------------------
+    (
+        "azure.mgmt.mongocluster",
+        "MongoClusterMgmtClient",
+        "mongo_clusters",
+        ["list"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.mongocluster",
+        "MongoClusterMgmtClient",
+        "firewall_rules",
+        ["list_by_mongo_cluster"],
+        "azure/data_services_configuration — allow-all firewall rules",
+    ),
+    (
+        "azure.mgmt.kusto",
+        "KustoManagementClient",
+        "clusters",
+        ["list", "list_callout_policies"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.kusto",
+        "KustoManagementClient",
+        "databases",
+        ["list_by_cluster"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.kusto",
+        "KustoManagementClient",
+        "cluster_principal_assignments",
+        ["list"],
+        "azure/data_services_configuration — who can administer the cluster",
+    ),
+    (
+        "azure.mgmt.kusto",
+        "KustoManagementClient",
+        "database_principal_assignments",
+        ["list"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.eventhub",
+        "EventHubManagementClient",
+        "namespaces",
+        ["list", "get_network_rule_set", "list_authorization_rules"],
+        "azure/data_services_configuration — a missing rule-set read makes exposure unknown",
+    ),
+    (
+        "azure.mgmt.eventhub",
+        "EventHubManagementClient",
+        "event_hubs",
+        ["list_by_namespace", "list_authorization_rules"],
+        "azure/data_services_configuration",
     ),
 ]
 
@@ -1523,6 +1630,37 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/app_service_plans — server_farm_id is how sites join their plan",
     ),
     (
+        "azure.mgmt.web.models",
+        "SiteProperties",
+        ["sku"],
+        "azure/app_service_backups — a renamed sku reads as an unknown plan tier",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SnapshotProperties",
+        ["time"],
+        "azure/app_service_backups — automatic backup times",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "BackupItemProperties",
+        ["name", "status", "scheduled", "created", "finished_time_stamp", "last_restore_time_stamp",
+         "storage_account_url", "log"],
+        "azure/app_service_backups — custom backup history; a renamed created reads as 'no restore point'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "BackupRequestProperties",
+        ["enabled", "storage_account_url", "backup_schedule", "databases"],
+        "azure/app_service_backups — a renamed field reads as 'no custom backup configured'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "BackupSchedule",
+        ["frequency_interval", "frequency_unit", "retention_period_in_days", "keep_at_least_one_backup"],
+        "azure/app_service_backups — custom backup interval and retention",
+    ),
+    (
         "azure.mgmt.network.models",
         "NetworkInterfacePropertiesFormat",
         ["network_security_group", "virtual_machine", "ip_configurations"],
@@ -1903,6 +2041,44 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "RemediationDeploymentSummary",
         ["total_deployments", "successful_deployments", "failed_deployments"],
         "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "QueryOptions",
+        ["filter", "top", "expand", "apply", "from_property", "to", "select", "order_by"],
+        "azure/policy_compliance — a dropped option silently widens or empties a query",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyState",
+        ["policy_evaluation_details", "policy_definition_reference_id", "additional_properties"],
+        "azure/policy_compliance — evaluation details, and the grouped history count",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyEvaluationDetails",
+        ["evaluated_expressions", "if_not_exists_details"],
+        "azure/policy_compliance — expected vs actual values",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "ExpressionEvaluationDetails",
+        ["expression", "expression_kind", "path", "operator", "expression_value",
+         "target_value", "result"],
+        "azure/policy_compliance — expected vs actual values",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "IfNotExistsEvaluationDetails",
+        ["resource_id", "total_resources"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "RemediationDeployment",
+        ["remediated_resource_id", "deployment_id", "status", "resource_location", "error",
+         "created_on", "last_updated_on"],
+        "azure/policy_compliance — per-resource remediation deployments",
     ),
     (
         "msgraph.generated.models.service_principal",
@@ -2532,6 +2708,191 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["subscriptions", "query", "options"],
         "_shared/resource_graph query_all — an unscoped request "
         "(subscriptions=None) is how cross-subscription lookups resolve",
+    ),
+    # --- container workloads: TypeSpec SDKs, so pin the *Properties models -----------
+    (
+        "azure.mgmt.appcontainers.models",
+        "ManagedEnvironmentProperties",
+        ["vnet_configuration", "public_network_access", "peer_authentication", "peer_traffic_configuration", "app_logs_configuration", "zone_redundant"],
+        "azure/container_workloads_configuration — a renamed vnet_configuration reads every "
+        "environment as public",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "VnetConfiguration",
+        ["internal", "infrastructure_subnet_id"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "JobProperties",
+        ["configuration", "template", "environment_id"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "ContainerAppProperties",
+        ["configuration", "template", "environment_id"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "Secret",
+        ["name", "key_vault_url", "identity"],
+        "azure/container_workloads_configuration — a renamed key_vault_url reads every secret as "
+        "stored in the app",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "RegistryCredentials",
+        ["server", "identity", "password_secret_ref"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "EnvironmentVar",
+        ["name", "secret_ref"],
+        "azure/container_workloads_configuration — secret-like plain variables",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "Ingress",
+        ["external", "allow_insecure", "ip_security_restrictions", "client_certificate_mode"],
+        "azure/container_workloads_configuration — internet-facing apps",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "AuthConfigProperties",
+        ["platform", "global_validation", "identity_providers"],
+        "azure/container_workloads_configuration — Easy Auth",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "AuthPlatform",
+        ["enabled"],
+        "azure/container_workloads_configuration — a renamed enabled reads every app as unauthenticated",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "GlobalValidation",
+        ["unauthenticated_client_action"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.containerinstance.models",
+        "ContainerGroupProperties",
+        ["ip_address", "subnet_ids", "containers", "image_registry_credentials", "encryption_properties", "diagnostics", "volumes"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.containerinstance.models",
+        "IpAddress",
+        ["type", "ports", "dns_name_label"],
+        "azure/container_workloads_configuration — a renamed type reads every group as private",
+    ),
+    (
+        "azure.mgmt.containerinstance.models",
+        "EnvironmentVariable",
+        ["name", "value", "secure_value"],
+        "azure/container_workloads_configuration — secure variables are told by the absence of both",
+    ),
+    (
+        "azure.mgmt.containerinstance.models",
+        "ImageRegistryCredential",
+        ["server", "username", "identity"],
+        "azure/container_workloads_configuration",
+    ),
+    # --- data services -------------------------------------------------------------
+    (
+        "azure.mgmt.mongocluster.models",
+        "MongoClusterProperties",
+        ["public_network_access", "auth_config", "high_availability", "encryption", "data_api", "private_endpoint_connections"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.mongocluster.models",
+        "AuthConfigProperties",
+        ["allowed_modes"],
+        "azure/data_services_configuration — native vs Entra authentication",
+    ),
+    (
+        "azure.mgmt.mongocluster.models",
+        "FirewallRuleProperties",
+        ["start_ip_address", "end_ip_address"],
+        "azure/data_services_configuration — a renamed range reads allow-all as restricted",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "ClusterProperties",
+        ["public_network_access", "allowed_ip_range_list", "restrict_outbound_network_access", "enable_disk_encryption", "enable_double_encryption", "key_vault_properties", "trusted_external_tenants", "virtual_network_configuration", "private_endpoint_connections", "enable_purge"],
+        "azure/data_services_configuration — a renamed trusted_external_tenants hides trust of any tenant",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "CalloutPolicy",
+        ["callout_type", "callout_uri_regex", "outbound_access"],
+        "azure/data_services_configuration — outbound callouts",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "TrustedExternalTenant",
+        ["value"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "ReadWriteDatabaseProperties",
+        ["soft_delete_period", "hot_cache_period"],
+        "azure/data_services_configuration — database retention",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "ClusterPrincipalProperties",
+        ["role", "principal_type", "principal_name", "principal_id"],
+        "azure/data_services_configuration — admin assignments",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "DatabasePrincipalProperties",
+        ["role", "principal_type", "principal_name", "principal_id"],
+        "azure/data_services_configuration — admin assignments",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "EHNamespaceProperties",
+        ["minimum_tls_version", "public_network_access", "disable_local_auth", "zone_redundant", "encryption", "private_endpoint_connections", "geo_data_replication"],
+        "azure/data_services_configuration — a renamed disable_local_auth reads every namespace as "
+        "accepting shared keys",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "GeoDataReplicationProperties",
+        ["locations"],
+        "azure/data_services_configuration — geo-replica regions",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "Encryption",
+        ["key_source", "require_infrastructure_encryption"],
+        "azure/data_services_configuration — customer-managed keys",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "NetworkRuleSetProperties",
+        ["default_action", "public_network_access", "trusted_service_access_enabled", "ip_rules", "virtual_network_rules"],
+        "azure/data_services_configuration — network exposure",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "AuthorizationRuleProperties",
+        ["rights"],
+        "azure/data_services_configuration — Manage rights on shared keys",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "EventhubProperties",
+        ["message_retention_in_days", "retention_description", "capture_description", "status", "partition_count"],
+        "azure/data_services_configuration",
     ),
 ]
 

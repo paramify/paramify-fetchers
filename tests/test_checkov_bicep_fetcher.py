@@ -70,6 +70,7 @@ printf '%s' "$status"
 # Prints $STUB_REPORT with __ROOT__ replaced by the --directory it was given.
 _STUB_CHECKOV = r"""#!/bin/bash
 printf '%s\n' "$*" > "$STUB_LOG/checkov.args"
+printf '%s\n' "$@" > "$STUB_LOG/checkov.argv"
 dir=""; prev=""
 for a in "$@"; do [ "$prev" = "--directory" ] && dir="$a"; prev="$a"; done
 sed "s#__ROOT__#$dir#g" "$STUB_REPORT"
@@ -116,7 +117,7 @@ def make_repo(root: Path, files: dict) -> Path:
     return root
 
 
-def run(tmp_path, files, checkov_report=None, real_checkov=False, tfvc=None, **env_over):
+def run(tmp_path, files, checkov_report=None, real_checkov=False, tfvc=None, fetcher=FETCHER, **env_over):
     """Run the fetcher; returns (exit code, payload or None, status-file dict or None, tmp_path).
 
     tfvc maps a curl route (changesets, changeset, items) to (HTTP status, body bytes or JSON).
@@ -154,12 +155,18 @@ def run(tmp_path, files, checkov_report=None, real_checkov=False, tfvc=None, **e
         "STUB_TFVC": str(tfvc_dir),
         **env_over,
     }
-    proc = subprocess.run(["bash", str(FETCHER)], cwd=tmp_path, env=env,
+    proc = subprocess.run(["bash", str(fetcher)], cwd=tmp_path, env=env,
                           capture_output=True, text=True, timeout=600)
     outputs = list(evidence.glob("checkov_bicep_*.json")) if evidence.exists() else []
     payload = json.loads(outputs[0].read_text()) if outputs else None
     status = json.loads(status_file.read_text()) if status_file.exists() else None
     return proc.returncode, payload, status, tmp_path
+
+
+def flag_values(tmp, flag):
+    """The values checkov was given as flag=value, in order."""
+    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
+    return [a[len(flag) + 1:] for a in argv if a.startswith(flag + "=")]
 
 
 @pytest.fixture(autouse=True)
@@ -282,6 +289,15 @@ def test_skip_resource_glob_matches_whole_name_only(tmp_path):
                                                      "Microsoft.Storage/storageAccounts.[format(*"]
 
 
+def test_skip_resources_split_on_newlines_too(tmp_path):
+    code, payload, _, _ = run(tmp_path, {"main.bicep": BICEP}, FAILED_MIX,
+                              CHECKOV_SKIP_RESOURCES="Microsoft.Storage/storageAccounts.dev*\n Microsoft.Storage/storageAccounts.prodsa\n")
+    assert code == 0
+    assert payload["summary"]["skipped_by_resource_filter"] == 2
+    assert payload["metadata"]["skip_resources"] == ["Microsoft.Storage/storageAccounts.dev*",
+                                                     "Microsoft.Storage/storageAccounts.prodsa"]
+
+
 def test_skip_resources_moves_failures_to_skipped(tmp_path):
     code, payload, _, _ = run(tmp_path, {"main.bicep": BICEP}, FAILED_MIX,
                               CHECKOV_SKIP_RESOURCES="Microsoft.Storage/storageAccounts.dev*")
@@ -314,35 +330,122 @@ def test_effective_skip_list_is_recorded(tmp_path):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
                                 CHECKOV_SKIP_CHECKS="CKV_AZURE_35, CKV_AZURE_35,CKV_AZURE_33", CHECKOV_BICEP_CHECKS="CKV_AZURE_33")
     assert code == 0
-    args = (tmp / "log" / "checkov.args").read_text().split()
-    assert args[args.index("--skip-check") + 1] == "CKV_AZURE_35"
+    assert flag_values(tmp, "--skip-check") == ["CKV_AZURE_35"]
     assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_35"]
+    assert payload["metadata"]["checks"] == ["CKV_AZURE_33"]
     assert payload["metadata"]["default_skip_checks_applied"] is True
     assert payload["metadata"]["skip_paths"] == []
+
+
+def test_skip_path_with_spaces_is_one_argument(tmp_path):
+    code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
+                                CHECKOV_SKIP_PATHS=" My Templates/legacy , ,other ")
+    assert code == 0
+    assert flag_values(tmp, "--skip-path") == ["My Templates/legacy", "other"]
+    assert payload["metadata"]["skip_paths"] == ["My Templates/legacy", "other"]
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("modules/new.bicep,\nlegacy\n", ["modules/new.bicep", "legacy"]),   # a YAML literal block
+    ("a\nb", ["a", "b"]),
+    ("\n", []),
+])
+def test_skip_paths_split_on_newlines_too(tmp_path, raw, expected):
+    code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
+                                CHECKOV_SKIP_PATHS=raw)
+    assert code == 0
+    assert flag_values(tmp, "--skip-path") == expected
+    assert payload["metadata"]["skip_paths"] == expected
+
+
+def test_check_allowlist_is_trimmed_and_still_overrides_skips(tmp_path):
+    code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
+                                CHECKOV_BICEP_CHECKS="CKV_AZURE_3, CKV_AZURE_44,",
+                                CHECKOV_SKIP_CHECKS="CKV_AZURE_44,\n CKV_AZURE_35")
+    assert code == 0
+    assert flag_values(tmp, "--check") == ["CKV_AZURE_3,CKV_AZURE_44"]
+    assert flag_values(tmp, "--skip-check") == ["CKV_AZURE_35"]
+    assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_35"]
+    assert payload["metadata"]["checks"] == ["CKV_AZURE_3", "CKV_AZURE_44"]
+
+
+@pytest.mark.parametrize("env,flag,expected", [
+    ({"CHECKOV_BICEP_CHECKS": "CKV_AZURE_3,CKV_AZURE_44 CKV_AZURE_35"}, "--check", "CKV_AZURE_3,CKV_AZURE_44,CKV_AZURE_35"),
+    ({"CHECKOV_BICEP_CHECKS": "CKV_AZURE_3 CKV_AZURE_44"}, "--check", "CKV_AZURE_3,CKV_AZURE_44"),
+    ({"CHECKOV_SKIP_CHECKS": "CKV_AZURE_3 CKV_AZURE_44"}, "--skip-check", "CKV_AZURE_3,CKV_AZURE_44"),
+    ({"CHECKOV_SKIP_CHECKS": "CKV_AZURE_3\tCKV_AZURE_44"}, "--skip-check", "CKV_AZURE_3,CKV_AZURE_44"),
+])
+def test_check_ids_separated_by_whitespace(tmp_path, env, flag, expected):
+    code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]), **env)
+    assert code == 0
+    assert flag_values(tmp, flag) == [expected]
+    assert payload["metadata"]["skip_checks" if flag == "--skip-check" else "checks"] == expected.split(",")
+
+
+def test_values_starting_with_a_dash_are_not_read_as_options(tmp_path):
+    code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
+                                CHECKOV_SKIP_PATHS="-legacy", CHECKOV_REPO_ID="-infra")
+    assert code == 0
+    argv = (tmp / "log" / "checkov.argv").read_text().splitlines()
+    assert "--skip-path=-legacy" in argv and "--repo-id=-infra" in argv
+    assert "-legacy" not in argv and "-infra" not in argv
+    assert payload["metadata"]["skip_paths"] == ["-legacy"]
+
+
+@pytest.mark.parametrize("raw,bad", [("*.json", "'*.json'"), ("legacy, (unclosed", "'(unclosed'")])
+def test_skip_path_that_is_not_a_regex_is_bad_config(tmp_path, raw, bad):
+    code, payload, status, tmp = run(tmp_path, {"main.bicep": BICEP}, CHECKOV_SKIP_PATHS=raw)
+    assert code == 1
+    assert status["code"] == "bad_config"
+    assert f"skip_paths entry {bad} is not a valid regular expression" in status["error"]
+    assert payload is None
+    assert not (tmp / "log" / "git.log").exists() and not (tmp / "log" / "checkov.args").exists()
 
 
 def test_skip_paths_are_recorded(tmp_path):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
                                 CHECKOV_SKIP_PATHS="modules/new-syntax.bicep, legacy")
     assert code == 0
-    args = (tmp / "log" / "checkov.args").read_text().split()
-    assert [args[i + 1] for i, a in enumerate(args) if a == "--skip-path"] == ["modules/new-syntax.bicep", "legacy"]
+    assert flag_values(tmp, "--skip-path") == ["modules/new-syntax.bicep", "legacy"]
     assert payload["metadata"]["skip_paths"] == ["modules/new-syntax.bicep", "legacy"]
+
+
+def fetcher_with_default_skips(tmp_path, text):
+    """A copy of the fetcher tree whose shipped skip-checks file is text."""
+    root = tmp_path / "fetchers"
+    for d in ("checkov", "_lib"):
+        shutil.copytree(REPO_ROOT / "fetchers" / d, root / d, ignore=shutil.ignore_patterns("__pycache__"))
+    (root / "checkov" / "_shared" / "skip-checks.default.txt").write_text(text)
+    return root / "checkov" / "bicep" / "fetcher.sh"
+
+
+def test_default_skip_checks_file_is_split_like_skip_checks(tmp_path):
+    fetcher = fetcher_with_default_skips(tmp_path, "# header\nCKV_AZURE_3, CKV_AZURE_44\nCKV_AZURE_35  # noisy\n"
+                                                   "CKV_AZURE_33\tCKV_AZURE_59\n\n#CKV_AZURE_1\n")
+    code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
+                                fetcher=fetcher, CHECKOV_BICEP_CHECKS="CKV_AZURE_44", CHECKOV_SKIP_CHECKS="CKV_AZURE_36")
+    assert code == 0
+    expected = ["CKV_AZURE_3", "CKV_AZURE_35", "CKV_AZURE_33", "CKV_AZURE_59", "CKV_AZURE_36"]
+    assert flag_values(tmp, "--skip-check") == [",".join(expected)]
+    assert payload["metadata"]["skip_checks"] == expected
 
 
 def test_default_skip_checks_can_be_turned_off(tmp_path):
     code, payload, _, tmp = run(tmp_path, {"main.bicep": BICEP}, report("bicep", passed=[check("CKV_AZURE_2", "x")]),
                                 CHECKOV_USE_DEFAULT_SKIP_CHECKS="false")
     assert code == 0
-    assert "--skip-check" not in (tmp / "log" / "checkov.args").read_text().split()
+    assert flag_values(tmp, "--skip-check") == flag_values(tmp, "--check") == []
     assert payload["metadata"]["skip_checks"] == []
+    assert payload["metadata"]["checks"] == []
     assert payload["metadata"]["default_skip_checks_applied"] is False
 
 
 def test_no_files_result_still_records_scan_config(tmp_path):
-    _, payload, _, _ = run(tmp_path, {"README.md": "# infra\n"}, CHECKOV_SKIP_CHECKS="CKV_AZURE_35")
+    _, payload, _, _ = run(tmp_path, {"README.md": "# infra\n"}, CHECKOV_SKIP_CHECKS="CKV_AZURE_35",
+                           CHECKOV_BICEP_CHECKS="CKV_AZURE_3")
     assert payload["status"] == "no_files"
     assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_35"]
+    assert payload["metadata"]["checks"] == ["CKV_AZURE_3"]
     assert payload["summary"]["skipped_by_resource_filter"] is None
 
 
@@ -367,8 +470,7 @@ def test_requested_branch_recorded(tmp_path):
     assert code == 0
     meta = payload["metadata"]
     assert (meta["branch"], meta["requested_branch"], meta["branch_fallback"]) == ("main", "main", False)
-    args = (tmp / "log" / "checkov.args").read_text().split()
-    assert args[args.index("--branch") + 1] == "main"
+    assert flag_values(tmp, "--branch") == ["main"]
 
 
 def test_branch_fallback_records_the_branch_that_was_scanned(tmp_path):
@@ -377,8 +479,7 @@ def test_branch_fallback_records_the_branch_that_was_scanned(tmp_path):
     assert code == 0
     meta = payload["metadata"]
     assert (meta["branch"], meta["requested_branch"], meta["branch_fallback"]) == ("trunk", "release-9", True)
-    args = (tmp / "log" / "checkov.args").read_text().split()
-    assert args[args.index("--branch") + 1] == "trunk"
+    assert flag_values(tmp, "--branch") == ["trunk"]
 
 
 def test_clone_failure(tmp_path):
@@ -482,7 +583,7 @@ def test_tfvc_latest_pins_the_newest_changeset_and_records_it(tmp_path):
     assert out.name == "checkov_bicep_dev.azure.com_contoso_Infra___Infra_ARM_Templates.json"
     assert PAT not in out.read_text()
     assert not (tmp / "log" / "git.log").exists()
-    assert "--branch" not in (tmp / "log" / "checkov.args").read_text().split()
+    assert not [a for a in (tmp / "log" / "checkov.argv").read_text().splitlines() if a.startswith("--branch")]
 
 
 def test_tfvc_named_changeset(tmp_path):
@@ -589,3 +690,66 @@ def test_real_checkov_scans_a_tfvc_download(tmp_path):
     failed = payload["results"]["failed_checks"]
     assert any(c["check_id"] == "CKV_AZURE_3" and c["file_path"].endswith("azuredeploy.json") for c in failed)
     assert payload["metadata"]["changeset"] == 4217
+
+
+def scanned(payload):
+    r = payload["results"]
+    return {c["file_path"] for k in ("passed_checks", "failed_checks", "skipped_checks") for c in r[k]}
+
+
+@pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
+def test_real_checkov_takes_values_starting_with_a_dash(tmp_path):
+    files = {"x-legacy/azuredeploy.json": ARM, "x-legacy/main.bicep": BICEP, "keep/azuredeploy.json": ARM, "keep/main.bicep": BICEP}
+    code, payload, status, _ = run(tmp_path, files, real_checkov=True, CHECKOV_SKIP_PATHS="-legacy", CHECKOV_REPO_ID="-infra")
+    assert code == 0, status
+    assert scanned(payload) == {"/keep/azuredeploy.json", "/keep/main.bicep"}
+
+
+@pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
+def test_real_checkov_skips_a_path_with_spaces(tmp_path):
+    # Split on its space, the path would become "My" and "Templates/legacy", and the second skips both folders.
+    # Both kinds of file, because checkov's Bicep and ARM runners apply --skip-path differently.
+    files = {"My Templates/legacy/azuredeploy.json": ARM, "My Templates/legacy/main.bicep": BICEP,
+             "Templates/legacy/azuredeploy.json": ARM, "Templates/legacy/main.bicep": BICEP}
+
+    (tmp_path / "all").mkdir()
+    code, payload, status, _ = run(tmp_path / "all", files, real_checkov=True)
+    assert code == 0, status
+    assert scanned(payload) == {"/My Templates/legacy/azuredeploy.json", "/My Templates/legacy/main.bicep",
+                                "/Templates/legacy/azuredeploy.json", "/Templates/legacy/main.bicep"}
+
+    (tmp_path / "skip").mkdir()
+    code, payload, status, _ = run(tmp_path / "skip", files, real_checkov=True, CHECKOV_SKIP_PATHS="My Templates/legacy")
+    assert code == 0, status
+    assert scanned(payload) == {"/Templates/legacy/azuredeploy.json", "/Templates/legacy/main.bicep"}
+    assert payload["metadata"]["skip_paths"] == ["My Templates/legacy"]
+
+
+@pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
+def test_real_checkov_reads_skip_paths_as_regular_expressions(tmp_path):
+    files = {"legacy (old)/azuredeploy.json": ARM, "legacy (old)/main.bicep": BICEP,
+             "new/azuredeploy.json": ARM, "new/main.bicep": BICEP}
+    code, payload, status, _ = run(tmp_path, files, real_checkov=True, CHECKOV_SKIP_PATHS=r"legacy \(old\)")
+    assert code == 0, status
+    assert scanned(payload) == {"/new/azuredeploy.json", "/new/main.bicep"}
+
+
+@pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
+@pytest.mark.parametrize("checks", ["CKV_AZURE_3, CKV_AZURE_44", "CKV_AZURE_3 CKV_AZURE_44"])
+def test_real_checkov_runs_every_trimmed_check(tmp_path, checks):
+    code, payload, status, _ = run(tmp_path, {"azuredeploy.json": ARM}, real_checkov=True, CHECKOV_BICEP_CHECKS=checks)
+    assert code == 0, status
+    r = payload["results"]
+    ran = {c["check_id"] for k in ("passed_checks", "failed_checks", "skipped_checks") for c in r[k]}
+    assert ran == {"CKV_AZURE_3", "CKV_AZURE_44"}
+
+
+@pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov not on PATH")
+def test_real_checkov_skips_space_separated_check_ids(tmp_path):
+    code, payload, status, _ = run(tmp_path, {"azuredeploy.json": ARM}, real_checkov=True,
+                                   CHECKOV_SKIP_CHECKS="CKV_AZURE_3 CKV_AZURE_44")
+    assert code == 0, status
+    r = payload["results"]
+    ran = {c["check_id"] for k in ("passed_checks", "failed_checks", "skipped_checks") for c in r[k]}
+    assert ran and not ran & {"CKV_AZURE_3", "CKV_AZURE_44"}
+    assert payload["metadata"]["skip_checks"] == ["CKV_AZURE_3", "CKV_AZURE_44"]
