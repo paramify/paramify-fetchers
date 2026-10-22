@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-NETWORK-FIREWALL
   name: Network Firewall Rules
-  instructions: 'Script: fetcher.sh. Commands executed: aws networkfirewall list-firewalls, aws networkfirewall describe-firewall, aws networkfirewall describe-firewall-policy, aws networkfirewall describe-rule-group.'
+  instructions: 'Script: aws/network_firewall_rules/fetcher.sh. Commands executed: aws networkfirewall list-firewalls, aws networkfirewall describe-firewall, aws networkfirewall describe-firewall-policy, aws networkfirewall describe-rule-group.'

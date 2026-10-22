@@ -135,7 +135,11 @@ Read these before building (skim, don't summarize back):
   (aws, az, kubectl, gcloud); **python** if it needs an SDK/REST client,
   pagination, or non-trivial parsing (okta, gitlab, rippling).
 - `description` and `evidence_set.instructions` — from the user's goal + the
-  exact API/CLI calls the fetcher will make.
+  exact API/CLI calls the fetcher will make, laid out as in
+  `docs/authoring_fetcher_guide.md` ("The `description` and `instructions` text"): a
+  one-sentence description, then plain-text instructions in a `|` block with
+  Script (`<category>/<short_name>/<entry>`), Access, Commands Executed, Output
+  and Summary fields. Paramify shows them as typed, so no markdown.
 - `category` — from the tool name.
 
 **Ask the user (batch into ONE `AskUserQuestion`, ≤3 questions):**

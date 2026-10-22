@@ -42,8 +42,9 @@ evidence_set:
   reference_id: EVD-<CATEGORY>-<SHORT-NAME>
   name: <Display name>
   instructions: >-
-    Script: fetcher.py. Reads <input_fetcher_a> and <input_fetcher_b> from the
-    same run and <how each record is matched>. Calls no API.
+    Script: <category>/<short_name>/fetcher.py. Reads <input_fetcher_a> and
+    <input_fetcher_b> from the same run and <how each record is matched>. Calls
+    no API.
 
 ksis:
   - <KSI-ID>

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -214,6 +215,11 @@ def test_create_defaults_frequency_for_an_envelope_without_one():
     # with the default, not NOT_SET.
     body = _created_body({"reference_id": "EVD-1", "name": "n"})
     assert body["frequency"] == "THREE_DAY"
+
+
+def test_create_starts_the_schedule_on_the_creation_day():
+    body = _created_body({"reference_id": "EVD-1", "name": "n"})
+    assert body["startDate"] == date.today().isoformat()
 
 
 def test_override_replaces_frequency():

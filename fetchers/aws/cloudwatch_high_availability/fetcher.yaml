@@ -35,4 +35,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CLOUDWATCH-HA
   name: CloudWatch High Availability
-  instructions: 'Script: fetcher.sh. Commands executed: aws autoscaling describe-policies, aws cloudwatch describe-alarms'
+  instructions: 'Script: aws/cloudwatch_high_availability/fetcher.sh. Commands executed: aws autoscaling describe-policies, aws cloudwatch describe-alarms'

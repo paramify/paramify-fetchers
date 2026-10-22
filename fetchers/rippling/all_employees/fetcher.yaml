@@ -23,4 +23,4 @@ ksis:
 evidence_set:
   reference_id: EVD-RIPPLING-ALL-EMPLOYEES
   name: Rippling All Employees
-  instructions: 'Script: rippling_all_employees.py. Commands executed: curl GET /platform/api/employees/include_terminated with limit/offset pagination'
+  instructions: 'Script: rippling/all_employees/fetcher.py. Commands executed: curl GET /platform/api/employees/include_terminated with limit/offset pagination'

@@ -90,7 +90,7 @@ in the run directory, and writes only its verdicts.
 4. **No credentials.** A comparator gets nothing from its category: no secrets,
    no config and no passthrough env. It gets `EVIDENCE_DIR`,
    `FETCHER_STATUS_FILE`, its own `config_schema` values, the
-   [inherited minimum](fetcher_contract.md#input), and `COMPARATOR_INPUTS`.
+   [inherited minimum](fetcher_contract_guide.md#2-it-reads-only-what-it-declares), and `COMPARATOR_INPUTS`.
 5. **Handoff.** `COMPARATOR_INPUTS` is the path of an index the runner builds
    from its own results, without opening a payload. Like the status file, it
    sits outside `EVIDENCE_DIR` and is deleted with the invocation.
@@ -132,7 +132,7 @@ treats a bad input the same way. `load_inputs()` puts each input in one state:
 | `failed` | An invocation failed but still wrote its file. | The same as `partial`. |
 | `missing` | Not in the manifest, didn't run, wrote no file for some target, a file isn't a complete envelope from this fetcher and this run (a half-written file is caught here), its payload isn't a JSON object, or an inventory file has `records_included: false` (its `data` is `[]` by contract). | Writes its file with `results: []` and every summary value `null`, never 0, and exits 1 with `input_failed`. |
 
-`input_failed` is a [status code](fetcher_contract.md#output). It tells whoever
+`input_failed` is a [status code](fetcher_contract_guide.md#6-check-the-status-file-directly). It tells whoever
 triages the comparator's artifact to look at the input's evidence, which holds
 the cause (for example `not_authorized`).
 

@@ -51,7 +51,7 @@ evidence_set:
   reference_id: EVD-AZURE-VM-HARDENING
   name: Azure Virtual Machine Hardening
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-compute
+    Script: azure/vm_hardening_status/fetcher.py. Azure SDK calls: azure-mgmt-compute
     ComputeManagementClient.virtual_machines.list_all(),
     virtual_machine_extensions.list(resource_group, vm_name) per VM,
     virtual_machine_scale_sets.list_all(), and

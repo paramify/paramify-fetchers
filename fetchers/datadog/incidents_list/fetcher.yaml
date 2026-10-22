@@ -28,4 +28,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-INCIDENTS-LIST
   name: Datadog Incidents List
-  instructions: 'Calls GET /api/v2/incidents with offset pagination and date filters. Lookback window controlled by DATADOG_INCIDENTS_LOOKBACK_DAYS (default 90). Writes JSON incident list.'
+  instructions: 'Script: datadog/incidents_list/fetcher.py. Calls GET /api/v2/incidents with offset pagination and date filters. Lookback window controlled by DATADOG_INCIDENTS_LOOKBACK_DAYS (default 90). Writes JSON incident list.'

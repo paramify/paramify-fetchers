@@ -76,7 +76,7 @@ evidence_set:
   reference_id: EVD-AZURE-CHANGE-PROVENANCE
   name: Azure Change Provenance
   instructions: >
-    Script: fetcher.py. Reader on the subscription is sufficient. Changes come from
+    Script: azure/change_provenance/fetcher.py. Reader on the subscription is sufficient. Changes come from
     two Azure Resource Graph queries (azure-mgmt-resourcegraph
     ResourceGraphClient.resources, subscriptions=[<subscription_id>], paged with
     $skipToken to the end, failing the run if Resource Graph returns fewer rows than

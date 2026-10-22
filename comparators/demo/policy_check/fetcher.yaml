@@ -21,5 +21,6 @@ evidence_set:
   reference_id: EVD-DEMO-POLICY-CHECK
   name: Demo — Synthetic Policy Check
   instructions: >
-    Script: fetcher.py. Reads demo_hello's evidence from the same run and gives
-    each policy a verdict. Calls no API. For trying comparators only.
+    Script: demo/policy_check/fetcher.py. Reads demo_hello's evidence from the
+    same run and gives each policy a verdict. Calls no API. For trying
+    comparators only.
