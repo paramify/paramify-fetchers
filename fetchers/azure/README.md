@@ -1,7 +1,7 @@
 # Azure
 
 Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
-Azure DevOps with Microsoft's Python SDKs and REST APIs. All 69 fetchers are
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 73 fetchers are
 read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
 or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
 [Install](../../README.md#install)).
@@ -88,6 +88,7 @@ tenant-scoped.
 | `Directory.Read.All` | `azure_entra_authentication_policy` (group settings, subscribed SKUs), `azure_entra_mfa_status` (users, role members), `azure_entra_privileged_roles`, `azure_residual_resources` (principal lookup) |
 | `AuditLog.Read.All` | `azure_entra_mfa_status` (sign-in activity and the registration report) |
 | `Directory.Read.All` (optional) | `azure_log_analytics_deletion_rights`: principal names; without it the grants are listed by id |
+| `Application.Read.All` (optional) | `azure_managed_identity_configuration`: each identity's Graph app permissions; without it `graph_access` reads `not_authorized` and the run succeeds |
 | `Organization.Read.All` (optional) | Every `azure_entra_*` fetcher: tenant name and domain; without it the tenant id comes from `AZURE_TENANT_ID`, and the run fails only if that is unset too |
 
 For the Entra fetchers, narrower permissions can stand in for `Directory.Read.All`;
@@ -185,6 +186,7 @@ Identity and access:
 | `azure_entra_privileged_roles` | Activated directory roles and their holders, with Global Administrators counted and tenant-wide admin roles flagged |
 | `azure_rbac_role_assignments` | Role assignments at the subscription and above, and separately below it, with Owner, Contributor, User Access Administrator and RBAC Administrator flagged |
 | `azure_rbac_custom_roles` | Custom role definitions with their full permission sets, flagged for wildcards and for permissions that allow privilege escalation |
+| `azure_managed_identity_configuration` | Managed identities: attached resources, federated credentials, Azure roles judged by their permissions, and Microsoft Graph app permissions |
 
 Network and edge:
 
@@ -203,6 +205,7 @@ Network and edge:
 | `azure_front_door_origins` | Front Door origin groups and origins: regions, active-active or failover, health probes, and how Front Door connects to them |
 | `azure_front_door_waf_policies` | Front Door WAF policies: mode, managed rule sets, overrides, exclusions, custom rules, and whether each blocks |
 | `azure_front_door_waf_coverage` | Each Front Door host resolved to the WAF policy that applies to it, with hosts lacking a blocking WAF flagged |
+| `azure_api_management_configuration` | API Management services: network exposure, legacy TLS and ciphers, portal sign-up, how each API is protected, subscriptions, backends, audit logs |
 
 Compute, containers and apps:
 
@@ -216,6 +219,7 @@ Compute, containers and apps:
 | `azure_function_app_configuration` | Function apps: network exposure, transport settings, runtime, identity, and the names of access keys and app settings (never values) |
 | `azure_app_service_plans` | App Service plans: SKU, instance count, zone redundancy, scaling, and the apps on each |
 | `azure_ai_hub_configuration` | AI hubs, projects and Machine Learning workspaces: network exposure, managed network isolation, encryption, connections, endpoints and compute |
+| `azure_ai_services_configuration` | AI services accounts (Foundry, OpenAI and others) and AI Search: network exposure, API keys or Entra only, encryption, audit logs, model deployments, content filters, agent connections |
 | `azure_databricks_workspace_configuration` | Databricks workspaces: public access, secure cluster connectivity, VNet injection and customer-managed keys |
 
 Data, storage and keys:
@@ -255,6 +259,7 @@ Logging and monitoring:
 | `azure_log_analytics_query_audit` | Whether each workspace audits queries, and who queried the logs in which weeks |
 | `azure_log_analytics_deletion_rights` | Who can purge, delete or shorten the retention of each workspace's log data, active or PIM-eligible |
 | `azure_log_storage_immutability` | Immutability policies, legal holds and soft delete on the blob containers Azure Monitor writes logs to |
+| `azure_network_flow_logs` | Network Watchers and flow logs (target, state, storage, retention, Traffic Analytics), and which virtual networks and subnets an enabled flow log covers |
 | `azure_alert_rules` | Metric, log search and smart detector alert rules, resolved to the receivers they notify and checked against suppression rules |
 | `azure_activity_log_alerts` | Activity log alert rules and which security-relevant control-plane operations they cover |
 
