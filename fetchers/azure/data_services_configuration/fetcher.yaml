@@ -55,7 +55,7 @@ evidence_set:
   reference_id: EVD-AZURE-DATA-SERVICES-CONFIG
   name: Azure Data Services Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-mongocluster MongoClusterMgmtClient
+    Script: azure/data_services_configuration/fetcher.py. Azure SDK calls: azure-mgmt-mongocluster MongoClusterMgmtClient
     mongo_clusters.list() and firewall_rules.list_by_mongo_cluster per cluster; azure-mgmt-kusto
     KustoManagementClient clusters.list(), cluster_principal_assignments.list, databases.list_by_cluster and
     database_principal_assignments.list per cluster and database; azure-mgmt-eventhub

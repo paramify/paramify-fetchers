@@ -51,7 +51,7 @@ evidence_set:
   reference_id: EVD-AZURE-API-MANAGEMENT-CONFIG
   name: Azure API Management Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-apimanagement ApiManagementClient
+    Script: azure/api_management_configuration/fetcher.py. Azure SDK calls: azure-mgmt-apimanagement ApiManagementClient
     api_management_service.list(); per service sign_up_settings.get, policy.get (global),
     product.list_by_service with product_policy.get and product_api.list_by_product per product,
     api.list_by_service with api_policy.get, api_operation.list_by_api and api_operation_policy.get per

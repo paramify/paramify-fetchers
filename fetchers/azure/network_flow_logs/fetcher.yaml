@@ -47,7 +47,7 @@ evidence_set:
   reference_id: EVD-AZURE-NETWORK-FLOW-LOGS
   name: Azure Network Watcher and Flow Logs
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-network NetworkManagementClient
+    Script: azure/network_flow_logs/fetcher.py. Azure SDK calls: azure-mgmt-network NetworkManagementClient
     network_watchers.list_all(); flow_logs.list(resource_group, watcher) for each watcher;
     virtual_networks.list_all() for each VNet's subnets; and, when an NSG flow log exists,
     network_security_groups.list_all() to see where each NSG is attached.
