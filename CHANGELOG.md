@@ -189,6 +189,93 @@ schemas and the `paramify` CLI — not the internal code.
   read) gives `null` with no failure entry. **Re-check any validator or query
   that expects `private_ip_addresses` to be a list.**
 
+### Changed
+
+- **`azure_sentinel_incidents` 0.2.0: response timeline, monthly metrics, rules
+  and entities.** Besides the latest SecurityIncident row per incident, which
+  still gives close times and now tasks, the fetcher reads every update row in
+  the lookback. Each incident gains:
+  - `acknowledged_time_utc` and `hours_to_acknowledge`: the first update by a
+    person that moves it to Active or Closed or gives it an owner or a different
+    one (by object id when both updates have one, so a renamed owner isn't a
+    different one), up to its first close, so a reopen never counts and removing an owner
+    doesn't either; a person creating it already Active or owned acknowledges
+    it at creation. Updates with no modifier, and those by automation rules,
+    playbooks, alert grouping, Fusion, incident creation or the Defender XDR
+    sync, don't count. Microsoft doesn't document what a person's update writes
+    as the modifier, so any other modifier counts as a person, an unlisted
+    system included. Known only when the creation row was read; a later row
+    missing doesn't undo one already found.
+  - `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
+    who made it), and `tasks` with status and completion time. Owners compare
+    by object id when both updates have one, so a rename isn't an owner change,
+    and an owner known only by object id is named by it. Times are each
+    update's LastModifiedTime, and rows written at the same instant always sort
+    alike.
+  - `hours_to_detect` (first activity to creation), `comments_count`,
+    `classification_comment` and `related_analytic_rule_ids`.
+  - the `entities` on its alerts, as kind and identifier, from SecurityAlert
+    joined on the incident's alert ids: up to 25 of each kind, processes as image
+    name and process id, URLs as scheme and host only. Entities read
+    as `null` when the alerts can't be read.
+  - `provider_incident_id` and `provider_incident_url`: for an incident synced
+    from Defender XDR, its id and link there; Microsoft Graph alerts give the same
+    id as `incidentId`.
+  - `owner_object_id` and `owner_email`, beside the existing owner names. An
+    owner known only by email or object id is still an owner, in
+    `history_complete`, `open_new_unowned_history_incomplete` and the backlog
+    by owner.
+  - `history_complete`: whether every update was read: the incident was created
+    inside the history read, which starts at the lookback or SecurityIncident's
+    retention, whichever is later; its creation row was read; and a row tied for
+    the latest time read matches its current status, severity and owner (by
+    object id when both sides have one, else by name) and, if its
+    `lastModifiedTimeUtc` is within the last hour, is that recent. One already
+    acknowledged before its oldest update read has no acknowledgement time rather
+    than a late one. `updates_read` counts the update rows read for it.
+
+  Each workspace gains `monthly`: per calendar month of the lookback, MTTD by
+  month created, MTTA by month acknowledged and MTTR by month closed over the
+  in-scope incidents, and the open backlog at month end by severity and owner
+  over every incident, which is `null` for month ends older than
+  SecurityIncident's retention; its `updates_retained` is true when the whole
+  month is inside the history read. An older incident closed in the lookback leaves
+  the backlog without counting in that month's MTTR, so monthly MTTR may read
+  low. It also gains `recurring_titles`, `recurrence_by_title` and
+  `recurrence_by_rule` (two or more incidents created in the lookback),
+  `open_unacknowledged` (open, every update read, and no person has acknowledged
+  it), `open_new_unowned_history_incomplete` (open, still New with no owner, and
+  not every update read, so never counted in `open_unacknowledged`), and
+  `mttd_hours`, `mtta_hours` and `mttr_hours`. When the update history can't be
+  read, the timeline fields, `monthly`, `acknowledged_incidents` and
+  `open_unacknowledged` are `null` rather than empty. When close times can't be
+  read, `close_time_status` is `unknown` and the close-time counts are `null`,
+  rather than every closed incident counting as missing. A SecurityIncident
+  table the query can't find, in a workspace that lists an incident over an hour
+  old, is hidden by table-level access: the run records an access failure and
+  exits 1, and close times and history are unknown. In a workspace that lists
+  none, or only incidents under an hour old that may not be ingested yet, it
+  reads as empty, with a note. SecurityAlert is treated the same way when an
+  incident over an hour old has alerts. SecurityAlert is cut to the incidents'
+  alert ids before it is aggregated and joined, and a query whose result is too
+  large for one response (over 64 MB or 500,000 rows) is read again in halves
+  of the incidents, down to 64 shares, rather than failing the run.
+  The summary's counts, existing ones included, are `null` when any workspace's
+  incident list failed, the workspace list or a check for Sentinel failed, or a
+  workspace named in `SENTINEL_WORKSPACES` wasn't found, and the counts that
+  can be unknown are `null` when any workspace's value is; with no Sentinel
+  workspace found they are 0.
+  Each workspace also gains `limitations`: in a workspace connected to Defender
+  XDR, analysts usually work incidents in the Defender portal and
+  SecurityIncident shows mostly the XDR sync's updates, so those incidents read
+  as not acknowledged and an open one can count in `open_unacknowledged`; their
+  acknowledgement times would need Defender XDR's incident activity history,
+  which neither SecurityIncident nor Graph's `security/incidents` (its current
+  state and comments, but not when an incident was first activated or assigned)
+  provides.
+  Other existing fields are unchanged; KSI-PIY-RES is not mapped, since it isn't
+  evidenceable.
+
 ## [0.6.0-beta] - 2026-10-23
 
 ### Breaking
