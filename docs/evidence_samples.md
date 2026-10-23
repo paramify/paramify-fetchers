@@ -27,7 +27,7 @@ payload:
 | Command | What it does |
 |---|---|
 | `paramify samples status` | Lists every evidence fetcher and whether it has a sample. UNREVIEWED means nobody has read the sample yet. OLD means it was captured from an earlier fetcher version. |
-| `paramify samples show <fetcher>` | Shows the record counts, how often each field was filled in, and the record that was kept. |
+| `paramify samples show <fetcher>` | Shows the record counts, how often each field was filled in, and the record that was kept. Press Tab to complete the fetcher name (see [Tab completion](cli_guide.md#tab-completion)). |
 | `paramify samples backfill` | Builds samples from past runs under `./evidence` (`--evidence DIR` to change it). Existing samples are kept unless you pass `--force`. |
 
 ## The sample file

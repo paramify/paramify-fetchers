@@ -1,0 +1,39 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_firehose_encryption_status",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 2,
+      "fields": {
+        "name": 2,
+        "arn": 2,
+        "delivery_stream_type": 2,
+        "encryption_status": 2,
+        "kms_key_arn": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:12:01Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "name": "pft-encrypted",
+        "arn": "arn:aws:firehose:us-east-2:111111111111:deliverystream/pft-encrypted",
+        "delivery_stream_type": "DirectPut",
+        "encryption_status": "ENABLED",
+        "kms_key_arn": "None"
+      }
+    ]
+  }
+}
