@@ -22,6 +22,17 @@ schemas and the `paramify` CLI — not the internal code.
   for commands and options. `paramify samples show <Tab>` completes the names of
   the fetchers that have a sample. See
   [`docs/cli_guide.md`](docs/cli_guide.md#tab-completion).
+- **Three more fetchers on `_shared/azure_rest`: `azure_sentinel_playbooks`,
+  `azure_entra_diagnostic_settings` and `azure_entra_risky_users`.** Per
+  subscription, `azure_sentinel_playbooks` reports what each Logic App Sentinel
+  can run does (disable an account, isolate a device, notify) and who it
+  notifies, Standard workflows included when an automation rule runs them. Per
+  tenant, `azure_entra_diagnostic_settings` reports which Entra log categories
+  reach a Sentinel workspace (unknown where a destination can't be read), and
+  `azure_entra_risky_users` joins Identity Protection risky users to privileged
+  directory roles; a tenant without Entra ID P2 reports that as a state, not a
+  failure. It keys on the privileged-role list in `_shared/entra_graph`, the
+  one `azure_entra_privileged_roles` and `azure_entra_mfa_status` use.
 
 ## [0.6.0-beta] - 2026-10-23
 
