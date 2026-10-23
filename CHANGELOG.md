@@ -128,11 +128,11 @@ schemas and the `paramify` CLI — not the internal code.
   `comparators/<category>/<name>/` tree and share the fetchers' namespace. The
   schema rejects a comparator with secrets, targets, non-JSON output or no
   `evidence_set`. A run takes every fetcher in manifest order, then every
-  comparator. The runner runs a comparator even when an input failed, gives it
-  no category secrets, config or passthrough env, and passes an index of the
-  inputs' files in `$COMPARATOR_INPUTS`. Inputs are
-  read in place from the same run only; nothing is copied. The envelope gets an
-  optional `metadata.inputs` (each input file's run, target, status and
+  comparator. The runner runs a comparator even when an input ran and failed,
+  gives it no category secrets, config or passthrough env, and passes an index
+  of the inputs' files in `$COMPARATOR_INPUTS`. Inputs are read in place from
+  the same run only; nothing is copied. The envelope gets an optional
+  `metadata.inputs` (each input file's run, target, status and
   collection time), and the comparator's `_run_metadata.json` record carries the
   same list. `paramify manifest add <comparator>` (and the console's add picker)
   adds its inputs too. `paramify validate` reports an input missing from the

@@ -94,8 +94,12 @@ in the run directory, and writes only its verdicts.
    order (`framework/runner/dependency_graph.py`). The run stays serial, so
    every input of a comparator that runs has finished, or failed, before it
    starts; one in a cycle, or reading one, is skipped instead.
-2. **No skip on failure.** A comparator runs even when an input failed, so a
-   failed artifact reaches Paramify instead of the set going stale.
+2. **No skip on a failed input.** A comparator runs even when an input ran and
+   failed, so a failed artifact reaches Paramify instead of the set going
+   stale. It is skipped, with the cause named, only when it can't run: an
+   unknown input, a cycle, an input of the wrong kind, or an input that is
+   itself a comparator that can't run for any of these reasons
+   ([above](#where-comparators-live)).
 3. **No credentials.** A comparator gets nothing from its category: no secrets,
    no config and no passthrough env. It gets `EVIDENCE_DIR`,
    `FETCHER_STATUS_FILE`, its own `config_schema` values, the

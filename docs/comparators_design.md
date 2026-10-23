@@ -22,7 +22,7 @@ other.
 | Q1 | **Add `input_failed`** as a status code. A comparator reports it when an input failed, so triage looks at that input's evidence. See [Q1](#q1-failure-code-for-a-bad-input). |
 | Q2 | **Same run only, permanently.** A comparator reads only inputs collected in the same run. No stored-run inputs and no `max_age_hours`, now or later. Inputs are read in place: nothing is copied, and the comparator writes verdicts only. |
 | Q3 | The runner records the inputs in the comparator's envelope as `metadata.inputs`. |
-| Runner | The runner runs every fetcher, then every comparator (two phases), so every input has finished before a comparator starts; a comparator in a cycle, or reading one, is skipped. It does not skip a comparator when an input failed. |
+| Runner | The runner runs every fetcher, then every comparator (two phases), so every input has finished before a comparator starts. A comparator still runs when an input ran and failed, so a failed artifact reaches Paramify. It is skipped, with the cause named, only when it can't run: an unknown input, a cycle, an input of the wrong kind, or an input comparator that can't run for any of these reasons. |
 | Review (2026-10-22) | Four simplifications, same design: the two-phase order, which replaces the explicit completion check; `paramify manifest add` adds a comparator's inputs; `validate` and `run` report a comparator's bad inputs on its entry instead of discovery leaving it out; and one shared `run()` in `comparator_inputs.py`, so a comparator is only its comparison. |
 | Placement | **A separate top-level `comparators/` folder**, not inside `fetchers/`. See [§4](#4-placement-decided). |
 | Q4 (a) | **Measured on the sandbox, 2026-10-19:** Resource Graph `changedBy` for a service principal is its app (client) id. See [Q4](#q4-sandbox-checks). |
@@ -137,8 +137,9 @@ The comparator reads the fetchers' own files in place from those paths.
 - An input that is not in the manifest is listed as `missing`. `paramify
   validate` reports it beforehand, with the fix `paramify manifest add <input>`.
 
-**Failed, partial or missing inputs.** The runner always runs the comparator; if
-it were skipped, nothing would reach Paramify. The shared reader applies one
+**Failed, partial or missing inputs.** The runner runs the comparator whenever
+its inputs could run, even if one failed; if it were skipped, nothing would
+reach Paramify. Only a comparator that can't run at all (§1) is skipped. The shared reader applies one
 policy:
 
 | Input state | Comparator does | Exit |
@@ -405,7 +406,7 @@ Decided: a separate `comparators/` folder. See §4.
 | Comparators inside `fetchers/` with a `_template_comparator` (placement B) | Decided against: a separate tree keeps it obvious which code calls an API |
 | Reuse `partial_failure` or `bad_config` for a bad input | Points triage at the comparator or the manifest instead of the input that failed |
 | New `kind: comparator` | A comparator produces ordinary evidence; `depends_on` already marks it |
-| Skip the comparator when an input failed | Nothing reaches Paramify, so the set goes stale silently |
+| Skip the comparator when an input ran and failed | Nothing reaches Paramify, so the set goes stale silently |
 | Comparator searches the run folder itself | Depends on file naming, misses targets that wrote nothing, reads undeclared files |
 | Copy inputs into a separate store or the comparator's own folder | A second copy of collected evidence; files are read in place instead |
 | Inputs from an earlier stored run | Decided against (Q2): stale data, and a race with a run still writing |
