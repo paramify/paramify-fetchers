@@ -105,7 +105,6 @@ _HELP_OPTS = {"help_option_names": ["-h", "--help"]}
 
 app = typer.Typer(
     no_args_is_help=True,
-    add_completion=False,
     context_settings=_HELP_OPTS,
     help="Paramify fetcher framework — discover, build, run, and inspect evidence fetchers.",
 )
@@ -1093,9 +1092,25 @@ def samples_status(
     )
 
 
+def _complete_sampled_fetcher(incomplete: str) -> List[tuple]:
+    """Tab completion for `samples show`: only fetchers that have a sample, each
+    with its version and capture date as the hint. Outside the repo, nothing."""
+    try:
+        rows = api.sample_status(api.find_repo_root())
+    except Exception:
+        return []
+    return [
+        (r["fetcher"], f"v{r['sample_version']} {r['source']} {r['captured_on'] or ''}".rstrip())
+        for r in rows
+        if r["has_sample"] and r["fetcher"].startswith(incomplete)
+    ]
+
+
 @samples_app.command("show")
 def samples_show(
-    fetcher: str = typer.Argument(..., help="Fetcher name"),
+    fetcher: str = typer.Argument(
+        ..., help="Fetcher name", autocompletion=_complete_sampled_fetcher,
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Show one fetcher's sample: how many records were seen, how often each
