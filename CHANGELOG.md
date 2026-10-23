@@ -28,24 +28,25 @@ schemas and the `paramify` CLI — not the internal code.
   by which pattern. A fetcher that adopts it reads them from its
   `scope_exclusions` config field, and its evidence keeps every excluded item in
   `results.excluded` with the pattern that matched (or the reason it followed),
-  echoes the patterns, lists the ones that matched nothing, and counts each
-  excluded kind. Every verdict, count and percentage covers only what remains in
-  scope. With no patterns set the output is unchanged apart from those empty or
-  zero fields. Adopted by:
-  - `azure_front_door_origins` 0.4.0: custom-domain host names, endpoint host
-    names and route names. A route is out of scope when its name matches or every
-    host it serves does, an origin group when every route reaching it is, and a
-    production app when only out-of-scope groups reach it, so multi-region
-    redundancy is judged on the core domains. Custom domains are read only when
-    patterns are set, and access restrictions only for apps an in-scope group
-    reaches.
-  - `azure_front_door_tls` 0.2.0 and `azure_front_door_waf_coverage` 0.2.0:
-    custom-domain host names, endpoint host names and route names. A route is out
-    of scope when its name or every host it serves matches; TLS also leaves out
-    certificate secrets that only out-of-scope domains use, and WAF coverage the
-    host-routes of an out-of-scope route. Both fetcher.yaml texts move to the new
-    description format.
-  - `azure_dns_configuration` 0.3.0: public record-set names, relative or FQDN.
+  echoes the patterns, lists the ones that matched nothing, counts each excluded
+  kind, and counts what stayed in scope (`in_scope_hosts` and the like), so a
+  check can require more than 0 and catch a pattern such as `*` that takes out
+  everything. Every verdict, count and percentage covers only what remains in
+  scope. With no patterns set the output is unchanged apart from those empty,
+  zero or total fields. Adopted by:
+  - `azure_front_door_origins` 0.5.0: custom-domain and endpoint host names, and
+    route names through a `route:` prefix (`route:qa-*`); a bare pattern never
+    matches a route's name. A route is out of scope when a `route:` pattern
+    matches it or every host it serves is out, an origin group when every route
+    reaching it is, and a production app when only out-of-scope groups reach it,
+    so multi-region redundancy is judged on the core domains. Access restrictions
+    are read only for apps an in-scope group reaches.
+  - `azure_front_door_tls` 0.3.0 and `azure_front_door_waf_coverage` 0.3.0:
+    the same matching. TLS also leaves out certificate secrets that only
+    out-of-scope domains use, and WAF coverage the host-routes of an out-of-scope
+    route. Both fetcher.yaml texts move to the new description format.
+  - `azure_dns_configuration` 0.4.0: public record-set names, relative (in every
+    zone) or FQDN.
 - **A string config field can be a `${env:VAR}` reference.** The runner
   resolves it the way it resolves a secret. An unset or empty variable gives way
   to the next value down (platform config, then the default; an error for a
@@ -56,12 +57,27 @@ schemas and the `paramify` CLI — not the internal code.
   `set-target` refuse one on a typed config field or any target field (a
   target's secrets still take references), as does `validate` for a hand-edited
   one. Only the fetcher's own fields and the issue-report keys are resolved; a key
-  only a sibling fetcher declares passes through untouched. `effective_config`,
-  and so the TUI, shows a reference as written with whether it is set, like a
-  secret, and `validate` names an issue-report reference unset in its shell.
+  only a sibling fetcher declares passes through untouched. A reference must be
+  the whole value, and one naming a credential variable (`_TOKEN`, `_SECRET`
+  and the like) or a variable that holds one of the fetcher's secrets is never
+  resolved: the runner, `validate` and the `manifest` commands refuse it, naming
+  the variable. The value a reference reads is masked out of the fetcher's
+  captured output and the run metadata like a secret. `effective_config`, and
+  so the TUI, shows a reference as written, never its value, with whether it is
+  set, and `validate` names an issue-report reference unset in its shell.
 
 ### Changed
 
+- **`azure_front_door_origins` 0.5.0: Kudu and silent regions.** An app whose
+  Kudu (scm) site has its own access restrictions
+  (`scmIpSecurityRestrictionsUseMain` off) that let every public caller in is no
+  longer `locked_to_front_door`: the gap is `scm_public_access_unrestricted`,
+  counted in `serving_app_service_origins_scm_public_access_unrestricted`, and
+  each record lists the Kudu rules. `all_regions_healthy_last_hour` is null when
+  a region with an enabled origin has no value for the last hour (false still
+  wins when a region is known to be unhealthy), so a region that went silent no
+  longer reads as healthy. Custom domains are now always read, for
+  `in_scope_hosts`.
 - **`azure_front_door_origins` 0.3.0: live origin health and traffic per region.**
   Hourly Azure Monitor metrics for each profile over `metrics_lookback_days`
   (default 7, at most 30): `OriginHealthPercentage` (average and minimum) by origin
