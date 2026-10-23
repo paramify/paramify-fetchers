@@ -1,0 +1,50 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_s3_encryption_status",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.storage_inventory.object[]",
+      "records": 6,
+      "fields": {
+        "name": 6,
+        "type": 6,
+        "encrypted": 6,
+        "encryption_type": 6,
+        "kms_key_id": 6,
+        "bucket_key_enabled": 6
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:13:16Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "storage_inventory": {
+        "object": [
+          {
+            "name": "pft-111111111111-e25deb-kms",
+            "type": "s3",
+            "encrypted": true,
+            "encryption_type": "aws:kms",
+            "kms_key_id": "None",
+            "bucket_key_enabled": true
+          }
+        ]
+      },
+      "summary": {
+        "total_storage": 6,
+        "encrypted_storage": 6,
+        "encryption_percentage": 100
+      }
+    }
+  }
+}

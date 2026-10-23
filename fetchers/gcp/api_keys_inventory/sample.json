@@ -1,0 +1,114 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_api_keys_inventory",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.api_keys[]",
+      "records": 2,
+      "fields": {
+        "age_days": 2,
+        "allowed_android_packages": 0,
+        "allowed_ios_bundle_ids": 0,
+        "allowed_ips": 0,
+        "allowed_referrers": 0,
+        "api_restrictions_configured": 2,
+        "api_target_services": 1,
+        "api_targets": 1,
+        "client_restrictions_configured": 2,
+        "create_time": 2,
+        "days_since_update": 2,
+        "delete_time": 0,
+        "display_name": 2,
+        "fully_restricted": 2,
+        "key_material_collected": 2,
+        "name": 2,
+        "never_updated": 2,
+        "past_rotation_age": 2,
+        "targets_all_cloud_apis": 2,
+        "uid": 2,
+        "unrestricted": 2,
+        "update_time": 2
+      }
+    },
+    {
+      "path": "results.api_keys[].api_targets[]",
+      "records": 1,
+      "fields": {
+        "method_count": 1,
+        "methods": 0,
+        "service": 1,
+        "wildcard_service": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:54:31Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "api_keys": [
+        {
+          "age_days": 0,
+          "allowed_android_packages": [],
+          "allowed_ios_bundle_ids": [],
+          "allowed_ips": [],
+          "allowed_referrers": [],
+          "api_restrictions_configured": true,
+          "api_target_services": [
+            "storage.googleapis.com"
+          ],
+          "api_targets": [
+            {
+              "method_count": 0,
+              "methods": [],
+              "service": "storage.googleapis.com",
+              "wildcard_service": false
+            }
+          ],
+          "client_restrictions_configured": false,
+          "create_time": "2026-08-17T14:31:43.758971Z",
+          "days_since_update": 0,
+          "delete_time": null,
+          "display_name": "example-restricted",
+          "fully_restricted": false,
+          "key_material_collected": false,
+          "name": "projects/111111111111/locations/global/keys/00000000-0000-4000-8000-222222222222",
+          "never_updated": false,
+          "past_rotation_age": false,
+          "targets_all_cloud_apis": false,
+          "uid": "00000000-0000-4000-8000-222222222222",
+          "unrestricted": false,
+          "update_time": "2026-08-17T14:31:43.871975Z"
+        }
+      ]
+    },
+    "summary": {
+      "api_keys_api_readable": true,
+      "api_restricted_keys": 1,
+      "api_target_service_counts": {
+        "storage.googleapis.com": 1
+      },
+      "client_restricted_keys": 0,
+      "fully_restricted_keys": 0,
+      "key_material_collected": false,
+      "keys_never_updated": 0,
+      "keys_past_rotation_age": 0,
+      "keys_targeting_all_cloud_apis": 0,
+      "no_api_keys": false,
+      "oldest_key_age_days": 0,
+      "restricted_key_percentage": 50,
+      "rotation_age_days": 90,
+      "total_api_keys": 2,
+      "unrestricted_keys": 1
+    }
+  }
+}

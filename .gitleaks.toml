@@ -156,3 +156,21 @@ condition = "AND"
 paths = ['''tests/test_cornerstone_fetchers\.py$''']
 regexes = ['''(?m)^SECRET = "csod-s3cr3t-that-must-never-appear-91ab"\s*$''']
 regexTarget = "line"
+
+# --- False positive: GCP key-algorithm enum in evidence samples -------------- #
+# The same `KEY_ALG_RSA_2048` enum name as the entry above, this time in the
+# committed evidence sample for gcp_iam_service_accounts (docs/evidence_samples.md):
+# the sample shows one service-account key's metadata, and `key_algorithm` is
+# one of its fields. Samples are sanitized output — they carry no key material,
+# and long hex ids in them are replaced with counters.
+#
+# Scoped to sample.json files and the exact enum literal, so any other value
+# under that field is still reported. `(?m)` is required for the reason
+# documented on the Service Management API entry.
+[[allowlists]]
+description = "GCP KEY_ALG_RSA_2048 is an algorithm enum name in evidence samples"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''fetchers/[^/]+/[^/]+/sample\.json$''']
+regexes = ['''(?m)^\s*"key_algorithm": "KEY_ALG_RSA_2048",\s*$''']
+regexTarget = "line"
