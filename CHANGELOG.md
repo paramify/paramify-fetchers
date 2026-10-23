@@ -22,6 +22,34 @@ schemas and the `paramify` CLI — not the internal code.
   for commands and options. `paramify samples show <Tab>` completes the names of
   the fetchers that have a sample. See
   [`docs/cli_guide.md`](docs/cli_guide.md#tab-completion).
+- **CI regression tests for the terminal UI and the demo CLI path.** A new
+  `tui` job runs the TUI's tests on the lowest (8.0.0) and latest textual 8, and
+  `--fail-on-skip` fails it if any of them skipped or xfailed, so a broken `tui`
+  install can no longer pass as a page of skips. It adds SVG snapshots of every
+  screen and the key modals over an offline demo workspace, compared on the
+  latest textual only (the new `snapshots` extra;
+  `pytest tests/test_tui_snapshots.py --snapshot-update` refreshes them, and a
+  mismatch uploads a side-by-side report), one end-to-end pilot flow (open the
+  demo manifest, add `demo_hello`, run it, read its evidence, upload dry-run,
+  with the network blocked for the app and the fetcher it runs), a check that every
+  page fits a 160x50 terminal, and a real launch of `paramify tui` and
+  `python -m framework.tui` in a pseudo-terminal that presses `q` and expects a
+  clean exit. The smoke job now also compares `paramify run`, `validate` and
+  `upload --dry-run` on `examples/demo.yaml` with committed goldens
+  (`python tools/cli_goldens.py --update` refreshes them).
+
+### Fixed
+
+- **The TUI's Paramify tab fits a 160x50 terminal.** Below 242 columns the
+  scripts-sync panel was squeezed to its border, its buttons drawn over the log,
+  and a missing-token preflight error ran off the evidence panel behind a
+  horizontal scrollbar. The scripts and log panels now share the space left
+  under the evidence and scan-report panels, each with a minimum height, and
+  preflight errors and warnings wrap under their table.
+- **TUI tables no longer keep a cut-off row.** A row that arrived from a worker
+  could be drawn before its table widened the column, and Textual kept that
+  drawing (`demo_he` for `demo_hello` in the scripts plan) until a hover or a
+  resize. Every table now redraws once its columns are sized.
 
 ## [0.6.0-beta] - 2026-10-23
 

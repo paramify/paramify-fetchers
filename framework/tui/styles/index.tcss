@@ -247,6 +247,8 @@ UploadPage {
 /* Paramify tab: evidence + issue-report + scripts panels over a shared log. */
 #evidence-panel { height: auto; margin: 1 1 0 1; }
 #evidence-summary { height: auto; }
+/* Preflight errors and warnings: prose that wraps, under the summary table. */
+.panel-notes { height: auto; padding: 0 1; }
 #evidence-actions { height: auto; align: left middle; padding-top: 1; }
 
 /* Sized to content like the evidence panel: for a run with no issue reports it
@@ -256,10 +258,13 @@ UploadPage {
 #issues-actions { height: auto; align: left middle; padding-top: 1; }
 #issues-actions Button { width: 24; }
 
-#scripts-panel { height: 1fr; margin: 1 1 0 1; }
+/* Scripts and log split what the two auto-height panels leave. Each keeps a
+   floor, so neither collapses to its border on a 50-row terminal: the scripts
+   panel needs header, summary, a plan row and the action row (8 with border). */
+#scripts-panel { height: 1fr; min-height: 8; margin: 1 1 0 1; }
 #scripts-header { height: auto; }
 #scripts-plan-summary { height: auto; color: $text-muted; }
-#scripts-plan { height: 1fr; }
+#scripts-plan { height: 1fr; min-height: 2; }
 #scripts-actions { height: auto; align: left middle; padding-top: 1; }
 /* Uniform SIZE across the whole action row. Buttons and checkboxes size to their
    text by default (mismatched widths), and Checkbox keeps its 3-row bordered box
@@ -278,7 +283,7 @@ UploadPage {
     background: $panel;
 }
 
-#upload-log-panel { height: 40%; margin: 1 1 0 1; }
+#upload-log-panel { height: 1fr; min-height: 6; margin: 1 1 0 1; }
 #upload-log { height: 1fr; }
 
 #upload-banner {
