@@ -1,0 +1,127 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_network_security_groups",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.network_security_groups[]",
+      "records": 3,
+      "fields": {
+        "id": 3,
+        "location": 3,
+        "name": 3,
+        "resource_group": 3,
+        "security_rules": 3
+      }
+    },
+    {
+      "path": "results.network_security_groups[].security_rules[]",
+      "records": 6,
+      "fields": {
+        "access": 6,
+        "destination_port_range": 5,
+        "destination_port_ranges": 1,
+        "direction": 6,
+        "id": 6,
+        "name": 6,
+        "protocol": 6,
+        "source_address_prefix": 5,
+        "source_address_prefixes": 1
+      }
+    },
+    {
+      "path": "results.virtual_networks[]",
+      "records": 3,
+      "fields": {
+        "enable_ddos_protection": 3,
+        "id": 3,
+        "location": 3,
+        "name": 3,
+        "resource_group": 3,
+        "subnets": 3
+      }
+    },
+    {
+      "path": "results.virtual_networks[].subnets[]",
+      "records": 5,
+      "fields": {
+        "id": 5,
+        "name": 5,
+        "nsg_id": 3
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T17:08:16Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "network_security_groups": [
+        {
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Network/networkSecurityGroups/nsg-pf-exposed",
+          "location": "eastus",
+          "name": "nsg-pf-exposed",
+          "resource_group": "rg-example-example-profile",
+          "security_rules": [
+            {
+              "access": "Allow",
+              "destination_port_range": "",
+              "destination_port_ranges": [
+                "8443-8445",
+                "8080"
+              ],
+              "direction": "Inbound",
+              "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Network/networkSecurityGroups/nsg-pf-exposed/securityRules/allow-mgmt-range-from-internet",
+              "name": "allow-mgmt-range-from-internet",
+              "protocol": "Tcp",
+              "source_address_prefix": "",
+              "source_address_prefixes": [
+                "0.0.0.0/0"
+              ]
+            }
+          ]
+        }
+      ],
+      "provider_registration_status": "registered",
+      "virtual_networks": [
+        {
+          "enable_ddos_protection": false,
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/databricks-rg-dbw-pf-jov5akcv-wxbvqsimsvlt9/providers/Microsoft.Network/virtualNetworks/workers-vnet",
+          "location": "eastus",
+          "name": "workers-vnet",
+          "resource_group": "databricks-rg-dbw-pf-jov5akcv-wxbvqsimsvlt9",
+          "subnets": [
+            {
+              "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/databricks-rg-dbw-pf-jov5akcv-wxbvqsimsvlt9/providers/Microsoft.Network/virtualNetworks/workers-vnet/subnets/public-subnet",
+              "name": "public-subnet",
+              "nsg_id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/databricks-rg-dbw-pf-jov5akcv-wxbvqsimsvlt9/providers/Microsoft.Network/networkSecurityGroups/workers-sg"
+            }
+          ]
+        }
+      ]
+    },
+    "summary": {
+      "ddos_protected_virtual_networks": 0,
+      "inbound_allow_rules": 5,
+      "internet_sourced_allow_rules": 3,
+      "provider_registration_status": "registered",
+      "rdp_open_to_internet_groups": 1,
+      "ssh_open_to_internet_groups": 1,
+      "subnet_nsg_coverage_percentage": 60,
+      "subnets_with_nsg": 3,
+      "subnets_without_nsg": 2,
+      "total_network_security_groups": 3,
+      "total_security_rules": 6,
+      "total_subnets": 5,
+      "total_virtual_networks": 3
+    }
+  }
+}
