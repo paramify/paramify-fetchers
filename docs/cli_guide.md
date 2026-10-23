@@ -86,7 +86,7 @@ into CI:
 
 ```text
 $ paramify doctor examples/minimal_run.yaml
-✅ Python 3.11.9 (need ≥ 3.10)
+✅ Python 3.11.9 (need ≥ 3.11)
 
 Required CLIs:
   ✅ curl     /usr/bin/curl  (okta)

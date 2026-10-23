@@ -48,5 +48,5 @@ evidence_set:
   reference_id: EVD-GCP-API-KEYS
   name: API Keys Inventory and Restrictions
   instructions: >
-    Script: fetcher.py. Google Cloud client library call: apikeys
+    Script: gcp/api_keys_inventory/fetcher.py. Google Cloud client library call: apikeys
     keys.list(). No key string is read. One evidence file per project.

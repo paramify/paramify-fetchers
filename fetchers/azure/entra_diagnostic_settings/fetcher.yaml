@@ -54,7 +54,7 @@ evidence_set:
   reference_id: EVD-AZURE-ENTRA-DIAGNOSTIC-SETTINGS
   name: Azure Entra ID Diagnostic Settings
   instructions: >
-    Script: fetcher.py. ARM REST at tenant scope, api-version 2017-04-01:
+    Script: azure/entra_diagnostic_settings/fetcher.py. ARM REST at tenant scope, api-version 2017-04-01:
     microsoft.aadiam/diagnosticSettings and diagnosticSettingsCategories. A
     category counts as exported when a setting lists it enabled. Each destination
     workspace's SecurityInsights onboardingStates decides to_sentinel_workspace

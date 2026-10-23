@@ -54,7 +54,7 @@ evidence_set:
   reference_id: EVD-AZURE-ENTRA-RISKY-USERS
   name: Azure Entra ID Risky Users
   instructions: >
-    Script: fetcher.py. Microsoft Graph v1.0, every @odata.nextLink followed:
+    Script: azure/entra_risky_users/fetcher.py. Microsoft Graph v1.0, every @odata.nextLink followed:
     identityProtection/riskyUsers, directoryRoles, each role's members
     (directoryRoles/{id}/members), and users/{id} for privileged users at open
     risk (riskState atRisk or confirmedCompromised). Roles are active assignments

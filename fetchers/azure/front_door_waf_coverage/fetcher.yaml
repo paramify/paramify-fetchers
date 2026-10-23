@@ -52,7 +52,7 @@ evidence_set:
   reference_id: EVD-AZURE-FRONTDOOR-WAF-COVERAGE
   name: Azure Front Door WAF Coverage
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-cdn CdnManagementClient
+    Script: azure/front_door_waf_coverage/fetcher.py. Azure SDK calls: azure-mgmt-cdn CdnManagementClient
     profiles.list() (kept to sku Standard_AzureFrontDoor / Premium_AzureFrontDoor;
     other CDN SKUs counted in skipped_profiles_by_sku), per profile
     afd_endpoints.list_by_profile, afd_custom_domains.list_by_profile and

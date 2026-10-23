@@ -131,3 +131,28 @@ regexes = [
     '''(?m)^LAW_KEY = "bGF3LXNoYXJlZC1rZXktZG8tbm90LXdyaXRl"\s*$''',
 ]
 regexTarget = "line"
+
+# --- False positive: canary secret in the Cornerstone fetcher tests ---------- #
+# tests/test_cornerstone_fetchers.py (branch feat/cornerstone-training-fetchers,
+# commit 5bcb762) defines a deliberate canary:
+#   SECRET = "csod-s3cr3t-that-must-never-appear-91ab"
+# It is a made-up client secret the tests feed to the fetcher and then assert is
+# ABSENT from the evidence it writes. It never authenticated to anything; its
+# whole job is to be recognisable if it leaks into output.
+#
+# generic-api-key fires because the name is `SECRET` and the value clears the
+# rule's entropy threshold — name-plus-entropy, not a leak. CI's `gitleaks git`
+# walks every ref the checkout fetches, so this branch's commit turns the scan
+# red on unrelated PRs; this entry unblocks that all-refs scan.
+#
+# Scoped to that one test path and the exact literal, so any other value
+# assigned to SECRET, or a real credential elsewhere in the file, is still
+# reported. `(?m)` is required for the reason documented on the Service
+# Management API entry.
+[[allowlists]]
+description = "Canary client secret in the Cornerstone tests is asserted absent from evidence, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''tests/test_cornerstone_fetchers\.py$''']
+regexes = ['''(?m)^SECRET = "csod-s3cr3t-that-must-never-appear-91ab"\s*$''']
+regexTarget = "line"

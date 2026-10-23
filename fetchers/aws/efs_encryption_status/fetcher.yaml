@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-EFS-ENC
   name: EFS Encryption at Rest
-  instructions: 'Script: fetcher.sh. Commands executed: aws efs describe-file-systems.'
+  instructions: 'Script: aws/efs_encryption_status/fetcher.sh. Commands executed: aws efs describe-file-systems.'

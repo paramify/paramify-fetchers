@@ -46,7 +46,7 @@ evidence_set:
   reference_id: EVD-AZURE-APPSVC-PLANS
   name: Azure App Service Plans
   instructions: >
-    Script: fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Web"), then
+    Script: azure/app_service_plans/fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Web"), then
     azure-mgmt-web WebSiteManagementClient app_service_plans.list(detailed=True) and
     web_apps.list(); sites are joined to plans by server_farm_id. Reader is
     sufficient — all GETs. Maps to KSI-CNA-OFA.

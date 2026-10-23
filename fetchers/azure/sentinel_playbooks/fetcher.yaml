@@ -55,7 +55,7 @@ evidence_set:
   reference_id: EVD-AZURE-SENTINEL-PLAYBOOKS
   name: Azure Sentinel Playbooks
   instructions: >
-    Script: fetcher.py. ARM REST: Microsoft.Logic/workflows (api-version
+    Script: azure/sentinel_playbooks/fetcher.py. ARM REST: Microsoft.Logic/workflows (api-version
     2019-05-01) and each Sentinel workspace's automationRules (2025-09-01).
     Capabilities come from each action's connector and inputs, nested branches
     included. Account containment means an action sets accountEnabled false,
