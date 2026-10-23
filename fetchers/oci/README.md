@@ -82,9 +82,11 @@ permission" below.
 
 1. **API signing key from the environment.** The deployed path. All five of
    `OCI_TENANCY_OCID`, `OCI_USER_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`
-   and `OCI_REGION` must be set; a partially-set environment falls through to
-   the config file and would collect from the wrong tenancy while looking like
-   it worked, so it is refused instead.
+   and `OCI_REGION` must be set. If any of the first four is set and the rest
+   are not, the run fails with `bad_config` naming the missing variables,
+   rather than falling through to the config file and collecting as whoever
+   `~/.oci/config` names. `OCI_REGION` alone is fine: the other paths use it to
+   pick the region.
 2. **Instance principal** — a compute instance's own identity. Select with
    `OCI_CLI_AUTH=instance_principal`.
 3. **Resource principal** — Functions or OKE workload identity. Selected
@@ -124,6 +126,9 @@ region, so a tenancy subscribed to several needs one target per region — the
 same shape as the AWS fetchers' `region`. Each evidence file says what it did
 not cover: `metadata.regions_subscribed` and `metadata.regions_not_collected`,
 so "no public buckets" is never read as more than "none in this region".
+Each target's file is named `<fetcher>_<compartment>_<region>.json`, so
+per-region targets over one compartment never overwrite each other. The three
+IAM fetchers answer tenancy-wide and leave the region out.
 
 Four fetchers are tenancy-scoped whatever compartment a target names, because
 the resources are: `oci_iam_users_credentials`, `oci_iam_password_policy`, and

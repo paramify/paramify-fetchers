@@ -16,11 +16,11 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from oci_common import (  # noqa: E402
     Collector,
     build_payload,
+    evidence_filename,
     finish,
     list_all,
     load_config,
     make_client,
-    sanitize_for_filename,
     short_ocid,
     to_plain,
     walk_compartments,
@@ -233,8 +233,7 @@ def main() -> int:
         regional=False,  # IAM lives in the home region and answers tenancy-wide
     )
 
-    target = auth.get("tenancy") or "unknown"
-    filename = f"oci_iam_password_policy_{sanitize_for_filename(target)}.json"
+    filename = evidence_filename("oci_iam_password_policy", auth, scope, regional=False)
     path = write_evidence(output_dir, filename, evidence)
     return finish(collector, logger, path)
 

@@ -75,7 +75,7 @@ evidence_set:
     - object_storage.list_replication_policies (per bucket) — replication policies and their destinations
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_object_storage_buckets_<compartment>.json — every bucket with its access type, pre-authenticated requests, key, versioning, retention rules, replication policies and logs.
+    Output: oci_object_storage_buckets_<compartment>_<region>.json — every bucket with its access type, pre-authenticated requests, key, versioning, retention rules, replication policies and logs.
 
     Summary fields:
 

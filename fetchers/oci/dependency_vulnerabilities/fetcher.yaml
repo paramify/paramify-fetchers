@@ -70,7 +70,7 @@ evidence_set:
     - adm.list_remediation_runs (per compartment) — remediation runs and the stage each reached
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_dependency_vulnerabilities_<compartment>.json — every knowledge base, vulnerability audit with its suppression delta, remediation recipe and remediation run.
+    Output: oci_dependency_vulnerabilities_<compartment>_<region>.json — every knowledge base, vulnerability audit with its suppression delta, remediation recipe and remediation run.
 
     Summary fields:
 

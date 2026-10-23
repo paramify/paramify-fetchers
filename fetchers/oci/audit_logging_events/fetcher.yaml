@@ -86,7 +86,7 @@ evidence_set:
     - events.get_rule (per rule) — each rule's actions, which the listing leaves out
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_audit_logging_events_<compartment>.json — the audit retention, every log group with its logs, every Events rule with its condition parsed into event types and its actions joined to topics and subscribers, and every topic with its subscriptions.
+    Output: oci_audit_logging_events_<compartment>_<region>.json — the audit retention, every log group with its logs, every Events rule with its condition parsed into event types and its actions joined to topics and subscribers, and every topic with its subscriptions.
 
     Summary fields:
 

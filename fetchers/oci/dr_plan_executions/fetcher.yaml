@@ -71,7 +71,7 @@ evidence_set:
     - disaster_recovery.list_dr_plan_executions (per protection group) — every execution with its type, state, duration and step counts
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_dr_plan_executions_<compartment>.json — every protection group, plan and execution, each execution classified as a drill, recovery, precheck or cleanup with its outcome, duration and ignored step failures.
+    Output: oci_dr_plan_executions_<compartment>_<region>.json — every protection group, plan and execution, each execution classified as a drill, recovery, precheck or cleanup with its outcome, duration and ignored step failures.
 
     Summary fields:
 

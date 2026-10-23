@@ -74,7 +74,7 @@ evidence_set:
     - cloud_guard.list_problems (per compartment) — open problems
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_cloud_guard_posture_<compartment>.json — the Cloud Guard configuration, every target with its effective detector and responder rules, every Security Zone and recipe, and every open problem.
+    Output: oci_cloud_guard_posture_<compartment>_<region>.json — the Cloud Guard configuration, every target with its effective detector and responder rules, every Security Zone and recipe, and every open problem.
 
     Summary fields:
 

@@ -72,7 +72,7 @@ evidence_set:
     - kms_management.list_key_versions (per key) — how many versions the key has had
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_vault_keys_<compartment>.json — every vault and every key with its protection mode, rotation settings, current version age and version count.
+    Output: oci_vault_keys_<compartment>_<region>.json — every vault and every key with its protection mode, rotation settings, current version age and version count.
 
     Summary fields:
 

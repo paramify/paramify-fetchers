@@ -76,7 +76,7 @@ evidence_set:
     - delegate_access_control.get_delegation_control (per live control) — approvals required, pre-approved actions and governed resources
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_operator_access_control_<compartment>.json — every operator control, assignment and delegation control with its approval settings, and every access request with its outcome and whether it was auto-approved.
+    Output: oci_operator_access_control_<compartment>_<region>.json — every operator control, assignment and delegation control with its approval settings, and every access request with its outcome and whether it was auto-approved.
 
     Summary fields:
 

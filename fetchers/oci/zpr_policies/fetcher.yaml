@@ -72,7 +72,7 @@ evidence_set:
     - virtual_network.list_vcns (per compartment) — VCNs with their security attributes
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_zpr_policies_<compartment>.json — the ZPR configuration, every policy with each statement parsed, every security attribute namespace with its definitions, and every VCN with its ZPR attributes.
+    Output: oci_zpr_policies_<compartment>_<region>.json — the ZPR configuration, every policy with each statement parsed, every security attribute namespace with its definitions, and every VCN with its ZPR attributes.
 
     Summary fields:
 

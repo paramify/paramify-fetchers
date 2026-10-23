@@ -68,7 +68,7 @@ evidence_set:
     - certificates_management.list_certificate_authorities (per compartment) — certificate authorities
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_certificates_<compartment>.json — every certificate and certificate authority with its subject, validity window, days to expiry, key and signature algorithms, revocation and renewal rule.
+    Output: oci_certificates_<compartment>_<region>.json — every certificate and certificate authority with its subject, validity window, days to expiry, key and signature algorithms, revocation and renewal rule.
 
     Summary fields:
 

@@ -72,7 +72,7 @@ evidence_set:
     - blockstorage.list_boot_volumes (per compartment and availability domain) — boot volumes
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_block_volume_encryption_<compartment>.json — every live block and boot volume with its key, its attachments and their in-transit encryption, and its backups with their keys.
+    Output: oci_block_volume_encryption_<compartment>_<region>.json — every live block and boot volume with its key, its attachments and their in-transit encryption, and its backups with their keys.
 
     Summary fields:
 

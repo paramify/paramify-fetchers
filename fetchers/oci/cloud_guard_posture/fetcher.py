@@ -16,13 +16,13 @@ from oci_common import (  # noqa: E402
     as_bool,
     build_payload,
     coverage_percentage,
+    evidence_filename,
     finish,
     iso,
     list_all,
     load_config,
     make_client,
     resolve_scope,
-    sanitize_for_filename,
     service_not_subscribed,
     short_ocid,
     to_plain,
@@ -467,8 +467,7 @@ def main() -> int:
         compartments_scanned=collected.get("compartments"),
     )
 
-    target = scope["compartment_id"] or auth.get("tenancy") or "unknown"
-    filename = f"oci_cloud_guard_posture_{sanitize_for_filename(target)}.json"
+    filename = evidence_filename("oci_cloud_guard_posture", auth, scope)
     path = write_evidence(output_dir, filename, evidence)
 
     return finish(collector, logger, path)

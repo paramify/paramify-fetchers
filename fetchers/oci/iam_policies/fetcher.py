@@ -18,13 +18,13 @@ from oci_common import (  # noqa: E402
     Collector,
     as_bool,
     build_payload,
+    evidence_filename,
     finish,
     iso,
     list_all,
     load_config,
     make_client,
     resolve_scope,
-    sanitize_for_filename,
     short_ocid,
     to_plain,
     walk_compartments,
@@ -281,8 +281,7 @@ def main() -> int:
         regional=False,  # IAM lives in the home region and answers tenancy-wide
     )
 
-    target = scope["compartment_id"] or auth.get("tenancy") or "unknown"
-    filename = f"oci_iam_policies_{sanitize_for_filename(target)}.json"
+    filename = evidence_filename("oci_iam_policies", auth, scope, regional=False)
     path = write_evidence(output_dir, filename, evidence)
     return finish(collector, logger, path)
 

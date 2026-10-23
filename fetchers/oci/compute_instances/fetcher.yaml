@@ -70,7 +70,7 @@ evidence_set:
     - virtual_network.get_vnic (per attached VNIC) — its public IP, network security groups and source/destination check, which the attachment leaves out
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_compute_instances_<compartment>.json — every live instance with its metadata-service, boot-integrity, in-transit encryption and agent settings, and its VNICs with public IPs and network security groups.
+    Output: oci_compute_instances_<compartment>_<region>.json — every live instance with its metadata-service, boot-integrity, in-transit encryption and agent settings, and its VNICs with public IPs and network security groups.
 
     Summary fields:
 

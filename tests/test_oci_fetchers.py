@@ -443,3 +443,16 @@ def test_the_fault_sweep_bootstrap_fails_the_named_call(signing_key, tmp_path):
     # Ten failures on one client open the SDK's default circuit breaker, so the
     # 500 surfaces as CircuitBreakerError with the status inside its message.
     assert any(f.get("status") == "500" or "'status': 500" in f["message"] for f in failures), failures
+
+
+def test_one_target_per_region_writes_one_file_per_region(signing_key, tmp_path):
+    """The README's fanout: the same compartment in two regions, into one run
+    directory, as the runner does it. Named by compartment alone, the second
+    region overwrote the first and the runner, which credits a target only with
+    files that did not exist before it ran, recorded it as producing nothing."""
+    for region in ("us-phoenix-1", "us-ashburn-1"):
+        before = {p.name for p in tmp_path.glob("oci_*.json")}
+        result = run_fetcher("bastion_sessions", signing_key, tmp_path, OCI_REGION=region)
+        assert result.returncode == 0, result.stderr[-800:]
+        new = {p.name for p in tmp_path.glob("oci_*.json")} - before
+        assert len(new) == 1 and region in new.pop(), f"{region} produced no file of its own"

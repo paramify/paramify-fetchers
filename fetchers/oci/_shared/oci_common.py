@@ -202,6 +202,7 @@ _STATUS_TO_CODE = {
 # contains, and a signing failure is auth, not a bad request.
 _FAILURE_SIGNATURES = (
     ("bad_config", (
+        "incompleteapikeyconfig",
         "notauthorizedornotfound", "authorization failed or requested resource not found",
     )),
     ("auth_failed", (
@@ -391,16 +392,36 @@ class Collector:
 
 # --- auth ---
 
-def _api_key_config() -> Optional[Dict[str, str]]:
-    """A config dict from the five API-key env vars, or None if any is missing.
+class IncompleteApiKeyConfig(ValueError):
+    """Some of the API-key variables are set and some are not."""
 
-    All five or none: a partially-set environment is an operator mistake, and
-    falling through to the config file would collect from the wrong tenancy
-    while looking like it worked.
+
+# The four that identify an API-key credential. OCI_REGION is not among them: it
+# is also the region selector for the principal and config-file paths, so it is
+# legitimately set on its own.
+_CREDENTIAL_KEYS = ("user", "tenancy", "fingerprint", "key_content")
+
+
+def _api_key_config() -> Optional[Dict[str, str]]:
+    """A config dict from the five API-key env vars, or None if no credential var is set.
+
+    All five or none. A partial set raises rather than returning None: falling
+    through to the config file then signed in with whatever ~/.oci/config holds,
+    which on an administrator's host is another user and often another tenancy,
+    and the run still exited 0. The error names the missing variables, never a
+    value.
     """
     values = {key: os.environ.get(env) for key, env in API_KEY_ENV.items()}
-    if not all(values.values()):
+    if not any(values[key] for key in _CREDENTIAL_KEYS):
         return None
+    missing = [env for key, env in API_KEY_ENV.items() if not values[key]]
+    if missing:
+        raise IncompleteApiKeyConfig(
+            f"API signing key is partly configured: {', '.join(missing)} not set. Set all of "
+            "OCI_TENANCY_OCID, OCI_USER_OCID, OCI_FINGERPRINT, OCI_PRIVATE_KEY and OCI_REGION, "
+            "or none of the first four to use an instance principal, resource principal or "
+            "config file"
+        )
     config = {k: v for k, v in values.items() if v is not None}
     passphrase = os.environ.get("OCI_PRIVATE_KEY_PASSPHRASE")
     if passphrase:
@@ -420,8 +441,10 @@ def load_config(collector: Collector) -> Dict[str, Any]:
 
     requested = (os.environ.get("OCI_CLI_AUTH") or "").strip().lower()
 
-    api_key = _api_key_config()
-    if api_key and requested in ("", "api_key"):
+    # Read only when no principal was asked for, so leftover key variables on a
+    # host that selects instance_principal are not an error.
+    api_key = _api_key_config() if requested in ("", "api_key") else None
+    if api_key:
         oci.config.validate_config(api_key)
         return {
             "config": api_key,
@@ -695,6 +718,33 @@ def region_coverage(auth: Dict[str, Any], collector: Collector) -> Dict[str, Any
         "regions_subscribed": subscribed,
         "regions_not_collected": [r for r in subscribed if r != collected],
     }
+
+
+def evidence_filename(
+    name: str, auth: Dict[str, Any], scope: Dict[str, Any], *, regional: bool = True,
+) -> str:
+    """`<name>_<compartment>_<region>.json`, unique per target.
+
+    The runner gives every target of a fanout the same directory, and credits a
+    target only with files that did not exist before it ran. The README's
+    fanout is one target per region over the same compartment, so a name built
+    from the compartment alone was written twice: the second region overwrote
+    the first, and the runner recorded the second target as producing nothing.
+    `regional=False` (the IAM fetchers, which answer tenancy-wide) leaves the
+    region out. Both parts fall back to what the runner put in the environment,
+    so a run that failed before credentials resolved still names its own file.
+    """
+    target = (
+        scope.get("compartment_id") or auth.get("tenancy")
+        or os.environ.get("OCI_COMPARTMENT_ID") or os.environ.get("OCI_TENANCY_OCID")
+        or "unknown"
+    )
+    parts = [name, sanitize_for_filename(target)]
+    if regional:
+        region = (auth.get("config") or {}).get("region") or os.environ.get("OCI_REGION")
+        if region:
+            parts.append(sanitize_for_filename(region))
+    return "_".join(parts) + ".json"
 
 
 def write_evidence(output_dir: Path, filename: str, evidence: Dict[str, Any]) -> Path:

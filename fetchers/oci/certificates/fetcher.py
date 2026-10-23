@@ -17,6 +17,7 @@ from oci_common import (  # noqa: E402
     as_bool,
     build_payload,
     coverage_percentage,
+    evidence_filename,
     finish,
     is_past,
     iso,
@@ -24,7 +25,6 @@ from oci_common import (  # noqa: E402
     load_config,
     make_client,
     resolve_scope,
-    sanitize_for_filename,
     service_not_subscribed,
     to_plain,
     walk_compartments,
@@ -420,8 +420,7 @@ def main() -> int:
         compartments_scanned=scanned,
     )
 
-    target = scope["compartment_id"] or auth.get("tenancy") or "unknown"
-    filename = f"oci_certificates_{sanitize_for_filename(target)}.json"
+    filename = evidence_filename("oci_certificates", auth, scope)
     path = write_evidence(output_dir, filename, evidence)
 
     return finish(collector, logger, path)

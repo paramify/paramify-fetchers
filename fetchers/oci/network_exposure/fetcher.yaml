@@ -77,7 +77,7 @@ evidence_set:
     - virtual_network.list_network_security_group_security_rules (per group) — each group's rules
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_network_exposure_<compartment>.json — every VCN, subnet, security list, network security group and internet gateway, with each rule parsed into peer, protocol and ports and each subnet's reachability and flow logs.
+    Output: oci_network_exposure_<compartment>_<region>.json — every VCN, subnet, security list, network security group and internet gateway, with each rule parsed into peer, protocol and ports and each subnet's reachability and flow logs.
 
     Summary fields:
 

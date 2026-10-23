@@ -69,7 +69,7 @@ evidence_set:
     - bastion.list_sessions (per bastion) — the sessions opened through it
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_bastion_sessions_<compartment>.json — every bastion with its just-in-time settings and every session with its type, target and the operating-system account assumed.
+    Output: oci_bastion_sessions_<compartment>_<region>.json — every bastion with its just-in-time settings and every session with its type, target and the operating-system account assumed.
 
     Summary fields:
 

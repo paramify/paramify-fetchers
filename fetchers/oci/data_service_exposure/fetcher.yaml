@@ -75,7 +75,7 @@ evidence_set:
     - file_storage.get_export (per export) — the export's client options, which the listing leaves out
     - identity.list_region_subscriptions — the regions this run did not cover
 
-    Output: oci_data_service_exposure_<compartment>.json — every Autonomous Database, DB system, file system with its exports and mount targets, and Integration instance, each with its reachability and key.
+    Output: oci_data_service_exposure_<compartment>_<region>.json — every Autonomous Database, DB system, file system with its exports and mount targets, and Integration instance, each with its reachability and key.
 
     Summary fields:
 

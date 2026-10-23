@@ -17,13 +17,13 @@ from oci_common import (  # noqa: E402
     age_in_days,
     as_bool,
     build_payload,
+    evidence_filename,
     finish,
     iso,
     list_all,
     load_config,
     make_client,
     resolve_scope,
-    sanitize_for_filename,
     short_ocid,
     to_plain,
     walk_compartments,
@@ -517,8 +517,7 @@ def main() -> int:
         compartments_scanned=collected.get("compartments_scanned"),
     )
 
-    target = scope["compartment_id"] or auth.get("tenancy") or "unknown"
-    filename = f"oci_operator_access_control_{sanitize_for_filename(target)}.json"
+    filename = evidence_filename("oci_operator_access_control", auth, scope)
     path = write_evidence(output_dir, filename, evidence)
 
     return finish(collector, logger, path)
