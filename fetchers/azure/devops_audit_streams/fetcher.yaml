@@ -67,7 +67,7 @@ evidence_set:
   reference_id: EVD-AZURE-DEVOPS-AUDIT-STREAMS
   name: Azure DevOps Audit Streams
   instructions: >
-    Script: fetcher.py. Azure DevOps REST: OrganizationPolicy
+    Script: azure/devops_audit_streams/fetcher.py. Azure DevOps REST: OrganizationPolicy
     Policy.LogAuditEvents (an Entra login reads it, a PAT gets 401; then its
     newest logged change, else any event in the window; see auditing.source),
     auditservice _apis/audit/streams and _apis/audit/auditlog, ignoring

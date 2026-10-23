@@ -74,7 +74,7 @@ evidence_set:
   reference_id: EVD-AZURE-RESOURCE-INVENTORY
   name: Azure Resource Inventory
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-resourcegraph ResourceGraphClient),
+    Script: azure/resource_inventory/fetcher.py. Azure SDK calls (azure-mgmt-resourcegraph ResourceGraphClient),
     each resources(QueryRequest(subscriptions=[<subscription_id>], query=...,
     options=QueryRequestOptions(top=1000, skip_token=<previous page's $skipToken>,
     result_format="objectArray"))) repeated until no $skipToken is returned:

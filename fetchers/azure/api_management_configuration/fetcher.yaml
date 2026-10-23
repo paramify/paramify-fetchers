@@ -1,0 +1,99 @@
+name: azure_api_management_configuration
+version: 0.1.0
+description: >
+  Inventories Azure API Management services in the subscription. For every service: how it is
+  reachable (public network access, virtual network mode, private endpoints), which legacy TLS/SSL
+  versions and cipher suites the gateway accepts, whether legacy management API versions are blocked,
+  its hostnames and certificate expiry, the developer portal and whether self sign-up is open, which
+  security policies apply at global, product, API and operation level, its subscriptions (including the
+  built-in all-access one) and whether audit logs are exported. For its APIs, products and backends:
+  whether they accept plain HTTP, how each API is protected, and whether backends validate certificates
+  and authenticate. Secret named values are checked for Key Vault storage without reading their values.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_api_management_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # TLS versions and ciphers accepted by the gateway and used to backends
+  - KSI-CNA-MAT   # public network access, virtual network mode and private endpoints
+  - KSI-CNA-RNT   # gateway policies that filter and rate-limit traffic
+  - KSI-SVC-ASM   # secret named values held in Key Vault rather than in API Management
+
+evidence_set:
+  reference_id: EVD-AZURE-API-MANAGEMENT-CONFIG
+  name: Azure API Management Configuration
+  instructions: >
+    Script: azure/api_management_configuration/fetcher.py. Azure SDK calls: azure-mgmt-apimanagement ApiManagementClient
+    api_management_service.list(); per service sign_up_settings.get, policy.get (global),
+    product.list_by_service with product_policy.get and product_api.list_by_product per product,
+    api.list_by_service with api_policy.get, api_operation.list_by_api and api_operation_policy.get per
+    API and operation, policy_fragment.list_by_service with policy_fragment.get, subscription.list,
+    backend.list_by_service, identity_provider.list_by_service, named_value.list_by_service,
+    certificate.list_by_service and logger.list_by_service; and azure-mgmt-monitor
+    diagnostic_settings.list for each service.
+    Never written to the evidence: policy XML (only which security elements each policy contains:
+    ip-filter, rate-limit, rate-limit-by-key, quota, quota-by-key, validate-jwt, validate-azure-ad-token,
+    check-header, cors, validate-content, authentication-managed-identity, authentication-certificate;
+    elements inside XML comments do not count),
+    named-value values (only secret, key_vault_backed and secret_stored_in_api_management), subscription
+    keys (only scope, state and allow_tracing), and identity-provider and backend credentials (backends
+    record only auth_configured).
+    TLS: legacy_protocols covers client- and backend-side TLS 1.0, TLS 1.1 and SSL 3.0 from customProperties;
+    source explicit means set, default means unset and Azure's documented default applies (on only for
+    services created on or before 1 April 2018). ciphers covers every suite Azure lets you switch off: the
+    nine CBC and RSA-key-exchange suites default to on for every service and stay on until set to False,
+    and TripleDes168 (TLS_RSA_WITH_3DES_EDE_CBC_SHA) follows the April 2018 rule; each records its
+    weaknesses (cbc, no_forward_secrecy, 3des). weak_ciphers_enabled lists those effectively on. The
+    GCM/ECDHE suites Azure requires for its own platform cannot be switched off and are not listed.
+    minimum_api_version_enforced is true when apiVersionConstraint.minApiVersion is 2019-12-01 or later,
+    Microsoft's recommended floor below which management API versions can read back secrets.
+    Hostname and certificate expiry is recorded with days to expiry at collection time
+    (certificate_days_to_expiry, days_to_expiry); summary counts expired and expiring within 30 days.
+    developer_portal_sign_up is enabled, disabled, not_available_in_tier (the v2 tiers have no sign-up
+    settings), or null when the read failed.
+    Subscriptions: scope_kind is all_apis (the service itself), product or api; built_in_all_access marks
+    the built-in "master" subscription, whose keys work for every API. allow_tracing on a subscription
+    lets its callers request traces that can include request data.
+    APIs: access_control answers whether a call without a subscription key is stopped. It is true when the
+    API requires a subscription key, or when a validate-jwt or validate-azure-ad-token policy runs on every
+    operation's call. Policies apply innermost first (operation, API, open product, global), and an outer
+    scope's policy runs only when every scope inside it keeps <base />; a scope with no policy of its own
+    runs Azure's default, which keeps it. Policy fragments pulled in with <include-fragment> count as
+    part of the policy. An OAuth 2.0 / OpenID Connect server on the API (oauth2_or_openid_configured) only
+    configures the developer portal's test console, so it is not access control. A keyed product's policy
+    never runs for a keyless call; with several open products (ones that require no subscription), each
+    must protect it. False when nothing does; null when a policy or fragment that decides it could not be
+    read. policy_elements lists base when a policy keeps <base />. accepts_http and backend_uses_http mark plain HTTP.
+    audit_logs_exported is true when a diagnostic setting with a destination enables GatewayLogs or the
+    audit or allLogs group, and null when settings could not be read. Lists that could not be read are null
+    and set metadata.partial_failure. A summary with total_apis 0 proves nothing about API protection:
+    there is nothing to protect yet. provider_registration_status (registered / not_registered / unknown)
+    is the Microsoft.ApiManagement resource provider's state.

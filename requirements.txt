@@ -79,6 +79,15 @@ azure-mgmt-redisenterprise>=3.1.0,<4
 azure-mgmt-redis>=14.5.0,<15
 azure-mgmt-dns>=9.0.0,<10
 azure-mgmt-privatedns>=2.0.0,<3
+azure-mgmt-cognitiveservices>=14.1.0,<15
+azure-mgmt-msi>=7.1.0,<8
+azure-mgmt-apimanagement>=5.0.0,<6
+# Container workloads and the data tier.
+azure-mgmt-appcontainers>=5.1.0,<6
+azure-mgmt-containerinstance>=10.1.0,<11
+azure-mgmt-mongocluster>=1.2.0,<2
+azure-mgmt-kusto>=4.0.0,<5
+azure-mgmt-eventhub>=12.0.0,<13
 
 # Compute and containers.
 azure-mgmt-compute>=38.2.0,<39
