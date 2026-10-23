@@ -426,7 +426,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-252 of 263 fetchers carry a mapping.
+252 of 264 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -767,4 +767,4 @@ python tools/gen_ksi_mapping.py
 
 ### Unmapped
 
-[`aws_discovery_beta`](../fetchers/aws/discovery_beta), [`demo_hello`](../fetchers/demo/hello), [`knowbe4_discovery_beta`](../fetchers/knowbe4/discovery_beta), [`servicenow_cases`](../fetchers/servicenow/cases), [`servicenow_changes`](../fetchers/servicenow/changes), [`web_page_text`](../fetchers/web/page_text), [`web_vulnerability_disclosure`](../fetchers/web/vulnerability_disclosure), [`wiz_issues_report`](../fetchers/wiz/issues_report), [`wiz_stig_compliance_report`](../fetchers/wiz/stig_compliance_report), [`wiz_vulnerability_findings`](../fetchers/wiz/vulnerability_findings), [`zendesk_help_center_section`](../fetchers/zendesk/help_center_section) — deliberately carry no mapping.
+[`aws_discovery_beta`](../fetchers/aws/discovery_beta), [`demo_hello`](../fetchers/demo/hello), [`demo_policy_check`](../comparators/demo/policy_check), [`knowbe4_discovery_beta`](../fetchers/knowbe4/discovery_beta), [`servicenow_cases`](../fetchers/servicenow/cases), [`servicenow_changes`](../fetchers/servicenow/changes), [`web_page_text`](../fetchers/web/page_text), [`web_vulnerability_disclosure`](../fetchers/web/vulnerability_disclosure), [`wiz_issues_report`](../fetchers/wiz/issues_report), [`wiz_stig_compliance_report`](../fetchers/wiz/stig_compliance_report), [`wiz_vulnerability_findings`](../fetchers/wiz/vulnerability_findings), [`zendesk_help_center_section`](../fetchers/zendesk/help_center_section) — deliberately carry no mapping.

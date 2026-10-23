@@ -1,8 +1,8 @@
 ---
 name: create-fetcher
 description: >
-  Create a new Paramify fetcher — evidence, inventory or issue report — or port an existing
-  one from another source. Use when the user wants to add a fetcher,
+  Create a new Paramify fetcher — evidence, inventory, issue report, or a comparator that
+  matches records across other fetchers' evidence — or port an existing one from another source. Use when the user wants to add a fetcher,
   integrate a new tool or data source (aws, azure, okta, gitlab, k8s, a
   vulnerability scanner, …), or scaffold a fetcher for a category. Runs a short
   interview, routes to the right kind, scaffolds to the v0.x contract, and
@@ -82,6 +82,22 @@ this one cannot reach (Phase 4).
      `metadata.inventory.complete` is true. Test the failure paths, not only the
      happy one. A list of resources that backs a configuration claim (an IAM
      role list proving least privilege) is evidence, not inventory.
+   - **The claim needs two fetchers' evidence matched record by record →
+     COMPARATOR.** A validator reads one file, so "every change in A was made by
+     a run in B" needs a comparator: it calls no API, declares the fetchers it
+     reads in `depends_on`, and writes one evidence file of verdicts. Copy
+     `comparators/_template/` to `comparators/<category>/<short_name>/` (not
+     under `fetchers/`) and follow `docs/comparators_guide.md`. Its inputs must
+     be JSON evidence fetchers that already exist. `secrets: []`, no targets,
+     and an `evidence_set`; the runner gives it no credentials. Write only a
+     `check(inputs)` returning `(results, summary)` and end with
+     `raise SystemExit(run(check, output=..., summary_keys=...))` from
+     `comparators/_lib/comparator_inputs.py`: `run()` reads the inputs (never
+     glob the run dir), writes the file and reports `input_failed` or
+     `internal_error`. Results hold verdicts, not copies of input records. The Phase 2 auth and fanout questions don't
+     apply; ask only which inputs, the join key, and the evidence set. Test the
+     policy with a missing input (summary all `null`) and a failed one (still
+     compared, exit 1), not only the happy path.
    - **Fetcher asserts a state → EVIDENCE.** Continue below.
 
    Don't ask this as a question if the tool makes it obvious; a scanner is an
@@ -150,9 +166,9 @@ Read these before building (skim, don't summarize back):
 - First fetcher in a new category → Phase 3 does per-category setup.
 - A long scanner → `runtime.timeout` (default 600s).
 
-**Do NOT offer** `depends_on`/comparators (schema has it but the runner has no
-consumer yet — it won't run), or `controls`/`validation_rules`/`tags` (schema
-rejects them).
+**Do NOT offer** `depends_on` on a fetcher that calls an API — that makes it a
+comparator, which belongs under `comparators/` (Phase 0) — or
+`controls`/`validation_rules`/`tags` (schema rejects them).
 
 **Checkpoint:** print the resolved spec — name, runtime, `secrets[]`, fanout +
 `target_schema`, `evidence_set`, and how a failed run is detected — and get a

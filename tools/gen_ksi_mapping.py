@@ -34,8 +34,10 @@ SOURCE_URL = "https://github.com/FedRAMP/rules/blob/main/fedramp-consolidated-ru
 def fetcher_link(name: str) -> str:
     """`name` -> a repo-relative link to its directory, when we can infer one."""
     cat, _, rest = name.partition("_")
-    d = REPO_ROOT / "fetchers" / cat / rest
-    return f"[`{name}`](../fetchers/{cat}/{rest})" if d.is_dir() else f"`{name}`"
+    for tree in ("fetchers", "comparators"):
+        if (REPO_ROOT / tree / cat / rest).is_dir():
+            return f"[`{name}`](../{tree}/{cat}/{rest})"
+    return f"`{name}`"
 
 
 def main() -> int:

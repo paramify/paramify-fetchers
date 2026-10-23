@@ -10,6 +10,8 @@ The runner's contract with a fetcher:
 - Capture stdout, stderr, exit code, duration
 - Diff the output dir to discover what files the fetcher wrote
 - Continue on per-target failures (each target is its own failure domain)
+- For a comparator: set COMPARATOR_INPUTS to an index of its inputs' files, and
+  pass no category secrets, config or passthrough env
 """
 
 import json
@@ -32,6 +34,7 @@ from framework.contract import (
     PlatformConfig,
     PlatformSpec,
     TargetInstance,
+    config_hint,
     effective_secrets,
 )
 from framework.discovery import DISCOVERY_DIR
@@ -63,6 +66,8 @@ _MIN_SECRET_LEN_TO_MASK = 5
 # OUTSIDE EVIDENCE_DIR: outputs are discovered by diffing that directory, so a
 # .json dropped there would be collected as evidence and enveloped.
 _STATUS_FILE_ENV = "FETCHER_STATUS_FILE"
+# A comparator's input index; beside the status file, so outside EVIDENCE_DIR.
+COMPARATOR_INPUTS_ENV = "COMPARATOR_INPUTS"
 # Bound on the reported reason. Truncates the tail, not the head — the useful
 # part of an error message is the front (stderr is the opposite; see envelope.py).
 _STATUS_ERROR_MAX_CHARS = 4000
@@ -194,8 +199,7 @@ def _apply_config(
         if val is None:
             if fdef.required:
                 raise RuntimeError(
-                    f"{fetcher.name}: required config '{name}' has no value "
-                    f"(set it under platforms.{fetcher.category}.config or the fetcher's config)"
+                    f"{fetcher.name}: required config '{name}' has no value ({config_hint(fetcher, name)})"
                 )
             continue
         env[fdef.env] = _coerce_env(val)
@@ -444,6 +448,7 @@ def _invoke(
     on_line: Optional[Callable[[str], None]] = None,
     secret_values=None,
     run_dir: Optional[Path] = None,
+    inputs_index: Optional[dict] = None,
 ) -> InvocationResult:
     """Run one fetcher invocation.
 
@@ -479,6 +484,10 @@ def _invoke(
     with tempfile.TemporaryDirectory(prefix="paramify-status-", ignore_cleanup_errors=True) as status_dir:
         status_path = Path(status_dir) / "status.json"
         env = {**env, _STATUS_FILE_ENV: str(status_path)}
+        if inputs_index is not None:
+            index_path = Path(status_dir) / "inputs.json"
+            index_path.write_text(json.dumps(inputs_index, indent=2, default=str))
+            env[COMPARATOR_INPUTS_ENV] = str(index_path)
 
         proc = subprocess.Popen(
             cmd,
@@ -590,6 +599,7 @@ def run_entry(
     platform_cfg: Optional[PlatformConfig] = None,
     on_line: Optional[Callable[[str], None]] = None,
     on_note: Optional[Callable[[str], None]] = None,
+    inputs_index: Optional[dict] = None,
 ) -> List[InvocationResult]:
     """Run one manifest entry: single invocation, or one per target for fanout.
 
@@ -602,6 +612,10 @@ def run_entry(
     `output_dir` is the run directory. An issue-report fetcher is pointed at its
     issue-reports/ subdirectory instead, and reports its outputs relative to the
     run dir either way (see invocation_dir / _invoke).
+
+    A comparator gets `inputs_index` as $COMPARATOR_INPUTS. Callers pick the
+    category blocks with contract.platform_for, which gives a comparator none: no
+    secrets, config or passthrough env, so it gets no credentials from the runner.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     inv_dir = invocation_dir(fetcher, output_dir)
@@ -613,7 +627,8 @@ def run_entry(
         env = _build_env(fetcher, entry, None, inv_dir, platform_spec, platform_cfg,
                          secrets_seen, notes)
         _emit_notes(notes, on_note)
-        return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir)]
+        return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir,
+                        inputs_index)]
 
     if not entry.targets:
         # No targets[] given. If every target field is optional, run once with the

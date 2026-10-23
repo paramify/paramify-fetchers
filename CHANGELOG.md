@@ -22,6 +22,38 @@ schemas and the `paramify` CLI — not the internal code.
   for commands and options. `paramify samples show <Tab>` completes the names of
   the fetchers that have a sample. See
   [`docs/cli_guide.md`](docs/cli_guide.md#tab-completion).
+- **Comparators** — a fetcher whose inputs are other fetchers' evidence from the
+  same run, declared with `depends_on`. Comparators live in a separate
+  `comparators/<category>/<name>/` tree and share the fetchers' namespace. The
+  schema rejects a comparator with secrets, targets, non-JSON output or no
+  `evidence_set`. A run takes every fetcher in manifest order, then every
+  comparator. The runner runs a comparator even when an input ran and failed,
+  gives it no category secrets, config or passthrough env, and passes an index
+  of the inputs' files in `$COMPARATOR_INPUTS`. Inputs are read in place from
+  the same run only; nothing is copied. The envelope gets an optional
+  `metadata.inputs` (each input file's run, target, status and
+  collection time), and the comparator's `_run_metadata.json` record carries the
+  same list. `paramify manifest add <comparator>` (and the console's add picker)
+  adds its inputs too. `paramify validate` reports an input missing from the
+  manifest, with the fix, and a comparator whose inputs are unknown, cyclic,
+  not JSON evidence, or a comparator that can't run; `run` skips that entry and
+  runs the rest. The shared
+  `comparators/_lib/comparator_inputs.py` holds `run(check, output,
+  summary_keys)`, so a comparator is only its comparison, and applies one
+  policy: failed or partial inputs, including an inventory the runner marked
+  incomplete, are compared and the result is partial (exit 1); a missing input,
+  a file that isn't a complete envelope from this run, or an inventory with
+  `records_included: false` makes every summary value `null`; the file is
+  written even when the index can't be read or the comparison fails. Ships with
+  `comparators/_template/`, the credential-free `demo_policy_check`
+  (`EVD-DEMO-POLICY-CHECK`, `examples/demo_comparator.yaml`),
+  `docs/comparators.md`, `docs/comparators_guide.md` and
+  `docs/comparators_design.md`. `paramify list` shows `reads=<inputs>` and
+  `describe` shows `depends_on`; the `create-fetcher` skill has a comparator
+  route and `wire-manifest` treats a missing input as a gap.
+- **`input_failed` status code** — what a comparator reports when an input failed
+  or is missing, so triage looks at that input's evidence. Accepted by
+  `report_failure` in both `fetchers/_lib/fetcher_status.py` and `status.sh`.
 
 ## [0.6.0-beta] - 2026-10-23
 
