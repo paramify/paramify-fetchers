@@ -47,7 +47,7 @@ evidence_set:
   reference_id: EVD-AZURE-PRIVATE-DNS-ZONE-CONFIG
   name: Azure Private DNS Zone Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-privatedns PrivateDnsManagementClient
+    Script: azure/private_dns_zone_configuration/fetcher.py. Azure SDK calls: azure-mgmt-privatedns PrivateDnsManagementClient
     private_zones.list(), and for each zone virtual_network_links.list(resource_group, zone) and
     record_sets.list(resource_group, zone); a list that fails leaves virtual_network_links or
     record_sets null (counted in zones_links_unknown / zones_records_unknown), never empty. SOA records
