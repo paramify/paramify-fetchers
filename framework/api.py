@@ -24,7 +24,6 @@ import re
 import shutil
 import sys
 import tempfile
-from collections import Counter
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
@@ -42,7 +41,6 @@ from framework import yaml_io
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
     ConfigField,
-    InvocationResult,
     Secret,
     TargetField,
     config_hint,
@@ -1170,7 +1168,6 @@ def run(
     # Two phases: every fetcher in manifest order, then every comparator.
     entries = dependency_graph.order(parsed.entries, fetchers)
     in_manifest = {e.use for e in entries}
-    pending = Counter(e.use for e in entries)
     collected: Dict[str, List[dict]] = {}
     problems = dependency_graph.problems(fetchers)
 
@@ -1190,7 +1187,6 @@ def run(
         if reason:
             emit({"event": "fetcher_skip", "fetcher": entry.use, "reason": reason})
             overall_ok = False
-            pending[entry.use] -= 1
             continue
         fetcher = fetchers[entry.use]
         spec, platform_cfg = platform_for(fetcher, platforms), platform_for(fetcher, parsed.platforms)
@@ -1206,31 +1202,9 @@ def run(
             start_event["depends_on"] = list(fetcher.depends_on)
         emit(start_event)
 
-        inputs_index = None
-        if fetcher.is_comparator:
-            # Checked here rather than trusted to the order, so it holds if runs go parallel.
-            waiting = dependency_graph.unfinished(fetcher, pending)
-            if waiting:
-                now = _iso_now()
-                reason = (
-                    f"runner: comparator not started: input(s) {', '.join(waiting)} "
-                    f"have not finished in this run"
-                )
-                all_results.append(InvocationResult(
-                    fetcher_name=fetcher.name, fetcher_version=fetcher.version, target=None,
-                    started_at=now, completed_at=now, duration_sec=0.0, exit_code=255,
-                    stdout="", stderr=reason, outputs=[], error=reason,
-                    error_code="runner_setup_failed",
-                    inputs=_metadata_inputs(fetcher, run_id, collected),
-                ))
-                emit({"event": "fetcher_result", "fetcher": entry.use, "exit_code": 255,
-                      "duration_sec": 0.0, "target": None, "outputs": [], "error": reason,
-                      "error_code": "runner_setup_failed"})
-                overall_ok = False
-                collected.setdefault(entry.use, []).append(_setup_failure_record(reason))
-                pending[entry.use] -= 1
-                continue
-            inputs_index = _inputs_index(fetcher, run_id, run_dir, collected, in_manifest)
+        inputs_index = (
+            _inputs_index(fetcher, run_id, run_dir, collected, in_manifest) if fetcher.is_comparator else None
+        )
 
         def on_line(line: str, _use=entry.use) -> None:
             emit({"event": "log_line", "fetcher": _use, "line": line})
@@ -1269,7 +1243,6 @@ def run(
             emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
             overall_ok = False
             collected.setdefault(entry.use, []).append(_setup_failure_record(str(e)))
-            pending[entry.use] -= 1
             if fetcher.is_issue_report:
                 # No invocation ran, so nothing else records it — and a cycle
                 # must not close on a run this entry was part of.
@@ -1277,7 +1250,6 @@ def run(
             continue
 
         collected.setdefault(entry.use, []).extend(_input_record(r) for r in results)
-        pending[entry.use] -= 1
         for r in results:
             if fetcher.is_comparator:
                 r.inputs = _metadata_inputs(fetcher, run_id, collected)

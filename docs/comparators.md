@@ -89,22 +89,18 @@ in the run directory, and writes only its verdicts.
 
 1. **Two phases.** The run takes every fetcher in manifest order, then every
    comparator, each after any comparator it reads and otherwise in manifest
-   order (`framework/runner/dependency_graph.py`). The run stays serial.
-2. **Completion check.** Before starting a comparator, the runner confirms that
-   every input in the manifest has a finished record in this run: succeeded,
-   failed, or failed to start. If one doesn't, the comparator isn't started. It
-   is recorded as failed with `runner_setup_failed`, naming the input. The check
-   doesn't rely on the order, so it still holds if runs ever go parallel.
-3. **No skip on failure.** A comparator runs even when an input failed, so a
+   order (`framework/runner/dependency_graph.py`). The run stays serial, so
+   every input has finished, or failed, before a comparator starts.
+2. **No skip on failure.** A comparator runs even when an input failed, so a
    failed artifact reaches Paramify instead of the set going stale.
-4. **No credentials.** A comparator gets nothing from its category: no secrets,
+3. **No credentials.** A comparator gets nothing from its category: no secrets,
    no config and no passthrough env. It gets `EVIDENCE_DIR`,
    `FETCHER_STATUS_FILE`, its own `config_schema` values, the
    [inherited minimum](fetcher_contract_guide.md#2-it-reads-only-what-it-declares), and `COMPARATOR_INPUTS`.
-5. **Handoff.** `COMPARATOR_INPUTS` is the path of an index the runner builds
+4. **Handoff.** `COMPARATOR_INPUTS` is the path of an index the runner builds
    from its own results, without opening a payload. Like the status file, it
    sits outside `EVIDENCE_DIR` and is deleted with the invocation.
-6. **Wrapping.** The comparator's output is enveloped like any evidence, with
+5. **Wrapping.** The comparator's output is enveloped like any evidence, with
    `metadata.inputs` added (see [Output](#output)).
 
 The index:

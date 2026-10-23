@@ -83,8 +83,3 @@ def order(entries: Sequence[ManifestEntry], fetchers: Mapping[str, Fetcher]) -> 
         left[entry.use] -= 1
         out.append(entry)
     return out
-
-
-def unfinished(fetcher: Fetcher, pending: Mapping[str, int]) -> List[str]:
-    """The inputs the manifest holds that haven't finished in this run yet."""
-    return [d for d in fetcher.depends_on if pending.get(d, 0) > 0]

@@ -1,5 +1,4 @@
-"""Comparators: discovery checks, run order, the completion check, the input
-handoff, `metadata.inputs`, and the shared reader's policy.
+"""Comparators: input checks, run order, the input handoff, `metadata.inputs`, and the shared reader's policy.
 
 The run tests stage a small repo in tmp_path with real subprocess fetchers, the
 real schemas and the real `_lib` helpers, so they assert what a comparator
@@ -551,21 +550,6 @@ def test_a_comparators_required_config_points_at_its_own_entry(tmp_path):
 
     m["run"]["fetchers"][1]["config"] = {"environments": "production"}
     assert api.validate(m, tmp_path) == []
-
-
-def test_the_completion_check_does_not_start_a_comparator_whose_input_is_pending(tmp_path, monkeypatch):
-    src = input_fetcher(tmp_path, "src")
-    cmp = comparator(tmp_path, "cmp", [src], PROBE)
-    monkeypatch.setattr(dependency_graph, "order", lambda entries, fetchers: list(entries))
-
-    summary, run_dir, events = run(tmp_path, manifest(tmp_path, cmp, src))
-
-    assert not summary["ok"]
-    assert not (run_dir / "cmp.json").exists(), "the comparator must not have run"
-    result = next(e for e in events if e["event"] == "fetcher_result" and e["fetcher"] == cmp)
-    assert result["exit_code"] == 255 and result["error_code"] == "runner_setup_failed"
-    assert src in result["error"]
-    assert (run_dir / "src.json").exists(), "the input still runs"
 
 
 def test_demo_comparator_runs_after_demo_hello(tmp_path):
