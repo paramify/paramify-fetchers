@@ -45,6 +45,7 @@ from framework.contract import (
     PlatformConfig,
     Secret,
     TargetField,
+    TargetInstance,
     effective_secrets,
 )
 from framework.custom_tags import category_display_names
@@ -69,7 +70,12 @@ from framework.paramify_auth import (
 )
 from framework.probe import probe_categories
 from framework.runner import manifest_loader
-from framework.secret_resolver import is_env_ref_attempt
+from framework.secret_resolver import (
+    SecretResolutionError,
+    is_env_ref_attempt,
+    is_partial_env_ref,
+    resolve,
+)
 
 
 def _missing_token_error() -> str:
@@ -957,7 +963,7 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
         errors += [f"{entry.use}: {problem}" for problem in merged.errors.values()]
         for j, t in enumerate(entry.targets):
             errors += [f"{entry.use} target[{j}]: {k} is {v!r}, but target fields aren't resolved, so ${{env:}} "
-                       f"references don't work there" for k, v in t.values.items() if is_env_ref_attempt(v)]
+                       f"references don't work there" for k, v in t.values.items() if is_env_ref_attempt(v) or is_partial_env_ref(v)]
 
         # An issue report with no assessment collects fine but can never be
         # intaken, so the gap is reported here rather than at upload time — after
@@ -1491,6 +1497,10 @@ def _with_manifest_close_cycles(run_dir: Path, root: Path, config: dict, index: 
         value = next(
             (d["value"] for d in view.get(name, []) if d["name"] == CLOSE_CYCLE_FIELD), None
         )
+        try:
+            value = resolve(value) if value is not None else None  # the view shows a reference as written
+        except SecretResolutionError:
+            value = None
         if value is not None:
             overrides.setdefault(name, {}).setdefault(CLOSE_CYCLE_FIELD, value)
     return {**config, "overrides": overrides}
@@ -2922,7 +2932,9 @@ def effective_config(
     "platforms.<category>", "default", or None when nothing supplies it. When the
     value as written is a ${env:} reference, "reference" holds it and
     "reference_state" says "set", "unset" (value and source are then the next
-    value down, as at run time) or "invalid"; "value" is what the runner injects. A field the category
+    value down, as at run time) or "invalid". "value" is what the runner injects,
+    except that a value read from a reference is shown as the reference, never
+    what it resolves to. A field the category
     declares (and the fetcher doesn't) is included too, since it is injected into
     that fetcher's environment just the same.
 
@@ -2945,16 +2957,20 @@ def effective_config(
             continue
         spec = specs.get(f.category) if f.category else None
         platform_values = ((all_platforms.get(f.category or "") or {}).get("config")) or {}
-        entry_values = (_find_entry(m, use) or {}).get("config") or {}
+        raw = _find_entry(m, use) or {}
+        entry_values = raw.get("config") or {}
+        # Secrets too, so a config reference reading one of them shows as invalid, as at run time.
+        targets = [TargetInstance(values={}, secrets=dict(t.get("secrets") or {})) for t in raw.get("targets") or []]
         merged = merged_config(f, spec, PlatformConfig(config=dict(platform_values)),
-                               ManifestEntry(use=use, config=dict(entry_values)))
+                               ManifestEntry(use=use, config=dict(entry_values), secrets=dict(raw.get("secrets") or {}),
+                                             targets=targets))
         labels = {"entry": "entry", "platform": f"platforms.{f.category}", "default": "default"}
 
         fields: List[dict] = []
         for name, fdef in merged.schema.items():
             d = _config_descriptor(fdef)
             d["category"] = f.category
-            d["value"] = merged.values.get(name)
+            d["value"] = merged.referenced.get(name, merged.values.get(name))
             d["source"] = labels.get(merged.sources.get(name, ""))
             # The value as written, when it is a reference: "set" when the runner resolves it,
             # "unset" when the next value down applies, "invalid" when the runner refuses it.
@@ -2962,7 +2978,7 @@ def effective_config(
                                                                 ("platform", platform_values.get(name)),
                                                                 ("default", fdef.default)) if v is not None),
                                    (None, None))
-            if is_env_ref_attempt(top):
+            if is_env_ref_attempt(top) or is_partial_env_ref(top):
                 d["reference"] = top
                 d["reference_state"] = ("invalid" if name in merged.errors
                                         else "set" if merged.sources.get(name) == top_source else "unset")

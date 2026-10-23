@@ -94,3 +94,8 @@ def env_var_name(value) -> Optional[str]:
 def is_env_ref_attempt(value) -> bool:
     """True if the value opens with the reference sigil, well-formed or not."""
     return isinstance(value, str) and bool(_ENV_REF_ATTEMPT.match(value.strip()))
+
+
+def is_partial_env_ref(value) -> bool:
+    """True if the reference sigil appears in the value anywhere but at its start."""
+    return isinstance(value, str) and "${env:" in value and not is_env_ref_attempt(value)

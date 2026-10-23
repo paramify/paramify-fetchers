@@ -309,7 +309,8 @@ def test_effective_config_shows_the_reference_and_whether_it_is_set(tmp_path, mo
     view = api.effective_config(m, ["t_fetcher"], tmp_path, {"t_fetcher": fetcher}, {})["t_fetcher"]
     by_name = {f["name"]: f for f in view}
     assert {k: by_name["hosts"][k] for k in ("value", "source", "reference", "reference_state")} == {
-        "value": "secret-ish-value", "source": "entry", "reference": "${env:SET_VAR}", "reference_state": "set"}
+        "value": "${env:SET_VAR}", "source": "entry", "reference": "${env:SET_VAR}", "reference_state": "set"}
+    assert "secret-ish-value" not in json.dumps(view)
     assert {k: by_name["patterns"][k] for k in ("value", "source", "reference", "reference_state")} == {
         "value": "qa.*", "source": "default", "reference": "${env:UNSET_VAR}", "reference_state": "unset"}
 
@@ -330,6 +331,80 @@ def test_effective_config_skips_an_unset_reference_like_the_runner(tmp_path, mon
                  "platforms": {"testcat": {"config": {"patterns": "qa.*"}}}}}
     [field] = api.effective_config(m, ["t_fetcher"], tmp_path, {"t_fetcher": fetcher}, {})["t_fetcher"]
     assert (field["value"], field["source"]) == ("qa.*", "platforms.testcat")
+
+
+LEAK_PROBE = "leak-probe-aaaaaaaa"
+
+
+@pytest.mark.parametrize("targets", [[], [{"subscription_id": "s"}]], ids=["ambient", "target"])
+def test_a_reference_to_a_credential_variable_is_refused_and_never_resolved(tmp_path, monkeypatch, targets):
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", LEAK_PROBE)
+    m = _manifest("azure_front_door_tls", {"scope_exclusions": "${env:PARAMIFY_UPLOAD_API_TOKEN}"})
+    m["run"]["output_dir"] = str(tmp_path / "evidence")
+    m["run"]["fetchers"][0]["targets"] = targets
+    refusal = ("config 'scope_exclusions' reads ${env:PARAMIFY_UPLOAD_API_TOKEN}, which holds a secret; "
+               "config references can't read secrets")
+
+    assert f"azure_front_door_tls: {refusal}" in api.validate(m, REPO_ROOT)
+    [field] = [f for f in api.effective_config(m, ["azure_front_door_tls"], REPO_ROOT)["azure_front_door_tls"]
+               if f["name"] == "scope_exclusions"]
+    assert (field["value"], field["reference_state"]) == ("${env:PARAMIFY_UPLOAD_API_TOKEN}", "invalid")
+
+    events: list = []
+    summary = api.run(m, REPO_ROOT, on_event=events.append)
+    assert summary["ok"] is False
+    assert any(refusal in json.dumps(e) for e in events)
+    written = [f for f in Path(summary["run_dir"]).rglob("*") if f.is_file()]
+    assert [f.name for f in written] == ["_run_metadata.json"]
+    assert all(LEAK_PROBE not in f.read_text() for f in written)
+    assert LEAK_PROBE not in json.dumps(events) + json.dumps(field)
+
+
+def test_a_reference_to_one_of_the_fetchers_secrets_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("ACME_CLIENT_ID", "client-0123456789")
+    monkeypatch.setenv("ACME_LOGIN", "login-0123456789")
+    fetcher = make_fetcher(tmp_path, secrets=[Secret(name="client_id", env="ACME_CLIENT_ID")],
+                           config_schema={"patterns": cfg("patterns", "PATTERNS")})
+    for var, entry_secrets in (("ACME_CLIENT_ID", {}), ("ACME_LOGIN", {"client_id": "${env:ACME_LOGIN}"})):
+        merged = merged_config(fetcher, None, None, ManifestEntry(
+            use="x", config={"patterns": f"${{env:{var}}}"}, secrets=entry_secrets))
+        assert merged.errors == {"patterns": f"config 'patterns' reads ${{env:{var}}}, which holds a secret; "
+                                             f"config references can't read secrets"}
+        assert merged.values["patterns"] == f"${{env:{var}}}" and merged.referenced == {}
+        with pytest.raises(RuntimeError, match="which holds a secret"):
+            _apply_config({}, fetcher, None, None, ManifestEntry(use="x", config={"patterns": f"${{env:{var}}}"},
+                                                                 secrets=entry_secrets))
+
+
+@pytest.mark.parametrize("value", ["qa.* ${env:MY_PATTERNS}", "qa.*,${env:MY_PATTERNS}"])
+def test_a_reference_that_is_only_part_of_the_value_is_refused(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("MY_PATTERNS", "webdav*")
+    fetcher = make_fetcher(tmp_path, config_schema={"patterns": cfg("patterns", "PATTERNS")})
+    with pytest.raises(RuntimeError, match="must be the whole value"):
+        _apply_config({}, fetcher, None, None, ManifestEntry(use="x", config={"patterns": value}))
+    errors = api.validate(_manifest("azure_front_door_origins", {"scope_exclusions": value}), REPO_ROOT)
+    assert ("azure_front_door_origins: config 'scope_exclusions': a ${env:} reference must be the whole value, "
+            "not part of it") in errors
+
+
+def test_an_allowed_reference_reaches_the_fetcher_and_is_masked_in_its_output(tmp_path, monkeypatch):
+    monkeypatch.setenv("MY_PATTERNS", "qa.*, *.sandbox.example.com")
+    fdir = tmp_path / "fetcher"
+    fdir.mkdir()
+    (fdir / "fetcher.py").write_text(
+        "import json, os, sys\n"
+        "patterns = os.environ['PATTERNS']\n"
+        "print('patterns: ' + patterns, file=sys.stderr)\n"
+        "print('patterns: ' + patterns)\n"
+        "open(os.path.join(os.environ['EVIDENCE_DIR'], 'out.json'), 'w').write(json.dumps({'patterns': patterns}))\n"
+    )
+    fetcher = make_fetcher(fdir, config_schema={"patterns": cfg("patterns", "PATTERNS")})
+    lines: list = []
+    [result] = run_entry(fetcher, ManifestEntry(use="t_fetcher", config={"patterns": "${env:MY_PATTERNS}"}),
+                         tmp_path / "out", on_line=lines.append)
+    assert result.exit_code == 0
+    assert result.stderr.strip() == result.stdout.strip() == lines[0] == "patterns: ***REDACTED***"
+    assert json.loads((tmp_path / "out" / "out.json").read_text()) == {"patterns": "qa.*, *.sandbox.example.com"}
 
 
 def test_required_config_env_reference_unset_raises(tmp_path, monkeypatch):

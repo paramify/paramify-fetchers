@@ -44,7 +44,9 @@ from framework.issue_reports import (
 from framework.secret_resolver import (
     SecretResolutionError,
     UnsetSecretError,
+    env_var_name,
     is_env_ref_attempt,
+    is_partial_env_ref,
     resolve,
 )
 
@@ -167,6 +169,14 @@ class MergedConfig(NamedTuple):
     sources: Dict[str, str]         # per value: "entry", "platform" or "default"
     unset: List[Tuple[str, str]]    # (field, VAR) for every reference whose variable was unset or empty
     errors: Dict[str, str]          # per field: a reference the runner refuses
+    referenced: Dict[str, str]      # per value read from a reference: the reference as written
+
+
+def _secret_env_vars(fetcher: Fetcher, platform_spec: Optional[PlatformSpec], entry: ManifestEntry) -> set:
+    """The env vars that carry this fetcher's secrets: the ones it declares, and the ones its secret references read."""
+    refs = [*entry.secrets.values(), *(v for t in entry.targets for v in t.secrets.values())]
+    return ({s.env for s in effective_secrets(fetcher, platform_spec) if s.env}
+            | {var for var in map(env_var_name, refs) if var})
 
 
 def merged_config(
@@ -180,9 +190,11 @@ def merged_config(
     The precedence ladder, lowest to highest: schema defaults, platform values,
     per-fetcher values. A string field's value may be a ${env:VAR} reference; one
     whose variable is unset or empty gives way to the next value down, as if it
-    had not been set. A reference on an integer or boolean field, or a malformed
-    one, is an error for that field, and its text stays the value so a view can
-    show it. Only this fetcher's fields and the issue-report keys the manifest
+    had not been set. These are errors for that field, and the text as written
+    stays the value so a view can show it: a reference on an integer or boolean
+    field, a malformed one, one that is only part of the value, and one reading a
+    credential variable or one of the fetcher's secrets, which is never resolved.
+    Only this fetcher's fields and the issue-report keys the manifest
     carries undeclared are resolved; any other key (a sibling fetcher's, or a
     stale one) passes through as written. Extracted from _apply_config so callers that need a resolved value
     the fetcher never sees can read it without re-implementing the ladder —
@@ -195,10 +207,12 @@ def merged_config(
     schema.update(fetcher.config_schema)  # per-fetcher overrides platform on name clash
 
     platform_values = platform_cfg.config if platform_cfg else {}
+    secret_vars = _secret_env_vars(fetcher, platform_spec, entry)
     values: Dict[str, object] = {}
     sources: Dict[str, str] = {}
     unset: List[Tuple[str, str]] = []
     errors: Dict[str, str] = {}
+    referenced: Dict[str, str] = {}
     for name in dict.fromkeys([*schema, *platform_values, *entry.config]):
         fdef = schema.get(name) or ConfigField(name=name)
         resolved = name in schema or name in UNDECLARED_KEYS
@@ -207,13 +221,19 @@ def merged_config(
         for source, value in layers:
             if value is None:
                 continue
-            if resolved and is_env_ref_attempt(value):
+            var = env_var_name(value)
+            if resolved and is_partial_env_ref(value):
+                errors[name] = f"config '{name}': a ${{env:}} reference must be the whole value, not part of it"
+            elif resolved and var and (var in secret_vars or _is_sensitive_env_name(var)):
+                errors[name] = (f"config '{name}' reads ${{env:{var}}}, which holds a secret; "
+                                f"config references can't read secrets")
+            elif resolved and is_env_ref_attempt(value):
                 if fdef.type != "string":
                     errors[name] = (f"config '{name}' is {fdef.type}; ${{env:}} references work on "
                                     f"string config fields only")
                 else:
                     try:
-                        value = resolve(value)
+                        referenced[name], value = value, resolve(value)
                     except UnsetSecretError as e:
                         unset.append((name, e.env_var))
                         continue
@@ -221,7 +241,7 @@ def merged_config(
                         errors[name] = f"config '{name}': {e}"
             values[name], sources[name] = value, source
             break
-    return MergedConfig(schema, values, sources, unset, errors)
+    return MergedConfig(schema, values, sources, unset, errors, referenced)
 
 
 def _apply_config(
@@ -258,6 +278,9 @@ def _apply_config(
                 )
             continue
         env[fdef.env] = _coerce_env(merged.values[name])
+    # A value read from a reference is masked out of captured output like a secret; the evidence is the fetcher's own.
+    if secret_sink is not None:
+        secret_sink.update(str(merged.values[name]) for name in merged.referenced)
 
     passthrough = set(platform_spec.passthrough_env if platform_spec else [])
     if platform_cfg:

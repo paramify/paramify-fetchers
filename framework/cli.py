@@ -95,7 +95,12 @@ from framework.issue_reports import (
     CLOSE_CYCLE_VALUES,
     ISSUE_REPORTS_DIR,
 )
-from framework.secret_resolver import is_env_ref_attempt
+from framework.runner.executor import _is_sensitive_env_name
+from framework.secret_resolver import (
+    env_var_name,
+    is_env_ref_attempt,
+    is_partial_env_ref,
+)
 
 _DEFAULT_MANIFEST = "manifest.yaml"
 
@@ -229,9 +234,15 @@ def _parse_kv(arg: str, path, json_out: bool):
 def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool, target: bool = False):
     # The runner resolves ${env:VAR} in string config fields only, so anywhere else
     # a reference would be saved as literal text (or coerced to false).
-    if is_env_ref_attempt(value):
+    if is_env_ref_attempt(value) or is_partial_env_ref(value):
         if target:
             _fail(path, f"{key}: target fields aren't resolved, so ${{env:}} references don't work there", json_out)
+        if is_partial_env_ref(value):
+            _fail(path, f"config '{key}': a ${{env:}} reference must be the whole value, not part of it", json_out)
+        var = env_var_name(value)
+        if var and _is_sensitive_env_name(var):
+            _fail(path, f"config '{key}' reads ${{env:{var}}}, which holds a secret; config references can't read "
+                        f"secrets", json_out)
         if typ != "string":
             _fail(path, f"config '{key}' is {typ}; ${{env:}} references work on string config fields only", json_out)
         return value

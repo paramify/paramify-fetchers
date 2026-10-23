@@ -58,6 +58,13 @@ config, then the default), and the run prints a note. Integer and boolean
 fields and target fields don't take `${env:VAR}` (a target's secrets do), and
 `manifest` and `validate` refuse one there.
 
+The reference must be the whole value: `qa.* ${env:VAR}` is refused. So is a
+reference to a credential variable (a name containing `SECRET`, `TOKEN`,
+`PASSWORD`, `PASSWD`, `CREDENTIAL` or `PRIVATE_KEY`) or to a variable that holds
+one of the fetcher's secrets. The run masks the value it reads out of the
+fetcher's logs and the run metadata, but a fetcher may still write it into its
+evidence, as the Azure scope exclusions do with their patterns.
+
 ## 3. Check it
 
 It matches the worked example.

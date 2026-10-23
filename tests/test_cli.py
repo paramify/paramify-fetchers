@@ -809,6 +809,26 @@ def test_env_reference_on_a_typed_config_field_is_refused(in_repo, tmp_path, com
     assert "MY_VALUE" not in json.dumps(shown)
 
 
+@pytest.mark.parametrize("command, message", [
+    (["set-config", "azure_front_door_tls", "scope_exclusions=${env:PARAMIFY_UPLOAD_API_TOKEN}"],
+     "config 'scope_exclusions' reads ${env:PARAMIFY_UPLOAD_API_TOKEN}, which holds a secret"),
+    (["set-platform-config", "azure", "scope_exclusions=${env:AZURE_CLIENT_SECRET}"],
+     "config 'scope_exclusions' reads ${env:AZURE_CLIENT_SECRET}, which holds a secret"),
+    (["set-config", "azure_front_door_tls", "scope_exclusions=qa.* ${env:MY_VALUE}"],
+     "a ${env:} reference must be the whole value"),
+])
+def test_env_reference_to_a_secret_or_inside_a_value_is_refused(in_repo, tmp_path, command, message):
+    m = str(tmp_path / "m.yaml")
+    runner.invoke(app, ["manifest", "init", "-f", m])
+    if command[0] == "set-config":
+        runner.invoke(app, ["manifest", "add", command[1], "-f", m])
+    r = runner.invoke(app, ["manifest", *command, "-f", m, "--json"])
+    assert r.exit_code == 1
+    assert message in json.loads(r.output)["errors"][0]
+    shown = _json(runner.invoke(app, ["manifest", "show", "-f", m, "--json"]))
+    assert "${env:" not in json.dumps(shown)
+
+
 def test_env_reference_in_a_target_field_is_refused(in_repo, tmp_path):
     m = str(tmp_path / "m.yaml")
     runner.invoke(app, ["manifest", "init", "-f", m])
