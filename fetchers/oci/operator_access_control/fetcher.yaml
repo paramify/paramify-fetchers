@@ -1,17 +1,7 @@
 name: oci_operator_access_control
 version: 0.1.0
-description: >
-  Operator Access Control and Delegate Access Control — the approval gate on
-  Oracle's own staff reaching customer Exadata infrastructure and VM clusters.
-  Collects the controls (approvers, pre-approved actions, auto-approval during
-  maintenance), which resources each governs and whether it is always enforced
-  and forwarding operator session logs, and a year of access requests from
-  Oracle operators: whether each was granted (including since expired, revoked
-  or completed), is pending or was rejected, and whether it was auto-approved
-  with no person involved. These services govern Exadata resources only; a
-  tenancy with none reports empty lists with the services marked readable,
-  never a control in place. Record fields are verified against the SDK models,
-  not a populated live response.
+description: >-
+  Shows whether Oracle's own operators need customer approval to reach Exadata infrastructure, and which of their access requests in the last year went through without a person.
 category: oci
 
 supports_targets: true
@@ -69,11 +59,57 @@ ksis:
 evidence_set:
   reference_id: EVD-OCI-OPERATOR-ACCESS
   name: Oracle Operator Access Controls
-  instructions: >
-    Script: oci/operator_access_control/fetcher.py. OCI Python SDK calls:
-    operator_access_control list_operator_controls(),
-    list_operator_control_assignments() and list_access_requests() (last 365
-    days), delegate_access_control list_delegation_controls() and
-    list_delegated_resource_access_requests(), walked over every accessible
-    compartment beneath the target, plus a get of each live control and
-    assignment for its approval settings. One evidence file per target.
+  instructions: |
+    Script: oci/operator_access_control/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope. These services govern Exadata resources only; a tenancy with none reports empty lists with both services readable.
+
+    Commands Executed:
+    - identity.list_compartments — the compartments beneath the target
+    - operator_access_control.list_operator_controls (per compartment) — operator controls
+    - operator_access_control.list_operator_control_assignments (per compartment) — which resources each control governs
+    - operator_access_control.list_access_requests (per compartment) — Oracle operators' access requests in the last 365 days
+    - delegate_access_control.list_delegation_controls (per compartment) — delegation controls
+    - delegate_access_control.list_delegated_resource_access_requests (per compartment) — delegated access requests, filtered here to the last 365 days
+    - operator_access_control.get_operator_control (per live control) — approvers and pre-approved actions, which the listing leaves out
+    - operator_access_control.get_operator_control_assignment (per live assignment) — auto-approval during maintenance
+    - delegate_access_control.get_delegation_control (per live control) — approvals required, pre-approved actions and governed resources
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_operator_access_control_<compartment>.json — every operator control, assignment and delegation control with its approval settings, and every access request with its outcome and whether it was auto-approved.
+
+    Summary fields:
+
+    Could the services be read?
+    - operator_access_control_readable — True if every Operator Access Control listing succeeded in at least one compartment; false otherwise
+    - delegate_access_control_readable — True if every Delegate Access Control listing succeeded in at least one compartment; false otherwise
+    - records_outside_requested_compartment — Number of records the API returned naming a different compartment than the one queried; they are dropped, and a non-zero count is an API anomaly rather than a finding
+
+    Is the approval gate in place?
+    - governed_resources — Number of distinct resources governed by an assignment or delegation control
+    - total_operator_controls — Number of operator controls not deleted
+    - operator_controls_fully_pre_approved — Number of operator controls where every action is approved in advance, so the gate records access but blocks none
+    - operator_controls_with_pre_approved_actions — Number of operator controls with some actions pre-approved
+    - operator_controls_with_unread_detail — Number of operator controls whose approval settings could not be read
+    - total_operator_control_assignments — Number of assignments of a control to a resource, not deleted
+    - assignments_not_always_enforced — Number of assignments that govern the resource only inside a time window
+    - assignments_auto_approving_during_maintenance — Number of assignments that skip approval during maintenance windows
+    - assignments_not_forwarding_operator_logs — Number of assignments not forwarding operator session logs to the customer's syslog
+    - assignments_failed_to_apply — Number of assignments in a failed state, so the control is not in force
+    - assignments_with_unread_detail — Number of assignments whose detail could not be read
+    - total_delegation_controls — Number of delegation controls not deleted
+    - delegation_controls_with_pre_approved_actions — Number of delegation controls with pre-approved actions
+    - delegation_controls_auto_approving_during_maintenance — Number of delegation controls that skip approval during maintenance
+    - delegation_controls_with_unread_detail — Number of delegation controls whose detail could not be read
+
+    Did Oracle staff get in, and who let them?
+    - access_request_window_days — Number of days of request history read (365)
+    - total_access_requests — Number of access requests from both services in the window
+    - provider_access_requests — Number of those raised by Oracle operators rather than by the customer or the system
+    - provider_requests_granted — Number of operator requests that were approved, including those since expired, revoked or completed
+    - provider_requests_pending — Number of operator requests still awaiting a decision
+    - provider_requests_rejected — Number of operator requests that were rejected
+    - provider_requests_in_unrecognized_state — Number of operator requests in a state this evidence does not classify
+    - provider_requests_auto_approved — Number of operator requests approved with no person involved, by pre-approval or maintenance auto-approval
+    - requests_by_state — Number of requests for each lifecycle state the services report
+    - requests_by_severity — Number of requests for each severity the requester gave

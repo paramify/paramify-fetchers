@@ -1,53 +1,8 @@
 #!/usr/bin/env python3
-"""
-OCI networking — what the rules allow, and whether anything can actually reach it
-
-Every VCN, subnet, security list and network security group in scope, with each
-ingress and egress rule parsed into peer, protocol and port range; the subnet
-controls that override rules entirely (`prohibit_internet_ingress`,
-`prohibit_public_ip_on_vnic`); the route tables and gateways that decide whether
-a subnet is reachable from the internet at all; and the flow logs configured
-over each subnet or VCN.
-
-Evidence for KSI-CNA-RNT, "resources are persistently reviewed to ensure they
-are appropriately configured to limit inbound and outbound network traffic",
-KSI-CNA-MAT (minimal attack surface) and KSI-MLA-LET for the flow logs.
-
-Ported from Prowler's OCI network service (Apache-2.0,
-prowler/providers/oraclecloud/services/network, commit 5fe1a67) — the SSH and
-RDP ingress checks for security lists and NSGs, the default-security-list check,
-and the subnet flow-logs check. Five departures, every one of them a rule
-Prowler would call clean:
-
-  * IPv6 IS INVISIBLE TO PROWLER. Every check compares `source == "0.0.0.0/0"`,
-    so `::/0` — the IPv6 internet, and a legal source on the same rule list —
-    passes every one of them.
-
-  * ONLY SSH AND RDP ARE CHECKED. A rule opening 5432, 3306, 1521, 445 or
-    "all ports" to the internet is not SSH, so nothing fires. Here every port
-    range open to the internet is recorded, and a named set of sensitive ports
-    is called out.
-
-  * EGRESS IS NOT CHECKED AT ALL. The indicator says "inbound and outbound".
-    The live tenancy's security lists both allow egress to 0.0.0.0/0 on every
-    protocol, which no Prowler check reports.
-
-  * UDP IS NOT PARSED. Prowler reads `tcp_options` only, so a UDP rule to the
-    internet is read as "no ports specified" or skipped by protocol.
-
-  * A RULE THAT NOTHING CAN REACH IS NOT AN EXPOSURE. Three facts decide that,
-    all verified live: a security list attached to no subnet applies to nothing;
-    `prohibit_internet_ingress` on a subnet blocks inbound regardless of rules;
-    and a subnet whose route table has no 0.0.0.0/0 route to an *enabled*
-    internet gateway is not reachable. The staged tenancy has an SSH-from-
-    anywhere rule on a list attached to no subnet, in a VCN with no gateway, so
-    `internet_ingress_rules` and `reachable_internet_ingress_rules` deliberately
-    disagree — the first is the configuration finding, the second the exposure.
-
-NSGs ARE NOT SCOPED TO SUBNETS. An NSG attaches to VNICs, not subnets, so its
-rules cannot be resolved to a route table here; NSG exposure is reported on the
-rules alone and never folded into the reachable counts.
-"""
+"""OCI security list and NSG rules, which internet-open rules a packet can actually reach, egress, gateways, and flow logs."""
+# Ported from Prowler's OCI network checks (Apache-2.0,
+# prowler/providers/oraclecloud/services/network, commit 5fe1a67); the departures are
+# listed in fetchers/oci/README.md.
 
 import logging
 import os

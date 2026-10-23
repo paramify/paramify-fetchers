@@ -1,51 +1,5 @@
 #!/usr/bin/env python3
-"""
-OCI Certificates — the trust material behind machine-to-machine communications
-
-Every certificate and certificate authority in scope: who it identifies, the
-validity window it is inside, the key and signature algorithms behind it,
-whether it renews automatically, and whether it has been revoked.
-
-This is the evidence for KSI-SVC-VCM, "the authenticity and integrity of
-communications between machine-based information resources is persistently
-validated using automation" — an indicator uncovered across the whole repo.
-Certificates ARE that validation: a service presenting one is asserting its
-identity, and a peer checking it is validating authenticity and integrity.
-
-THE "USING AUTOMATION" CLAUSE IS THE POINT, and it is what makes this evidence
-rather than a certificate inventory. A `CertificateRenewalRule` carries a
-`renewal_interval` and an `advance_renewal_period`; a certificate that has one
-re-issues itself before it lapses, and a certificate that does not is
-hand-managed and will eventually expire in production. So the summary answers
-"how many are on automatic renewal" as its headline, not "how many exist".
-
-IMPORTED CERTIFICATES CANNOT AUTO-RENEW. `config_type` IMPORTED means the
-material came from outside OCI, so no renewal rule is possible and OCI is not
-the system of record for its lifecycle. Those are counted apart from
-internally-issued certificates that simply have no rule configured — the second
-group is a gap, the first is a boundary, and summing them would misstate both.
-
-DO NOT "IMPROVE" THIS BY CALLING get_certificate PER CERTIFICATE. OCI inverts
-the usual summary/detail relationship here, and the inversion is silent:
-
-    CertificateSummary (from list_certificates) HAS current_version_summary
-    Certificate        (from get_certificate)   DOES NOT
-
-`current_version_summary` is where the entire validity window, serial number and
-revocation status live, so a detail call per certificate would drop every expiry
-date in this file and leave `days_until_expiry` null across the board — with no
-error, because the field simply is not on that model. Verified by diffing the
-two models' `swagger_types` against a live tenancy.
-
-This is the exact opposite of `bastion_sessions`, where the fields that matter
-are ONLY on the detail response and the per-resource get IS mandatory. Neither
-instinct generalises; check the models per service.
-
-Deliberately NOT included: the private keys. Nothing here reads certificate
-content or any key material — only metadata. `list_certificates` and
-`list_certificate_authorities` return neither, and no `get_certificate_bundle`
-call is made, which is the call that would.
-"""
+"""OCI certificates and certificate authorities: validity, algorithms, revocation, and whether a renewal rule re-issues them."""
 
 import logging
 import os

@@ -1,32 +1,5 @@
 #!/usr/bin/env python3
-"""
-OCI Bastion — time-boxed administrative access, and the sessions opened through it
-
-Every Bastion in scope with the three settings that decide whether it is
-genuinely just-in-time access — the maximum session lifetime, the maximum number
-of concurrent sessions, and the CIDR allow-list of who may connect at all —
-plus every session recorded against it.
-
-This is the evidence for KSI-IAM-JIT, "a least-privileged, role and
-attribute-based, and just-in-time security authorization model is used and
-persistently reviewed for all user and non-user accounts and services". A
-Bastion is OCI's answer to standing SSH access: hosts sit in a private subnet
-with no public IP, and an operator opens a session that expires on its own.
-
-WHAT MAKES THIS EVIDENCE RATHER THAN AN INVENTORY: a bastion configured with the
-maximum TTL and an allow-list of 0.0.0.0/0 is a permanently-reachable jump host
-wearing the word "bastion". The two fields that separate those cases are
-`max_session_ttl_in_seconds` and `client_cidr_block_allow_list`, so both are
-read per bastion and both are judged in the summary.
-
-AN N+1 THAT IS NOT AN OVERSIGHT: `list_bastions` returns BastionSummary, which
-does NOT carry `max_session_ttl_in_seconds`, `max_sessions_allowed` or
-`client_cidr_block_allow_list` — verified against a live bastion, where the
-summary model simply has no such attributes. Every field this fetcher exists to
-report is only on the full `get_bastion` response, so one detail call per
-bastion is mandatory rather than lazy. Bastion counts are small (they are
-per-subnet infrastructure, not per-workload), so this stays bounded.
-"""
+"""OCI Bastions with the settings that make access just-in-time, and the sessions opened through them."""
 
 import ipaddress
 import logging

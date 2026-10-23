@@ -1,15 +1,7 @@
 name: oci_zpr_policies
 version: 0.1.0
-description: >
-  Whether Zero Trust Packet Routing is enabled for the tenancy; every ZPR policy
-  in scope with each statement parsed into source, destination and protocol
-  condition; the security attribute namespaces and definitions statements can
-  reference; and which VCNs carry a ZPR attribute, in which mode, and whether
-  they run ZPR-only. Counts the permissive statement shapes Oracle accepts —
-  the internet or all-endpoints as a source, the internet or all-endpoints as a
-  destination, and no protocol restriction — and statements naming attributes
-  that are not defined, which match nothing. Statements the parser does not
-  recognise are kept verbatim and counted, never treated as restrictive.
+description: >-
+  Shows whether Zero Trust Packet Routing is on, every policy statement parsed with the permissive shapes counted, and which VCNs carry an enforced ZPR attribute.
 category: oci
 
 supports_targets: true
@@ -66,9 +58,45 @@ ksis:
 evidence_set:
   reference_id: EVD-OCI-ZPR
   name: Zero Trust Network Flow Policy
-  instructions: >
-    Script: oci/zpr_policies/fetcher.py. OCI Python SDK calls: zpr.get_configuration() on the
-    tenancy; security_attribute.list_security_attribute_namespaces() across the
-    tenancy and list_security_attributes() per namespace; then per compartment
-    zpr.list_zpr_policies() and virtual_network.list_vcns(). Every policy
-    statement is parsed locally. One evidence file per target.
+  instructions: |
+    Script: oci/zpr_policies/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope; the ZPR configuration and security attribute definitions are read at the tenancy root.
+
+    Commands Executed:
+    - zpr.get_configuration — whether ZPR is enabled; a 404 with no policies anywhere reads as never enabled
+    - security_attribute.list_security_attribute_namespaces — the namespaces statements may reference, across the tenancy
+    - security_attribute.list_security_attributes (per namespace) — the attribute definitions in each
+    - identity.list_compartments — the compartments beneath the target
+    - zpr.list_zpr_policies (per compartment) — policies, each statement parsed into source, destination and conditions
+    - virtual_network.list_vcns (per compartment) — VCNs with their security attributes
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_zpr_policies_<compartment>.json — the ZPR configuration, every policy with each statement parsed, every security attribute namespace with its definitions, and every VCN with its ZPR attributes.
+
+    Summary fields:
+
+    Is ZPR on?
+    - zpr_enabled — True if the configuration reports ENABLED; false if ZPR has never been enabled; null when the configuration could not be read
+    - zpr_status — Whether ZPR is on, as the configuration reports it: ENABLED or another status; null when not read or never enabled
+
+    What do the policies allow?
+    - total_policies — Number of ZPR policies
+    - active_policies — Number of policies in the ACTIVE state
+    - policy_names — List of policy names with the last characters of their OCID
+    - total_statements — Number of statements across policies
+    - unparsed_statements — Number of statements the parser did not recognise; they are kept verbatim and never read as restrictive
+    - statements_allowing_internet_source — Number of parsed statements whose source is 0.0.0.0/0 or ::/0
+    - statements_allowing_any_endpoint_source — Number of parsed statements whose source is all-endpoints
+    - statements_allowing_internet_or_any_destination — Number of parsed statements whose destination is the internet or all-endpoints
+    - statements_without_protocol_restriction — Number of parsed statements with no protocol clause, so every protocol and port
+    - statements_with_undefined_attributes — Number of parsed statements naming a security attribute that is not defined or is retired, so they match nothing; null when the definitions could not be read
+
+    Which attributes are defined, and which networks use them?
+    - security_attribute_namespaces — Number of security attribute namespaces
+    - security_attribute_definitions — Number of attribute definitions across namespaces
+    - total_vcns — Number of VCNs in the AVAILABLE state
+    - vcns_with_zpr_attributes — Number of VCNs carrying at least one ZPR security attribute
+    - vcns_with_enforced_zpr — Number of VCNs with an attribute in enforce mode
+    - vcn_zpr_enforcement_percentage — Percentage of VCNs with enforced ZPR = vcns_with_enforced_zpr / total_vcns × 100, a whole number; 0 when total_vcns is 0
+    - vcns_zpr_only — Number of VCNs that are ZPR-only, admitting no traffic a ZPR statement does not allow

@@ -1,15 +1,7 @@
 name: oci_cloud_guard_posture
 version: 0.1.0
-description: >
-  Whether Cloud Guard is enabled for the tenancy and in which reporting region;
-  every Cloud Guard target with the detector and responder rules actually in
-  force on it (enabled rules by detector and risk level, and which responder
-  rules remediate automatically rather than waiting for a human); every Security
-  Zone with the number of policies its recipe enforces; and every open problem
-  by risk level and age. A disabled Cloud Guard is recorded as evidence, not a
-  collection failure. Rules are counted from their own enabled flag and mode,
-  never from the presence of a recipe, and targets whose detail call failed are
-  counted separately rather than reading as unmonitored.
+description: >-
+  Shows whether Cloud Guard is on, which targets assess configuration and activity, what remediates automatically, every Security Zone, and the open problems by risk and age.
 category: oci
 
 supports_targets: true
@@ -66,11 +58,56 @@ ksis:
 evidence_set:
   reference_id: EVD-OCI-CLOUD-GUARD
   name: Continuous Security Posture Assessment and Enforcement
-  instructions: >
-    Script: oci/cloud_guard_posture/fetcher.py. OCI Python SDK calls: cloud_guard.get_configuration() on
-    the tenancy, stopping there when Cloud Guard is disabled; otherwise, in the
-    reporting region, list_security_recipes() and list_security_policies() once,
-    then per compartment
-    list_targets() with get_target() per target because the list summary omits
-    the recipe rules, list_security_zones(), and list_problems() filtered to
-    open problems. One evidence file per target.
+  instructions: |
+    Script: oci/cloud_guard_posture/fetcher.py
+
+    Access: inspect and read all-resources in the tenancy; Security Zone recipes and policies are read at the tenancy root whatever compartment the target names.
+
+    Commands Executed:
+    - cloud_guard.get_configuration — whether Cloud Guard is enabled and its reporting region; nothing else is read when it is disabled
+    - identity.list_compartments — the compartments beneath the target
+    - cloud_guard.list_security_recipes — Security Zone recipes, read once at the tenancy root
+    - cloud_guard.list_security_policies — the names of the policies those recipes enforce
+    - cloud_guard.list_targets (per compartment) — Cloud Guard targets
+    - cloud_guard.get_target (per target) — the detector and responder rules in force, which the listing leaves out
+    - cloud_guard.list_security_zones (per compartment) — Security Zones
+    - cloud_guard.list_problems (per compartment) — open problems
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_cloud_guard_posture_<compartment>.json — the Cloud Guard configuration, every target with its effective detector and responder rules, every Security Zone and recipe, and every open problem.
+
+    Summary fields:
+
+    Is Cloud Guard on?
+    - cloud_guard_status — Whether Cloud Guard is on for the tenancy: ENABLED or DISABLED; null when the configuration could not be read
+    - cloud_guard_enabled — True if cloud_guard_status is ENABLED; false if DISABLED; null when not read
+    - reporting_region — Region Cloud Guard reports from; null when not read
+    - compartments_in_scope — Number of compartments walked; 0 when Cloud Guard is disabled
+
+    Do the targets assess anything?
+    - total_targets — Number of ACTIVE Cloud Guard targets
+    - targets_with_unreadable_detail — Number of targets whose rules could not be read; they are left out of the counts below
+    - targets_assessing_configuration — Number of targets (detail read) with at least one enabled configuration detector rule
+    - targets_assessing_activity — Number of targets (detail read) with at least one enabled activity detector rule
+    - targets_with_no_enabled_detector_rules — Number of targets (detail read) with no enabled detector rule at all
+    - configuration_assessment_percentage — Percentage of readable targets assessing configuration = targets_assessing_configuration / (total_targets minus targets_with_unreadable_detail) × 100, a whole number; 0 when none is readable
+    - tenancy_root_is_target — True if a readable target covers the tenancy root compartment, so every compartment inherits it; false otherwise
+
+    Does anything enforce?
+    - targets_with_auto_remediation — Number of readable targets with at least one enabled REMEDIATION responder rule in AUTOACTION mode
+    - total_auto_remediating_rules — Number of such rules across readable targets
+    - total_security_zones — Number of Security Zones
+    - active_security_zones — Number of Security Zones in the ACTIVE state
+    - security_zone_names — List of Security Zone names with the last characters of their OCID
+
+    What problems are open?
+    - open_problems — Number of problems Cloud Guard lists as open
+    - open_problems_by_risk — Number of open problems for each risk level:
+      - CRITICAL (Cloud Guard's highest risk level)
+      - HIGH (high risk)
+      - MEDIUM (medium risk)
+      - LOW (low risk)
+      - MINOR (Cloud Guard's lowest risk level)
+    - open_problems_with_unknown_risk — Number of open problems whose risk level is none of the five above
+    - open_problems_older_than_30_days — Number of open problems first detected more than 30 days before the run
+    - oldest_open_problem_days — Number of days since the oldest open problem was first detected; null when there is none

@@ -1,42 +1,8 @@
 #!/usr/bin/env python3
-"""
-OCI IAM policies — every statement parsed, and the broad grants counted
-
-Every IAM policy in scope with each statement parsed into its subject, verb or
-permissions, resource, location and condition, plus the tenancy's dynamic
-groups (workload identities that authenticate without a stored key).
-
-Evidence for KSI-IAM-ELP, "each user or device can only access the resources
-they need", and KSI-IAM-SNU for the dynamic groups — a workload using an
-instance or resource principal holds no key to leak or rotate.
-
-Ported from Prowler's OCI identity service (Apache-2.0,
-prowler/providers/oraclecloud/services/identity, commit c0fdd5b) — the
-`identity_tenancy_admin_permissions_limited`,
-`identity_iam_admins_cannot_update_tenancy_admins`,
-`identity_service_level_admins_exist` and `identity_instance_principal_used`
-checks. Prowler matches substrings of upper-cased statements; this port parses
-the documented grammar instead, because the substrings miss real grants:
-
-  * `allow any-user to manage all-resources in tenancy` is not flagged — every
-    Prowler test starts with "ALLOW GROUP". Nor is a dynamic group.
-  * The Administrators-guard check splits on lowercase "where", so a statement
-    written with WHERE is read as having no condition — a false failure.
-  * `manage groups in tenancy` is only caught when the same statement also
-    mentions users.
-  * The default admin policy is exempted by NAME alone, so any policy renamed
-    "Tenant Admin Policy" is exempt. Here it must also sit in the tenancy root
-    and hold exactly Oracle's one default statement.
-
-ANY-USER IS NOT AUTOMATICALLY A FINDING. Oracle's own managed CloudGuardPolicies
-contain `Allow any-user to { WLP_BOM_READ } in tenancy where all {
-request.principal.type = 'workloadprotectionagent', ... }` — read off a live
-tenancy. That is a narrowly conditioned service grant. Only an any-user or
-any-group grant with no `where` clause is counted as unconditional.
-
-Statements the parser does not recognise are kept verbatim, counted, and never
-read as narrow.
-"""
+"""OCI IAM policies with every statement parsed and the broad grants counted, plus dynamic groups."""
+# Ported from Prowler's OCI identity checks (Apache-2.0,
+# prowler/providers/oraclecloud/services/identity, commit c0fdd5b); the departures are
+# listed in fetchers/oci/README.md.
 
 import logging
 import os

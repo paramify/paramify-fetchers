@@ -1,46 +1,5 @@
 #!/usr/bin/env python3
-"""
-OCI Cloud Guard — whether the tenancy continuously assesses itself, and enforces
-
-Cloud Guard's tenancy configuration, every target it monitors with the detector
-and responder rules actually in force on it, every Security Zone and the policy
-set its recipe enforces, and the open problems Cloud Guard has raised.
-
-This is the evidence for KSI-CNA-EIS, "automated services are used to
-persistently assess the security of all machine-based information resources and
-automatically enforce their intended operational state", and KSI-MLA-EVC,
-"the configuration of machine-based information resources is persistently
-evaluated". The indicator has two verbs, and Cloud Guard has a mechanism for
-each, so each is reported apart:
-
-  * ASSESS — detector rules. A target with the configuration detector enabled
-    re-evaluates every resource beneath it and raises a problem on drift.
-
-  * ENFORCE — two different mechanisms, and only one is preventive. A responder
-    rule in AUTOACTION mode remediates after the fact; in USERACTION mode it only
-    proposes a fix a human must approve, which is assessment wearing the word
-    "responder". A Security Zone is the preventive one: OCI refuses to create a
-    resource in that compartment that violates the zone's recipe at all.
-
-WHAT MAKES THIS EVIDENCE RATHER THAN AN INVENTORY: a target whose recipe is
-attached but whose rules are all disabled monitors nothing, and a responder
-recipe full of USERACTION rules enforces nothing. Both are counted from the
-rules' own `is_enabled` and `mode`, never from the presence of a recipe.
-
-DISABLED IS THE FINDING, NOT A FAILURE. A tenancy that never turned Cloud Guard
-on answers `get_configuration` with status DISABLED and 404s the rest of the
-service. That is recorded as `cloud_guard_enabled: false`, the remaining calls
-are not made, and the run exits 0 — the evidence is complete and says no.
-
-AN N+1 THAT IS NOT AN OVERSIGHT: `list_targets` returns TargetSummary, which
-carries a `recipe_count` and nothing else about the recipes. The rules — the
-only part that says whether anything is being assessed — are on `get_target`.
-Targets are few (typically one per top-level compartment), so this stays small.
-
-A TRAP IN ORACLE'S OWN MODEL: targets spell it `lifecyle_details`, missing the
-second "c". Security zones, recipes and every other model spell it correctly.
-Reading the correct spelling off a target returns None forever.
-"""
+"""OCI Cloud Guard: whether it is on, what each target assesses and remediates, Security Zones, and open problems."""
 
 import logging
 import os

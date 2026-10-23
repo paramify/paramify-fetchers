@@ -1,35 +1,5 @@
 #!/usr/bin/env python3
-"""
-OCI Application Dependency Management — third-party dependency risk
-
-Every ADM knowledge base, vulnerability audit, remediation recipe and
-remediation run in scope: which third-party dependencies were found vulnerable,
-how severe, whether anything was suppressed, and whether a run actually fixed
-them.
-
-This is the evidence for KSI-SCR-MIT, "persistently identify, review, and
-mitigate potential supply chain risks", and KSI-SCR-MON, "third party software
-information resources are automatically monitored for upstream vulnerabilities".
-SCR-MIT is uncovered across the whole repo. ADM's remediation-run stages are
-that statement almost verbatim — DETECT identifies, RECOMMEND reviews, APPLY
-mitigates, VERIFY confirms — so the stage a run reached is the evidence for how
-far the process actually got.
-
-THE SUPPRESSION GAP is the finding this fetcher exists to surface. ADM reports
-every severity and count twice: `max_observed_severity` excludes vulnerabilities
-the team chose to ignore, `max_observed_severity_with_ignored` includes them.
-A project can drive its headline severity to NONE by suppressing findings rather
-than fixing them, and the audit still reports success. The difference between
-the two numbers is exactly what was suppressed, so both are reported and the
-delta is derived rather than left for a reader to spot.
-
-SCOPE LIMIT, stated because overclaiming here would be worse than a gap: ADM's
-`build_type` enum is MAVEN or UNSET, so it covers Java/Maven dependency trees
-and nothing else. A tenancy whose services are Python or Go will have no audits,
-and that is a real absence of coverage rather than a clean bill of health. The
-summary says so via `knowledge_bases_configured`, so "0 vulnerabilities" is
-never mistaken for "0 vulnerabilities found by a scanner that was looking".
-"""
+"""OCI Application Dependency Management audits, what their ignore lists hide, and how far remediation runs got."""
 
 import logging
 import os

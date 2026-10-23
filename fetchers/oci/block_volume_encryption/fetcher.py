@@ -1,45 +1,8 @@
 #!/usr/bin/env python3
-"""
-OCI Block Storage — which key encrypts each volume, and whether the wire is encrypted too
-
-Every block volume and boot volume in scope with the key that encrypts it, every
-backup of those volumes with the key that encrypts the backup, and every
-attachment with whether data moving between the instance and the volume is
-encrypted in transit.
-
-Evidence for KSI-SVC-SIN, "information is encrypted or otherwise secured from
-unwanted access or modification". OCI encrypts every volume at rest with no way
-to turn it off, so the at-rest question is not *whether* but *whose key*: an
-Oracle-managed key is encryption the provider controls, a customer-managed key
-in Vault is encryption the customer controls and can revoke.
-
-Ported from Prowler's OCI blockstorage service (Apache-2.0,
-prowler/providers/oraclecloud/services/blockstorage, commit 5fe1a67) — the
-`blockstorage_block_volume_encrypted_with_cmk` and
-`blockstorage_boot_volume_encrypted_with_cmk` checks, which test `kms_key_id is
-not None` and stop there. Three additions:
-
-  * BACKUPS CARRY THEIR OWN KEY. `VolumeBackup.kms_key_id` is independent of the
-    volume's, so a customer-managed volume can have Oracle-managed backups
-    holding the same bytes. Prowler does not look at backups at all.
-
-  * IN-TRANSIT ENCRYPTION IS PART OF THE SAME INDICATOR. A volume attachment
-    carries `is_pv_encryption_in_transit_enabled`; boot attachments also carry
-    `encryption_in_transit_type`. Verified live: the staged instance reports
-    False / NONE, so this is a real, separately reportable state.
-
-  * UNATTACHED VOLUMES ARE COUNTED. A detached volume still holds every byte
-    written to it. Cloud Guard raises BLOCK_VOLUME_NOT_ATTACHED for exactly this
-    reason, and the count appears here beside the key it is encrypted with.
-
-DELIBERATELY NOT COLLECTED: backup-policy assignments. They answer a recovery
-question (KSI-RPL-ABO), not an encryption one, and cost one call per volume.
-
-A NOTE ON THE KEY OCID. This fetcher records which key each volume uses; whether
-that key is rotated, HSM-backed or pending deletion is `oci_vault_keys`. Joining
-them is the assessor's job, not this fetcher's — the two evidence files carry the
-same key OCIDs.
-"""
+"""OCI block and boot volumes with the key encrypting each, its attachments' in-transit encryption, and its backups' keys."""
+# Ported from Prowler's OCI blockstorage checks (Apache-2.0,
+# prowler/providers/oraclecloud/services/blockstorage, commit 5fe1a67); the departures are
+# listed in fetchers/oci/README.md.
 
 import logging
 import os

@@ -1,49 +1,8 @@
 #!/usr/bin/env python3
-"""
-OCI audit, logging and events — what is recorded, what is watched, and who is told
-
-The tenancy's audit retention, every log group and log with what it captures and
-whether it is enabled, every Events rule with its condition parsed into the
-event types it matches, and every notification topic with the state of its
-subscriptions — joined end to end, so a rule that fires into a topic nobody
-subscribes to is reported as notifying nobody.
-
-Evidence for KSI-MLA-LET, "a list of information resources and event types that
-will be logged, monitored, and audited is maintained and persistently reviewed
-to ensure these activities occur", and KSI-MLA-OSM for the centralized audit
-trail and its retention.
-
-Ported from Prowler's OCI audit, logging and events services (Apache-2.0,
-prowler/providers/oraclecloud/services/{audit,logging,events}, commit 5fe1a67) —
-the 365-day audit retention check, the eleven `events_rule_*` change-monitoring
-checks and the notification-topic check. Prowler handles the "no rule at all"
-case correctly; these three departures are about rules that exist:
-
-  * WILDCARD EVENT TYPES ARE MISSED. Oracle's rule conditions support the
-    asterisk — its own documentation gives
-    `"eventType": "com.oraclecloud.objectstorage.*bucket"` and says it "matches
-    all types of bucket events". Prowler tests `required_type in event_types`,
-    exact string membership, so a tenancy monitoring a whole service by wildcard
-    is reported as monitoring nothing.
-
-  * A BARE STRING CONDITION IS MISSED. `eventType` may be a single string rather
-    than a list — again Oracle's own example. Prowler requires
-    `isinstance(event_types, list)` and returns False otherwise.
-
-  * RULES AND TOPICS ARE NEVER JOINED. Prowler asks whether a rule has actions,
-    and separately whether some topic somewhere has a subscription. A rule whose
-    ONS action points at a topic with no ACTIVE subscription notifies nobody,
-    which is exactly the live tenancy's state: one enabled rule, one enabled ONS
-    action, one topic, zero subscriptions. `notifying` walks the whole chain.
-
-ALSO NOT COUNTED AS NOTIFICATION: a disabled action, and a Streaming or
-Functions action. Prowler counts any non-empty action list. Streams and
-functions are recorded separately — they are real destinations, but they are not
-someone being told.
-
-A PENDING SUBSCRIPTION IS NOT A SUBSCRIBER. An emailed confirmation that was
-never clicked sits in PENDING forever and receives nothing.
-"""
+"""OCI audit retention, logs, Events rules and notification topics, joined so a rule that reaches nobody says so."""
+# Ported from Prowler's OCI audit, logging and events checks (Apache-2.0,
+# prowler/providers/oraclecloud/services/{audit,logging,events}, commit 5fe1a67); the departures are
+# listed in fetchers/oci/README.md.
 
 import json
 import logging

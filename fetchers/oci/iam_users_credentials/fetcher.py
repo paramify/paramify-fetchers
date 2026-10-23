@@ -1,52 +1,8 @@
 #!/usr/bin/env python3
-"""
-OCI IAM — every user, their MFA, their admin membership, and every standing credential
-
-Every IAM user in the tenancy with MFA status, console capability, last login
-and group membership, plus every long-lived credential they hold — API signing
-keys, auth tokens, customer secret keys, SMTP credentials, database credentials
-and OAuth2 client credentials — with each credential's age.
-
-Evidence for KSI-IAM-APM (strong passwords with phishing-resistant MFA),
-KSI-IAM-SNU (non-user authentication is appropriately secured and reviewed —
-every credential here authenticates without a human at a login page) and
-KSI-IAM-ELP (who holds tenancy administration).
-
-Ported from Prowler's OCI identity service (Apache-2.0,
-prowler/providers/oraclecloud/services/identity, commit c0fdd5b) — the
-`identity_user_mfa_enabled_console_access`, `identity_user_*_rotated_90_days`
-and `identity_tenancy_admin_users_no_api_keys` checks — with three departures,
-each verified against a live identity-domain tenancy:
-
-  * TENANCY ADMINS ARE MATCHED BY EXACT GROUP NAME. Prowler tests
-    `"Administrators" in group.name`, so a group called NetworkAdministrators
-    makes its members tenancy admins and their API keys a critical finding. The
-    tenancy admin group is literally `Administrators`.
-
-  * SMTP AND OAUTH2 CLIENT CREDENTIALS ARE COLLECTED. Prowler lists four
-    credential types and omits these two; both are standing credentials that
-    authenticate as the user.
-
-  * A CONSOLE CAPABILITY IS NOT A PASSWORD. `can_use_console_password` is true
-    for every user by default, including one that was created and never
-    activated. `last_successful_login_time` is reported beside it, so a
-    never-used account without MFA is distinguishable from a live one.
-
-`is_mfa_activated` on the legacy IAM user was checked against the identity
-domain's own MFA record for the same users (`mfa_status: ENROLLED` for the
-enrolled user, none for the other) and agrees, so the legacy API is used for the
-Default domain.
-
-EVERY OTHER IDENTITY DOMAIN IS READ THROUGH ITS OWN SCIM API. The legacy IAM
-API answers for the Default domain only: with a second domain staged, its user
-was absent from the evidence and the run exited 0, so a user without MFA there
-was invisible. Secondary domains are found by walking compartments (a domain
-can live in any of them), and each one's users and six credential types are
-read from the domain's endpoint and translated into the legacy shape, so one
-set of judgements covers both. Every record says which domain it came from.
-A secondary domain's Domain_Administrators group administers that domain, not
-the tenancy, so it is reported as `is_domain_admin`, never as tenancy admin.
-"""
+"""OCI IAM users across every identity domain: MFA, console access, administrator membership, and each standing credential's age."""
+# Ported from Prowler's OCI identity checks (Apache-2.0,
+# prowler/providers/oraclecloud/services/identity, commit c0fdd5b); the departures are
+# listed in fetchers/oci/README.md.
 
 import logging
 import os

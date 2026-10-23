@@ -1,16 +1,7 @@
 name: oci_certificates
 version: 0.1.0
-description: >
-  Every certificate and certificate authority in scope with the facts that
-  decide whether machine-to-machine communications stay authenticated: the
-  subject identified, the validity window and distance to expiry, key and
-  signature algorithms, revocation state, and whether a renewal rule re-issues
-  the certificate automatically before it lapses. Certificates imported from
-  outside OCI are counted apart from internally-issued ones that simply have no
-  renewal rule, since only the second group is a gap. Certificate authority
-  expiry is reported separately from leaf expiry, because a lapsed CA
-  invalidates every certificate beneath it at once. Reads metadata only — no
-  certificate bundle or private key material is requested.
+description: >-
+  Shows every certificate and certificate authority with its validity window, algorithms and revocation state, and whether OCI renews it automatically.
 category: oci
 
 supports_targets: true
@@ -66,9 +57,54 @@ ksis:
 evidence_set:
   reference_id: EVD-OCI-CERTIFICATES
   name: Certificate Lifecycle and Automatic Renewal
-  instructions: >
-    Script: oci/certificates/fetcher.py. OCI Python SDK calls:
-    certificates_management.list_certificates() and
-    list_certificate_authorities(), walked over every accessible compartment
-    beneath the target. Metadata only — no certificate bundle is retrieved. One
-    evidence file per target.
+  instructions: |
+    Script: oci/certificates/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope. No certificate bundle or private key is read.
+
+    Commands Executed:
+    - identity.list_compartments — the compartments beneath the target
+    - certificates_management.list_certificates (per compartment) — certificates, whose listing carries the current version's validity window and revocation state
+    - certificates_management.list_certificate_authorities (per compartment) — certificate authorities
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_certificates_<compartment>.json — every certificate and certificate authority with its subject, validity window, days to expiry, key and signature algorithms, revocation and renewal rule.
+
+    Summary fields:
+
+    Which certificates exist?
+    - certificates_service_readable — True if the certificate listing was read in at least one compartment; false if every listing failed
+    - total_certificates — Number of certificates, including those being deleted
+    - certificates_pending_deletion — Number of certificates being deleted; they are left out of every count below
+    - active_certificates — Number of certificates in the ACTIVE state
+    - total_certificate_authorities — Number of certificate authorities
+    - certificate_common_names — List of distinct subject common names
+
+    Does OCI renew them automatically?
+    - certificates_with_automatic_renewal — Number of certificates with a renewal rule, so OCI re-issues them before they lapse
+    - certificates_requiring_manual_renewal — Number of certificates OCI could renew that have no renewal rule: issued by an internal CA, not imported, and not issued from a customer-held key
+    - imported_certificates — Number of certificates imported from outside OCI; no renewal rule is possible for them
+    - certificates_with_externally_managed_keys — Number of certificates issued by an internal CA from a customer-held key; OCI cannot renew them
+    - automatic_renewal_percentage — Percentage of renewable certificates on automatic renewal = certificates_with_automatic_renewal / (certificates minus imported minus externally managed) × 100, a whole number; 0 when none is renewable
+    - shortest_renewal_interval_days — Number of days of the shortest renewal interval among auto-renewing certificates; null when none
+    - longest_renewal_interval_days — Number of days of the longest renewal interval among auto-renewing certificates; null when none
+
+    Is anything expiring or revoked?
+    - expired_certificates — Number of certificates whose validity ended before the run
+    - certificates_expiring_within_30_days — Number of unexpired certificates with 30 or fewer days left
+    - certificates_expiring_within_90_days — Number of unexpired certificates with 90 or fewer days left, including those within 30
+    - soonest_certificate_expiry_days — Number of days until the next unexpired certificate lapses; null when none has a known expiry
+    - certificates_with_unknown_expiry — Number of certificates with no validity window in the response
+    - revoked_certificates — Number of certificates with a revocation time, whatever their state
+
+    Are the algorithms strong?
+    - certificates_with_strong_key_algorithm — Number of certificates whose key algorithm is RSA2048, RSA4096, ECDSA_P256 or ECDSA_P384
+    - certificates_with_strong_signature_algorithm — Number of certificates signed with SHA-256, SHA-384 or SHA-512 over RSA or ECDSA
+    - key_algorithms_in_use — List of distinct key algorithms
+    - signature_algorithms_in_use — List of distinct signature algorithms
+
+    Are the authorities themselves healthy?
+    - expired_certificate_authorities — Number of certificate authorities whose validity ended before the run
+    - certificate_authorities_expiring_within_90_days — Number of unexpired certificate authorities with 90 or fewer days left
+    - soonest_authority_expiry_days — Number of days until the next unexpired certificate authority lapses; null when none
+    - certificate_authorities_backed_by_kms_key — Number of certificate authorities whose private key is held in a Vault key

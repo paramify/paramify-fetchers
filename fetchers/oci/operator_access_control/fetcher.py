@@ -1,53 +1,5 @@
 #!/usr/bin/env python3
-"""
-OCI Operator Access Control and Delegate Access Control — Oracle staff access
-
-Oracle's own operators cannot touch Exadata infrastructure governed by these
-services until the customer approves, and every request, approval and session is
-a record. This collects the controls, which resources they govern, and the
-access requests Oracle staff have raised against them.
-
-This is the evidence for KSI-IAM-JIT ("a least-privileged ... just-in-time
-security authorization model ... for all user and non-user accounts and
-services") applied to the one set of accounts a customer normally cannot see —
-the cloud provider's — and for KSI-SCR-MIT, since the provider is the supplier
-with the most access. No other cloud exposes this as an API.
-
-Two services, one shape. Operator Access Control governs Exadata Cloud@Customer
-and Exadata infrastructure; Delegate Access Control governs the VM clusters on
-it. Each has a control (who approves, what is pre-approved), a binding of the
-control to resources, and access requests with an approval outcome.
-
-The findings are the ways the approval gate is turned off while still looking
-present:
-
-  * `is_fully_pre_approved` — every operator action is approved in advance, so
-    the control records access but gates none of it.
-  * pre-approved action lists — the same, for some actions only.
-  * `is_auto_approve_during_maintenance` — approval is skipped in maintenance
-    windows, which is when operators are most likely to be on the system.
-  * an assignment that is not `is_enforced_always` governs the resource only
-    inside its time window.
-  * `is_auto_approved` on a request — the request that was actually let through
-    without a human.
-
-VERIFIED AGAINST SDK MODELS ONLY. These services govern Exadata resources, which
-no trial tenancy can create, so every list call here has only ever returned an
-empty collection from a live tenancy. The request shapes are live-verified —
-including two traps below — but the record fields come from the SDK's generated
-models (`tools/oci_schema_check.py`), not from a recorded response. Most
-tenancies own none of these resource types; an empty result then means "no
-Oracle-operated infrastructure to govern", which is reported as such and never
-as a control in place.
-
-Request traps, all measured against a live tenancy. Operator Access Control's
-`num_days` is capped at 90, so its window is sent as `time_start` + `time_end`.
-Delegate Access Control refuses those two together (400), and its time-filtered
-list did not page consistently, so DAC is listed unfiltered and the window is
-applied here. Every list result is also checked against the compartment queried:
-anything naming another compartment is dropped and counted
-(`records_outside_requested_compartment`), never reported as this tenancy's.
-"""
+"""OCI Operator and Delegate Access Control: the approval gate on Oracle staff reaching Exadata, and their access requests."""
 
 import logging
 import os

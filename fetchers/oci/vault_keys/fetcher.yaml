@@ -1,16 +1,7 @@
 name: oci_vault_keys
 version: 0.1.0
-description: >
-  Every OCI Vault in scope and every key inside it: protection mode (HSM,
-  software or external), algorithm and length, auto-rotation settings, the age
-  of the key version actually in use, whether that version arrived automatically
-  or by hand, key version count, and whether the key or its vault is scheduled
-  for deletion. Automatic rotation requires the auto-rotation flag to be on and
-  the interval within 365 days — an interval left behind after auto-rotation was
-  switched off is not rotation. Manual rotation is counted separately from
-  automatic, and keys in a DEFAULT vault (where OCI refuses auto-rotation
-  entirely) are counted apart so the summary never reports a finding an operator
-  cannot clear. Keys that are disabled or pending deletion are collected too.
+description: >-
+  Shows every Vault key's protection mode, whether its vault can rotate it automatically, and whether its current version is within the rotation window.
 category: oci
 
 supports_targets: true
@@ -66,12 +57,48 @@ ksis:
 evidence_set:
   reference_id: EVD-OCI-VAULT-KEYS
   name: Key Protection and Rotation
-  instructions: >
-    Script: oci/vault_keys/fetcher.py. Ported from Prowler's OCI kms service (Apache-2.0). OCI
-    Python SDK calls: key_management.list_vaults() per compartment with
-    get_vault() per vault (the summary omits time_of_deletion), then against
-    each ACTIVE vault's own management endpoint list_keys() for every
-    compartment in scope (a key may live outside its vault's compartment), get_key() per key
-    (the summary omits auto_key_rotation_details and current_key_version),
-    get_key_version() for the version in use and list_key_versions() for the
-    count. One evidence file per target.
+  instructions: |
+    Script: oci/vault_keys/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope. No key material is read.
+
+    Commands Executed:
+    - identity.list_compartments — the compartments beneath the target
+    - kms_vault.list_vaults (per compartment) — vaults
+    - kms_vault.get_vault (per vault) — its deletion time and primary flag, which the listing leaves out
+    - kms_management.list_keys (per active vault and compartment in scope) — keys, read from the vault's own management endpoint; a key may live in a different compartment from its vault
+    - kms_management.get_key (per key) — rotation settings and the current version, which the listing leaves out
+    - kms_management.get_key_version (per key) — when the version in use was created and whether rotation produced it
+    - kms_management.list_key_versions (per key) — how many versions the key has had
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_vault_keys_<compartment>.json — every vault and every key with its protection mode, rotation settings, current version age and version count.
+
+    Summary fields:
+
+    Which vaults and keys exist?
+    - vault_service_readable — True if the vault listing was read in at least one compartment; false if every listing failed
+    - total_vaults — Number of vaults
+    - active_vaults — Number of vaults in the ACTIVE state
+    - vaults_pending_deletion — Number of vaults scheduled for deletion
+    - vaults_supporting_auto_rotation — Number of VIRTUAL_PRIVATE vaults, the only type that can rotate keys automatically
+    - vaults_using_external_key_manager — Number of vaults backed by an external key manager
+    - total_keys — Number of keys in every state
+    - live_keys — Number of keys in the ENABLED or UPDATING state; only these are judged below
+    - keys_pending_deletion — Number of live keys scheduled for deletion, which still protect everything encrypted under them until then
+    - keys_with_unreadable_version — Number of live keys whose current version could not be read; their rotation is unknown and they are left out of the rotation counts
+
+    Are the keys rotated?
+    - keys_with_automatic_rotation — Number of keys (version read) with automatic rotation on and an interval of 365 days or less
+    - keys_rotated_manually_within_window — Number of keys (version read) without automatic rotation whose current version is 365 days old or less
+    - keys_not_rotated_within_window — Number of keys (version read) with no automatic rotation and a current version older than 365 days
+    - automatic_rotation_percentage — Percentage of keys on automatic rotation = keys_with_automatic_rotation / keys with version read × 100, a whole number; 0 when none was read
+    - keys_in_vaults_without_auto_rotation_support — Number of keys (version read) in a vault type that refuses automatic rotation, so only manual rotation is possible for them
+    - oldest_key_version_age_days — Number of days since the oldest current key version was created; null when none was read
+    - keys_with_a_single_key_version — Number of keys (version read) that have never been rotated
+    - key_names_not_rotated_within_window — List of key names, with the last characters of their OCID, not rotated within the window
+
+    How are the keys held?
+    - hsm_protected_keys — Number of live keys whose protection mode is HSM
+    - software_protected_keys — Number of live keys whose protection mode is SOFTWARE
+    - hsm_protection_percentage — Percentage of live keys held in an HSM = hsm_protected_keys / live_keys × 100, a whole number; 0 when live_keys is 0

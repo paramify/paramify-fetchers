@@ -179,6 +179,62 @@ validity window is only on the *list* summary and absent from `get_certificate`.
 Both are pinned in `tests/test_oci_model_shapes.py`, which asserts facts about
 Oracle's models rather than about this code.
 
+## Departures from the Prowler checks these port
+
+Ten fetchers port Prowler's `oraclecloud` checks (Apache-2.0, attributed in each
+module). Prowler was read as a specification to check rather than code to trust,
+and each port handles cases the original passes. Kept here rather than in the
+fetchers, whose docstrings are one line by convention.
+
+- **`oci_network_exposure`** (network): Prowler compares `source == "0.0.0.0/0"`,
+  so IPv6 `::/0` is invisible; it checks only SSH and RDP, never egress, and
+  reads `tcp_options` only, so a UDP rule is skipped. Every internet-open port
+  range is recorded here, egress is judged, and a rule nothing can reach (a list
+  attached to no subnet, a subnet prohibiting ingress, no default route to an
+  enabled gateway) is counted apart from one a packet could arrive through.
+- **`oci_compute_instances`** (compute): Prowler fails secure boot on shapes whose
+  `platform_config` is None, which is hardware that cannot offer it. Boot
+  integrity is counted over capable shapes only; measured boot, TPM, memory
+  encryption, agent and plugin state, and VNIC exposure are added. Metadata
+  values are never read, only key names.
+- **`oci_data_service_exposure`** (database, filestorage, integration): a live
+  Autonomous Database returns the literal string `ORACLE_MANAGED_KEY` in
+  `kms_key_id`, which `kms_key_id is not None` reads as a customer key. mTLS,
+  NFS export options (source, access, identity squash) and DB systems are added.
+- **`oci_object_storage_buckets`** (objectstorage): a bucket with NoPublicAccess
+  is still readable by anyone holding a pre-authenticated request URL, which
+  Prowler never looks at. Read logging is reported beside write logging (Prowler
+  computes it and never uses it); retention and replication are added.
+- **`oci_block_volume_encryption`** (blockstorage): backups carry a key of their
+  own, so a customer-managed volume can have Oracle-managed backups; attachments
+  carry in-transit encryption; unattached volumes still hold data. All added.
+- **`oci_vault_keys`** (kms): Prowler passes a key when the rotation interval is
+  within 365 days *or* auto-rotation is on, so an interval left behind after
+  auto-rotation was switched off passes forever. Automatic rotation counts only
+  with the flag on and the interval in range; manual rotation is reported apart;
+  keys in a DEFAULT vault, where OCI refuses auto-rotation, are counted apart;
+  disabled and pending-deletion keys are collected.
+- **`oci_iam_users_credentials`** (identity): Prowler tests
+  `"Administrators" in group.name`, so NetworkAdministrators are tenancy admins.
+  The group is matched exactly. SMTP and OAuth2 client credentials are added, a
+  console capability is not read as a password, and users in non-Default
+  identity domains are read through each domain's SCIM endpoint (the IAM API
+  answers for the Default domain only).
+- **`oci_iam_policies`** (identity): Prowler matches substrings of upper-cased
+  statements starting with ALLOW GROUP, so `any-user`, dynamic groups and a
+  WHERE in capitals are missed, and the default admin policy is exempted by name
+  alone. Statements are parsed against the documented grammar; the default
+  policy must sit in the tenancy root and hold exactly Oracle's one statement.
+- **`oci_iam_password_policy`** (identity): lockout settings are added, and every
+  SCIM page is read (Prowler reads the first).
+- **`oci_audit_logging_events`** (audit, logging, events): Prowler tests
+  `required_type in event_types`, so a wildcard condition (`*bucket`, which
+  Oracle documents) and a single-string `eventType` read as monitoring nothing.
+  Rules, actions and topics are joined end to end: an enabled rule with an ONS
+  action to a topic with no ACTIVE subscription notifies nobody, a PENDING
+  subscription is not a subscriber, and Streaming or Functions actions are not
+  notification.
+
 ## Testing without a tenancy
 
 `tests/test_oci_fetchers.py` runs all seventeen as subprocesses against recorded

@@ -1,15 +1,7 @@
 name: oci_dr_plan_executions
 version: 0.1.0
-description: >
-  Full Stack Disaster Recovery protection groups, the recovery plans defined
-  against them, and every recorded execution of those plans — the type of
-  recovery run, whether it succeeded, when it ran, and the measured wall-clock
-  duration. Separates drills (a test of the capability) from switchovers and
-  failovers (an actual recovery), and prechecks (plan validation that moves
-  nothing) from executions that did, so "recovery has been tested" is never
-  inferred from a record that only proves the plan parses. Derives days since
-  the last successful drill and per-plan test coverage, so the annual
-  contingency-test question is answered from the summary.
+description: >-
+  Shows Full Stack DR protection groups and plans, every recorded drill and recovery with its outcome and measured duration, and when recovery was last tested.
 category: oci
 
 supports_targets: true
@@ -67,8 +59,55 @@ ksis:
 evidence_set:
   reference_id: EVD-OCI-DR-TESTS
   name: Disaster Recovery Plan Executions
-  instructions: >
-    Script: oci/dr_plan_executions/fetcher.py. OCI Python SDK calls:
-    disaster_recovery.list_dr_protection_groups(), list_dr_plans() and
-    list_dr_plan_executions(), walked over every accessible compartment beneath
-    the target. One evidence file per target.
+  instructions: |
+    Script: oci/dr_plan_executions/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope.
+
+    Commands Executed:
+    - identity.list_compartments — the compartments beneath the target
+    - disaster_recovery.list_dr_protection_groups (per compartment) — protection groups with their role and peer
+    - disaster_recovery.list_dr_plans (per protection group) — the recovery plans defined against it
+    - disaster_recovery.list_dr_plan_executions (per protection group) — every execution with its type, state, duration and step counts
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_dr_plan_executions_<compartment>.json — every protection group, plan and execution, each execution classified as a drill, recovery, precheck or cleanup with its outcome, duration and ignored step failures.
+
+    Summary fields:
+
+    Is DR set up?
+    - dr_service_readable — True if the protection group listing was read in at least one compartment; false if Full Stack DR is not subscribed or every listing failed
+    - total_protection_groups — Number of protection groups
+    - primary_protection_groups — Number of protection groups in the PRIMARY role
+    - standby_protection_groups — Number of protection groups in the STANDBY role
+    - protection_groups_with_peer — Number of protection groups paired with a peer group
+    - peer_regions — List of regions the peer groups live in
+    - protection_groups_by_name — List of protection group names with the last characters of their OCID
+    - total_plans — Number of recovery plans
+    - drill_plans — Number of START_DRILL plans, the ones that can run a recovery test
+    - failover_plans — Number of FAILOVER plans
+    - switchover_plans — Number of SWITCHOVER plans
+
+    What has been run?
+    - total_executions — Number of plan executions of every kind
+    - recovery_tests_executed — Number of START_DRILL executions that are not prechecks (a recovery test, as this evidence defines it)
+    - recovery_tests_succeeded — Number of recovery tests in the SUCCEEDED state
+    - recovery_tests_failed — Number of recovery tests in the FAILED state
+    - successful_tests_with_ignored_failures — Number of successful tests whose plan ignored failed, timed-out or warning steps to reach SUCCEEDED
+    - prechecks_executed — Number of executions of a precheck type, which validate a plan without moving anything
+    - drill_cleanups_executed — Number of STOP_DRILL executions, the teardown after a drill
+    - actual_recoveries_executed — Number of SWITCHOVER and FAILOVER executions that are not prechecks
+    - automatic_executions — Number of executions started by a schedule rather than by hand
+
+    Is every plan tested, and recently?
+    - plans_with_a_successful_test — Number of distinct plans with at least one successful recovery test
+    - drill_plans_never_tested — Number of drill plans with no successful recovery test
+    - drill_plan_test_coverage_percentage — Percentage of drill plans with a successful test = (drill_plans minus drill_plans_never_tested) / drill_plans × 100, a whole number; 0 when drill_plans is 0
+    - last_successful_test — Timestamp when the most recent successful recovery test ended; null when none
+    - last_successful_test_type — Execution type of that test; null when none
+    - days_since_last_successful_test — Number of days since last_successful_test; null when none
+    - tested_within_365_days — True if days_since_last_successful_test is 365 or less; false if more; null when no test ever succeeded
+
+    How long does recovery take?
+    - longest_successful_test_duration_sec — Number of seconds the longest successful recovery test took; null when none
+    - last_successful_test_duration_sec — Number of seconds the most recent successful recovery test took; null when none

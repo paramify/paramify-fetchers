@@ -1,39 +1,5 @@
 #!/usr/bin/env python3
-"""
-OCI Full Stack Disaster Recovery — plans and their recorded executions
-
-Every DR protection group in scope, the recovery plans defined against it, and
-the executions of those plans: what type of recovery was run, whether it
-succeeded, when, and how long it actually took.
-
-This is the evidence for KSI-RPL-TRC, "the capability to recover from incidents
-and contingencies aligned with defined recovery objectives is persistently
-tested" — an indicator no other fetcher in the repo covers, because AWS, Azure
-and GCP have no equivalent API. Elastic Disaster Recovery, Azure Site Recovery
-and GCP have backup and replication state; only OCI records the *drill* as a
-first-class resource with an outcome and a measured duration.
-
-Two distinctions carry the whole evidence set:
-
-  * A DRILL is a test; a FAILOVER is an incident. `START_DRILL` / `STOP_DRILL`
-    stand up the standby in an isolated environment and tear it down again, so a
-    completed drill proves the capability was exercised without proving anything
-    went wrong. A FAILOVER proves recovery happened, but under duress — it is
-    not a test. Both are reported, counted separately, and never summed.
-    Within a drill only the START_DRILL is the test: the STOP_DRILL is its
-    cleanup, counted as `drill_cleanups_executed`, and its teardown time is
-    never reported as a recovery time.
-
-  * A PRECHECK is not an execution. Every plan type has a `*_PRECHECK` variant
-    that validates the plan without moving anything. Prechecks are real evidence
-    of persistent review, but a tenancy whose only records are prechecks has
-    never actually tested recovery, so they are counted apart from the
-    executions that did.
-
-`execution_duration_in_sec` is the measured wall-clock recovery time. That is
-the number an assessor compares against a documented RTO, so it is surfaced per
-execution and as a max/latest in the summary rather than left in the record.
-"""
+"""OCI Full Stack DR protection groups, plans, and every drill and recovery execution with its outcome and duration."""
 
 import logging
 import os

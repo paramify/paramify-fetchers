@@ -1,48 +1,8 @@
 #!/usr/bin/env python3
-"""
-OCI managed data services — who can reach the data, and whose key encrypts it
-
-Every Autonomous Database, DB system, File Storage file system with its NFS
-exports, and Integration instance in scope: the network path that reaches it
-(public endpoint, access control list, private subnet, NSG), whether transport
-is authenticated, and whether it is encrypted with a customer-managed key.
-
-Evidence for KSI-SVC-SIN (information encrypted and secured from unwanted
-access), KSI-CNA-MAT (minimal attack surface) and KSI-CNA-RNT (inbound traffic
-limited) — the three managed services where the data sits directly behind a
-network endpoint rather than behind an instance.
-
-Ported from Prowler's OCI database, filestorage and integration services
-(Apache-2.0, commit 5fe1a67) — `database_autonomous_database_access_restricted`,
-`filestorage_file_system_encrypted_with_cmk` and
-`integration_instance_access_restricted`, one check each. Four departures:
-
-  * "ORACLE_MANAGED_KEY" IS A STRING, NOT NULL. A live Autonomous Database
-    reports `kms_key_id: "ORACLE_MANAGED_KEY"` when Oracle holds the key.
-    Prowler's key test elsewhere is `kms_key_id is not None`, which reads that
-    literal as a customer-managed key — the exact inversion of the finding.
-    Here a key counts only when it is a real OCID.
-
-  * mTLS IS NOT CHECKED. `is_mtls_connection_required: false` means a wallet
-    alone opens a connection, so an allow-list is the only thing left between
-    the internet and the database. It belongs beside the access-control answer,
-    not in a separate universe.
-
-  * NFS EXPORT OPTIONS ARE WHERE FILE STORAGE IS ACTUALLY EXPOSED. Prowler
-    checks the file system's key and nothing else. An export with
-    `source: 0.0.0.0/0`, `access: READ_WRITE` and `identity_squash: NONE` hands
-    root-equivalent access to anyone who can reach the mount target — which the
-    mount target's own subnet and NSGs then decide.
-
-  * DB SYSTEMS ARE NOT COVERED BY PROWLER AT ALL. Only Autonomous Databases
-    are. A DB system carries the same questions (subnet, NSGs, customer key)
-    and is collected here. Verified against SDK models only — the trial tenancy
-    has none, and that is stated rather than implied.
-
-An Autonomous Database with no allow-list and no subnet is reachable from the
-whole internet; an empty `whitelisted_ips` is not a restrictive allow-list, it
-is the absence of one. That is the live tenancy's staged case.
-"""
+"""OCI Autonomous Databases, DB systems, File Storage and Integration instances: who can reach them, and whose key encrypts them."""
+# Ported from Prowler's OCI database, filestorage and integration checks (Apache-2.0,
+# prowler/providers/oraclecloud/services/{database,filestorage,integration}, commit 5fe1a67); the departures are
+# listed in fetchers/oci/README.md.
 
 import logging
 import os

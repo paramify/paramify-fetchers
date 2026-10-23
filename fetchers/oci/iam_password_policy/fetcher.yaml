@@ -1,14 +1,7 @@
 name: oci_iam_password_policy
 version: 0.1.0
-description: >
-  Every OCI identity domain's password policies — length, character classes,
-  expiry, history, lockout and group scope — judged against the CIS OCI
-  Foundations thresholds (minimum 14 characters, 24 passwords remembered, expiry
-  within 365 days) plus a bounded lockout, and the tenancy's legacy IAM
-  authentication policy. Oracle's built-in Standard and Simple template policies
-  are recorded but excluded from the judgement, because the domain's own
-  PasswordPolicy is the one in force. Identity domains are tenancy-scoped, so
-  this walks the whole tenancy.
+description: >-
+  Shows every identity domain's password policies against the CIS thresholds for length, history, expiry and lockout, plus the legacy authentication policy.
 category: oci
 
 supports_targets: false
@@ -29,9 +22,32 @@ ksis:
 evidence_set:
   reference_id: EVD-OCI-IAM-PASSWORD-POLICY
   name: Password Policy Strength
-  instructions: >
-    Script: oci/iam_password_policy/fetcher.py. Ported from Prowler's OCI identity service (Apache-2.0),
-    adding lockout settings and SCIM paging. OCI Python SDK calls:
-    identity.get_authentication_policy() on the tenancy, list_domains() per
-    compartment, then identity_domains.list_password_policies() against each
-    domain's own endpoint, following every page.
+  instructions: |
+    Script: oci/iam_password_policy/fetcher.py
+
+    Access: inspect and read all-resources in the tenancy; identity domains can live in any compartment, so the whole tenancy is walked whatever target is set.
+
+    Commands Executed:
+    - identity.get_authentication_policy — the tenancy's legacy password rules
+    - identity.list_compartments — every compartment in the tenancy
+    - identity.list_domains (per compartment) — identity domains
+    - identity_domains.list_password_policies (per domain, every page) — the domain's password policies, read from the domain's own endpoint
+
+    Output: oci_iam_password_policy_<tenancy>.json — every identity domain with each of its password policies judged against the CIS thresholds, and the legacy authentication policy.
+
+    Summary fields:
+
+    Which domains and policies were read?
+    - identity_domains — Number of ACTIVE identity domains
+    - domains_with_unreadable_policies — Number of domains whose policies could not be read
+    - domains_without_own_policy — Number of domains whose only policies are Oracle's Standard and Simple templates, so none of their own applies
+    - policies_evaluated — Number of policies judged, leaving out Oracle's template policies
+    - legacy_minimum_password_length — Number of characters the legacy authentication policy requires; null when not read
+
+    Do the policies meet the CIS thresholds?
+    - policies_below_cis_min_length — List of policies, as domain/policy, requiring fewer than 14 characters or no minimum
+    - policies_below_cis_history — List of policies remembering fewer than 24 previous passwords or none
+    - policies_exceeding_cis_expiry — List of policies whose passwords expire after more than 365 days or never
+    - policies_without_bounded_lockout — List of policies that allow more than 10 incorrect attempts or never lock out
+    - all_policies_meet_cis — True if at least one policy was evaluated and every one meets the length, history and expiry thresholds; false if any misses or none was evaluated
+    - shortest_min_length — Number of characters required by the policy with the shortest minimum; null when none is set

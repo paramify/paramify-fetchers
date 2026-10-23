@@ -1,50 +1,8 @@
 #!/usr/bin/env python3
-"""
-OCI Vault — every key, how it is protected, and whether it is actually rotated
-
-Every Vault in scope and every key inside it: protection mode, algorithm and
-length, auto-rotation settings, the age of the key version currently in use,
-whether that version arrived by automatic rotation or by hand, and whether
-either the key or its vault is scheduled for deletion.
-
-Evidence for KSI-SVC-ASM, "management, protection, and regular rotation of
-digital keys, certificates, and other secrets is automated and persistently
-reviewed", and KSI-SVC-SIN for the protection mode — a key held in software is
-secured differently from one that never leaves an HSM.
-
-Ported from Prowler's OCI kms service (Apache-2.0,
-prowler/providers/oraclecloud/services/kms, commit 5fe1a67) — the
-`kms_key_rotation_enabled` check — with four departures, three of them verified
-against a live tenancy:
-
-  * A ROTATION INTERVAL IS NOT ROTATION. Prowler passes a key when
-    `rotation_interval_in_days <= 365` *or* auto-rotation is enabled, so a key
-    that carries an interval from when auto-rotation was switched on, and has
-    since had it switched off, reads as compliant forever. Here automatic
-    rotation counts only when `is_auto_rotation_enabled` is true AND the
-    interval is within the window.
-
-  * AUTOMATIC AND MANUAL ROTATION ARE REPORTED APART. The indicator asks for
-    rotation that is *automated*. A key rotated by hand inside the window
-    satisfies "regular rotation" but not "is automated", so
-    `rotation_is_manual` is recorded rather than folded into one pass.
-
-  * THE VAULT TYPE DECIDES WHETHER AUTO-ROTATION IS EVEN POSSIBLE. Creating a
-    key with auto-rotation in a DEFAULT (virtual) vault is refused —
-    "Automatic key rotation is not supported with VIRTUAL vaults" — so every
-    key in one would otherwise read as a finding no operator can clear.
-    `auto_rotation_supported` carries the vault type, and the summary counts
-    those keys separately.
-
-  * DISABLED AND PENDING-DELETION KEYS ARE COLLECTED. Prowler keeps only
-    ENABLED keys, so a key scheduled for deletion — which still protects
-    everything encrypted under it until the day it goes — is invisible.
-
-On the live tenancy both keys came back `protection_mode: HSM`,
-`is_auto_rotation_enabled: false` and `auto_key_rotation_details: null`, and the
-hand-rotated one is distinguishable only by having two key versions. That is why
-version count and current-version age are on every record.
-"""
+"""OCI Vault keys: protection mode, whether the vault can rotate them automatically, and the age of the version in use."""
+# Ported from Prowler's OCI kms checks (Apache-2.0,
+# prowler/providers/oraclecloud/services/kms, commit 5fe1a67); the departures are
+# listed in fetchers/oci/README.md.
 
 import logging
 import os

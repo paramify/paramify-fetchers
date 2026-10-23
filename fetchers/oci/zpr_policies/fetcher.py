@@ -1,55 +1,5 @@
 #!/usr/bin/env python3
-"""
-OCI Zero Trust Packet Routing — network intent written as policy, and how loose it is
-
-Whether ZPR is enabled for the tenancy, every ZPR policy in scope with each
-statement parsed into source, destination and conditions, the security
-attribute namespaces and definitions those statements can reference, and which
-VCNs carry a ZPR attribute or run ZPR-only.
-
-This is the evidence for KSI-CNA-ULN, "logical networking and related
-capabilities are used and persistently reviewed to enforce traffic flow
-controls", and KSI-CNA-RNT, "resources are persistently reviewed to ensure they
-are appropriately configured to limit inbound and outbound network traffic". ZPR
-is OCI-only: access is granted between labelled workloads rather than between
-IP ranges, so it survives a re-address, and a packet no statement allows is
-dropped even when a security list would have let it through.
-
-WHAT MAKES THIS EVIDENCE RATHER THAN AN INVENTORY: a ZPR policy is free text, so
-"has ZPR policies" says nothing about what they allow. Every statement is parsed
-and the four permissive shapes are counted, each of which Oracle accepts without
-complaint (verified by creating them on a live tenancy):
-
-    allow '0.0.0.0/0' to connect to ...            the internet as a source
-    allow all-endpoints to connect to ...          anything, inside or out
-    ... to connect to '0.0.0.0/0' / all-endpoints   unrestricted egress
-    (no `with protocol=` clause)                    every protocol and port
-
-DANGLING REFERENCES ARE ACCEPTED TOO. A policy naming `ns.key:value` goes ACTIVE
-even when no namespace `ns` exists — four policies went ACTIVE on the test
-tenancy minutes before their namespace was created. A statement whose attribute
-is undefined or retired matches nothing; it reads as a control and grants or
-blocks nothing. Counted as `statements_with_undefined_attributes`.
-
-THE PARSER IS DELIBERATELY CONSERVATIVE. Oracle documents the grammar only in
-prose, so a statement that does not match the documented shapes is kept verbatim
-with `parsed: false` and counted, never guessed at. An unparsed statement is
-never counted as restrictive.
-
-NOT ENABLED READS AS A 404, NOT A STATUS. Unlike Cloud Guard, which answers
-DISABLED, ZPR's `get_configuration` 404s until ZPR has been turned on — and 404
-is also OCI's answer to a missing permission. So a 404 is recorded as
-`zpr_enabled: false` (the pessimistic reading) with the call in skipped_calls;
-if policies are then found anyway, the 404 was a permission problem and is
-recorded as a collection failure instead.
-
-TWO FIELDS THAT LOOK USEFUL AND ARE NOT, both verified live:
-  * `Instance.security_attributes` is `{}` for an instance whose VNIC carries a
-    ZPR attribute — the label lives on the VNIC. This fetcher does not claim
-    per-instance coverage for that reason.
-  * `Vcn.is_zpr_only` is None, not False, on a VCN that never set it; only True
-    is read as ZPR-only.
-"""
+"""OCI Zero Trust Packet Routing: whether it is on, every policy statement parsed, and which VCNs enforce it."""
 
 import logging
 import os

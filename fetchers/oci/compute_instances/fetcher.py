@@ -1,51 +1,8 @@
 #!/usr/bin/env python3
-"""
-OCI Compute — instance hardening, boot integrity, and what is reachable from outside
-
-Every compute instance in scope with its metadata-service configuration, boot
-integrity settings (secure boot, measured boot, TPM, memory encryption),
-in-transit encryption, Oracle Cloud Agent and plugin state, and every VNIC with
-its public IP and attached network security groups.
-
-Evidence for KSI-CNA-MAT (minimal attack surface, lateral movement minimized),
-KSI-SVC-VRI (cryptographic methods validate the integrity of resources — secure
-and measured boot, and the TPM that attests them) and KSI-SVC-SIN for in-transit
-and memory encryption.
-
-Ported from Prowler's OCI compute service (Apache-2.0,
-prowler/providers/oraclecloud/services/compute, commit 5fe1a67) — the legacy
-metadata endpoint, secure boot and in-transit encryption checks — with four
-departures, the first two verified against a live instance:
-
-  * SECURE BOOT IS NOT AVAILABLE ON EVERY SHAPE.
-    `platform_config` is None on a shape that does not support shielded
-    instances — confirmed on a live VM.Standard.E2.1.Micro — and Prowler's
-    `hasattr(None, ...)` guard then defaults `is_secure_boot_enabled` to False,
-    reporting a FAIL on hardware that cannot offer the control. Here
-    `shielded_instance_supported` carries that distinction and the summary
-    counts those instances separately.
-
-  * MEASURED BOOT, TPM AND MEMORY ENCRYPTION ARE ON THE SAME OBJECT AND UNREAD.
-    Secure boot alone says the firmware refused unsigned code; the TPM and
-    measured boot are what let that be *attested*, which is the "cryptographic
-    methods to validate integrity" half of SVC-VRI. Memory encryption (AMD SEV)
-    protects data in use.
-
-  * PUBLIC ADDRESSES ARE THE ATTACK SURFACE AND ARE NOT COLLECTED AT ALL. An
-    instance's exposure lives on its VNICs (`public_ip`, `nsg_ids`,
-    `skip_source_dest_check`), which Prowler never reads.
-
-  * THE ORACLE CLOUD AGENT DECIDES WHETHER ANYTHING IS WATCHING. `agent_config`
-    carries `is_monitoring_disabled`, `is_management_disabled`,
-    `are_all_plugins_disabled` and the per-plugin desired state — including the
-    Vulnerability Scanning and OS Management plugins that other indicators rely
-    on. An instance with the agent off reports clean to every agent-based check.
-
-INSTANCE METADATA VALUES ARE DELIBERATELY NOT COLLECTED. `metadata` and
-`extended_metadata` hold cloud-init `user_data` and `ssh_authorized_keys`;
-user_data routinely carries bootstrap secrets. Only the key names are recorded,
-so the evidence can say a key is present without copying what is in it.
-"""
+"""OCI compute instances: metadata endpoint, boot integrity, in-transit encryption, agent state, and VNIC exposure."""
+# Ported from Prowler's OCI compute checks (Apache-2.0,
+# prowler/providers/oraclecloud/services/compute, commit 5fe1a67); the departures are
+# listed in fetchers/oci/README.md.
 
 import logging
 import os

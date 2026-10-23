@@ -1,15 +1,7 @@
 name: oci_iam_policies
 version: 0.1.0
-description: >
-  Every OCI IAM policy in scope with each statement parsed into subject, verb or
-  permission list, resource, location and condition, plus the tenancy's dynamic
-  groups. Counts manage all-resources grants outside Oracle's default tenant
-  admin policy (recognised by its content and location, not its name), grants
-  that let non-administrators manage users, groups or policies without excluding
-  the Administrators group, unconditional any-user or any-group grants (Oracle's
-  own conditioned service grants are counted apart), cross-tenancy statements,
-  and dynamic groups that give workloads keyless identities. Unrecognised
-  statements are kept and counted, never read as narrow.
+description: >-
+  Shows every IAM policy statement parsed, the broad and unguarded grants among them, and the dynamic groups that give workloads keyless identities.
 category: oci
 
 supports_targets: true
@@ -56,8 +48,41 @@ ksis:
 evidence_set:
   reference_id: EVD-OCI-IAM-POLICIES
   name: IAM Policy Least Privilege Review
-  instructions: >
-    Script: oci/iam_policies/fetcher.py. Ported from Prowler's OCI identity service (Apache-2.0),
-    parsing statements rather than matching substrings. OCI Python SDK calls:
-    identity.list_policies() per compartment beneath the target, and
-    list_dynamic_groups() on the tenancy root. One evidence file per target.
+  instructions: |
+    Script: oci/iam_policies/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope; dynamic groups are read at the tenancy root.
+
+    Commands Executed:
+    - identity.list_compartments — the compartments beneath the target
+    - identity.list_policies (per compartment) — policies with their statements, each parsed into subject, verb, resource, location and condition
+    - identity.list_dynamic_groups — the tenancy's dynamic groups and their matching rules
+
+    Output: oci_iam_policies_<compartment>.json — every policy with each statement parsed, and every dynamic group.
+
+    Summary fields:
+
+    Which policies exist?
+    - total_policies — Number of policies
+    - active_policies — Number of policies in the ACTIVE state; only these are judged below
+    - total_statements — Number of statements across active policies
+    - unparsed_statements — Number of statements the parser did not recognise; they are kept verbatim and never read as narrow
+    - statements_by_subject_kind — Number of parsed statements for each kind of subject:
+      - group (a named group)
+      - dynamic_group (a dynamic group of workloads)
+      - service (an OCI service)
+      - any (any-user or any-group)
+    - default_tenant_admin_policy_present — True if Oracle's default Tenant Admin Policy is present as itself: in the tenancy root, named Tenant Admin Policy, holding exactly its one default statement; false otherwise
+
+    Which grants are broad?
+    - manage_all_resources_in_tenancy_outside_default_admin_policy — Number of statements outside the default admin policy that grant manage all-resources in tenancy
+    - manage_all_resources_statements_outside_default_admin_policy — Number of statements outside the default admin policy that grant manage all-resources anywhere, tenancy or compartment
+    - iam_management_statements_without_administrators_guard — Number of tenancy-wide statements letting a group, dynamic group or any principal manage or use users, groups, policies or other IAM resources without a condition excluding the Administrators group
+    - unconditional_any_principal_statements — Number of statements granting any-user or any-group with no where clause
+    - conditional_any_principal_statements — Number of any-user or any-group statements with a where clause, such as Oracle's own service grants
+    - cross_tenancy_statements — Number of endorse or admit statements, which grant across tenancies
+    - policies_with_broad_grants — List of active policy names, with the last characters of their OCID, holding at least one broad, unconditional or unguarded statement
+
+    Do workloads authenticate without keys?
+    - dynamic_groups — Number of dynamic groups
+    - dynamic_groups_matching_workloads — Number of dynamic groups whose matching rule names instances, functions, databases or other resources

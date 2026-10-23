@@ -1,37 +1,8 @@
 #!/usr/bin/env python3
-"""
-OCI password policy — every identity domain's rules, against the CIS thresholds
-
-Every identity domain in scope with each password policy it defines: length,
-character classes, expiry, history, lockout, and which groups a policy is
-scoped to. Also the tenancy's legacy IAM authentication policy, which is the
-only password policy a tenancy without identity domains has.
-
-Evidence for KSI-IAM-APM, "strong passwords with phishing-resistant MFA" — the
-strong-passwords half. Pairs with `oci_iam_users_credentials` for the MFA half.
-
-Ported from Prowler's OCI identity service (Apache-2.0,
-prowler/providers/oraclecloud/services/identity, commit c0fdd5b) — the
-`identity_password_policy_minimum_length_14`, `_prevents_reuse` and
-`_expires_within_365_days` checks, with the same CIS thresholds (14 characters,
-24 remembered, 365 days). Two additions:
-
-  * LOCKOUT. `max_incorrect_attempts` and `lockout_duration` are on the same
-    model and Prowler does not read them; an unlimited-attempts policy is the
-    one setting that makes every other rule guessable.
-
-  * PAGING. Prowler reads one page of `list_password_policies`. SCIM pages at 50
-    by default; this follows `total_results`.
-
-WHICH POLICY APPLIES. Every identity domain ships two templates,
-`StandardPasswordPolicy` and `SimplePasswordPolicy`, next to its own
-`PasswordPolicy`. Verified live: the legacy authentication policy reported a
-minimum length of 12, matching the domain's `PasswordPolicy`
-(`password_strength: Custom`, min 12), not either template (min 8). So the
-templates are recorded but excluded from the judgement, as Prowler does. A
-policy with `groups` set applies only to those groups, and is reported alongside
-the domain default rather than replacing it.
-"""
+"""OCI identity domain password policies against the CIS thresholds, plus the legacy authentication policy."""
+# Ported from Prowler's OCI identity checks (Apache-2.0,
+# prowler/providers/oraclecloud/services/identity, commit c0fdd5b); the departures are
+# listed in fetchers/oci/README.md.
 
 import logging
 import os

@@ -1,15 +1,7 @@
 name: oci_block_volume_encryption
 version: 0.1.0
-description: >
-  Every OCI block volume and boot volume in scope with the key that encrypts it
-  (Oracle-managed or a customer-managed Vault key), every backup of those
-  volumes with the key encrypting the backup, and every attachment with whether
-  traffic between instance and volume is encrypted in transit. OCI always
-  encrypts at rest, so the reported question is whose key — and backups carry a
-  key of their own, so a customer-managed volume with Oracle-managed backups is
-  counted as its own finding. Unattached volumes are counted because they still
-  hold data. Backup-policy assignments are deliberately not collected; they
-  answer a recovery question, not an encryption one.
+description: >-
+  Shows whose key encrypts each block and boot volume and its backups, and whether attached volumes encrypt traffic in transit.
 category: oci
 
 supports_targets: true
@@ -64,11 +56,50 @@ ksis:
 evidence_set:
   reference_id: EVD-OCI-BLOCK-VOLUME-ENCRYPTION
   name: Volume Encryption Keys and In-Transit Encryption
-  instructions: >
-    Script: oci/block_volume_encryption/fetcher.py. Ported from Prowler's OCI blockstorage service
-    (Apache-2.0), adding backups and in-transit encryption. OCI Python SDK
-    calls per compartment: identity.list_availability_domains(),
-    compute.list_volume_attachments() and list_boot_volume_attachments() per AD,
-    blockstorage.list_volumes() and list_boot_volumes() per AD, then
-    list_volume_backups() / list_boot_volume_backups() per volume. One evidence
-    file per target.
+  instructions: |
+    Script: oci/block_volume_encryption/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope.
+
+    Commands Executed:
+    - identity.list_compartments — the compartments beneath the target
+    - identity.list_availability_domains — the region's availability domains, which boot volumes are listed by
+    - compute.list_volume_attachments (per compartment) — block volume attachments and their in-transit encryption flag
+    - compute.list_boot_volume_attachments (per compartment and availability domain) — boot volume attachments
+    - blockstorage.list_volume_backups (per compartment) — block volume backups and the key encrypting each
+    - blockstorage.list_boot_volume_backups (per compartment) — boot volume backups
+    - blockstorage.list_volumes (per compartment) — block volumes and the key encrypting each
+    - blockstorage.list_boot_volumes (per compartment and availability domain) — boot volumes
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_block_volume_encryption_<compartment>.json — every live block and boot volume with its key, its attachments and their in-transit encryption, and its backups with their keys.
+
+    Summary fields:
+
+    Which volumes exist?
+    - block_storage_readable — True if the volume listing was read in at least one compartment; false if every listing failed
+    - total_volumes — Number of live block and boot volumes (terminated ones left out)
+    - block_volumes — Number of live block volumes
+    - boot_volumes — Number of live boot volumes
+
+    Whose key encrypts them at rest?
+    - volumes_with_customer_managed_key — Number of volumes encrypted with a Vault key the customer holds (a kms_key_id is set)
+    - volumes_with_oracle_managed_key — Number of volumes encrypted with a key Oracle manages (no kms_key_id)
+    - customer_managed_key_percentage — Percentage of volumes under a customer-managed key = volumes_with_customer_managed_key / total_volumes × 100, a whole number; 0 when total_volumes is 0
+    - block_volumes_with_customer_managed_key — Number of block volumes under a customer-managed key
+    - boot_volumes_with_customer_managed_key — Number of boot volumes under a customer-managed key
+    - distinct_keys_in_use — Number of distinct customer-managed keys encrypting volumes
+    - volume_names_with_oracle_managed_key — List of volume names, with the last characters of their OCID, encrypted with an Oracle-managed key
+
+    Is data encrypted on the wire?
+    - attached_volumes — Number of volumes with an attachment in the ATTACHED or ATTACHING state
+    - unattached_volumes — Number of volumes attached to no instance; they still hold their data
+    - attached_volumes_with_in_transit_encryption — Number of attached volumes with in-transit encryption enabled on at least one attachment
+    - in_transit_encryption_percentage — Percentage of attached volumes encrypting in transit = attached_volumes_with_in_transit_encryption / attached_volumes × 100, a whole number; 0 when attached_volumes is 0
+
+    Whose key encrypts the backups?
+    - volumes_with_unreadable_backups — Number of volumes whose backups could not be listed, so their backup keys are unknown
+    - total_backups — Number of backups across volumes whose backups were read
+    - backups_with_customer_managed_key — Number of backups encrypted with a customer-managed key
+    - backups_with_oracle_managed_key — Number of backups encrypted with an Oracle-managed key
+    - volumes_with_customer_key_but_oracle_managed_backups — Number of volumes under a customer-managed key that have at least one backup under an Oracle-managed key

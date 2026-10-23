@@ -1,41 +1,8 @@
 #!/usr/bin/env python3
-"""
-OCI Object Storage — who can reach each bucket, whose key encrypts it, and what is logged
-
-Every bucket in scope with its public access type, the key encrypting it,
-versioning, retention rules, replication policies, object-event emission, the
-read and write logs configured against it, and — the part a public-access check
-misses — every pre-authenticated request that hands out access by URL.
-
-Evidence for KSI-SVC-SIN (encrypted and secured from unwanted access),
-KSI-IAM-ELP (a PAR is an access grant to whoever holds the link) and
-KSI-MLA-LET (the list of resources and event types that are logged).
-
-Ported from Prowler's OCI objectstorage service (Apache-2.0,
-prowler/providers/oraclecloud/services/objectstorage, commit 5fe1a67) — the
-`objectstorage_bucket_not_publicly_accessible`, `_encrypted_with_cmk`,
-`_versioning_enabled` and `_logging_enabled` checks. Three additions:
-
-  * PRE-AUTHENTICATED REQUESTS ARE THE HOLE IN THE PUBLIC-ACCESS CHECK. A bucket
-    with `public_access_type: NoPublicAccess` is readable by anyone holding a PAR
-    URL, and a PAR with `access_type: AnyObjectRead` plus
-    `bucket_listing_action: ListObjects` exposes the whole bucket. Prowler reads
-    the access type and stops, so this is invisible to it. Staged on the live
-    tenancy — a private bucket carrying exactly such a PAR — and reported as
-    `buckets_private_but_reachable_by_par`.
-
-  * READ LOGGING IS REPORTED BESIDE WRITE LOGGING. Prowler's check computes
-    `has_read_logging` and then never uses it. Both are recorded: a bucket with
-    write logging alone cannot answer "who read this object".
-
-  * REPLICATION AND RETENTION ARE COLLECTED. A replication policy copies objects
-    to another bucket, possibly in another region, which the encryption and
-    access answers must travel with; a retention rule with `time_rule_locked` in
-    the past is immutability that cannot be undone.
-
-A PAR's secret is its URL, which OCI returns only at creation and never again.
-Nothing here can read it, and nothing here logs one.
-"""
+"""OCI Object Storage buckets: public access, pre-authenticated requests, key, versioning, retention, replication, and logging."""
+# Ported from Prowler's OCI objectstorage checks (Apache-2.0,
+# prowler/providers/oraclecloud/services/objectstorage, commit 5fe1a67); the departures are
+# listed in fetchers/oci/README.md.
 
 import logging
 import os
