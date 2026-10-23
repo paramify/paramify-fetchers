@@ -60,7 +60,7 @@ evidence_set:
   reference_id: EVD-AZURE-LOG-ANALYTICS-QUERY-AUDIT
   name: Azure Log Analytics Query Audit
   instructions: >
-    Script: fetcher.py. ARM REST: Log Analytics workspaces and their diagnostic
+    Script: azure/log_analytics_query_audit/fetcher.py. ARM REST: Log Analytics workspaces and their diagnostic
     settings; auditing is on when one enables category Audit or categoryGroup
     audit/allLogs. LAQueryLogs on the setting's destination, filtered to this
     workspace's _ResourceId, per startofweek(TimeGenerated): human when

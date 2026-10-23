@@ -25,4 +25,4 @@ ksis:
 evidence_set:
   reference_id: EVD-OKTA-KSI-IAM-01
   name: Okta Phishing-Resistant MFA
-  instructions: 'Script: okta_phishing_resistant_mfa.py. Uses Okta APIs to collect phishing-resistant MFA (FIDO2/WebAuthn) configuration and adoption evidence. Output: okta_phishing_resistant_mfa.json'
+  instructions: 'Script: okta/phishing_resistant_mfa/fetcher.py. Uses Okta APIs to collect phishing-resistant MFA (FIDO2/WebAuthn) configuration and adoption evidence. Output: okta_phishing_resistant_mfa.json'

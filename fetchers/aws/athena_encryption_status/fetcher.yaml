@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-ATHENA-ENC
   name: Athena Workgroup Query-Result Encryption
-  instructions: 'Script: fetcher.sh. Commands executed: aws athena list-work-groups, aws athena get-work-group.'
+  instructions: 'Script: aws/athena_encryption_status/fetcher.sh. Commands executed: aws athena list-work-groups, aws athena get-work-group.'

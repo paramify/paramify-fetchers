@@ -56,7 +56,7 @@ evidence_set:
   reference_id: EVD-CS-ZERO-TRUST-ASSESSMENT
   name: CrowdStrike Zero Trust Assessment
   instructions: >-
-    Script: fetcher.py. Authenticates at POST /oauth2/token and reads
+    Script: crowdstrike/zero_trust_assessment/fetcher.py. Authenticates at POST /oauth2/token and reads
     GET /zero-trust-assessment/entities/audit/v1 for the tenant-wide ZTA audit
     report. When include_host_assessments is enabled, also pages
     GET /zero-trust-assessment/queries/assessments/v1 with the configured score

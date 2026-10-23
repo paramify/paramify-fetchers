@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-RDS-ENC
   name: RDS Encryption
-  instructions: 'Script: fetcher.sh. Commands executed: aws rds describe-db-instances, aws rds describe-db-clusters'
+  instructions: 'Script: aws/rds_encryption_status/fetcher.sh. Commands executed: aws rds describe-db-instances, aws rds describe-db-clusters'

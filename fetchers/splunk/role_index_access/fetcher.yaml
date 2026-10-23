@@ -58,7 +58,7 @@ evidence_set:
   reference_id: EVD-SPLUNK-ROLE-INDEX-ACCESS
   name: Splunk Role and Index Access
   instructions: >-
-    Every role and user with the indexes it can effectively search: own and
+    Script: splunk/role_index_access/fetcher.py. Every role and user with the indexes it can effectively search: own and
     inherited grants minus denials, expanded against the real index list. `*`
     covers every non-internal index and `_*` every internal one; neither crosses
     over. Also who holds `delete_by_keyword` and other log-privilege
