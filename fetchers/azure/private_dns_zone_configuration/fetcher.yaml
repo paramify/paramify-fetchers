@@ -1,5 +1,5 @@
 name: azure_private_dns_zone_configuration
-version: 0.1.1
+version: 0.2.0
 description: >
   Inventories Azure private DNS zones (Microsoft.Network/privateDnsZones) in the subscription. For
   every zone: its virtual network links (auto-registration, resolution policy, link state, and
@@ -55,11 +55,11 @@ evidence_set:
     scoped to a subscription so resources in other subscriptions the credential can read still
     resolve: the virtual networks the zones link to, then the ones peered (peeringState Connected)
     with a private-link zone's linked VNets, each read by id (Resources | where id in~ (...), 200 ids
-    a query; a failed query leaves every link's virtual_network_status and every private-link record
-    unknown) with
+    a query; a failed query leaves only its own VNets unknown: the links to them, and every
+    private-link record of a zone that resolves for one of them) with
     its address prefixes, peerings and each subnet's prefixes and IP configuration ids; every network
     interface owned by a private endpoint, with its private IPs, subnet and
-    properties.ipConfigurations[].properties.privateLinkConnectionProperties.fqdns (mv-expand limit
+    properties.ipConfigurations[].properties.privateLinkConnectionProperties.fqdns (mv-expand ... limit
     2000, above the 256 IP configurations a NIC can hold); every private endpoint's connection states;
     the private IPs and subnets of other network interfaces and of load balancer frontends; every
     private DNS zone and zone link; and the resource groups the credential can read (ResourceContainers).
@@ -68,9 +68,17 @@ evidence_set:
     privatelink-global.wvd.microsoft.com). A private IP is not unique across a tenant, so each IP of an
     A record in such a zone is matched only within the virtual networks the zone resolves for: its
     linked VNets and the VNets peered with them (an endpoint in a spoke peered with a hub the zone is
-    linked to counts; a resource holding the same address in an unrelated VNet does not).
-    ip_address_networks lists, per IP, the VNets it was matched in: those holding it or whose address
-    space contains it. Each IP gets a status in
+    linked to counts; a resource holding the same address in an unrelated VNet does not). Only one
+    peering hop is followed, and only from the linked VNet's own peering list, so these layouts read
+    unverified where 0.1.0 said backed: Virtual WAN (spokes reach each other through the hub's managed
+    VNet, two hops); spoke to spoke (the zone linked to one spoke, the endpoint in another, both peered
+    only with a hub); Azure Virtual Network Manager mesh connectivity (connected groups create no
+    peering objects); and a linked hub the credential cannot read while the spoke holding the endpoint
+    is readable (the hub's peerings are not read). A linked VNet the credential cannot read stays in
+    scope: a visible endpoint NIC in it still backs the record, but its address space and peers are
+    unknown. ip_address_networks lists, per IP, the VNets it was matched in (those holding it or whose
+    address space contains it), [] when there were none, and null when a lookup it depends on failed.
+    Each IP gets a status in
     ip_address_statuses: backed when an Approved private endpoint holds the IP and one of its FQDNs is
     the record's full name (AKS keeps the privatelink label) or the record's name under the zone's
     public suffix (the zone without its privatelink label; privatelink.vaultcore.azure.net maps to
@@ -81,12 +89,14 @@ evidence_set:
     network interface or an internal load balancer does (an AKS private cluster's API server, for
     one); stale when nothing holds the IP, it falls inside a readable virtual network, and every
     resource group with a NIC in its subnet is readable (so an endpoint there could not have been
-    missed: a record left behind by a deleted endpoint); unverified, never backed, when no readable
-    VNet the zone resolves for holds or contains the IP (the zone has no links, or its links point at
-    VNets the credential cannot read), when a NIC in its subnet sits in a resource group the credential
-    cannot read, or when the IP falls inside more than one of those VNets (overlapping address spaces)
-    and their verdicts differ, in which case ip_address_networks names each rather than one being
-    picked; unknown when a query it depends on failed (including the zone's link list), never stale. The record's
+    missed: a record left behind by a deleted endpoint); unverified when no VNet the zone resolves for
+    holds the IP and none it can read contains it (the zone has no links, its links point only at VNets
+    the credential cannot read and nothing visible there holds the IP, or one of the layouts above),
+    when a NIC in its subnet sits in a resource group the credential cannot read, or when the IP falls
+    inside more than one of those VNets (overlapping address spaces) and their verdicts differ, in
+    which case ip_address_networks names each rather than one being picked; unknown when a query it
+    depends on failed (including the zone's link list and the lookup of a VNet it resolves for), never
+    stale. The record's
     private_endpoint_status is backed only when every IP is backed, partially_backed when some are
     (so a dead IP next to a live one is not hidden), no_addresses for an A record with no IP, and
     otherwise the most serious of ip_mismatch, endpoint_not_approved, stale, unknown, unverified,
@@ -105,8 +115,9 @@ evidence_set:
     summary.privatelink_records_backed over summary.privatelink_a_records is the share of privatelink
     records that resolve only to live private endpoints. summary.links_to_unreadable_virtual_networks
     is non-zero when the credential cannot read every subscription the zones serve, and falls to zero
-    once it can; summary.privatelink_records_unverified also counts records in zones with no links
-    and records whose IPs fall in overlapping VNets that disagree. provider_registration_status
+    once it can; summary.privatelink_records_unverified also counts records in zones with no links,
+    records in the layouts above, and records whose IPs fall in overlapping VNets that disagree.
+    provider_registration_status
     (registered / not_registered / unknown) is the Microsoft.Network resource provider's state, so
     total_zones 0 on an unregistered subscription reads as "service not in use" rather than "in use,
     none deployed".

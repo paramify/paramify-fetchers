@@ -32,7 +32,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from resource_graph import (  # noqa: E402
-    query_all,
+    lookup_by_ids,
     quoted_ids,
     readable_scopes,
     resource_graph_client,
@@ -41,7 +41,6 @@ from resource_graph import (  # noqa: E402
 logger = logging.getLogger("azure_private_endpoint_configuration")
 
 STATUSES = ("Approved", "Pending", "Rejected", "Disconnected")
-LOOKUP_CHUNK = 200
 # mv-expand defaults to 128 rows per input row; a VNet can hold far more subnets.
 MV_EXPAND_LIMIT = 2000
 # publicNetworkAccess values that close the public path. SecuredByPerimeter puts the resource behind a
@@ -358,28 +357,6 @@ def truncated_vnets(subnet_rows: dict) -> set:
         seen[vnet] = seen.get(vnet, 0) + 1
         expected[vnet] = row.get("subnet_count")
     return {v for v, n in seen.items() if isinstance(expected[v], int) and n < expected[v]}
-
-
-def lookup_by_ids(client, ids: list[str], build_query, label: str, collector: Collector):
-    """Resource Graph rows keyed by lowercased id, plus the ids whose chunk failed.
-
-    Unscoped so resources in other readable subscriptions resolve.
-    """
-    unique = sorted({i.lower() for i in ids if i})
-    out, failed = {}, set()
-    for start in range(0, len(unique), LOOKUP_CHUNK):
-        chunk = unique[start : start + LOOKUP_CHUNK]
-        rows = collector.guard(
-            f"resourcegraph.resources ({label} {start + 1}-{start + len(chunk)})",
-            lambda: query_all(client, None, build_query(chunk))["rows"],
-        )
-        if rows is None:
-            failed.update(chunk)
-            continue
-        for row in rows:
-            row = {k: (None if v == "" else v) for k, v in row.items()}
-            out[(row.get("id") or "").lower()] = row
-    return out, failed
 
 
 def collect_endpoints(subscription_id, cred, collector: Collector) -> list[dict]:

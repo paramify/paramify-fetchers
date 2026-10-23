@@ -77,6 +77,32 @@ def quoted_ids(ids: List[str]) -> str:
     return ", ".join("@'" + i.replace("'", "''") + "'" for i in ids)
 
 
+# Ids per `id in~ (...)` lookup query.
+LOOKUP_CHUNK = 200
+
+
+def lookup_by_ids(client, ids, build_query, label: str, collector: Collector):
+    """Resource Graph rows keyed by lowercased id, plus the ids whose chunk failed.
+
+    Unscoped so resources in other readable subscriptions resolve. A failed chunk leaves only its own ids unknown.
+    """
+    unique = sorted({i.lower() for i in ids if i})
+    out, failed = {}, set()
+    for start in range(0, len(unique), LOOKUP_CHUNK):
+        chunk = unique[start : start + LOOKUP_CHUNK]
+        rows = collector.guard(
+            f"resourcegraph.resources ({label} {start + 1}-{start + len(chunk)})",
+            lambda: query_all(client, None, build_query(chunk))["rows"],
+        )
+        if rows is None:
+            failed.update(chunk)
+            continue
+        for row in rows:
+            row = {k: (None if v == "" else v) for k, v in row.items()}
+            out[(row.get("id") or "").lower()] = row
+    return out, failed
+
+
 READABLE_RESOURCE_GROUPS_QUERY = (
     "ResourceContainers | where type =~ 'microsoft.resources/subscriptions/resourcegroups' "
     "| project id = tolower(id) | order by id asc"

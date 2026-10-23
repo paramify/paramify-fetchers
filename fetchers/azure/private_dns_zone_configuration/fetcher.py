@@ -33,6 +33,7 @@ from azure_common import (  # noqa: E402
 )
 from private_dns import project_vnet_link  # noqa: E402
 from resource_graph import (  # noqa: E402
+    lookup_by_ids,
     query_all,
     quoted_ids,
     readable_scopes,
@@ -59,7 +60,6 @@ PUBLIC_SUFFIX_ALIASES = {"vaultcore.azure.net": "vault.azure.net"}
 # mv-expand defaults to 128 rows per input row. A NIC holds at most 256 IP configurations, so
 # 2000 can never cut one short.
 MV_EXPAND_LIMIT = 2000
-LOOKUP_CHUNK = 200
 
 # Every private endpoint NIC IP the credential can see, with the FQDNs it serves and the subnet it sits in.
 ENDPOINT_IPS_QUERY = (
@@ -135,8 +135,11 @@ def vnets_query(ids: list[str]) -> str:
 
 
 def vnet_of(subnet_id):
-    """Lowercased VNet id from a subnet id; None when the id names no subnet."""
-    head, sep, _ = (subnet_id or "").lower().partition("/subnets/")
+    """Lowercased VNet id from a subnet id; None when the id names no subnet.
+
+    Split at the last /subnets/: a resource group or VNet may itself be named "subnets".
+    """
+    head, sep, _ = (subnet_id or "").lower().rpartition("/subnets/")
     return head if sep else None
 
 
@@ -174,22 +177,25 @@ def vnet_index(rows):
     return index
 
 
-def zone_networks(links, vnets):
+def zone_networks(links, vnets, failed_vnets=frozenset()):
     """Lowercased ids of the VNets a zone resolves for: its linked VNets and the VNets peered with them.
 
-    None when the links or the VNets could not be read. A link to an unreadable VNet adds the VNet but not
-    its peers, so an IP there is matched only to resources the credential can see in that VNet.
+    None when the links could not be read, or when the lookup of a VNet in that set failed. A link to an
+    unreadable VNet adds the VNet but not its peers, so an IP there is matched only to resources the
+    credential can see in that VNet.
     """
     if links is None or vnets is None:
         return None
     linked = {(link.get("virtual_network_id") or "").lower() for link in links if link.get("virtual_network_id")}
-    return linked | {peer for v in linked for peer in (vnets.get(v) or {}).get("peers", ())}
+    networks = linked | {peer for v in linked for peer in (vnets.get(v) or {}).get("peers", ())}
+    return None if networks & set(failed_vnets) else networks
 
 
-def link_status(vnet_id, vnets, scopes) -> str:
+def link_status(vnet_id, vnets, scopes, failed_vnets=frozenset()) -> str:
     """found / not_found (deleted) / not_visible (scope unreadable) / unknown (lookup failed)."""
-    found = vnets is not None and (vnet_id or "").lower() in vnets
-    return lookup_status(vnet_id, found, vnets is not None, scopes)
+    key = (vnet_id or "").lower()
+    found = vnets is not None and key in vnets
+    return lookup_status(vnet_id, found, vnets is not None and key not in failed_vnets, scopes)
 
 
 def _is_privatelink_label(label: str) -> bool:
@@ -336,7 +342,7 @@ def status_in_network(addr, network, record, zone_name, held, others_here, vnets
 def classify_ip(
     ip, record: dict, endpoints, vnets, zone_name="", approvals=None, others=None, scopes=None, networks=None
 ) -> tuple:
-    """(status, private endpoint ids, VNets matched) for one IP of a privatelink A record.
+    """(status, private endpoint ids, VNets matched or None when a lookup it needs failed) for one IP of a privatelink A record.
 
     The IP is matched only in `networks`, the VNets the zone resolves for (zone_networks): those that
     hold it or whose address space contains it. An IP is not unique across a tenant, so a resource
@@ -356,7 +362,7 @@ def classify_ip(
     unknown               — a lookup this depends on failed; never reported as stale
     """
     if endpoints is None or vnets is None or networks is None:
-        return "unknown", [], []
+        return "unknown", [], None
     try:
         addr = ipaddress.ip_address(ip)
     except ValueError:
@@ -367,7 +373,7 @@ def classify_ip(
     if addr is not None:
         matched |= {v for v in networks if any(addr in net for net in (vnets.get(v) or {}).get("nets", ()))}
     if not matched:
-        return ("unknown" if others is None else "unverified"), [], []
+        return ("unknown", [], None) if others is None else ("unverified", [], [])
     verdicts = [
         status_in_network(
             addr,
@@ -429,12 +435,21 @@ def classify_record(
     }
 
 
-def zone_record(zone: dict, links, records, endpoints, vnets, scopes, approvals=None, others=None) -> dict:
-    """`links` / `records` are None when they could not be listed: unknown, never "none"."""
-    networks = zone_networks(links, vnets)
+def zone_record(
+    zone: dict, links, records, endpoints, vnets, scopes, approvals=None, others=None, failed_vnets=frozenset()
+) -> dict:
+    """`links` / `records` are None when they could not be listed: unknown, never "none".
+
+    `failed_vnets` are the VNets whose lookup failed: links to them and records of zones that resolve for them
+    are unknown, while other zones are classified as usual.
+    """
+    networks = zone_networks(links, vnets, failed_vnets)
     if links is not None:
         links = sorted(
-            ({**link, "virtual_network_status": link_status(link["virtual_network_id"], vnets, scopes)} for link in links),
+            (
+                {**link, "virtual_network_status": link_status(link["virtual_network_id"], vnets, scopes, failed_vnets)}
+                for link in links
+            ),
             key=lambda r: r.get("id") or "",
         )
     if records is not None:
@@ -569,17 +584,6 @@ def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
             return None
         return collector.guard(f"resourcegraph.resources ({label})", lambda: query_all(graph, None, query)["rows"])
 
-    def _vnet_rows(label, ids):
-        # None when any chunk failed: a partly read set of VNets is never taken for the whole.
-        ids, rows = sorted(ids), []
-        for start in range(0, len(ids), LOOKUP_CHUNK):
-            chunk = ids[start : start + LOOKUP_CHUNK]
-            chunk_rows = _graph(f"{label} {start + 1}-{start + len(chunk)}", vnets_query(chunk))
-            if chunk_rows is None:
-                return None
-            rows += chunk_rows
-        return rows
-
     def _linked(privatelink_only: bool) -> set:
         return {
             link["virtual_network_id"].lower()
@@ -597,18 +601,20 @@ def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
             _graph("other NIC IPs", OTHER_NIC_IPS_QUERY), _graph("load balancer frontend IPs", LOAD_BALANCER_IPS_QUERY)
         )
     # Only the VNets the zones resolve for: every linked VNet, then the VNets peered with a private-link zone's.
-    linked = _linked(False)
-    vnet_rows = _vnet_rows("linked virtual networks", linked)
-    if vnet_rows is not None:
-        read = vnet_index(vnet_rows)
+    # A failed chunk leaves only its own VNets unknown, and with them the zones that resolve for them.
+    vnets, failed_vnets = None, set()
+    if graph is not None:
+        linked = _linked(False)
+        rows, failed_vnets = lookup_by_ids(graph, linked, vnets_query, "linked virtual networks", collector)
+        read = vnet_index(list(rows.values()))
         peers = {p for v in _linked(True) for p in (read.get(v) or {}).get("peers", ())} - linked
-        peer_rows = _vnet_rows("peered virtual networks", peers)
-        vnet_rows = None if peer_rows is None else vnet_rows + peer_rows
-    vnets = vnet_index(vnet_rows)
+        peer_rows, failed_peers = lookup_by_ids(graph, peers, vnets_query, "peered virtual networks", collector)
+        vnets = vnet_index(list(rows.values()) + list(peer_rows.values()))
+        failed_vnets |= failed_peers
     scopes = readable_scopes(cred, collector)
     out = sorted(
         (
-            zone_record(z, links[z["id"]], records[z["id"]], endpoints, vnets, scopes, approvals, others)
+            zone_record(z, links[z["id"]], records[z["id"]], endpoints, vnets, scopes, approvals, others, failed_vnets)
             for z in zones
         ),
         key=lambda r: r.get("id") or "",

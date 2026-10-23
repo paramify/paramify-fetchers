@@ -13,19 +13,30 @@ schemas and the `paramify` CLI — not the internal code.
 ### Fixed
 
 - **`azure_private_dns_zone_configuration` matches a record's IP only in the
-  networks its zone resolves for** (0.1.0 → 0.1.1). An IP was matched against
+  networks its zone resolves for** (0.1.0 → 0.2.0). An IP was matched against
   every private endpoint, NIC and load balancer in the tenant, so a stale record
   at a common address such as 10.0.0.4 read as backed, `ip_mismatch` or
   `platform_managed` when an unrelated VNet used the same address. Each IP is
   now matched only within the zone's linked VNets and the VNets peered with
   them, so an endpoint in a spoke peered with the hub the zone is linked to
-  still backs it. A zone with no links, or whose linked VNets the credential
-  cannot read, reads as `unverified`, not backed. Where address spaces overlap,
-  the verdict no longer depends on which VNet sorts first: an IP that falls in
-  more than one of the zone's VNets with different verdicts is `unverified`,
-  and the new per-record `ip_address_networks` names the VNets each IP was
-  matched in. VNets are read by id (linked, then peered) instead of every VNet
-  in the tenant.
+  still backs it. A zone with no links reads as `unverified`, not backed. A
+  linked VNet the credential cannot read stays in scope: a visible endpoint NIC
+  in it still backs the record, but an IP nothing visible holds there is
+  `unverified`. Only one peering hop is followed, from the linked VNet's own
+  peering list, so records in these layouts move from backed to `unverified`:
+  Virtual WAN (spokes two hops apart through the hub), spoke to spoke through a
+  hub, Azure Virtual Network Manager mesh (no peering objects), and a linked hub
+  the credential cannot read with the endpoint in a readable spoke. Where
+  address spaces overlap, the verdict no longer depends on which VNet sorts
+  first: an IP that falls in more than one of the zone's VNets with different
+  verdicts is `unverified`. The new per-record `ip_address_networks` names the
+  VNets each IP was matched in, `[]` when none, `null` when a lookup it depends
+  on failed. VNets are read by id (linked, then peered) instead of every VNet in
+  the tenant, and a failed lookup chunk leaves only its own VNets unknown (the
+  links to them and the records of zones that resolve for them), not the whole
+  run. Status counts move, so **re-check any validator or query that asserts on
+  `private_endpoint_status`, `ip_address_statuses` or the
+  `privatelink_records_*` summary counts.**
 - **The private DNS zone and private endpoint fetchers' expanding queries
   parse.** Four Resource Graph queries put `mv-expand`'s row limit before the
   expanded column (`mv-expand limit 2000 x = ...`), which Resource Graph
@@ -36,9 +47,12 @@ schemas and the `paramify` CLI — not the internal code.
   so every endpoint's subnet read `unknown`. The limit now follows the column
   (`mv-expand x = ... limit 2000`).
 - **`azure_private_endpoint_configuration` reports unread IPs as unknown**
-  (0.1.0 → 0.1.1). When an endpoint's network interface lookup failed,
-  `private_ip_addresses` was `[]`, reading as "no IPs". It is now `null`, with
-  the failed lookup in `metadata.failures`.
+  (0.1.0 → 0.1.1). When an endpoint's network interface was not read,
+  `private_ip_addresses` was `[]`, reading as "no IPs". It is now `null`. A
+  failed lookup is also recorded in `metadata.api_failures`; a NIC that Resource
+  Graph simply did not return (indexing lag, or a scope the credential cannot
+  read) gives `null` with no failure entry. **Re-check any validator or query
+  that expects `private_ip_addresses` to be a list.**
 
 ## [0.6.0-beta] - 2026-10-23
 
