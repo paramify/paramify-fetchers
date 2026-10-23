@@ -17,6 +17,109 @@ schemas and the `paramify` CLI — not the internal code.
   `>=3.11`, so `pip install` refuses a 3.10 interpreter. `paramify doctor` also
   reports 3.10 as too old. To upgrade, make a new virtual environment on Python
   3.11 or later and install again. The ruff and mypy targets move to 3.11 too.
+### Security
+
+- **Jira fetchers** (`jira_site_inventory`, `jira_remediation_items`,
+  `jira_audit_records`, `jira_access_roles`): `JIRA_BASE_URL` must now be a Jira
+  Cloud site (`https://<site>.atlassian.net`, or the Government Cloud domain) or
+  the API gateway for a scoped token (`https://api.atlassian.com/ex/jira/<cloudId>`).
+  Any other host, a userinfo part, a query, a fragment or a port is refused before
+  the token is sent, and the error no longer echoes the value. HTTP redirects are
+  no longer followed; a 3xx answer is a `bad_config` failure. The README documents
+  a read-only scoped token for the admin collector.
+- **`jira_remediation_items`, `jira_audit_records`, `jira_access_roles`**: hitting a
+  collection cap now fails the run with `partial_failure`, and every evidence file
+  carries `metadata.complete` and `metadata.incomplete_reason`.
+  `jira_audit_records` no longer reports `records_truncated: false` when records
+  past the cap were dropped.
+- **`jira_change_requests`, `jira_incident_postmortems`**: a configured field name
+  that matches no Jira field, or several, now fails the run as `partial_failure`
+  instead of silently skipping the checks that need it. Ambiguous names list their
+  matching ids in `metadata.field_candidates`.
+- **`jira_change_requests`, `jira_incident_postmortems`** (review of PR #174): a
+  check whose field role is turned off no longer produces its finding on every
+  ticket; `metadata.checks_disabled` lists the findings that cannot be produced,
+  and a setting that depends on a turned-off field (required severities, required
+  phases, category targets, report window, or no approval source at all) is
+  refused as `bad_config`. A failed `issue/bulkfetch` marks its keys as not
+  visible (`postmortem_not_visible`, `action_items_not_visible`) instead of
+  reporting the post-mortem or action items as absent. The deployment time of a
+  reopened change is its first move into the done status, so a late approval is
+  still caught. A role may be pinned to several `customfield_` ids for
+  team-managed projects; changelog reads with more than 10 field ids are made in
+  groups instead of being cut to 10. Pinned ids are checked against the site's
+  field list, a value that is neither a name, an id nor a list of ids is
+  `bad_config`, the deployment time of a change is its first entry into any
+  done-category status (read from `GET /rest/api/3/status`), and turning off
+  `change_type` while change types are pre-approved is refused.
+- **All Jira fetchers**: `metadata.partial_failure` now follows
+  `metadata.complete` (a hit cap or an unresolved field is partial, not only a
+  failed call). HTTP 429 and 5xx are retried with `Retry-After` or backoff, and a
+  request that still gets no answer after the first success is one failed call
+  rather than the end of the run. `jira_site_inventory` (0.1.1) uses the shared
+  client instead of its own drifted copy.
+- **`jira_access_roles`**: reads only the project roles named in a privileged
+  grant (`JIRA_ACCESS_ALL_ROLES=true` reads every role), lists grants to holder
+  types it cannot resolve (`reporter`, `assignee`, custom fields) as
+  `unresolved_privileged_grants`, tolerates a product the site does not have in
+  the `group/bulk` fallback, and states that organization admins are not included.
+- **`jira_audit_records`**: sensitive changes are matched by key words in the
+  category name with `summary.unclassified_categories` for what matched nothing
+  (Atlassian does not publish the category list); changed values are kept only
+  for sensitive records, shortened and markup-escaped; fewer records than the
+  server's `total` is reported as partial.
+- **`jira_access_roles`**: reading no admin group at all is a recorded failure,
+  never an empty result. **`jira_site_inventory`**: a bad token is `auth_failed`
+  again (the credential is checked on `/myself` before the anonymous
+  `serverInfo`), and hitting the issue cap now fails the run as partial like the
+  other Jira fetchers.
+- **All Jira fetchers** (second review): summary counts are `null`, not `0`, for
+  a section whose fetch failed or did not finish, so an assessor never reads a
+  refused call as "none found". A date-only approval date is compared with the
+  deployment at day granularity (same day is unknown, never a finding), and a
+  date-only detected or reported time is `report_time_not_measurable` instead of
+  a false `reported_late`. `jira_remediation_items` measures a done ticket with
+  no `resolutiondate` from its status history and counts
+  `closed_without_close_time`. `jira_change_requests` claims only KSI-CMT-LMC
+  (CNA-RNT and CNA-ULN dropped). `search_issues` stops on a repeated page token.
+- **All Jira fetchers** (third round, from an adversarial review of the second):
+  a check that could not run because a read failed is listed per ticket under
+  `unknown`, never under `findings` (`approval_unknown` when a status-based
+  approval's history read failed; `phases_unknown`, `postmortem_not_visible`,
+  `action_items_not_visible`; a remediation ticket's `closed_at_source:
+  unknown`), and `bulk_changelogs` now says which issues' history it failed to
+  read. A capped search, a stopped collection (an unexpected response shape)
+  and, in `jira_access_roles`, a failed role, role-index, admin-group listing or
+  membership read null the summary section they belong to and no other.
+  `summary.action_items` is null when any post-mortem or action item was not
+  read. Changelog times are rendered in the ticket's own UTC offset before they
+  are compared with a date-only field (bulkfetch gives epoch milliseconds, which
+  is UTC), so a closure at 20:00 local on the due day is no longer "after the due
+  date". `is_date_only` requires a parseable date, so `10/05/2026` is
+  unparseable, not unmeasurable. `jira_remediation_items`, `jira_audit_records`
+  and `jira_site_inventory` now survive an unexpected response shape
+  (`internal_error` with the evidence written) like the other three, and
+  `jira_site_inventory` nulls its project or issue counts when that read failed
+  or the issue search hit its cap. History times follow the collector's IANA
+  timezone from `/myself` (DST included), not a fixed offset; a done
+  remediation ticket's close time is its last entry into the done category by
+  status id (`GET /rest/api/3/status`, so `jira_remediation_items` now needs
+  `read:status:jira` with a scoped token), with `reopened` recorded; summary
+  `changes_approval_unknown` names deployed changes whose approval could not be
+  read; `jira_access_roles` marks a group whose membership read failed with
+  `membership_complete: false` and null counts instead of "0 members". A done
+  remediation ticket whose close time cannot be taken from the history (an
+  unparseable time, or the status catalog unread) has `closed_at_source:
+  unknown` rather than a guessed date; an open ticket closed once before is
+  `reopened`.
+- **`jira_site_inventory` scopes documented**: the README scope table had no row
+  for it. Found on the first scoped-token run: `GET /rest/api/3/priority/search`
+  needs `read:priority:jira`, which the other Jira fetchers do not use.
+- **`jira_site_inventory` behaviour change** (from the base URL allowlist above):
+  `JIRA_BASE_URL` now accepts `https://<site>.atlassian.net`,
+  `https://<site>.jira.com`, the Government Cloud domain and the scoped-token
+  gateway, and nothing else. A URL with a path, query, port or userinfo, which the
+  old client passed through to `requests`, is now refused as `bad_config`.
 
 ### Added
 
@@ -224,6 +327,30 @@ schemas and the `paramify` CLI — not the internal code.
   pages, because www.paramify.com was not reachable from the test environment.
   No KSI mapping. The README's supported services grid lists Web, with a globe
   icon drawn for this repo (`fetchers/logos/web.svg` and `web-dark.svg`).
+- **`jira_change_requests`** (`EVD-JIRA-CHANGE-REQUESTS`): change, internal
+  connection and exception tickets with CCB approver and time, deployment time,
+  test and security review results, watcher and comment counts, status and field
+  history, and per-ticket findings (deployed without approval, approved after
+  deployment, failed tests, missing security review, exceptions open past expiry
+  or overdue for review). Field names are configurable and resolved by name.
+- **`jira_incident_postmortems`** (`EVD-JIRA-INCIDENT-POSTMORTEMS`): incidents with
+  severity, category, minutes from detection to report against a reporting window
+  and per-category targets, phase history, linked post-mortems and their action
+  items, with findings for late reports, missing post-mortems and unassigned or
+  overdue action items.
+- **`jira_remediation_items`** (`EVD-JIRA-REMEDIATION-ITEMS`): the Jira tickets a
+  required JQL (`JIRA_REMEDIATION_JQL`) selects as findings, each with owner, due
+  date, overdue flag and full status history from `POST /rest/api/3/changelog/bulkfetch`,
+  plus open, closed, overdue, unassigned and days-to-close rollups. Browse Projects only.
+- **`jira_audit_records`** (`EVD-JIRA-AUDIT-RECORDS`): the Jira site audit log over a
+  lookback window (`GET /rest/api/3/auditing/record`) with actor, time, source address
+  and changed values, and a rollup of permission, user, group, workflow and scheme
+  changes. Needs the Administer Jira global permission.
+- **`jira_access_roles`** (`EVD-JIRA-ACCESS-ROLES`): Jira site-admin and admin groups
+  and their members, product access roles, and per project the privileged permission
+  grants, project role members and the resolved privileged users, flagging privileged
+  grants made to everyone. Needs the Administer Jira global permission.
+
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
