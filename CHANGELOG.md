@@ -35,8 +35,9 @@ schemas and the `paramify` CLI — not the internal code.
   scope. With no patterns set the output is unchanged apart from those empty,
   zero or total fields. Adopted by:
   - `azure_front_door_origins` 0.5.0: custom-domain and endpoint host names, and
-    route names through a `route:` prefix (`route:qa-*`); a bare pattern never
-    matches a route's name. A route is out of scope when a `route:` pattern
+    route names through a `route:` prefix (`route:qa-*`, or `route: qa-*`); a
+    bare pattern never matches a route's name, and any other prefix fails the
+    run. A route is out of scope when a `route:` pattern
     matches it or every host it serves is out, an origin group when every route
     reaching it is, and a production app when only out-of-scope groups reach it,
     so multi-region redundancy is judged on the core domains. Access restrictions
@@ -46,7 +47,7 @@ schemas and the `paramify` CLI — not the internal code.
     out-of-scope domains use, and WAF coverage the host-routes of an out-of-scope
     route. Both fetcher.yaml texts move to the new description format.
   - `azure_dns_configuration` 0.4.0: public record-set names, relative (in every
-    zone) or FQDN.
+    zone) or FQDN. A prefixed pattern fails the run.
 - **A string config field can be a `${env:VAR}` reference.** The runner
   resolves it the way it resolves a secret. An unset or empty variable gives way
   to the next value down (platform config, then the default; an error for a
@@ -58,13 +59,18 @@ schemas and the `paramify` CLI — not the internal code.
   target's secrets still take references), as does `validate` for a hand-edited
   one. Only the fetcher's own fields and the issue-report keys are resolved; a key
   only a sibling fetcher declares passes through untouched. A reference must be
-  the whole value, and one naming a credential variable (`_TOKEN`, `_SECRET`
-  and the like) or a variable that holds one of the fetcher's secrets is never
-  resolved: the runner, `validate` and the `manifest` commands refuse it, naming
-  the variable. The value a reference reads is masked out of the fetcher's
-  captured output and the run metadata like a secret. `effective_config`, and
-  so the TUI, shows a reference as written, never its value, with whether it is
-  set, and `validate` names an issue-report reference unset in its shell.
+  the whole value, and it can't read a variable whose name looks like a
+  credential's (`_TOKEN`, `_SECRET`, `_API_KEY`, `_PAT` and the like) or one that
+  holds a secret: any fetcher's or category's declared secret, or any variable a
+  `secrets:` reference in the manifest reads. The runner and `validate` refuse
+  all of these without resolving them, naming the variable; the `manifest`
+  commands refuse a partial reference or a credential-like name, and the
+  `validate` they run after saving reports the rest. The value an allowed
+  reference reads is masked out of the fetcher's captured output and the run
+  metadata like a secret. `effective_config`, and so the TUI, shows a reference
+  as written, never its value, with whether it is set; the TUI and shared config
+  checks compare what it reads, and `validate` names an issue-report reference
+  unset in its shell.
 
 ### Changed
 
