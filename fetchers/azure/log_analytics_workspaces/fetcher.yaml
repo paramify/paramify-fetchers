@@ -52,7 +52,7 @@ evidence_set:
   reference_id: EVD-AZURE-LOG-ANALYTICS
   name: Azure Log Analytics Workspaces
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-loganalytics
+    Script: azure/log_analytics_workspaces/fetcher.py. Azure SDK calls (azure-mgmt-loganalytics
     LogAnalyticsManagementClient): workspaces.list(), then per workspace
     tables.list_by_workspace(resource_group, workspace),
     data_exports.list_by_workspace(resource_group, workspace) and

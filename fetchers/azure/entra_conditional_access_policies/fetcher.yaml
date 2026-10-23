@@ -61,6 +61,6 @@ evidence_set:
   reference_id: EVD-AZURE-ENTRA-CA-POLICIES
   name: Microsoft Entra ID Conditional Access Policies
   instructions: >
-    Script: fetcher.py. Microsoft Graph calls: GET
+    Script: azure/entra_conditional_access_policies/fetcher.py. Microsoft Graph calls: GET
     /identity/conditionalAccess/policies (state, conditions, grantControls,
     sessionControls); GET /organization. Paged via @odata.nextLink.

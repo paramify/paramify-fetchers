@@ -16,7 +16,6 @@ from azure_common import (  # noqa: E402
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
-    basename,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -31,6 +30,7 @@ from azure_common import (  # noqa: E402
     sorted_counts,
     write_evidence,
 )
+from private_dns import project_vnet_link  # noqa: E402
 from scope_exclusions import ScopeExclusions, excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_dns_configuration")
@@ -243,20 +243,6 @@ def project_private_zone(zone) -> dict:
             zone, "number_of_virtual_network_links_with_registration"
         ),
         "provisioning_state": model_attr(zone, "provisioning_state"),
-    }
-
-
-def project_vnet_link(link) -> dict:
-    vnet_id = model_attr(model_attr(link, "virtual_network"), "id")
-    return {
-        "id": model_attr(link, "id"),
-        "name": model_attr(link, "name"),
-        "virtual_network_id": vnet_id,
-        "virtual_network_name": basename(vnet_id),
-        "registration_enabled": bool(model_attr(link, "registration_enabled") or False),
-        "resolution_policy": model_attr(link, "resolution_policy"),
-        "virtual_network_link_state": model_attr(link, "virtual_network_link_state"),
-        "provisioning_state": model_attr(link, "provisioning_state"),
     }
 
 

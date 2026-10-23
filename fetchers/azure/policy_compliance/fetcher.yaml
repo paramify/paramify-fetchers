@@ -99,7 +99,7 @@ evidence_set:
   reference_id: EVD-AZURE-POLICY-COMPLIANCE
   name: Azure Policy Compliance State
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-policyinsights
+    Script: azure/policy_compliance/fetcher.py. Azure SDK calls (azure-mgmt-policyinsights
     PolicyInsightsClient): resource.providers.get("Microsoft.PolicyInsights"), then
     policy_states.summarize_for_subscription("latest", <subscription_id>),
     policy_states.list_query_results_for_subscription("latest", <subscription_id>,

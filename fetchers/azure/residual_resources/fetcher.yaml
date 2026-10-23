@@ -63,7 +63,7 @@ evidence_set:
   reference_id: EVD-AZURE-RESIDUAL-RESOURCES
   name: Azure Residual Resources
   instructions: >
-    Script: fetcher.py. Permissions: Reader on the subscription, and for the
+    Script: azure/residual_resources/fetcher.py. Permissions: Reader on the subscription, and for the
     principal check Microsoft Graph directory read: a service principal or managed
     identity needs the Directory.Read.All application permission with admin consent;
     a signed-in member user has it by default. Every query is an Azure Resource Graph

@@ -54,7 +54,7 @@ evidence_set:
   reference_id: EVD-AZURE-AI-HUB-CONFIG
   name: Azure AI Hub and Project Configuration
   instructions: >
-    Script: fetcher.py. Read as ARM JSON through the shared ARM REST client (the token is only ever sent
+    Script: azure/ai_hub_configuration/fetcher.py. Read as ARM JSON through the shared ARM REST client (the token is only ever sent
     to the cloud's ARM endpoint, and paging stops on a repeated next link), because azure-mgmt-machinelearningservices 1.x predates AI hubs, projects, managed
     networks and connection auth types: GET /subscriptions/{id}/providers/Microsoft.MachineLearningServices/workspaces
     and, per workspace, {workspace}/connections, /datastores, /onlineEndpoints, /serverlessEndpoints

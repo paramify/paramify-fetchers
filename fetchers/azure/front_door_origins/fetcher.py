@@ -45,7 +45,6 @@ from frontdoor import (  # noqa: E402
     wire,
 )
 from resource_graph import (  # noqa: E402
-    ALL_SUBSCRIPTIONS,
     query_all,
     resource_graph_client,
 )
@@ -976,7 +975,7 @@ def graph_client(cred, collector: Collector):
 
 def graph_rows(client, query: str) -> list[dict]:
     # An origin can live in any subscription the credential reads.
-    return query_all(client, ALL_SUBSCRIPTIONS, query)["rows"]
+    return query_all(client, None, query)["rows"]
 
 
 def lookup_regions(client, collector: Collector, resource_ids: list[str], host_names: list[str]) -> tuple[dict, dict]:

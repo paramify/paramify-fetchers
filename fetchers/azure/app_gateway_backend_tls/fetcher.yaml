@@ -48,7 +48,7 @@ evidence_set:
   reference_id: EVD-AZURE-APPGW-BACKEND-TLS
   name: Azure Application Gateway Backend TLS
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-network
+    Script: azure/app_gateway_backend_tls/fetcher.py. Azure SDK calls: azure-mgmt-network
     application_gateways.list_all() and a Resource Graph count of
     microsoft.network/applicationgateways; the run fails if the two differ
     (results.completeness.match false). Reader at subscription scope is
