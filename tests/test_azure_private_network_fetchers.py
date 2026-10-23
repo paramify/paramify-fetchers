@@ -12,6 +12,7 @@ Run: ``pytest tests/test_azure_private_network_fetchers.py``
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -308,8 +309,8 @@ BLOB = "privatelink.blob.core.windows.net"
 
 
 def test_mv_expand_is_not_capped_at_128():
-    assert "mv-expand limit 2000" in pe.subnet_query(["/x"])
-    assert "mv-expand limit 2000" in dns.ENDPOINT_IPS_QUERY
+    assert "mv-expand s = properties.subnets limit 2000 " in pe.subnet_query(["/x"])
+    assert "mv-expand ipc = properties.ipConfigurations limit 2000 " in dns.ENDPOINT_IPS_QUERY
 
 
 def test_vnet_with_more_subnets_than_returned_is_unknown():
@@ -579,6 +580,106 @@ def test_collect_zones_reads_only_linked_and_peered_vnets(monkeypatch):
     assert f"@'{SPOKE.lower()}'" in vnet_queries[1]
     [rec] = out["record_sets"]
     assert rec["private_endpoint_status"] == "stale" and rec["ip_address_networks"] == {"10.0.0.4": [VNET.lower()]}
+
+
+# --------------------------------------------------------------------------- #
+# Resource Graph query text: the strings Azure parses
+# --------------------------------------------------------------------------- #
+
+# Rendered exactly as sent; each was parse-checked against Resource Graph. KQL takes an
+# mv-expand row limit after the expanded column: "mv-expand limit N x = ..." is a ParserFailure.
+RENDERED_QUERIES = {
+    "dns endpoint NICs": (
+        lambda: dns.ENDPOINT_IPS_QUERY,
+        "Resources | where type =~ 'microsoft.network/networkinterfaces' and isnotnull(properties.privateEndpoint) "
+        "| mv-expand ipc = properties.ipConfigurations limit 2000 "
+        "| project id, ip = tostring(ipc.properties.privateIPAddress), "
+        "private_endpoint_id = tostring(properties.privateEndpoint.id), "
+        "fqdns = ipc.properties.privateLinkConnectionProperties.fqdns, subnet_id = tostring(ipc.properties.subnet.id) "
+        "| order by id asc, ip asc",
+    ),
+    "dns other NIC IPs": (
+        lambda: dns.OTHER_NIC_IPS_QUERY,
+        "Resources | where type =~ 'microsoft.network/networkinterfaces' and isnull(properties.privateEndpoint) "
+        "| mv-expand ipc = properties.ipConfigurations limit 2000 "
+        "| project id, ip = tostring(ipc.properties.privateIPAddress), subnet_id = tostring(ipc.properties.subnet.id) "
+        "| where isnotempty(ip) | order by id asc, ip asc",
+    ),
+    "dns load balancer frontend IPs": (
+        lambda: dns.LOAD_BALANCER_IPS_QUERY,
+        "Resources | where type =~ 'microsoft.network/loadbalancers' "
+        "| mv-expand fe = properties.frontendIPConfigurations limit 2000 "
+        "| project id, ip = tostring(fe.properties.privateIPAddress), subnet_id = tostring(fe.properties.subnet.id) "
+        "| where isnotempty(ip) | order by id asc, ip asc",
+    ),
+    "dns virtual networks by id": (
+        lambda: dns.vnets_query(["/v"]),
+        "Resources | where type =~ 'microsoft.network/virtualnetworks' and id in~ (@'/v') "
+        "| project id, address_prefixes = properties.addressSpace.addressPrefixes, "
+        "peerings = properties.virtualNetworkPeerings, subnets = properties.subnets | order by id asc",
+    ),
+    "pe subnet lookup": (
+        lambda: pe.subnet_query(["/v"]),
+        "Resources | where id in~ (@'/v') | extend vnet_id = tolower(id), subnet_count = array_length(properties.subnets) "
+        "| mv-expand s = properties.subnets limit 2000 "
+        "| project id = tostring(s.id), vnet_id, subnet_count, policies = tostring(s.properties.privateEndpointNetworkPolicies), "
+        "nsg_id = tostring(s.properties.networkSecurityGroup.id), route_table_id = tostring(s.properties.routeTable.id) "
+        "| order by id asc",
+    ),
+    "pe lookup": (
+        lambda: pe.lookup_query(["/v"]),
+        "Resources | where id in~ (@'/v') | project id, type, public_network_access = tostring(properties.publicNetworkAccess), "
+        "network_acls_default_action = tostring(properties.networkAcls.defaultAction), "
+        "ip_configurations = properties.ipConfigurations | order by id asc",
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(RENDERED_QUERIES))
+def test_rendered_query_shape_is_pinned(name):
+    render, expected = RENDERED_QUERIES[name]
+    assert render() == expected
+
+
+# `limit` straight after mv-expand (or its kind= / with_itemindex= options) is where KQL wants the column.
+MISPLACED_MV_EXPAND_LIMIT = re.compile(r"mv-expand\s+(?:(?:kind|with_itemindex)\s*=\s*\w+\s+)*limit\b", re.IGNORECASE)
+
+
+@pytest.mark.parametrize("path", sorted(AZURE.glob("*/fetcher.py")) + sorted(AZURE.glob("_shared/*.py")), ids=lambda p: p.parent.name if p.name == "fetcher.py" else p.name)
+def test_no_azure_query_puts_mv_expand_limit_before_the_column(path):
+    assert not MISPLACED_MV_EXPAND_LIMIT.search(path.read_text()), "use `mv-expand x = <array> limit N`"
+
+
+def _verbatim_list(query: str) -> list:
+    """Decode the first `in~ (...)` list of KQL verbatim literals; fails on a literal that does not close."""
+    i = query.index("in~ (") + len("in~ (")
+    values = []
+    while True:
+        assert query.startswith("@'", i), query[i : i + 20]
+        i += 2
+        value = ""
+        while True:
+            j = query.index("'", i)
+            value += query[i:j]
+            if query.startswith("''", j):  # a doubled quote is one quote inside the literal
+                value += "'"
+                i = j + 2
+                continue
+            i = j + 1
+            break
+        values.append(value)
+        if query.startswith(", ", i):
+            i += 2
+            continue
+        assert query[i] == ")", query[i : i + 20]
+        return values
+
+
+@pytest.mark.parametrize("build", [dns.vnets_query, pe.lookup_query, pe.subnet_query], ids=lambda f: f.__name__)
+def test_id_lists_round_trip_through_kql_quoting(build):
+    ids = ["/a'b", "/c\\d", "/e'),(@'f", "/g''h", "/plain"]
+    assert _verbatim_list(build(ids)) == ids
+    assert _verbatim_list(build([f"/v{i}" for i in range(200)])) == [f"/v{i}" for i in range(200)]
 
 
 def test_unread_endpoint_nic_leaves_private_ips_unknown():

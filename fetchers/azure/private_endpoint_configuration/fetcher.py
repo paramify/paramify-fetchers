@@ -340,7 +340,7 @@ def subnet_query(vnet_ids: list[str]) -> str:
     return (
         f"Resources | where id in~ ({quoted_ids(vnet_ids)}) "
         "| extend vnet_id = tolower(id), subnet_count = array_length(properties.subnets) "
-        f"| mv-expand limit {MV_EXPAND_LIMIT} s = properties.subnets "
+        f"| mv-expand s = properties.subnets limit {MV_EXPAND_LIMIT} "
         "| project id = tostring(s.id), vnet_id, subnet_count, "
         "policies = tostring(s.properties.privateEndpointNetworkPolicies), "
         "nsg_id = tostring(s.properties.networkSecurityGroup.id), "

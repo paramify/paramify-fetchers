@@ -26,6 +26,15 @@ schemas and the `paramify` CLI — not the internal code.
   and the new per-record `ip_address_networks` names the VNets each IP was
   matched in. VNets are read by id (linked, then peered) instead of every VNet
   in the tenant.
+- **The private DNS zone and private endpoint fetchers' expanding queries
+  parse.** Four Resource Graph queries put `mv-expand`'s row limit before the
+  expanded column (`mv-expand limit 2000 x = ...`), which Resource Graph
+  rejects with `ParserFailure`. The private endpoint, other NIC and load
+  balancer IP lookups in `azure_private_dns_zone_configuration` therefore always
+  failed, every privatelink A record read `unknown` and the run exited 1. The
+  subnet lookup in `azure_private_endpoint_configuration` also always failed,
+  so every endpoint's subnet read `unknown`. The limit now follows the column
+  (`mv-expand x = ... limit 2000`).
 - **`azure_private_endpoint_configuration` reports unread IPs as unknown**
   (0.1.0 → 0.1.1). When an endpoint's network interface lookup failed,
   `private_ip_addresses` was `[]`, reading as "no IPs". It is now `null`, with

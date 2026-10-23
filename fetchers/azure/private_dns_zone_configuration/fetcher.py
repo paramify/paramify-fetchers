@@ -65,7 +65,7 @@ LOOKUP_CHUNK = 200
 ENDPOINT_IPS_QUERY = (
     "Resources | where type =~ 'microsoft.network/networkinterfaces' "
     "and isnotnull(properties.privateEndpoint) "
-    f"| mv-expand limit {MV_EXPAND_LIMIT} ipc = properties.ipConfigurations "
+    f"| mv-expand ipc = properties.ipConfigurations limit {MV_EXPAND_LIMIT} "
     "| project id, ip = tostring(ipc.properties.privateIPAddress), "
     "private_endpoint_id = tostring(properties.privateEndpoint.id), "
     "fqdns = ipc.properties.privateLinkConnectionProperties.fqdns, "
@@ -78,13 +78,13 @@ ENDPOINT_IPS_QUERY = (
 OTHER_NIC_IPS_QUERY = (
     "Resources | where type =~ 'microsoft.network/networkinterfaces' "
     "and isnull(properties.privateEndpoint) "
-    f"| mv-expand limit {MV_EXPAND_LIMIT} ipc = properties.ipConfigurations "
+    f"| mv-expand ipc = properties.ipConfigurations limit {MV_EXPAND_LIMIT} "
     "| project id, ip = tostring(ipc.properties.privateIPAddress), subnet_id = tostring(ipc.properties.subnet.id) "
     "| where isnotempty(ip) | order by id asc, ip asc"
 )
 LOAD_BALANCER_IPS_QUERY = (
     "Resources | where type =~ 'microsoft.network/loadbalancers' "
-    f"| mv-expand limit {MV_EXPAND_LIMIT} fe = properties.frontendIPConfigurations "
+    f"| mv-expand fe = properties.frontendIPConfigurations limit {MV_EXPAND_LIMIT} "
     "| project id, ip = tostring(fe.properties.privateIPAddress), subnet_id = tostring(fe.properties.subnet.id) "
     "| where isnotempty(ip) | order by id asc, ip asc"
 )
