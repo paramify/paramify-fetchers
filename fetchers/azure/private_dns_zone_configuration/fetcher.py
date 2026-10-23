@@ -17,6 +17,7 @@ from azure_common import (  # noqa: E402
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
+    basename,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -30,9 +31,10 @@ from azure_common import (  # noqa: E402
     resource_group_from_id,
     resource_group_scope_of,
     sanitize_for_filename,
+    subscription_of,
     write_evidence,
 )
-from private_dns import project_vnet_link  # noqa: E402
+from private_dns import project_vnet_link, project_zone_group  # noqa: E402
 from resource_graph import (  # noqa: E402
     lookup_by_ids,
     query_all,
@@ -444,10 +446,68 @@ def record_status(ip_statuses: list) -> str:
     return "unknown"
 
 
+# zone_group_proof's input when no endpoint zone groups were read and none failed.
+NO_ZONE_GROUPS: tuple = ({}, frozenset())
+
+
+def fqdn_key(fqdn) -> str:
+    return (fqdn or "").lower().rstrip(".")
+
+
+def zone_group_index(groups_by_endpoint: dict) -> dict:
+    """(zone id, FQDN) → [(endpoint id, IPs)] from each endpoint's projected private DNS zone groups."""
+    index: dict = {}
+    for endpoint_id, groups in groups_by_endpoint.items():
+        for group in groups:
+            for cfg in group["private_dns_zone_configs"]:
+                for record_set in cfg["record_sets"]:
+                    key = ((cfg["private_dns_zone_id"] or "").lower(), fqdn_key(record_set["fqdn"]))
+                    index.setdefault(key, []).append((endpoint_id.lower(), frozenset(record_set["ip_addresses"])))
+    return index
+
+
+def zone_group_proof(record: dict, zone_id, endpoints, approvals, zone_groups) -> tuple:
+    """(True, endpoint id) when an Approved private endpoint whose NIC holds every IP of the record registers it,
+    through its own private DNS zone group, in this zone with this FQDN and exactly these IPs; (None, None) when a
+    lookup that could have proved it failed; else (False, None).
+
+    `zone_groups` is (zone_group_index, ids of endpoints whose zone groups could not be read), or None.
+    """
+    ips = frozenset(record["ip_addresses"])
+    if not ips:
+        return False, None
+    if endpoints is None or zone_groups is None:
+        return None, None
+    registered, failed = zone_groups
+    original = {(ep["private_endpoint_id"] or "").lower(): ep["private_endpoint_id"] for ip in ips for ep in endpoints.get(ip, [])}
+    holders = [{(ep["private_endpoint_id"] or "").lower() for ep in endpoints.get(ip, [])} for ip in ips]
+    candidates = set.intersection(*holders) - {""}
+    if not candidates:
+        return False, None
+    unknown = bool(candidates & failed)
+    for endpoint_id, registered_ips in registered.get(((zone_id or "").lower(), fqdn_key(record["fqdn"])), []):
+        if endpoint_id in candidates and registered_ips == ips:
+            if approvals is None:
+                unknown = True
+            elif approvals.get(endpoint_id):
+                return True, original[endpoint_id]
+    return (None, None) if unknown else (False, None)
+
+
 def classify_record(
-    record: dict, zone_name: str, endpoints, vnets, approvals=None, others=None, scopes=None, networks=None
+    record: dict,
+    zone_name: str,
+    endpoints,
+    vnets,
+    approvals=None,
+    others=None,
+    scopes=None,
+    networks=None,
+    zone_id=None,
+    zone_groups=NO_ZONE_GROUPS,
 ) -> dict:
-    """A privatelink A record with each IP's status, the VNets it was matched in, and the record's overall status."""
+    """A privatelink A record with each IP's status, the VNets it was matched in, the record's overall status,
+    and which proof backs it: its endpoint's own zone group, or the network match."""
     if not is_privatelink_zone(zone_name) or record["record_type"] != "A" or record["name"] == "@":
         return {**record, "private_endpoint_status": None, "private_endpoint_ids": []}
     per_ip, per_ip_networks, endpoint_ids = {}, {}, set()
@@ -456,12 +516,22 @@ def classify_record(
         per_ip[ip] = status
         per_ip_networks[ip] = matched
         endpoint_ids.update(ids)
+    network_backed = "backed" in per_ip.values()
+    proof, proving_endpoint = zone_group_proof(record, zone_id, endpoints, approvals, zone_groups)
+    if proof:
+        per_ip = dict.fromkeys(per_ip, "backed")
+        endpoint_ids.add(proving_endpoint)
+    elif proof is None:
+        # The zone groups that could have backed the record were not read: unknown, never stale.
+        per_ip = {ip: "unknown" if status == "stale" else status for ip, status in per_ip.items()}
     return {
         **record,
         "ip_address_statuses": per_ip,
         "ip_address_networks": per_ip_networks,
         "private_endpoint_status": record_status(list(per_ip.values())),
         "private_endpoint_ids": sorted(endpoint_ids),
+        "zone_group_backed": proof,
+        "backed_by": [p for p, ok in (("network", network_backed), ("zone_group", proof is True)) if ok] or None,
     }
 
 
@@ -476,11 +546,13 @@ def zone_record(
     others=None,
     failed_vnets=frozenset(),
     spokes=None,
+    zone_groups=NO_ZONE_GROUPS,
 ) -> dict:
     """`links` / `records` are None when they could not be listed: unknown, never "none".
 
     `failed_vnets` are the VNets whose lookup failed: links to them and records of zones that resolve for them
     are unknown, while other zones are classified as usual. `spokes` is spokes_by_hub for unreadable linked hubs.
+    `zone_groups` is collect_zone_groups' result, None when the endpoint lookup it needs failed.
     """
     networks = zone_networks(links, vnets, failed_vnets, spokes)
     if links is not None:
@@ -494,7 +566,9 @@ def zone_record(
     if records is not None:
         records = sorted(
             (
-                classify_record(r, zone["name"], endpoints, vnets, approvals, others, scopes, networks)
+                classify_record(
+                    r, zone["name"], endpoints, vnets, approvals, others, scopes, networks, zone["id"], zone_groups
+                )
                 for r in records
                 if r["record_type"] != "SOA"
             ),
@@ -584,6 +658,42 @@ def summarize(zones: list[dict], duplicates: list[dict], duplicates_scope: str) 
     }
 
 
+def collect_zone_groups(cred, endpoint_ids, collector: Collector) -> tuple:
+    """(zone_group_index, lowercased ids of the endpoints whose zone groups could not be read).
+
+    Read per endpoint with private_dns_zone_groups.list, each in its own subscription; a failed read is recorded
+    and leaves only that endpoint's zone groups unknown.
+    """
+    by_id: dict = {}
+    for endpoint_id in endpoint_ids:
+        if endpoint_id:
+            by_id.setdefault(endpoint_id.lower(), endpoint_id)
+    clients: dict = {}
+    groups, failed = {}, set()
+    for key, endpoint_id in sorted(by_id.items()):
+        sub, rg, name = subscription_of(endpoint_id), resource_group_from_id(endpoint_id), basename(endpoint_id)
+        if sub not in clients:
+
+            def _client(sub=sub):
+                from azure.mgmt.network import NetworkManagementClient  # lazy
+
+                return NetworkManagementClient(credential=cred, subscription_id=sub, **arm_client_kwargs())
+
+            clients[sub] = collector.guard(f"network.NetworkManagementClient (init, {sub})", _client)
+        client = clients[sub]
+        read = None
+        if client is not None:
+            read = collector.guard(
+                f"network.private_dns_zone_groups.list({rg}/{name})",
+                lambda: [project_zone_group(g) for g in client.private_dns_zone_groups.list(name, rg)],
+            )
+        if read is None:
+            failed.add(key)
+        else:
+            groups[key] = read
+    return zone_group_index(groups), failed
+
+
 def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
     """(zone records, duplicate zone names, the scope duplicates were compared across)."""
 
@@ -661,10 +771,33 @@ def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
         vnets = vnet_index(list(rows.values()) + list(peer_rows.values()))
         failed_vnets |= failed_peers
     scopes = readable_scopes(cred, collector)
+    # Zone groups of the endpoints whose NIC holds a privatelink A record's IP: proof that does not depend on topology.
+    zone_groups = None
+    if endpoints is not None:
+        record_ips = {
+            ip
+            for z in zones
+            if is_privatelink_zone(z["name"])
+            for r in records[z["id"]] or []
+            if r["record_type"] == "A"
+            for ip in r["ip_addresses"]
+        }
+        holders = {ep["private_endpoint_id"] for ip in record_ips for ep in endpoints.get(ip, [])}
+        zone_groups = collect_zone_groups(cred, holders, collector)
     out = sorted(
         (
             zone_record(
-                z, links[z["id"]], records[z["id"]], endpoints, vnets, scopes, approvals, others, failed_vnets, spokes
+                z,
+                links[z["id"]],
+                records[z["id"]],
+                endpoints,
+                vnets,
+                scopes,
+                approvals,
+                others,
+                failed_vnets,
+                spokes,
+                zone_groups,
             )
             for z in zones
         ),

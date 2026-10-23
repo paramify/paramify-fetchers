@@ -536,24 +536,46 @@ def test_vnets_are_read_by_id_not_tenant_wide():
     assert not hasattr(dns, "VNETS_QUERY")
 
 
-def _collect(monkeypatch, zone_links: dict, table_rows, fail_on=None, other_rows=()):
+def _collect(
+    monkeypatch, zone_links: dict, table_rows, fail_on=None, other_rows=(), endpoint_rows=(), approved=(), zone_groups=None
+):
     """collect_zones over a fake SDK and Resource Graph: {zone name: [linked VNet ids]}, one A record
-    acct → 10.0.0.4 per zone. A VNet query for which `fail_on(query)` is true raises, as a throttled chunk would."""
+    acct → 10.0.0.4 per zone. A VNet query for which `fail_on(query)` is true raises, as a throttled chunk would.
+    `zone_groups` maps an endpoint name to the zone group models private_dns_zone_groups.list returns, or an
+    exception it raises; `approved` names the endpoint ids whose connections are Approved."""
     from types import ModuleType
     from types import SimpleNamespace as NS
 
     zones = [NS(id=f"{RG}/providers/Microsoft.Network/privateDnsZones/{n}", name=n) for n in zone_links]
-    record = NS(name="acct", type="Microsoft.Network/privateDnsZones/A", a_records=[NS(ipv4_address="10.0.0.4")])
     client = NS(
         private_zones=NS(list=lambda: zones),
         virtual_network_links=NS(
             list=lambda rg, name: [NS(id=f"{name}-{v}", name="l", virtual_network=NS(id=v)) for v in zone_links[name]]
         ),
-        record_sets=NS(list=lambda rg, name: [record]),
+        record_sets=NS(
+            list=lambda rg, name: [
+                NS(name="acct", type="Microsoft.Network/privateDnsZones/A", fqdn=f"acct.{name}.",
+                   a_records=[NS(ipv4_address="10.0.0.4")])
+            ]
+        ),
     )
     privatedns = ModuleType("azure.mgmt.privatedns")
     privatedns.PrivateDnsManagementClient = lambda **kw: client
     monkeypatch.setitem(sys.modules, "azure.mgmt.privatedns", privatedns)
+
+    def list_zone_groups(name, rg):
+        found = (zone_groups or {}).get(name, [])
+        if isinstance(found, Exception):
+            raise found
+        return found
+
+    network = ModuleType("azure.mgmt.network")
+    network.NetworkManagementClient = lambda **kw: NS(private_dns_zone_groups=NS(list=list_zone_groups))
+    monkeypatch.setitem(sys.modules, "azure.mgmt.network", network)
+    approval_rows = [
+        {"id": pid, "auto": [{"properties": {"privateLinkServiceConnectionState": {"status": "Approved"}}}]}
+        for pid in approved
+    ]
 
     table = {r["id"].lower(): r for r in table_rows}
     vnet_queries = []
@@ -575,6 +597,10 @@ def _collect(monkeypatch, zone_links: dict, table_rows, fail_on=None, other_rows
             return {"rows": [r for i, r in table.items() if f"@'{i}'" in query.lower()]}
         if "isnull(properties.privateEndpoint)" in query:
             return {"rows": list(other_rows)}
+        if "isnotnull(properties.privateEndpoint)" in query:
+            return {"rows": list(endpoint_rows)}
+        if "microsoft.network/privateendpoints'" in query:
+            return {"rows": approval_rows}
         return {"rows": []}
 
     monkeypatch.setattr(dns, "query_all", fake_query_all)
@@ -717,6 +743,124 @@ def test_a_failed_reverse_peering_query_leaves_the_zone_unknown_and_the_link_as_
 def test_spokes_by_hub_reads_make_set_as_a_list_or_json_text():
     rows = {"/s1": {"id": "/S1", "hubs": ["/h"]}, "/s2": {"id": "/s2", "hubs": '["/h"]'}}
     assert dns.spokes_by_hub(rows, {"/h", "/g"}, {"/f"}) == {"/h": {"/s1", "/s2"}, "/g": set(), "/f": None}
+
+
+# --------------------------------------------------------------------------- #
+# Zone-group proof: the endpoint's own registration backs a record without topology
+# --------------------------------------------------------------------------- #
+
+ZONE_ID = f"{RG}/providers/Microsoft.Network/privateDnsZones/{BLOB}"
+
+
+def _zone_group(zone_id=ZONE_ID, fqdn=f"acct.{BLOB}", ips=("10.1.0.4",)):
+    return {"private_dns_zone_configs": [{"private_dns_zone_id": zone_id, "record_sets": [
+        {"fqdn": fqdn, "ip_addresses": list(ips)}]}]}
+
+
+def _zone_record_with_groups(ip, vnet_rows, linked, endpoint_rows, zone_groups, approvals=APPROVED):
+    zone = {"id": ZONE_ID, "name": BLOB}
+    links = [{"id": f"link-{i}", "virtual_network_id": v} for i, v in enumerate(linked)]
+    out = dns.zone_record(
+        zone, links, [_record("acct", BLOB, ip)], dns.endpoint_index(list(endpoint_rows)), dns.vnet_index(vnet_rows),
+        DNS_SCOPES, approvals, dns.holder_index([], []), zone_groups=zone_groups,
+    )
+    return out["record_sets"][0]
+
+
+def test_an_endpoints_own_zone_group_backs_the_record_without_topology():
+    # The zone is linked only to a hub the run can't read, and the endpoint's VNet has no peering to it.
+    rows = [_vnet_row(SPOKE, "10.1.0.0/16")]
+    groups = (dns.zone_group_index({"pe-1": [_zone_group()]}), frozenset())
+    rec = _zone_record_with_groups("10.1.0.4", rows, [UNREADABLE_HUB], [_endpoint_row("10.1.0.4", SPOKE)], groups)
+    assert rec["private_endpoint_status"] == "backed" and rec["ip_address_statuses"] == {"10.1.0.4": "backed"}
+    assert rec["backed_by"] == ["zone_group"] and rec["zone_group_backed"] is True
+    assert rec["private_endpoint_ids"] == ["pe-1"]
+    assert rec["ip_address_networks"] == {"10.1.0.4": []}  # the network match still says what it found
+
+
+@pytest.mark.parametrize(
+    "group,approvals",
+    [
+        (_zone_group(fqdn=f"acct2.{BLOB}"), APPROVED),
+        (_zone_group(ips=("10.1.0.4", "10.1.0.5")), APPROVED),
+        (_zone_group(zone_id=f"/subscriptions/{SUB}/resourceGroups/other/providers/Microsoft.Network/privateDnsZones/{BLOB}"), APPROVED),
+        (_zone_group(), {"pe-1": False}),
+    ],
+    ids=["other-fqdn", "other-ips", "other-zone-copy", "not-approved"],
+)
+def test_a_zone_group_that_does_not_register_exactly_this_record_does_not_back_it(group, approvals):
+    rows = [_vnet_row(SPOKE, "10.1.0.0/16")]
+    groups = (dns.zone_group_index({"pe-1": [group]}), frozenset())
+    rec = _zone_record_with_groups(
+        "10.1.0.4", rows, [UNREADABLE_HUB], [_endpoint_row("10.1.0.4", SPOKE)], groups, approvals
+    )
+    assert rec["private_endpoint_status"] == "unverified"
+    assert rec["zone_group_backed"] is False and rec["backed_by"] is None
+
+
+@pytest.mark.parametrize(
+    "linked,endpoint_vnet,ip,expected,backed_by",
+    [
+        ([VNET], VNET, "10.0.1.4", "backed", ["network"]),  # topology still backs it
+        ([UNREADABLE_HUB], SPOKE, "10.1.0.4", "unverified", None),  # nothing else to go on
+        ([VNET], ELSEWHERE, "10.0.0.4", "unknown", None),  # topology says stale: a failure is never stale
+    ],
+    ids=["network-backed", "unverified", "stale-becomes-unknown"],
+)
+def test_a_failed_zone_group_read_falls_back_to_topology(linked, endpoint_vnet, ip, expected, backed_by):
+    rows = [_vnet_row(VNET, "10.0.0.0/16", [NIC_CONFIG]), _vnet_row(SPOKE, "10.1.0.0/16"), _vnet_row(ELSEWHERE, "10.0.0.0/16")]
+    rec = _zone_record_with_groups(ip, rows, linked, [_endpoint_row(ip, endpoint_vnet)], ({}, frozenset({"pe-1"})))
+    assert rec["private_endpoint_status"] == expected and rec["backed_by"] == backed_by
+    assert rec["zone_group_backed"] is None
+
+
+def test_collect_zone_groups_reads_each_endpoint_and_records_failures(monkeypatch):
+    from types import ModuleType
+    from types import SimpleNamespace as NS
+
+    model = NS(name="default", private_dns_zone_configs=[NS(private_dns_zone_id=ZONE_ID, record_sets=[
+        NS(fqdn=f"acct.{BLOB}", record_type="A", ip_addresses=["10.1.0.4"])])])
+    calls = []
+
+    def client(**kw):
+        def list_groups(name, rg):
+            calls.append((kw["subscription_id"], rg, name))
+            if name == "pe-broken":
+                raise RuntimeError("throttled")
+            return [model]
+        return NS(private_dns_zone_groups=NS(list=list_groups))
+
+    network = ModuleType("azure.mgmt.network")
+    network.NetworkManagementClient = client
+    monkeypatch.setitem(sys.modules, "azure.mgmt.network", network)
+    good = f"/subscriptions/{OTHER_SUB}/resourceGroups/App/providers/Microsoft.Network/privateEndpoints/pe-ok"
+    broken = f"{RG}/providers/Microsoft.Network/privateEndpoints/pe-broken"
+    collector = azure_common.Collector(dns.logger)
+    index, failed = dns.collect_zone_groups(object(), [good, good.upper(), broken, None], collector)
+
+    assert sorted(calls) == sorted([(OTHER_SUB, "App", "pe-ok"), (SUB, "net", "pe-broken")])  # once each, own sub
+    assert index == {(ZONE_ID.lower(), f"acct.{BLOB}"): [(good.lower(), frozenset({"10.1.0.4"}))]}
+    assert failed == {broken.lower()}
+    assert [f["operation"] for f in collector.failures] == ["network.private_dns_zone_groups.list(net/pe-broken)"]
+
+
+def test_collect_zones_backs_by_zone_group_when_the_linked_hub_is_unreadable(monkeypatch):
+    # The real-run shape: the zone links only VNets in a subscription the run can't read, and the endpoint sits in a
+    # readable VNet that peers with none of them.
+    from types import SimpleNamespace as NS
+
+    pe_id = f"{RG}/providers/Microsoft.Network/privateEndpoints/pe-1"
+    nic = {"ip": "10.0.0.4", "private_endpoint_id": pe_id, "fqdns": ["acct.blob.core.windows.net"],
+           "subnet_id": f"{SPOKE}/subnets/pe"}
+    group = NS(name="default", private_dns_zone_configs=[NS(private_dns_zone_id=ZONE_ID, record_sets=[
+        NS(fqdn=f"acct.{BLOB}", record_type="A", ip_addresses=["10.0.0.4"])])])
+    zones, _, collector = _collect(
+        monkeypatch, {BLOB: [UNREADABLE_HUB]}, [_vnet_row(SPOKE, "10.0.0.0/16")],
+        endpoint_rows=[nic], approved=[pe_id], zone_groups={"pe-1": [group]},
+    )
+    assert collector.ok
+    [rec] = zones[BLOB]["record_sets"]
+    assert rec["private_endpoint_status"] == "backed" and rec["backed_by"] == ["zone_group"]
 
 
 def test_virtual_wan_spokes_two_hops_apart_are_unverified():

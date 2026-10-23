@@ -673,7 +673,8 @@ REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
         "NetworkManagementClient",
         "private_dns_zone_groups",
         ["list"],
-        "azure/private_endpoint_configuration — which private DNS zones publish each endpoint",
+        "azure/private_endpoint_configuration — which private DNS zones publish each endpoint; "
+        "azure/private_dns_zone_configuration — the zone-group proof that backs a record",
     ),
     # --- private DNS ---------------------------------------------------------
     (
@@ -2852,7 +2853,14 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure.mgmt.network.models",
         "PrivateDnsZonePropertiesFormat",
         ["private_dns_zone_id", "record_sets"],
-        "azure/private_endpoint_configuration",
+        "azure/private_endpoint_configuration, azure/private_dns_zone_configuration",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RecordSet",
+        ["fqdn", "ip_addresses", "record_type"],
+        "azure/private_dns_zone_configuration — a rename leaves every zone-group proof false, "
+        "so zone-group-backed records drop to the network match",
     ),
     # --- private DNS ---------------------------------------------------------
     (

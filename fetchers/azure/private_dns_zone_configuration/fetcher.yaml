@@ -51,7 +51,12 @@ evidence_set:
     private_zones.list(), and for each zone virtual_network_links.list(resource_group, zone) and
     record_sets.list(resource_group, zone); a list that fails leaves virtual_network_links or
     record_sets null (counted in zones_links_unknown / zones_records_unknown), never empty. SOA records
-    are omitted. azure-mgmt-resourcegraph queries, paged by _shared/resource_graph.query_all and not
+    are omitted. azure-mgmt-network NetworkManagementClient private_dns_zone_groups.list(endpoint,
+    resource_group), in the endpoint's own subscription, for each private endpoint whose NIC holds an
+    IP of a privatelink A record; a read that fails is recorded and leaves only that endpoint's zone
+    groups unknown. Access: Reader on the subscription, which includes
+    Microsoft.Network/privateEndpoints/privateDnsZoneGroups/read; Reader on other subscriptions lets
+    their VNets, endpoints and zone groups resolve too. azure-mgmt-resourcegraph queries, paged by _shared/resource_graph.query_all and not
     scoped to a subscription so resources in other subscriptions the credential can read still
     resolve: the virtual networks the zones link to; for a private-link zone's linked VNet the
     credential cannot read, the VNets whose own peering points at it, with the hubs each one peers
@@ -74,10 +79,12 @@ evidence_set:
     linked VNets and the VNets peered with them (an endpoint in a spoke peered with a hub the zone is
     linked to counts; a resource holding the same address in an unrelated VNet does not). A peering
     counts from either side, so a readable spoke peered with a linked hub the credential cannot read
-    is in scope too. Only one peering hop is followed, so these layouts read unverified where 0.1.0
-    said backed: Virtual WAN (spokes reach each other through the hub's managed VNet, two hops); spoke
-    to spoke (the zone linked to one spoke, the endpoint in another, both peered only with a hub); and
-    Azure Virtual Network Manager mesh connectivity (connected groups create no peering objects). A
+    is in scope too. Only one peering hop is followed, so in these layouts the network match finds
+    nothing: Virtual WAN (spokes reach each other through the hub's managed VNet, two hops); spoke to
+    spoke (the zone linked to one spoke, the endpoint in another, both peered only with a hub); and
+    Azure Virtual Network Manager mesh connectivity (connected groups create no peering objects). Their
+    records are still backed when the endpoint registers them through a private DNS zone group (below);
+    only hand-made records there read unverified where 0.1.0 said backed. A
     linked VNet the credential cannot read stays in scope: a visible endpoint NIC in it still backs the
     record, but its address space is unknown. An endpoint in a subscription the credential cannot read
     is not visible, so its records read unverified until the credential can read that subscription.
@@ -107,6 +114,17 @@ evidence_set:
     otherwise the most serious of ip_mismatch, endpoint_not_approved, stale, unknown, unverified,
     platform_managed. Records in non-privatelink zones and the zone apex have private_endpoint_status
     null.
+    A record is also backed, whatever the network match found, when an Approved private endpoint whose
+    NIC holds every IP of the record has a private DNS zone group that registers this exact zone (by
+    resource id), the record's FQDN and exactly the record's IPs: the record is then the endpoint's own
+    Azure-maintained registration, so it is live. That proof does not depend on topology (it covers
+    Virtual WAN, spoke to spoke, AVNM mesh and forwarder-only DNS wherever zone groups are used); it
+    does not show that the zone's linked VNets can route to the endpoint, which the network match does
+    not show either. zone_group_backed is true when that proof holds, false when every endpoint that
+    could have registered the record was read and none does, and null when one of those reads (or the
+    endpoint or approval lookup) failed: the record then keeps the network verdict, never backed by
+    the zone group, and a stale verdict becomes unknown. backed_by lists the proofs behind a backed or
+    partially_backed record: network (an IP matched as above) and/or zone_group; null otherwise.
     virtual_network_status on a link is found; not_found when the credential can read the VNet's
     resource group and the VNet is not in it; not_visible when its subscription or resource group is
     not readable to this credential (a deleted resource group also lands here); unknown when a lookup
@@ -121,7 +139,8 @@ evidence_set:
     records that resolve only to live private endpoints. summary.links_to_unreadable_virtual_networks
     is non-zero when the credential cannot read every subscription the zones serve, and falls to zero
     once it can; summary.privatelink_records_unverified also counts records in zones with no links,
-    records in the layouts above, and records whose IPs fall in overlapping VNets that disagree.
+    hand-made records in the layouts above, and records whose IPs fall in overlapping VNets that
+    disagree.
     provider_registration_status
     (registered / not_registered / unknown) is the Microsoft.Network resource provider's state, so
     total_zones 0 on an unregistered subscription reads as "service not in use" rather than "in use,

@@ -24,10 +24,17 @@ schemas and the `paramify` CLI — not the internal code.
   points at it are found with a separate query. A zone with no links reads as
   `unverified`, not backed. A linked VNet the credential cannot read stays in
   scope: a visible endpoint NIC in it still backs the record, but an IP nothing
-  visible holds there is `unverified`. Only one peering hop is followed, so
-  records in these layouts move from backed to `unverified`: Virtual WAN (spokes
-  two hops apart through the hub), spoke to spoke through a hub, and Azure
-  Virtual Network Manager mesh (no peering objects). Where
+  visible holds there is `unverified`. A record is also backed, whatever the
+  network match finds, when an Approved endpoint whose NIC holds its IPs
+  registers it through the endpoint's own private DNS zone group: this exact
+  zone, this FQDN, exactly these IPs. The zone groups are read per endpoint with
+  `private_dns_zone_groups.list` (Reader covers it); a failed read is recorded,
+  leaves only that proof unknown (`zone_group_backed: null`) and never backs a
+  record or reads it stale. The new `backed_by` names the proof (`network`,
+  `zone_group` or both). Only one peering hop is followed, so in these layouts
+  only hand-made records (no zone group) move from backed to `unverified`:
+  Virtual WAN (spokes two hops apart through the hub), spoke to spoke through a
+  hub, and Azure Virtual Network Manager mesh (no peering objects). Where
   address spaces overlap, the verdict no longer depends on which VNet sorts
   first: an IP that falls in more than one of the zone's VNets with different
   verdicts is `unverified`. The new per-record `ip_address_networks` names the
@@ -36,7 +43,7 @@ schemas and the `paramify` CLI — not the internal code.
   the tenant, and a failed lookup chunk leaves only its own VNets unknown (the
   links to them and the records of zones that resolve for them), not the whole
   run. Status counts move, so **re-check any validator or query that asserts on
-  `private_endpoint_status`, `ip_address_statuses` or the
+  `private_endpoint_status`, `ip_address_statuses`, `backed_by` or the
   `privatelink_records_*` summary counts.**
 - **The private DNS zone and private endpoint fetchers' expanding queries
   parse.** Four Resource Graph queries put `mv-expand`'s row limit before the
