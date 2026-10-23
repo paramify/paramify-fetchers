@@ -1,0 +1,46 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_sqs_encryption_status",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.queues[]",
+      "records": 3,
+      "fields": {
+        "name": 3,
+        "url": 3,
+        "encrypted": 3,
+        "kms_master_key_id": 3,
+        "sqs_managed_sse_enabled": 3
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:13:30Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "queues": [
+        {
+          "name": "pft-sse-kms",
+          "url": "https://sqs.us-east-2.amazonaws.com/111111111111/pft-sse-kms",
+          "encrypted": true,
+          "kms_master_key_id": "alias/aws/sqs",
+          "sqs_managed_sse_enabled": "false"
+        }
+      ],
+      "summary": {
+        "total_queues": 3,
+        "encrypted_queues": 2,
+        "encryption_percentage": 66
+      }
+    }
+  }
+}

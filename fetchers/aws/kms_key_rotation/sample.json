@@ -1,0 +1,61 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_kms_key_rotation",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.kms_keys.object[]",
+      "records": 7,
+      "fields": {
+        "key_id": 7,
+        "key_arn": 7,
+        "key_state": 7,
+        "key_usage": 7,
+        "rotation_enabled": 6,
+        "rotation_status": 7,
+        "key_policy": 7,
+        "collection_error": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:12:44Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "kms_keys": {
+        "object": [
+          {
+            "key_id": "00000000-0000-4000-8000-222222222222",
+            "key_arn": "arn:aws:kms:us-east-2:111111111111:key/00000000-0000-4000-8000-222222222222",
+            "key_state": "Enabled",
+            "key_usage": "ENCRYPT_DECRYPT",
+            "rotation_enabled": true,
+            "rotation_status": "enabled",
+            "key_policy": {
+              "Policy": "{\n  \"Version\" : \"2012-10-17\",\n  \"Id\" : \"auto-backup-1\",\n  \"Statement\" : [ {\n    \"Sid\" : \"Allow access through Backup for all principals in the account that are authorized to use Backup Storage\",\n    \"Effect\" : \"Allow\",\n    \"Principal\" : {\n      \"AWS\" : \"*\"\n    },\n    \"Action\" : [ \"kms:CreateGrant\", \"kms:Decrypt\", \"kms:GenerateDataKey*\" ],\n    \"Resource\" : \"*\",\n    \"Condition\" : {\n      \"StringEquals\" : {\n        \"kms:CallerAccount\" : \"111111111111\",\n        \"kms:ViaService\" : \"backup.us-east-2.amazonaws.com\"\n      }\n    }\n  }, {\n    \"Sid\" : \"Allow direct access to key metadata to the account\",\n    \"Effect\" : \"Allow\",\n    \"Principal\" : {\n      \"AWS\" : \"arn:aws:iam::111111111111:root\"\n    },\n    \"Action\" : [ \"kms:Describe*\", \"kms:Get*\", \"kms:List*\", \"kms:RevokeGrant\" ],\n    \"Resource\" : \"*\"\n  } ]\n}",
+              "PolicyName": "default"
+            }
+          }
+        ]
+      },
+      "config_rule": {
+        "ComplianceByConfigRules": []
+      },
+      "summary": {
+        "total_keys": 7,
+        "readable_keys": 6,
+        "unreadable_keys": 1,
+        "rotated_keys": 6,
+        "rotation_percentage": 100
+      }
+    }
+  }
+}

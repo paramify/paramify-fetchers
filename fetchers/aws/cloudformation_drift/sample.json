@@ -1,0 +1,41 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_cloudformation_drift",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 1,
+      "fields": {
+        "StackName": 1,
+        "StackId": 1,
+        "StackStatus": 1,
+        "StackDriftStatus": 1,
+        "LastDriftCheckTimestamp": 0,
+        "EnableTerminationProtection": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:11Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "StackName": "pft-stack",
+        "StackId": "arn:aws:cloudformation:us-east-2:111111111111:stack/pft-stack/00000000-0000-4000-8000-222222222222",
+        "StackStatus": "CREATE_COMPLETE",
+        "StackDriftStatus": "NOT_CHECKED",
+        "LastDriftCheckTimestamp": null,
+        "EnableTerminationProtection": false
+      }
+    ]
+  }
+}
