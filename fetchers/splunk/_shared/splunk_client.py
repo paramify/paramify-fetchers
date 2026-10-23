@@ -39,7 +39,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import requests
 from dotenv import load_dotenv
@@ -60,8 +60,9 @@ SEARCHABLE_INDEXES_SPL = "| eventcount summarize=false index=* index=_* | stats 
 NON_NOTIFYING_ACTIONS = {"logevent", "lookup", "outputtelemetry", "populate_lookup", "rss",
                          "studio_snapshot", "summary_index", "summary_metric_index"}
 
-# A fetcher's CONFIG: {metadata key: (env var, default)}. Every value is an integer and is recorded in metadata.
-Config = Dict[str, Tuple[str, int]]
+# A fetcher's CONFIG: {metadata key: (env var, default)}. The default's type (integer or string) is the value's
+# type, and every value is recorded in metadata.
+Config = Dict[str, Tuple[str, Union[int, str]]]
 
 
 # --- values --------------------------------------------------------------------
@@ -318,7 +319,7 @@ def _message_text(resp: requests.Response) -> str:
 
 # --- the entry point --------------------------------------------------------------
 
-def run(name: str, collect: Callable[[SplunkClient, Dict[str, int]], Optional[dict]],
+def run(name: str, collect: Callable[[SplunkClient, Dict[str, Union[int, str]]], Optional[dict]],
         capabilities: Iterable[str], config: Optional[Config] = None) -> int:
     """Run one fetcher against the target in the environment and write its evidence. Returns the exit code."""
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -326,7 +327,8 @@ def run(name: str, collect: Callable[[SplunkClient, Dict[str, int]], Optional[di
     load_dotenv()
     try:
         target = _target_from_env()
-        settings = {key: _env_int(env, default) for key, (env, default) in (config or {}).items()}
+        settings = {key: _env_int(env, default) if isinstance(default, int) else _env_str(env, default)
+                    for key, (env, default) in (config or {}).items()}
     except ValueError as exc:
         report_failure(str(exc), "bad_config")
         return 1
@@ -392,3 +394,7 @@ def _env_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         raise ValueError(f"{name} must be an integer, got {raw!r}") from None
+
+
+def _env_str(name: str, default: str) -> str:
+    return os.environ.get(name, "").strip() or default

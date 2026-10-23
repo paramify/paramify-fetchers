@@ -1,5 +1,5 @@
 name: splunk_data_inputs
-version: 0.1.0
+version: 0.2.0
 description: >-
   What a Splunk instance is configured to collect, and every host, index and
   sourcetype the deployment receives.
@@ -33,6 +33,16 @@ target_schema:
       a deployment on a private CA. When set, TLS is verified against it and
       verify_ssl is ignored.
 
+config_schema:
+  indexes:
+    type: string
+    env: SPLUNK_INDEXES
+    description: >-
+      Comma-separated index names to read received data from, for example
+      idx_aws,idx_sys. Each one must return events. Unset reads every index,
+      which needs the index list that Splunk Cloud's REST API does not serve.
+      Wildcards are not accepted.
+
 runtime:
   type: python
   entry: fetcher.py
@@ -51,9 +61,10 @@ evidence_set:
   reference_id: EVD-SPLUNK-DATA-INPUTS
   name: Splunk Data Inputs
   instructions: >-
-    Script: splunk/data_inputs/fetcher.py. What the queried instance is configured to collect (`inputs[]`: inputs.conf
-    matched to Splunk's own list of running inputs) and every host, index and
-    sourcetype the deployment actually receives (`received[]`, from tstats),
-    each `silent` past `max_silence_minutes`. `index_resolved` turns "default"
-    into the instance's default index. In a distributed deployment most inputs
-    live on forwarders, which appear only in `received[]`.
+    Script: splunk/data_inputs/fetcher.py. What the queried instance is
+    configured to collect (`inputs[]`) and what the deployment receives:
+    `sourcetypes[]` per index and sourcetype, `received[]` per host. A row is
+    `silent` past `max_silence_minutes`; a `sourcetypes[]` row only when every
+    host is. `metadata.indexes` is the indexes read, or "all".
+    `index_resolved` turns "default" into the instance's default index. Inputs
+    on forwarders appear only as received data.

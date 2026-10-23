@@ -318,6 +318,11 @@ def _searches(m):
             {"host": "sh1", "index": "_internal", "sourcetype": "splunkd", "count": "9", "sources": "2", **times}],
         m["data_inputs"].RECEIVED_CHECK_SPL: [{"host": "web01", "index": "main", "sourcetypes": "1"},
                                               {"host": "sh1", "index": "_internal", "sourcetypes": "1"}],
+        # SPLUNK_INDEXES=main, and main,web where web returns nothing.
+        **{spl("index=main" + extra): rows for extra in ("", " OR index=web") for spl, rows in (
+            (m["data_inputs"].received_spl, [{"host": "web01", "index": "main", "sourcetype": "linux_secure",
+                                              "count": "5", "sources": "1", **times}]),
+            (m["data_inputs"].received_check_spl, [{"host": "web01", "index": "main", "sourcetypes": "1"}]))},
         m["alert_rules"].RUNS_SPL: [{"savedsearch_id": "nobody;search;Failed logins", "runs": "96", "skipped": "0",
                                      "last_run": NOW - 300, "last_status": "success", "last_user": "nobody"}],
         m["alert_rules"].FIRED_SPL: [{"ss_user": "nobody", "ss_app": "search", "ss_name": "Failed logins",
@@ -377,7 +382,8 @@ class FakeSplunk:
                 return _Resp(400, {"messages": [{"type": "ERROR", "text": f"unknown search {data['search']}"}]})
             messages = [{"type": "WARN", "text": "Search filters restricted results"}] if self.fault == "warn" else []
             return _Resp(200, {"results": self.searches[data["search"]], "messages": messages})
-        if path not in self.routes:
+        # "cloud": Splunk Cloud's REST API serves no index list.
+        if path not in self.routes or (path == "services/data/indexes" and self.fault == "cloud"):
             return _Resp(404, {"messages": [{"type": "ERROR", "text": f"no route {path}"}]})
         body = self.routes[path]
         if path == "services/data/indexes" and (params or {}).get("datatype") != "all":
@@ -484,3 +490,41 @@ def test_data_inputs_and_delivery_verdicts(monkeypatch, tmp_path):
     row = delivery["deliveries"][0]
     assert (row["triggered"], row["succeeded"], row["last_outcome"]) == (1, 1, "succeeded")
     assert row["transport_encrypted"] is True and delivery["email_settings"][0]["auth_username_set"] is True
+
+
+def test_received_streams_add_up_per_index_and_sourcetype():
+    def stream(host, count, last, silent):
+        return {"host": host, "index": "idx_aws", "sourcetype": "aws:waf", "event_count": count,
+                "first_event": f"2026-09-0{count}T00:00:00Z", "last_event": last, "last_indexed": last,
+                "minutes_since_last_indexed": 5 if not silent else 9000, "max_silence_minutes": 240, "silent": silent}
+
+    rows = MODS["data_inputs"].by_sourcetype([stream("a", 2, "2026-10-23T14:00:00Z", False),
+                                              stream("b", 3, "2026-09-01T00:00:00Z", True)])
+    assert rows == [{"index": "idx_aws", "internal": False, "sourcetype": "aws:waf", "event_count": 5,
+                     "host_count": 2, "hosts_silent": 1, "first_event": "2026-09-02T00:00:00Z",
+                     "last_event": "2026-10-23T14:00:00Z", "last_indexed": "2026-10-23T14:00:00Z",
+                     "minutes_since_last_indexed": 5, "max_silence_minutes": 240, "silent": False}]
+    # Silent only when every host's stream is.
+    assert MODS["data_inputs"].by_sourcetype([stream("b", 3, "2026-09-01T00:00:00Z", True)])[0]["silent"] is True
+
+
+def test_a_named_index_scope_runs_without_the_index_list(monkeypatch, tmp_path):
+    code, evidence, _ = _run("data_inputs", monkeypatch, tmp_path, "cloud", env={"SPLUNK_INDEXES": " main "})
+    assert (code, evidence["metadata"]["api_failures"]) == (0, [])
+    assert evidence["metadata"]["indexes"] == ["main"] and evidence["summary"]["received_indexes"] == ["main"]
+    assert [(r["index"], r["sourcetype"], r["event_count"]) for r in evidence["sourcetypes"]] == [("main", "linux_secure", 5)]
+    # Unscoped, the same deployment fails: every index must be listed to know none is hidden.
+    code, evidence, _ = _run("data_inputs", monkeypatch, tmp_path, "cloud")
+    assert code == 1 and evidence["summary"] == {}
+
+
+def test_a_named_index_that_returns_nothing_fails(monkeypatch, tmp_path):
+    code, evidence, status = _run("data_inputs", monkeypatch, tmp_path, env={"SPLUNK_INDEXES": "main,web"})
+    assert (code, status["code"]) == (1, "partial_failure")
+    assert evidence["metadata"]["api_failures"][0]["type"] == "NoEventsInIndex"
+    assert "web" in evidence["metadata"]["api_failures"][0]["message"]
+
+
+def test_an_index_pattern_is_bad_config(monkeypatch, tmp_path):
+    code, evidence, status = _run("data_inputs", monkeypatch, tmp_path, env={"SPLUNK_INDEXES": "idx_*"})
+    assert (code, status["code"]) == (1, "bad_config") and evidence["summary"] == {}

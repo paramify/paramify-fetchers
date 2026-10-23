@@ -22,6 +22,14 @@ schemas and the `paramify` CLI — not the internal code.
   for commands and options. `paramify samples show <Tab>` completes the names of
   the fetchers that have a sample. See
   [`docs/cli_guide.md`](docs/cli_guide.md#tab-completion).
+- **`splunk_data_inputs` 0.2.0: an index list, and data per sourcetype.** The
+  new `indexes` setting (`SPLUNK_INDEXES`) limits received data to the named
+  indexes. With it set, the fetcher does not read the index list, which Splunk
+  Cloud's REST API does not serve. Each named index must return events, or the
+  collection fails. The new `sourcetypes[]` has one row per index and
+  sourcetype: event count, host count, silent hosts, first and last event, and
+  last indexed. A row is `silent` only when every host's stream is.
+  `received[]` keeps the per-host detail.
 
 ## [0.6.0-beta] - 2026-10-23
 

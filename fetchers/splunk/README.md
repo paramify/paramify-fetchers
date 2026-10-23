@@ -44,7 +44,7 @@ fails, naming what is missing.
 | `splunk_index_retention` | `search`, `rest_properties_get` | none beyond `search` |
 | `splunk_index_activity` | `search`, `rest_properties_get` | every enabled index |
 | `splunk_log_source_freshness` | `search`, `rest_properties_get` | every enabled index |
-| `splunk_data_inputs` | `search`, `list_inputs`, `rest_properties_get` | every enabled index |
+| `splunk_data_inputs` | `search`, `list_inputs`, `rest_properties_get` | every enabled index, or each index in `indexes` |
 | `splunk_alert_rules` | `search`, `admin_all_objects` | `_audit`, `_internal` |
 | `splunk_alert_delivery` | `search`, `rest_properties_get` | `_internal` |
 | `splunk_role_index_access` | `search`, `list_all_roles`, `list_all_users`, `rest_properties_get` | `*` and `_*`, nothing disallowed |
@@ -104,9 +104,16 @@ The token is a per-target secret, `SPLUNK_TOKEN`. Every evidence file records
 | `lookback_days` | `SPLUNK_ALERT_LOOKBACK_DAYS` | 30 | alert rules |
 | `lookback_days` | `SPLUNK_DELIVERY_LOOKBACK_DAYS` | 30 | alert delivery |
 | `dormant_days` | `SPLUNK_DORMANT_DAYS` | 90 | role index access |
+| `indexes` | `SPLUNK_INDEXES` | every index | data inputs |
 
 Every setting a fetcher used is recorded in its `metadata`. The lookbacks read
 `_internal`, which keeps 30 days by default.
+
+`indexes` is a comma-separated list of index names, for example
+`idx_aws,idx_sys`. With it, `splunk_data_inputs` reads received data from those
+indexes only and does not read the index list. Each named index must return
+events, because an index the token cannot search looks empty. Wildcards are not
+accepted.
 
 ---
 
@@ -215,14 +222,16 @@ against a live instance first.
   and officially only access control, knowledge objects, KV store, metrics,
   federated search and search. The index list, `indexes.conf` and data inputs
   that these fetchers read come from Splunk's Admin Config Service on Cloud
-  instead.
+  instead. `splunk_data_inputs` with `indexes` set does not read the index
+  list, but it is not yet tested on Splunk Cloud.
 - An alert that is running while `splunk_alert_delivery` collects can show up
   in `summary.attempts_unmatched`, because Splunk logs the delivery before it
   logs the scheduled run it belongs to. The next collection matches it.
 - `splunk_index_activity` fails on a distributed deployment unless the search
   head defines the indexers' indexes.
 - `splunk_data_inputs` sees only the queried instance's `inputs.conf`. Inputs
-  on forwarders appear only as streams in `received[]`.
+  on forwarders appear only as received data, in `sourcetypes[]` and
+  `received[]`.
 - Splunk records nothing after an alert is delivered and keeps no record of
   access reviews. None of this evidence shows that an alert was read or a
   grant was reviewed.
