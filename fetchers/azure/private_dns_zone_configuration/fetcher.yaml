@@ -114,17 +114,21 @@ evidence_set:
     otherwise the most serious of ip_mismatch, endpoint_not_approved, stale, unknown, unverified,
     platform_managed. Records in non-privatelink zones and the zone apex have private_endpoint_status
     null.
-    A record is also backed, whatever the network match found, when an Approved private endpoint whose
-    NIC holds every IP of the record has a private DNS zone group that registers this exact zone (by
-    resource id), the record's FQDN and exactly the record's IPs: the record is then the endpoint's own
-    Azure-maintained registration, so it is live. That proof does not depend on topology (it covers
-    Virtual WAN, spoke to spoke, AVNM mesh and forwarder-only DNS wherever zone groups are used); it
-    does not show that the zone's linked VNets can route to the endpoint, which the network match does
-    not show either. zone_group_backed is true when that proof holds, false when every endpoint that
-    could have registered the record was read and none does, and null when one of those reads (or the
-    endpoint or approval lookup) failed: the record then keeps the network verdict, never backed by
-    the zone group, and a stale verdict becomes unknown. backed_by lists the proofs behind a backed or
-    partially_backed record: network (an IP matched as above) and/or zone_group; null otherwise.
+    An IP the network match reads stale, unverified or unknown is also backed when an Approved private
+    endpoint whose NIC holds every IP of the record has a private DNS zone group that registers this
+    exact zone (by resource id), the record's FQDN and exactly the record's IPs: the record is then the
+    endpoint's own Azure-maintained registration, so it is live. That proof does not depend on topology
+    (it covers Virtual WAN, spoke to spoke, AVNM mesh and forwarder-only DNS wherever zone groups are
+    used); it does not show that the zone's linked VNets can route to the endpoint, which the network
+    match does not show either. It never overrules what the zone's own VNets found: an IP that one of
+    them reads ip_mismatch, endpoint_not_approved or platform_managed (another endpoint, a Pending one,
+    or another NIC holds that address there) keeps its verdict, even when an endpoint elsewhere
+    registers the record. zone_group_backed is true when the proof backs at least one IP; false when
+    every endpoint that could have registered the record was read and none does, or when every IP has
+    such a finding; and null when one of those reads (or the endpoint or approval lookup) failed: the
+    record then keeps the network verdict, never backed by the zone group, and a stale verdict becomes
+    unknown. backed_by lists the proofs behind a backed or partially_backed record: network (an IP
+    matched as above) and/or zone_group; null otherwise.
     virtual_network_status on a link is found; not_found when the credential can read the VNet's
     resource group and the VNet is not in it; not_visible when its subscription or resource group is
     not readable to this credential (a deleted resource group also lands here); unknown when a lookup

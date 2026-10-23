@@ -58,6 +58,8 @@ RECORD_STATUSES = (
 )
 # When a record's IPs disagree and none is backed, the record carries the most serious.
 IP_STATUS_SEVERITY = ("ip_mismatch", "endpoint_not_approved", "stale", "unknown", "unverified", "platform_managed")
+# Something other than an Approved endpoint serving the record holds the IP in a VNet the zone resolves for.
+NETWORK_FINDINGS = frozenset({"ip_mismatch", "endpoint_not_approved", "platform_managed"})
 # Zones whose public name differs from the private-link zone with "privatelink" removed.
 PUBLIC_SUFFIX_ALIASES = {"vaultcore.azure.net": "vault.azure.net"}
 # mv-expand defaults to 128 rows per input row. A NIC holds at most 256 IP configurations, so
@@ -392,9 +394,11 @@ def classify_ip(
                             group the credential cannot read, or it falls in more than one of those VNets
                             and they disagree
     unknown               — a lookup this depends on failed; never reported as stale
+
+    The fourth value is whether any of those VNets found a NETWORK_FINDINGS status for the IP.
     """
     if endpoints is None or vnets is None or networks is None:
-        return "unknown", [], None
+        return "unknown", [], None, False
     try:
         addr = ipaddress.ip_address(ip)
     except ValueError:
@@ -405,7 +409,7 @@ def classify_ip(
     if addr is not None:
         matched |= {v for v in networks if any(addr in net for net in (vnets.get(v) or {}).get("nets", ()))}
     if not matched:
-        return ("unknown", [], None) if others is None else ("unverified", [], [])
+        return ("unknown", [], None, False) if others is None else ("unverified", [], [], False)
     verdicts = [
         status_in_network(
             addr,
@@ -424,11 +428,11 @@ def classify_ip(
     statuses = {status for status, _ in verdicts}
     ids = sorted({pid for _, pids in verdicts for pid in pids if pid})
     if len(statuses) == 1:
-        status = statuses.pop()
+        [status] = statuses
     else:
         # Overlapping VNets the zone resolves for disagree: say so rather than pick one.
         status = "unknown" if "unknown" in statuses else "unverified"
-    return status, ids, sorted(matched)
+    return status, ids, sorted(matched), bool(statuses & NETWORK_FINDINGS)
 
 
 def record_status(ip_statuses: list) -> str:
@@ -510,16 +514,23 @@ def classify_record(
     and which proof backs it: its endpoint's own zone group, or the network match."""
     if not is_privatelink_zone(zone_name) or record["record_type"] != "A" or record["name"] == "@":
         return {**record, "private_endpoint_status": None, "private_endpoint_ids": []}
-    per_ip, per_ip_networks, endpoint_ids = {}, {}, set()
+    per_ip, per_ip_networks, endpoint_ids, found = {}, {}, set(), set()
     for ip in record["ip_addresses"]:
-        status, ids, matched = classify_ip(ip, record, endpoints, vnets, zone_name, approvals, others, scopes, networks)
+        status, ids, matched, finding = classify_ip(
+            ip, record, endpoints, vnets, zone_name, approvals, others, scopes, networks
+        )
         per_ip[ip] = status
         per_ip_networks[ip] = matched
         endpoint_ids.update(ids)
+        if finding:
+            found.add(ip)
     network_backed = "backed" in per_ip.values()
     proof, proving_endpoint = zone_group_proof(record, zone_id, endpoints, approvals, zone_groups)
-    if proof:
-        per_ip = dict.fromkeys(per_ip, "backed")
+    # The proof never overrules what the zone's own VNets found holding an IP.
+    provable = [ip for ip in per_ip if ip not in found]
+    zone_group_backed = proof and bool(provable)
+    if zone_group_backed:
+        per_ip.update(dict.fromkeys(provable, "backed"))
         endpoint_ids.add(proving_endpoint)
     elif proof is None:
         # The zone groups that could have backed the record were not read: unknown, never stale.
@@ -530,8 +541,8 @@ def classify_record(
         "ip_address_networks": per_ip_networks,
         "private_endpoint_status": record_status(list(per_ip.values())),
         "private_endpoint_ids": sorted(endpoint_ids),
-        "zone_group_backed": proof,
-        "backed_by": [p for p, ok in (("network", network_backed), ("zone_group", proof is True)) if ok] or None,
+        "zone_group_backed": zone_group_backed,
+        "backed_by": [p for p, ok in (("network", network_backed), ("zone_group", zone_group_backed)) if ok] or None,
     }
 
 

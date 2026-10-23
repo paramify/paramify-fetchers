@@ -37,10 +37,12 @@ schemas and the `paramify` CLI — not the internal code.
   points at it are found with a separate query. A zone with no links reads as
   `unverified`, not backed. A linked VNet the credential cannot read stays in
   scope: a visible endpoint NIC in it still backs the record, but an IP nothing
-  visible holds there is `unverified`. A record is also backed, whatever the
-  network match finds, when an Approved endpoint whose NIC holds its IPs
-  registers it through the endpoint's own private DNS zone group: this exact
-  zone, this FQDN, exactly these IPs. The zone groups are read per endpoint with
+  visible holds there is `unverified`. An IP the network match reads `stale`,
+  `unverified` or `unknown` is also backed when an Approved endpoint whose NIC
+  holds the record's IPs registers it through the endpoint's own private DNS
+  zone group: this exact zone, this FQDN, exactly these IPs. That proof never
+  overrules an `ip_mismatch`, `endpoint_not_approved` or `platform_managed`
+  found in the zone's own VNets. The zone groups are read per endpoint with
   `private_dns_zone_groups.list` (Reader covers it); a failed read is recorded,
   leaves only that proof unknown (`zone_group_backed: null`) and never backs a
   record or reads it stale. The new `backed_by` names the proof (`network`,

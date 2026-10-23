@@ -466,11 +466,11 @@ ELSEWHERE = f"{RG}/providers/Microsoft.Network/virtualNetworks/elsewhere"
 UNREADABLE_NIC = f"/subscriptions/{SUB}/resourceGroups/apps/providers/Microsoft.Network/networkInterfaces/n/ipConfigurations/c"
 
 
-def _vnet_row(vnet_id, prefix, nic_configs=(), peers=()):
+def _vnet_row(vnet_id, prefix, nic_configs=(), peers=(), state="Connected"):
     return {
         "id": vnet_id,
         "address_prefixes": [prefix],
-        "peerings": [{"properties": {"peeringState": "Connected", "remoteVirtualNetwork": {"id": p}}} for p in peers],
+        "peerings": [{"properties": {"peeringState": state, "remoteVirtualNetwork": {"id": p}}} for p in peers],
         "subnets": [{"properties": {"addressPrefix": prefix, "ipConfigurations": [{"id": c} for c in nic_configs]}}],
     }
 
@@ -503,6 +503,16 @@ def test_an_endpoint_in_a_peered_spoke_backs_a_zone_linked_to_the_hub():
     record = _zone_ip("10.1.0.4", rows, [VNET], endpoint_rows=[_endpoint_row("10.1.0.4", SPOKE)])
     assert record["private_endpoint_status"] == "backed"
     assert record["ip_address_networks"] == {"10.1.0.4": [SPOKE.lower()]}
+
+
+def test_a_disconnected_peering_does_not_bring_the_spoke_into_scope():
+    rows = [
+        _vnet_row(VNET, "10.0.0.0/16", [NIC_CONFIG], peers=[SPOKE], state="Disconnected"),
+        _vnet_row(SPOKE, "10.1.0.0/16"),
+    ]
+    record = _zone_ip("10.1.0.4", rows, [VNET], endpoint_rows=[_endpoint_row("10.1.0.4", SPOKE)])
+    assert record["private_endpoint_status"] == "unverified"
+    assert record["ip_address_networks"] == {"10.1.0.4": []}
 
 
 @pytest.mark.parametrize(
@@ -757,12 +767,15 @@ def _zone_group(zone_id=ZONE_ID, fqdn=f"acct.{BLOB}", ips=("10.1.0.4",)):
         {"fqdn": fqdn, "ip_addresses": list(ips)}]}]}
 
 
-def _zone_record_with_groups(ip, vnet_rows, linked, endpoint_rows, zone_groups, approvals=APPROVED):
+def _zone_record_with_groups(ip, vnet_rows, linked, endpoint_rows, zone_groups, approvals=APPROVED, other_rows=()):
+    """`ip` is one IP or a tuple of them; `other_rows` None stands for a failed lookup of other IP holders."""
     zone = {"id": ZONE_ID, "name": BLOB}
     links = [{"id": f"link-{i}", "virtual_network_id": v} for i, v in enumerate(linked)]
+    ips = (ip,) if isinstance(ip, str) else ip
+    others = None if other_rows is None else dns.holder_index(list(other_rows), [])
     out = dns.zone_record(
-        zone, links, [_record("acct", BLOB, ip)], dns.endpoint_index(list(endpoint_rows)), dns.vnet_index(vnet_rows),
-        DNS_SCOPES, approvals, dns.holder_index([], []), zone_groups=zone_groups,
+        zone, links, [_record("acct", BLOB, *ips)], dns.endpoint_index(list(endpoint_rows)), dns.vnet_index(vnet_rows),
+        DNS_SCOPES, approvals, others, zone_groups=zone_groups,
     )
     return out["record_sets"][0]
 
@@ -812,6 +825,90 @@ def test_a_failed_zone_group_read_falls_back_to_topology(linked, endpoint_vnet, 
     rec = _zone_record_with_groups(ip, rows, linked, [_endpoint_row(ip, endpoint_vnet)], ({}, frozenset({"pe-1"})))
     assert rec["private_endpoint_status"] == expected and rec["backed_by"] == backed_by
     assert rec["zone_group_backed"] is None
+
+
+# Reuses the zone's address plan; neither linked to the zone nor peered with its VNets.
+SANDBOX = f"/subscriptions/{OTHER_SUB}/resourceGroups/sandbox/providers/Microsoft.Network/virtualNetworks/sandbox"
+
+
+def _prod_endpoint(ip="10.0.0.4", fqdn=f"acct.{BLOB}"):
+    return {"ip": ip, "private_endpoint_id": "pe-prod", "fqdns": [fqdn], "subnet_id": f"{VNET}/subnets/default"}
+
+
+@pytest.mark.parametrize(
+    "linked,prod_endpoints,prod_approved,other_rows,expected,ids",
+    [
+        ([VNET], [_prod_endpoint()], False, (), "endpoint_not_approved", ["pe-prod"]),
+        ([VNET], [_prod_endpoint(fqdn="other.blob.core.windows.net")], True, (), "ip_mismatch", ["pe-prod"]),
+        ([VNET], [], True, [{"id": "vm-nic", "ip": "10.0.0.4", "subnet_id": f"{VNET}/subnets/default"}],
+         "platform_managed", []),
+        # ELSEWHERE overlaps VNET and reads stale; VNET's Pending endpoint makes the verdicts disagree.
+        ([VNET, ELSEWHERE], [_prod_endpoint()], False, (), "unverified", ["pe-prod"]),
+    ],
+    ids=["pending-endpoint", "endpoint-serving-another-name", "other-nic", "overlap-with-a-finding"],
+)
+def test_a_zone_group_elsewhere_never_overrules_a_finding_in_the_zones_own_vnets(
+    linked, prod_endpoints, prod_approved, other_rows, expected, ids
+):
+    # The zone is linked to prod 10.0.0.0/16; a sandbox VNet reuses the address plan, and its Approved endpoint
+    # at 10.0.0.4 registers the record through its zone group.
+    rows = [_vnet_row(VNET, "10.0.0.0/16", [NIC_CONFIG]), _vnet_row(ELSEWHERE, "10.0.0.0/16"),
+            _vnet_row(SANDBOX, "10.0.0.0/16")]
+    groups = (dns.zone_group_index({"pe-1": [_zone_group(ips=("10.0.0.4",))]}), frozenset())
+    rec = _zone_record_with_groups(
+        "10.0.0.4", rows, linked, [*prod_endpoints, _endpoint_row("10.0.0.4", SANDBOX)], groups,
+        {"pe-1": True, "pe-prod": prod_approved}, other_rows,
+    )
+    assert rec["private_endpoint_status"] == expected and rec["ip_address_statuses"] == {"10.0.0.4": expected}
+    assert rec["zone_group_backed"] is False and rec["backed_by"] is None
+    assert rec["private_endpoint_ids"] == ids
+
+
+def test_a_zone_group_backs_only_the_ips_without_a_finding():
+    rows = [_vnet_row(VNET, "10.0.0.0/16", [NIC_CONFIG]), _vnet_row(SANDBOX, "10.0.0.0/16")]
+    groups = (dns.zone_group_index({"pe-1": [_zone_group(ips=("10.0.0.4", "10.0.0.5"))]}), frozenset())
+    sandbox = [_endpoint_row("10.0.0.4", SANDBOX), _endpoint_row("10.0.0.5", SANDBOX)]
+    rec = _zone_record_with_groups(
+        ("10.0.0.4", "10.0.0.5"), rows, [VNET], [_prod_endpoint(), *sandbox], groups, {"pe-1": True, "pe-prod": False}
+    )
+    assert rec["ip_address_statuses"] == {"10.0.0.4": "endpoint_not_approved", "10.0.0.5": "backed"}
+    assert rec["private_endpoint_status"] == "partially_backed"
+    assert rec["zone_group_backed"] is True and rec["backed_by"] == ["zone_group"]
+    assert rec["private_endpoint_ids"] == ["pe-1", "pe-prod"]
+
+
+@pytest.mark.parametrize(
+    "other_rows,network_verdict",
+    [((), "stale"), (None, "unknown")],
+    ids=["stale", "unknown"],
+)
+def test_a_zone_group_upgrades_a_stale_or_unknown_network_verdict(other_rows, network_verdict):
+    rows = [_vnet_row(VNET, "10.0.0.0/16", [NIC_CONFIG]), _vnet_row(SANDBOX, "10.0.0.0/16")]
+    endpoint = [_endpoint_row("10.0.0.4", SANDBOX)]
+    no_groups = _zone_record_with_groups("10.0.0.4", rows, [VNET], endpoint, dns.NO_ZONE_GROUPS, other_rows=other_rows)
+    assert no_groups["private_endpoint_status"] == network_verdict
+    groups = (dns.zone_group_index({"pe-1": [_zone_group(ips=("10.0.0.4",))]}), frozenset())
+    rec = _zone_record_with_groups("10.0.0.4", rows, [VNET], endpoint, groups, other_rows=other_rows)
+    assert rec["private_endpoint_status"] == "backed" and rec["backed_by"] == ["zone_group"]
+
+
+@pytest.mark.parametrize(
+    "holds,registers",
+    [
+        ({"pe-1": ("10.1.0.4", "10.1.0.5")}, ("10.1.0.4",)),
+        ({"pe-1": ("10.1.0.4",), "pe-2": ("10.1.0.5",)}, ("10.1.0.4", "10.1.0.5")),
+    ],
+    ids=["registers-a-subset-of-the-ips", "holds-a-subset-of-the-ips"],
+)
+def test_the_zone_group_proof_needs_one_endpoint_holding_and_registering_every_ip(holds, registers):
+    rows = [
+        {"ip": ip, "private_endpoint_id": pe, "fqdns": [f"acct.{BLOB}"], "subnet_id": f"{SPOKE}/subnets/default"}
+        for pe, ips in holds.items()
+        for ip in ips
+    ]
+    groups = (dns.zone_group_index({"pe-1": [_zone_group(ips=registers)]}), frozenset())
+    record = _record("acct", BLOB, "10.1.0.4", "10.1.0.5")
+    assert dns.zone_group_proof(record, ZONE_ID, dns.endpoint_index(rows), APPROVED, groups) == (False, None)
 
 
 def test_collect_zone_groups_reads_each_endpoint_and_records_failures(monkeypatch):
