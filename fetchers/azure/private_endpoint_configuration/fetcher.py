@@ -33,6 +33,7 @@ from azure_common import (  # noqa: E402
 )
 from resource_graph import (  # noqa: E402
     query_all,
+    quoted_ids,
     readable_scopes,
     resource_graph_client,
 )
@@ -222,9 +223,9 @@ def endpoint_record(
 ) -> dict:
     connections = [target_record(c, lookups, failed, scopes) for c in pe["connections"]]
     statuses = [c["status"] for c in connections]
-    ips = []
-    for nic_id in pe["network_interface_ids"]:
-        ips.extend(nic_private_ips(lookups.get((nic_id or "").lower())))
+    nics = [lookups.get((nic_id or "").lower()) for nic_id in pe["network_interface_ids"]]
+    # A NIC that was not read leaves the endpoint's IPs unknown (None), never "no IPs".
+    ips = None if None in nics else sorted({ip for nic in nics for ip in nic_private_ips(nic)})
     # zone_groups is None when the endpoint's zone groups could not be listed: unknown, never "none".
     zones = None if zone_groups is None else sorted(
         {cfg["private_dns_zone_name"] for g in zone_groups for cfg in g["private_dns_zone_configs"] if cfg["private_dns_zone_name"]}
@@ -236,7 +237,7 @@ def endpoint_record(
         "connections": connections,
         "connection_status": statuses[0] if len(set(statuses)) == 1 else ("Mixed" if statuses else None),
         "approved": bool(statuses) and all(s == "Approved" for s in statuses),
-        "private_ip_addresses": sorted(set(ips)),
+        "private_ip_addresses": ips,
         "private_dns_zone_groups": zone_groups,
         "private_dns_zone_names": zones,
         "has_private_dns_zone_group": None if zones is None else bool(zones),
@@ -321,11 +322,6 @@ def summarize(endpoints: list[dict]) -> dict:
             if e["subnet_network_security_group_id"] and not e["subnet_nsg_applies_to_endpoint"]
         ),
     }
-
-
-def quoted_ids(ids: list[str]) -> str:
-    """KQL verbatim string literals: inside @'...' a doubled quote is the escape and a backslash is literal."""
-    return ", ".join("@'" + i.replace("'", "''") + "'" for i in ids)
 
 
 def lookup_query(ids: list[str]) -> str:

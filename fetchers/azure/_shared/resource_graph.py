@@ -72,6 +72,11 @@ def query_all(client, subscription_id: Union[str, List[str], None], query: str) 
     return {"rows": rows, "total_records": total_records, "pages": pages}
 
 
+def quoted_ids(ids: List[str]) -> str:
+    """KQL verbatim string literals: inside @'...' a doubled quote is the escape and a backslash is literal."""
+    return ", ".join("@'" + i.replace("'", "''") + "'" for i in ids)
+
+
 READABLE_RESOURCE_GROUPS_QUERY = (
     "ResourceContainers | where type =~ 'microsoft.resources/subscriptions/resourcegroups' "
     "| project id = tolower(id) | order by id asc"

@@ -34,6 +34,7 @@ from azure_common import (  # noqa: E402
 from private_dns import project_vnet_link  # noqa: E402
 from resource_graph import (  # noqa: E402
     query_all,
+    quoted_ids,
     readable_scopes,
     resource_graph_client,
 )
@@ -58,23 +59,17 @@ PUBLIC_SUFFIX_ALIASES = {"vaultcore.azure.net": "vault.azure.net"}
 # mv-expand defaults to 128 rows per input row. A NIC holds at most 256 IP configurations, so
 # 2000 can never cut one short.
 MV_EXPAND_LIMIT = 2000
+LOOKUP_CHUNK = 200
 
-# Every VNet with its address space and each subnet's prefixes and IP configuration ids. A VNet read
-# lists every IP configuration in its subnets, including NICs in resource groups the credential cannot read.
-VNETS_QUERY = (
-    "Resources | where type =~ 'microsoft.network/virtualnetworks' "
-    "| project id, address_prefixes = properties.addressSpace.addressPrefixes, subnets = properties.subnets "
-    "| order by id asc"
-)
-
-# Every private endpoint NIC IP the credential can see, with the FQDNs it serves.
+# Every private endpoint NIC IP the credential can see, with the FQDNs it serves and the subnet it sits in.
 ENDPOINT_IPS_QUERY = (
     "Resources | where type =~ 'microsoft.network/networkinterfaces' "
     "and isnotnull(properties.privateEndpoint) "
     f"| mv-expand limit {MV_EXPAND_LIMIT} ipc = properties.ipConfigurations "
     "| project id, ip = tostring(ipc.properties.privateIPAddress), "
     "private_endpoint_id = tostring(properties.privateEndpoint.id), "
-    "fqdns = ipc.properties.privateLinkConnectionProperties.fqdns "
+    "fqdns = ipc.properties.privateLinkConnectionProperties.fqdns, "
+    "subnet_id = tostring(ipc.properties.subnet.id) "
     "| order by id asc, ip asc"
 )
 
@@ -84,13 +79,13 @@ OTHER_NIC_IPS_QUERY = (
     "Resources | where type =~ 'microsoft.network/networkinterfaces' "
     "and isnull(properties.privateEndpoint) "
     f"| mv-expand limit {MV_EXPAND_LIMIT} ipc = properties.ipConfigurations "
-    "| project id, ip = tostring(ipc.properties.privateIPAddress) "
+    "| project id, ip = tostring(ipc.properties.privateIPAddress), subnet_id = tostring(ipc.properties.subnet.id) "
     "| where isnotempty(ip) | order by id asc, ip asc"
 )
 LOAD_BALANCER_IPS_QUERY = (
     "Resources | where type =~ 'microsoft.network/loadbalancers' "
     f"| mv-expand limit {MV_EXPAND_LIMIT} fe = properties.frontendIPConfigurations "
-    "| project id, ip = tostring(fe.properties.privateIPAddress) "
+    "| project id, ip = tostring(fe.properties.privateIPAddress), subnet_id = tostring(fe.properties.subnet.id) "
     "| where isnotempty(ip) | order by id asc, ip asc"
 )
 
@@ -125,10 +120,31 @@ def _networks(prefixes) -> list:
     return nets
 
 
-def vnet_index(rows):
-    """Lowercased VNet id → {"nets", "subnets"}; None when the query failed.
+def vnets_query(ids: list[str]) -> str:
+    """The given VNets with address space, peerings, and each subnet's prefixes and IP configuration ids.
 
-    Each subnet carries its prefixes and the resource groups of every NIC holding an IP in it.
+    A VNet read lists every IP configuration in its subnets, including NICs in resource groups the
+    credential cannot read.
+    """
+    return (
+        f"Resources | where type =~ 'microsoft.network/virtualnetworks' and id in~ ({quoted_ids(ids)}) "
+        "| project id, address_prefixes = properties.addressSpace.addressPrefixes, "
+        "peerings = properties.virtualNetworkPeerings, subnets = properties.subnets "
+        "| order by id asc"
+    )
+
+
+def vnet_of(subnet_id):
+    """Lowercased VNet id from a subnet id; None when the id names no subnet."""
+    head, sep, _ = (subnet_id or "").lower().partition("/subnets/")
+    return head if sep else None
+
+
+def vnet_index(rows):
+    """Lowercased VNet id → {"nets", "peers", "subnets"}; None when the query failed.
+
+    peers are the VNets reached over a Connected peering. Each subnet carries its prefixes and the
+    resource groups of every NIC holding an IP in it.
     """
     if rows is None:
         return None
@@ -144,23 +160,30 @@ def vnet_index(rows):
                 if cfg.get("id")
             }
             subnets.append({"nets": _networks(prefixes), "holder_resource_groups": holders})
-        index[(row.get("id") or "").lower()] = {"nets": _networks(row.get("address_prefixes")), "subnets": subnets}
+        peers = set()
+        for peering in row.get("peerings") or []:
+            props = (peering or {}).get("properties") or {}
+            remote = ((props.get("remoteVirtualNetwork") or {}).get("id") or "").lower()
+            if remote and str(props.get("peeringState") or "").lower() == "connected":
+                peers.add(remote)
+        index[(row.get("id") or "").lower()] = {
+            "nets": _networks(row.get("address_prefixes")),
+            "peers": peers,
+            "subnets": subnets,
+        }
     return index
 
 
-def containing_network(ip, vnets: dict):
-    """(in a readable VNet, the subnet holding the IP or None)."""
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
-        return False, None
-    for vnet in vnets.values():
-        if any(addr in net for net in vnet["nets"]):
-            for subnet in vnet["subnets"]:
-                if any(addr in net for net in subnet["nets"]):
-                    return True, subnet
-            return True, None
-    return False, None
+def zone_networks(links, vnets):
+    """Lowercased ids of the VNets a zone resolves for: its linked VNets and the VNets peered with them.
+
+    None when the links or the VNets could not be read. A link to an unreadable VNet adds the VNet but not
+    its peers, so an IP there is matched only to resources the credential can see in that VNet.
+    """
+    if links is None or vnets is None:
+        return None
+    linked = {(link.get("virtual_network_id") or "").lower() for link in links if link.get("virtual_network_id")}
+    return linked | {peer for v in linked for peer in (vnets.get(v) or {}).get("peers", ())}
 
 
 def link_status(vnet_id, vnets, scopes) -> str:
@@ -229,7 +252,7 @@ def project_record_set(record) -> dict:
 
 
 def endpoint_index(rows):
-    """ip → [{private_endpoint_id, fqdns}] from the NIC query; None when the query failed."""
+    """ip → [{private_endpoint_id, fqdns, virtual_network_id}] from the NIC query; None when the query failed."""
     if rows is None:
         return None
     index: dict = {}
@@ -240,6 +263,7 @@ def endpoint_index(rows):
                 {
                     "private_endpoint_id": row.get("private_endpoint_id"),
                     "fqdns": [f.lower().rstrip(".") for f in row.get("fqdns") or []],
+                    "virtual_network_id": vnet_of(row.get("subnet_id")),
                 }
             )
     return index
@@ -261,32 +285,24 @@ def endpoint_approvals(rows):
 
 
 def holder_index(*row_sets):
-    """IP → ids of the non-endpoint resources holding it; None when any query failed."""
+    """IP → [{id, virtual_network_id}] of the non-endpoint resources holding it; None when any query failed."""
     if any(rows is None for rows in row_sets):
         return None
     index: dict = {}
     for rows in row_sets:
         for row in rows:
             if row.get("ip"):
-                index.setdefault(row["ip"], []).append(row.get("id"))
+                index.setdefault(row["ip"], []).append(
+                    {"id": row.get("id"), "virtual_network_id": vnet_of(row.get("subnet_id"))}
+                )
     return index
 
 
-def classify_ip(ip, record: dict, endpoints, vnets, zone_name="", approvals=None, others=None, scopes=None) -> tuple:
-    """(status, private endpoint ids) for one IP of a privatelink A record.
+def status_in_network(addr, network, record, zone_name, held, others_here, vnets, approvals, others, scopes) -> tuple:
+    """(status, private endpoint ids) for an IP within one VNet the zone resolves for.
 
-    backed                — an Approved private endpoint holds the IP and serves this record's name
-    endpoint_not_approved — the endpoint serving the name is Pending, Rejected or Disconnected
-    ip_mismatch           — a private endpoint holds the IP but serves a different name
-    platform_managed      — no private endpoint holds it, but a live NIC or internal load balancer does
-                            (an AKS private cluster's API server, for one)
-    stale                 — nothing holds the IP, it sits in a readable VNet, and every resource group with a
-                            NIC in its subnet is readable, so an endpoint there could not have been missed
-    unverified            — nothing visible holds it and it is outside every readable VNet, or a NIC in its
-                            subnet is in a resource group the credential cannot read
-    unknown               — a lookup this depends on failed; never reported as stale
+    `held` / `others_here` are the private endpoints and other resources holding the IP in that VNet.
     """
-    held = (endpoints or {}).get(ip, [])
     serving = [
         ep["private_endpoint_id"]
         for ep in held
@@ -301,19 +317,80 @@ def classify_ip(ip, record: dict, endpoints, vnets, zone_name="", approvals=None
         return "endpoint_not_approved", serving
     if held:
         return "ip_mismatch", [ep["private_endpoint_id"] for ep in held]
-    if endpoints is None or vnets is None or others is None:
+    if others is None:
         return "unknown", []
-    if others.get(ip):
+    if others_here:
         return "platform_managed", []
-    in_vnet, subnet = containing_network(ip, vnets)
-    if not in_vnet:
+    vnet = vnets.get(network)
+    if vnet is None or addr is None:
         return "unverified", []
     if scopes is None:
         return "unknown", []
-    holders = subnet["holder_resource_groups"] if subnet else set()
-    if subnet is None or any(rg not in scopes["resource_groups"] for rg in holders):
+    # Subnets of one VNet never overlap, so at most one holds the IP.
+    subnet = next((s for s in vnet["subnets"] if any(addr in net for net in s["nets"])), None)
+    if subnet is None or any(rg not in scopes["resource_groups"] for rg in subnet["holder_resource_groups"]):
         return "unverified", []
     return "stale", []
+
+
+def classify_ip(
+    ip, record: dict, endpoints, vnets, zone_name="", approvals=None, others=None, scopes=None, networks=None
+) -> tuple:
+    """(status, private endpoint ids, VNets matched) for one IP of a privatelink A record.
+
+    The IP is matched only in `networks`, the VNets the zone resolves for (zone_networks): those that
+    hold it or whose address space contains it. An IP is not unique across a tenant, so a resource
+    holding the same address in an unrelated VNet says nothing about this record.
+
+    backed                — an Approved private endpoint holds the IP and serves this record's name
+    endpoint_not_approved — the endpoint serving the name is Pending, Rejected or Disconnected
+    ip_mismatch           — a private endpoint holds the IP but serves a different name
+    platform_managed      — no private endpoint holds it, but a live NIC or internal load balancer does
+                            (an AKS private cluster's API server, for one)
+    stale                 — nothing holds the IP, it sits in a readable VNet, and every resource group with a
+                            NIC in its subnet is readable, so an endpoint there could not have been missed
+    unverified            — no readable VNet the zone resolves for holds or contains the IP (the zone has no
+                            links, or its linked VNets are unreadable), a NIC in its subnet is in a resource
+                            group the credential cannot read, or it falls in more than one of those VNets
+                            and they disagree
+    unknown               — a lookup this depends on failed; never reported as stale
+    """
+    if endpoints is None or vnets is None or networks is None:
+        return "unknown", [], []
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        addr = None
+    held = [ep for ep in endpoints.get(ip, []) if ep["virtual_network_id"] in networks]
+    others_held = [h for h in (others or {}).get(ip, []) if h["virtual_network_id"] in networks]
+    matched = {h["virtual_network_id"] for h in held + others_held}
+    if addr is not None:
+        matched |= {v for v in networks if any(addr in net for net in (vnets.get(v) or {}).get("nets", ()))}
+    if not matched:
+        return ("unknown" if others is None else "unverified"), [], []
+    verdicts = [
+        status_in_network(
+            addr,
+            v,
+            record,
+            zone_name,
+            [ep for ep in held if ep["virtual_network_id"] == v],
+            [h for h in others_held if h["virtual_network_id"] == v],
+            vnets,
+            approvals,
+            others,
+            scopes,
+        )
+        for v in sorted(matched)
+    ]
+    statuses = {status for status, _ in verdicts}
+    ids = sorted({pid for _, pids in verdicts for pid in pids if pid})
+    if len(statuses) == 1:
+        status = statuses.pop()
+    else:
+        # Overlapping VNets the zone resolves for disagree: say so rather than pick one.
+        status = "unknown" if "unknown" in statuses else "unverified"
+    return status, ids, sorted(matched)
 
 
 def record_status(ip_statuses: list) -> str:
@@ -331,18 +408,22 @@ def record_status(ip_statuses: list) -> str:
     return "unknown"
 
 
-def classify_record(record: dict, zone_name: str, endpoints, vnets, approvals=None, others=None, scopes=None) -> dict:
-    """A privatelink A record with each IP's status and the record's overall status."""
+def classify_record(
+    record: dict, zone_name: str, endpoints, vnets, approvals=None, others=None, scopes=None, networks=None
+) -> dict:
+    """A privatelink A record with each IP's status, the VNets it was matched in, and the record's overall status."""
     if not is_privatelink_zone(zone_name) or record["record_type"] != "A" or record["name"] == "@":
         return {**record, "private_endpoint_status": None, "private_endpoint_ids": []}
-    per_ip, endpoint_ids = {}, set()
+    per_ip, per_ip_networks, endpoint_ids = {}, {}, set()
     for ip in record["ip_addresses"]:
-        status, ids = classify_ip(ip, record, endpoints, vnets, zone_name, approvals, others, scopes)
+        status, ids, matched = classify_ip(ip, record, endpoints, vnets, zone_name, approvals, others, scopes, networks)
         per_ip[ip] = status
+        per_ip_networks[ip] = matched
         endpoint_ids.update(ids)
     return {
         **record,
         "ip_address_statuses": per_ip,
+        "ip_address_networks": per_ip_networks,
         "private_endpoint_status": record_status(list(per_ip.values())),
         "private_endpoint_ids": sorted(endpoint_ids),
     }
@@ -350,6 +431,7 @@ def classify_record(record: dict, zone_name: str, endpoints, vnets, approvals=No
 
 def zone_record(zone: dict, links, records, endpoints, vnets, scopes, approvals=None, others=None) -> dict:
     """`links` / `records` are None when they could not be listed: unknown, never "none"."""
+    networks = zone_networks(links, vnets)
     if links is not None:
         links = sorted(
             ({**link, "virtual_network_status": link_status(link["virtual_network_id"], vnets, scopes)} for link in links),
@@ -358,7 +440,7 @@ def zone_record(zone: dict, links, records, endpoints, vnets, scopes, approvals=
     if records is not None:
         records = sorted(
             (
-                classify_record(r, zone["name"], endpoints, vnets, approvals, others, scopes)
+                classify_record(r, zone["name"], endpoints, vnets, approvals, others, scopes, networks)
                 for r in records
                 if r["record_type"] != "SOA"
             ),
@@ -487,6 +569,26 @@ def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
             return None
         return collector.guard(f"resourcegraph.resources ({label})", lambda: query_all(graph, None, query)["rows"])
 
+    def _vnet_rows(label, ids):
+        # None when any chunk failed: a partly read set of VNets is never taken for the whole.
+        ids, rows = sorted(ids), []
+        for start in range(0, len(ids), LOOKUP_CHUNK):
+            chunk = ids[start : start + LOOKUP_CHUNK]
+            chunk_rows = _graph(f"{label} {start + 1}-{start + len(chunk)}", vnets_query(chunk))
+            if chunk_rows is None:
+                return None
+            rows += chunk_rows
+        return rows
+
+    def _linked(privatelink_only: bool) -> set:
+        return {
+            link["virtual_network_id"].lower()
+            for z in zones
+            if not privatelink_only or is_privatelink_zone(z["name"])
+            for link in links[z["id"]] or []
+            if link["virtual_network_id"]
+        }
+
     endpoints, approvals, others = {}, {}, {}
     if any(is_privatelink_zone(z["name"]) for z in zones):
         endpoints = endpoint_index(_graph("private endpoint NICs", ENDPOINT_IPS_QUERY))
@@ -494,7 +596,15 @@ def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
         others = holder_index(
             _graph("other NIC IPs", OTHER_NIC_IPS_QUERY), _graph("load balancer frontend IPs", LOAD_BALANCER_IPS_QUERY)
         )
-    vnets = vnet_index(_graph("virtual networks", VNETS_QUERY))
+    # Only the VNets the zones resolve for: every linked VNet, then the VNets peered with a private-link zone's.
+    linked = _linked(False)
+    vnet_rows = _vnet_rows("linked virtual networks", linked)
+    if vnet_rows is not None:
+        read = vnet_index(vnet_rows)
+        peers = {p for v in _linked(True) for p in (read.get(v) or {}).get("peers", ())} - linked
+        peer_rows = _vnet_rows("peered virtual networks", peers)
+        vnet_rows = None if peer_rows is None else vnet_rows + peer_rows
+    vnets = vnet_index(vnet_rows)
     scopes = readable_scopes(cred, collector)
     out = sorted(
         (

@@ -10,6 +10,27 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`azure_private_dns_zone_configuration` matches a record's IP only in the
+  networks its zone resolves for** (0.1.0 → 0.1.1). An IP was matched against
+  every private endpoint, NIC and load balancer in the tenant, so a stale record
+  at a common address such as 10.0.0.4 read as backed, `ip_mismatch` or
+  `platform_managed` when an unrelated VNet used the same address. Each IP is
+  now matched only within the zone's linked VNets and the VNets peered with
+  them, so an endpoint in a spoke peered with the hub the zone is linked to
+  still backs it. A zone with no links, or whose linked VNets the credential
+  cannot read, reads as `unverified`, not backed. Where address spaces overlap,
+  the verdict no longer depends on which VNet sorts first: an IP that falls in
+  more than one of the zone's VNets with different verdicts is `unverified`,
+  and the new per-record `ip_address_networks` names the VNets each IP was
+  matched in. VNets are read by id (linked, then peered) instead of every VNet
+  in the tenant.
+- **`azure_private_endpoint_configuration` reports unread IPs as unknown**
+  (0.1.0 → 0.1.1). When an endpoint's network interface lookup failed,
+  `private_ip_addresses` was `[]`, reading as "no IPs". It is now `null`, with
+  the failed lookup in `metadata.failures`.
+
 ## [0.6.0-beta] - 2026-10-23
 
 ### Breaking

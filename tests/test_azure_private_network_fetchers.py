@@ -50,8 +50,10 @@ APPROVED = {"pe-1": True, "pe-2": True}
 
 
 def _classify(record, zone, endpoints, vnets, approvals=APPROVED, others=None, scopes=DNS_SCOPES):
-    """classify_record with the lookups collect_zones supplies: approved endpoints, no other IP holders."""
-    return dns.classify_record(record, zone, endpoints, vnets, approvals, {} if others is None else others, scopes)
+    """classify_record with the lookups collect_zones supplies for a zone linked to VNET: approved
+    endpoints, no other IP holders."""
+    others = {} if others is None else others
+    return dns.classify_record(record, zone, endpoints, vnets, approvals, others, scopes, {VNET.lower()})
 
 
 def _record(name: str, zone: str, *ips: str) -> dict:
@@ -64,9 +66,12 @@ def _record(name: str, zone: str, *ips: str) -> dict:
 
 
 def _endpoints(*entries: tuple) -> dict:
-    """(ip, endpoint id, [fqdns]) → the index the NIC query builds."""
+    """(ip, endpoint id, [fqdns]) → the index the NIC query builds, each NIC in a subnet of VNET."""
     return dns.endpoint_index(
-        [{"ip": ip, "private_endpoint_id": pid, "fqdns": fqdns} for ip, pid, fqdns in entries]
+        [
+            {"ip": ip, "private_endpoint_id": pid, "fqdns": fqdns, "subnet_id": f"{VNET}/subnets/pe"}
+            for ip, pid, fqdns in entries
+        ]
     )
 
 
@@ -374,7 +379,7 @@ def test_query_all_raises_on_a_short_count(fake_graph_models):
 def test_one_pager_only():
     import azure_common
     assert not hasattr(azure_common, "resource_graph_rows")
-    for q in (pe.lookup_query(["/x"]), pe.subnet_query(["/x"]), dns.VNETS_QUERY, dns.ENDPOINT_IPS_QUERY,
+    for q in (pe.lookup_query(["/x"]), pe.subnet_query(["/x"]), dns.vnets_query(["/x"]), dns.ENDPOINT_IPS_QUERY,
               dns.ZONES_QUERY, dns.LINKS_QUERY, resource_graph.READABLE_RESOURCE_GROUPS_QUERY):
         assert "order by id" in q, q  # query_all needs a stable order for skip-token paging
 
@@ -410,7 +415,7 @@ def test_record_without_ips_is_no_addresses():
 
 
 def test_ip_held_by_an_internal_load_balancer_is_platform_managed():
-    others = dns.holder_index([], [{"id": "lb", "ip": "10.0.9.9"}])
+    others = dns.holder_index([], [{"id": "lb", "ip": "10.0.9.9", "subnet_id": f"{VNET}/subnets/aks"}])
     record = _classify(_record("api", "abc.privatelink.eastus.azmk8s.io", "10.0.9.9"),
                        "abc.privatelink.eastus.azmk8s.io", {}, VNETS, others=others)
     assert record["private_endpoint_status"] == "platform_managed"
@@ -448,3 +453,136 @@ def test_link_projection_is_shared_with_dns_configuration():
 def test_privatelink_zones_beyond_the_prefix(zone, is_privatelink, suffix):
     assert dns.is_privatelink_zone(zone) is is_privatelink
     assert dns.public_suffix(zone) == suffix
+
+
+# --------------------------------------------------------------------------- #
+# A record's IP is matched only in the networks its zone resolves for
+# --------------------------------------------------------------------------- #
+
+SPOKE = f"{RG}/providers/Microsoft.Network/virtualNetworks/spoke"
+ELSEWHERE = f"{RG}/providers/Microsoft.Network/virtualNetworks/elsewhere"
+UNREADABLE_NIC = f"/subscriptions/{SUB}/resourceGroups/apps/providers/Microsoft.Network/networkInterfaces/n/ipConfigurations/c"
+
+
+def _vnet_row(vnet_id, prefix, nic_configs=(), peers=()):
+    return {
+        "id": vnet_id,
+        "address_prefixes": [prefix],
+        "peerings": [{"properties": {"peeringState": "Connected", "remoteVirtualNetwork": {"id": p}}} for p in peers],
+        "subnets": [{"properties": {"addressPrefix": prefix, "ipConfigurations": [{"id": c} for c in nic_configs]}}],
+    }
+
+
+def _endpoint_row(ip, vnet_id, fqdn="acct.blob.core.windows.net"):
+    return {"ip": ip, "private_endpoint_id": "pe-1", "fqdns": [fqdn], "subnet_id": f"{vnet_id}/subnets/default"}
+
+
+def _zone_ip(ip, vnet_rows, linked, endpoint_rows=(), other_rows=()):
+    """One privatelink A record run through zone_record, the path collect_zones takes."""
+    zone = {"id": f"{RG}/providers/Microsoft.Network/privateDnsZones/{BLOB}", "name": BLOB}
+    links = [{"id": f"link-{i}", "virtual_network_id": v} for i, v in enumerate(linked)]
+    out = dns.zone_record(
+        zone, links, [_record("acct", BLOB, ip)], dns.endpoint_index(list(endpoint_rows)),
+        dns.vnet_index(vnet_rows), DNS_SCOPES, APPROVED, dns.holder_index(list(other_rows), []),
+    )
+    return out["record_sets"][0]
+
+
+def test_an_ip_held_in_an_unlinked_network_does_not_hide_a_stale_record():
+    rows = [_vnet_row(VNET, "10.0.0.0/16", [NIC_CONFIG]), _vnet_row(ELSEWHERE, "10.0.0.0/16")]
+    vm_nic = [{"id": "vm-nic", "ip": "10.0.0.4", "subnet_id": f"{ELSEWHERE}/subnets/default"}]
+    assert _zone_ip("10.0.0.4", rows, [VNET], other_rows=vm_nic)["private_endpoint_status"] == "stale"
+    pe_rows = [_endpoint_row("10.0.0.4", ELSEWHERE)]
+    assert _zone_ip("10.0.0.4", rows, [VNET], endpoint_rows=pe_rows)["private_endpoint_status"] == "stale"
+
+
+def test_an_endpoint_in_a_peered_spoke_backs_a_zone_linked_to_the_hub():
+    rows = [_vnet_row(VNET, "10.0.0.0/16", [NIC_CONFIG], peers=[SPOKE]), _vnet_row(SPOKE, "10.1.0.0/16")]
+    record = _zone_ip("10.1.0.4", rows, [VNET], endpoint_rows=[_endpoint_row("10.1.0.4", SPOKE)])
+    assert record["private_endpoint_status"] == "backed"
+    assert record["ip_address_networks"] == {"10.1.0.4": [SPOKE.lower()]}
+
+
+@pytest.mark.parametrize(
+    "linked",
+    [[], [f"/subscriptions/{OTHER_SUB}/resourceGroups/x/providers/Microsoft.Network/virtualNetworks/v"]],
+    ids=["no-links", "linked-vnet-unreadable"],
+)
+def test_a_zone_with_no_readable_network_is_unverified_not_backed(linked):
+    rows = [_vnet_row(VNET, "10.0.0.0/16", [NIC_CONFIG])]
+    record = _zone_ip("10.0.1.4", rows, linked, endpoint_rows=[_endpoint_row("10.0.1.4", VNET)])
+    assert record["private_endpoint_status"] == "unverified"
+
+
+@pytest.mark.parametrize("order", [1, -1], ids=["sorted", "reversed"])
+def test_overlapping_address_spaces_do_not_depend_on_sort_order(order):
+    # ELSEWHERE overlaps the linked VNet and has a NIC in a resource group the credential cannot read.
+    rows = [_vnet_row(ELSEWHERE, "10.0.0.0/16", [UNREADABLE_NIC]), _vnet_row(VNET, "10.0.0.0/16", [NIC_CONFIG])]
+    assert _zone_ip("10.0.9.9", rows[::order], [VNET])["private_endpoint_status"] == "stale"
+
+
+def test_an_ip_in_two_linked_networks_that_disagree_is_unverified_and_names_both():
+    rows = [_vnet_row(VNET, "10.0.0.0/16", [NIC_CONFIG]), _vnet_row(ELSEWHERE, "10.0.0.0/16")]
+    record = _zone_ip("10.0.1.4", rows, [VNET, ELSEWHERE], endpoint_rows=[_endpoint_row("10.0.1.4", VNET)])
+    assert record["private_endpoint_status"] == "unverified"
+    assert record["ip_address_networks"] == {"10.0.1.4": sorted([VNET.lower(), ELSEWHERE.lower()])}
+
+
+def test_vnets_are_read_by_id_not_tenant_wide():
+    query = dns.vnets_query([VNET])
+    assert f"id in~ (@'{VNET}')" in query and "peerings" in query and "order by id" in query
+    assert not hasattr(dns, "VNETS_QUERY")
+
+
+def test_collect_zones_reads_only_linked_and_peered_vnets(monkeypatch):
+    from types import ModuleType
+    from types import SimpleNamespace as NS
+
+    zone = NS(id=f"{RG}/providers/Microsoft.Network/privateDnsZones/{BLOB}", name=BLOB)
+    link = NS(id="link-1", name="hub", virtual_network=NS(id=VNET))
+    record = NS(name="acct", type="Microsoft.Network/privateDnsZones/A", a_records=[NS(ipv4_address="10.0.0.4")])
+    client = NS(
+        private_zones=NS(list=lambda: [zone]),
+        virtual_network_links=NS(list=lambda rg, name: [link]),
+        record_sets=NS(list=lambda rg, name: [record]),
+    )
+    privatedns = ModuleType("azure.mgmt.privatedns")
+    privatedns.PrivateDnsManagementClient = lambda **kw: client
+    monkeypatch.setitem(sys.modules, "azure.mgmt.privatedns", privatedns)
+
+    table = {
+        r["id"].lower(): r
+        for r in (
+            _vnet_row(VNET, "10.0.0.0/16", [NIC_CONFIG], peers=[SPOKE]),
+            _vnet_row(SPOKE, "10.1.0.0/16"),
+            _vnet_row(ELSEWHERE, "10.0.0.0/16"),
+        )
+    }
+    vnet_queries = []
+
+    def fake_query_all(graph, scope, query):
+        if "virtualnetworks'" in query:
+            vnet_queries.append(query)
+            return {"rows": [r for i, r in table.items() if f"@'{i}'" in query.lower()]}
+        if "isnull(properties.privateEndpoint)" in query:  # another VM's NIC at the same IP elsewhere
+            return {"rows": [{"id": "vm-nic", "ip": "10.0.0.4", "subnet_id": f"{ELSEWHERE}/subnets/default"}]}
+        return {"rows": []}
+
+    monkeypatch.setattr(dns, "query_all", fake_query_all)
+    monkeypatch.setattr(dns, "resource_graph_client", lambda cred: object())
+    monkeypatch.setattr(dns, "readable_scopes", lambda cred, collector: DNS_SCOPES)
+    collector = azure_common.Collector(dns.logger)
+    [out], _, _ = dns.collect_zones(SUB, object(), collector)
+
+    assert collector.ok
+    assert len(vnet_queries) == 2 and "elsewhere" not in " ".join(vnet_queries).lower()
+    assert f"@'{SPOKE.lower()}'" in vnet_queries[1]
+    [rec] = out["record_sets"]
+    assert rec["private_endpoint_status"] == "stale" and rec["ip_address_networks"] == {"10.0.0.4": [VNET.lower()]}
+
+
+def test_unread_endpoint_nic_leaves_private_ips_unknown():
+    endpoint = {"id": "pe", "name": "pe", "subnet_id": None, "connections": [], "network_interface_ids": ["/nic1"]}
+    assert pe.endpoint_record(endpoint, [], {}, {"/nic1"}, {}, set(), None)["private_ip_addresses"] is None
+    read = {"/nic1": {"ip_configurations": [{"properties": {"privateIPAddress": "10.0.1.4"}}]}}
+    assert pe.endpoint_record(endpoint, [], read, set(), {}, set(), None)["private_ip_addresses"] == ["10.0.1.4"]

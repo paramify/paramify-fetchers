@@ -1,5 +1,5 @@
 name: azure_private_endpoint_configuration
-version: 0.1.0
+version: 0.1.1
 description: >
   Inventories Azure private endpoints (Microsoft.Network/privateEndpoints) in the subscription. For
   every endpoint: the target resource and sub-resource (group id) it connects to, the connection's
@@ -90,7 +90,9 @@ evidence_set:
     one is attached. It says the NSG is in the path, not what its rules allow; the rules themselves
     are evidenced by azure_network_security_groups. summary.endpoint_subnets_with_nsg_not_applied counts subnets with an
     NSG attached that Azure does not apply to their endpoints. private_ip_addresses come from the endpoint's
-    network interfaces. summary.approved_endpoints over summary.total_private_endpoints is approval
+    network interfaces, and are null (unknown, never an empty list) when one of them was not read: its
+    lookup failed (recorded in metadata.failures and setting metadata.partial_failure) or Resource Graph
+    did not return it. summary.approved_endpoints over summary.total_private_endpoints is approval
     coverage; summary.target_resources_public_access_disabled over summary.target_resources_found is
     the share of private-linked services closed to the public internet;
     summary.target_resources_public_access_enabled and summary.target_resources_public_access_unset
