@@ -49,7 +49,7 @@ evidence_set:
   reference_id: EVD-AZURE-PRIVATE-ENDPOINT-CONFIG
   name: Azure Private Endpoint Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-network NetworkManagementClient
+    Script: azure/private_endpoint_configuration/fetcher.py. Azure SDK calls: azure-mgmt-network NetworkManagementClient
     private_endpoints.list_by_subscription(), and private_dns_zone_groups.list(endpoint, resource_group)
     for each endpoint (a failed zone-group list leaves has_private_dns_zone_group null, counted in
     endpoints_private_dns_zone_group_unknown and in endpoints_without_private_dns_zone_group, never
