@@ -12,6 +12,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Evidence samples for 84 fetchers.** Each one is a `sample.json` beside the
+  fetcher's `fetcher.yaml`. A sample shows one sanitized record from a live run
+  in a test account, for AWS, Azure, GCP and the demo fetchers. Use
+  `paramify samples show <fetcher>` to read one. No sample is reviewed yet, and
+  12 come from an earlier fetcher version. `paramify samples status` marks both.
+  See [`docs/evidence_samples.md`](docs/evidence_samples.md).
+- **Shell tab completion.** `paramify --install-completion` installs completion
+  for commands and options. `paramify samples show <Tab>` completes the names of
+  the fetchers that have a sample. See
+  [`docs/cli_guide.md`](docs/cli_guide.md#tab-completion).
 - **CI regression tests for the terminal UI and the demo CLI path.** A new
   `tui` job runs the TUI's tests on the lowest (8.0.0) and latest textual 8, and
   `--fail-on-skip` fails it if any of them skipped or xfailed, so a broken `tui`
