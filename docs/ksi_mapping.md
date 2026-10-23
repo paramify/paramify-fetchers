@@ -64,7 +64,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-17.3`, `ac-18.1`, `ac-18.3`, `ac-20.1`, `ca-9`, `sc-7.3`, `sc-7.4`, `sc-7.5`, `sc-7.8`, `sc-8`, `sc-10`, `si-10`, `si-11`, `si-16`
 
-*35 fetchers:* [`aws_ec2_public_exposure`](../fetchers/aws/ec2_public_exposure), [`aws_security_groups`](../fetchers/aws/security_groups), [`azure_ai_hub_configuration`](../fetchers/azure/ai_hub_configuration), [`azure_ai_services_configuration`](../fetchers/azure/ai_services_configuration), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_api_management_configuration`](../fetchers/azure/api_management_configuration), [`azure_app_gateway_tls_listeners`](../fetchers/azure/app_gateway_tls_listeners), [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration), [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration), [`azure_data_services_configuration`](../fetchers/azure/data_services_configuration), [`azure_databricks_workspace_configuration`](../fetchers/azure/databricks_workspace_configuration), [`azure_front_door_tls`](../fetchers/azure/front_door_tls), [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage), [`azure_front_door_waf_policies`](../fetchers/azure/front_door_waf_policies), [`azure_function_app_configuration`](../fetchers/azure/function_app_configuration), [`azure_key_vault_configuration`](../fetchers/azure/key_vault_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_network_security_groups`](../fetchers/azure/network_security_groups), [`azure_private_endpoint_configuration`](../fetchers/azure/private_endpoint_configuration), [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration), [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration), [`azure_vm_hardening_status`](../fetchers/azure/vm_hardening_status), [`crowdstrike_firewall_policies`](../fetchers/crowdstrike/firewall_policies), [`gcp_cloud_sql_network_configuration`](../fetchers/gcp/cloud_sql_network_configuration), [`gcp_compute_instance_configuration`](../fetchers/gcp/compute_instance_configuration), [`gcp_firewall_rules`](../fetchers/gcp/firewall_rules), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`k8s_eks_microservice_segmentation`](../fetchers/k8s/eks_microservice_segmentation), [`k8s_kubectl_security`](../fetchers/k8s/kubectl_security), [`oci_compute_instances`](../fetchers/oci/compute_instances), [`oci_data_service_exposure`](../fetchers/oci/data_service_exposure), [`oci_network_exposure`](../fetchers/oci/network_exposure), [`wiz_attack_surface_findings`](../fetchers/wiz/attack_surface_findings)
+*36 fetchers:* [`aws_ec2_public_exposure`](../fetchers/aws/ec2_public_exposure), [`aws_security_groups`](../fetchers/aws/security_groups), [`azure_ai_hub_configuration`](../fetchers/azure/ai_hub_configuration), [`azure_ai_services_configuration`](../fetchers/azure/ai_services_configuration), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_api_management_configuration`](../fetchers/azure/api_management_configuration), [`azure_app_gateway_tls_listeners`](../fetchers/azure/app_gateway_tls_listeners), [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration), [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration), [`azure_data_services_configuration`](../fetchers/azure/data_services_configuration), [`azure_databricks_workspace_configuration`](../fetchers/azure/databricks_workspace_configuration), [`azure_dns_configuration`](../fetchers/azure/dns_configuration), [`azure_front_door_tls`](../fetchers/azure/front_door_tls), [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage), [`azure_front_door_waf_policies`](../fetchers/azure/front_door_waf_policies), [`azure_function_app_configuration`](../fetchers/azure/function_app_configuration), [`azure_key_vault_configuration`](../fetchers/azure/key_vault_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_network_security_groups`](../fetchers/azure/network_security_groups), [`azure_private_endpoint_configuration`](../fetchers/azure/private_endpoint_configuration), [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration), [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration), [`azure_vm_hardening_status`](../fetchers/azure/vm_hardening_status), [`crowdstrike_firewall_policies`](../fetchers/crowdstrike/firewall_policies), [`gcp_cloud_sql_network_configuration`](../fetchers/gcp/cloud_sql_network_configuration), [`gcp_compute_instance_configuration`](../fetchers/gcp/compute_instance_configuration), [`gcp_firewall_rules`](../fetchers/gcp/firewall_rules), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`k8s_eks_microservice_segmentation`](../fetchers/k8s/eks_microservice_segmentation), [`k8s_kubectl_security`](../fetchers/k8s/kubectl_security), [`oci_compute_instances`](../fetchers/oci/compute_instances), [`oci_data_service_exposure`](../fetchers/oci/data_service_exposure), [`oci_network_exposure`](../fetchers/oci/network_exposure), [`wiz_attack_surface_findings`](../fetchers/wiz/attack_surface_findings)
 
 #### `KSI-CNA-OFA` — Optimizing for Availability
 
@@ -78,7 +78,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-17.3`, `ca-9`, `cm-7.1`, `sc-7.5`, `si-8`
 
-*30 fetchers:* [`aws_network_acls`](../fetchers/aws/network_acls), [`aws_network_firewall_rules`](../fetchers/aws/network_firewall_rules), [`aws_security_groups`](../fetchers/aws/security_groups), [`azure_ai_hub_configuration`](../fetchers/azure/ai_hub_configuration), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_api_management_configuration`](../fetchers/azure/api_management_configuration), [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage), [`azure_front_door_waf_policies`](../fetchers/azure/front_door_waf_policies), [`azure_key_vault_configuration`](../fetchers/azure/key_vault_configuration), [`azure_managed_redis_configuration`](../fetchers/azure/managed_redis_configuration), [`azure_network_security_groups`](../fetchers/azure/network_security_groups), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_private_dns_zone_configuration`](../fetchers/azure/private_dns_zone_configuration), [`azure_private_endpoint_configuration`](../fetchers/azure/private_endpoint_configuration), [`azure_redis_cache_configuration`](../fetchers/azure/redis_cache_configuration), [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`azure_virtual_wan_configuration`](../fetchers/azure/virtual_wan_configuration), [`azure_vnet_egress_routing`](../fetchers/azure/vnet_egress_routing), [`azure_vpn_gateway_configuration`](../fetchers/azure/vpn_gateway_configuration), [`crowdstrike_firewall_policies`](../fetchers/crowdstrike/firewall_policies), [`gcp_cloud_sql_network_configuration`](../fetchers/gcp/cloud_sql_network_configuration), [`gcp_firewall_rules`](../fetchers/gcp/firewall_rules), [`oci_data_service_exposure`](../fetchers/oci/data_service_exposure), [`oci_network_exposure`](../fetchers/oci/network_exposure), [`oci_zpr_policies`](../fetchers/oci/zpr_policies), [`wiz_tenant_security_settings`](../fetchers/wiz/tenant_security_settings)
+*31 fetchers:* [`aws_network_acls`](../fetchers/aws/network_acls), [`aws_network_firewall_rules`](../fetchers/aws/network_firewall_rules), [`aws_security_groups`](../fetchers/aws/security_groups), [`azure_ai_hub_configuration`](../fetchers/azure/ai_hub_configuration), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_api_management_configuration`](../fetchers/azure/api_management_configuration), [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_front_door_origins`](../fetchers/azure/front_door_origins), [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage), [`azure_front_door_waf_policies`](../fetchers/azure/front_door_waf_policies), [`azure_key_vault_configuration`](../fetchers/azure/key_vault_configuration), [`azure_managed_redis_configuration`](../fetchers/azure/managed_redis_configuration), [`azure_network_security_groups`](../fetchers/azure/network_security_groups), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_private_dns_zone_configuration`](../fetchers/azure/private_dns_zone_configuration), [`azure_private_endpoint_configuration`](../fetchers/azure/private_endpoint_configuration), [`azure_redis_cache_configuration`](../fetchers/azure/redis_cache_configuration), [`azure_sql_server_configuration`](../fetchers/azure/sql_server_configuration), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`azure_virtual_wan_configuration`](../fetchers/azure/virtual_wan_configuration), [`azure_vnet_egress_routing`](../fetchers/azure/vnet_egress_routing), [`azure_vpn_gateway_configuration`](../fetchers/azure/vpn_gateway_configuration), [`crowdstrike_firewall_policies`](../fetchers/crowdstrike/firewall_policies), [`gcp_cloud_sql_network_configuration`](../fetchers/gcp/cloud_sql_network_configuration), [`gcp_firewall_rules`](../fetchers/gcp/firewall_rules), [`oci_data_service_exposure`](../fetchers/oci/data_service_exposure), [`oci_network_exposure`](../fetchers/oci/network_exposure), [`oci_zpr_policies`](../fetchers/oci/zpr_policies), [`wiz_tenant_security_settings`](../fetchers/wiz/tenant_security_settings)
 
 #### `KSI-CNA-RVP` — Reviewing Protections
 
@@ -94,7 +94,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-12`, `ac-17.3`, `ca-9`, `sc-4`, `sc-7`, `sc-7.7`, `sc-8`, `sc-10`
 
-*17 fetchers:* [`aws_network_acls`](../fetchers/aws/network_acls), [`aws_network_firewall_rules`](../fetchers/aws/network_firewall_rules), [`aws_vpc_network_segmentation`](../fetchers/aws/vpc_network_segmentation), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration), [`azure_databricks_workspace_configuration`](../fetchers/azure/databricks_workspace_configuration), [`azure_network_security_groups`](../fetchers/azure/network_security_groups), [`azure_private_dns_zone_configuration`](../fetchers/azure/private_dns_zone_configuration), [`azure_private_endpoint_configuration`](../fetchers/azure/private_endpoint_configuration), [`azure_virtual_wan_configuration`](../fetchers/azure/virtual_wan_configuration), [`azure_vnet_egress_routing`](../fetchers/azure/vnet_egress_routing), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`gcp_vpc_network_configuration`](../fetchers/gcp/vpc_network_configuration), [`k8s_eks_microservice_segmentation`](../fetchers/k8s/eks_microservice_segmentation), [`k8s_kubectl_security`](../fetchers/k8s/kubectl_security), [`oci_zpr_policies`](../fetchers/oci/zpr_policies)
+*18 fetchers:* [`aws_network_acls`](../fetchers/aws/network_acls), [`aws_network_firewall_rules`](../fetchers/aws/network_firewall_rules), [`aws_vpc_network_segmentation`](../fetchers/aws/vpc_network_segmentation), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration), [`azure_databricks_workspace_configuration`](../fetchers/azure/databricks_workspace_configuration), [`azure_network_security_groups`](../fetchers/azure/network_security_groups), [`azure_private_dns_zone_configuration`](../fetchers/azure/private_dns_zone_configuration), [`azure_private_endpoint_configuration`](../fetchers/azure/private_endpoint_configuration), [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`azure_virtual_wan_configuration`](../fetchers/azure/virtual_wan_configuration), [`azure_vnet_egress_routing`](../fetchers/azure/vnet_egress_routing), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`gcp_vpc_network_configuration`](../fetchers/gcp/vpc_network_configuration), [`k8s_eks_microservice_segmentation`](../fetchers/k8s/eks_microservice_segmentation), [`k8s_kubectl_security`](../fetchers/k8s/kubectl_security), [`oci_zpr_policies`](../fetchers/oci/zpr_policies)
 
 ### SVC — Service Configuration  (7/7)
 
@@ -228,7 +228,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2.5`, `ac-2.6`, `ac-3`, `ac-4`, `ac-6`, `ac-12`, `ac-14`, `ac-17`, `ac-17.1`, `ac-17.2`, `ac-17.3`, `ac-20`, `ac-20.1`, `cm-2.7`, `cm-9`, `ia-2`, `ia-3`, `ia-4`, `ia-4.4`, `ia-5.2`, `ia-5.6`, `ia-11`, `ps-2`, `ps-3`, `ps-4`, `ps-5`, `ps-6`, `sc-4`, `sc-20`, `sc-21`, `sc-22`, `sc-23`, `sc-39`, `si-3`
 
-*26 fetchers:* [`aws_access_analyzer_findings`](../fetchers/aws/access_analyzer_findings), [`aws_iam_policies`](../fetchers/aws/iam_policies), [`aws_iam_roles`](../fetchers/aws/iam_roles), [`aws_iam_users_groups`](../fetchers/aws/iam_users_groups), [`aws_organizations_scp`](../fetchers/aws/organizations_scp), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration), [`azure_data_services_configuration`](../fetchers/azure/data_services_configuration), [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_entra_privileged_roles`](../fetchers/azure/entra_privileged_roles), [`azure_key_vault_configuration`](../fetchers/azure/key_vault_configuration), [`azure_managed_identity_configuration`](../fetchers/azure/managed_identity_configuration), [`azure_rbac_custom_roles`](../fetchers/azure/rbac_custom_roles), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`gcp_api_keys_inventory`](../fetchers/gcp/api_keys_inventory), [`gcp_bigquery_dataset_configuration`](../fetchers/gcp/bigquery_dataset_configuration), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`gcp_iam_custom_roles`](../fetchers/gcp/iam_custom_roles), [`gcp_iam_policy_bindings`](../fetchers/gcp/iam_policy_bindings), [`gcp_iam_service_accounts`](../fetchers/gcp/iam_service_accounts), [`oci_bastion_sessions`](../fetchers/oci/bastion_sessions), [`oci_iam_policies`](../fetchers/oci/iam_policies), [`oci_iam_users_credentials`](../fetchers/oci/iam_users_credentials), [`oci_object_storage_buckets`](../fetchers/oci/object_storage_buckets), [`okta_least_privilege`](../fetchers/okta/least_privilege), [`sentinelone_user_config`](../fetchers/sentinelone/user_config)
+*27 fetchers:* [`aws_access_analyzer_findings`](../fetchers/aws/access_analyzer_findings), [`aws_iam_policies`](../fetchers/aws/iam_policies), [`aws_iam_roles`](../fetchers/aws/iam_roles), [`aws_iam_users_groups`](../fetchers/aws/iam_users_groups), [`aws_organizations_scp`](../fetchers/aws/organizations_scp), [`azure_aks_cluster_configuration`](../fetchers/azure/aks_cluster_configuration), [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration), [`azure_data_services_configuration`](../fetchers/azure/data_services_configuration), [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_entra_privileged_roles`](../fetchers/azure/entra_privileged_roles), [`azure_key_vault_configuration`](../fetchers/azure/key_vault_configuration), [`azure_managed_identity_configuration`](../fetchers/azure/managed_identity_configuration), [`azure_rbac_custom_roles`](../fetchers/azure/rbac_custom_roles), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`gcp_api_keys_inventory`](../fetchers/gcp/api_keys_inventory), [`gcp_bigquery_dataset_configuration`](../fetchers/gcp/bigquery_dataset_configuration), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`gcp_iam_custom_roles`](../fetchers/gcp/iam_custom_roles), [`gcp_iam_policy_bindings`](../fetchers/gcp/iam_policy_bindings), [`gcp_iam_service_accounts`](../fetchers/gcp/iam_service_accounts), [`jira_access_roles`](../fetchers/jira/access_roles), [`oci_bastion_sessions`](../fetchers/oci/bastion_sessions), [`oci_iam_policies`](../fetchers/oci/iam_policies), [`oci_iam_users_credentials`](../fetchers/oci/iam_users_credentials), [`oci_object_storage_buckets`](../fetchers/oci/object_storage_buckets), [`okta_least_privilege`](../fetchers/okta/least_privilege), [`sentinelone_user_config`](../fetchers/sentinelone/user_config)
 
 #### `KSI-IAM-JIT` — Authorizing Just-in-Time
 
@@ -252,7 +252,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2`, `ac-2.1`, `ac-2.3`, `ac-2.13`, `ac-7`, `ps-4`, `ps-8`
 
-*4 fetchers:* [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules), [`okta_suspicious_activity_management`](../fetchers/okta/suspicious_activity_management), [`wiz_threat_detections`](../fetchers/wiz/threat_detections)
+*5 fetchers:* [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules), [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`okta_suspicious_activity_management`](../fetchers/okta/suspicious_activity_management), [`wiz_threat_detections`](../fetchers/wiz/threat_detections)
 
 ### CMT — Change Management  (3/3)
 
@@ -262,7 +262,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `au-2`, `cm-3`, `cm-3.2`, `cm-4.2`, `cm-6`, `cm-8.3`, `ma-2`
 
-*10 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`crowdstrike_filevantage`](../fetchers/crowdstrike/filevantage), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration), [`gitlab_merge_request_summary`](../fetchers/gitlab/merge_request_summary), [`gitlab_significant_change_notifications`](../fetchers/gitlab/significant_change_notifications), [`jira_site_inventory`](../fetchers/jira/site_inventory)
+*12 fetchers:* [`aws_cloudtrail_configuration`](../fetchers/aws/cloudtrail_configuration), [`aws_config_monitoring`](../fetchers/aws/config_monitoring), [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`azure_activity_log_alerts`](../fetchers/azure/activity_log_alerts), [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings), [`crowdstrike_filevantage`](../fetchers/crowdstrike/filevantage), [`gcp_cloud_logging_configuration`](../fetchers/gcp/cloud_logging_configuration), [`gitlab_merge_request_summary`](../fetchers/gitlab/merge_request_summary), [`gitlab_significant_change_notifications`](../fetchers/gitlab/significant_change_notifications), [`jira_audit_records`](../fetchers/jira/audit_records), [`jira_change_requests`](../fetchers/jira/change_requests), [`jira_site_inventory`](../fetchers/jira/site_inventory)
 
 #### `KSI-CMT-RMV` — Redeploying vs Modifying
 
@@ -296,7 +296,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2.3`, `cp-6`, `cp-9`, `cp-10`, `cp-10.2`, `si-12`
 
-*15 fetchers:* [`aws_backup_recovery_high_availability`](../fetchers/aws/backup_recovery_high_availability), [`aws_backup_validation`](../fetchers/aws/backup_validation), [`aws_dlm_lifecycle_policies`](../fetchers/aws/dlm_lifecycle_policies), [`aws_dynamodb_pitr_status`](../fetchers/aws/dynamodb_pitr_status), [`aws_ebs_snapshot_status`](../fetchers/aws/ebs_snapshot_status), [`azure_app_service_backups`](../fetchers/azure/app_service_backups), [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups), [`gcp_cloud_sql_backup_configuration`](../fetchers/gcp/cloud_sql_backup_configuration), [`gcp_cloud_sql_encryption_status`](../fetchers/gcp/cloud_sql_encryption_status), [`gcp_cloud_storage_encryption_status`](../fetchers/gcp/cloud_storage_encryption_status), [`oci_dr_plan_executions`](../fetchers/oci/dr_plan_executions)
+*16 fetchers:* [`aws_backup_recovery_high_availability`](../fetchers/aws/backup_recovery_high_availability), [`aws_backup_validation`](../fetchers/aws/backup_validation), [`aws_dlm_lifecycle_policies`](../fetchers/aws/dlm_lifecycle_policies), [`aws_dynamodb_pitr_status`](../fetchers/aws/dynamodb_pitr_status), [`aws_ebs_snapshot_status`](../fetchers/aws/ebs_snapshot_status), [`azure_app_service_backups`](../fetchers/azure/app_service_backups), [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_dns_configuration`](../fetchers/azure/dns_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups), [`gcp_cloud_sql_backup_configuration`](../fetchers/gcp/cloud_sql_backup_configuration), [`gcp_cloud_sql_encryption_status`](../fetchers/gcp/cloud_sql_encryption_status), [`gcp_cloud_storage_encryption_status`](../fetchers/gcp/cloud_storage_encryption_status), [`oci_dr_plan_executions`](../fetchers/oci/dr_plan_executions)
 
 #### ⬜ `KSI-RPL-ARP` — Aligning Recovery Plan
 
@@ -320,7 +320,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cp-2.1`, `cp-2.3`, `cp-4`, `cp-4.1`, `cp-6`, `cp-6.1`, `cp-9.1`, `cp-10`, `ir-3`, `ir-3.2`
 
-*1 fetcher:* [`oci_dr_plan_executions`](../fetchers/oci/dr_plan_executions)
+*4 fetchers:* [`azure_dns_configuration`](../fetchers/azure/dns_configuration), [`azure_front_door_origins`](../fetchers/azure/front_door_origins), [`jira_remediation_items`](../fetchers/jira/remediation_items), [`oci_dr_plan_executions`](../fetchers/oci/dr_plan_executions)
 
 ### PIY — Policy and Inventory  (1/1)
 
@@ -388,7 +388,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cp-3`, `ir-2`, `ps-6`, `at-2`, `at-2.2`, `at-2.3`, `at-3.5`, `at-4`, `ir-2.3`, `at-3`, `sr-11.1`
 
-*4 fetchers:* [`knowbe4_developer_specific_training`](../fetchers/knowbe4/developer_specific_training), [`knowbe4_high_risk_training`](../fetchers/knowbe4/high_risk_training), [`knowbe4_module_based_summary`](../fetchers/knowbe4/module_based_summary), [`knowbe4_security_awareness_training`](../fetchers/knowbe4/security_awareness_training)
+*8 fetchers:* [`cornerstone_incident_response_training`](../fetchers/cornerstone/incident_response_training), [`cornerstone_role_based_training`](../fetchers/cornerstone/role_based_training), [`cornerstone_secure_development_training`](../fetchers/cornerstone/secure_development_training), [`cornerstone_security_awareness_training`](../fetchers/cornerstone/security_awareness_training), [`knowbe4_developer_specific_training`](../fetchers/knowbe4/developer_specific_training), [`knowbe4_high_risk_training`](../fetchers/knowbe4/high_risk_training), [`knowbe4_module_based_summary`](../fetchers/knowbe4/module_based_summary), [`knowbe4_security_awareness_training`](../fetchers/knowbe4/security_awareness_training)
 
 ### INR — Incident Response  (2/2)
 
@@ -398,7 +398,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ir-3`, `ir-4`, `ir-4.1`, `ir-8`
 
-*1 fetcher:* [`datadog_incident_timelines`](../fetchers/datadog/incident_timelines)
+*3 fetchers:* [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`datadog_incident_timelines`](../fetchers/datadog/incident_timelines), [`jira_incident_postmortems`](../fetchers/jira/incident_postmortems)
 
 #### ⬜ `KSI-INR-RIR` — Reviewing Incident Response Procedures
 
@@ -414,11 +414,11 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ir-3`, `ir-4`, `ir-4.1`, `ir-5`, `ir-8`
 
-*4 fetchers:* [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`datadog_incidents_list`](../fetchers/datadog/incidents_list), [`jira_site_inventory`](../fetchers/jira/site_inventory), [`wiz_threat_detections`](../fetchers/wiz/threat_detections)
+*5 fetchers:* [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents), [`datadog_incidents_list`](../fetchers/datadog/incidents_list), [`jira_incident_postmortems`](../fetchers/jira/incident_postmortems), [`jira_site_inventory`](../fetchers/jira/site_inventory), [`wiz_threat_detections`](../fetchers/wiz/threat_detections)
 
 ## By fetcher
 
-264 of 275 fetchers carry a mapping.
+273 of 284 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -536,14 +536,14 @@ python tools/gen_ksi_mapping.py
 | [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines) | `KSI-CMT-RMV`, `KSI-CMT-VTD`, `KSI-SVC-VRI` |
 | [`azure_diagnostic_settings`](../fetchers/azure/diagnostic_settings) | `KSI-CMT-LMC`, `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_disk_encryption_status`](../fetchers/azure/disk_encryption_status) | `KSI-SVC-SIN` |
-| [`azure_dns_configuration`](../fetchers/azure/dns_configuration) | `KSI-SVC-SIN` |
+| [`azure_dns_configuration`](../fetchers/azure/dns_configuration) | `KSI-CNA-MAT`, `KSI-RPL-ABO`, `KSI-RPL-TRC`, `KSI-SVC-SIN` |
 | [`azure_entra_app_registrations`](../fetchers/azure/entra_app_registrations) | `KSI-IAM-SNU`, `KSI-SVC-ASM` |
 | [`azure_entra_authentication_policy`](../fetchers/azure/entra_authentication_policy) | `KSI-IAM-APM` |
 | [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies) | `KSI-IAM-ELP`, `KSI-IAM-JIT`, `KSI-IAM-SUS` |
 | [`azure_entra_mfa_status`](../fetchers/azure/entra_mfa_status) | `KSI-IAM-APM` |
 | [`azure_entra_privileged_roles`](../fetchers/azure/entra_privileged_roles) | `KSI-IAM-ELP` |
 | [`azure_entra_service_principals`](../fetchers/azure/entra_service_principals) | `KSI-IAM-SNU` |
-| [`azure_front_door_origins`](../fetchers/azure/front_door_origins) | `KSI-CNA-OFA`, `KSI-SVC-VCM` |
+| [`azure_front_door_origins`](../fetchers/azure/front_door_origins) | `KSI-CNA-OFA`, `KSI-CNA-RNT`, `KSI-RPL-TRC`, `KSI-SVC-VCM` |
 | [`azure_front_door_tls`](../fetchers/azure/front_door_tls) | `KSI-CNA-MAT`, `KSI-SVC-SIN` |
 | [`azure_front_door_waf_coverage`](../fetchers/azure/front_door_waf_coverage) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-RVP`, `KSI-MLA-LET` |
 | [`azure_front_door_waf_policies`](../fetchers/azure/front_door_waf_policies) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-RVP` |
@@ -573,7 +573,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_sentinel_analytics_rules`](../fetchers/azure/sentinel_analytics_rules) | `KSI-MLA-OSM`, `KSI-MLA-RVL` |
 | [`azure_sentinel_automation_rules`](../fetchers/azure/sentinel_automation_rules) | `KSI-IAM-SUS`, `KSI-MLA-RVL` |
 | [`azure_sentinel_data_sources`](../fetchers/azure/sentinel_data_sources) | `KSI-MLA-LET`, `KSI-MLA-OSM` |
-| [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents) | `KSI-INR-RPI`, `KSI-MLA-RVL` |
+| [`azure_sentinel_incidents`](../fetchers/azure/sentinel_incidents) | `KSI-CNA-ULN`, `KSI-IAM-SUS`, `KSI-INR-AAR`, `KSI-INR-RPI`, `KSI-MLA-RVL` |
 | [`azure_sql_encryption_status`](../fetchers/azure/sql_encryption_status) | `KSI-SVC-SIN` |
 | [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups) | `KSI-CNA-OFA`, `KSI-RPL-ABO` |
 | [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration) | `KSI-CNA-MAT`, `KSI-IAM-APM`, `KSI-MLA-LET`, `KSI-SVC-SIN` |
@@ -598,6 +598,15 @@ python tools/gen_ksi_mapping.py
 | [`checkov_bicep`](../fetchers/checkov/bicep) | `KSI-MLA-EVC` |
 | [`checkov_kubernetes`](../fetchers/checkov/kubernetes) | `KSI-MLA-EVC` |
 | [`checkov_terraform`](../fetchers/checkov/terraform) | `KSI-MLA-EVC` |
+
+### cornerstone  (4)
+
+| Fetcher | Indicators |
+|---|---|
+| [`cornerstone_incident_response_training`](../fetchers/cornerstone/incident_response_training) | `KSI-CED-RAT` |
+| [`cornerstone_role_based_training`](../fetchers/cornerstone/role_based_training) | `KSI-CED-RAT` |
+| [`cornerstone_secure_development_training`](../fetchers/cornerstone/secure_development_training) | `KSI-CED-RAT` |
+| [`cornerstone_security_awareness_training`](../fetchers/cornerstone/security_awareness_training) | `KSI-CED-RAT` |
 
 ### crowdstrike  (7)
 
@@ -662,10 +671,15 @@ python tools/gen_ksi_mapping.py
 | [`gitlab_project_summary`](../fetchers/gitlab/project_summary) | `KSI-PIY-GIV` |
 | [`gitlab_significant_change_notifications`](../fetchers/gitlab/significant_change_notifications) | `KSI-CMT-LMC` |
 
-### jira  (1)
+### jira  (6)
 
 | Fetcher | Indicators |
 |---|---|
+| [`jira_access_roles`](../fetchers/jira/access_roles) | `KSI-IAM-ELP` |
+| [`jira_audit_records`](../fetchers/jira/audit_records) | `KSI-CMT-LMC` |
+| [`jira_change_requests`](../fetchers/jira/change_requests) | `KSI-CMT-LMC` |
+| [`jira_incident_postmortems`](../fetchers/jira/incident_postmortems) | `KSI-INR-AAR`, `KSI-INR-RPI` |
+| [`jira_remediation_items`](../fetchers/jira/remediation_items) | `KSI-RPL-TRC` |
 | [`jira_site_inventory`](../fetchers/jira/site_inventory) | `KSI-CMT-LMC`, `KSI-INR-RPI` |
 
 ### k8s  (3)

@@ -1,0 +1,110 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_database_high_availability",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 3,
+      "fields": {
+        "Type": 3,
+        "ClusterInfo": 3
+      }
+    },
+    {
+      "path": "results[].ClusterInfo.VpcSecurityGroups[]",
+      "records": 3,
+      "fields": {
+        "VpcSecurityGroupId": 3,
+        "Status": 3
+      }
+    },
+    {
+      "path": "results[].ClusterInfo.TagList[]",
+      "records": 6,
+      "fields": {
+        "Key": 6,
+        "Value": 6
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:32Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "Type": "Aurora_Cluster",
+        "ClusterInfo": {
+          "AllocatedStorage": 1,
+          "AvailabilityZones": [
+            "us-east-2b",
+            "us-east-2c",
+            "us-east-2a"
+          ],
+          "BackupRetentionPeriod": 1,
+          "DBClusterIdentifier": "pft-aurora",
+          "DBClusterParameterGroup": "default.aurora-postgresql17",
+          "DBSubnetGroup": "pft-private",
+          "Status": "available",
+          "EarliestRestorableTime": "2026-09-28T17:04:40.801000+00:00",
+          "Endpoint": "pft-aurora.cluster-cnsma2m2m7rf.us-east-2.rds.amazonaws.com",
+          "ReaderEndpoint": "pft-aurora.cluster-ro-cnsma2m2m7rf.us-east-2.rds.amazonaws.com",
+          "MultiAZ": false,
+          "Engine": "aurora-postgresql",
+          "EngineVersion": "17.9",
+          "LatestRestorableTime": "2026-09-28T17:04:40.801000+00:00",
+          "Port": 5432,
+          "MasterUsername": "pftadmin",
+          "PreferredBackupWindow": "05:01-05:31",
+          "PreferredMaintenanceWindow": "sun:08:50-sun:09:20",
+          "UpgradeRolloutOrder": "second",
+          "ReadReplicaIdentifiers": [],
+          "DBClusterMembers": [],
+          "VpcSecurityGroups": [
+            {
+              "VpcSecurityGroupId": "sg-00acb6f4c9e5477ee",
+              "Status": "active"
+            }
+          ],
+          "HostedZoneId": "Z2XHWR1WZ565X2",
+          "StorageEncrypted": true,
+          "StorageEncryptionType": "sse-kms",
+          "KmsKeyId": "arn:aws:kms:us-east-2:111111111111:key/00000000-0000-4000-8000-222222222222",
+          "DbClusterResourceId": "cluster-AORUZOFALOXFVUSJ7QKIQIYFTU",
+          "DBClusterArn": "arn:aws:rds:us-east-2:111111111111:cluster:pft-aurora",
+          "AssociatedRoles": [],
+          "IAMDatabaseAuthenticationEnabled": false,
+          "ClusterCreateTime": "2026-09-28T17:04:19.653000+00:00",
+          "EngineMode": "provisioned",
+          "AutoMinorVersionUpgrade": true,
+          "DeletionProtection": false,
+          "HttpEndpointEnabled": false,
+          "ActivityStreamStatus": "stopped",
+          "CopyTagsToSnapshot": false,
+          "CrossAccountClone": false,
+          "DomainMemberships": [],
+          "TagList": [
+            {
+              "Key": "Project",
+              "Value": "example-example-profile"
+            }
+          ],
+          "NetworkType": "IPV4",
+          "DatabaseInsightsMode": "standard",
+          "LocalWriteForwardingStatus": "disabled",
+          "EngineLifecycleSupport": "open-source-rds-extended-support",
+          "VPCNetworkingEnabled": true,
+          "InternetAccessGatewayEnabled": false
+        }
+      }
+    ]
+  }
+}

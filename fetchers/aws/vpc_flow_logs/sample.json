@@ -1,0 +1,58 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_vpc_flow_logs",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 3,
+      "fields": {
+        "Id": 3,
+        "Name": 2,
+        "Default": 3,
+        "CidrBlock": 3,
+        "FlowLogsEnabled": 3,
+        "FlowLogs": 1
+      }
+    },
+    {
+      "path": "results[].FlowLogs[]",
+      "records": 1,
+      "fields": {
+        "Destination": 1,
+        "LogDestination": 1,
+        "TrafficType": 1,
+        "Status": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:13:35Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "Id": "vpc-0effedbf104e8ed6f",
+        "Name": "pft-main",
+        "Default": false,
+        "CidrBlock": "10.0.0.1/16",
+        "FlowLogsEnabled": true,
+        "FlowLogs": [
+          {
+            "Destination": "s3",
+            "LogDestination": "arn:aws:s3:::pft-111111111111-e25deb-logs/vpc-flow-logs/",
+            "TrafficType": "ALL",
+            "Status": "ACTIVE"
+          }
+        ]
+      }
+    ]
+  }
+}

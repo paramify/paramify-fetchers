@@ -1,0 +1,545 @@
+#!/usr/bin/env python3
+"""Jira incidents: severity, category, reporting times, response phases, post-mortems and their action items."""
+
+import logging
+import math
+import os
+import re
+import sys
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+
+from jira_common import (  # noqa: E402
+    Abort,
+    JiraClient,
+    all_field_ids,
+    collector_info,
+    connection_settings,
+    counts,
+    disabled_roles,
+    fetch_issues,
+    field_problem_reason,
+    in_offset_of,
+    int_env,
+    invalid_roles,
+    is_date_only,
+    json_env,
+    list_env,
+    name_of,
+    null_summary,
+    number_stats,
+    parse_ts,
+    report_failure,
+    resolve_fields,
+    role_values,
+    ts_sort_key,
+    utc_now,
+    write_and_finish,
+    zone_of,
+)
+
+logger = logging.getLogger("jira_incident_postmortems")
+
+OUTPUT_FILE = "jira_incident_postmortems.json"
+
+DEFAULT_FIELDS = {
+    "severity": "Severity",
+    "category": "Incident Category",
+    "detected_at": "Detected At",
+    "reported_at": "Reported At",
+    "phase": "Incident Phase",
+}
+INCIDENT_FIELDS = [
+    "summary",
+    "project",
+    "issuetype",
+    "status",
+    "priority",
+    "assignee",
+    "created",
+    "resolutiondate",
+    "resolution",
+    "issuelinks",
+]
+# Resolved incidents closed with these resolutions need no post-mortem.
+DEFAULT_NO_REVIEW = ["Won't Do", "Cancelled", "Canceled", "Duplicate", "False Positive", "Not an Incident"]
+POSTMORTEM_FIELDS = ["summary", "issuetype", "status", "created", "resolutiondate", "subtasks", "assignee"]
+ACTION_FIELDS = ["summary", "status", "assignee", "duedate", "created", "resolutiondate", "parent"]
+
+
+# Findings that cannot be produced when the field role they read is turned off
+# (an empty name in JIRA_INCIDENT_FIELDS). Listed in metadata.checks_disabled.
+FINDINGS_BY_FIELD = {
+    "detected_at": [
+        "missing_detected_time",
+        "report_time_not_measurable",
+        "detected_or_reported_time_unparseable",
+        "reported_before_detected",
+        "reported_late",
+        "category_notification_target_missed",
+    ],
+    "severity": ["missing_severity"],
+    "category": ["missing_category", "category_without_target", "category_notification_target_missed"],
+    "phase": ["phases_missing"],
+}
+
+
+def _checks_disabled(disabled_fields) -> list:
+    return sorted({f for role in disabled_fields for f in FINDINGS_BY_FIELD.get(role, [])})
+
+
+def _minutes_between(start, end):
+    """Minutes from start to end, or None when either is missing, unparseable or a
+    date without a time of day (a day has no minutes to measure)."""
+    a, b = parse_ts(start), parse_ts(end)
+    if not a or not b or is_date_only(start) or is_date_only(end):
+        return None
+    return round((b - a).total_seconds() / 60, 1)
+
+
+def _category_target(category, targets: dict):
+    """Target minutes for a category: exact name, else the longest whole-word prefix (case-insensitive)."""
+    if not category:
+        return None
+    lowered = {k.strip().lower(): v for k, v in targets.items()}
+    cat = category.strip().lower()
+    if cat in lowered:
+        return lowered[cat]
+    matches = [k for k in lowered if re.match(re.escape(k) + r"(?![0-9a-z])", cat)]
+    return lowered[max(matches, key=len)] if matches else None
+
+
+def _history(histories: list, phase_ids: set, reference=None, zone=None) -> tuple:
+    """(status moves, phase changes) oldest first, times in the issue's own timezone."""
+    moves, phases = [], []
+    for h in histories:
+        at = in_offset_of(h.get("created"), reference, zone)
+        for item in h.get("items") or []:
+            fid = item.get("fieldId") or item.get("field")
+            entry = {
+                "at": at,
+                "by": name_of(h.get("author"), "displayName"),
+                "from": item.get("fromString"),
+                "to": item.get("toString"),
+            }
+            if fid == "status":
+                moves.append(entry)
+            elif fid in phase_ids:
+                phases.append(entry)
+    key = lambda m: ts_sort_key(m["at"])  # noqa: E731
+    return sorted(moves, key=key), sorted(phases, key=key)
+
+
+def _linked_keys(f: dict, types: set = None) -> list:
+    """Keys of linked issues, optionally only those whose issue type is in `types` (lowercased)."""
+    keys = []
+    for link in f.get("issuelinks") or []:
+        if not isinstance(link, dict):
+            continue
+        other = link.get("outwardIssue") or link.get("inwardIssue") or {}
+        if not isinstance(other, dict) or not other.get("key"):
+            continue
+        if types is not None:
+            itype = name_of((other.get("fields") or {}).get("issuetype"))
+            if (itype or "").strip().lower() not in types:
+                continue
+        if other["key"] not in keys:
+            keys.append(other["key"])
+    return keys
+
+
+def _action_record(issue: dict, now) -> dict:
+    f = issue.get("fields") or {}
+    status = f.get("status") or {}
+    is_open = name_of(status.get("statusCategory"), "key") != "done"
+    due = f.get("duedate")
+    return {
+        "key": issue.get("key"),
+        "summary": f.get("summary"),
+        "postmortem": name_of(f.get("parent"), "key"),
+        "status": status.get("name"),
+        "is_open": is_open,
+        "assignee": name_of(f.get("assignee"), "displayName"),
+        "due_date": due,
+        "overdue": bool(is_open and due and due < now.date().isoformat()),
+        "resolved": f.get("resolutiondate"),
+    }
+
+
+def _incident_record(
+    issue, histories, ids, cfg, postmortems: dict, actions: dict, hidden: set,
+    history_known: bool = True, zone=None,
+) -> dict:
+    f = issue.get("fields") or {}
+    status = f.get("status") or {}
+    resolved = name_of(status.get("statusCategory"), "key") == "done"
+    resolution = name_of(f.get("resolution"))
+    no_review = resolved and (resolution or "").strip().lower() in cfg["no_review"]
+    custom = role_values(f, ids)
+    moves, phase_changes = _history(histories, set(ids.get("phase") or []), f.get("created"), zone)
+    # Checks that could not run because a read failed go to `unknown`, never to
+    # `findings`: a refused call is not evidence that something is missing.
+    unknown = []
+
+    detected = custom.get("detected_at")
+    reported = custom.get("reported_at") or f.get("created")
+    reported_source = "field" if custom.get("reported_at") else "created"
+    minutes = _minutes_between(detected, reported)
+    category = custom.get("category")
+    target = _category_target(category, cfg["category_targets"])
+
+    phases_seen = []
+    first = [phase_changes[0]["from"]] if phase_changes else []
+    for p in first + [c["to"] for c in phase_changes] + [custom.get("phase")]:
+        if p and p not in phases_seen:
+            phases_seen.append(p)
+
+    linked_pm = _linked_keys(f, cfg["postmortem_types"])
+    pm_keys = [k for k in linked_pm if k in postmortems]
+    pm_hidden = [k for k in linked_pm if k in hidden]
+    pm_records = [postmortems[k] for k in pm_keys]
+    action_items = [a for k in pm_keys for a in actions.get(k, [])]
+    severity = custom.get("severity")
+    required = resolved and not no_review and (
+        not cfg["required_severities"] or (severity or "").strip().lower() in cfg["required_severities"]
+    )
+
+    # Each check runs only when the field it reads is turned on; a turned-off
+    # field must not produce a finding (see metadata.checks_disabled).
+    findings = []
+    if "detected_at" in ids:
+        if not detected:
+            findings.append("missing_detected_time")
+        elif minutes is None and (is_date_only(detected) or is_date_only(reported)):
+            findings.append("report_time_not_measurable")
+        elif minutes is None:
+            findings.append("detected_or_reported_time_unparseable")
+        elif minutes < 0:
+            findings.append("reported_before_detected")
+        elif minutes > cfg["report_minutes"]:
+            findings.append("reported_late")
+    if target is not None and minutes is not None and minutes > target:
+        findings.append("category_notification_target_missed")
+    if "severity" in ids and not severity:
+        findings.append("missing_severity")
+    if "category" in ids:
+        if not category:
+            findings.append("missing_category")
+        elif cfg["category_targets"] and target is None:
+            findings.append("category_without_target")
+    missing_phases = [p for p in cfg["required_phases"] if p.lower() not in {x.lower() for x in phases_seen}]
+    if "phase" in ids and resolved and not no_review and missing_phases:
+        # Past phases live in the history; without it only the current phase is seen.
+        (findings if history_known else unknown).append("phases_missing" if history_known else "phases_unknown")
+    if required and not pm_keys:
+        if pm_hidden:
+            unknown.append("postmortem_not_visible")
+        else:
+            findings.append("resolved_without_postmortem")
+    # A post-mortem lists its sub-tasks even when they could not be read, so an
+    # unreadable action item is "not visible", never "no action items".
+    expected_actions = sum(p["action_item_count"] for p in pm_records)
+    if pm_keys and expected_actions == 0:
+        findings.append("postmortem_without_action_items")
+    elif pm_keys and len(action_items) < expected_actions:
+        unknown.append("action_items_not_visible")
+    if any(a["is_open"] and not a["assignee"] for a in action_items):
+        findings.append("unassigned_action_items")
+    if any(a["overdue"] for a in action_items):
+        findings.append("overdue_action_items")
+
+    return {
+        "key": issue.get("key"),
+        "summary": f.get("summary"),
+        "project": name_of(f.get("project"), "key"),
+        "issue_type": name_of(f.get("issuetype")),
+        "status": status.get("name"),
+        "resolved": resolved,
+        "resolution": resolution,
+        "resolved_at": f.get("resolutiondate"),
+        "created": f.get("created"),
+        "severity": severity,
+        "category": category,
+        "assignee": name_of(f.get("assignee"), "displayName"),
+        "detected_at": detected,
+        "reported_at": reported,
+        "reported_at_source": reported_source,
+        "minutes_to_report": minutes,
+        "report_window_minutes": cfg["report_minutes"],
+        "category_target_minutes": target,
+        "current_phase": custom.get("phase"),
+        "phases_seen": phases_seen,
+        "phases_missing": (missing_phases if resolved else []) if history_known else None,
+        "status_history_known": history_known,
+        "postmortem_required": required,
+        "postmortems": pm_records,
+        "action_items": action_items,
+        "status_transitions": moves,
+        "phase_changes": phase_changes,
+        "findings": findings,
+        "unknown": unknown,
+    }
+
+
+def _summarize(incidents: list, complete: bool = True, related_complete: bool = True) -> dict:
+    actions = [a for i in incidents for a in i["action_items"]]
+    timed = [i["minutes_to_report"] for i in incidents if i["minutes_to_report"] is not None]
+    resolved = [i for i in incidents if i["resolved"]]
+    summary = {
+        "incidents": len(incidents),
+        "open": len(incidents) - len(resolved),
+        "resolved": len(resolved),
+        "by_severity": counts(i["severity"] for i in incidents),
+        "by_category": counts(i["category"] for i in incidents),
+        "by_current_phase": counts(i["current_phase"] for i in incidents),
+        "minutes_to_report": number_stats(timed),
+        "reported_within_window": sum(
+            1 for i in incidents
+            if i["minutes_to_report"] is not None
+            and 0 <= i["minutes_to_report"] <= i["report_window_minutes"]
+        ),
+        "reported_time_from_ticket_created": sum(
+            1 for i in incidents if i["reported_at_source"] == "created"
+        ),
+        "incidents_without_report_timing": sum(
+            1 for i in incidents if i["minutes_to_report"] is None
+        ),
+        "reported_late": sum(1 for i in incidents if "reported_late" in i["findings"]),
+        "category_target_missed": sum(
+            1 for i in incidents if "category_notification_target_missed" in i["findings"]
+        ),
+        "missing_detected_time": sum(1 for i in incidents if "missing_detected_time" in i["findings"]),
+        "postmortem_required": sum(1 for i in incidents if i["postmortem_required"]),
+        "resolved_with_postmortem": sum(1 for i in resolved if i["postmortems"]),
+        "resolved_without_postmortem": sum(
+            1 for i in incidents if "resolved_without_postmortem" in i["findings"]
+        ),
+        "action_items": {
+            "total": len(actions),
+            "open": sum(1 for a in actions if a["is_open"]),
+            "done": sum(1 for a in actions if not a["is_open"]),
+            "open_unassigned": sum(1 for a in actions if a["is_open"] and not a["assignee"]),
+            "overdue": sum(1 for a in actions if a["overdue"]),
+        },
+        "findings": counts(f for i in incidents for f in i["findings"]),
+        "unknown": counts(u for i in incidents for u in i["unknown"]),
+        "incidents_with_unknown_checks": sum(1 for i in incidents if i["unknown"]),
+    }
+    if not related_complete:
+        # A refused post-mortem or action-item read must not read as "0 action items".
+        summary["action_items"] = null_summary(summary["action_items"])
+    # When the incident search did not finish, every count would read as "none found".
+    return summary if complete else null_summary(summary)
+
+
+def _config():
+    fields, err = json_env("JIRA_INCIDENT_FIELDS", {})
+    if err:
+        return None, err
+    unknown = sorted(set(fields) - set(DEFAULT_FIELDS))
+    if unknown:
+        return None, f"JIRA_INCIDENT_FIELDS has unknown keys: {', '.join(unknown)}"
+    targets, err = json_env("JIRA_INCIDENT_CATEGORY_TARGETS", {})
+    if err:
+        return None, err
+    if not all(
+        isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v > 0
+        for v in targets.values()
+    ):
+        return None, "JIRA_INCIDENT_CATEGORY_TARGETS values must be positive minutes"
+    report_minutes = int_env("JIRA_INCIDENT_REPORT_MINUTES", 60)
+    max_items = int_env("JIRA_INCIDENT_MAX_ITEMS", 1000)
+    if report_minutes is None or max_items is None:
+        return None, "JIRA_INCIDENT_REPORT_MINUTES and JIRA_INCIDENT_MAX_ITEMS must be positive integers"
+    merged = {**DEFAULT_FIELDS, **fields}
+    invalid = invalid_roles(merged)
+    if invalid:
+        return None, (
+            f"JIRA_INCIDENT_FIELDS values must be a field name, a customfield_ id or a list of "
+            f"ids; not so for: {', '.join(invalid)}"
+        )
+    disabled = disabled_roles(merged)
+    required_severities = {t.lower() for t in list_env("JIRA_POSTMORTEM_REQUIRED_SEVERITIES")}
+    required_phases = list_env("JIRA_INCIDENT_REQUIRED_PHASES")
+    # A setting that depends on a turned-off field would make its check silently
+    # pass (or silently fail) every incident, so refuse the combination.
+    conflicts = [
+        ("severity", required_severities, "JIRA_POSTMORTEM_REQUIRED_SEVERITIES"),
+        ("phase", required_phases, "JIRA_INCIDENT_REQUIRED_PHASES"),
+        ("category", targets, "JIRA_INCIDENT_CATEGORY_TARGETS"),
+        ("detected_at", targets, "JIRA_INCIDENT_CATEGORY_TARGETS"),
+        ("detected_at", os.environ.get("JIRA_INCIDENT_REPORT_MINUTES", "").strip(), "JIRA_INCIDENT_REPORT_MINUTES"),
+    ]
+    for role, setting, env_name in conflicts:
+        if role in disabled and setting:
+            return None, (
+                f"{env_name} is set but the {role} field is turned off in JIRA_INCIDENT_FIELDS; "
+                f"the check could never run"
+            )
+    return {
+        "fields": merged,
+        "disabled_fields": sorted(disabled),
+        "category_targets": targets,
+        "report_minutes": report_minutes,
+        "max_items": max_items,
+        "postmortem_types": {
+            t.lower() for t in (list_env("JIRA_POSTMORTEM_ISSUE_TYPES") or ["Post-mortem"])
+        },
+        "required_severities": required_severities,
+        "required_phases": required_phases,
+        "no_review": {t.lower() for t in (list_env("JIRA_NO_POSTMORTEM_RESOLUTIONS") or DEFAULT_NO_REVIEW)},
+    }, None
+
+
+def main() -> int:
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    load_dotenv()
+
+    settings = connection_settings()
+    if isinstance(settings, str):
+        report_failure(settings, "bad_config")
+        return 1
+    base_url, email, api_token = settings
+    jql = os.environ.get("JIRA_INCIDENT_JQL", "").strip()
+    if not jql:
+        report_failure(
+            "JIRA_INCIDENT_JQL is not set; it selects the incident tickets, e.g. "
+            "'project = IR AND issuetype = Incident'",
+            "bad_config",
+        )
+        return 1
+    cfg, err = _config()
+    if err:
+        report_failure(err, "bad_config")
+        return 1
+
+    client = JiraClient(base_url, email, api_token)
+    now = utc_now()
+    collector = None
+    ids: dict = {}
+    problems: dict = {}
+    candidates: dict = {}
+    incidents: list = []
+    truncated = False
+    history_complete = True
+    search_complete = False
+    related_complete = True
+    missing_related: list = []
+
+    try:
+        collector = collector_info(client)
+        zone = zone_of((collector or {}).get("time_zone"))
+        ids, problems, candidates = resolve_fields(client, cfg["fields"])
+        raw, truncated, search_complete = client.search_issues(
+            jql, INCIDENT_FIELDS + all_field_ids(ids), cfg["max_items"]
+        )
+        history_fields = ["status"] + list(ids.get("phase") or [])
+        histories, history_complete, unknown_ids = client.bulk_changelogs(
+            [str(i.get("id")) for i in raw if i.get("id")], history_fields
+        )
+
+        linked = {
+            k for i in raw for k in _linked_keys(i.get("fields") or {}, cfg["postmortem_types"])
+        }
+        linked_issues, missing_pm, ok_pm = fetch_issues(client, linked, POSTMORTEM_FIELDS)
+        postmortems = {}
+        subtask_keys = []
+        subtasks_by_pm: dict = {}
+        for pm in linked_issues:
+            pf = pm.get("fields") or {}
+            if (name_of(pf.get("issuetype")) or "").strip().lower() not in cfg["postmortem_types"]:
+                continue
+            subs = [s.get("key") for s in pf.get("subtasks") or [] if s.get("key")]
+            subtask_keys.extend(subs)
+            subtasks_by_pm[pm.get("key")] = subs
+            postmortems[pm.get("key")] = {
+                "key": pm.get("key"),
+                "summary": pf.get("summary"),
+                "status": name_of(pf.get("status")),
+                "created": pf.get("created"),
+                "resolved": pf.get("resolutiondate"),
+                "action_item_count": len(subs),
+            }
+        action_issues, missing_ai, ok_ai = fetch_issues(client, subtask_keys, ACTION_FIELDS)
+        # Attribute each action item by the post-mortem that listed it as a sub-task,
+        # so an item whose parent field is missing is still counted where it belongs.
+        parent_of = {sk: pm for pm, subs in subtasks_by_pm.items() for sk in subs}
+        actions: dict = {}
+        for a in action_issues:
+            rec = _action_record(a, now)
+            rec["postmortem"] = parent_of.get(a.get("key")) or rec["postmortem"]
+            actions.setdefault(rec["postmortem"], []).append(rec)
+        related_complete = ok_pm and ok_ai
+        missing_related = sorted(set(missing_pm) | set(missing_ai))
+
+        incidents = [
+            _incident_record(
+                i, histories.get(str(i.get("id")), []), ids, cfg, postmortems, actions, set(missing_pm),
+                history_known=str(i.get("id")) not in unknown_ids, zone=zone,
+            )
+            for i in raw
+        ]
+    except Abort:
+        pass
+    except Exception as e:  # unexpected response shape: keep what was collected and say why
+        client.fail("collection", type(e).__name__, str(e)[:200], "internal_error")
+        search_complete = False  # the collection did not finish, so no count is trusted
+
+    evidence = {
+        "metadata": {
+            "collected_at": now.isoformat(),
+            "base_url": base_url,
+            "jql": jql,
+            "field_names": cfg["fields"],
+            "fields_resolved": ids,
+            "field_problems": problems,
+            "field_candidates": candidates,
+            "checks_disabled": _checks_disabled(cfg["disabled_fields"]),
+            "required_phases": cfg["required_phases"],
+            "no_postmortem_resolutions": sorted(cfg["no_review"]),
+            "report_window_minutes": cfg["report_minutes"],
+            "category_targets_minutes": cfg["category_targets"],
+            "postmortem_issue_types": sorted(cfg["postmortem_types"]),
+            "postmortem_required_severities": sorted(cfg["required_severities"]) or "all resolved",
+            "max_items": cfg["max_items"],
+            "incidents_collected": len(incidents),
+            "incidents_truncated": truncated,
+            "search_complete": search_complete,
+            "status_history_complete": history_complete,
+            "related_issues_complete": related_complete,
+            "related_issues_not_visible": missing_related,
+            "partial_failure": bool(client.api_failures),
+            "api_failures": client.api_failures,
+        },
+        "collector": collector,
+        # A capped search is also unfinished: its totals would read as the population.
+        # Hidden or unread post-mortems and action items make every action-item
+        # count low, so that block is null when any related issue was not read.
+        "summary": _summarize(
+            incidents, search_complete and not truncated, related_complete and not missing_related
+        ),
+        "incidents": incidents,
+    }
+    incomplete = ""
+    if truncated:
+        incomplete = f"incidents truncated at JIRA_INCIDENT_MAX_ITEMS={cfg['max_items']}"
+    elif not history_complete:
+        incomplete = "status or phase history incomplete for some incidents"
+    elif not related_complete or missing_related:
+        incomplete = "some post-mortems or action items could not be read"
+    field_reason = field_problem_reason(problems, "JIRA_INCIDENT_FIELDS")
+    if field_reason:
+        logger.warning("%s", field_reason)
+        incomplete = f"{incomplete}; {field_reason}" if incomplete else field_reason
+    return write_and_finish(logger, client, evidence, OUTPUT_FILE, incomplete)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -31,8 +31,10 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from private_dns import project_zone_group  # noqa: E402
 from resource_graph import (  # noqa: E402
-    query_all,
+    lookup_by_ids,
+    quoted_ids,
     readable_scopes,
     resource_graph_client,
 )
@@ -40,7 +42,6 @@ from resource_graph import (  # noqa: E402
 logger = logging.getLogger("azure_private_endpoint_configuration")
 
 STATUSES = ("Approved", "Pending", "Rejected", "Disconnected")
-LOOKUP_CHUNK = 200
 # mv-expand defaults to 128 rows per input row; a VNet can hold far more subnets.
 MV_EXPAND_LIMIT = 2000
 # publicNetworkAccess values that close the public path. SecuredByPerimeter puts the resource behind a
@@ -131,32 +132,6 @@ def project_endpoint(pe) -> dict:
     }
 
 
-def project_zone_group(group) -> dict:
-    configs = []
-    for cfg in model_attr(group, "private_dns_zone_configs") or []:
-        zone_id = model_attr(cfg, "private_dns_zone_id")
-        configs.append(
-            {
-                "private_dns_zone_id": zone_id,
-                "private_dns_zone_name": basename(zone_id),
-                "record_sets": [
-                    {
-                        "fqdn": model_attr(r, "fqdn"),
-                        "record_type": model_attr(r, "record_type"),
-                        "ip_addresses": model_attr(r, "ip_addresses") or [],
-                        "provisioning_state": model_attr(r, "provisioning_state"),
-                    }
-                    for r in model_attr(cfg, "record_sets") or []
-                ],
-            }
-        )
-    return {
-        "name": model_attr(group, "name"),
-        "provisioning_state": model_attr(group, "provisioning_state"),
-        "private_dns_zone_configs": configs,
-    }
-
-
 def nic_private_ips(nic_row) -> list:
     """Private IPs off a Resource Graph NIC row's raw ipConfigurations."""
     ips = []
@@ -222,9 +197,9 @@ def endpoint_record(
 ) -> dict:
     connections = [target_record(c, lookups, failed, scopes) for c in pe["connections"]]
     statuses = [c["status"] for c in connections]
-    ips = []
-    for nic_id in pe["network_interface_ids"]:
-        ips.extend(nic_private_ips(lookups.get((nic_id or "").lower())))
+    nics = [lookups.get((nic_id or "").lower()) for nic_id in pe["network_interface_ids"]]
+    # A NIC that was not read leaves the endpoint's IPs unknown (None), never "no IPs".
+    ips = None if None in nics else sorted({ip for nic in nics for ip in nic_private_ips(nic)})
     # zone_groups is None when the endpoint's zone groups could not be listed: unknown, never "none".
     zones = None if zone_groups is None else sorted(
         {cfg["private_dns_zone_name"] for g in zone_groups for cfg in g["private_dns_zone_configs"] if cfg["private_dns_zone_name"]}
@@ -236,7 +211,7 @@ def endpoint_record(
         "connections": connections,
         "connection_status": statuses[0] if len(set(statuses)) == 1 else ("Mixed" if statuses else None),
         "approved": bool(statuses) and all(s == "Approved" for s in statuses),
-        "private_ip_addresses": sorted(set(ips)),
+        "private_ip_addresses": ips,
         "private_dns_zone_groups": zone_groups,
         "private_dns_zone_names": zones,
         "has_private_dns_zone_group": None if zones is None else bool(zones),
@@ -323,11 +298,6 @@ def summarize(endpoints: list[dict]) -> dict:
     }
 
 
-def quoted_ids(ids: list[str]) -> str:
-    """KQL verbatim string literals: inside @'...' a doubled quote is the escape and a backslash is literal."""
-    return ", ".join("@'" + i.replace("'", "''") + "'" for i in ids)
-
-
 def lookup_query(ids: list[str]) -> str:
     return (
         f"Resources | where id in~ ({quoted_ids(ids)}) "
@@ -344,7 +314,7 @@ def subnet_query(vnet_ids: list[str]) -> str:
     return (
         f"Resources | where id in~ ({quoted_ids(vnet_ids)}) "
         "| extend vnet_id = tolower(id), subnet_count = array_length(properties.subnets) "
-        f"| mv-expand limit {MV_EXPAND_LIMIT} s = properties.subnets "
+        f"| mv-expand s = properties.subnets limit {MV_EXPAND_LIMIT} "
         "| project id = tostring(s.id), vnet_id, subnet_count, "
         "policies = tostring(s.properties.privateEndpointNetworkPolicies), "
         "nsg_id = tostring(s.properties.networkSecurityGroup.id), "
@@ -362,28 +332,6 @@ def truncated_vnets(subnet_rows: dict) -> set:
         seen[vnet] = seen.get(vnet, 0) + 1
         expected[vnet] = row.get("subnet_count")
     return {v for v, n in seen.items() if isinstance(expected[v], int) and n < expected[v]}
-
-
-def lookup_by_ids(client, ids: list[str], build_query, label: str, collector: Collector):
-    """Resource Graph rows keyed by lowercased id, plus the ids whose chunk failed.
-
-    Unscoped so resources in other readable subscriptions resolve.
-    """
-    unique = sorted({i.lower() for i in ids if i})
-    out, failed = {}, set()
-    for start in range(0, len(unique), LOOKUP_CHUNK):
-        chunk = unique[start : start + LOOKUP_CHUNK]
-        rows = collector.guard(
-            f"resourcegraph.resources ({label} {start + 1}-{start + len(chunk)})",
-            lambda: query_all(client, None, build_query(chunk))["rows"],
-        )
-        if rows is None:
-            failed.update(chunk)
-            continue
-        for row in rows:
-            row = {k: (None if v == "" else v) for k, v in row.items()}
-            out[(row.get("id") or "").lower()] = row
-    return out, failed
 
 
 def collect_endpoints(subscription_id, cred, collector: Collector) -> list[dict]:

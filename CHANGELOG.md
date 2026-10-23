@@ -10,14 +10,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
-### Breaking
-
-- **Python 3.11 is now the minimum version.** Python 3.10 reached end of life
-  in October 2026 and gets no more security fixes. `requires-python` is now
-  `>=3.11`, so `pip install` refuses a 3.10 interpreter. `paramify doctor` also
-  reports 3.10 as too old. To upgrade, make a new virtual environment on Python
-  3.11 or later and install again. The ruff and mypy targets move to 3.11 too.
-
 ### Added
 
 - **Oracle Cloud Infrastructure category** (`fetchers/oci/`, seventeen
@@ -38,11 +30,475 @@ schemas and the `paramify` CLI — not the internal code.
   a schema check against the SDK's generated models
   (`tools/oci_schema_check.py`), a fault sweep (`tools/oci_fault_sweep.py`) and
   a read-only collector policy in `fetchers/oci/README.md`. Contributed by
-  Stewart Clawson (#87).
+  Stewart Clawson (paramify/paramify-fetchers#87).
+
+- **Evidence samples for 84 fetchers.** Each one is a `sample.json` beside the
+  fetcher's `fetcher.yaml`. A sample shows one sanitized record from a live run
+  in a test account, for AWS, Azure, GCP and the demo fetchers. Use
+  `paramify samples show <fetcher>` to read one. No sample is reviewed yet, and
+  12 come from an earlier fetcher version. `paramify samples status` marks both.
+  See [`docs/evidence_samples.md`](docs/evidence_samples.md).
+- **Shell tab completion.** `paramify --install-completion` installs completion
+  for commands and options. `paramify samples show <Tab>` completes the names of
+  the fetchers that have a sample. See
+  [`docs/cli_guide.md`](docs/cli_guide.md#tab-completion).
+- **Scope exclusions for Azure fetchers.** A shared helper,
+  `fetchers/azure/_shared/scope_exclusions.py`, takes case-insensitive glob
+  patterns (comma- or space-separated) and answers whether a name is excluded and
+  by which pattern. A fetcher that adopts it reads them from its
+  `scope_exclusions` config field, and its evidence keeps every excluded item in
+  `results.excluded` with the pattern that matched (or the reason it followed),
+  echoes the patterns, lists the ones that matched nothing, counts each excluded
+  kind, and counts what stayed in scope (`in_scope_hosts` and the like), so a
+  check can require more than 0 and catch a pattern such as `*` that takes out
+  everything. Every verdict, count and percentage covers only what remains in
+  scope. With no patterns set the output is unchanged apart from those empty,
+  zero or total fields. Adopted by:
+  - `azure_front_door_origins` 0.5.0: custom-domain and endpoint host names, and
+    route names through a `route:` prefix (`route:qa-*`, or `route: qa-*`); a
+    bare pattern never matches a route's name, and any other prefix fails the
+    run. A route is out of scope when a `route:` pattern
+    matches it or every host it serves is out, an origin group when every route
+    reaching it is, and a production app when only out-of-scope groups reach it,
+    so multi-region redundancy is judged on the core domains. Access restrictions
+    are read only for apps an in-scope group reaches.
+  - `azure_front_door_tls` 0.3.0 and `azure_front_door_waf_coverage` 0.3.0:
+    the same matching. TLS also leaves out certificate secrets that only
+    out-of-scope domains use, and WAF coverage the host-routes of an out-of-scope
+    route. Both fetcher.yaml texts move to the new description format.
+  - `azure_dns_configuration` 0.4.0: public record-set names, relative (in every
+    zone) or FQDN. A prefixed pattern fails the run.
+- **A string config field can be a `${env:VAR}` reference.** The runner
+  resolves it the way it resolves a secret. An unset or empty variable gives way
+  to the next value down (platform config, then the default; an error for a
+  required field with neither) and leaves one run note per entry naming every
+  unset variable; a malformed reference is an error. String config fields only,
+  not targets: the runner refuses a reference on an integer or boolean field,
+  and `manifest set-config`, `set-platform-config`, `add-target` and
+  `set-target` refuse one on a typed config field or any target field (a
+  target's secrets still take references), as does `validate` for a hand-edited
+  one. Only the fetcher's own fields and the issue-report keys are resolved; a key
+  only a sibling fetcher declares passes through untouched. A reference must be
+  the whole value, and it can't read a variable whose name looks like a
+  credential's (`_TOKEN`, `_SECRET`, `_API_KEY`, `_PAT` and the like) or one that
+  holds a secret: any fetcher's or category's declared secret, or any variable a
+  `secrets:` reference in the manifest reads. The runner and `validate` refuse
+  all of these without resolving them, naming the variable; the `manifest`
+  commands refuse a partial reference or a credential-like name, and the
+  `validate` they run after saving reports the rest. The value an allowed
+  reference reads is masked out of the fetcher's captured output and the run
+  metadata like a secret. `effective_config`, and so the TUI, shows a reference
+  as written, never its value, with whether it is set; the TUI and shared config
+  checks compare what it reads, and `validate` names an issue-report reference
+  unset in its shell.
+
+### Changed
+
+- **`azure_front_door_origins` 0.5.0: Kudu and silent regions.** An app whose
+  Kudu (scm) site has its own access restrictions
+  (`scmIpSecurityRestrictionsUseMain` off) that let every public caller in is no
+  longer `locked_to_front_door`: the gap is `scm_public_access_unrestricted`,
+  counted in `serving_app_service_origins_scm_public_access_unrestricted`, and
+  each record lists the Kudu rules. `all_regions_healthy_last_hour` is null when
+  a region with an enabled origin has no value for the last hour (false still
+  wins when a region is known to be unhealthy), so a region that went silent no
+  longer reads as healthy. Custom domains are now always read, for
+  `in_scope_hosts`.
+- **`azure_front_door_origins` 0.3.0: live origin health and traffic per region.**
+  Hourly Azure Monitor metrics for each profile over `metrics_lookback_days`
+  (default 7, at most 30): `OriginHealthPercentage` (average and minimum) by origin
+  and group, and `OriginRequestCount` by origin, matched to origins by host name or
+  origin host header. `origin_health` rolls them up per group and region: health,
+  healthy hours (measured against the share of probes the group's load-balancing
+  settings require), requests and request share, whether every region was healthy
+  in the profile's newest hour with health data and serving in its newest hour
+  with requests (taken separately, since ingestion lags per profile and per
+  metric; a group silent that hour reads as not serving, and an hour older than
+  the window's last 3 leaves both unknown), and `traffic_shifts`, each hour the
+  set of serving regions changed. Adds KSI-RPL-TRC. `production_tag` moves from `config_schema`
+  to `target_schema`, so each subscription target sets its own tag (same
+  `AZURE_PRODUCTION_APP_TAG` variable). Existing fields are unchanged.
+- **`azure_front_door_origins` 0.2.0: App Service origin lockdown and regional
+  twins.** Each origin that is an App Service app or slot (by its azureOrigin, its
+  private-link target, or the app whose host name it uses) is listed in
+  `app_service_origins` with the app's access restrictions, its
+  `publicNetworkAccess`, its plan's capacity and zone redundancy, and
+  `locked_to_front_door`: public access is off, or the only public allow rules are
+  `AzureFrontDoor.Backend` rules whose `X-Azure-FDID` value is the profile's own
+  `frontDoorId` (read with `profiles.get`), or that of another profile in the
+  subscription that also serves the app (listed in `fronting_front_door_ids`).
+  `lockdown_gaps` names what fails; the id of a profile that doesn't serve the app
+  is `other_front_door_id_allowed` (listed in `other_front_door_ids_allowed`),
+  since that profile may not have the serving profile's WAF. Resource Graph lookups page
+  in a stable order and fail on a truncated result or a repeated skip token. Every app in the subscription (narrowed by the
+  new optional `production_tag`) is listed in `production_apps`, flagged when no
+  serving origin group reaches it, when no enabled origin in another region of its
+  group is its twin, or when the twin's plan has fewer instances. Existing fields
+  are unchanged; `profiles` gain `front_door_id`.
+- **`azure_dns_configuration` 0.2.0: public record sets.** Each public zone now
+  lists `record_sets` (`record_sets.list_all_by_dns_zone`): name, FQDN, type, TTL,
+  `targets` (the A, AAAA, CNAME, MX, TXT, NS, PTR, SRV, CAA or SOA values) and
+  the alias target resource with its type. Each A, AAAA or CNAME record gets a
+  `failover_method`: `front_door` or `traffic_manager` (an alias to one, or a CNAME
+  to its `azurefd.net` / `trafficmanager.net` / `usgovtrafficmanager.net` host),
+  `cdn`, or `record_update` (a fixed target, so failing over means changing the
+  record within its TTL). A record that points at another record set in the zone
+  (an alias, or a CNAME to a name in the zone) takes that record set's method, one
+  link deep, and names it in `same_zone_target` when the zone holds a record set
+  of that name and type (a name in a delegated child zone isn't a link). Dangling
+  aliases and CNAMEs to deleted hosts aren't detected. New summary fields count record sets by type,
+  aliases, empty endpoint records and endpoints by failover method; zones whose
+  record sets can't be read are null and fail the run. Adds KSI-CNA-MAT,
+  KSI-RPL-ABO and KSI-RPL-TRC. Existing fields and keys are unchanged.
+
+### Fixed
+
+- **`azure_private_dns_zone_configuration` matches a record's IP only in the
+  networks its zone resolves for** (0.1.0 → 0.2.0). An IP was matched against
+  every private endpoint, NIC and load balancer in the tenant, so a stale record
+  at a common address such as 10.0.0.4 read as backed, `ip_mismatch` or
+  `platform_managed` when an unrelated VNet used the same address. Each IP is
+  now matched only within the zone's linked VNets and the VNets peered with
+  them, so an endpoint in a spoke peered with the hub the zone is linked to
+  still backs it. A peering counts from either side, so this holds even when
+  the credential cannot read the hub: the readable spokes whose own peering
+  points at it are found with a separate query. A zone with no links reads as
+  `unverified`, not backed. A linked VNet the credential cannot read stays in
+  scope: a visible endpoint NIC in it still backs the record, but an IP nothing
+  visible holds there is `unverified`. An IP the network match reads `stale`,
+  `unverified` or `unknown` is also backed when an Approved endpoint whose NIC
+  holds the record's IPs registers it through the endpoint's own private DNS
+  zone group: this exact zone, this FQDN, exactly these IPs. That proof never
+  overrules an `ip_mismatch`, `endpoint_not_approved` or `platform_managed`
+  found in the zone's own VNets. The zone groups are read per endpoint with
+  `private_dns_zone_groups.list` (Reader covers it); a failed read is recorded,
+  leaves only that proof unknown (`zone_group_backed: null`) and never backs a
+  record or reads it stale. The new `backed_by` names the proof (`network`,
+  `zone_group` or both). Only one peering hop is followed, so in these layouts
+  only hand-made records (no zone group) move from backed to `unverified`:
+  Virtual WAN (spokes two hops apart through the hub), spoke to spoke through a
+  hub, and Azure Virtual Network Manager mesh (no peering objects). Where
+  address spaces overlap, the verdict no longer depends on which VNet sorts
+  first: an IP that falls in more than one of the zone's VNets with different
+  verdicts is `unverified`. The new per-record `ip_address_networks` names the
+  VNets each IP was matched in, `[]` when none, `null` when a lookup it depends
+  on failed. VNets are read by id (linked, then peered) instead of every VNet in
+  the tenant, and a failed lookup chunk leaves only its own VNets unknown (the
+  links to them and the records of zones that resolve for them), not the whole
+  run. Key Vault records in Azure Government and Azure China
+  (`privatelink.vaultcore.usgovcloudapi.net`, `privatelink.vaultcore.azure.cn`)
+  now match their endpoints' `vault.usgovcloudapi.net` and `vault.azure.cn`
+  names instead of reading `ip_mismatch`. Status counts move, so **re-check any
+  validator or query that asserts on `private_endpoint_status`,
+  `ip_address_statuses`, `backed_by` or the `privatelink_records_*` summary
+  counts.**
+- **The private DNS zone and private endpoint fetchers' expanding queries
+  parse.** Four Resource Graph queries put `mv-expand`'s row limit before the
+  expanded column (`mv-expand limit 2000 x = ...`), which Resource Graph
+  rejects with `ParserFailure`. The private endpoint, other NIC and load
+  balancer IP lookups in `azure_private_dns_zone_configuration` therefore always
+  failed, every privatelink A record read `unknown` and the run exited 1. The
+  subnet lookup in `azure_private_endpoint_configuration` also always failed,
+  so every endpoint's subnet read `unknown`. The limit now follows the column
+  (`mv-expand x = ... limit 2000`).
+- **`azure_private_endpoint_configuration` reports unread IPs as unknown**
+  (0.1.0 → 0.1.1). When an endpoint's network interface was not read,
+  `private_ip_addresses` was `[]`, reading as "no IPs". It is now `null`. A
+  failed lookup is also recorded in `metadata.api_failures`; a NIC that Resource
+  Graph simply did not return (indexing lag, or a scope the credential cannot
+  read) gives `null` with no failure entry. **Re-check any validator or query
+  that expects `private_ip_addresses` to be a list.**
+
+### Changed
+
+- **`azure_sentinel_incidents` 0.2.0: response timeline, monthly metrics, rules
+  and entities.** Besides the latest SecurityIncident row per incident, which
+  still gives close times and now tasks, the fetcher reads every update row in
+  the lookback. Each incident gains:
+  - `acknowledged_time_utc` and `hours_to_acknowledge`: the first update by a
+    person that moves it to Active or Closed or gives it an owner or a different
+    one (by object id when both updates have one, so a renamed owner isn't a
+    different one), up to its first close, so a reopen never counts and removing an owner
+    doesn't either; a person creating it already Active or owned acknowledges
+    it at creation. Updates with no modifier, and those by automation rules,
+    playbooks, alert grouping, Fusion, incident creation or the Defender XDR
+    sync, don't count. Microsoft doesn't document what a person's update writes
+    as the modifier, so any other modifier counts as a person, an unlisted
+    system included. Known only when the creation row was read; a later row
+    missing doesn't undo one already found.
+  - `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
+    who made it), and `tasks` with status and completion time. Owners compare
+    by object id when both updates have one, so a rename isn't an owner change,
+    and an owner known only by object id is named by it. Times are each
+    update's LastModifiedTime, and rows written at the same instant always sort
+    alike.
+  - `hours_to_detect` (first activity to creation), `comments_count`,
+    `classification_comment` and `related_analytic_rule_ids`.
+  - the `entities` on its alerts, as kind and identifier, from SecurityAlert
+    joined on the incident's alert ids: up to 25 of each kind, processes as image
+    name and process id, URLs as scheme and host only. Entities read
+    as `null` when the alerts can't be read.
+  - `provider_incident_id` and `provider_incident_url`: for an incident synced
+    from Defender XDR, its id and link there; Microsoft Graph alerts give the same
+    id as `incidentId`.
+  - `owner_object_id` and `owner_email`, beside the existing owner names. An
+    owner known only by email or object id is still an owner, in
+    `history_complete`, `open_new_unowned_history_incomplete` and the backlog
+    by owner.
+  - `history_complete`: whether every update was read: the incident was created
+    inside the history read, which starts at the lookback or SecurityIncident's
+    retention, whichever is later; its creation row was read; and a row tied for
+    the latest time read matches its current status, severity and owner (by
+    object id when both sides have one, else by name) and, if its
+    `lastModifiedTimeUtc` is within the last hour, is that recent. One already
+    acknowledged before its oldest update read has no acknowledgement time rather
+    than a late one. `updates_read` counts the update rows read for it.
+
+  Each workspace gains `monthly`: per calendar month of the lookback, MTTD by
+  month created, MTTA by month acknowledged and MTTR by month closed over the
+  in-scope incidents, and the open backlog at month end by severity and owner
+  over every incident, which is `null` for month ends older than
+  SecurityIncident's retention; its `updates_retained` is true when the whole
+  month is inside the history read. An older incident closed in the lookback leaves
+  the backlog without counting in that month's MTTR, so monthly MTTR may read
+  low. It also gains `recurring_titles`, `recurrence_by_title` and
+  `recurrence_by_rule` (two or more incidents created in the lookback),
+  `open_unacknowledged` (open, every update read, and no person has acknowledged
+  it), `open_new_unowned_history_incomplete` (open, still New with no owner, and
+  not every update read, so never counted in `open_unacknowledged`), and
+  `mttd_hours`, `mtta_hours` and `mttr_hours`. When the update history can't be
+  read, the timeline fields, `monthly`, `acknowledged_incidents` and
+  `open_unacknowledged` are `null` rather than empty. When close times can't be
+  read, `close_time_status` is `unknown` and the close-time counts are `null`,
+  rather than every closed incident counting as missing. A SecurityIncident
+  table the query can't find, in a workspace that lists an incident over an hour
+  old, is hidden by table-level access: the run records an access failure and
+  exits 1, and close times and history are unknown. In a workspace that lists
+  none, or only incidents under an hour old that may not be ingested yet, it
+  reads as empty, with a note. SecurityAlert is treated the same way when an
+  incident over an hour old has alerts. SecurityAlert is cut to the incidents'
+  alert ids before it is aggregated and joined, and a query whose result is too
+  large for one response (over 64 MB or 500,000 rows) is read again in halves
+  of the incidents, down to 64 shares, rather than failing the run.
+  The summary's counts, existing ones included, are `null` when any workspace's
+  incident list failed, the workspace list or a check for Sentinel failed, or a
+  workspace named in `SENTINEL_WORKSPACES` wasn't found, and the counts that
+  can be unknown are `null` when any workspace's value is; with no Sentinel
+  workspace found they are 0.
+  Each workspace also gains `limitations`: in a workspace connected to Defender
+  XDR, analysts usually work incidents in the Defender portal and
+  SecurityIncident shows mostly the XDR sync's updates, so those incidents read
+  as not acknowledged and an open one can count in `open_unacknowledged`; their
+  acknowledgement times would need Defender XDR's incident activity history,
+  which neither SecurityIncident nor Graph's `security/incidents` (its current
+  state and comments, but not when an incident was first activated or assigned)
+  provides.
+  Other existing fields are unchanged; KSI-PIY-RES is not mapped, since it isn't
+  evidenceable.
+
+## [0.6.0-beta] - 2026-10-23
+
+### Breaking
+
+- **Python 3.11 is now the minimum version.** Python 3.10 reached end of life
+  in October 2026 and gets no more security fixes. `requires-python` is now
+  `>=3.11`, so `pip install` refuses a 3.10 interpreter. `paramify doctor` also
+  reports 3.10 as too old. To upgrade, make a new virtual environment on Python
+  3.11 or later and install again. The ruff and mypy targets move to 3.11 too.
+- **`paramify issues upload` sends reports into Paramify pipelines.** The API
+  key needs new permissions, and each issue-report entry must now set
+  `close_cycle` (next entry). The command no longer calls
+  `POST /assessment/{id}/intake`. Per assessment it
+  uploads each report bare to `POST /pipelines/{id}/intake`, then queues one
+  `POST /pipelines/{id}/process` naming exactly those artifacts, then waits for
+  the job and prints its counts (created, updated, seen-closed, auto-closed). The
+  call is `PROCESS_CLOSE` only when the assessment's `close_cycle` is `after_run`
+  and every target bound to it in the run succeeded and uploaded; otherwise
+  `PROCESS`, with the reason the close was skipped. The pipeline puts an upload
+  on its oldest open cycle, so `effectiveDate` no longer routes it. The API key
+  needs `PIPELINE_INTAKE`, plus `PIPELINE_PROCESS`, plus `PIPELINE_CLOSE` to
+  close. A job that fails, is blocked behind a failed job, or outlasts
+  `--wait-timeout` (default 900 s) fails the command; `--no-wait` queues and
+  exits. The intake log now also records each job, so a re-run processes files
+  an interrupted run uploaded but never processed, and waits on a job it left
+  running. The TUI's issue-report panel shows the planned operation per
+  assessment and warns in the confirm when a run will close a cycle.
+- **Every issue-report entry must set `close_cycle`.** It is a reserved config
+  key, `after_run` or `never`, with no default. Until an entry sets it, the
+  uploader holds back that entry's reports. Closing a cycle auto-closes every
+  open issue the cycle never saw, so it states how the customer fills the
+  assessment's cycles: one report per cycle closes after each complete run;
+  several files per cycle close only when the last is in. `paramify assessments
+  select` asks for it (or takes `--close-cycle`), and so does the TUI's
+  assessment picker. `paramify validate` reports an entry without one, reading
+  entry and `platforms.<category>` config the way the runner does.
+- **A manifest path or name that does not exist is now an error.** Every
+  command resolves a manifest name the same way: as typed, then under
+  `manifests/`, then with `.yaml`. A name that matches nothing exits 1. Before,
+  some commands read it as an empty manifest, `-f demo` could create `./demo`,
+  and `doctor` passed. `paramify validate demo` now works.
+- **A malformed `${env:...}` reference is now an error.** A reference must name
+  an upper-case variable, such as `${env:OKTA_API_TOKEN}`. A reference that does
+  not match, such as a lower-case name, now fails the schema check and secret
+  resolution. Before, the runner passed it through as the literal secret value.
+- **A target's `profile` outranks static AWS keys in the environment.** When a
+  target sets `profile`, the runner removes `AWS_ACCESS_KEY_ID`,
+  `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` for that invocation and logs a
+  note. Before, keys in the environment silently won over the profile. A profile
+  that uses `credential_source = Environment` no longer works, because those
+  keys are gone when it runs. Categories can declare `auth.selector_env` and
+  `auth.credential_env` to describe the same rule for other clouds.
+- **The Okta account allowlists are configuration, not code.**
+  `okta_iam_core.py` carried a hardcoded list of one service account and two named
+  people's email addresses, used to seed service-account and Super Admin detection
+  for a single tenant. Both lists now come from config and default to empty:
+  `OKTA_KNOWN_SERVICE_ACCOUNTS` on `okta/non_user_accounts_authentication` and
+  `OKTA_KNOWN_SUPER_ADMINS` on `okta/least_privilege`, each declared in that
+  fetcher's `config_schema` and accepting a comma- or newline-separated list of
+  logins/emails. No behaviour change for a tenant that sets them; every other
+  tenant now gets only the name-independent detection methods (userType, API token
+  ownership, OAuth client assignment, group membership, assigned admin roles),
+  which is what it should always have been.
+- **`write_status` is gone from `azure_common` and `gcp_common`.** It was an
+  alias of `report_failure`, kept for older fetchers. A custom fetcher that
+  imports it must import `report_failure` instead.
+
+### Security
+
+- **Jira fetchers** (`jira_site_inventory`, `jira_remediation_items`,
+  `jira_audit_records`, `jira_access_roles`): `JIRA_BASE_URL` must now be a Jira
+  Cloud site (`https://<site>.atlassian.net`, or the Government Cloud domain) or
+  the API gateway for a scoped token (`https://api.atlassian.com/ex/jira/<cloudId>`).
+  Any other host, a userinfo part, a query, a fragment or a port is refused before
+  the token is sent, and the error no longer echoes the value. HTTP redirects are
+  no longer followed; a 3xx answer is a `bad_config` failure. The README documents
+  a read-only scoped token for the admin collector.
+- **`jira_remediation_items`, `jira_audit_records`, `jira_access_roles`**: hitting a
+  collection cap now fails the run with `partial_failure`, and every evidence file
+  carries `metadata.complete` and `metadata.incomplete_reason`.
+  `jira_audit_records` no longer reports `records_truncated: false` when records
+  past the cap were dropped.
+- **`jira_change_requests`, `jira_incident_postmortems`**: a configured field name
+  that matches no Jira field, or several, now fails the run as `partial_failure`
+  instead of silently skipping the checks that need it. Ambiguous names list their
+  matching ids in `metadata.field_candidates`.
+- **`jira_change_requests`, `jira_incident_postmortems`** (review of PR #174): a
+  check whose field role is turned off no longer produces its finding on every
+  ticket; `metadata.checks_disabled` lists the findings that cannot be produced,
+  and a setting that depends on a turned-off field (required severities, required
+  phases, category targets, report window, or no approval source at all) is
+  refused as `bad_config`. A failed `issue/bulkfetch` marks its keys as not
+  visible (`postmortem_not_visible`, `action_items_not_visible`) instead of
+  reporting the post-mortem or action items as absent. The deployment time of a
+  reopened change is its first move into the done status, so a late approval is
+  still caught. A role may be pinned to several `customfield_` ids for
+  team-managed projects; changelog reads with more than 10 field ids are made in
+  groups instead of being cut to 10. Pinned ids are checked against the site's
+  field list, a value that is neither a name, an id nor a list of ids is
+  `bad_config`, the deployment time of a change is its first entry into any
+  done-category status (read from `GET /rest/api/3/status`), and turning off
+  `change_type` while change types are pre-approved is refused.
+- **All Jira fetchers**: `metadata.partial_failure` now follows
+  `metadata.complete` (a hit cap or an unresolved field is partial, not only a
+  failed call). HTTP 429 and 5xx are retried with `Retry-After` or backoff, and a
+  request that still gets no answer after the first success is one failed call
+  rather than the end of the run. `jira_site_inventory` (0.1.1) uses the shared
+  client instead of its own drifted copy.
+- **`jira_access_roles`**: reads only the project roles named in a privileged
+  grant (`JIRA_ACCESS_ALL_ROLES=true` reads every role), lists grants to holder
+  types it cannot resolve (`reporter`, `assignee`, custom fields) as
+  `unresolved_privileged_grants`, tolerates a product the site does not have in
+  the `group/bulk` fallback, and states that organization admins are not included.
+- **`jira_audit_records`**: sensitive changes are matched by key words in the
+  category name with `summary.unclassified_categories` for what matched nothing
+  (Atlassian does not publish the category list); changed values are kept only
+  for sensitive records, shortened and markup-escaped; fewer records than the
+  server's `total` is reported as partial.
+- **`jira_access_roles`**: reading no admin group at all is a recorded failure,
+  never an empty result. **`jira_site_inventory`**: a bad token is `auth_failed`
+  again (the credential is checked on `/myself` before the anonymous
+  `serverInfo`), and hitting the issue cap now fails the run as partial like the
+  other Jira fetchers.
+- **All Jira fetchers** (second review): summary counts are `null`, not `0`, for
+  a section whose fetch failed or did not finish, so an assessor never reads a
+  refused call as "none found". A date-only approval date is compared with the
+  deployment at day granularity (same day is unknown, never a finding), and a
+  date-only detected or reported time is `report_time_not_measurable` instead of
+  a false `reported_late`. `jira_remediation_items` measures a done ticket with
+  no `resolutiondate` from its status history and counts
+  `closed_without_close_time`. `jira_change_requests` claims only KSI-CMT-LMC
+  (CNA-RNT and CNA-ULN dropped). `search_issues` stops on a repeated page token.
+- **All Jira fetchers** (third round, from an adversarial review of the second):
+  a check that could not run because a read failed is listed per ticket under
+  `unknown`, never under `findings` (`approval_unknown` when a status-based
+  approval's history read failed; `phases_unknown`, `postmortem_not_visible`,
+  `action_items_not_visible`; a remediation ticket's `closed_at_source:
+  unknown`), and `bulk_changelogs` now says which issues' history it failed to
+  read. A capped search, a stopped collection (an unexpected response shape)
+  and, in `jira_access_roles`, a failed role, role-index, admin-group listing or
+  membership read null the summary section they belong to and no other.
+  `summary.action_items` is null when any post-mortem or action item was not
+  read. Changelog times are rendered in the ticket's own UTC offset before they
+  are compared with a date-only field (bulkfetch gives epoch milliseconds, which
+  is UTC), so a closure at 20:00 local on the due day is no longer "after the due
+  date". `is_date_only` requires a parseable date, so `10/05/2026` is
+  unparseable, not unmeasurable. `jira_remediation_items`, `jira_audit_records`
+  and `jira_site_inventory` now survive an unexpected response shape
+  (`internal_error` with the evidence written) like the other three, and
+  `jira_site_inventory` nulls its project or issue counts when that read failed
+  or the issue search hit its cap. History times follow the collector's IANA
+  timezone from `/myself` (DST included), not a fixed offset; a done
+  remediation ticket's close time is its last entry into the done category by
+  status id (`GET /rest/api/3/status`, so `jira_remediation_items` now needs
+  `read:status:jira` with a scoped token), with `reopened` recorded; summary
+  `changes_approval_unknown` names deployed changes whose approval could not be
+  read; `jira_access_roles` marks a group whose membership read failed with
+  `membership_complete: false` and null counts instead of "0 members". A done
+  remediation ticket whose close time cannot be taken from the history (an
+  unparseable time, or the status catalog unread) has `closed_at_source:
+  unknown` rather than a guessed date; an open ticket closed once before is
+  `reopened`.
+- **`jira_site_inventory` scopes documented**: the README scope table had no row
+  for it. Found on the first scoped-token run: `GET /rest/api/3/priority/search`
+  needs `read:priority:jira`, which the other Jira fetchers do not use.
+- **`jira_site_inventory` behaviour change** (from the base URL allowlist above):
+  `JIRA_BASE_URL` now accepts `https://<site>.atlassian.net`,
+  `https://<site>.jira.com`, the Government Cloud domain and the scoped-token
+  gateway, and nothing else. A URL with a path, query, port or userinfo, which the
+  old client passed through to `requests`, is now refused as `bad_config`.
+
+### Added
+
+- **`cornerstone` category** with four KSI-CED-RAT fetchers over Cornerstone's
+  Reporting API (read-only OData views, OAuth 2.0 client credentials):
+  `cornerstone_security_awareness_training`, `cornerstone_role_based_training`,
+  `cornerstone_secure_development_training` and
+  `cornerstone_incident_response_training`. Each resolves the configured courses
+  in `vw_rpt_training`, reads every registration from `vw_rpt_transcript`, and
+  reports per user (numeric Cornerstone id only) the latest status, last
+  completion and whether it is inside the retraining interval, plus each
+  course's version and last content change. The awareness fetcher can take a
+  `vw_rpt_user` population filter so never-assigned users count as
+  `not_assigned`. Every view read is counted first and checked for
+  completeness; an unresolved course name reports null metrics and exits 0.
+  The portal URL must be one label under `csod.com`, redirects are refused, and
+  nextLinks are followed only on the same host under the views root. Covered
+  offline by `tests/test_cornerstone_fetchers.py`; not yet run against a live
+  portal. Review (PR #175): the user population filter is shared by all four
+  fetchers with a per-fetcher override and, without one, the completion rate is
+  null and the run is `partial_or_empty`; failed attempts (`user_lo_pass` false)
+  and configured withdrawn/failed status ids never count as completed;
+  exemptions age like completions; an overdue assignment overrides an older
+  completion; `A|B` names alternatives for one course; GUIDs compare
+  case-insensitively and rows read but unattributed fail the run; a URL the
+  client refuses is a recorded failure, not a crash; paging and throttle
+  settings are declared on the category; rows with no user id are excluded and
+  counted; all course names resolve in one chunked catalog query; a token
+  refresh after a 401 no longer consumes a retry attempt.
+
 
 - **CI runs the tests on Python 3.15.** The test matrix is now 3.11 to 3.15.
   The 3.10 row is gone.
-
 - **`azure_devops_audit_streams`** (`EVD-AZURE-DEVOPS-AUDIT-STREAMS`): whether an
   Azure DevOps organization exports its audit log, which it otherwise keeps for
   90 days. Records:
@@ -98,6 +554,48 @@ schemas and the `paramify` CLI — not the internal code.
   every Azure DevOps fetcher. It sends credentials only to the host it paged from
   and never follows a redirect, and it keeps the TF/VS error code on every
   failure.
+- **A ServiceNow category with two fetchers.** `servicenow_cases` collects
+  compliance review cases, and `servicenow_changes` collects ITSM change records.
+  Both use a bearer token (`SERVICENOW_API_TOKEN`) and take an instance URL for
+  each target. An optional last-run watermark limits a pull to new records.
+  Leave it unset for the first pull.
+- **Four Azure Front Door fetchers.** `azure_front_door_waf_policies`,
+  `azure_front_door_waf_coverage`, `azure_front_door_tls` and
+  `azure_front_door_origins` read Front Door Standard and Premium profiles.
+  Classic Front Door and classic CDN profiles are counted as skipped. All four
+  need only Reader access and run against each subscription. The `azure` extra
+  adds `azure-mgmt-frontdoor` and `azure-mgmt-cdn`.
+- **`azure_defender_assessments`** collects each Defender for Cloud assessment
+  for each resource, with its severity, status and resource id. Severity comes
+  from the assessment itself in Resource Graph, and falls back to the
+  subscription's metadata catalogue. Each record has a `severity_source`, and
+  the summary counts the records whose severity came from the catalogue or is
+  unknown. A failed Resource Graph query is a collection failure (exit 1). A
+  subscription where `Microsoft.Security` is not registered is recorded as
+  `not_registered`, not as a failure.
+- **`paramify capabilities list|show` and `paramify artifacts list|pull`.** These
+  read a workspace's solution capabilities and their narratives, and download
+  the artifacts of an evidence set. `pull` reports whether each artifact has an
+  envelope.
+- **`paramify validators check`** — runs the behaviour cases in
+  `validators/_cases/` through the real ECMAScript engine
+  (`framework/validator_eval/`, evaluated under `node` because Paramify's engine
+  is JavaScript and Python `re` cannot compile `(?<name>...)` at all). A case
+  file pins what a validator must return for a given artifact; a set-level file
+  combines every validator on an evidence set the way Paramify does
+  (ERROR > FAIL > PASS), which is the only way to prove an `integrity` validator
+  covers its partner — a violation-counting validator passes its own drifted
+  artifact, because zero matches is its pass condition. Reports vacuous passes
+  (a PASS reached with a rule that read nothing) and names validators with no
+  cases. Deliberately not a CI gate: the cases are an authoring aid, and
+  legitimate evidence-shape changes should not block a merge.
+- **An `onboard-platform` skill** integrates a platform that has no fetchers
+  yet. It researches the API, sets up a sandbox with real data, plans a set of
+  fetchers and builds each one.
+- **Illustrated guides** for the architecture, run manifest, fetcher contract,
+  authoring, envelope, config injection, validators, uploader, pipelines,
+  inventory and issue-report fetchers, KSI mapping, platform onboarding, private
+  mirror, versioning and releasing.
 - **`azure_app_service_backups`** (`EVD-AZURE-APPSVC-BACKUPS`, KSI-RPL-ABO). For
   each App Service web app, whether it is actually
   being backed up, judged from its restore points: automatic backups plus
@@ -212,6 +710,30 @@ schemas and the `paramify` CLI — not the internal code.
   pages, because www.paramify.com was not reachable from the test environment.
   No KSI mapping. The README's supported services grid lists Web, with a globe
   icon drawn for this repo (`fetchers/logos/web.svg` and `web-dark.svg`).
+- **`jira_change_requests`** (`EVD-JIRA-CHANGE-REQUESTS`): change, internal
+  connection and exception tickets with CCB approver and time, deployment time,
+  test and security review results, watcher and comment counts, status and field
+  history, and per-ticket findings (deployed without approval, approved after
+  deployment, failed tests, missing security review, exceptions open past expiry
+  or overdue for review). Field names are configurable and resolved by name.
+- **`jira_incident_postmortems`** (`EVD-JIRA-INCIDENT-POSTMORTEMS`): incidents with
+  severity, category, minutes from detection to report against a reporting window
+  and per-category targets, phase history, linked post-mortems and their action
+  items, with findings for late reports, missing post-mortems and unassigned or
+  overdue action items.
+- **`jira_remediation_items`** (`EVD-JIRA-REMEDIATION-ITEMS`): the Jira tickets a
+  required JQL (`JIRA_REMEDIATION_JQL`) selects as findings, each with owner, due
+  date, overdue flag and full status history from `POST /rest/api/3/changelog/bulkfetch`,
+  plus open, closed, overdue, unassigned and days-to-close rollups. Browse Projects only.
+- **`jira_audit_records`** (`EVD-JIRA-AUDIT-RECORDS`): the Jira site audit log over a
+  lookback window (`GET /rest/api/3/auditing/record`) with actor, time, source address
+  and changed values, and a rollup of permission, user, group, workflow and scheme
+  changes. Needs the Administer Jira global permission.
+- **`jira_access_roles`** (`EVD-JIRA-ACCESS-ROLES`): Jira site-admin and admin groups
+  and their members, product access roles, and per project the privileged permission
+  grants, project role members and the resolved privileged users, flagging privileged
+  grants made to everyone. Needs the Administer Jira global permission.
+
 - **`azure_vnet_egress_routing`** (`EVD-AZURE-VNET-EGRESS`) — where each subnet's
   and network interface's Internet-bound traffic goes, as `egress_path`: an
   appliance, a black hole, a gateway, a NAT gateway, or Azure's implicit default
@@ -521,14 +1043,6 @@ schemas and the `paramify` CLI — not the internal code.
   send the same byte for ctrl+i and Tab, so it never fired). The run console
   says when a run left issue reports to send, and the assessment picker no
   longer blocks the app while it lists the workspace's assessments.
-- **`close_cycle`, a reserved config key on every issue-report entry** —
-  `after_run` or `never`, with no default. Closing a cycle auto-closes every
-  open issue the cycle never saw, so it states how the customer fills the
-  assessment's cycles: one report per cycle closes after each complete run;
-  several files per cycle close only when the last is in. `paramify assessments
-  select` asks for it (or takes `--close-cycle`), and so does the TUI's
-  assessment picker. `paramify validate` reports an entry without one, reading
-  entry and `platforms.<category>` config the way the runner does.
 - **Issue-report invocations in the sidecar.** `_issue_reports.json` (schema
   1.1) gains `invocations`: one entry per issue-report invocation, including a
   failed one that wrote no file and an entry that raised before running. Before
@@ -843,7 +1357,19 @@ schemas and the `paramify` CLI — not the internal code.
   `startDate` (today, `YYYY-MM-DD`) alongside `frequency` when they create an
   evidence set, so the TUI and `paramify upload` no longer leave it unset.
   Existing sets are reused unchanged.
-
+- **`aws_config_conformance_packs` maps rules to FedRAMP Low and Moderate and
+  to NIST 800-53 Rev. 5 controls** (0.1.0 → 0.5.0). Deployed rule names change on
+  each redeploy, so each one now resolves to its stable source identifier. The
+  raw AWS response stays in the evidence. Adds Moderate pack support and a
+  control-to-rule view.
+- **`aws_detect_new_aws_resource` finds rules and topics with other names, and
+  accepts event-driven rules** (0.1.0 → 0.2.0). New optional `rule_name` and
+  `topic_name` target fields keep the old defaults. Event-pattern rules no
+  longer fail the polling-interval check. Adds `validation_results.rule_checks`.
+- **Azure SDK dependencies.** `azure-mgmt-resource-policy` moves from 1.0.0b3 to
+  1.0.0, and `azure-mgmt-network` stays below 34. The `azure` extra adds
+  `azure-mgmt-redisenterprise`, `azure-mgmt-dns`, `azure-mgmt-privatedns` and
+  `azure-mgmt-resource-deployments`.
 - **`azure_policy_compliance` 0.2.0: what was evaluated, whether remediation took,
   and what keeps coming back.**
   - Each listed non-compliant state now carries `evaluation_details`: the
@@ -937,22 +1463,6 @@ schemas and the `paramify` CLI — not the internal code.
   when `--output-dir` is not given. The standalone uploaders and each panel of
   the TUI's Paramify tab choose the same way; the TUI scopes to the active
   manifest's runs once it has any.
-- **`paramify issues upload` sends reports into Paramify pipelines** instead of
-  `POST /assessment/{id}/intake`, which it no longer calls. Per assessment it
-  uploads each report bare to `POST /pipelines/{id}/intake`, then queues one
-  `POST /pipelines/{id}/process` naming exactly those artifacts, then waits for
-  the job and prints its counts (created, updated, seen-closed, auto-closed). The
-  call is `PROCESS_CLOSE` only when the assessment's `close_cycle` is `after_run`
-  and every target bound to it in the run succeeded and uploaded; otherwise
-  `PROCESS`, with the reason the close was skipped. The pipeline puts an upload
-  on its oldest open cycle, so `effectiveDate` no longer routes it. The API key
-  needs `PIPELINE_INTAKE`, plus `PIPELINE_PROCESS`, plus `PIPELINE_CLOSE` to
-  close. A job that fails, is blocked behind a failed job, or outlasts
-  `--wait-timeout` (default 900 s) fails the command; `--no-wait` queues and
-  exits. The intake log now also records each job, so a re-run processes files
-  an interrupted run uploaded but never processed, and waits on a job it left
-  running. The TUI's issue-report panel shows the planned operation per
-  assessment and warns in the confirm when a run will close a cycle.
 - **AWS fetchers finish in large accounts** (67 fetchers, minor version
   bumps). Many made several AWS CLI calls, and started several `jq` processes,
   per resource, so an account with thousands of snapshots, roles or security
@@ -1118,20 +1628,6 @@ schemas and the `paramify` CLI — not the internal code.
   save that cannot happen reports why and keeps the edit rather than losing it
   along with the file write.
 
-
-- **`paramify validators check`** — runs the behaviour cases in
-  `validators/_cases/` through the real ECMAScript engine
-  (`framework/validator_eval/`, evaluated under `node` because Paramify's engine
-  is JavaScript and Python `re` cannot compile `(?<name>...)` at all). A case
-  file pins what a validator must return for a given artifact; a set-level file
-  combines every validator on an evidence set the way Paramify does
-  (ERROR > FAIL > PASS), which is the only way to prove an `integrity` validator
-  covers its partner — a violation-counting validator passes its own drifted
-  artifact, because zero matches is its pass condition. Reports vacuous passes
-  (a PASS reached with a rule that read nothing) and names validators with no
-  cases. Deliberately not a CI gate: the cases are an authoring aid, and
-  legitimate evidence-shape changes should not block a merge.
-
 - **Validator authoring: guards are written positively, and collection health is
   its own validator.** `validationRules[].disposition` is accepted and then
   discarded by the REST API, so a rule authored in the negative `ERROR` form
@@ -1150,20 +1646,9 @@ schemas and the `paramify` CLI — not the internal code.
   `validators/aws/alb_encryption_in_transit.yaml` is reshaped accordingly; in its
   previous form it returned PASS on drifted evidence where 1 of 4 load balancers
   was encrypted.
-- The `suggest-validator` skill now authors validators into `validators/` rather
-  than only proposing a regex, and verifies them against compliant,
+- **The `suggest-validator` skill writes validators.** It now authors them into
+  `validators/` rather than only proposing a regex, and verifies them against compliant,
   non-compliant, and **unreadable** evidence.
-- **The Okta account allowlists are configuration, not code** (SEC-71).
-  `okta_iam_core.py` carried a hardcoded list of one service account and two named
-  people's email addresses, used to seed service-account and Super Admin detection
-  for a single tenant. Both lists now come from config and default to empty:
-  `OKTA_KNOWN_SERVICE_ACCOUNTS` on `okta/non_user_accounts_authentication` and
-  `OKTA_KNOWN_SUPER_ADMINS` on `okta/least_privilege`, each declared in that
-  fetcher's `config_schema` and accepting a comma- or newline-separated list of
-  logins/emails. No behaviour change for a tenant that sets them; every other
-  tenant now gets only the name-independent detection methods (userType, API token
-  ownership, OAuth client assignment, group membership, assigned admin roles),
-  which is what it should always have been.
 
 ### Deprecated
 
@@ -1185,6 +1670,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Azure management calls go to the credential's cloud.** Every
+  management-plane Azure fetcher sent its requests to commercial Azure, so a US
+  Government, Germany or China subscription failed with `SubscriptionNotFound`.
+  The management endpoint now follows `AZURE_AUTHORITY_HOST`, as the Entra
+  fetchers already did.
+- **An optional secret that cannot be resolved falls back to ambient identity.**
+  The TUI wires optional secrets to default environment variables. When such a
+  variable was unset, the entry failed before it ran (exit 255), even with a
+  task role or workload identity present.
+- **Four run-path failures that exited 0.** An unquoted YAML date in a target
+  stopped the run. The timeout now stops the whole process group, so a hung
+  `aws` or `curl` call cannot outlast it. Quitting the TUI during a run no
+  longer marks the running fetcher failed. `guard_duty`, `guard_duty_findings`
+  and `global_accelerator_ha` now record a service that is not enabled instead
+  of failing.
 - **`checkov_bicep` passes its list settings to checkov intact** (0.2.0 →
   0.2.1). `checks`, `skip_checks`, `skip_paths` and `skip_resources` take
   entries separated by commas or newlines, each trimmed. `checks` and
@@ -1227,24 +1727,6 @@ schemas and the `paramify` CLI — not the internal code.
 
   New `metadata.checks` lists the `checks` allowlist, so a restricted scan no
   longer reads as a full one. It is empty when every check ran.
-- **`azure_defender_assessments` reports each assessment's own severity**
-  (0.1.1 → 0.2.0). Severity came from the subscription's assessment metadata
-  catalogue, which can rate a check lower than the assessment itself does (App
-  Service authentication, for one, is High on the assessment and Low in the
-  catalogue), so `unhealthy_by_severity` undercounted High findings. Severity
-  now comes from each assessment's `properties.metadata.severity` in Resource
-  Graph (`SecurityResources`, one query paged to the end), with the catalogue
-  only as a fallback. Each record gains `severity_source` (`assessment`,
-  `catalogue`, or `null` when neither has one), and the summary gains
-  `severity_from_catalogue_count` and `severity_unknown_count`, and
-  `unhealthy_severity_from_catalogue_count` and
-  `unhealthy_severity_unknown_count` for Unhealthy records only, since an
-  Unhealthy record with no severity is missing from `unhealthy_by_severity`.
-  The catalogue still supplies categories, threats, type, user impact,
-  implementation effort and policy definition id. A failed
-  Resource Graph query is a collection failure (exit 1), and every record falls
-  back to the catalogue. Other fields are unchanged.
-
 - **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →
   0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
   counterpart of `DenyAction`, was reported as `unresolved` with no reason and
@@ -1387,19 +1869,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **AWS failure reports name the fetcher** instead of `aws__shared`, and an
   expired `aws login` session is reported as expired credentials.
-
-- **`azure_defender_assessments` collects again, with severity** (fetcher
-  0.1.1). A missing import made every run fail with a `NameError`, so the
-  evidence set published zero assessments and reported the provider as
-  `unknown`. Behind that, `assessments.list` returns no metadata, so severity,
-  categories and assessment type were null on every record and
-  `unhealthy_by_severity` was always empty. It now reads each check's metadata
-  from `assessments_metadata.list_by_subscription()` — one extra call, joined on
-  the assessment name. And `resource_id` / `resource_source` were null on every
-  record, so the evidence couldn't say *which* resource failed a check: the
-  service returns `resourceDetails` with PascalCase keys the SDK doesn't
-  deserialize. Both are now read from the raw payload, with the assessed
-  resource's id taken from the assessment id as a last resort.
 
 ## [0.5.1-beta] - 2026-09-02
 
@@ -2171,7 +2640,8 @@ change before 1.0 (see [`docs/versioning.md`](https://github.com/paramify/parami
 - TUI restyled — border titles, status pills, denser controls, and hatched empty
   states.
 
-[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.5.1-beta...HEAD
+[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.6.0-beta...HEAD
+[0.6.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.5.1-beta...v0.6.0-beta
 [0.5.1-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.5.0-beta...v0.5.1-beta
 [0.5.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.4.0-beta...v0.5.0-beta
 [0.4.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.3.1-beta...v0.4.0-beta
