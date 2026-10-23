@@ -538,7 +538,7 @@ def test_vnets_are_read_by_id_not_tenant_wide():
 
 def _collect(monkeypatch, zone_links: dict, table_rows, fail_on=None, other_rows=()):
     """collect_zones over a fake SDK and Resource Graph: {zone name: [linked VNet ids]}, one A record
-    acct → 10.0.0.4 per zone. A VNet query naming `fail_on` raises, as a throttled chunk would."""
+    acct → 10.0.0.4 per zone. A VNet query for which `fail_on(query)` is true raises, as a throttled chunk would."""
     from types import ModuleType
     from types import SimpleNamespace as NS
 
@@ -559,14 +559,19 @@ def _collect(monkeypatch, zone_links: dict, table_rows, fail_on=None, other_rows
     vnet_queries = []
 
     def fake_query_all(graph, scope, query):
-        if "remoteVirtualNetwork" in query:  # reverse peering: the read VNets that peer with a listed VNet
-            vnet_queries.append(query)
-            remotes = lambda r: [p["properties"]["remoteVirtualNetwork"]["id"].lower() for p in r["peerings"]]  # noqa: E731
-            return {"rows": [{"id": r["id"]} for r in table.values() if any(f"@'{x}'" in query.lower() for x in remotes(r))]}
         if "virtualnetworks'" in query:
             vnet_queries.append(query)
-            if fail_on and f"@'{fail_on.lower()}'" in query.lower():
+            if fail_on and fail_on(query.lower()):
                 raise RuntimeError("throttled")
+        if "remoteVirtualNetwork" in query:  # reverse peering: the VNets that peer with a listed VNet, and which
+            out = []
+            for r in table.values():
+                hubs = [p["properties"]["remoteVirtualNetwork"]["id"].lower() for p in r["peerings"]]
+                hubs = [h for h in hubs if f"@'{h}'" in query.lower()]
+                if hubs:
+                    out.append({"id": r["id"], "hubs": hubs})
+            return {"rows": out}
+        if "virtualnetworks'" in query:
             return {"rows": [r for i, r in table.items() if f"@'{i}'" in query.lower()]}
         if "isnull(properties.privateEndpoint)" in query:
             return {"rows": list(other_rows)}
@@ -604,7 +609,9 @@ def test_a_failed_peer_chunk_leaves_only_the_zones_that_need_it_unknown(monkeypa
         _vnet_row(SPOKE, "10.1.0.0/16"),
         _vnet_row(ELSEWHERE, "10.0.0.0/16", [NIC_CONFIG]),
     ]
-    zones, _, collector = _collect(monkeypatch, {BLOB: [VNET], file_zone: [ELSEWHERE]}, rows, fail_on=SPOKE)
+    zones, _, collector = _collect(
+        monkeypatch, {BLOB: [VNET], file_zone: [ELSEWHERE]}, rows, fail_on=lambda q: f"@'{SPOKE.lower()}'" in q
+    )
 
     assert not collector.ok
     [blob] = zones[BLOB]["record_sets"]
@@ -677,6 +684,41 @@ def test_collect_zones_finds_spokes_of_an_unreadable_linked_hub(monkeypatch):
     assert other["private_endpoint_status"] == "stale"
 
 
+HUB_SPOKE = f"{RG}/providers/Microsoft.Network/virtualNetworks/spoke2"
+
+
+@pytest.mark.parametrize(
+    "linked,also_readable",
+    [([UNREADABLE_HUB], []), ([UNREADABLE_HUB, ELSEWHERE], [_vnet_row(ELSEWHERE, "10.0.0.0/16", [NIC_CONFIG])])],
+    ids=["hub-only", "overlapping-readable-link"],
+)
+def test_a_failed_read_of_a_reverse_peered_spoke_is_unknown_never_stale(monkeypatch, linked, also_readable):
+    # The spoke is found by reverse peering, then its read fails. With a fully readable linked VNet overlapping
+    # it, the IP would otherwise be judged there alone and read stale.
+    rows = [_vnet_row(HUB_SPOKE, "10.0.0.0/16", [NIC_CONFIG], peers=[UNREADABLE_HUB]), *also_readable]
+    spoke_read = lambda q: f"@'{HUB_SPOKE.lower()}'" in q and "remotevirtualnetwork" not in q  # noqa: E731
+    zones, _, collector = _collect(monkeypatch, {BLOB: linked}, rows, fail_on=spoke_read)
+    assert not collector.ok
+    [rec] = zones[BLOB]["record_sets"]
+    assert rec["private_endpoint_status"] == "unknown" and rec["ip_address_networks"] == {"10.0.0.4": None}
+
+
+def test_a_failed_reverse_peering_query_leaves_the_zone_unknown_and_the_link_as_read(monkeypatch):
+    rows = [_vnet_row(HUB_SPOKE, "10.0.0.0/16", [NIC_CONFIG], peers=[UNREADABLE_HUB])]
+    zones, _, collector = _collect(
+        monkeypatch, {BLOB: [UNREADABLE_HUB]}, rows, fail_on=lambda q: "remotevirtualnetwork" in q
+    )
+    assert not collector.ok
+    [rec] = zones[BLOB]["record_sets"]
+    assert rec["private_endpoint_status"] == "unknown" and rec["ip_address_networks"] == {"10.0.0.4": None}
+    assert [link["virtual_network_status"] for link in zones[BLOB]["virtual_network_links"]] == ["not_visible"]
+
+
+def test_spokes_by_hub_reads_make_set_as_a_list_or_json_text():
+    rows = {"/s1": {"id": "/S1", "hubs": ["/h"]}, "/s2": {"id": "/s2", "hubs": '["/h"]'}}
+    assert dns.spokes_by_hub(rows, {"/h", "/g"}, {"/f"}) == {"/h": {"/s1", "/s2"}, "/g": set(), "/f": None}
+
+
 def test_virtual_wan_spokes_two_hops_apart_are_unverified():
     # The zone's DNS spoke and the endpoint's spoke each peer only with the hub's managed VNet.
     hub = f"/subscriptions/{OTHER_SUB}/resourceGroups/RG_hub/providers/Microsoft.Network/virtualNetworks/HV_hub"
@@ -726,7 +768,9 @@ RENDERED_QUERIES = {
         "Resources | where type =~ 'microsoft.network/virtualnetworks' "
         "| mv-expand p = properties.virtualNetworkPeerings limit 2000 "
         "| where tostring(p.properties.remoteVirtualNetwork.id) in~ (@'/v') "
-        "and tostring(p.properties.peeringState) =~ 'Connected' | distinct id | order by id asc",
+        "and tostring(p.properties.peeringState) =~ 'Connected' "
+        "| summarize hubs = make_set(tolower(tostring(p.properties.remoteVirtualNetwork.id))) by id "
+        "| order by id asc",
     ),
     "pe subnet lookup": (
         lambda: pe.subnet_query(["/v"]),

@@ -2,6 +2,7 @@
 """Azure private DNS zones: VNet links, record sets, and whether privatelink records point at live private endpoints."""
 
 import ipaddress
+import json
 import logging
 import os
 import sys
@@ -135,14 +136,26 @@ def vnets_query(ids: list[str]) -> str:
 
 
 def reverse_peers_query(ids: list[str]) -> str:
-    """VNets with a Connected peering to one of the given VNets: the spokes of a linked hub the credential can't read."""
+    """VNets with a Connected peering to one of the given VNets, each with the hubs it peers with: the spokes
+    of a linked hub the credential can't read."""
     return (
         "Resources | where type =~ 'microsoft.network/virtualnetworks' "
         f"| mv-expand p = properties.virtualNetworkPeerings limit {MV_EXPAND_LIMIT} "
         f"| where tostring(p.properties.remoteVirtualNetwork.id) in~ ({quoted_ids(ids)}) "
         "and tostring(p.properties.peeringState) =~ 'Connected' "
-        "| distinct id | order by id asc"
+        "| summarize hubs = make_set(tolower(tostring(p.properties.remoteVirtualNetwork.id))) by id "
+        "| order by id asc"
     )
+
+
+def spokes_by_hub(rows: dict, hubs, failed) -> dict:
+    """Hub id → ids of the VNets peered with it, from reverse_peers_query rows; None for a hub whose query failed."""
+    out: dict = {hub: set() for hub in hubs}
+    for row in rows.values():
+        found = row.get("hubs") or []
+        for hub in json.loads(found) if isinstance(found, str) else found:
+            out.setdefault(hub.lower(), set()).add((row.get("id") or "").lower())
+    return {**out, **{hub: None for hub in failed}}
 
 
 def vnet_of(subnet_id):
@@ -188,17 +201,22 @@ def vnet_index(rows):
     return index
 
 
-def zone_networks(links, vnets, failed_vnets=frozenset()):
+def zone_networks(links, vnets, failed_vnets=frozenset(), spokes=None):
     """Lowercased ids of the VNets a zone resolves for: its linked VNets and the VNets peered with them.
 
-    A peering is seen from either side: in a linked VNet's own list, or in a read VNet whose Connected peering
-    points at a linked VNet (a spoke of a linked hub the credential can't read). None when the links could
-    not be read, or when the lookup of a VNet in that set failed.
+    A peering is seen from either side: in a linked VNet's own list, or in a VNet whose Connected peering
+    points at a linked VNet (`spokes`, hub → spokes, for linked hubs the credential can't read). None when
+    the links could not be read, when the spokes of a linked hub could not be listed, or when the lookup of
+    a VNet in the set failed.
     """
     if links is None or vnets is None:
         return None
+    spokes = spokes or {}
     linked = {(link.get("virtual_network_id") or "").lower() for link in links if link.get("virtual_network_id")}
+    if any(spokes.get(v, ()) is None for v in linked):
+        return None
     networks = linked | {peer for v in linked for peer in (vnets.get(v) or {}).get("peers", ())}
+    networks |= {spoke for v in linked for spoke in spokes.get(v, ())}
     networks |= {v for v, vnet in vnets.items() if vnet["peers"] & linked}
     return None if networks & set(failed_vnets) else networks
 
@@ -448,14 +466,23 @@ def classify_record(
 
 
 def zone_record(
-    zone: dict, links, records, endpoints, vnets, scopes, approvals=None, others=None, failed_vnets=frozenset()
+    zone: dict,
+    links,
+    records,
+    endpoints,
+    vnets,
+    scopes,
+    approvals=None,
+    others=None,
+    failed_vnets=frozenset(),
+    spokes=None,
 ) -> dict:
     """`links` / `records` are None when they could not be listed: unknown, never "none".
 
     `failed_vnets` are the VNets whose lookup failed: links to them and records of zones that resolve for them
-    are unknown, while other zones are classified as usual.
+    are unknown, while other zones are classified as usual. `spokes` is spokes_by_hub for unreadable linked hubs.
     """
-    networks = zone_networks(links, vnets, failed_vnets)
+    networks = zone_networks(links, vnets, failed_vnets, spokes)
     if links is not None:
         links = sorted(
             (
@@ -614,7 +641,7 @@ def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
         )
     # Only the VNets the zones resolve for: every linked VNet, then the VNets peered with a private-link zone's.
     # A failed chunk leaves only its own VNets unknown, and with them the zones that resolve for them.
-    vnets, failed_vnets = None, set()
+    vnets, failed_vnets, spokes = None, set(), {}
     if graph is not None:
         linked = _linked(False)
         rows, failed_vnets = lookup_by_ids(graph, linked, vnets_query, "linked virtual networks", collector)
@@ -623,19 +650,22 @@ def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
         peers = {p for v in privatelink_linked for p in (read.get(v) or {}).get("peers", ())}
         # A linked VNet the credential can't read lists no peers: find the readable VNets peered with it instead.
         unread = privatelink_linked - set(read) - failed_vnets
-        spokes, failed_unread = lookup_by_ids(
+        # A failed query leaves those hubs' zones unknown (None in spokes) but their links as already read.
+        spoke_rows, failed_unread = lookup_by_ids(
             graph, unread, reverse_peers_query, "VNets peered with unreadable linked VNets", collector
         )
-        failed_vnets |= failed_unread
+        spokes = spokes_by_hub(spoke_rows, unread, failed_unread)
         peer_rows, failed_peers = lookup_by_ids(
-            graph, (peers | set(spokes)) - linked, vnets_query, "peered virtual networks", collector
+            graph, (peers | set(spoke_rows)) - linked, vnets_query, "peered virtual networks", collector
         )
         vnets = vnet_index(list(rows.values()) + list(peer_rows.values()))
         failed_vnets |= failed_peers
     scopes = readable_scopes(cred, collector)
     out = sorted(
         (
-            zone_record(z, links[z["id"]], records[z["id"]], endpoints, vnets, scopes, approvals, others, failed_vnets)
+            zone_record(
+                z, links[z["id"]], records[z["id"]], endpoints, vnets, scopes, approvals, others, failed_vnets, spokes
+            )
             for z in zones
         ),
         key=lambda r: r.get("id") or "",

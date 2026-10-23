@@ -82,7 +82,7 @@ evidence_set:
     whose public access is not disabled but whose firewall defaults to Deny (reachable only from
     allow-listed networks). connections_by_target_type keys are lowercased because ARM ids keep the
     creator's casing. Each endpoint's subnet is read from its virtual network in the same Resource
-    Graph lookup (mv-expand limit 2000 over the VNet's subnets; a VNet that returns fewer subnet rows
+    Graph lookup (mv-expand s = properties.subnets limit 2000; a VNet that returns fewer subnet rows
     than it has reads its subnets as unknown rather than dropping them): subnet_private_endpoint_network_policies is the subnet's
     privateEndpointNetworkPolicies. Azure applies a subnet's NSG to private endpoint traffic only when
     it is Enabled or NetworkSecurityGroupEnabled (subnet_nsg_applies_to_endpoint), and its route table

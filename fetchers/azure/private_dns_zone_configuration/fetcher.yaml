@@ -54,9 +54,10 @@ evidence_set:
     are omitted. azure-mgmt-resourcegraph queries, paged by _shared/resource_graph.query_all and not
     scoped to a subscription so resources in other subscriptions the credential can read still
     resolve: the virtual networks the zones link to; for a private-link zone's linked VNet the
-    credential cannot read, the VNets whose own peering points at it (mv-expand over
-    properties.virtualNetworkPeerings, remoteVirtualNetwork.id in~ (...), peeringState Connected);
-    then the VNets peered (peeringState Connected) with a private-link zone's linked VNets and those
+    credential cannot read, the VNets whose own peering points at it, with the hubs each one peers
+    with (mv-expand over properties.virtualNetworkPeerings, remoteVirtualNetwork.id in~ (...),
+    peeringState Connected; a failed query leaves the zones that link those hubs unknown, while the
+    links keep the status already read); then the VNets peered (peeringState Connected) with a private-link zone's linked VNets and those
     found the other way, each read by id (Resources | where id in~ (...), 200 ids a query; a failed
     query leaves only its own VNets unknown: the links to them, and every private-link record of a
     zone that resolves for one of them) with
