@@ -53,10 +53,13 @@ evidence_set:
     record_sets null (counted in zones_links_unknown / zones_records_unknown), never empty. SOA records
     are omitted. azure-mgmt-resourcegraph queries, paged by _shared/resource_graph.query_all and not
     scoped to a subscription so resources in other subscriptions the credential can read still
-    resolve: the virtual networks the zones link to, then the ones peered (peeringState Connected)
-    with a private-link zone's linked VNets, each read by id (Resources | where id in~ (...), 200 ids
-    a query; a failed query leaves only its own VNets unknown: the links to them, and every
-    private-link record of a zone that resolves for one of them) with
+    resolve: the virtual networks the zones link to; for a private-link zone's linked VNet the
+    credential cannot read, the VNets whose own peering points at it (mv-expand over
+    properties.virtualNetworkPeerings, remoteVirtualNetwork.id in~ (...), peeringState Connected);
+    then the VNets peered (peeringState Connected) with a private-link zone's linked VNets and those
+    found the other way, each read by id (Resources | where id in~ (...), 200 ids a query; a failed
+    query leaves only its own VNets unknown: the links to them, and every private-link record of a
+    zone that resolves for one of them) with
     its address prefixes, peerings and each subnet's prefixes and IP configuration ids; every network
     interface owned by a private endpoint, with its private IPs, subnet and
     properties.ipConfigurations[].properties.privateLinkConnectionProperties.fqdns (mv-expand ... limit
@@ -68,15 +71,16 @@ evidence_set:
     privatelink-global.wvd.microsoft.com). A private IP is not unique across a tenant, so each IP of an
     A record in such a zone is matched only within the virtual networks the zone resolves for: its
     linked VNets and the VNets peered with them (an endpoint in a spoke peered with a hub the zone is
-    linked to counts; a resource holding the same address in an unrelated VNet does not). Only one
-    peering hop is followed, and only from the linked VNet's own peering list, so these layouts read
-    unverified where 0.1.0 said backed: Virtual WAN (spokes reach each other through the hub's managed
-    VNet, two hops); spoke to spoke (the zone linked to one spoke, the endpoint in another, both peered
-    only with a hub); Azure Virtual Network Manager mesh connectivity (connected groups create no
-    peering objects); and a linked hub the credential cannot read while the spoke holding the endpoint
-    is readable (the hub's peerings are not read). A linked VNet the credential cannot read stays in
-    scope: a visible endpoint NIC in it still backs the record, but its address space and peers are
-    unknown. ip_address_networks lists, per IP, the VNets it was matched in (those holding it or whose
+    linked to counts; a resource holding the same address in an unrelated VNet does not). A peering
+    counts from either side, so a readable spoke peered with a linked hub the credential cannot read
+    is in scope too. Only one peering hop is followed, so these layouts read unverified where 0.1.0
+    said backed: Virtual WAN (spokes reach each other through the hub's managed VNet, two hops); spoke
+    to spoke (the zone linked to one spoke, the endpoint in another, both peered only with a hub); and
+    Azure Virtual Network Manager mesh connectivity (connected groups create no peering objects). A
+    linked VNet the credential cannot read stays in scope: a visible endpoint NIC in it still backs the
+    record, but its address space is unknown. An endpoint in a subscription the credential cannot read
+    is not visible, so its records read unverified until the credential can read that subscription.
+    ip_address_networks lists, per IP, the VNets it was matched in (those holding it or whose
     address space contains it), [] when there were none, and null when a lookup it depends on failed.
     Each IP gets a status in
     ip_address_statuses: backed when an Approved private endpoint holds the IP and one of its FQDNs is

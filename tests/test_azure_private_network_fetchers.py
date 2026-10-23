@@ -380,7 +380,8 @@ def test_query_all_raises_on_a_short_count(fake_graph_models):
 def test_one_pager_only():
     import azure_common
     assert not hasattr(azure_common, "resource_graph_rows")
-    for q in (pe.lookup_query(["/x"]), pe.subnet_query(["/x"]), dns.vnets_query(["/x"]), dns.ENDPOINT_IPS_QUERY,
+    for q in (pe.lookup_query(["/x"]), pe.subnet_query(["/x"]), dns.vnets_query(["/x"]), dns.reverse_peers_query(["/x"]),
+              dns.ENDPOINT_IPS_QUERY,
               dns.ZONES_QUERY, dns.LINKS_QUERY, resource_graph.READABLE_RESOURCE_GROUPS_QUERY):
         assert "order by id" in q, q  # query_all needs a stable order for skip-token paging
 
@@ -558,6 +559,10 @@ def _collect(monkeypatch, zone_links: dict, table_rows, fail_on=None, other_rows
     vnet_queries = []
 
     def fake_query_all(graph, scope, query):
+        if "remoteVirtualNetwork" in query:  # reverse peering: the read VNets that peer with a listed VNet
+            vnet_queries.append(query)
+            remotes = lambda r: [p["properties"]["remoteVirtualNetwork"]["id"].lower() for p in r["peerings"]]  # noqa: E731
+            return {"rows": [{"id": r["id"]} for r in table.values() if any(f"@'{x}'" in query.lower() for x in remotes(r))]}
         if "virtualnetworks'" in query:
             vnet_queries.append(query)
             if fail_on and f"@'{fail_on.lower()}'" in query.lower():
@@ -587,7 +592,7 @@ def test_collect_zones_reads_only_linked_and_peered_vnets(monkeypatch):
 
     assert collector.ok
     assert len(vnet_queries) == 2 and "elsewhere" not in " ".join(vnet_queries).lower()
-    assert f"@'{SPOKE.lower()}'" in vnet_queries[1]
+    assert f"@'{SPOKE.lower()}'" in vnet_queries[1]  # every linked VNet was readable: no reverse-peering query
     [rec] = zones[BLOB]["record_sets"]
     assert rec["private_endpoint_status"] == "stale" and rec["ip_address_networks"] == {"10.0.0.4": [VNET.lower()]}
 
@@ -639,6 +644,39 @@ def test_a_visible_endpoint_in_an_unreadable_linked_vnet_backs_the_record():
     assert record["private_endpoint_status"] == "backed"
 
 
+UNREADABLE_HUB = f"/subscriptions/{OTHER_SUB}/resourceGroups/conn/providers/Microsoft.Network/virtualNetworks/hub"
+
+
+def test_a_readable_spoke_peered_with_an_unreadable_linked_hub_backs_the_record():
+    rows = [_vnet_row(SPOKE, "10.1.0.0/16", peers=[UNREADABLE_HUB])]
+    record = _zone_ip("10.1.0.4", rows, [UNREADABLE_HUB], endpoint_rows=[_endpoint_row("10.1.0.4", SPOKE)])
+    assert record["private_endpoint_status"] == "backed"
+    assert record["ip_address_networks"] == {"10.1.0.4": [SPOKE.lower()]}
+
+
+def test_collect_zones_finds_spokes_of_an_unreadable_linked_hub(monkeypatch):
+    # Both zones link a hub in a subscription the run can't read (one zone also links a readable VNet). The
+    # record's IP falls in a readable spoke peered with that hub, and nothing holds it.
+    other_spoke = f"{RG}/providers/Microsoft.Network/virtualNetworks/spoke2"
+    rows = [
+        _vnet_row(SPOKE, "10.1.0.0/16", peers=[UNREADABLE_HUB]),
+        _vnet_row(other_spoke, "10.0.0.0/16", [NIC_CONFIG], peers=[UNREADABLE_HUB]),
+        _vnet_row(ELSEWHERE, "10.9.0.0/16"),
+    ]
+    file_zone = "privatelink.file.core.windows.net"
+    zones, vnet_queries, collector = _collect(
+        monkeypatch, {BLOB: [UNREADABLE_HUB], file_zone: [UNREADABLE_HUB, ELSEWHERE]}, rows
+    )
+    assert collector.ok
+    assert any("remoteVirtualNetwork" in q and f"@'{UNREADABLE_HUB.lower()}'" in q for q in vnet_queries)
+    [blob] = zones[BLOB]["record_sets"]
+    assert blob["ip_address_networks"] == {"10.0.0.4": [other_spoke.lower()]}
+    assert blob["private_endpoint_status"] == "stale"  # unheld in a fully readable spoke the zone resolves for
+    assert [link["virtual_network_status"] for link in zones[BLOB]["virtual_network_links"]] == ["not_visible"]
+    [other] = zones[file_zone]["record_sets"]
+    assert other["private_endpoint_status"] == "stale"
+
+
 def test_virtual_wan_spokes_two_hops_apart_are_unverified():
     # The zone's DNS spoke and the endpoint's spoke each peer only with the hub's managed VNet.
     hub = f"/subscriptions/{OTHER_SUB}/resourceGroups/RG_hub/providers/Microsoft.Network/virtualNetworks/HV_hub"
@@ -682,6 +720,13 @@ RENDERED_QUERIES = {
         "Resources | where type =~ 'microsoft.network/virtualnetworks' and id in~ (@'/v') "
         "| project id, address_prefixes = properties.addressSpace.addressPrefixes, "
         "peerings = properties.virtualNetworkPeerings, subnets = properties.subnets | order by id asc",
+    ),
+    "dns VNets peered with unreadable linked VNets": (
+        lambda: dns.reverse_peers_query(["/v"]),
+        "Resources | where type =~ 'microsoft.network/virtualnetworks' "
+        "| mv-expand p = properties.virtualNetworkPeerings limit 2000 "
+        "| where tostring(p.properties.remoteVirtualNetwork.id) in~ (@'/v') "
+        "and tostring(p.properties.peeringState) =~ 'Connected' | distinct id | order by id asc",
     ),
     "pe subnet lookup": (
         lambda: pe.subnet_query(["/v"]),
@@ -740,7 +785,9 @@ def _verbatim_list(query: str) -> list:
         return values
 
 
-@pytest.mark.parametrize("build", [dns.vnets_query, pe.lookup_query, pe.subnet_query], ids=lambda f: f.__name__)
+@pytest.mark.parametrize(
+    "build", [dns.vnets_query, dns.reverse_peers_query, pe.lookup_query, pe.subnet_query], ids=lambda f: f.__name__
+)
 def test_id_lists_round_trip_through_kql_quoting(build):
     ids = ["/a'b", "/c\\d", "/e'),(@'f", "/g''h", "/plain"]
     assert _verbatim_list(build(ids)) == ids

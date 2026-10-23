@@ -134,6 +134,17 @@ def vnets_query(ids: list[str]) -> str:
     )
 
 
+def reverse_peers_query(ids: list[str]) -> str:
+    """VNets with a Connected peering to one of the given VNets: the spokes of a linked hub the credential can't read."""
+    return (
+        "Resources | where type =~ 'microsoft.network/virtualnetworks' "
+        f"| mv-expand p = properties.virtualNetworkPeerings limit {MV_EXPAND_LIMIT} "
+        f"| where tostring(p.properties.remoteVirtualNetwork.id) in~ ({quoted_ids(ids)}) "
+        "and tostring(p.properties.peeringState) =~ 'Connected' "
+        "| distinct id | order by id asc"
+    )
+
+
 def vnet_of(subnet_id):
     """Lowercased VNet id from a subnet id; None when the id names no subnet.
 
@@ -180,14 +191,15 @@ def vnet_index(rows):
 def zone_networks(links, vnets, failed_vnets=frozenset()):
     """Lowercased ids of the VNets a zone resolves for: its linked VNets and the VNets peered with them.
 
-    None when the links could not be read, or when the lookup of a VNet in that set failed. A link to an
-    unreadable VNet adds the VNet but not its peers, so an IP there is matched only to resources the
-    credential can see in that VNet.
+    A peering is seen from either side: in a linked VNet's own list, or in a read VNet whose Connected peering
+    points at a linked VNet (a spoke of a linked hub the credential can't read). None when the links could
+    not be read, or when the lookup of a VNet in that set failed.
     """
     if links is None or vnets is None:
         return None
     linked = {(link.get("virtual_network_id") or "").lower() for link in links if link.get("virtual_network_id")}
     networks = linked | {peer for v in linked for peer in (vnets.get(v) or {}).get("peers", ())}
+    networks |= {v for v, vnet in vnets.items() if vnet["peers"] & linked}
     return None if networks & set(failed_vnets) else networks
 
 
@@ -607,8 +619,17 @@ def collect_zones(subscription_id, cred, collector: Collector) -> tuple:
         linked = _linked(False)
         rows, failed_vnets = lookup_by_ids(graph, linked, vnets_query, "linked virtual networks", collector)
         read = vnet_index(list(rows.values()))
-        peers = {p for v in _linked(True) for p in (read.get(v) or {}).get("peers", ())} - linked
-        peer_rows, failed_peers = lookup_by_ids(graph, peers, vnets_query, "peered virtual networks", collector)
+        privatelink_linked = _linked(True)
+        peers = {p for v in privatelink_linked for p in (read.get(v) or {}).get("peers", ())}
+        # A linked VNet the credential can't read lists no peers: find the readable VNets peered with it instead.
+        unread = privatelink_linked - set(read) - failed_vnets
+        spokes, failed_unread = lookup_by_ids(
+            graph, unread, reverse_peers_query, "VNets peered with unreadable linked VNets", collector
+        )
+        failed_vnets |= failed_unread
+        peer_rows, failed_peers = lookup_by_ids(
+            graph, (peers | set(spokes)) - linked, vnets_query, "peered virtual networks", collector
+        )
         vnets = vnet_index(list(rows.values()) + list(peer_rows.values()))
         failed_vnets |= failed_peers
     scopes = readable_scopes(cred, collector)

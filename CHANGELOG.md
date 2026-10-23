@@ -19,14 +19,15 @@ schemas and the `paramify` CLI — not the internal code.
   `platform_managed` when an unrelated VNet used the same address. Each IP is
   now matched only within the zone's linked VNets and the VNets peered with
   them, so an endpoint in a spoke peered with the hub the zone is linked to
-  still backs it. A zone with no links reads as `unverified`, not backed. A
-  linked VNet the credential cannot read stays in scope: a visible endpoint NIC
-  in it still backs the record, but an IP nothing visible holds there is
-  `unverified`. Only one peering hop is followed, from the linked VNet's own
-  peering list, so records in these layouts move from backed to `unverified`:
-  Virtual WAN (spokes two hops apart through the hub), spoke to spoke through a
-  hub, Azure Virtual Network Manager mesh (no peering objects), and a linked hub
-  the credential cannot read with the endpoint in a readable spoke. Where
+  still backs it. A peering counts from either side, so this holds even when
+  the credential cannot read the hub: the readable spokes whose own peering
+  points at it are found with a separate query. A zone with no links reads as
+  `unverified`, not backed. A linked VNet the credential cannot read stays in
+  scope: a visible endpoint NIC in it still backs the record, but an IP nothing
+  visible holds there is `unverified`. Only one peering hop is followed, so
+  records in these layouts move from backed to `unverified`: Virtual WAN (spokes
+  two hops apart through the hub), spoke to spoke through a hub, and Azure
+  Virtual Network Manager mesh (no peering objects). Where
   address spaces overlap, the verdict no longer depends on which VNet sorts
   first: an IP that falls in more than one of the zone's VNets with different
   verdicts is `unverified`. The new per-record `ip_address_networks` names the
