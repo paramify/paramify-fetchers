@@ -1,3 +1,4 @@
+display_name: Oracle Cloud
 description: >
   Oracle Cloud Infrastructure evidence fetchers (python, the official `oci` SDK).
   Each fetcher resolves one tenancy, walks the compartment tree beneath a chosen
