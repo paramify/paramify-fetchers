@@ -1,0 +1,82 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_vpc_network_segmentation",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 4,
+      "fields": {
+        "ResourceType": 4,
+        "Items": 4
+      }
+    },
+    {
+      "path": "results[].Items[]",
+      "records": 13,
+      "fields": {
+        "VpcId": 12,
+        "CidrBlock": 11,
+        "IsDefault": 3,
+        "State": 4,
+        "Tags": 9,
+        "SubnetId": 8,
+        "AvailabilityZone": 8,
+        "DefaultForAz": 8,
+        "MapPublicIpOnLaunch": 8,
+        "VpcPeeringConnectionId": 1,
+        "Status": 1,
+        "RequesterVpc": 1,
+        "RequesterCidr": 1,
+        "AccepterVpc": 1,
+        "AccepterCidr": 1,
+        "VpcEndpointId": 1,
+        "ServiceName": 1,
+        "VpcEndpointType": 1,
+        "SubnetIds": 0,
+        "OwnerId": 1
+      }
+    },
+    {
+      "path": "results[].Items[].Tags[]",
+      "records": 26,
+      "fields": {
+        "Key": 26,
+        "Value": 26
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:13:37Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "ResourceType": "Subnets",
+        "Items": [
+          {
+            "SubnetId": "subnet-0189b9682dd8910c2",
+            "VpcId": "vpc-0effedbf104e8ed6f",
+            "CidrBlock": "10.0.0.1/24",
+            "AvailabilityZone": "us-east-2b",
+            "DefaultForAz": false,
+            "MapPublicIpOnLaunch": false,
+            "Tags": [
+              {
+                "Key": "Name",
+                "Value": "pft-private-1"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

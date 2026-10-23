@@ -1,0 +1,81 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_codepipeline_config",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 1,
+      "fields": {
+        "name": 1,
+        "pipelineType": 1,
+        "stages": 1,
+        "source_providers": 1,
+        "artifactStore": 1,
+        "artifactStores": 0,
+        "encryption": 1
+      }
+    },
+    {
+      "path": "results[].stages[]",
+      "records": 2,
+      "fields": {
+        "name": 2,
+        "actions": 2
+      }
+    },
+    {
+      "path": "results[].stages[].actions[]",
+      "records": 2,
+      "fields": {
+        "name": 2,
+        "category": 2,
+        "provider": 2,
+        "owner": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:22Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "name": "pft-pipeline",
+        "pipelineType": "V2",
+        "stages": [
+          {
+            "name": "Source",
+            "actions": [
+              {
+                "name": "Source",
+                "category": "Source",
+                "provider": "S3",
+                "owner": "AWS"
+              }
+            ]
+          }
+        ],
+        "source_providers": [
+          "S3"
+        ],
+        "artifactStore": {
+          "type": "S3",
+          "location": "pft-111111111111-e25deb-logs"
+        },
+        "artifactStores": null,
+        "encryption": {
+          "artifactStore": null,
+          "artifactStores": []
+        }
+      }
+    ]
+  }
+}
