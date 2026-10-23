@@ -10,6 +10,97 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Added
+
+- **Scope exclusions for Azure fetchers.** A shared helper,
+  `fetchers/azure/_shared/scope_exclusions.py`, takes case-insensitive glob
+  patterns (comma- or space-separated) and answers whether a name is excluded and
+  by which pattern. A fetcher that adopts it reads them from its
+  `scope_exclusions` config field, and its evidence keeps every excluded item in
+  `results.excluded` with the pattern that matched (or the reason it followed),
+  echoes the patterns, lists the ones that matched nothing, and counts each
+  excluded kind. Every verdict, count and percentage covers only what remains in
+  scope. With no patterns set the output is unchanged apart from those empty or
+  zero fields. Adopted by:
+  - `azure_front_door_origins` 0.4.0: custom-domain host names, endpoint host
+    names and route names. A route is out of scope when its name matches or every
+    host it serves does, an origin group when every route reaching it is, and a
+    production app when only out-of-scope groups reach it, so multi-region
+    redundancy is judged on the core domains. Custom domains are read only when
+    patterns are set, and access restrictions only for apps an in-scope group
+    reaches.
+  - `azure_front_door_tls` 0.2.0 and `azure_front_door_waf_coverage` 0.2.0:
+    custom-domain host names, endpoint host names and route names. A route is out
+    of scope when its name or every host it serves matches; TLS also leaves out
+    certificate secrets that only out-of-scope domains use, and WAF coverage the
+    host-routes of an out-of-scope route. Both fetcher.yaml texts move to the new
+    description format.
+  - `azure_dns_configuration` 0.3.0: public record-set names, relative or FQDN.
+- **A string config field can be a `${env:VAR}` reference.** The runner
+  resolves it the way it resolves a secret. An unset or empty variable gives way
+  to the next value down (platform config, then the default; an error for a
+  required field with neither) and leaves one run note per entry naming every
+  unset variable; a malformed reference is an error. String config fields only,
+  not targets: the runner refuses a reference on an integer or boolean field,
+  and `manifest set-config`, `set-platform-config`, `add-target` and
+  `set-target` refuse one on a typed config field or any target field (a
+  target's secrets still take references), as does `validate` for a hand-edited
+  one. Only the fetcher's own fields and the issue-report keys are resolved; a key
+  only a sibling fetcher declares passes through untouched. `effective_config`,
+  and so the TUI, shows a reference as written with whether it is set, like a
+  secret, and `validate` names an issue-report reference unset in its shell.
+
+### Changed
+
+- **`azure_front_door_origins` 0.3.0: live origin health and traffic per region.**
+  Hourly Azure Monitor metrics for each profile over `metrics_lookback_days`
+  (default 7, at most 30): `OriginHealthPercentage` (average and minimum) by origin
+  and group, and `OriginRequestCount` by origin, matched to origins by host name or
+  origin host header. `origin_health` rolls them up per group and region: health,
+  healthy hours (measured against the share of probes the group's load-balancing
+  settings require), requests and request share, whether every region was healthy
+  in the profile's newest hour with health data and serving in its newest hour
+  with requests (taken separately, since ingestion lags per profile and per
+  metric; a group silent that hour reads as not serving, and an hour older than
+  the window's last 3 leaves both unknown), and `traffic_shifts`, each hour the
+  set of serving regions changed. Adds KSI-RPL-TRC. `production_tag` moves from `config_schema`
+  to `target_schema`, so each subscription target sets its own tag (same
+  `AZURE_PRODUCTION_APP_TAG` variable). Existing fields are unchanged.
+- **`azure_front_door_origins` 0.2.0: App Service origin lockdown and regional
+  twins.** Each origin that is an App Service app or slot (by its azureOrigin, its
+  private-link target, or the app whose host name it uses) is listed in
+  `app_service_origins` with the app's access restrictions, its
+  `publicNetworkAccess`, its plan's capacity and zone redundancy, and
+  `locked_to_front_door`: public access is off, or the only public allow rules are
+  `AzureFrontDoor.Backend` rules whose `X-Azure-FDID` value is the profile's own
+  `frontDoorId` (read with `profiles.get`), or that of another profile in the
+  subscription that also serves the app (listed in `fronting_front_door_ids`).
+  `lockdown_gaps` names what fails; the id of a profile that doesn't serve the app
+  is `other_front_door_id_allowed` (listed in `other_front_door_ids_allowed`),
+  since that profile may not have the serving profile's WAF. Resource Graph lookups page
+  in a stable order and fail on a truncated result or a repeated skip token. Every app in the subscription (narrowed by the
+  new optional `production_tag`) is listed in `production_apps`, flagged when no
+  serving origin group reaches it, when no enabled origin in another region of its
+  group is its twin, or when the twin's plan has fewer instances. Existing fields
+  are unchanged; `profiles` gain `front_door_id`.
+- **`azure_dns_configuration` 0.2.0: public record sets.** Each public zone now
+  lists `record_sets` (`record_sets.list_all_by_dns_zone`): name, FQDN, type, TTL,
+  `targets` (the A, AAAA, CNAME, MX, TXT, NS, PTR, SRV, CAA or SOA values) and
+  the alias target resource with its type. Each A, AAAA or CNAME record gets a
+  `failover_method`: `front_door` or `traffic_manager` (an alias to one, or a CNAME
+  to its `azurefd.net` / `trafficmanager.net` / `usgovtrafficmanager.net` host),
+  `cdn`, or `record_update` (a fixed target, so failing over means changing the
+  record within its TTL). A record that points at another record set in the zone
+  (an alias, or a CNAME to a name in the zone) takes that record set's method, one
+  link deep, and names it in `same_zone_target` when the zone holds a record set
+  of that name and type (a name in a delegated child zone isn't a link). Dangling
+  aliases and CNAMEs to deleted hosts aren't detected. New summary fields count record sets by type,
+  aliases, empty endpoint records and endpoints by failover method; zones whose
+  record sets can't be read are null and fail the run. Adds KSI-CNA-MAT,
+  KSI-RPL-ABO and KSI-RPL-TRC. Existing fields and keys are unchanged.
+
+## [0.6.0-beta] - 2026-10-23
+
 ### Breaking
 
 - **Python 3.11 is now the minimum version.** Python 3.10 reached end of life
@@ -17,6 +108,64 @@ schemas and the `paramify` CLI — not the internal code.
   `>=3.11`, so `pip install` refuses a 3.10 interpreter. `paramify doctor` also
   reports 3.10 as too old. To upgrade, make a new virtual environment on Python
   3.11 or later and install again. The ruff and mypy targets move to 3.11 too.
+- **`paramify issues upload` sends reports into Paramify pipelines.** The API
+  key needs new permissions, and each issue-report entry must now set
+  `close_cycle` (next entry). The command no longer calls
+  `POST /assessment/{id}/intake`. Per assessment it
+  uploads each report bare to `POST /pipelines/{id}/intake`, then queues one
+  `POST /pipelines/{id}/process` naming exactly those artifacts, then waits for
+  the job and prints its counts (created, updated, seen-closed, auto-closed). The
+  call is `PROCESS_CLOSE` only when the assessment's `close_cycle` is `after_run`
+  and every target bound to it in the run succeeded and uploaded; otherwise
+  `PROCESS`, with the reason the close was skipped. The pipeline puts an upload
+  on its oldest open cycle, so `effectiveDate` no longer routes it. The API key
+  needs `PIPELINE_INTAKE`, plus `PIPELINE_PROCESS`, plus `PIPELINE_CLOSE` to
+  close. A job that fails, is blocked behind a failed job, or outlasts
+  `--wait-timeout` (default 900 s) fails the command; `--no-wait` queues and
+  exits. The intake log now also records each job, so a re-run processes files
+  an interrupted run uploaded but never processed, and waits on a job it left
+  running. The TUI's issue-report panel shows the planned operation per
+  assessment and warns in the confirm when a run will close a cycle.
+- **Every issue-report entry must set `close_cycle`.** It is a reserved config
+  key, `after_run` or `never`, with no default. Until an entry sets it, the
+  uploader holds back that entry's reports. Closing a cycle auto-closes every
+  open issue the cycle never saw, so it states how the customer fills the
+  assessment's cycles: one report per cycle closes after each complete run;
+  several files per cycle close only when the last is in. `paramify assessments
+  select` asks for it (or takes `--close-cycle`), and so does the TUI's
+  assessment picker. `paramify validate` reports an entry without one, reading
+  entry and `platforms.<category>` config the way the runner does.
+- **A manifest path or name that does not exist is now an error.** Every
+  command resolves a manifest name the same way: as typed, then under
+  `manifests/`, then with `.yaml`. A name that matches nothing exits 1. Before,
+  some commands read it as an empty manifest, `-f demo` could create `./demo`,
+  and `doctor` passed. `paramify validate demo` now works.
+- **A malformed `${env:...}` reference is now an error.** A reference must name
+  an upper-case variable, such as `${env:OKTA_API_TOKEN}`. A reference that does
+  not match, such as a lower-case name, now fails the schema check and secret
+  resolution. Before, the runner passed it through as the literal secret value.
+- **A target's `profile` outranks static AWS keys in the environment.** When a
+  target sets `profile`, the runner removes `AWS_ACCESS_KEY_ID`,
+  `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` for that invocation and logs a
+  note. Before, keys in the environment silently won over the profile. A profile
+  that uses `credential_source = Environment` no longer works, because those
+  keys are gone when it runs. Categories can declare `auth.selector_env` and
+  `auth.credential_env` to describe the same rule for other clouds.
+- **The Okta account allowlists are configuration, not code.**
+  `okta_iam_core.py` carried a hardcoded list of one service account and two named
+  people's email addresses, used to seed service-account and Super Admin detection
+  for a single tenant. Both lists now come from config and default to empty:
+  `OKTA_KNOWN_SERVICE_ACCOUNTS` on `okta/non_user_accounts_authentication` and
+  `OKTA_KNOWN_SUPER_ADMINS` on `okta/least_privilege`, each declared in that
+  fetcher's `config_schema` and accepting a comma- or newline-separated list of
+  logins/emails. No behaviour change for a tenant that sets them; every other
+  tenant now gets only the name-independent detection methods (userType, API token
+  ownership, OAuth client assignment, group membership, assigned admin roles),
+  which is what it should always have been.
+- **`write_status` is gone from `azure_common` and `gcp_common`.** It was an
+  alias of `report_failure`, kept for older fetchers. A custom fetcher that
+  imports it must import `report_failure` instead.
+
 ### Security
 
 - **Jira fetchers** (`jira_site_inventory`, `jira_remediation_items`,
@@ -125,7 +274,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **CI runs the tests on Python 3.15.** The test matrix is now 3.11 to 3.15.
   The 3.10 row is gone.
-
 - **`azure_devops_audit_streams`** (`EVD-AZURE-DEVOPS-AUDIT-STREAMS`): whether an
   Azure DevOps organization exports its audit log, which it otherwise keeps for
   90 days. Records:
@@ -181,6 +329,48 @@ schemas and the `paramify` CLI — not the internal code.
   every Azure DevOps fetcher. It sends credentials only to the host it paged from
   and never follows a redirect, and it keeps the TF/VS error code on every
   failure.
+- **A ServiceNow category with two fetchers.** `servicenow_cases` collects
+  compliance review cases, and `servicenow_changes` collects ITSM change records.
+  Both use a bearer token (`SERVICENOW_API_TOKEN`) and take an instance URL for
+  each target. An optional last-run watermark limits a pull to new records.
+  Leave it unset for the first pull.
+- **Four Azure Front Door fetchers.** `azure_front_door_waf_policies`,
+  `azure_front_door_waf_coverage`, `azure_front_door_tls` and
+  `azure_front_door_origins` read Front Door Standard and Premium profiles.
+  Classic Front Door and classic CDN profiles are counted as skipped. All four
+  need only Reader access and run against each subscription. The `azure` extra
+  adds `azure-mgmt-frontdoor` and `azure-mgmt-cdn`.
+- **`azure_defender_assessments`** collects each Defender for Cloud assessment
+  for each resource, with its severity, status and resource id. Severity comes
+  from the assessment itself in Resource Graph, and falls back to the
+  subscription's metadata catalogue. Each record has a `severity_source`, and
+  the summary counts the records whose severity came from the catalogue or is
+  unknown. A failed Resource Graph query is a collection failure (exit 1). A
+  subscription where `Microsoft.Security` is not registered is recorded as
+  `not_registered`, not as a failure.
+- **`paramify capabilities list|show` and `paramify artifacts list|pull`.** These
+  read a workspace's solution capabilities and their narratives, and download
+  the artifacts of an evidence set. `pull` reports whether each artifact has an
+  envelope.
+- **`paramify validators check`** — runs the behaviour cases in
+  `validators/_cases/` through the real ECMAScript engine
+  (`framework/validator_eval/`, evaluated under `node` because Paramify's engine
+  is JavaScript and Python `re` cannot compile `(?<name>...)` at all). A case
+  file pins what a validator must return for a given artifact; a set-level file
+  combines every validator on an evidence set the way Paramify does
+  (ERROR > FAIL > PASS), which is the only way to prove an `integrity` validator
+  covers its partner — a violation-counting validator passes its own drifted
+  artifact, because zero matches is its pass condition. Reports vacuous passes
+  (a PASS reached with a rule that read nothing) and names validators with no
+  cases. Deliberately not a CI gate: the cases are an authoring aid, and
+  legitimate evidence-shape changes should not block a merge.
+- **An `onboard-platform` skill** integrates a platform that has no fetchers
+  yet. It researches the API, sets up a sandbox with real data, plans a set of
+  fetchers and builds each one.
+- **Illustrated guides** for the architecture, run manifest, fetcher contract,
+  authoring, envelope, config injection, validators, uploader, pipelines,
+  inventory and issue-report fetchers, KSI mapping, platform onboarding, private
+  mirror, versioning and releasing.
 - **`azure_app_service_backups`** (`EVD-AZURE-APPSVC-BACKUPS`, KSI-RPL-ABO). For
   each App Service web app, whether it is actually
   being backed up, judged from its restore points: automatic backups plus
@@ -628,14 +818,6 @@ schemas and the `paramify` CLI — not the internal code.
   send the same byte for ctrl+i and Tab, so it never fired). The run console
   says when a run left issue reports to send, and the assessment picker no
   longer blocks the app while it lists the workspace's assessments.
-- **`close_cycle`, a reserved config key on every issue-report entry** —
-  `after_run` or `never`, with no default. Closing a cycle auto-closes every
-  open issue the cycle never saw, so it states how the customer fills the
-  assessment's cycles: one report per cycle closes after each complete run;
-  several files per cycle close only when the last is in. `paramify assessments
-  select` asks for it (or takes `--close-cycle`), and so does the TUI's
-  assessment picker. `paramify validate` reports an entry without one, reading
-  entry and `platforms.<category>` config the way the runner does.
 - **Issue-report invocations in the sidecar.** `_issue_reports.json` (schema
   1.1) gains `invocations`: one entry per issue-report invocation, including a
   failed one that wrote no file and an entry that raised before running. Before
@@ -942,43 +1124,6 @@ schemas and the `paramify` CLI — not the internal code.
   profiles, attached WAF policies and L4 listeners have not yet been
   exercised against live data. `tests/test_azure_app_gateway_verdicts.py`
   covers those paths against modelled gateways.
-- **Scope exclusions for Azure fetchers.** A shared helper,
-  `fetchers/azure/_shared/scope_exclusions.py`, takes case-insensitive glob
-  patterns (comma- or space-separated) and answers whether a name is excluded and
-  by which pattern. A fetcher that adopts it reads them from its
-  `scope_exclusions` config field, and its evidence keeps every excluded item in
-  `results.excluded` with the pattern that matched (or the reason it followed),
-  echoes the patterns, lists the ones that matched nothing, and counts each
-  excluded kind. Every verdict, count and percentage covers only what remains in
-  scope. With no patterns set the output is unchanged apart from those empty or
-  zero fields. Adopted by:
-  - `azure_front_door_origins` 0.4.0: custom-domain host names, endpoint host
-    names and route names. A route is out of scope when its name matches or every
-    host it serves does, an origin group when every route reaching it is, and a
-    production app when only out-of-scope groups reach it, so multi-region
-    redundancy is judged on the core domains. Custom domains are read only when
-    patterns are set, and access restrictions only for apps an in-scope group
-    reaches.
-  - `azure_front_door_tls` 0.2.0 and `azure_front_door_waf_coverage` 0.2.0:
-    custom-domain host names, endpoint host names and route names. A route is out
-    of scope when its name or every host it serves matches; TLS also leaves out
-    certificate secrets that only out-of-scope domains use, and WAF coverage the
-    host-routes of an out-of-scope route. Both fetcher.yaml texts move to the new
-    description format.
-  - `azure_dns_configuration` 0.3.0: public record-set names, relative or FQDN.
-- **A string config field can be a `${env:VAR}` reference.** The runner
-  resolves it the way it resolves a secret. An unset or empty variable gives way
-  to the next value down (platform config, then the default; an error for a
-  required field with neither) and leaves one run note per entry naming every
-  unset variable; a malformed reference is an error. String config fields only,
-  not targets: the runner refuses a reference on an integer or boolean field,
-  and `manifest set-config`, `set-platform-config`, `add-target` and
-  `set-target` refuse one on a typed config field or any target field (a
-  target's secrets still take references), as does `validate` for a hand-edited
-  one. Only the fetcher's own fields and the issue-report keys are resolved; a key
-  only a sibling fetcher declares passes through untouched. `effective_config`,
-  and so the TUI, shows a reference as written with whether it is set, like a
-  secret, and `validate` names an issue-report reference unset in its shell.
 
 ### Changed
 
@@ -987,7 +1132,19 @@ schemas and the `paramify` CLI — not the internal code.
   `startDate` (today, `YYYY-MM-DD`) alongside `frequency` when they create an
   evidence set, so the TUI and `paramify upload` no longer leave it unset.
   Existing sets are reused unchanged.
-
+- **`aws_config_conformance_packs` maps rules to FedRAMP Low and Moderate and
+  to NIST 800-53 Rev. 5 controls** (0.1.0 → 0.5.0). Deployed rule names change on
+  each redeploy, so each one now resolves to its stable source identifier. The
+  raw AWS response stays in the evidence. Adds Moderate pack support and a
+  control-to-rule view.
+- **`aws_detect_new_aws_resource` finds rules and topics with other names, and
+  accepts event-driven rules** (0.1.0 → 0.2.0). New optional `rule_name` and
+  `topic_name` target fields keep the old defaults. Event-pattern rules no
+  longer fail the polling-interval check. Adds `validation_results.rule_checks`.
+- **Azure SDK dependencies.** `azure-mgmt-resource-policy` moves from 1.0.0b3 to
+  1.0.0, and `azure-mgmt-network` stays below 34. The `azure` extra adds
+  `azure-mgmt-redisenterprise`, `azure-mgmt-dns`, `azure-mgmt-privatedns` and
+  `azure-mgmt-resource-deployments`.
 - **`azure_policy_compliance` 0.2.0: what was evaluated, whether remediation took,
   and what keeps coming back.**
   - Each listed non-compliant state now carries `evaluation_details`: the
@@ -1040,52 +1197,6 @@ schemas and the `paramify` CLI — not the internal code.
     mapped to `KSI-SVC-EIS`.
   - `runtime.timeout` is 3600 seconds: the added queries run serially, and a
     production run took about 8 minutes, near the runner's 600-second default.
-- **`azure_front_door_origins` 0.3.0: live origin health and traffic per region.**
-  Hourly Azure Monitor metrics for each profile over `metrics_lookback_days`
-  (default 7, at most 30): `OriginHealthPercentage` (average and minimum) by origin
-  and group, and `OriginRequestCount` by origin, matched to origins by host name or
-  origin host header. `origin_health` rolls them up per group and region: health,
-  healthy hours (measured against the share of probes the group's load-balancing
-  settings require), requests and request share, whether every region was healthy
-  in the profile's newest hour with health data and serving in its newest hour
-  with requests (taken separately, since ingestion lags per profile and per
-  metric; a group silent that hour reads as not serving, and an hour older than
-  the window's last 3 leaves both unknown), and `traffic_shifts`, each hour the
-  set of serving regions changed. Adds KSI-RPL-TRC. `production_tag` moves from `config_schema`
-  to `target_schema`, so each subscription target sets its own tag (same
-  `AZURE_PRODUCTION_APP_TAG` variable). Existing fields are unchanged.
-- **`azure_front_door_origins` 0.2.0: App Service origin lockdown and regional
-  twins.** Each origin that is an App Service app or slot (by its azureOrigin, its
-  private-link target, or the app whose host name it uses) is listed in
-  `app_service_origins` with the app's access restrictions, its
-  `publicNetworkAccess`, its plan's capacity and zone redundancy, and
-  `locked_to_front_door`: public access is off, or the only public allow rules are
-  `AzureFrontDoor.Backend` rules whose `X-Azure-FDID` value is the profile's own
-  `frontDoorId` (read with `profiles.get`), or that of another profile in the
-  subscription that also serves the app (listed in `fronting_front_door_ids`).
-  `lockdown_gaps` names what fails; the id of a profile that doesn't serve the app
-  is `other_front_door_id_allowed` (listed in `other_front_door_ids_allowed`),
-  since that profile may not have the serving profile's WAF. Resource Graph lookups page
-  in a stable order and fail on a truncated result or a repeated skip token. Every app in the subscription (narrowed by the
-  new optional `production_tag`) is listed in `production_apps`, flagged when no
-  serving origin group reaches it, when no enabled origin in another region of its
-  group is its twin, or when the twin's plan has fewer instances. Existing fields
-  are unchanged; `profiles` gain `front_door_id`.
-- **`azure_dns_configuration` 0.2.0: public record sets.** Each public zone now
-  lists `record_sets` (`record_sets.list_all_by_dns_zone`): name, FQDN, type, TTL,
-  `targets` (the A, AAAA, CNAME, MX, TXT, NS, PTR, SRV, CAA or SOA values) and
-  the alias target resource with its type. Each A, AAAA or CNAME record gets a
-  `failover_method`: `front_door` or `traffic_manager` (an alias to one, or a CNAME
-  to its `azurefd.net` / `trafficmanager.net` / `usgovtrafficmanager.net` host),
-  `cdn`, or `record_update` (a fixed target, so failing over means changing the
-  record within its TTL). A record that points at another record set in the zone
-  (an alias, or a CNAME to a name in the zone) takes that record set's method, one
-  link deep, and names it in `same_zone_target` when the zone holds a record set
-  of that name and type (a name in a delegated child zone isn't a link). Dangling
-  aliases and CNAMEs to deleted hosts aren't detected. New summary fields count record sets by type,
-  aliases, empty endpoint records and endpoints by failover method; zones whose
-  record sets can't be read are null and fail the run. Adds KSI-CNA-MAT,
-  KSI-RPL-ABO and KSI-RPL-TRC. Existing fields and keys are unchanged.
 - **`azure_network_security_groups` 0.3.0: east-west segmentation.** Each workload
   subnet now says which other subnets in its VNet can reach it on every port
   (`east_west_segmentation`: `segmented`, `partial`, `unsegmented`, `undetermined`
@@ -1127,22 +1238,6 @@ schemas and the `paramify` CLI — not the internal code.
   when `--output-dir` is not given. The standalone uploaders and each panel of
   the TUI's Paramify tab choose the same way; the TUI scopes to the active
   manifest's runs once it has any.
-- **`paramify issues upload` sends reports into Paramify pipelines** instead of
-  `POST /assessment/{id}/intake`, which it no longer calls. Per assessment it
-  uploads each report bare to `POST /pipelines/{id}/intake`, then queues one
-  `POST /pipelines/{id}/process` naming exactly those artifacts, then waits for
-  the job and prints its counts (created, updated, seen-closed, auto-closed). The
-  call is `PROCESS_CLOSE` only when the assessment's `close_cycle` is `after_run`
-  and every target bound to it in the run succeeded and uploaded; otherwise
-  `PROCESS`, with the reason the close was skipped. The pipeline puts an upload
-  on its oldest open cycle, so `effectiveDate` no longer routes it. The API key
-  needs `PIPELINE_INTAKE`, plus `PIPELINE_PROCESS`, plus `PIPELINE_CLOSE` to
-  close. A job that fails, is blocked behind a failed job, or outlasts
-  `--wait-timeout` (default 900 s) fails the command; `--no-wait` queues and
-  exits. The intake log now also records each job, so a re-run processes files
-  an interrupted run uploaded but never processed, and waits on a job it left
-  running. The TUI's issue-report panel shows the planned operation per
-  assessment and warns in the confirm when a run will close a cycle.
 - **AWS fetchers finish in large accounts** (67 fetchers, minor version
   bumps). Many made several AWS CLI calls, and started several `jq` processes,
   per resource, so an account with thousands of snapshots, roles or security
@@ -1308,20 +1403,6 @@ schemas and the `paramify` CLI — not the internal code.
   save that cannot happen reports why and keeps the edit rather than losing it
   along with the file write.
 
-
-- **`paramify validators check`** — runs the behaviour cases in
-  `validators/_cases/` through the real ECMAScript engine
-  (`framework/validator_eval/`, evaluated under `node` because Paramify's engine
-  is JavaScript and Python `re` cannot compile `(?<name>...)` at all). A case
-  file pins what a validator must return for a given artifact; a set-level file
-  combines every validator on an evidence set the way Paramify does
-  (ERROR > FAIL > PASS), which is the only way to prove an `integrity` validator
-  covers its partner — a violation-counting validator passes its own drifted
-  artifact, because zero matches is its pass condition. Reports vacuous passes
-  (a PASS reached with a rule that read nothing) and names validators with no
-  cases. Deliberately not a CI gate: the cases are an authoring aid, and
-  legitimate evidence-shape changes should not block a merge.
-
 - **Validator authoring: guards are written positively, and collection health is
   its own validator.** `validationRules[].disposition` is accepted and then
   discarded by the REST API, so a rule authored in the negative `ERROR` form
@@ -1340,20 +1421,9 @@ schemas and the `paramify` CLI — not the internal code.
   `validators/aws/alb_encryption_in_transit.yaml` is reshaped accordingly; in its
   previous form it returned PASS on drifted evidence where 1 of 4 load balancers
   was encrypted.
-- The `suggest-validator` skill now authors validators into `validators/` rather
-  than only proposing a regex, and verifies them against compliant,
+- **The `suggest-validator` skill writes validators.** It now authors them into
+  `validators/` rather than only proposing a regex, and verifies them against compliant,
   non-compliant, and **unreadable** evidence.
-- **The Okta account allowlists are configuration, not code** (SEC-71).
-  `okta_iam_core.py` carried a hardcoded list of one service account and two named
-  people's email addresses, used to seed service-account and Super Admin detection
-  for a single tenant. Both lists now come from config and default to empty:
-  `OKTA_KNOWN_SERVICE_ACCOUNTS` on `okta/non_user_accounts_authentication` and
-  `OKTA_KNOWN_SUPER_ADMINS` on `okta/least_privilege`, each declared in that
-  fetcher's `config_schema` and accepting a comma- or newline-separated list of
-  logins/emails. No behaviour change for a tenant that sets them; every other
-  tenant now gets only the name-independent detection methods (userType, API token
-  ownership, OAuth client assignment, group membership, assigned admin roles),
-  which is what it should always have been.
 
 ### Deprecated
 
@@ -1375,6 +1445,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Azure management calls go to the credential's cloud.** Every
+  management-plane Azure fetcher sent its requests to commercial Azure, so a US
+  Government, Germany or China subscription failed with `SubscriptionNotFound`.
+  The management endpoint now follows `AZURE_AUTHORITY_HOST`, as the Entra
+  fetchers already did.
+- **An optional secret that cannot be resolved falls back to ambient identity.**
+  The TUI wires optional secrets to default environment variables. When such a
+  variable was unset, the entry failed before it ran (exit 255), even with a
+  task role or workload identity present.
+- **Four run-path failures that exited 0.** An unquoted YAML date in a target
+  stopped the run. The timeout now stops the whole process group, so a hung
+  `aws` or `curl` call cannot outlast it. Quitting the TUI during a run no
+  longer marks the running fetcher failed. `guard_duty`, `guard_duty_findings`
+  and `global_accelerator_ha` now record a service that is not enabled instead
+  of failing.
 - **`checkov_bicep` passes its list settings to checkov intact** (0.2.0 →
   0.2.1). `checks`, `skip_checks`, `skip_paths` and `skip_resources` take
   entries separated by commas or newlines, each trimmed. `checks` and
@@ -1417,24 +1502,6 @@ schemas and the `paramify` CLI — not the internal code.
 
   New `metadata.checks` lists the `checks` allowlist, so a restricted scan no
   longer reads as a full one. It is empty when every check ran.
-- **`azure_defender_assessments` reports each assessment's own severity**
-  (0.1.1 → 0.2.0). Severity came from the subscription's assessment metadata
-  catalogue, which can rate a check lower than the assessment itself does (App
-  Service authentication, for one, is High on the assessment and Low in the
-  catalogue), so `unhealthy_by_severity` undercounted High findings. Severity
-  now comes from each assessment's `properties.metadata.severity` in Resource
-  Graph (`SecurityResources`, one query paged to the end), with the catalogue
-  only as a fallback. Each record gains `severity_source` (`assessment`,
-  `catalogue`, or `null` when neither has one), and the summary gains
-  `severity_from_catalogue_count` and `severity_unknown_count`, and
-  `unhealthy_severity_from_catalogue_count` and
-  `unhealthy_severity_unknown_count` for Unhealthy records only, since an
-  Unhealthy record with no severity is missing from `unhealthy_by_severity`.
-  The catalogue still supplies categories, threats, type, user impact,
-  implementation effort and policy definition id. A failed
-  Resource Graph query is a collection failure (exit 1), and every record falls
-  back to the catalogue. Other fields are unchanged.
-
 - **`azure_policy_assignments` recognises the `AuditAction` effect** (0.2.0 →
   0.3.0). An assignment whose effect resolved to `AuditAction`, the audit
   counterpart of `DenyAction`, was reported as `unresolved` with no reason and
@@ -1577,19 +1644,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **AWS failure reports name the fetcher** instead of `aws__shared`, and an
   expired `aws login` session is reported as expired credentials.
-
-- **`azure_defender_assessments` collects again, with severity** (fetcher
-  0.1.1). A missing import made every run fail with a `NameError`, so the
-  evidence set published zero assessments and reported the provider as
-  `unknown`. Behind that, `assessments.list` returns no metadata, so severity,
-  categories and assessment type were null on every record and
-  `unhealthy_by_severity` was always empty. It now reads each check's metadata
-  from `assessments_metadata.list_by_subscription()` — one extra call, joined on
-  the assessment name. And `resource_id` / `resource_source` were null on every
-  record, so the evidence couldn't say *which* resource failed a check: the
-  service returns `resourceDetails` with PascalCase keys the SDK doesn't
-  deserialize. Both are now read from the raw payload, with the assessed
-  resource's id taken from the assessment id as a last resort.
 
 ## [0.5.1-beta] - 2026-09-02
 
@@ -2361,7 +2415,8 @@ change before 1.0 (see [`docs/versioning.md`](https://github.com/paramify/parami
 - TUI restyled — border titles, status pills, denser controls, and hatched empty
   states.
 
-[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.5.1-beta...HEAD
+[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.6.0-beta...HEAD
+[0.6.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.5.1-beta...v0.6.0-beta
 [0.5.1-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.5.0-beta...v0.5.1-beta
 [0.5.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.4.0-beta...v0.5.0-beta
 [0.4.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.3.1-beta...v0.4.0-beta
