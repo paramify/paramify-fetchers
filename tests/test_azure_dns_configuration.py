@@ -1,4 +1,4 @@
-"""azure_dns_configuration: public record sets, their targets and failover method, over real SDK models."""
+"""azure_dns_configuration: public record sets, their targets and failover method."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from azure.mgmt.dns import models as m
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AZURE = REPO_ROOT / "fetchers" / "azure"
@@ -21,6 +20,11 @@ dns = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(dns)
 
 from azure_common import Collector  # noqa: E402
+
+# Stand-ins for azure.mgmt.dns.models; test_azure_sdk_surface.py pins the fields the fetcher reads.
+m = SimpleNamespace(**dict.fromkeys((
+    "Zone", "RecordSet", "SubResource", "ARecord", "AaaaRecord", "CnameRecord", "MxRecord", "NsRecord",
+    "PtrRecord", "TxtRecord", "SrvRecord", "CaaRecord", "SoaRecord"), SimpleNamespace))
 
 SUB = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-dns/providers"
 AFD = f"{SUB}/Microsoft.Cdn/profiles/fd-prod/afdEndpoints/web"
@@ -290,10 +294,10 @@ def fake_clients(monkeypatch, zones, by_zone):
     record_sets = FakeRecordSets(by_zone)
     dns_client = SimpleNamespace(zones=SimpleNamespace(list=lambda: iter(zones)), record_sets=record_sets)
     arm = SimpleNamespace(send_request=lambda request: SimpleNamespace(status_code=404))
-    import azure.mgmt.dns
-    import azure.mgmt.privatedns
-    monkeypatch.setattr(azure.mgmt.dns, "DnsManagementClient", lambda **kw: dns_client)
-    monkeypatch.setattr(azure.mgmt.privatedns, "PrivateDnsManagementClient", lambda **kw: arm)
+    monkeypatch.setitem(sys.modules, "azure.mgmt.dns", SimpleNamespace(DnsManagementClient=lambda **kw: dns_client))
+    monkeypatch.setitem(sys.modules, "azure.mgmt.privatedns",
+                        SimpleNamespace(PrivateDnsManagementClient=lambda **kw: arm))
+    monkeypatch.setitem(sys.modules, "azure.core.rest", SimpleNamespace(HttpRequest=lambda method, url: (method, url)))
     return record_sets
 
 

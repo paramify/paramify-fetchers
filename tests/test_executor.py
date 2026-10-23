@@ -298,6 +298,7 @@ def test_validate_names_an_unset_assessment_reference(monkeypatch):
 
 
 def test_effective_config_shows_the_reference_and_whether_it_is_set(tmp_path, monkeypatch):
+    pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
     from framework.tui import render
 
     monkeypatch.setenv("SET_VAR", "secret-ish-value")
