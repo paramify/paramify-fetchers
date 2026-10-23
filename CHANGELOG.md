@@ -136,8 +136,9 @@ schemas and the `paramify` CLI — not the internal code.
   collection time), and the comparator's `_run_metadata.json` record carries the
   same list. `paramify manifest add <comparator>` (and the console's add picker)
   adds its inputs too. `paramify validate` reports an input missing from the
-  manifest, with the fix, and a comparator whose inputs are unknown, cyclic or
-  not JSON evidence; `run` skips that entry and runs the rest. The shared
+  manifest, with the fix, and a comparator whose inputs are unknown, cyclic,
+  not JSON evidence, or a comparator that can't run; `run` skips that entry and
+  runs the rest. The shared
   `comparators/_lib/comparator_inputs.py` holds `run(check, output,
   summary_keys)`, so a comparator is only its comparison, and applies one
   policy: failed or partial inputs, including an inventory the runner marked

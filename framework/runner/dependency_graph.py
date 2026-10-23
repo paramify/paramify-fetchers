@@ -16,7 +16,8 @@ INPUT_KINDS = ("evidence", "inventory")
 
 def problems(fetchers: Mapping[str, Fetcher]) -> Dict[str, str]:
     """Each comparator that can't run, with why: an unknown input, one that writes no
-    JSON evidence, or a cycle. `validate` and `run` report these on the entry."""
+    JSON evidence, a cycle, or an input that is itself a comparator that can't run.
+    `validate` and `run` report these on the entry."""
     out: Dict[str, str] = {}
     for name in sorted(fetchers):
         for dep in fetchers[name].depends_on:
@@ -34,7 +35,19 @@ def problems(fetchers: Mapping[str, Fetcher]) -> Dict[str, str]:
     for cycle in _cycles(fetchers):
         for name in cycle[:-1]:
             out.setdefault(name, "dependency cycle: " + " -> ".join(cycle))
-    return out
+    # To a fixed point, so whatever reads a bad comparator, and every member of a cycle,
+    # is flagged too; `order` then never has to place one. Each names the root cause.
+    cause = dict(out)
+    while True:
+        more: Dict[str, str] = {}
+        for name in sorted(fetchers):
+            bad = next((d for d in fetchers[name].depends_on if d in out), None)
+            if name not in out and bad is not None:
+                more[name] = f"depends_on {bad}, which can't run ({cause[bad]})"
+                cause[name] = cause[bad]
+        if not more:
+            return out
+        out.update(more)
 
 
 def _cycles(fetchers: Mapping[str, Fetcher]) -> List[List[str]]:
@@ -76,7 +89,8 @@ def order(entries: Sequence[ManifestEntry], fetchers: Mapping[str, Fetcher]) -> 
             None,
         )
         if ready is None:
-            # Only a cycle gets here, and `run` skips every entry in one.
+            # Only a cycle, or what reads one, gets here; `problems` flags all of
+            # those, so `run` skips them.
             out.extend(comparators)
             break
         entry = comparators.pop(ready)

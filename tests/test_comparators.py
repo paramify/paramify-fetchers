@@ -191,18 +191,29 @@ def test_problems_accepts_only_json_evidence_inputs(build_fetcher_fn, tmp_path, 
     assert (problems == {}) is ok, problems
 
 
-def test_problems_names_unknown_inputs_and_cycles_on_the_comparator_itself(build_fetcher_fn, tmp_path):
+def test_problems_names_unknown_inputs_cycles_and_what_reads_them(build_fetcher_fn, tmp_path):
     fx = {name: _f(build_fetcher_fn, tmp_path, name, deps) for name, deps in {
-        "c": ["nope"], "self": ["self"], "p": ["q"], "q": ["p"], "reader": ["c"], "fine": [],
+        "c": ["nope"], "self": ["self"], "p": ["q"], "q": ["p"], "reader": ["c"], "far": ["reader"],
+        "fine": [],
     }.items()}
-    # `reader` can run: c is a comparator that writes JSON evidence. If c is skipped, reader
-    # finds it missing at run time and writes null counts.
     assert dependency_graph.problems(fx) == {
         "c": "depends_on names an unknown fetcher: nope",
         "self": "dependency cycle: self -> self",
         "p": "dependency cycle: p -> q -> p",
         "q": "dependency cycle: p -> q -> p",
+        "reader": "depends_on c, which can't run (depends_on names an unknown fetcher: nope)",
+        "far": "depends_on reader, which can't run (depends_on names an unknown fetcher: nope)",
     }
+
+
+def test_problems_flags_every_member_of_a_cycle(build_fetcher_fn, tmp_path):
+    """The walk names the cycle a -> b -> a; c is also on one (a -> c -> b -> a) but read via b."""
+    fx = {name: _f(build_fetcher_fn, tmp_path, name, deps) for name, deps in {
+        "a": ["b", "c"], "b": ["a"], "c": ["b"],
+    }.items()}
+    found = dependency_graph.problems(fx)
+    assert set(found) == {"a", "b", "c"}
+    assert found["c"] == "depends_on b, which can't run (dependency cycle: a -> b -> a)"
 
 
 def test_discovery_finds_comparators_beside_fetchers(tmp_path):
@@ -240,16 +251,38 @@ def test_validate_and_run_report_a_bad_input_on_that_entry_and_the_rest_still_ru
     src = input_fetcher(tmp_path, "src")
     cmp = make(tmp_path)
     reader = comparator(tmp_path, "reader", [cmp], PROBE)
-    m = manifest(tmp_path, src, cmp, reader)
+    fine = comparator(tmp_path, "fine", [src], PROBE)
+    m = manifest(tmp_path, src, cmp, reader, fine)
+    reader_why = f"depends_on {cmp}, which can't run ({why})"
 
-    assert api.validate(m, tmp_path) == [f"{cmp}: {why}"]
+    assert api.validate(m, tmp_path) == [f"{cmp}: {why}", f"{reader}: {reader_why}"]
     summary, run_dir, events = run(tmp_path, m)
 
     assert not summary["ok"]
-    assert [(e["fetcher"], e["reason"]) for e in events if e["event"] == "fetcher_skip"] == [(cmp, why)]
-    assert started(events) == [src, reader]
-    assert not (run_dir / "cmp.json").exists()
-    assert envelope(run_dir, "reader.json")["metadata"]["inputs"][0]["status"] == "missing"
+    skipped = [(e["fetcher"], e["reason"]) for e in events if e["event"] == "fetcher_skip"]
+    assert skipped == [(cmp, why), (reader, reader_why)]
+    assert started(events) == [src, fine]
+    assert not (run_dir / "cmp.json").exists() and not (run_dir / "reader.json").exists()
+
+
+def test_a_comparator_downstream_of_a_cycle_is_skipped_not_started_early(tmp_path):
+    """c5 reads c3, which reads the cycle c1 <-> c2. Listed first, c5 and c3 must not start
+    ahead of an input that would run later; all four are skipped with a reason."""
+    src = input_fetcher(tmp_path, "src")
+    c1 = comparator(tmp_path, "c1", ["testcat_c2", src], PROBE)
+    c2 = comparator(tmp_path, "c2", [c1], PROBE)
+    c3 = comparator(tmp_path, "c3", [c1], PROBE)
+    c5 = comparator(tmp_path, "c5", [c3], PROBE)
+    m = manifest(tmp_path, c5, c3, c1, c2, src)
+
+    errors = api.validate(m, tmp_path)
+    assert [e.split(":")[0] for e in errors] == [c5, c3, c1, c2]
+    assert f"{c5}: depends_on {c3}, which can't run (dependency cycle: " in errors[0]
+    summary, run_dir, events = run(tmp_path, m)
+
+    assert started(events) == [src]
+    assert {e["fetcher"] for e in events if e["event"] == "fetcher_skip"} == {c1, c2, c3, c5}
+    assert not any((run_dir / f"{n}.json").exists() for n in ("c1", "c2", "c3", "c5"))
 
 
 def test_discovery_does_not_judge_which_tree_a_fetcher_is_in(tmp_path):

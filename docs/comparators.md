@@ -39,10 +39,12 @@ skips that entry with the same reason and runs the rest:
   (`demo_policy_check: depends_on names an unknown fetcher: demo_hello`), or an
   input writes no JSON evidence (see [Inputs](#inputs));
 - the inputs form a cycle, including a comparator that lists itself
-  (`dependency cycle: a -> b -> a`).
+  (`dependency cycle: a -> b -> a`);
+- an input is a comparator that can't run
+  (`depends_on b, which can't run (dependency cycle: a -> b -> a)`).
 
-So a private mirror that drops an input fetcher fails only the entries that read
-it. Filing a fetcher with `depends_on` under `comparators/`, and one without
+So a private mirror that drops an input fetcher fails only the comparators that
+read it, directly or through another comparator. Filing a fetcher with `depends_on` under `comparators/`, and one without
 under `fetchers/`, is this repo's layout rule, checked by
 `tests/test_contracts.py`.
 
@@ -90,7 +92,8 @@ in the run directory, and writes only its verdicts.
 1. **Two phases.** The run takes every fetcher in manifest order, then every
    comparator, each after any comparator it reads and otherwise in manifest
    order (`framework/runner/dependency_graph.py`). The run stays serial, so
-   every input has finished, or failed, before a comparator starts.
+   every input of a comparator that runs has finished, or failed, before it
+   starts; one in a cycle, or reading one, is skipped instead.
 2. **No skip on failure.** A comparator runs even when an input failed, so a
    failed artifact reaches Paramify instead of the set going stale.
 3. **No credentials.** A comparator gets nothing from its category: no secrets,

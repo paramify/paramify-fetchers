@@ -22,7 +22,7 @@ other.
 | Q1 | **Add `input_failed`** as a status code. A comparator reports it when an input failed, so triage looks at that input's evidence. See [Q1](#q1-failure-code-for-a-bad-input). |
 | Q2 | **Same run only, permanently.** A comparator reads only inputs collected in the same run. No stored-run inputs and no `max_age_hours`, now or later. Inputs are read in place: nothing is copied, and the comparator writes verdicts only. |
 | Q3 | The runner records the inputs in the comparator's envelope as `metadata.inputs`. |
-| Runner | The runner runs every fetcher, then every comparator (two phases), so every input has finished before a comparator starts. It does not skip a comparator when an input failed. |
+| Runner | The runner runs every fetcher, then every comparator (two phases), so every input has finished before a comparator starts; a comparator in a cycle, or reading one, is skipped. It does not skip a comparator when an input failed. |
 | Review (2026-10-22) | Four simplifications, same design: the two-phase order, which replaces the explicit completion check; `paramify manifest add` adds a comparator's inputs; `validate` and `run` report a comparator's bad inputs on its entry instead of discovery leaving it out; and one shared `run()` in `comparator_inputs.py`, so a comparator is only its comparison. |
 | Placement | **A separate top-level `comparators/` folder**, not inside `fetchers/`. See [§4](#4-placement-decided). |
 | Q4 (a) | **Measured on the sandbox, 2026-10-19:** Resource Graph `changedBy` for a service principal is its app (client) id. See [Q4](#q4-sandbox-checks). |
@@ -84,10 +84,11 @@ secrets: []
   - has an unknown name;
   - is part of a cycle;
   - is `kind: issue_report` or `discovery`, or has output that isn't JSON (only
-    JSON is enveloped).
+    JSON is enveloped);
+  - is a comparator that can't run, for any of these reasons.
 
-  So a private mirror that drops an input fetcher fails only the entries that
-  read it. Which tree a comparator is filed in is this repo's layout rule, a
+  So a private mirror that drops an input fetcher fails only the comparators
+  that read it, directly or through another comparator. Which tree a comparator is filed in is this repo's layout rule, a
   contract test.
 - `paramify manifest add` adds a comparator's inputs, and theirs, that the
   manifest lacks. It does this when the manifest is edited, never during a run:
@@ -111,8 +112,10 @@ that a comparator never starts while an input is still running:
    current entry's processes have exited, or been killed at their timeout, and
    after their files have been wrapped in envelopes.
    With two phases, every fetcher has finished before the first comparator
-   starts, and a comparator that reads another comparator runs after it. A test
-   lists the comparator first and asserts that it starts last.
+   starts, and a comparator that reads another comparator runs after it. A
+   comparator in a cycle, or downstream of one, has no such place, so it is
+   flagged as unable to run and skipped. Tests list the comparator first and
+   assert that it starts last, and that one downstream of a cycle never starts.
 2. **Same run only.** No other process writes to the run folder, so a comparator
    never reads a file another run is still writing.
 
@@ -409,7 +412,7 @@ Decided: a separate `comparators/` folder. See §4.
 | Add missing inputs during a run | An input can need targets and secrets a run can't supply; `manifest add` adds them when the manifest is edited instead |
 | Leave a comparator with bad inputs out of discovery | Built first, dropped in review: `validate` is the one place for "this entry can't run", and only that entry fails |
 | Move each comparator only as far as its last input | Built first, dropped in review: fetchers and comparators took turns, which is harder to explain than two phases |
-| An explicit completion check before each comparator | Built first, dropped in review: with a serial two-phase run it can never fire, and `run` skips a comparator in a cycle |
+| An explicit completion check before each comparator | Built first, dropped in review: with a serial two-phase run it can never fire, because `run` skips every comparator in a cycle or downstream of one |
 | Retry a comparator | Its failures are logical |
 | Give comparators credentials | It would become a hidden second fetcher |
 | Time-only matching via `pipeline_principals` | Overlapping runs can't be told apart |

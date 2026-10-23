@@ -159,6 +159,7 @@ paramify upload --dry-run
 |---|---|
 | `depends_on names an unknown fetcher` | A copied template still lists `<input_fetcher_a>`. Name real fetchers in `depends_on`. |
 | `which writes no JSON evidence` | An input is an issue report, a discovery fetcher, or writes CSV or HTML. Compare a JSON evidence fetcher instead. |
+| `depends_on <input>, which can't run (…)` | That input is a comparator that can't run. Fix the cause in the parentheses. |
 | `comparators (depends_on) belong under comparators/` in the contract tests | Move the directory to `comparators/<category>/<short_name>/`, or delete `depends_on` if it collects from a source. |
 | The comparator shows `[FAIL]` with `input_failed` | Open the evidence of the input its `error` names; that file holds the cause. |
 | Every summary value is `null` | An input is missing: not in the manifest, not run, or no complete file. `metadata.error` says which. |
