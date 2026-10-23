@@ -1,0 +1,52 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_defender_plans",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.defender_plans[]",
+      "records": 18,
+      "fields": {
+        "extensions": 0,
+        "free_trial_remaining_time": 18,
+        "pricing_tier": 18,
+        "resource_id": 18,
+        "resource_name": 18
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:09:23Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "defender_plans": [
+        {
+          "extensions": {},
+          "free_trial_remaining_time": "P30D",
+          "pricing_tier": "Free",
+          "resource_id": "/subscriptions/00000000-0000-4000-8000-111111111111/providers/Microsoft.Security/pricings/AI",
+          "resource_name": "AI"
+        }
+      ],
+      "provider_registration_status": "registered"
+    },
+    "summary": {
+      "free_tier_plans": 16,
+      "plans_with_enabled_extensions": 0,
+      "provider_registration_status": "registered",
+      "standard_tier_percentage": 11,
+      "standard_tier_plans": 2,
+      "total_enabled_extensions": 0,
+      "total_plans": 18
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_acm_certificate_status",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 1,
+      "fields": {
+        "certificate_arn": 1,
+        "domain_name": 1,
+        "type": 1,
+        "status": 1,
+        "key_algorithm": 1,
+        "not_after": 1,
+        "renewal_eligibility": 1,
+        "in_use": 1,
+        "in_use_by": 0
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:10:47Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "certificate_arn": "arn:aws:acm:us-east-2:111111111111:certificate/00000000-0000-4000-8000-222222222222",
+        "domain_name": "example-profile.example.com",
+        "type": "IMPORTED",
+        "status": "ISSUED",
+        "key_algorithm": "RSA-2048",
+        "not_after": "2027-09-28T11:03:50-06:00",
+        "renewal_eligibility": "INELIGIBLE",
+        "in_use": false,
+        "in_use_by": []
+      }
+    ]
+  }
+}
