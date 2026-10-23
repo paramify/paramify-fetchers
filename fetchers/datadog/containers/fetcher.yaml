@@ -27,4 +27,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-CONTAINERS
   name: Datadog Containers
-  instructions: 'Calls GET /api/v2/containers with cursor-based pagination. Extracts container name, image, state, host, tags. Writes JSON inventory.'
+  instructions: 'Script: datadog/containers/fetcher.py. Calls GET /api/v2/containers with cursor-based pagination. Extracts container name, image, state, host, tags. Writes JSON inventory.'

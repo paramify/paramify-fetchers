@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DMS-ENC
   name: DMS Encryption
-  instructions: 'Script: fetcher.sh. Commands executed: aws dms describe-replication-instances, aws dms describe-endpoints.'
+  instructions: 'Script: aws/dms_encryption_status/fetcher.sh. Commands executed: aws dms describe-replication-instances, aws dms describe-endpoints.'

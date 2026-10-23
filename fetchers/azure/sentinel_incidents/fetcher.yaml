@@ -64,7 +64,7 @@ evidence_set:
   reference_id: EVD-AZURE-SENTINEL-INCIDENTS
   name: Azure Sentinel Incidents
   instructions: >
-    Script: fetcher.py. ARM REST per Sentinel workspace: incidents at api-version
+    Script: azure/sentinel_incidents/fetcher.py. ARM REST per Sentinel workspace: incidents at api-version
     2025-09-01, every nextLink followed. ARM has no close time, so it comes from
     SecurityIncident (arg_max by IncidentName). A closed incident last updated
     before that table's retention is close_time_status not_retained, not
