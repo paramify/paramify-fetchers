@@ -8,10 +8,6 @@
 #                              CIS thresholds
 #   oci_bastion_sessions       whether administrative access is genuinely
 #                              just-in-time: session TTL, CIDR allow-list
-#   oci_operator_access_control
-#                              whether ORACLE's staff need your approval to
-#                              reach Exadata infrastructure, and which of
-#                              their requests went through without a person
 #
 # Auth is an API signing key the runner injects as secrets — nothing is written
 # to disk, because the SDK accepts the PEM as `key_content` in a config dict and
@@ -96,18 +92,6 @@ run:
     # access path, not an empty one. `include_subcompartments` is on by default;
     # set it false to collect the named compartment only.
     - use: oci_bastion_sessions
-      secrets:
-        tenancy_ocid: ${env:OCI_TENANCY_OCID}
-        user_ocid: ${env:OCI_USER_OCID}
-        fingerprint: ${env:OCI_FINGERPRINT}
-        private_key: ${env:OCI_PRIVATE_KEY}
-      targets:
-        - compartment_id: ocid1.compartment.oc1..replace-me
-          environment: preprod
-
-    # Governs Exadata / ExaCC resources only. A tenancy with none reports empty
-    # lists with both services readable: nothing Oracle-operated to govern.
-    - use: oci_operator_access_control
       secrets:
         tenancy_ocid: ${env:OCI_TENANCY_OCID}
         user_ocid: ${env:OCI_USER_OCID}

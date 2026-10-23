@@ -47,10 +47,9 @@ KEPT_HEADERS = ("opc-next-page", "content-type", "opc-total-items")
 # page one forever against its own next-page header — an infinite loop, which is
 # exactly how this was found.
 #
-# `timeStart`/`timeEnd` are a window computed from the clock at run time
-# (oci_operator_access_control), so no replay could ever match them. Sending the
-# window at all is asserted by that fetcher's unit tests instead.
-VOLATILE_PARAMS: tuple = ("timeStart", "timeEnd")
+# A parameter computed from the clock at run time would never match a
+# recording; list it here so it is left out of the key. No fetcher sends one now.
+VOLATILE_PARAMS: tuple = ()
 
 # Identifier patterns replaced on the way into a cassette. Each distinct match
 # gets its own deterministic stand-in, never one shared placeholder.

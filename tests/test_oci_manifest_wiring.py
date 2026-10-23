@@ -86,7 +86,7 @@ def test_the_framework_actually_offers_the_secrets_to_every_oci_fetcher():
     assert platform is not None, "no oci platform spec discovered"
 
     oci = {name: f for name, f in fetchers.items() if f.category == "oci"}
-    assert len(oci) == 17, f"expected 17 OCI fetchers, discovered {len(oci)}"
+    assert len(oci) == 15, f"expected 15 OCI fetchers, discovered {len(oci)}"
     for name, fetcher in oci.items():
         envs = {s.env for s in api.effective_secrets(fetcher, platform)}
         assert "OCI_PRIVATE_KEY" in envs, (

@@ -236,7 +236,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-2`, `ac-2.1`, `ac-2.2`, `ac-2.3`, `ac-2.4`, `ac-2.6`, `ac-3`, `ac-4`, `ac-5`, `ac-6`, `ac-6.1`, `ac-6.2`, `ac-6.5`, `ac-6.7`, `ac-6.9`, `ac-6.10`, `ac-7`, `ac-20.1`, `ac-17`, `au-9.4`, `cm-5`, `cm-7`, `cm-7.2`, `cm-7.5`, `cm-9`, `ia-4`, `ia-4.4`, `ia-7`, `ps-2`, `ps-3`, `ps-4`, `ps-5`, `ps-6`, `ps-9`, `ra-5.5`, `sc-2`, `sc-23`, `sc-39`
 
-*6 fetchers:* [`aws_iam_identity_center`](../fetchers/aws/iam_identity_center), [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`oci_bastion_sessions`](../fetchers/oci/bastion_sessions), [`oci_operator_access_control`](../fetchers/oci/operator_access_control), [`okta_just_in_time_authorization`](../fetchers/okta/just_in_time_authorization)
+*5 fetchers:* [`aws_iam_identity_center`](../fetchers/aws/iam_identity_center), [`azure_entra_conditional_access_policies`](../fetchers/azure/entra_conditional_access_policies), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`oci_bastion_sessions`](../fetchers/oci/bastion_sessions), [`okta_just_in_time_authorization`](../fetchers/okta/just_in_time_authorization)
 
 #### `KSI-IAM-SNU` — Securing Non-User Authentication
 
@@ -296,7 +296,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2.3`, `cp-6`, `cp-9`, `cp-10`, `cp-10.2`, `si-12`
 
-*16 fetchers:* [`aws_backup_recovery_high_availability`](../fetchers/aws/backup_recovery_high_availability), [`aws_backup_validation`](../fetchers/aws/backup_validation), [`aws_dlm_lifecycle_policies`](../fetchers/aws/dlm_lifecycle_policies), [`aws_dynamodb_pitr_status`](../fetchers/aws/dynamodb_pitr_status), [`aws_ebs_snapshot_status`](../fetchers/aws/ebs_snapshot_status), [`azure_app_service_backups`](../fetchers/azure/app_service_backups), [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_dns_configuration`](../fetchers/azure/dns_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups), [`gcp_cloud_sql_backup_configuration`](../fetchers/gcp/cloud_sql_backup_configuration), [`gcp_cloud_sql_encryption_status`](../fetchers/gcp/cloud_sql_encryption_status), [`gcp_cloud_storage_encryption_status`](../fetchers/gcp/cloud_storage_encryption_status), [`oci_dr_plan_executions`](../fetchers/oci/dr_plan_executions)
+*15 fetchers:* [`aws_backup_recovery_high_availability`](../fetchers/aws/backup_recovery_high_availability), [`aws_backup_validation`](../fetchers/aws/backup_validation), [`aws_dlm_lifecycle_policies`](../fetchers/aws/dlm_lifecycle_policies), [`aws_dynamodb_pitr_status`](../fetchers/aws/dynamodb_pitr_status), [`aws_ebs_snapshot_status`](../fetchers/aws/ebs_snapshot_status), [`azure_app_service_backups`](../fetchers/azure/app_service_backups), [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status), [`azure_cosmosdb_configuration`](../fetchers/azure/cosmosdb_configuration), [`azure_dns_configuration`](../fetchers/azure/dns_configuration), [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration), [`azure_postgresql_configuration`](../fetchers/azure/postgresql_configuration), [`azure_sql_managed_instance_backups`](../fetchers/azure/sql_managed_instance_backups), [`gcp_cloud_sql_backup_configuration`](../fetchers/gcp/cloud_sql_backup_configuration), [`gcp_cloud_sql_encryption_status`](../fetchers/gcp/cloud_sql_encryption_status), [`gcp_cloud_storage_encryption_status`](../fetchers/gcp/cloud_storage_encryption_status)
 
 #### ⬜ `KSI-RPL-ARP` — Aligning Recovery Plan
 
@@ -320,7 +320,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cp-2.1`, `cp-2.3`, `cp-4`, `cp-4.1`, `cp-6`, `cp-6.1`, `cp-9.1`, `cp-10`, `ir-3`, `ir-3.2`
 
-*4 fetchers:* [`azure_dns_configuration`](../fetchers/azure/dns_configuration), [`azure_front_door_origins`](../fetchers/azure/front_door_origins), [`jira_remediation_items`](../fetchers/jira/remediation_items), [`oci_dr_plan_executions`](../fetchers/oci/dr_plan_executions)
+*3 fetchers:* [`azure_dns_configuration`](../fetchers/azure/dns_configuration), [`azure_front_door_origins`](../fetchers/azure/front_door_origins), [`jira_remediation_items`](../fetchers/jira/remediation_items)
 
 ### PIY — Policy and Inventory  (1/1)
 
@@ -370,7 +370,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `ac-20`, `ra-3.1`, `sa-9`, `sa-10`, `sa-11`, `sa-15.3`, `sa-22`, `si-7.1`, `sr-5`, `sr-6`, `ca-7.4`, `sc-18`
 
-*2 fetchers:* [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities), [`oci_operator_access_control`](../fetchers/oci/operator_access_control)
+*1 fetcher:* [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities)
 
 #### `KSI-SCR-MON` — Monitoring Supply Chain Risk
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-273 of 284 fetchers carry a mapping.
+271 of 282 fetchers carry a mapping.
 
 ### aws  (80)
 
@@ -699,7 +699,7 @@ python tools/gen_ksi_mapping.py
 | [`knowbe4_module_based_summary`](../fetchers/knowbe4/module_based_summary) | `KSI-CED-RAT` |
 | [`knowbe4_security_awareness_training`](../fetchers/knowbe4/security_awareness_training) | `KSI-CED-RAT` |
 
-### oci  (17)
+### oci  (15)
 
 | Fetcher | Indicators |
 |---|---|
@@ -711,13 +711,11 @@ python tools/gen_ksi_mapping.py
 | [`oci_compute_instances`](../fetchers/oci/compute_instances) | `KSI-CNA-MAT`, `KSI-SVC-SIN`, `KSI-SVC-VRI` |
 | [`oci_data_service_exposure`](../fetchers/oci/data_service_exposure) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-SVC-SIN` |
 | [`oci_dependency_vulnerabilities`](../fetchers/oci/dependency_vulnerabilities) | `KSI-SCR-MIT`, `KSI-SCR-MON` |
-| [`oci_dr_plan_executions`](../fetchers/oci/dr_plan_executions) | `KSI-RPL-ABO`, `KSI-RPL-TRC` |
 | [`oci_iam_password_policy`](../fetchers/oci/iam_password_policy) | `KSI-IAM-APM` |
 | [`oci_iam_policies`](../fetchers/oci/iam_policies) | `KSI-IAM-ELP`, `KSI-IAM-SNU` |
 | [`oci_iam_users_credentials`](../fetchers/oci/iam_users_credentials) | `KSI-IAM-APM`, `KSI-IAM-ELP`, `KSI-IAM-SNU` |
 | [`oci_network_exposure`](../fetchers/oci/network_exposure) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-MLA-LET` |
 | [`oci_object_storage_buckets`](../fetchers/oci/object_storage_buckets) | `KSI-IAM-ELP`, `KSI-MLA-LET`, `KSI-SVC-SIN` |
-| [`oci_operator_access_control`](../fetchers/oci/operator_access_control) | `KSI-IAM-JIT`, `KSI-SCR-MIT` |
 | [`oci_vault_keys`](../fetchers/oci/vault_keys) | `KSI-SVC-ASM`, `KSI-SVC-SIN` |
 | [`oci_zpr_policies`](../fetchers/oci/zpr_policies) | `KSI-CNA-RNT`, `KSI-CNA-ULN` |
 

@@ -63,31 +63,6 @@ def test_certificate_validity_is_only_on_the_list_summary():
     )
 
 
-def test_dr_step_counts_are_nested_not_flat():
-    """The shape that produced this category's first real bug.
-
-    An early revision of `step_counts` read flat `succeeded`/`failed`/`ignored`
-    keys. They do not exist: the model is `total_steps` plus five sub-objects,
-    each with its own total and a per-reason split.
-    """
-    counts = _fields(oci.disaster_recovery.models.DrPlanExecutionStepStatusCounts)
-
-    assert counts == {
-        "total_steps",
-        "remaining_steps",
-        "skipped_steps",
-        "successful_steps",
-        "warning_steps",
-        "failed_steps",
-    }
-    for flat in ("succeeded", "failed", "ignored", "total"):
-        assert flat not in counts
-
-    # The three sub-counts that let a SUCCEEDED drill hide failing steps.
-    skipped = _fields(oci.disaster_recovery.models.DrPlanExecutionSkippedStepStatusCounts)
-    warning = _fields(oci.disaster_recovery.models.DrPlanExecutionWarningStepStatusCounts)
-    assert {"failed_ignored", "timed_out_ignored"} <= skipped
-    assert "warnings_ignored" in warning
 
 
 def test_adm_reports_severity_twice_so_suppression_is_visible():
@@ -123,26 +98,6 @@ def test_adm_only_scans_maven_builds():
     )
 
 
-def test_dr_distinguishes_drills_from_real_recoveries():
-    """The distinction the whole RPL-TRC claim rests on.
-
-    A drill is a test; a failover is an incident. If Oracle adds an execution
-    type, `classify()` returns "unknown" for it and it is silently excluded from
-    both counts — so this pins the enum the classifier was written against.
-    """
-    types = {
-        value for key, value in vars(oci.disaster_recovery.models.DrPlanExecution).items()
-        if key.startswith("PLAN_EXECUTION_TYPE_") and isinstance(value, str)
-    }
-    assert types == {
-        "SWITCHOVER", "SWITCHOVER_PRECHECK",
-        "FAILOVER", "FAILOVER_PRECHECK",
-        "START_DRILL", "START_DRILL_PRECHECK",
-        "STOP_DRILL", "STOP_DRILL_PRECHECK",
-    }, (
-        f"DR execution types changed to {sorted(types)} — classify() in "
-        f"fetchers/oci/dr_plan_executions/ needs a case for anything new"
-    )
 
 
 def test_cloud_guard_target_rules_are_only_on_the_detail_response():

@@ -7,8 +7,8 @@ time with every multi-item list re-served one item per page — `opc-next-page`
 tokens for OCI's own APIs, `startIndex`/`totalResults` for SCIM — and the
 evidence must come out identical.
 
-Proven to bite: making `list_all` return the first page only changes eleven of
-the seventeen fetchers' evidence here, and the other six through
+Proven to bite: making `list_all` return the first page only changes every
+fetcher's evidence here, most directly and the rest through
 `compartments_scanned`; cutting the SCIM loop in `iam_password_policy` to one
 page changes its findings.
 """

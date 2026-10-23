@@ -66,14 +66,6 @@ FETCHER_ROOT = REPO_ROOT / "fetchers" / "oci"
 # model is named separately and the parent's own entry does not have to repeat
 # its fields.
 FUNCTION_MODELS: Dict[Tuple[str, str], Tuple[str, str]] = {
-    ("dr_plan_executions", "execution_record"): ("disaster_recovery", "DrPlanExecution"),
-    ("dr_plan_executions", "plan_record"): ("disaster_recovery", "DrPlanSummary"),
-    ("dr_plan_executions", "protection_group_record"): (
-        "disaster_recovery", "DrProtectionGroupSummary",
-    ),
-    ("dr_plan_executions", "step_counts"): (
-        "disaster_recovery", "DrPlanExecutionStepStatusCounts",
-    ),
     ("dependency_vulnerabilities", "audit_record"): ("adm", "VulnerabilityAuditSummary"),
     ("dependency_vulnerabilities", "suppression_delta"): ("adm", "VulnerabilityAuditSummary"),
     ("dependency_vulnerabilities", "remediation_run_record"): ("adm", "RemediationRunSummary"),
@@ -163,44 +155,12 @@ FUNCTION_MODELS: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("iam_users_credentials", "credential_record"): ("identity", "AuthToken"),
     ("iam_users_credentials", "scim_user"): ("identity_domains", "User"),
     ("iam_users_credentials", "scim_credential"): ("identity_domains", "AuthToken"),
-    # Each control/assignment transform reads the list summary as `summary` and
-    # the full GET as `full`; the full model is declared as the nested receiver.
-    ("operator_access_control", "operator_control_record"): (
-        "operator_access_control", "OperatorControlSummary",
-    ),
-    ("operator_access_control", "assignment_record"): (
-        "operator_access_control", "OperatorControlAssignmentSummary",
-    ),
-    ("operator_access_control", "access_request_record"): (
-        "operator_access_control", "AccessRequestSummary",
-    ),
-    ("operator_access_control", "delegation_control_record"): (
-        "delegate_access_control", "DelegationControlSummary",
-    ),
-    ("operator_access_control", "delegated_request_record"): (
-        "delegate_access_control", "DelegatedResourceAccessRequestSummary",
-    ),
 }
 
 # Fields a record function reads off a NESTED dict it pulled out of the parent,
 # rather than off the parent model itself. Keyed the same way, valued by the
 # model the nested dict actually is.
 NESTED_MODELS: Dict[Tuple[str, str], List[Tuple[str, str, str]]] = {
-    ("dr_plan_executions", "step_counts"): [
-        ("remaining_steps", "disaster_recovery", "DrPlanExecutionRemainingStepStatusCounts"),
-        ("skipped_steps", "disaster_recovery", "DrPlanExecutionSkippedStepStatusCounts"),
-        ("successful_steps", "disaster_recovery", "DrPlanExecutionSuccessfulStepStatusCounts"),
-        ("warning_steps", "disaster_recovery", "DrPlanExecutionWarningStepStatusCounts"),
-        ("failed_steps", "disaster_recovery", "DrPlanExecutionFailedStepStatusCounts"),
-    ],
-    ("dr_plan_executions", "ignored_failures"): [
-        ("skipped_steps", "disaster_recovery", "DrPlanExecutionSkippedStepStatusCounts"),
-        ("warning_steps", "disaster_recovery", "DrPlanExecutionWarningStepStatusCounts"),
-    ],
-    ("dr_plan_executions", "execution_record"): [
-        ("step_status_counts", "disaster_recovery", "DrPlanExecutionStepStatusCounts"),
-        ("log_location", "disaster_recovery", "ObjectStorageLogLocation"),
-    ],
     ("bastion_sessions", "session_record"): [
         # Polymorphic: the managed-SSH subtype is the widest, and the
         # port-forwarding one is a subset apart from target_resource_fqdn.
@@ -315,15 +275,6 @@ NESTED_MODELS: Dict[Tuple[str, str], List[Tuple[str, str, str]]] = {
     ],
     ("block_volume_encryption", "backup_record"): [
         ("_boot", "core", "BootVolumeBackup"),
-    ],
-    ("operator_access_control", "operator_control_record"): [
-        ("full", "operator_access_control", "OperatorControl"),
-    ],
-    ("operator_access_control", "assignment_record"): [
-        ("full", "operator_access_control", "OperatorControlAssignment"),
-    ],
-    ("operator_access_control", "delegation_control_record"): [
-        ("full", "delegate_access_control", "DelegationControl"),
     ],
     ("vault_keys", "key_record"): [
         ("rotation", "key_management", "AutoKeyRotationDetails"),

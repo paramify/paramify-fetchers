@@ -10,8 +10,6 @@
 #   oci_compute_instances          instance hardening, boot integrity, exposure
 #   oci_audit_logging_events       audit retention, log coverage, and which
 #                                  change categories actually notify a person
-#   oci_dr_plan_executions         recovery DRILLS, with outcome and measured
-#                                  duration
 #   oci_dependency_vulnerabilities Application Dependency Management audits, and
 #                                  whether findings were fixed or suppressed
 #
@@ -104,16 +102,6 @@ run:
         - compartment_id: ocid1.compartment.oc1..replace-me
           environment: preprod
           # skip_audit_retention: true
-
-    - use: oci_dr_plan_executions
-      secrets:
-        tenancy_ocid: ${env:OCI_TENANCY_OCID}
-        user_ocid: ${env:OCI_USER_OCID}
-        fingerprint: ${env:OCI_FINGERPRINT}
-        private_key: ${env:OCI_PRIVATE_KEY}
-      targets:
-        - compartment_id: ocid1.compartment.oc1..replace-me
-          environment: preprod
 
     - use: oci_dependency_vulnerabilities
       secrets:

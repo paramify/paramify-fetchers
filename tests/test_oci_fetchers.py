@@ -56,13 +56,11 @@ REQUIRED_SUMMARY_KEY = {
     "compute_instances": "total_instances",
     "data_service_exposure": "total_autonomous_databases",
     "dependency_vulnerabilities": "adm_service_readable",
-    "dr_plan_executions": "total_executions",
     "iam_password_policy": "identity_domains",
     "iam_policies": "total_policies",
     "iam_users_credentials": "total_users",
     "network_exposure": "internet_ingress_rules",
     "object_storage_buckets": "total_buckets",
-    "operator_access_control": "provider_access_requests",
     "vault_keys": "total_keys",
     "zpr_policies": "zpr_enabled",
 }
