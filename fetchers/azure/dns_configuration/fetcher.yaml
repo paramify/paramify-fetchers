@@ -46,7 +46,7 @@ evidence_set:
   reference_id: EVD-AZURE-DNS-CONFIG
   name: Azure DNS Zone Configuration and DNSSEC
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-dns DnsManagementClient zones.list() for public
+    Script: azure/dns_configuration/fetcher.py. Azure SDK calls: azure-mgmt-dns DnsManagementClient zones.list() for public
     zones; for each, ARM GET {zone id}/dnssecConfigs/default?api-version=2023-07-01-preview (the SDK has
     no DNSSEC operation; this preview is the only API version that exposes DNSSEC). An HTTP 404 "DNSSEC
     is not enabled" is recorded as dnssec_enabled false, not as a collection failure; any other failed

@@ -20,6 +20,7 @@ Run: ``pytest tests/test_contracts.py`` (needs an editable install:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -164,6 +165,181 @@ def test_every_evidence_fetcher_has_a_frequency() -> None:
         if f.evidence_set and f.evidence_set.frequency not in EVIDENCE_FREQUENCIES
     ]
     assert not bad, "\n".join(bad)
+
+
+def _script_line(yaml_path: Path, spec: dict) -> str:
+    return f"Script: {yaml_path.parent.parent.name}/{yaml_path.parent.name}/{spec['runtime']['entry']}"
+
+
+def test_instructions_open_with_the_entry_path() -> None:
+    """Instructions open with `Script: <category>/<short_name>/<entry>`, ended by a period or
+    the end of the line, so a reader can find the code."""
+    bad: list[str] = []
+    for yaml_path in FETCHER_YAMLS:
+        spec = yaml.safe_load(yaml_path.read_text())
+        text = (spec.get("evidence_set") or {}).get("instructions") or ""
+        expected = _script_line(yaml_path, spec)
+        if text and not (text.startswith(expected + ".") or text.split("\n", 1)[0] == expected):
+            bad.append(f"{yaml_path.parent.relative_to(FETCHERS_ROOT)}: want instructions to open with {expected!r}")
+    assert not bad, "\n".join(bad)
+
+
+# --------------------------------------------------------------------------- #
+# Description and instructions text (docs/authoring_fetcher_guide.md). Paramify shows
+# both as plain text, so the layout is checked here for each converted fetcher;
+# add a category (or category/short_name) once its fetchers are converted.
+# --------------------------------------------------------------------------- #
+
+TEXT_FORMAT_FETCHERS = ("azure/alert_rules",)
+MAX_DESCRIPTION_WORDS = 30
+FIELD_LINE = re.compile(r"^- (\S+) — \S")
+BREAKDOWN_LINE = re.compile(r"^  - \S+ \(\S.*\)$")
+COMMAND_LINE = re.compile(r"^- \S.* — \S")
+
+
+def _matches(yaml_path: Path, prefix: str) -> bool:
+    rel = yaml_path.parent.relative_to(FETCHERS_ROOT).as_posix()
+    return rel == prefix or rel.startswith(prefix + "/")
+
+
+CONVERTED_YAMLS = [y for y in FETCHER_YAMLS if any(_matches(y, p) for p in TEXT_FORMAT_FETCHERS)]
+
+
+def _description_problems(label: str, desc: str, name: str) -> list[str]:
+    desc = " ".join(desc.split())
+    problems = []
+    if len(desc.split()) > MAX_DESCRIPTION_WORDS:
+        problems.append(f"{label} has {len(desc.split())} words; at most {MAX_DESCRIPTION_WORDS}")
+    if not desc.endswith(".") or re.search(r"(?<!e\.g)(?<!i\.e)[.!?]\s", desc):
+        problems.append(f"{label} is not one sentence ending in a period")
+    if name in desc:
+        problems.append(f"{label} repeats the fetcher's name")
+    return problems
+
+
+def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
+    es = spec.get("evidence_set") or {}
+    problems = _description_problems("description", spec.get("description") or "", spec["name"])
+    if es.get("description"):
+        problems += _description_problems("evidence_set.description", es["description"], spec["name"])
+    if not es:
+        return problems  # discovery fetchers and issue reports carry no evidence set
+
+    text = es.get("instructions") or ""
+    if "`" in text or "**" in text:
+        problems.append("instructions use markdown (backticks or **); Paramify shows them as typed")
+    blocks = [b.split("\n") for b in text.strip("\n").split("\n\n")]
+    labels = [b[0] for b in blocks]
+    if labels[0] != _script_line(yaml_path, spec):
+        problems.append(f"instructions do not open with {_script_line(yaml_path, spec)!r} on a line of its own")
+    order_ok = (
+        len(labels) >= 4 and labels[1].startswith("Access: ")
+        and labels[2] == "Commands Executed:" and labels[3].startswith("Output: ")
+    )
+    if not order_ok:
+        problems.append("after Script come Access, then 'Commands Executed:' on its own line, then Output, "
+                        f"each a blank line apart; got {[lab[:20] for lab in labels[1:4]]}")
+        return problems
+    if len(blocks[2]) < 2 or any(not COMMAND_LINE.match(ln) for ln in blocks[2][1:]):
+        problems.append("each Commands Executed line must read '- <call> — <why>'")
+    if len(blocks[3]) > 1 or " — " not in labels[3]:
+        problems.append("Output must be one line: '<file> — <what it holds>'")
+    rest = blocks[4:]
+    if rest:
+        if rest[0] != ["Summary fields:"] or len(rest) < 2:
+            problems.append("after Output comes 'Summary fields:' on its own, then at least one question group")
+            return problems
+        seen: set[str] = set()
+        for group in rest[1:]:
+            if not group[0].endswith("?"):
+                problems.append(f"summary group must start with a question: {group[0]!r}")
+            lines = group[1:]
+            # a breakdown's values sit on indented lines under a field line ending in ':'
+            in_breakdown = [i > 0 and (lines[i - 1].rstrip().endswith(":") or bool(BREAKDOWN_LINE.match(lines[i - 1])))
+                            for i in range(len(lines))]
+            if not lines or any(
+                not (FIELD_LINE.match(ln) or (in_breakdown[i] and BREAKDOWN_LINE.match(ln)))
+                for i, ln in enumerate(lines)
+            ):
+                problems.append(f"each summary field line must read '- <field> — <meaning>', with any breakdown "
+                                f"values under a line ending in ':' as '  - <value> (<meaning>)', under {group[0]!r}")
+            if any(ln.rstrip().endswith(":") and not (i + 1 < len(lines) and BREAKDOWN_LINE.match(lines[i + 1]))
+                   for i, ln in enumerate(lines)):
+                problems.append(f"a summary field line ending in ':' needs its values below it, under {group[0]!r}")
+            for ln in group[1:]:
+                m = FIELD_LINE.match(ln)
+                if m and m.group(1) in seen:
+                    problems.append(f"summary field {m.group(1)} is listed twice")
+                if m:
+                    seen.add(m.group(1))
+    return problems
+
+
+def test_text_format_fetchers_exist() -> None:
+    """Every TEXT_FORMAT_FETCHERS entry names real fetchers, so a typo can't switch the check off."""
+    assert TEXT_FORMAT_FETCHERS
+    missing = [p for p in TEXT_FORMAT_FETCHERS if not any(_matches(y, p) for y in FETCHER_YAMLS)]
+    assert not missing, f"no fetcher matches {missing}"
+
+
+@pytest.mark.parametrize("yaml_path", CONVERTED_YAMLS, ids=_rel_ids(CONVERTED_YAMLS))
+def test_converted_fetcher_text_follows_the_format(yaml_path: Path) -> None:
+    spec = yaml.safe_load(yaml_path.read_text())
+    problems = _text_format_problems(yaml_path, spec)
+    assert not problems, f"{yaml_path.parent.relative_to(FETCHERS_ROOT)}:\n  " + "\n  ".join(problems)
+
+
+_ALERT_RULES_YAML = FETCHERS_ROOT / "azure" / "alert_rules" / "fetcher.yaml"
+_GOOD_TEXT = """Script: azure/alert_rules/fetcher.py
+
+Access: Reader on the subscription.
+
+Commands Executed:
+- GET Microsoft.Insights/metricAlerts — metric alert rules
+
+Output: azure_alert_rules_<subscription>.json — each alert rule and whether it reaches a person.
+
+Summary fields:
+
+Which rules exist?
+- total_rules — Number of alert rules
+- rules_by_kind — Number of alert rules for each kind:
+  - metric (a metric alert rule)
+  - log (a log search alert rule)
+"""
+_BREAKDOWN = "for each kind:\n  - metric (a metric alert rule)\n  - log (a log search alert rule)"
+
+
+@pytest.mark.parametrize(("old", "new", "es_description", "problem"), [
+    (None, None, None, None),
+    ("for each kind:\n", "for each kind: \n", None, None),
+    ("- total_rules — Number", "- total_rules: Number", None, "each summary field line"),
+    (_BREAKDOWN, "for each kind:", None, "needs its values below it"),
+    (_BREAKDOWN, "for each kind: ", None, "needs its values below it"),
+    ("  - metric", "- metric", None, "each summary field line"),
+    ("alert rules\n- rules_by_kind", "alert rules\n  - extra (no parent)\n- rules_by_kind", None,
+     "each summary field line"),
+    ("- rules_by_kind — Number of alert rules for each kind:", "- total_rules — Number of rules for each kind:",
+     None, "listed twice"),
+    ("Script: azure/alert_rules/fetcher.py", "Script: fetcher.py", None, "do not open with"),
+    ("metric alert rules\n", "`metric` alert rules\n", None, "markdown"),
+    ("Which rules exist?", "Which rules exist", None, "must start with a question"),
+    (None, None, "Shows rules. And more.", "evidence_set.description is not one sentence"),
+])
+def test_text_format_check_catches_each_break(old, new, es_description, problem) -> None:
+    """The layout check itself, on a known-good text and one break at a time."""
+    text = _GOOD_TEXT if old is None else _GOOD_TEXT.replace(old, new, 1)
+    assert old is None or text != _GOOD_TEXT
+    spec = {"name": "azure_alert_rules", "runtime": {"type": "python", "entry": "fetcher.py"},
+            "description": "Shows every alert rule and whether it reaches a person.",
+            "evidence_set": {"reference_id": "EVD-X", "name": "X", "instructions": text}}
+    if es_description:
+        spec["evidence_set"]["description"] = es_description
+    problems = _text_format_problems(_ALERT_RULES_YAML, spec)
+    if problem is None:
+        assert problems == []
+    else:
+        assert any(problem in p for p in problems), problems
 
 
 def test_frequency_enum_matches_the_contract() -> None:

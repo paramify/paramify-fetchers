@@ -1,14 +1,12 @@
 # Documentation
 
-Most topics have two documents. A **guide** (`*_guide.md`) walks through one task
-from start to finish. A **reference** or **design** document gives the full
-rules and the reasons for them. Start with the guide.
+Most topics have a **guide** (`*_guide.md`) that walks through one task from
+start to finish.
 
 ## Run fetchers
 
 - [The `paramify` CLI](cli_guide.md): every command, from manifests to uploads
-- [Build a run manifest](run_manifest_guide.md), and the
-  [manifest format reference](run_manifest_reference.md)
+- [Build a run manifest](run_manifest_guide.md)
 - [Give a fetcher its config and secrets](config_injection_guide.md)
 - [Read an evidence envelope](envelope_guide.md)
 - [Follow one run through the framework](architecture_guide.md)
@@ -19,6 +17,7 @@ rules and the reasons for them. Start with the guide.
 **Platform setup.** Most platforms have a guide for their credentials and
 permissions:
 [AWS](../fetchers/aws/README.md) ·
+[Azure](../fetchers/azure/README.md) ·
 [GCP](../fetchers/gcp/README.md) ·
 [Wiz](../fetchers/wiz/README.md) ·
 [Datadog](../fetchers/datadog/README.md) ·
@@ -37,33 +36,25 @@ permissions:
 
 ## Send results to Paramify
 
-- [Upload a run](uploader_guide.md), the
-  [API key and upload options](../uploaders/paramify_evidence/README.md), and the
-  [uploader design](uploader_design.md)
-- [Send scan reports to an assessment](pipelines_guide.md), the
-  [pipelines reference](pipelines.md), and the
+- [Upload a run](uploader_guide.md), and the
+  [API key and upload options](../uploaders/paramify_evidence/README.md)
+- [Send scan reports to an assessment](pipelines_guide.md), and the
   [scan-report uploader](../uploaders/paramify_issues/README.md)
-- [Run an inventory fetcher](inventory_fetchers_guide.md), and the
-  [inventory reference](inventory_fetchers.md)
+- [Run an inventory fetcher](inventory_fetchers_guide.md)
 - [Sync fetcher scripts to Paramify](../uploaders/paramify_scripts/README.md)
 
 ## Validators
 
 - [Write validators with `/suggest-validator`](suggest_validator_guide.md)
 - [Write a validator by hand](validators_guide.md)
-- [Validator design](validators_design.md), and the
-  [validator sync stage](../uploaders/paramify_validators/README.md)
+- [The validator sync stage](../uploaders/paramify_validators/README.md)
 
 ## Write fetchers
 
-- [Write a new evidence fetcher](authoring_fetcher_guide.md), and the
-  [authoring reference](authoring_a_fetcher.md)
-- [Examine a fetcher against the contract](fetcher_contract_guide.md), and the
-  [fetcher contract](fetcher_contract.md)
-- [Onboard a new platform](platform_onboarding_guide.md), and the
-  [onboarding reference](platform_onboarding.md)
-- [Write an issue-report fetcher](issue_report_fetchers_guide.md), the
-  [issue-report reference](issue_report_fetchers.md), and the
+- [Write a new evidence fetcher](authoring_fetcher_guide.md)
+- [Examine a fetcher against the contract](fetcher_contract_guide.md)
+- [Onboard a new platform](platform_onboarding_guide.md)
+- [Write an issue-report fetcher](issue_report_fetchers_guide.md), and the
   [Wiz pipeline guide](wiz_pipeline_guide.md)
 
 ## FedRAMP KSI coverage
@@ -72,12 +63,8 @@ permissions:
   the gaps
 - [Find the fetchers for a KSI](ksi_mapping_guide.md)
 
-## Design and project
+## Releases and project
 
-- [Framework design notes](design.md)
-- [Evidence envelope design](envelope_design.md) and
-  [config injection design](config_injection_design.md)
-- [Pin a release and upgrade safely](versioning_guide.md), and the
-  [versioning policy](versioning.md)
-- [Cut a release](releasing_guide.md), and the [release process](releasing.md)
+- [Pin a release and upgrade safely](versioning_guide.md)
+- [Cut a release](releasing_guide.md)
 - [Work in a private copy of this repo](private_mirror_guide.md)

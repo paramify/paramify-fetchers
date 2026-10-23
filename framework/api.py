@@ -445,8 +445,8 @@ def doctor(
     py = sys.version_info
     python = {
         "version": f"{py.major}.{py.minor}.{py.micro}",
-        "required": "3.10",
-        "ok": (py.major, py.minor) >= (3, 10),
+        "required": "3.11",
+        "ok": (py.major, py.minor) >= (3, 11),
     }
 
     fetchers = discover_fetchers(root)
