@@ -1,0 +1,73 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_codebuild_pipeline_config",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 2,
+      "fields": {
+        "name": 2,
+        "arn": 2,
+        "serviceRole": 2,
+        "projectVisibility": 2,
+        "source": 2,
+        "environment": 2,
+        "artifacts": 2,
+        "encryptionKey": 2,
+        "logsConfig": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:20Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "name": "pft-privileged",
+        "arn": "arn:aws:codebuild:us-east-2:111111111111:project/pft-privileged",
+        "serviceRole": "arn:aws:iam::111111111111:role/pft-codebuild",
+        "projectVisibility": "PRIVATE",
+        "source": {
+          "type": "NO_SOURCE",
+          "location": null,
+          "buildspec": "version: 0.2\nphases:\n  build:\n    commands:\n      - echo ok\n",
+          "gitCloneDepth": 0
+        },
+        "environment": {
+          "type": "LINUX_CONTAINER",
+          "image": "aws/codebuild/amazonlinux-x86_64-standard:5.0",
+          "computeType": "BUILD_GENERAL1_SMALL",
+          "privilegedMode": true,
+          "imagePullCredentialsType": "CODEBUILD"
+        },
+        "artifacts": {
+          "type": "NO_ARTIFACTS",
+          "location": null,
+          "encryptionDisabled": null
+        },
+        "encryptionKey": "arn:aws:kms:us-east-2:111111111111:alias/aws/s3",
+        "logsConfig": {
+          "cloudWatchLogs": {
+            "status": "ENABLED",
+            "groupName": null,
+            "streamName": null
+          },
+          "s3Logs": {
+            "status": "DISABLED",
+            "location": null,
+            "encryptionDisabled": false
+          }
+        }
+      }
+    ]
+  }
+}
