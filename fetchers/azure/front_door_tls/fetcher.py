@@ -312,7 +312,8 @@ def main() -> int:
         )
 
     now = datetime.now(timezone.utc)
-    exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV)
+    exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV, kinds=("route",))
+    exclusions.record_invalid(collector, SCOPE_EXCLUSIONS_ENV)
     profiles, routes, domains, secrets, excluded, scopes = [], [], [], [], [], []
     for c in collected:
         tls = tls_for_profile(c, now, exclusions)

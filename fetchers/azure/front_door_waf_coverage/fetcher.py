@@ -393,7 +393,8 @@ def main() -> int:
             ),
         )
 
-    exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV)
+    exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV, kinds=("route",))
+    exclusions.record_invalid(collector, SCOPE_EXCLUSIONS_ENV)
     profiles, host_routes, no_routes, unrouted, security_policies, excluded, scopes = [], [], [], [], [], [], []
     for c in collected:
         cov = coverage_for_profile(c, waf_by_key, exclusions)

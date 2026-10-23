@@ -25,6 +25,9 @@ from scope_exclusions import (  # noqa: E402
     ("qa.example.com", ["qa.example.com"]),
     ("qa.*, *.sandbox.example.com\nwebdav*", ["qa.*", "*.sandbox.example.com", "webdav*"]),
     ("QA.*,qa.*  qa.*.", ["QA.*"]),
+    ("route: qa-*, Route:  web*", ["route:qa-*", "Route:web*"]),
+    ("route:, qa-*", ["route:qa-*"]),
+    ("www route:", ["www", "route:"]),
 ])
 def test_parse_patterns(raw, patterns):
     assert parse_patterns(raw) == patterns
@@ -93,6 +96,26 @@ def test_a_route_prefix_matches_route_names_only_and_a_bare_pattern_never_does()
     assert exclusions.match("www.contoso.com", kind="route") is None
     assert exclusions.match("qa-legacy-route") == "qa*"
     assert ScopeExclusions(["route:qa*"]).match("qa.example.com") is None
+
+
+def test_unknown_prefixes_and_empty_prefixes_are_invalid():
+    patterns = ["routes:qa", "route:", "route:qa", "qa*", "host:www"]
+    assert ScopeExclusions(patterns, kinds=("route",)).invalid() == ["routes:qa", "route:", "host:www"]
+    assert ScopeExclusions(patterns).invalid() == ["routes:qa", "route:", "route:qa", "host:www"]
+
+
+def test_record_invalid_fails_the_run_naming_each_pattern():
+    class Collector:
+        def __init__(self):
+            self.failures = []
+
+        def record(self, call, exc):
+            self.failures.append((call, str(exc)))
+
+    collector = Collector()
+    ScopeExclusions(parse_patterns("route: qa-*, routes:web"), kinds=("route",)).record_invalid(collector, "SCOPE")
+    assert collector.failures == [("config SCOPE", "scope exclusion pattern 'routes:web' has an unknown prefix or "
+                                                   "nothing after it (known prefixes: route:)")]
 
 
 def test_warn_unmatched(caplog):

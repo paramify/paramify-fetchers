@@ -15,10 +15,11 @@ config_schema:
       names (* matches any run of characters, dots included, ? one character, and [
       ] one character from a set, such as [0-9]). A pattern starting route:
       (route:qa-*) matches route names instead; a pattern without it never matches a
-      route's name. A route is out of scope when a route: pattern matches its name
-      or every host it serves is out, and a host-route when its host matches or its
-      route is out. Each is listed under excluded and left out of every verdict and
-      count. Can be ${env:VAR}. Empty: everything is in scope.
+      route's name, and any other prefix fails the run. A route is out of scope when
+      a route: pattern matches its name or every host it serves is out, and a
+      host-route when its host matches or its route is out. Each is listed under
+      excluded and left out of every verdict and count. Can be ${env:VAR}. Empty:
+      everything is in scope.
 
 supports_targets: true
 

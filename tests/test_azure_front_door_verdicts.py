@@ -1157,7 +1157,7 @@ def test_waf_route_name_takes_out_its_host_routes():
     assert scoped["route_count"] == 7 and scoped["endpoint_count"] == 1
 
 
-def run_main(module, name, monkeypatch, tmp_path, patterns, collected, **fakes):
+def run_main(module, name, monkeypatch, tmp_path, patterns, collected, exit_code=0, **fakes):
     for attr, fake in {
         "resolve_subscription": lambda c: {"subscription_id": "s", "subscription_source": "env"},
         "credential": lambda: object(),
@@ -1172,8 +1172,22 @@ def run_main(module, name, monkeypatch, tmp_path, patterns, collected, **fakes):
         monkeypatch.delenv(module.SCOPE_EXCLUSIONS_ENV, raising=False)
     else:
         monkeypatch.setenv(module.SCOPE_EXCLUSIONS_ENV, patterns)
-    assert module.main() == 0
+    assert module.main() == exit_code
     return json.loads((tmp_path / f"{name}_s.json").read_text())
+
+
+def test_route_prefix_with_a_space_is_still_a_route_pattern(monkeypatch, tmp_path):
+    evidence = run_main(tls, "azure_front_door_tls", monkeypatch, tmp_path, "route: nohost", with_secrets(topology()))
+    assert evidence["summary"]["scope_exclusion_patterns"] == ["route:nohost"]
+    assert by_kind(evidence["results"]["excluded"]) == {"route": [("nohost", "route:nohost", "name_matched")]}
+
+
+def test_an_unknown_prefix_fails_the_run(monkeypatch, tmp_path):
+    evidence = run_main(tls, "azure_front_door_tls", monkeypatch, tmp_path, "routes:qa*", with_secrets(topology()),
+                        exit_code=1)
+    assert evidence["results"]["excluded"] == [] and evidence["summary"]["scope_exclusion_patterns"] == ["routes:qa*"]
+    [failure] = evidence["metadata"]["api_failures"]
+    assert "unknown prefix" in json.dumps(failure)
 
 
 @pytest.mark.parametrize("patterns", [None, ",".join(PATTERNS)])

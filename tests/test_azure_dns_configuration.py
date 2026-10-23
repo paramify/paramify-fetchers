@@ -417,6 +417,13 @@ def test_main_with_a_match_all_pattern_leaves_no_record_set_in_scope(monkeypatch
     assert (evidence["summary"]["in_scope_record_sets"], evidence["summary"]["excluded_record_sets"]) == (0, 5)
 
 
+def test_a_route_prefix_is_invalid_for_dns():
+    exclusions = dns.ScopeExclusions(["route:www", "www"])
+    assert exclusions.invalid() == ["route:www"]
+    _, excluded = dns.exclude_record_sets([scoped_zone()], exclusions)
+    assert [e["pattern"] for e in excluded] == ["www"]
+
+
 def test_a_relative_name_matches_in_every_zone():
     zones = [scoped_zone(), {**scoped_zone(), "name": "example.org", "id": scoped_zone()["id"].replace("example.com", "example.org")}]
     _, excluded = dns.exclude_record_sets(zones, dns.ScopeExclusions(["www"]))

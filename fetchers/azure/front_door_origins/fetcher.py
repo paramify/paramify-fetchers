@@ -1218,7 +1218,8 @@ def main() -> int:
     metrics_by_profile: dict = {}
     scoped_profiles: list[dict] = []
     days = lookback_days(collector)
-    exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV)
+    exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV, kinds=("route",))
+    exclusions.record_invalid(collector, SCOPE_EXCLUSIONS_ENV)
     window = metrics_window(days, datetime.now(timezone.utc))
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:

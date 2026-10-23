@@ -422,6 +422,7 @@ def main() -> int:
         )
 
     exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV)
+    exclusions.record_invalid(collector, SCOPE_EXCLUSIONS_ENV)
     public, excluded = exclude_record_sets(public, exclusions)
     exclusions.warn_unmatched(logger)
 

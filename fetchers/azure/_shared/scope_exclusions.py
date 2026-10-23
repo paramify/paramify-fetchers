@@ -24,8 +24,15 @@ def split_kind(pattern: str) -> tuple[Optional[str], str]:
 
 def parse_patterns(raw: Optional[str]) -> list[str]:
     """Comma- or whitespace-separated globs, in configured order, duplicates (ignoring case) dropped."""
-    patterns, seen = [], set()
+    parts: list[str] = []
     for part in SEPARATORS.split(raw or ""):
+        # "route: qa-*" is one pattern, not an empty route: plus a bare host pattern.
+        if parts and parts[-1].endswith(":") and part:
+            parts[-1] += part
+        else:
+            parts.append(part)
+    patterns, seen = [], set()
+    for part in parts:
         key = normalize(part)
         if key and key not in seen:
             seen.add(key)
@@ -36,14 +43,15 @@ def parse_patterns(raw: Optional[str]) -> list[str]:
 class ScopeExclusions:
     """Answers whether a name is excluded and by which pattern, and remembers which patterns ever matched."""
 
-    def __init__(self, patterns: Iterable[str] = ()):
+    def __init__(self, patterns: Iterable[str] = (), kinds: Iterable[str] = ()):
         self.patterns = list(patterns)
+        self.kinds = tuple(kinds)  # the prefixes this fetcher matches on, such as "route"
         self._keys = [split_kind(p) for p in self.patterns]
         self._matched: set = set()
 
     @classmethod
-    def from_env(cls, env_var: str) -> "ScopeExclusions":
-        return cls(parse_patterns(os.environ.get(env_var)))
+    def from_env(cls, env_var: str, kinds: Iterable[str] = ()) -> "ScopeExclusions":
+        return cls(parse_patterns(os.environ.get(env_var)), kinds)
 
     def __bool__(self) -> bool:
         return bool(self.patterns)
@@ -57,6 +65,17 @@ class ScopeExclusions:
                 self._matched.add(pattern)
                 first = first or pattern
         return first
+
+    def invalid(self) -> list[str]:
+        """Patterns with a prefix this fetcher doesn't know, or nothing after the prefix; they can never match."""
+        return [p for p, (kind, key) in zip(self.patterns, self._keys) if (kind is not None and kind not in self.kinds) or not key]
+
+    def record_invalid(self, collector, env_var: str) -> None:
+        """Fail the run for each invalid pattern, rather than leave in scope what it was meant to exclude."""
+        known = ", ".join(f"{k}:" for k in self.kinds) or "none"
+        for pattern in self.invalid():
+            collector.record(f"config {env_var}", ValueError(
+                f"scope exclusion pattern {pattern!r} has an unknown prefix or nothing after it (known prefixes: {known})"))
 
     def unmatched(self) -> list[str]:
         return [p for p in self.patterns if p not in self._matched]

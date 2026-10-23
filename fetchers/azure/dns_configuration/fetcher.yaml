@@ -18,7 +18,8 @@ config_schema:
       public zone; use the FQDN to exclude one zone's record. A matching record set
       is listed under excluded with the pattern and left out of every count, though
       each zone's number_of_record_sets is Azure's own count and still includes it.
-      Can be ${env:VAR}. Empty: every record set is in scope.
+      A prefix such as route: fails the run. Can be ${env:VAR}. Empty: every record
+      set is in scope.
 
 supports_targets: true
 
