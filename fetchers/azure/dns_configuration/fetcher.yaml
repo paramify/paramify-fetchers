@@ -1,5 +1,5 @@
 name: azure_dns_configuration
-version: 0.3.0
+version: 0.4.0
 description: >-
   Shows the targets, TTL and failover method of each in-scope public DNS record, whether each public zone uses DNSSEC, and which virtual networks each private zone is linked to.
 category: azure
@@ -11,14 +11,14 @@ config_schema:
     env: AZURE_DNS_SCOPE_EXCLUSIONS
     description: >
       Public record sets to leave out of scope, as case-insensitive glob patterns
-      separated by commas or spaces (* matches any run of characters, dots
-      included). Each pattern is matched against a record set's relative name
-      (www, @) and its FQDN (www.example.com, the trailing dot optional). A
-      relative name applies in every public zone; use the FQDN to exclude one
-      zone's record. A matching record set is listed under excluded with the
-      pattern and left out of every count, though each zone's
-      number_of_record_sets is Azure's own count and still includes it. Can be
-      ${env:VAR}. Empty: every record set is in scope.
+      separated by commas or spaces (* matches any run of characters, dots included,
+      ? one character, and [ ] one character from a set, such as [0-9]). Each
+      pattern is matched against a record set's relative name (www, @) and its FQDN
+      (www.example.com, the trailing dot optional). A relative name applies in every
+      public zone; use the FQDN to exclude one zone's record. A matching record set
+      is listed under excluded with the pattern and left out of every count, though
+      each zone's number_of_record_sets is Azure's own count and still includes it.
+      Can be ${env:VAR}. Empty: every record set is in scope.
 
 supports_targets: true
 
@@ -83,9 +83,10 @@ evidence_set:
     - provider_registration_status — Whether Microsoft.Network is registered on the subscription: registered, not_registered or unknown
 
     Which record sets are left out of scope?
-    - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against each public record set's relative name and FQDN. A record set is in scope unless one matches it; empty when none are set, so every record set is in scope
+    - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against each public record set's relative name and FQDN. A relative name such as www matches that name in every public zone. A record set is in scope unless one matches it; empty when none are set, so every record set is in scope
     - scope_exclusion_patterns_unmatched — List of configured patterns that matched no public record set, such as a mistyped name
     - excluded_record_sets — Number of public record sets left out of scope because a pattern matched their name; each is listed under excluded with the pattern, and no other count includes them
+    - in_scope_record_sets — Number of public record sets read and in scope; 0 means the patterns took out every record set, which a check can catch by requiring more than 0
 
     Are public zones signed with DNSSEC?
     - dnssec_enabled_public_zones — Number of public zones with DNSSEC enabled: a DNSSEC configuration exists, its provisioning state is Succeeded and it has at least one signing key

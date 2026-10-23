@@ -16,6 +16,12 @@ def normalize(name: str) -> str:
     return str(name).strip().lower().rstrip(".")
 
 
+def split_kind(pattern: str) -> tuple[Optional[str], str]:
+    """("route", "qa*") for "route:qa*"; (None, pattern) for a bare pattern, which matches host or record names only."""
+    kind, sep, glob = pattern.partition(":")
+    return (normalize(kind), normalize(glob)) if sep else (None, normalize(pattern))
+
+
 def parse_patterns(raw: Optional[str]) -> list[str]:
     """Comma- or whitespace-separated globs, in configured order, duplicates (ignoring case) dropped."""
     patterns, seen = [], set()
@@ -32,7 +38,7 @@ class ScopeExclusions:
 
     def __init__(self, patterns: Iterable[str] = ()):
         self.patterns = list(patterns)
-        self._keys = [normalize(p) for p in self.patterns]
+        self._keys = [split_kind(p) for p in self.patterns]
         self._matched: set = set()
 
     @classmethod
@@ -42,12 +48,12 @@ class ScopeExclusions:
     def __bool__(self) -> bool:
         return bool(self.patterns)
 
-    def match(self, *names: Optional[str]) -> Optional[str]:
-        """The first configured pattern matching any of the names, else None; every pattern that matches counts as used."""
+    def match(self, *names: Optional[str], kind: Optional[str] = None) -> Optional[str]:
+        """The first pattern of this kind (bare when None) matching any of the names, else None; every match counts as used."""
         keys = [normalize(n) for n in names if n]
         first = None
-        for pattern, key in zip(self.patterns, self._keys):
-            if any(fnmatchcase(name, key) for name in keys):
+        for pattern, (pattern_kind, key) in zip(self.patterns, self._keys):
+            if pattern_kind == kind and any(fnmatchcase(name, key) for name in keys):
                 self._matched.add(pattern)
                 first = first or pattern
         return first
@@ -55,12 +61,14 @@ class ScopeExclusions:
     def unmatched(self) -> list[str]:
         return [p for p in self.patterns if p not in self._matched]
 
-    def summary(self, excluded: list[dict], kinds: Iterable[str]) -> dict:
-        """The patterns, the ones that matched nothing, and how many items of each kind were excluded."""
+    def summary(self, excluded: list[dict], kinds: Iterable[str], in_scope: dict) -> dict:
+        """The patterns, the ones that matched nothing, how many items of each kind were excluded, and how many of each
+        stayed in scope (in_scope maps a plural name to a count), so a check can require some to remain."""
         return {
             "scope_exclusion_patterns": list(self.patterns),
             "scope_exclusion_patterns_unmatched": self.unmatched(),
             **{f"excluded_{kind}s": sum(1 for e in excluded if e["kind"] == kind) for kind in kinds},
+            **{f"in_scope_{name}": count for name, count in in_scope.items()},
         }
 
     def warn_unmatched(self, logger: logging.Logger) -> None:

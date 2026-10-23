@@ -247,9 +247,10 @@ def fd_rule(*fdids, priority=100, header="x-azure-fdid"):
                 headers={header: list(fdids)} if fdids else None)
 
 
-def config(*rules, default=None, public_network_access=None):
+def config(*rules, default=None, public_network_access=None, scm=(), scm_default=None, scm_use_main=True):
     return {"public_network_access": public_network_access, "ip_security_restrictions": list(rules),
-            "ip_security_restrictions_default_action": default}
+            "ip_security_restrictions_default_action": default, "scm_ip_security_restrictions": list(scm),
+            "scm_ip_security_restrictions_default_action": scm_default, "scm_ip_security_restrictions_use_main": scm_use_main}
 
 
 @pytest.mark.parametrize("public, cfg, private_link, locked, basis, gaps", [
@@ -287,6 +288,51 @@ def test_app_service_lockdown(public, cfg, private_link, locked, basis, gaps):
     assert record["locked_to_front_door"] is locked
     assert record["lockdown_basis"] == basis
     assert record["lockdown_gaps"] == gaps
+
+
+@pytest.mark.parametrize("public, cfg, locked, gaps, scm_open", [
+    pytest.param("Enabled", config(fd_rule(OWN_FDID), scm_use_main=False), False, ["scm_public_access_unrestricted"], True,
+                 id="kudu-without-rules"),
+    pytest.param("Enabled", config(fd_rule(OWN_FDID), scm=[rule("Allow all", 2147483647, ip="Any")], scm_use_main=False),
+                 False, ["scm_public_access_unrestricted"], True, id="kudu-allow-all"),
+    pytest.param("Enabled", config(fd_rule(OWN_FDID), scm=[rule("build-agents")], scm_use_main=False), True, [], False,
+                 id="kudu-restricted"),
+    pytest.param("Enabled", config(fd_rule(OWN_FDID), scm_use_main=True), True, [], False, id="kudu-uses-main-rules"),
+    pytest.param("Enabled", config(fd_rule(OWN_FDID), scm_use_main=None), False, ["scm_public_access_unrestricted"], True,
+                 id="kudu-use-main-unset"),
+    pytest.param("Disabled", config(fd_rule(OWN_FDID), scm_use_main=False), True, [], True, id="public-access-disabled"),
+])
+def test_kudu_open_to_the_public_is_not_locked_down(public, cfg, locked, gaps, scm_open):
+    record = origins.lockdown(public, cfg, OWN_FDID, {OWN_FDID}, False)
+    assert (record["locked_to_front_door"], record["lockdown_gaps"]) == (locked, gaps)
+    assert record["scm_unmatched_public_callers_allowed"] is scm_open
+
+
+def test_kudu_gap_is_counted():
+    group = {"id": "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Cdn/profiles/p/originGroups/g", "name": "g",
+             "profile": "p", "serving": True, "best_priority": 1, "origins": [origin_rec("east", "eastus", "app-east")]}
+    sites = {origins.arm_key(SITE.format("app-east")): site_row("app-east", "eastus", "plan", public="Enabled")}
+    configs = {origins.arm_key(SITE.format("app-east")): config(fd_rule(OWN_FDID), scm_use_main=False)}
+    app_origins = origins.app_service_origin_records([group], {origins.profile_key(group["id"]): OWN_FDID}, sites, {}, {},
+                                                     configs, "s")
+    summary = origins.summarize_app_services(app_origins, [], None)
+    assert summary["serving_app_service_origins_scm_public_access_unrestricted"] == 1
+    assert summary["serving_app_service_origins_not_locked"] == 1
+
+
+def test_project_site_config_reads_kudu_restrictions():
+    from types import SimpleNamespace as NS
+
+    scm_rule = NS(name="build-agents", priority=100, action="Allow", tag="Default", ip_address="10.0.0.0/8",
+                  vnet_subnet_resource_id=None, headers=None)
+    projected = origins.project_site_config(NS(public_network_access="Enabled", ip_security_restrictions=[],
+                                               ip_security_restrictions_default_action="Deny",
+                                               scm_ip_security_restrictions=[scm_rule],
+                                               scm_ip_security_restrictions_default_action="Deny",
+                                               scm_ip_security_restrictions_use_main=False))
+    assert [r["name"] for r in projected["scm_ip_security_restrictions"]] == ["build-agents"]
+    assert (projected["scm_ip_security_restrictions_default_action"],
+            projected["scm_ip_security_restrictions_use_main"]) == ("Deny", False)
 
 
 def test_lockdown_reports_the_ids_it_compared():
@@ -663,6 +709,28 @@ def test_requests_lagging_behind_health_are_judged_at_their_own_last_hour():
     assert record["all_regions_healthy_last_hour"] is False
 
 
+def test_all_regions_healthy_is_unknown_when_an_enabled_region_went_silent():
+    group = health_group()
+    metrics = {"health": [series("east.azurewebsites.net", [100] * 6, "health", group="g"),
+                          series("west.azurewebsites.net", [0, 0, 0], "health", group="g")],
+               "requests": [series("east.azurewebsites.net", [10] * 6)]}
+    [record], _ = origin_health([group], {origins.profile_key(group["id"]): metrics})
+    regions = {r["region"]: r for r in record["regions"]}
+    assert (regions["eastus"]["healthy_last_hour"], regions["westus"]["healthy_last_hour"]) == (True, None)
+    assert record["all_regions_healthy_last_hour"] is None
+    summary = origins.summarize_health([record], [], 7, ("start", "end"))
+    assert (summary["serving_groups_all_regions_healthy_last_hour"], summary["serving_groups_region_unhealthy_last_hour"]) == (
+        0, 0)
+
+
+def test_a_known_unhealthy_region_outweighs_a_silent_one():
+    group = {**health_group(regions=("eastus", "westus")), "enabled_regions": ["centralus", "eastus", "westus"]}
+    metrics = {"health": [series("east.azurewebsites.net", [0] * 6, "health", group="g"),
+                          series("west.azurewebsites.net", [100] * 6, "health", group="g")], "requests": []}
+    [record], _ = origin_health([group], {origins.profile_key(group["id"]): metrics})
+    assert record["all_regions_healthy_last_hour"] is False
+
+
 def test_health_data_counts_an_unresolved_region():
     group = health_group(regions=(None, None))
     key = origins.profile_key(group["id"])
@@ -759,7 +827,7 @@ def fd_group(name, regions=("eastus", "westus")):
             } for r in regions]}
 
 
-def topology(read_domains=True):
+def topology():
     """One profile: core domains on two-region groups; QA, WebDAV and a file CDN on single-region groups.
 
     The QA route forwards plain HTTP to the shared group, which a core route also reaches.
@@ -782,7 +850,7 @@ def topology(read_domains=True):
                     "front_door_id": None},
         "endpoints": [{"id": f"{PROFILE_ID}/afdEndpoints/e", "name": "e", "host_name": ENDPOINT_HOST,
                        "enabled_state": "Enabled", "deployment_status": None, "routes": routes}],
-        "custom_domains": domains if read_domains else [],
+        "custom_domains": domains,
         "rule_sets": {},
         "secrets": [],
         "security_policies": [],
@@ -811,18 +879,47 @@ def test_profile_scope_matches_host_names_and_excludes_routes_whose_every_host_i
         "custom_domain": [("qa.example.com", "QA.*", "name_matched"), ("files.example.com", "files.example.com", "name_matched"),
                           ("webdav.example.com", "webdav*", "name_matched")],
         "route": [("qa-http", None, "all_hosts_excluded"), ("qa", None, "all_hosts_excluded"),
-                  ("files", None, "all_hosts_excluded"), ("webdav-route", "webdav*", "name_matched")],
+                  ("files", None, "all_hosts_excluded"), ("webdav-route", None, "all_hosts_excluded")],
     }
+    assert scope["in_scope"] == {"custom_domains": 2, "endpoints": 1, "routes": 5}
     # mixed also serves an in-scope domain; nohost serves no host at all
     assert {fd.arm_key(fd_route(n)["id"]) for n in ("mixed", "nohost", "core")}.isdisjoint(scope["routes"])
     assert exclusions.unmatched() == ["nothing.example.com"]
 
 
-def test_profile_scope_matches_route_names():
+def test_profile_scope_matches_route_names_only_with_the_route_prefix():
     c = topology()
-    named = fd.profile_scope(c["profile"], c["endpoints"], c["custom_domains"], scope_exclusions("default"))
-    assert by_kind(named["excluded"]) == {"route": [("default", "default", "name_matched")]}
+    named = fd.profile_scope(c["profile"], c["endpoints"], c["custom_domains"], scope_exclusions("Route:default"))
+    assert by_kind(named["excluded"]) == {"route": [("default", "Route:default", "name_matched")]}
     assert named["routes"] == {fd.arm_key(fd_route("default")["id"])}
+    bare = scope_exclusions("default", "route:*.example.com")
+    assert fd.profile_scope(c["profile"], c["endpoints"], c["custom_domains"], bare)["excluded"] == []
+    assert bare.unmatched() == ["default", "route:*.example.com"]
+
+
+def with_legacy_route(c):
+    """A route whose name looks like QA but which serves the production host www.contoso.com."""
+    c["custom_domains"].append(fd_domain("www.contoso.com"))
+    c["endpoints"][0]["routes"].append(fd_route("qa-legacy-route", ["www.contoso.com"]))
+    return c
+
+
+def test_a_bare_pattern_does_not_take_out_a_route_by_its_name():
+    c = with_legacy_route(topology())
+    scope = fd.profile_scope(c["profile"], c["endpoints"], c["custom_domains"], scope_exclusions("qa*"))
+    assert fd.arm_key(fd_route("qa-legacy-route")["id"]) not in scope["routes"]
+    assert "qa-legacy-route" not in {e["name"] for e in scope["excluded"]}
+
+    tls_routes = {r["route"]: r for r in tls.tls_for_profile(with_legacy_route(topology()), NOW, scope_exclusions("qa*"))["routes"]}
+    assert tls_routes["qa-legacy-route"]["hosts"] == ["www.contoso.com"]
+    waf = coverage.coverage_for_profile(with_legacy_route(topology()), {}, scope_exclusions("qa*"))
+    assert ("qa-legacy-route", "www.contoso.com") in {(h["route"], h["host_name"]) for h in waf["host_routes"]}
+    groups = origins.profile_groups(with_legacy_route(topology()), {}, REGIONS, scope_exclusions("qa*"))
+    core = next(g for g in groups["groups"] if g["name"] == "core")
+    assert "qa-legacy-route" in {r["route"] for r in core["routes"]}
+
+    named = fd.profile_scope(c["profile"], c["endpoints"], c["custom_domains"], scope_exclusions("route:qa-legacy-*"))
+    assert by_kind(named["excluded"]) == {"route": [("qa-legacy-route", "route:qa-legacy-*", "name_matched")]}
 
 
 def test_endpoint_host_name_excludes_routes_on_the_default_domain():
@@ -858,9 +955,9 @@ def test_origin_redundancy_is_judged_on_in_scope_routes_only():
 
 
 def test_route_name_pattern_takes_a_route_out_of_its_group():
-    scoped = origins.profile_groups(topology(), {}, REGIONS, scope_exclusions("webdav-*", "qa-http"))
+    scoped = origins.profile_groups(topology(), {}, REGIONS, scope_exclusions("route:webdav-*", "route:qa-http"))
     assert by_kind(scoped["excluded"]) == {
-        "route": [("qa-http", "qa-http", "name_matched"), ("webdav-route", "webdav-*", "name_matched")],
+        "route": [("qa-http", "route:qa-http", "name_matched"), ("webdav-route", "route:webdav-*", "name_matched")],
         "origin_group": [("webdav", None, "only_excluded_routes")],
     }
 
@@ -919,9 +1016,8 @@ def run_origins(monkeypatch, tmp_path, patterns, collected=None, configs=None, p
                      for g in ("core", "qa")],
     }}
 
-    def collect_profiles(subscription_id, cred, collector, read_domains=False):
-        reads.append(read_domains)
-        return collected or [topology(read_domains)], {}
+    def collect_profiles(subscription_id, cred, collector):
+        return collected or [topology()], {}
 
     for name, fake in {
         "resolve_subscription": lambda c: {"subscription_id": "s", "subscription_source": "env"},
@@ -947,10 +1043,13 @@ def run_origins(monkeypatch, tmp_path, patterns, collected=None, configs=None, p
     return reads + config_reads, json.loads((tmp_path / "azure_front_door_origins_s.json").read_text())
 
 
-def test_origins_without_patterns_reads_no_domains_and_adds_only_empty_scope_fields(monkeypatch, tmp_path):
+def test_origins_without_patterns_adds_only_empty_scope_fields_and_in_scope_totals(monkeypatch, tmp_path):
     reads, evidence = run_origins(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
-    assert reads == [False, ["app-core", "app-qa"]]
+    assert reads == [["app-core", "app-qa"]]
+    assert {k: v for k, v in summary.items() if k.startswith("in_scope_")} == {
+        "in_scope_hosts": 6, "in_scope_custom_domains": 5, "in_scope_endpoints": 1, "in_scope_routes": 9,
+        "in_scope_origin_groups": 7, "in_scope_apps": 2}
     assert evidence["results"]["excluded"] == []
     assert (summary["scope_exclusion_patterns"], summary["scope_exclusion_patterns_unmatched"]) == ([], [])
     assert all(summary[f"excluded_{k}s"] == 0 for k in origins.EXCLUDED_KINDS)
@@ -962,7 +1061,8 @@ def test_origins_with_patterns_leave_qa_groups_apps_and_health_out(monkeypatch, 
     reads, evidence = run_origins(monkeypatch, tmp_path, ",".join(PATTERNS))
     results, summary = evidence["results"], evidence["summary"]
     # Access restrictions are read only for apps an in-scope group reaches.
-    assert reads == [True, ["app-core"]]
+    assert reads == [["app-core"]]
+    assert (summary["in_scope_hosts"], summary["in_scope_origin_groups"], summary["in_scope_apps"]) == (3, 4, 1)
     assert [a["name"] for a in results["production_apps"]] == ["app-core"]
     assert [h["origin_group"] for h in results["origin_health"]] == ["core", "shared", "spare", "unused"]
     assert summary["origin_metric_series_unmatched"] == 0
@@ -971,6 +1071,15 @@ def test_origins_with_patterns_leave_qa_groups_apps_and_health_out(monkeypatch, 
     assert summary["scope_exclusion_patterns_unmatched"] == ["nothing.example.com"]
     assert summary["total_origin_groups"] == 4 and results["profiles"][0]["origin_group_count"] == 4
     assert {r["origin_group"] for r in results["app_service_origins"]} == {"core"}
+
+
+def test_a_match_all_pattern_leaves_nothing_in_scope_and_says_so(monkeypatch, tmp_path):
+    _, evidence = run_origins(monkeypatch, tmp_path, "*")
+    summary = evidence["summary"]
+    assert (summary["in_scope_hosts"], summary["in_scope_custom_domains"], summary["in_scope_endpoints"]) == (0, 0, 0)
+    # Only the route with no host, its group and the group no route reaches are left.
+    assert (summary["in_scope_routes"], summary["in_scope_origin_groups"]) == (1, 2)
+    assert summary["serving_groups_connection_unprotected"] == 0 and summary["serving_app_service_origins_not_locked"] == 0
 
 
 def test_an_out_of_scope_profile_does_not_vouch_for_an_app(monkeypatch, tmp_path):
@@ -1015,7 +1124,8 @@ def with_secrets(c):
 
 
 def test_tls_matches_route_names_and_keeps_only_in_scope_hosts_and_secrets():
-    scoped = tls.tls_for_profile(with_secrets(topology()), NOW, scope_exclusions(*PATTERNS, "*.azurefd.net", "nohost"))
+    scoped = tls.tls_for_profile(with_secrets(topology()), NOW,
+                                 scope_exclusions(*PATTERNS, "*.azurefd.net", "route:nohost"))
     routes = {r["route"]: r for r in scoped["routes"]}
 
     assert sorted(routes) == ["core", "mixed", "shared-core"]
@@ -1025,7 +1135,7 @@ def test_tls_matches_route_names_and_keeps_only_in_scope_hosts_and_secrets():
     assert secret == {"kind": "secret", "name": "s-qa", "pattern": None, "reason": "only_excluded_domains", "profile": "p",
                       "id": f"{PROFILE_ID}/secrets/s-qa", "custom_domains": ["qa.example.com"]}
     routes_out = by_kind(scoped["excluded"])["route"]
-    assert ("nohost", "nohost", "name_matched") in routes_out and ("default", None, "all_hosts_excluded") in routes_out
+    assert ("nohost", "route:nohost", "name_matched") in routes_out and ("default", None, "all_hosts_excluded") in routes_out
 
 
 def test_tls_route_record_drops_out_of_scope_default_domain():
@@ -1039,7 +1149,7 @@ def test_tls_route_record_drops_out_of_scope_default_domain():
 
 
 def test_waf_route_name_takes_out_its_host_routes():
-    scoped = coverage.coverage_for_profile(topology(), {}, scope_exclusions("mixed", "nohost"))
+    scoped = coverage.coverage_for_profile(topology(), {}, scope_exclusions("route:mixed", "route:nohost"))
     assert {h["route"] for h in scoped["host_routes"]} == {"core", "default", "shared-core", "qa-http", "qa", "files",
                                                           "webdav-route"}
     assert sorted((e["name"], e["route"], e["reason"]) for e in scoped["excluded"] if e["kind"] == "host_route") == [
@@ -1074,11 +1184,15 @@ def test_tls_main(monkeypatch, tmp_path, patterns):
         assert evidence["results"]["excluded"] == []
         assert all(summary[f"excluded_{k}s"] == 0 for k in tls.EXCLUDED_KINDS)
         assert (summary["total_custom_domains"], summary["total_routes"], summary["certificate_secrets"]) == (5, 9, 4)
+        assert (summary["in_scope_hosts"], summary["in_scope_routes"], summary["in_scope_secrets"]) == (6, 9, 4)
     else:
         assert {k: summary[f"excluded_{k}s"] for k in tls.EXCLUDED_KINDS} == {
             "custom_domain": 3, "endpoint": 0, "route": 4, "secret": 1}
         assert (summary["total_custom_domains"], summary["total_routes"], summary["certificate_secrets"]) == (2, 5, 3)
         assert summary["scope_exclusion_patterns_unmatched"] == ["nothing.example.com"]
+        assert {k: v for k, v in summary.items() if k.startswith("in_scope_")} == {
+            "in_scope_hosts": 3, "in_scope_custom_domains": 2, "in_scope_endpoints": 1, "in_scope_routes": 5,
+            "in_scope_secrets": 3}
     assert (profile["custom_domain_count"], profile["route_count"], profile["secret_count"]) == (
         summary["total_custom_domains"], summary["total_routes"], summary["certificate_secrets"])
 
@@ -1093,8 +1207,22 @@ def test_waf_coverage_main(monkeypatch, tmp_path, patterns):
         assert evidence["results"]["excluded"] == []
         assert all(summary[f"excluded_{k}s"] == 0 for k in coverage.EXCLUDED_KINDS)
         assert (summary["total_host_routes"], summary["total_routes"], summary["total_custom_domains"]) == (10, 9, 5)
+        assert (summary["in_scope_hosts"], summary["in_scope_host_routes"]) == (6, 10)
     else:
         assert {k: summary[f"excluded_{k}s"] for k in coverage.EXCLUDED_KINDS} == {
             "custom_domain": 3, "endpoint": 0, "route": 4, "host_route": 5}
         assert (summary["total_host_routes"], summary["total_routes"], summary["total_custom_domains"]) == (5, 5, 2)
         assert summary["unprotected_host_routes"] == 5 and summary["protected_host_route_percentage"] == 0
+        assert (summary["in_scope_hosts"], summary["in_scope_host_routes"]) == (3, 5)
+
+
+@pytest.mark.parametrize("module, name, fakes", [
+    (tls, "azure_front_door_tls", {}),
+    (coverage, "azure_front_door_waf_coverage", {"collect_waf_policies": lambda *a: ([], fd.definition_index([]))}),
+])
+def test_a_match_all_pattern_zeroes_the_in_scope_totals(monkeypatch, tmp_path, module, name, fakes):
+    collected = {**with_secrets(topology()), "log_categories": [], "log_settings": []}
+    evidence = run_main(module, name, monkeypatch, tmp_path, "*", collected, **fakes)
+    summary = evidence["summary"]
+    assert (summary["in_scope_hosts"], summary["in_scope_custom_domains"], summary["in_scope_endpoints"]) == (0, 0, 0)
+    assert summary["scope_exclusion_patterns_unmatched"] == []

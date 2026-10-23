@@ -365,7 +365,7 @@ def test_record_sets_match_on_relative_name_or_fqdn():
 def test_counts_cover_only_record_sets_in_scope():
     exclusions = dns.ScopeExclusions(["qa", "webdav", "files"])
     zones, excluded = dns.exclude_record_sets([scoped_zone()], exclusions)
-    summary = {**dns.summarize(zones, []), **exclusions.summary(excluded, ("record_set",))}
+    summary = {**dns.summarize(zones, []), **exclusions.summary(excluded, ("record_set",), {"record_sets": 2})}
 
     assert summary["total_public_record_sets"] == 2
     assert summary["public_endpoint_record_sets_by_failover_method"] == {
@@ -402,11 +402,22 @@ def test_main_without_patterns_adds_only_empty_scope_fields(monkeypatch, tmp_pat
     assert evidence["summary"]["scope_exclusion_patterns"] == []
     assert evidence["summary"]["scope_exclusion_patterns_unmatched"] == []
     assert evidence["summary"]["excluded_record_sets"] == 0
-    assert evidence["summary"]["total_public_record_sets"] == 5
+    assert evidence["summary"]["total_public_record_sets"] == evidence["summary"]["in_scope_record_sets"] == 5
 
 
 def test_main_with_patterns_from_the_env(monkeypatch, tmp_path):
     evidence = run_main(monkeypatch, tmp_path, "qa, webdav.example.com")
     assert [e["name"] for e in evidence["results"]["excluded"]] == ["qa", "webdav"]
-    assert evidence["summary"]["total_public_record_sets"] == 3
+    assert evidence["summary"]["total_public_record_sets"] == evidence["summary"]["in_scope_record_sets"] == 3
     assert evidence["summary"]["scope_exclusion_patterns"] == ["qa", "webdav.example.com"]
+
+
+def test_main_with_a_match_all_pattern_leaves_no_record_set_in_scope(monkeypatch, tmp_path):
+    evidence = run_main(monkeypatch, tmp_path, "*")
+    assert (evidence["summary"]["in_scope_record_sets"], evidence["summary"]["excluded_record_sets"]) == (0, 5)
+
+
+def test_a_relative_name_matches_in_every_zone():
+    zones = [scoped_zone(), {**scoped_zone(), "name": "example.org", "id": scoped_zone()["id"].replace("example.com", "example.org")}]
+    _, excluded = dns.exclude_record_sets(zones, dns.ScopeExclusions(["www"]))
+    assert [(e["zone"], e["name"]) for e in excluded] == [("example.com", "www"), ("example.org", "www")]

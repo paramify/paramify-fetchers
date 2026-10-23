@@ -35,6 +35,7 @@ from frontdoor import (  # noqa: E402
     custom_domains,
     endpoints_with_routes,
     front_door_profiles,
+    in_scope_totals,
     profile_scope,
     route_hosts,
     route_https,
@@ -207,7 +208,8 @@ def tls_for_profile(collected: dict, now: datetime, exclusions: ScopeExclusions 
     domains = [domain_record(profile, d, secrets_by_key, routed, served, now)
                for d in collected["custom_domains"] if arm_key(d["id"]) not in scope["hosts"]]
     secrets, excluded_secrets = secrets_in_scope(profile, collected["secrets"], collected["custom_domains"], scope["hosts"])
-    return {"routes": routes, "custom_domains": domains, "secrets": secrets, "excluded": scope["excluded"] + excluded_secrets}
+    return {"routes": routes, "custom_domains": domains, "secrets": secrets, "excluded": scope["excluded"] + excluded_secrets,
+            "in_scope": scope["in_scope"]}
 
 
 def summarize(profiles: list[dict], skipped_by_sku: dict, routes: list[dict], domains: list[dict], secrets: list[dict]) -> dict:
@@ -311,9 +313,10 @@ def main() -> int:
 
     now = datetime.now(timezone.utc)
     exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV)
-    profiles, routes, domains, secrets, excluded = [], [], [], [], []
+    profiles, routes, domains, secrets, excluded, scopes = [], [], [], [], [], []
     for c in collected:
         tls = tls_for_profile(c, now, exclusions)
+        scopes.append(tls["in_scope"])
         routes += tls["routes"]
         domains += tls["custom_domains"]
         excluded += tls["excluded"]
@@ -340,7 +343,7 @@ def main() -> int:
         summary={
             **summarize(profiles, skipped_by_sku, routes, domains, secrets),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, EXCLUDED_KINDS),
+            **exclusions.summary(excluded, EXCLUDED_KINDS, {**in_scope_totals(scopes), "secrets": len(secrets)}),
         },
     )
     exclusions.warn_unmatched(logger)

@@ -1,5 +1,5 @@
 name: azure_front_door_tls
-version: 0.2.0
+version: 0.3.0
 description: >-
   Shows whether each in-scope Front Door route accepts only HTTPS, and each in-scope custom domain's TLS floor, certificate and expiry.
 category: azure
@@ -11,12 +11,14 @@ config_schema:
     env: AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS
     description: >
       Parts of Front Door to leave out of scope, as case-insensitive glob patterns
-      separated by commas or spaces (* matches any run of characters, dots
-      included), matched against custom-domain host names, endpoint host names
-      and route names. A route is out of scope when its name matches or every host
-      it serves does, and a certificate secret when only out-of-scope domains use
-      it. Each is listed under excluded and left out of every count. Can be
-      ${env:VAR}. Empty: everything is in scope.
+      separated by commas or spaces, matched against custom-domain and endpoint host
+      names (* matches any run of characters, dots included, ? one character, and [
+      ] one character from a set, such as [0-9]). A pattern starting route:
+      (route:qa-*) matches route names instead; a pattern without it never matches a
+      route's name. A route is out of scope when a route: pattern matches its name
+      or every host it serves is out, and a certificate secret when only
+      out-of-scope domains use it. Each is listed under excluded and left out of
+      every count. Can be ${env:VAR}. Empty: everything is in scope.
 
 supports_targets: true
 
@@ -87,12 +89,17 @@ evidence_set:
     - provider_registration_status — Whether Microsoft.Cdn is registered on the subscription: registered, not_registered or unknown
 
     Which parts of Front Door are left out of scope?
-    - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against custom-domain host names, endpoint host names (azurefd.net) and route names. A custom domain is in scope unless its host name matches one; a route is in scope unless its name matches one or every host it serves matches (its custom domains, plus the endpoint's own host name when the route links it), and an in-scope route lists only its in-scope hosts; a certificate secret is in scope unless only out-of-scope custom domains use it. Empty when none are set, so everything is in scope
+    - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against custom-domain and endpoint host names (azurefd.net), or against route names when they start route:. A custom domain is in scope unless its host name matches one; a route is in scope unless a route: pattern matches its name or every host it serves matches (its custom domains, plus the endpoint's own host name when the route links it), and an in-scope route lists only its in-scope hosts; a certificate secret is in scope unless only out-of-scope custom domains use it. Empty when none are set, so everything is in scope
     - scope_exclusion_patterns_unmatched — List of configured patterns that matched no custom-domain host name, endpoint host name or route name, such as a mistyped name
     - excluded_custom_domains — Number of custom domains whose host name matches a pattern; each is listed under excluded with the pattern, and no other count includes them
     - excluded_endpoints — Number of endpoints whose own host name matches a pattern
-    - excluded_routes — Number of routes out of scope: their name matches a pattern, or every host they serve does
+    - excluded_routes — Number of routes out of scope: a route: pattern matches their name, or every host they serve is out of scope
     - excluded_secrets — Number of certificate secrets out of scope because only out-of-scope custom domains use them; each is listed under excluded with the custom domains that use it
+    - in_scope_hosts — Number of custom domains and endpoints whose host name no pattern matches; 0 means the patterns took out every host, which a check can catch by requiring more than 0
+    - in_scope_custom_domains — Number of custom domains whose host name no pattern matches
+    - in_scope_endpoints — Number of endpoints whose own host name no pattern matches
+    - in_scope_routes — Number of routes in scope
+    - in_scope_secrets — Number of certificate secrets in scope
 
     Do serving routes accept only HTTPS?
     - serving_routes_https_only — Number of serving routes that only ever handle HTTPS: they accept only HTTPS, or they redirect plain HTTP to HTTPS (a route that sets no protocols accepts both, and one that sets no redirect doesn't redirect)

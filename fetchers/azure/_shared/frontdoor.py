@@ -430,12 +430,13 @@ def route_serving(endpoint: dict, route: dict) -> bool:
     return endpoint["enabled_state"] == "Enabled" and route["enabled_state"] == "Enabled"
 
 
-# --- scope exclusions by host name (and optionally route name) ---
+# --- scope exclusions by host name, and by route name with a route: prefix ---
 
 def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exclusions) -> dict:
-    """The custom domains and endpoints whose host name matches a pattern (key -> pattern), and the keys of the routes out of scope.
+    """The custom domains and endpoints whose host name matches a bare pattern (key -> pattern), the keys of the routes out
+    of scope, and how many of each stay in scope.
 
-    A route is out of scope when its own name matches, or when every host it serves is out.
+    A route is out of scope when its name matches a route: pattern, or when every host it serves is out.
     """
     domains_by_key = {arm_key(d["id"]): d for d in domains}
     host_patterns, excluded = {}, []
@@ -457,7 +458,7 @@ def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exc
             hosts = route_hosts(endpoint, route, domains_by_key)
             context = {"profile": profile["name"], "endpoint": endpoint["name"], "id": route["id"],
                        "hosts": [h["host_name"] for h in hosts]}
-            pattern = exclusions.match(route["name"])
+            pattern = exclusions.match(route["name"], kind="route")
             if pattern:
                 excluded.append(excluded_item("route", route["name"], pattern, **context))
             elif hosts and all(arm_key(h["id"]) in host_patterns for h in hosts):
@@ -465,7 +466,18 @@ def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exc
             else:
                 continue
             routes.add(arm_key(route["id"]))
-    return {"hosts": host_patterns, "routes": routes, "excluded": excluded}
+    in_scope = {
+        "custom_domains": sum(1 for d in domains if arm_key(d["id"]) not in host_patterns),
+        "endpoints": sum(1 for e in endpoints if arm_key(e["id"]) not in host_patterns),
+        "routes": sum(1 for e in endpoints for r in e["routes"] if arm_key(r["id"]) not in routes),
+    }
+    return {"hosts": host_patterns, "routes": routes, "excluded": excluded, "in_scope": in_scope}
+
+
+def in_scope_totals(scopes: List[dict]) -> dict:
+    """Summed in-scope counts across profiles, with in_scope hosts (custom domains plus endpoints) first."""
+    totals = {name: sum(s[name] for s in scopes) for name in ("custom_domains", "endpoints", "routes")}
+    return {"hosts": totals["custom_domains"] + totals["endpoints"], **totals}
 
 
 # --- rule sets: HTTP→HTTPS redirects and origin overrides ---

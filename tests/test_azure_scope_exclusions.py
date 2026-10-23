@@ -62,8 +62,9 @@ def test_no_patterns_excludes_nothing():
     exclusions = ScopeExclusions.from_env("SCOPE_EXCLUSIONS_UNSET_FOR_TEST")
     assert not exclusions
     assert exclusions.match("anything") is None
-    assert exclusions.summary([], ("route",)) == {
-        "scope_exclusion_patterns": [], "scope_exclusion_patterns_unmatched": [], "excluded_routes": 0}
+    assert exclusions.summary([], ("route",), {"routes": 3}) == {
+        "scope_exclusion_patterns": [], "scope_exclusion_patterns_unmatched": [], "excluded_routes": 0,
+        "in_scope_routes": 3}
 
 
 def test_from_env(monkeypatch):
@@ -75,13 +76,23 @@ def test_summary_counts_each_kind_and_echoes_patterns():
     exclusions = ScopeExclusions(["qa.*", "nothing.*"])
     exclusions.match("qa.example.com")
     excluded = [excluded_item("custom_domain", "qa", "qa.*"), excluded_item("route", "r", None, reason="all_hosts_excluded")]
-    assert exclusions.summary(excluded, ("custom_domain", "route", "origin_group")) == {
+    assert exclusions.summary(excluded, ("custom_domain", "route", "origin_group"), {"hosts": 0, "routes": 2}) == {
         "scope_exclusion_patterns": ["qa.*", "nothing.*"],
         "scope_exclusion_patterns_unmatched": ["nothing.*"],
         "excluded_custom_domains": 1,
         "excluded_routes": 1,
         "excluded_origin_groups": 0,
+        "in_scope_hosts": 0,
+        "in_scope_routes": 2,
     }
+
+
+def test_a_route_prefix_matches_route_names_only_and_a_bare_pattern_never_does():
+    exclusions = ScopeExclusions(["route:QA-*", "qa*"])
+    assert exclusions.match("qa-legacy-route", kind="route") == "route:QA-*"
+    assert exclusions.match("www.contoso.com", kind="route") is None
+    assert exclusions.match("qa-legacy-route") == "qa*"
+    assert ScopeExclusions(["route:qa*"]).match("qa.example.com") is None
 
 
 def test_warn_unmatched(caplog):

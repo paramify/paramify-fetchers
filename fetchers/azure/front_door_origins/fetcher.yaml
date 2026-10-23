@@ -1,5 +1,5 @@
 name: azure_front_door_origins
-version: 0.4.0
+version: 0.5.0
 description: >-
   Shows whether Front Door's in-scope back ends span two healthy, serving regions, are reached securely, accept traffic only through their own profile, and have a regional twin with enough capacity.
 category: azure
@@ -20,13 +20,15 @@ config_schema:
     env: AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS
     description: >
       Parts of Front Door to leave out of scope, as case-insensitive glob patterns
-      separated by commas or spaces (* matches any run of characters, dots
-      included), matched against custom-domain host names, endpoint host names
-      and route names. A route is out of scope when its name matches or every host
-      it serves does; an origin group when every route reaching it is out of scope;
-      an app when only out-of-scope groups reach it. Each is listed under excluded
-      and left out of every verdict and count. Can be ${env:VAR}. Empty: everything
-      is in scope.
+      separated by commas or spaces, matched against custom-domain and endpoint host
+      names (* matches any run of characters, dots included, ? one character, and [
+      ] one character from a set, such as [0-9]). A pattern starting route:
+      (route:qa-*) matches route names instead; a pattern without it never matches a
+      route's name. A route is out of scope when a route: pattern matches its name
+      or every host it serves is out; an origin group when every route reaching it
+      is out of scope; an app when only out-of-scope groups reach it. Each is listed
+      under excluded and left out of every verdict and count. Can be ${env:VAR}.
+      Empty: everything is in scope.
 
 supports_targets: true
 
@@ -88,12 +90,12 @@ evidence_set:
     - profiles.get() (per profile) — the profile's Front Door id, which Front Door sends as the X-Azure-FDID header
     - afd_origin_groups.list_by_profile() and afd_origins.list_by_origin_group() — origin groups, origins, health probes and origin authentication
     - afd_endpoints.list_by_profile() and routes.list_by_endpoint() — which routes send traffic to each group, and over which protocol
-    - afd_custom_domains.list_by_profile() (per profile, only when scope_exclusions is set) — the host name of each custom domain a route serves, to match against the patterns
+    - afd_custom_domains.list_by_profile() (per profile) — the host name of each custom domain, to match against the patterns and count the hosts in scope
     - rule_sets.list_by_profile() and rules.list_by_rule_set() — rules that override a route's origin group or protocol
     - Resource Graph: Resources | where id in~ (…) — the region of each origin's target resource
     - Resource Graph: Resources | where type =~ 'microsoft.web/sites' — every App Service app in the subscription, and each origin's app or slot, with its public network access and plan
     - Resource Graph: Resources | where type =~ 'microsoft.web/serverfarms' — each app's plan capacity and zone redundancy
-    - web_apps.get_configuration() or get_configuration_slot() (per origin app an in-scope origin group reaches) — the app's access restrictions
+    - web_apps.get_configuration() or get_configuration_slot() (per origin app an in-scope origin group reaches) — the app's access restrictions and those of its Kudu (scm) site
     - metrics.list() for OriginHealthPercentage and OriginRequestCount (per profile) — hourly health and request count of each origin over the lookback window
 
     Output: azure_front_door_origins_<subscription>.json — each origin group with its origins, regions and connection settings, its measured health and traffic per region, each App Service origin with whether only its Front Door profile can reach it, each app with its regional twin, and the domains, routes, origin groups and apps left out of scope with the pattern that took each out.
@@ -120,13 +122,19 @@ evidence_set:
     - provider_registration_status — Whether Microsoft.Cdn is registered on the subscription: registered, not_registered or unknown
 
     Which parts of Front Door are left out of scope?
-    - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against custom-domain host names, endpoint host names (azurefd.net) and route names. A route is in scope unless its name matches one or every host it serves matches (its custom domains, plus the endpoint's own host name when the route links it); an origin group is in scope unless every route that reaches it is out of scope (a group no route reaches stays in scope); a production app is in scope unless only out-of-scope groups reach it. Verdicts on an in-scope group use only its in-scope routes. Empty when none are set, so everything is in scope
+    - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against custom-domain and endpoint host names (azurefd.net), or against route names when they start route:. A route is in scope unless a route: pattern matches its name or every host it serves matches (its custom domains, plus the endpoint's own host name when the route links it); an origin group is in scope unless every route that reaches it is out of scope (a group no route reaches stays in scope); a production app is in scope unless only out-of-scope groups reach it. Verdicts on an in-scope group use only its in-scope routes. Empty when none are set, so everything is in scope
     - scope_exclusion_patterns_unmatched — List of configured patterns that matched no custom-domain host name, endpoint host name or route name, such as a mistyped name
     - excluded_custom_domains — Number of custom domains whose host name matches a pattern
     - excluded_endpoints — Number of endpoints whose own host name matches a pattern
-    - excluded_routes — Number of routes out of scope: their name matches a pattern, or every host they serve does
+    - excluded_routes — Number of routes out of scope: a route: pattern matches their name, or every host they serve is out of scope
     - excluded_origin_groups — Number of origin groups out of scope because every route reaching them is; each is listed under excluded with its routes and origins, and no other count includes them, their origins or their health
     - excluded_apps — Number of production apps out of scope because only out-of-scope origin groups reach them
+    - in_scope_hosts — Number of custom domains and endpoints whose host name no pattern matches; 0 means the patterns took out every host, which a check can catch by requiring more than 0
+    - in_scope_custom_domains — Number of custom domains whose host name no pattern matches
+    - in_scope_endpoints — Number of endpoints whose own host name no pattern matches
+    - in_scope_routes — Number of routes in scope
+    - in_scope_origin_groups — Number of origin groups in scope
+    - in_scope_apps — Number of production apps in scope
 
     Does more than one region serve traffic?
     - serving_regions — List of regions holding an active origin in a serving group (active = enabled at the group's best priority)
@@ -145,10 +153,10 @@ evidence_set:
     - serving_groups_with_health_data — Number of serving groups with health-probe results in the window (a group without a health probe has none)
     - serving_groups_with_traffic — Number of serving groups whose origins received requests in the window
     - serving_groups_without_traffic — Number of serving groups whose origins received no requests in the window
-    - serving_groups_all_regions_healthy_last_hour — Number of serving groups with health data in their profile's newest hour with health data, where every region with health data that hour was healthy (that hour must be one of the window's last 3, or no group is judged); a region is healthy in an hour when one of its origins passed at least the share of health probes the group's load-balancing settings require (3 of 4, so 75%, by default)
-    - serving_groups_region_unhealthy_last_hour — Number of serving groups where a region with health data in their profile's newest hour with health data was not healthy that hour
+    - serving_groups_all_regions_healthy_last_hour — Number of serving groups where every region with an enabled origin has health data in their profile's newest hour with health data and was healthy that hour (that hour must be one of the window's last 3, or no group is judged; a region with no data that hour keeps the group out of this count); a region is healthy in an hour when one of its origins passed at least the share of health probes the group's load-balancing settings require (3 of 4, so 75%, by default)
+    - serving_groups_region_unhealthy_last_hour — Number of serving groups where a region with an enabled origin had health data in their profile's newest hour with health data and was not healthy that hour
     - serving_multi_region_groups — Number of serving groups whose enabled origins span two or more regions
-    - serving_multi_region_groups_all_regions_healthy_last_hour — Number of serving multi-region groups with health data in their profile's newest hour with health data, where every region with health data that hour was healthy
+    - serving_multi_region_groups_all_regions_healthy_last_hour — Number of serving multi-region groups where every region with an enabled origin has health data in their profile's newest hour with health data and was healthy that hour
     - serving_multi_region_groups_all_regions_serving_last_hour — Number of serving multi-region groups where every region with an enabled origin received requests in their profile's newest hour with requests (a group silent that hour isn't serving; when that hour isn't one of the window's last 3, no group is counted)
     - serving_multi_region_groups_with_traffic_shift — Number of serving multi-region groups where the set of regions receiving requests changed at least once in the window
     - regions_serving_traffic — List of regions whose origins in serving groups received requests in the window
@@ -166,7 +174,7 @@ evidence_set:
     Does each App Service origin accept traffic only through its own Front Door profile?
     - app_service_origins — Number of origins in in-scope groups that are App Service apps or slots, found by the origin's Azure resource, its private-link target, or the app owning its host name
     - serving_app_service_origins — Number of App Service origins that are enabled and in a serving group
-    - serving_app_service_origins_locked_to_front_door — Number of serving App Service origins locked to Front Door: the app's public network access is off, or its access restrictions turn away every public caller except Front Door requests carrying the Front Door id of the profile, or of another profile in the subscription that also serves the app, in the X-Azure-FDID header
+    - serving_app_service_origins_locked_to_front_door — Number of serving App Service origins locked to Front Door: the app's public network access is off, or its access restrictions turn away every public caller except Front Door requests carrying the Front Door id of the profile, or of another profile in the subscription that also serves the app, in the X-Azure-FDID header, and its Kudu (scm) site doesn't let every public caller in
     - serving_app_service_origins_not_locked — Number of serving App Service origins not locked to Front Door
     - serving_app_service_origins_public_network_access_disabled — Number of serving App Service origins whose app has public network access turned off
     - serving_app_service_origins_public_access_unrestricted — Number of serving App Service origins whose app lets any public caller in, through an "Allow all" rule, an allow default, or no rules
@@ -176,6 +184,7 @@ evidence_set:
     - serving_app_service_origins_other_front_door_id_allowed — Number of serving App Service origins whose app allows the Front Door id of another profile in the subscription that doesn't serve the app, which can bypass the serving profile's WAF
     - serving_app_service_origins_profile_front_door_id_not_allowed — Number of serving App Service origins reached over the public internet whose app's rules don't admit the origin's own profile
     - serving_app_service_origins_profile_front_door_id_unknown — Number of serving App Service origins reached over the public internet whose profile's Front Door id couldn't be read
+    - serving_app_service_origins_scm_public_access_unrestricted — Number of serving App Service origins whose app's Kudu (scm) site, the deployment and console endpoint, lets any public caller in through its own rules (an "Allow all" rule, an allow default, or no rules) rather than using the main site's
     - serving_app_service_origins_access_restrictions_unread — Number of serving App Service origins whose app's access restrictions couldn't be read
     - serving_app_service_origins_site_not_found — Number of serving App Service origins pointing at an app that no longer exists in the subscription
     - serving_app_service_origins_site_not_visible — Number of serving App Service origins pointing at an app in another subscription the credential can't read

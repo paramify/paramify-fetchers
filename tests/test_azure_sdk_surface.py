@@ -1887,7 +1887,9 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     (
         "azure.mgmt.web.models",
         "SiteConfig",
-        ["public_network_access", "ip_security_restrictions", "ip_security_restrictions_default_action"],
+        ["public_network_access", "ip_security_restrictions", "ip_security_restrictions_default_action",
+         "scm_ip_security_restrictions", "scm_ip_security_restrictions_default_action",
+         "scm_ip_security_restrictions_use_main"],
         "azure/front_door_origins — a renamed field reads as 'no rules', so a locked origin reads as open",
     ),
     (

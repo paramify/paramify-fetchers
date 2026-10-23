@@ -36,6 +36,7 @@ from frontdoor import (  # noqa: E402
     custom_domains,
     endpoints_with_routes,
     front_door_profiles,
+    in_scope_totals,
     profile_scope,
     project_reference,
     route_hosts,
@@ -271,6 +272,7 @@ def coverage_for_profile(collected: dict, waf_by_key: dict, exclusions: ScopeExc
                               or any(arm_key(r["id"]) not in excluded_routes for r in e["routes"])),
         "route_count": sum(1 for e in collected["endpoints"] for r in e["routes"] if arm_key(r["id"]) not in excluded_routes),
         "custom_domain_count": len(domains),
+        "in_scope": scope["in_scope"],
     }
 
 
@@ -392,9 +394,10 @@ def main() -> int:
         )
 
     exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV)
-    profiles, host_routes, no_routes, unrouted, security_policies, excluded = [], [], [], [], [], []
+    profiles, host_routes, no_routes, unrouted, security_policies, excluded, scopes = [], [], [], [], [], [], []
     for c in collected:
         cov = coverage_for_profile(c, waf_by_key, exclusions)
+        scopes.append(cov["in_scope"])
         host_routes += cov["host_routes"]
         no_routes += cov["endpoints_without_routes"]
         unrouted += cov["unrouted_custom_domains"]
@@ -426,7 +429,7 @@ def main() -> int:
         summary={
             **summarize(profiles, skipped_by_sku, host_routes, no_routes, unrouted, security_policies),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, EXCLUDED_KINDS),
+            **exclusions.summary(excluded, EXCLUDED_KINDS, {**in_scope_totals(scopes), "host_routes": len(host_routes)}),
         },
     )
     exclusions.warn_unmatched(logger)

@@ -38,6 +38,7 @@ from frontdoor import (  # noqa: E402
     custom_domains,
     endpoints_with_routes,
     front_door_profiles,
+    in_scope_totals,
     profile_scope,
     route_https,
     route_serving,
@@ -180,6 +181,10 @@ def project_site_config(config) -> dict:
         "public_network_access": model_attr(config, "public_network_access"),
         "ip_security_restrictions": [project_access_restriction(r) for r in (model_attr(config, "ip_security_restrictions") or [])],
         "ip_security_restrictions_default_action": model_attr(config, "ip_security_restrictions_default_action"),
+        "scm_ip_security_restrictions": [project_access_restriction(r)
+                                         for r in (model_attr(config, "scm_ip_security_restrictions") or [])],
+        "scm_ip_security_restrictions_default_action": model_attr(config, "scm_ip_security_restrictions_default_action"),
+        "scm_ip_security_restrictions_use_main": model_attr(config, "scm_ip_security_restrictions_use_main"),
     }
 
 
@@ -321,7 +326,7 @@ def profile_groups(collected: dict, regions_by_id: dict, regions_by_host: dict, 
             excluded.append(excluded_item("origin_group", g["name"], None, reason="only_excluded_routes", profile=profile["name"],
                                           id=g["id"], routes=sorted({p["route"] for p in reaching}),
                                           origins=[o["name"] for o in g["origins_projected"]]))
-    return {"groups": records, "excluded_groups": excluded_groups, "excluded": excluded}
+    return {"groups": records, "excluded_groups": excluded_groups, "excluded": excluded, "in_scope": scope["in_scope"]}
 
 
 def summarize(profiles: list[dict], skipped_by_sku: dict, groups: list[dict]) -> dict:
@@ -457,6 +462,10 @@ def lockdown(public_network_access, config: dict | None, profile_fdid: str | Non
     allowed_fdids = sorted({v for r in fd_rules for v in header_values(r, FDID_HEADER)})
     own = str(profile_fdid or "").lower() or None
     fronting = {str(f).lower() for f in fronting_fdids}
+    # Kudu (the scm site) has its own restrictions unless told to use the main site's.
+    scm_use_main = bool((config or {}).get("scm_ip_security_restrictions_use_main"))
+    scm_rules = (config or {}).get("scm_ip_security_restrictions") or []
+    _, scm_unmatched_allowed = public_allow_rules(scm_rules, (config or {}).get("scm_ip_security_restrictions_default_action"))
     record = {
         "public_network_access_disabled": str(public_network_access or "").lower() == "disabled",
         "access_restrictions_read": config is not None,
@@ -471,6 +480,11 @@ def lockdown(public_network_access, config: dict | None, profile_fdid: str | Non
         # Ids of other profiles that also serve the app are judged on those profiles' own records.
         "fronting_front_door_ids": [f for f in allowed_fdids if f != own and f in fronting],
         "other_front_door_ids_allowed": [f for f in allowed_fdids if f != own and f not in fronting],
+        "scm_access_restrictions_use_main": scm_use_main if config is not None else None,
+        "scm_access_restrictions": scm_rules,
+        "scm_access_restrictions_default_action": (config or {}).get("scm_ip_security_restrictions_default_action"),
+        "scm_unmatched_public_callers_allowed": None if config is None else (
+            unmatched_allowed if scm_use_main else scm_unmatched_allowed),
     }
     if record["public_network_access_disabled"]:
         return {**record, "locked_to_front_door": True, "lockdown_basis": "public_network_access_disabled", "lockdown_gaps": []}
@@ -495,6 +509,8 @@ def lockdown(public_network_access, config: dict | None, profile_fdid: str | Non
                 gaps.append("profile_front_door_id_unknown")
             elif own not in allowed_fdids:
                 gaps.append("profile_front_door_id_not_allowed")
+        if not scm_use_main and scm_unmatched_allowed:
+            gaps.append("scm_public_access_unrestricted")
     basis = None
     if not gaps:
         basis = "front_door_id_restricted" if fd_rules else "no_public_allow_rule"
@@ -707,6 +723,7 @@ def summarize_app_services(app_origins: list[dict], apps: list[dict], production
         "serving_app_service_origins_other_front_door_id_allowed": gap("other_front_door_id_allowed"),
         "serving_app_service_origins_profile_front_door_id_not_allowed": gap("profile_front_door_id_not_allowed"),
         "serving_app_service_origins_profile_front_door_id_unknown": gap("profile_front_door_id_unknown"),
+        "serving_app_service_origins_scm_public_access_unrestricted": gap("scm_public_access_unrestricted"),
         "production_tag": production_tag,
     }
     for app_type in ("web_app", "function_app"):
@@ -858,7 +875,9 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
             "serving_last_hour": (request_slot.get("requests") or 0) > 0 if last_request_hour else None,
         })
     resolved = [r for r in regions if r["region"] != "unresolved"]
-    with_health = [r for r in resolved if r["healthy_last_hour"] is not None]
+    # Unhealthy if any enabled region is; otherwise unknown while any enabled region has no last-hour value.
+    enabled_health = [next((r["healthy_last_hour"] for r in resolved if r["region"] == e), None)
+                      for e in group["enabled_regions"]]
     shifts = traffic_shifts(hours, {r: region_hours[r] for r in region_hours if r != "unresolved"})
     multi_region = len(group["enabled_regions"]) >= 2
     return {
@@ -876,7 +895,8 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
         "last_health_hour": last_health_hour,
         "origins": origin_rows,
         "regions": regions,
-        "all_regions_healthy_last_hour": all(r["healthy_last_hour"] for r in with_health) if with_health else None,
+        "all_regions_healthy_last_hour": (False if False in enabled_health
+                                          else None if None in enabled_health or not enabled_health else True),
         "regions_serving_last_hour": [r["region"] for r in resolved if r["serving_last_hour"]],
         "all_enabled_regions_serving_last_hour": None if last_request_hour is None else bool(group["enabled_regions"]) and all(
             any(r["region"] == e and r["serving_last_hour"] for r in resolved) for e in group["enabled_regions"]),
@@ -1135,7 +1155,7 @@ def collect_origin_metrics(subscription_id, cred, collector: Collector, profiles
     return metrics
 
 
-def collect_profiles(subscription_id, cred, collector: Collector, read_domains: bool = False) -> tuple[list[dict], dict]:
+def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[dict], dict]:
     cdn = cdn_client(subscription_id, cred, collector)
     cdn_origins = cdn_client(subscription_id, cred, collector, api_version=ORIGIN_API_VERSION)
     if cdn is None or cdn_origins is None:
@@ -1163,8 +1183,8 @@ def collect_profiles(subscription_id, cred, collector: Collector, read_domains: 
         collected.append({
             "profile": profile,
             "endpoints": endpoints_with_routes(cdn, collector, profile),
-            # Custom-domain host names only matter to scope exclusions.
-            "custom_domains": custom_domains(cdn, collector, profile) if read_domains else [],
+            # Custom-domain host names only matter to scope exclusions and the in-scope host count.
+            "custom_domains": custom_domains(cdn, collector, profile),
             "rule_sets": rule_sets_with_rules(cdn, collector, profile),
             "origin_groups": sorted(groups, key=lambda g: arm_key(g["id"])),
         })
@@ -1205,7 +1225,7 @@ def main() -> int:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Cdn")
         if registration == NOT_REGISTERED:
             logger.warning("Microsoft.Cdn is not registered on subscription %s", subscription_id)
-        collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector, read_domains=bool(exclusions))
+        collected, skipped_by_sku = collect_profiles(subscription_id, cred, collector)
         origins = [o for c in collected for g in c["origin_groups"] for o in g["origins_projected"]]
         ids = sorted({arm_key(i) for o in origins for i in (o["azure_origin_id"], (o["private_link"] or {}).get("target_id")) if i})
         hosts = sorted({str(o["host_name"]).lower() for o in origins if o["host_name"]})
@@ -1272,7 +1292,9 @@ def main() -> int:
         summary={**summarize(profiles, skipped_by_sku, groups), "provider_registration_status": registration,
                  **summarize_app_services(app_origins, apps, production_tag),
                  **summarize_health(health, unmatched, days, window),
-                 **exclusions.summary(excluded, EXCLUDED_KINDS)},
+                 **exclusions.summary(excluded, EXCLUDED_KINDS, {
+                     **in_scope_totals([sp["in_scope"] for sp in scoped_profiles]),
+                     "origin_groups": len(groups), "apps": len(apps)})},
     )
     exclusions.warn_unmatched(logger)
     filename = f"azure_front_door_origins_{sanitize_for_filename(subscription_id or 'unknown')}.json"

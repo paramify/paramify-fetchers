@@ -436,7 +436,8 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={**summarize(public, private), "provider_registration_status": registration,
-                 **exclusions.summary(excluded, ("record_set",))},
+                 **exclusions.summary(excluded, ("record_set",), {
+                     "record_sets": sum(len(z["record_sets"] or []) for z in public)})},
     )
     filename = f"azure_dns_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)
