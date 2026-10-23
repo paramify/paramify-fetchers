@@ -95,7 +95,7 @@ from framework.issue_reports import (
     CLOSE_CYCLE_VALUES,
     ISSUE_REPORTS_DIR,
 )
-from framework.runner.executor import _is_sensitive_env_name
+from framework.runner.executor import is_credential_env_name
 from framework.secret_resolver import (
     env_var_name,
     is_env_ref_attempt,
@@ -240,7 +240,7 @@ def _coerce_or_fail(value: str, typ: str, key: str, path, json_out: bool, target
         if is_partial_env_ref(value):
             _fail(path, f"config '{key}': a ${{env:}} reference must be the whole value, not part of it", json_out)
         var = env_var_name(value)
-        if var and _is_sensitive_env_name(var):
+        if var and is_credential_env_name(var):
             _fail(path, f"config '{key}' reads ${{env:{var}}}, which holds a secret; config references can't read "
                         f"secrets", json_out)
         if typ != "string":

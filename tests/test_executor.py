@@ -376,6 +376,81 @@ def test_a_reference_to_one_of_the_fetchers_secrets_is_refused(tmp_path, monkeyp
                                                                  secrets=entry_secrets))
 
 
+@pytest.mark.parametrize("var, sibling", [
+    ("AZURE_DEVOPS_PAT", "azure_devops_audit_streams"),
+    ("DATADOG_API_KEY", None),
+    ("KNOWBE4_API_KEY", None),
+])
+def test_a_reference_to_another_fetchers_secret_is_refused(tmp_path, monkeypatch, var, sibling):
+    monkeypatch.setenv(var, LEAK_PROBE)
+    m = _manifest("azure_front_door_tls", {"scope_exclusions": f"${{env:{var}}}"})
+    if sibling:
+        api.add_entry(m, sibling)
+    m["run"]["output_dir"] = str(tmp_path / "evidence")
+    refusal = f"azure_front_door_tls: config 'scope_exclusions' reads ${{env:{var}}}, which holds a secret"
+    assert any(e.startswith(refusal) for e in api.validate(m, REPO_ROOT))
+    [field] = [f for f in api.effective_config(m, ["azure_front_door_tls"], REPO_ROOT)["azure_front_door_tls"]
+               if f["name"] == "scope_exclusions"]
+    assert field["reference_state"] == "invalid" and LEAK_PROBE not in json.dumps(field)
+    m["run"]["fetchers"] = [e for e in m["run"]["fetchers"] if e["use"] == "azure_front_door_tls"]
+    summary = api.run(m, REPO_ROOT)
+    assert summary["ok"] is False
+    assert all(LEAK_PROBE not in f.read_text() for f in Path(summary["run_dir"]).rglob("*") if f.is_file())
+
+
+def test_a_variable_a_sibling_entrys_secret_reads_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("MY_DEVOPS_LOGIN", LEAK_PROBE)
+    m = _manifest("azure_front_door_tls", {"scope_exclusions": "${env:MY_DEVOPS_LOGIN}"})
+    api.add_entry(m, "azure_devops_audit_streams")
+    m["run"]["fetchers"][-1]["secrets"] = {"pat": "${env:MY_DEVOPS_LOGIN}"}
+    assert any("reads ${env:MY_DEVOPS_LOGIN}, which holds a secret" in e for e in api.validate(m, REPO_ROOT))
+    view = api.effective_config(m, ["azure_front_door_tls"], REPO_ROOT)["azure_front_door_tls"]
+    assert next(f for f in view if f["name"] == "scope_exclusions")["reference_state"] == "invalid"
+
+
+@pytest.mark.parametrize("name, refused", [
+    ("ACME_API_KEY", True), ("ACME_APP_KEY", True), ("GITHUB_PAT", True), ("ACME_APIKEY", True),
+    ("DB_PASS", True), ("STORAGE_SAS", True), ("ACME_CONNECTION_STRING", True), ("ACME_KEY_FILE", False),
+    ("SCOPE_PATTERNS", False), ("PATH_PREFIX", False), ("KEYVAULT_NAME", False), ("PROD_TAG", False),
+])
+def test_config_references_refuse_credential_like_names(name, refused):
+    from framework.runner.executor import _is_sensitive_env_name, is_credential_env_name
+
+    assert is_credential_env_name(name) is refused
+    # The masking heuristic is unchanged, so selectors such as AWS_ACCESS_KEY_ID stay readable in output.
+    assert _is_sensitive_env_name("AWS_ACCESS_KEY_ID") is False and is_credential_env_name("AWS_ACCESS_KEY_ID") is True
+
+
+def test_shared_config_state_compares_references_as_the_runner_reads_them(tmp_path, monkeypatch):
+    fetchers = {n: make_fetcher(tmp_path, name=n, config_schema={"tag": cfg("tag", "TAG")}) for n in ("t_a", "t_b")}
+    m = {"run": {"fetchers": [{"use": "t_a", "config": {"tag": "${env:PROD_TAG}"}},
+                              {"use": "t_b", "config": {"tag": "Environment"}}]}}
+    monkeypatch.setenv("PROD_TAG", "Environment")
+    state = api.shared_config_state(m, ["t_a", "t_b"], "tag", tmp_path, fetchers=fetchers, platforms={})
+    assert (state["conflict"], state["value"]) == (False, "${env:PROD_TAG}")
+    monkeypatch.setenv("PROD_TAG", "Owner")
+    state = api.shared_config_state(m, ["t_a", "t_b"], "tag", tmp_path, fetchers=fetchers, platforms={})
+    assert (state["conflict"], state["value"]) == (True, None)
+
+
+def test_tui_reads_a_referenced_close_cycle(monkeypatch):
+    pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
+    from rich.console import Console
+
+    from framework.tui import kinds, render
+
+    monkeypatch.setenv("CLOSE_POLICY", "after_run")
+    m = _manifest("wiz_issues_report", {"assessment_id": "A-1", "close_cycle": "${env:CLOSE_POLICY}"})
+    view = api.effective_config(m, ["wiz_issues_report"], REPO_ROOT)["wiz_issues_report"]
+    cell = render.destination_cell({"kind": kinds.SCAN_REPORT}, view).plain
+    assert cell == "A-1 · after_run"
+    console = Console(width=200, record=True)
+    console.print(render._destination({"kind": kinds.SCAN_REPORT}, view, in_manifest=True))
+    assert "after each complete run" in console.export_text()
+    monkeypatch.setenv("CLOSE_POLICY", "weekly")
+    assert render.destination_cell({"kind": kinds.SCAN_REPORT}, view).plain == "A-1 · close unset"
+
+
 @pytest.mark.parametrize("value", ["qa.* ${env:MY_PATTERNS}", "qa.*,${env:MY_PATTERNS}"])
 def test_a_reference_that_is_only_part_of_the_value_is_refused(tmp_path, monkeypatch, value):
     monkeypatch.setenv("MY_PATTERNS", "webdav*")

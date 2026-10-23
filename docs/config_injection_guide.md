@@ -59,11 +59,15 @@ fields and target fields don't take `${env:VAR}` (a target's secrets do), and
 `manifest` and `validate` refuse one there.
 
 The reference must be the whole value: `qa.* ${env:VAR}` is refused. So is a
-reference to a credential variable (a name containing `SECRET`, `TOKEN`,
-`PASSWORD`, `PASSWD`, `CREDENTIAL` or `PRIVATE_KEY`) or to a variable that holds
-one of the fetcher's secrets. The run masks the value it reads out of the
-fetcher's logs and the run metadata, but a fetcher may still write it into its
-evidence, as the Azure scope exclusions do with their patterns.
+reference to a variable whose name looks like a credential's (it contains
+`SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `CREDENTIAL`, `PRIVATE_KEY` or
+`CONNECTION_STRING`, or has a `KEY`, `KEYS`, `APIKEY`, `PAT`, `PASS`, `PWD` or
+`SAS` part, such as `DATADOG_API_KEY`), and, by `validate` and the run, a
+reference to any variable that holds a secret: one a fetcher or category in the
+catalog declares, or one a `secrets:` reference anywhere in the manifest reads.
+The run masks the value it reads out of the fetcher's logs and the run metadata,
+but a fetcher may still write it into its evidence, as the Azure scope
+exclusions do with their patterns.
 
 ## 3. Check it
 

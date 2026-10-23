@@ -45,7 +45,6 @@ from framework.contract import (
     PlatformConfig,
     Secret,
     TargetField,
-    TargetInstance,
     effective_secrets,
 )
 from framework.custom_tags import category_display_names
@@ -71,10 +70,9 @@ from framework.paramify_auth import (
 from framework.probe import probe_categories
 from framework.runner import manifest_loader
 from framework.secret_resolver import (
-    SecretResolutionError,
     is_env_ref_attempt,
     is_partial_env_ref,
-    resolve,
+    view_runtime_value,
 )
 
 
@@ -911,7 +909,10 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
     may be passed pre-discovered (e.g. when validating many manifests in a loop)
     to avoid re-scanning the fetcher tree each call.
     """
-    from framework.runner.executor import merged_config  # lazy: import cycle
+    from framework.runner.executor import (  # lazy: import cycle
+        merged_config,
+        secret_env_vars,
+    )
 
     errors = manifest_loader.schema_errors(manifest, root)
     if errors:
@@ -922,6 +923,7 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
     if platforms is None:
         platforms = discover_platforms(root)
     parsed = manifest_loader.parse_manifest(manifest)
+    secret_vars = secret_env_vars(fetchers.values(), platforms.values(), parsed.entries)
 
     for i, entry in enumerate(parsed.entries):
         if entry.use not in fetchers:
@@ -959,7 +961,7 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
                 )
 
         # The references the runner would refuse, so a hand edit fails here rather than at run time.
-        merged = merged_config(fetcher, spec, platform_cfg, entry)
+        merged = merged_config(fetcher, spec, platform_cfg, entry, secret_vars)
         errors += [f"{entry.use}: {problem}" for problem in merged.errors.values()]
         for j, t in enumerate(entry.targets):
             errors += [f"{entry.use} target[{j}]: {k} is {v!r}, but target fields aren't resolved, so ${{env:}} "
@@ -1082,6 +1084,7 @@ def run(
     from framework.runner.executor import (  # lazy: avoid import cycle
         merged_config,
         run_entry,
+        secret_env_vars,
     )
 
     errs = manifest_loader.schema_errors(manifest, root)
@@ -1091,6 +1094,7 @@ def run(
     fetchers = discover_fetchers(root)
     platforms = discover_platforms(root)
     parsed = manifest_loader.parse_manifest(manifest)
+    secret_vars = secret_env_vars(fetchers.values(), platforms.values(), parsed.entries)
 
     def emit(event: dict) -> None:
         if on_event is not None:
@@ -1146,6 +1150,7 @@ def run(
                 platforms.get(fetcher.category or ""),
                 parsed.platforms.get(fetcher.category or ""),
                 entry,
+                secret_vars,
             ).values
             assessment = {
                 ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
@@ -1162,6 +1167,7 @@ def run(
                 parsed.platforms.get(fetcher.category or ""),
                 on_line=on_line,
                 on_note=on_note,
+                secret_vars=secret_vars,
             )
         except (RuntimeError, ValueError) as e:
             emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
@@ -1494,13 +1500,7 @@ def _with_manifest_close_cycles(run_dir: Path, root: Path, config: dict, index: 
         return config
     overrides = {k: dict(v or {}) for k, v in (config.get("overrides") or {}).items()}
     for name in unset:
-        value = next(
-            (d["value"] for d in view.get(name, []) if d["name"] == CLOSE_CYCLE_FIELD), None
-        )
-        try:
-            value = resolve(value) if value is not None else None  # the view shows a reference as written
-        except SecretResolutionError:
-            value = None
+        value = view_runtime_value(next((d for d in view.get(name, []) if d["name"] == CLOSE_CYCLE_FIELD), None))
         if value is not None:
             overrides.setdefault(name, {}).setdefault(CLOSE_CYCLE_FIELD, value)
     return {**config, "overrides": overrides}
@@ -2934,7 +2934,8 @@ def effective_config(
     "reference_state" says "set", "unset" (value and source are then the next
     value down, as at run time) or "invalid". "value" is what the runner injects,
     except that a value read from a reference is shown as the reference, never
-    what it resolves to. A field the category
+    what it resolves to, and "value_from_env" is then True (see
+    secret_resolver.view_runtime_value for the value itself). A field the category
     declares (and the fetcher doesn't) is included too, since it is injected into
     that fetcher's environment just the same.
 
@@ -2943,11 +2944,18 @@ def effective_config(
     every entry that inherits it. Batched over `uses` so a caller redrawing a
     table scans the fetcher tree once, not once per row.
     """
-    from framework.runner.executor import merged_config  # lazy: import cycle
+    from framework.runner.executor import (  # lazy: import cycle
+        merged_config,
+        secret_env_vars,
+    )
 
     discovered = fetchers if fetchers is not None else discover_fetchers(root)
     specs = platforms if platforms is not None else discover_platforms(root)
-    all_platforms = _run(m).get("platforms") or {}
+    run = _run(m)
+    parsed = manifest_loader.parse_manifest({"run": {**run, "fetchers": run.get("fetchers") or []}})
+    entries = {e.use: e for e in parsed.entries}
+    # The whole manifest's secrets, so a config reference reading one shows as invalid, as at run time.
+    secret_vars = secret_env_vars(discovered.values(), specs.values(), parsed.entries)
 
     out: Dict[str, List[dict]] = {}
     for use in uses:
@@ -2956,14 +2964,10 @@ def effective_config(
             out[use] = []
             continue
         spec = specs.get(f.category) if f.category else None
-        platform_values = ((all_platforms.get(f.category or "") or {}).get("config")) or {}
-        raw = _find_entry(m, use) or {}
-        entry_values = raw.get("config") or {}
-        # Secrets too, so a config reference reading one of them shows as invalid, as at run time.
-        targets = [TargetInstance(values={}, secrets=dict(t.get("secrets") or {})) for t in raw.get("targets") or []]
-        merged = merged_config(f, spec, PlatformConfig(config=dict(platform_values)),
-                               ManifestEntry(use=use, config=dict(entry_values), secrets=dict(raw.get("secrets") or {}),
-                                             targets=targets))
+        platform_cfg = parsed.platforms.get(f.category or "") or PlatformConfig()
+        entry = entries.get(use) or ManifestEntry(use=use)
+        platform_values, entry_values = platform_cfg.config, entry.config
+        merged = merged_config(f, spec, platform_cfg, entry, secret_vars)
         labels = {"entry": "entry", "platform": f"platforms.{f.category}", "default": "default"}
 
         fields: List[dict] = []
@@ -2971,6 +2975,8 @@ def effective_config(
             d = _config_descriptor(fdef)
             d["category"] = f.category
             d["value"] = merged.referenced.get(name, merged.values.get(name))
+            if name in merged.referenced:
+                d["value_from_env"] = True
             d["source"] = labels.get(merged.sources.get(name, ""))
             # The value as written, when it is a reference: "set" when the runner resolves it,
             # "unset" when the next value down applies, "invalid" when the runner refuses it.
@@ -2994,11 +3000,12 @@ def shared_config_state(
     `uses` — the kind set once per category rather than per entry:
 
         categories  every category among `uses` that accepts `field_name`
-        value       the value they all resolve to today, or None when nothing
-                    supplies one or the entries disagree
+        value       the value they all resolve to today, as written (a reference
+                    stays one), or None when nothing supplies one or the entries
+                    disagree
         sources     where those values come from ("entry", "platforms.<cat>",
                     "default"), distinct, in the order met
-        conflict    True when the entries resolve to different values
+        conflict    True when the entries resolve to different values at run time
         missing     categories where nothing supplies a required value
 
     A view over effective_config() rather than a second merge, so "is it set"
@@ -3010,6 +3017,7 @@ def shared_config_state(
     categories: List[str] = []
     missing: List[str] = []
     values: List[Any] = []
+    runtime: List[Any] = []
     sources: List[str] = []
     for fields in effective_config(m, uses, root, fetchers, platforms).values():
         for d in fields:
@@ -3021,14 +3029,17 @@ def shared_config_state(
                 missing.append(d["category"])
             if d["source"] is None:
                 continue
-            if d["value"] not in values:
+            # Compared as the runner sees them, so ${env:TAG} and the literal it reads agree.
+            now = view_runtime_value(d)
+            if now not in runtime:
+                runtime.append(now)
                 values.append(d["value"])
             if d["source"] not in sources:
                 sources.append(d["source"])
     return {
         "categories": categories,
-        "value": values[0] if len(values) == 1 else None,
+        "value": values[0] if len(runtime) == 1 else None,
         "sources": sources,
-        "conflict": len(values) > 1,
+        "conflict": len(runtime) > 1,
         "missing": missing,
     }

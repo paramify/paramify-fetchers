@@ -22,7 +22,16 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import (
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    NamedTuple,
+    Optional,
+    Tuple,
+)
 
 from framework.contract import (
     ConfigField,
@@ -147,6 +156,21 @@ def _is_sensitive_env_name(name: str) -> bool:
     return any(part in up for part in _SENSITIVE_NAME_PARTS)
 
 
+# Config references only: broader than _is_sensitive_env_name, which drives output masking and must leave
+# selectors such as AWS_ACCESS_KEY_ID unmasked, while a config value never needs to read a key.
+_CREDENTIAL_NAME_WORDS = {"KEY", "KEYS", "APIKEY", "PAT", "PASS", "PWD", "SAS"}
+
+
+def is_credential_env_name(name: str) -> bool:
+    """Does this env var NAME look like it holds a credential, for a config ${env:} reference to be refused?"""
+    up = name.upper()
+    if _is_sensitive_env_name(up):
+        return True
+    if up.endswith("_FILE") or up.endswith("_URI"):
+        return False
+    return bool(_CREDENTIAL_NAME_WORDS & set(up.split("_"))) or "CONNECTION_STRING" in up
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -172,11 +196,15 @@ class MergedConfig(NamedTuple):
     referenced: Dict[str, str]      # per value read from a reference: the reference as written
 
 
-def _secret_env_vars(fetcher: Fetcher, platform_spec: Optional[PlatformSpec], entry: ManifestEntry) -> set:
-    """The env vars that carry this fetcher's secrets: the ones it declares, and the ones its secret references read."""
-    refs = [*entry.secrets.values(), *(v for t in entry.targets for v in t.secrets.values())]
-    return ({s.env for s in effective_secrets(fetcher, platform_spec) if s.env}
-            | {var for var in map(env_var_name, refs) if var})
+def secret_env_vars(fetchers: Iterable[Fetcher], platform_specs: Iterable[PlatformSpec],
+                    entries: Iterable[ManifestEntry]) -> FrozenSet[str]:
+    """Every env var that may hold a secret: each fetcher's and category's declared secrets and static credentials,
+    and each variable a secret reference in the manifest reads. No config reference may read one."""
+    names = {s.env for f in fetchers for s in f.secrets if s.env}
+    for spec in platform_specs:
+        names |= {s.env for s in spec.secrets if s.env} | set(spec.credential_env)
+    refs = [v for e in entries for v in (*e.secrets.values(), *(x for t in e.targets for x in t.secrets.values()))]
+    return frozenset(names | {var for var in map(env_var_name, refs) if var})
 
 
 def merged_config(
@@ -184,6 +212,7 @@ def merged_config(
     platform_spec: Optional[PlatformSpec],
     platform_cfg: Optional[PlatformConfig],
     entry: ManifestEntry,
+    secret_vars: FrozenSet[str] = frozenset(),
 ) -> MergedConfig:
     """Resolve a fetcher's effective config.
 
@@ -193,7 +222,8 @@ def merged_config(
     had not been set. These are errors for that field, and the text as written
     stays the value so a view can show it: a reference on an integer or boolean
     field, a malformed one, one that is only part of the value, and one reading a
-    credential variable or one of the fetcher's secrets, which is never resolved.
+    variable whose name looks like a credential's or that holds a secret (this
+    fetcher's, or any in `secret_vars`, see secret_env_vars), which is never resolved.
     Only this fetcher's fields and the issue-report keys the manifest
     carries undeclared are resolved; any other key (a sibling fetcher's, or a
     stale one) passes through as written. Extracted from _apply_config so callers that need a resolved value
@@ -207,7 +237,7 @@ def merged_config(
     schema.update(fetcher.config_schema)  # per-fetcher overrides platform on name clash
 
     platform_values = platform_cfg.config if platform_cfg else {}
-    secret_vars = _secret_env_vars(fetcher, platform_spec, entry)
+    secret_vars = secret_env_vars([fetcher], [platform_spec] if platform_spec else [], [entry]) | secret_vars
     values: Dict[str, object] = {}
     sources: Dict[str, str] = {}
     unset: List[Tuple[str, str]] = []
@@ -224,7 +254,7 @@ def merged_config(
             var = env_var_name(value)
             if resolved and is_partial_env_ref(value):
                 errors[name] = f"config '{name}': a ${{env:}} reference must be the whole value, not part of it"
-            elif resolved and var and (var in secret_vars or _is_sensitive_env_name(var)):
+            elif resolved and var and (var in secret_vars or is_credential_env_name(var)):
                 errors[name] = (f"config '{name}' reads ${{env:{var}}}, which holds a secret; "
                                 f"config references can't read secrets")
             elif resolved and is_env_ref_attempt(value):
@@ -687,6 +717,7 @@ def run_entry(
     platform_cfg: Optional[PlatformConfig] = None,
     on_line: Optional[Callable[[str], None]] = None,
     on_note: Optional[Callable[[str], None]] = None,
+    secret_vars: FrozenSet[str] = frozenset(),
 ) -> List[InvocationResult]:
     """Run one manifest entry: single invocation, or one per target for fanout.
 
@@ -700,12 +731,15 @@ def run_entry(
     `output_dir` is the run directory. An issue-report fetcher is pointed at its
     issue-reports/ subdirectory instead, and reports its outputs relative to the
     run dir either way (see invocation_dir / _invoke).
+
+    `secret_vars` are the secret variables of the whole catalog and manifest
+    (secret_env_vars), which no config reference may read.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     inv_dir = invocation_dir(fetcher, output_dir)
     inv_dir.mkdir(parents=True, exist_ok=True)
     # Config is per entry: merged once, and its notes given once, whatever the number of targets.
-    merged = merged_config(fetcher, platform_spec, platform_cfg, entry)
+    merged = merged_config(fetcher, platform_spec, platform_cfg, entry, secret_vars)
     _emit_config_notes(merged, on_note)
 
     if not fetcher.supports_targets:
