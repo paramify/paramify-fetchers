@@ -93,8 +93,10 @@ evidence_set:
     Each IP gets a status in
     ip_address_statuses: backed when an Approved private endpoint holds the IP and one of its FQDNs is
     the record's full name (AKS keeps the privatelink label) or the record's name under the zone's
-    public suffix (the zone without its privatelink label; privatelink.vaultcore.azure.net maps to
-    vault.azure.net), so a blob record never matches an endpoint for acct.file... or a vault; an
+    public suffix (the zone without its privatelink label; Key Vault's privatelink.vaultcore.azure.net,
+    privatelink.vaultcore.usgovcloudapi.net and privatelink.vaultcore.azure.cn map to vault.azure.net,
+    vault.usgovcloudapi.net and vault.azure.cn), so a blob record never matches an endpoint for
+    acct.file... or a vault; an
     endpoint that publishes no FQDNs is matched by IP alone. endpoint_not_approved when the endpoint
     serving the name is Pending, Rejected or Disconnected; ip_mismatch when a private endpoint holds
     the IP but serves a different name; platform_managed when no private endpoint holds it but another

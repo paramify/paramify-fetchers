@@ -61,7 +61,11 @@ IP_STATUS_SEVERITY = ("ip_mismatch", "endpoint_not_approved", "stale", "unknown"
 # Something other than an Approved endpoint serving the record holds the IP in a VNet the zone resolves for.
 NETWORK_FINDINGS = frozenset({"ip_mismatch", "endpoint_not_approved", "platform_managed"})
 # Zones whose public name differs from the private-link zone with "privatelink" removed.
-PUBLIC_SUFFIX_ALIASES = {"vaultcore.azure.net": "vault.azure.net"}
+PUBLIC_SUFFIX_ALIASES = {
+    "vaultcore.azure.net": "vault.azure.net",
+    "vaultcore.usgovcloudapi.net": "vault.usgovcloudapi.net",
+    "vaultcore.azure.cn": "vault.azure.cn",
+}
 # mv-expand defaults to 128 rows per input row. A NIC holds at most 256 IP configurations, so
 # 2000 can never cut one short.
 MV_EXPAND_LIMIT = 2000
@@ -257,7 +261,8 @@ def endpoint_serves(record_name: str, record_fqdn: str, endpoint_fqdns: list, zo
 
     The endpoint must publish either the record's full name (AKS keeps the privatelink label) or the
     record's name under the zone's public suffix: a blob record never matches the IP of acct.file… or
-    acct.vault.azure.net. Key Vault's zone privatelink.vaultcore.azure.net maps to vault.azure.net.
+    acct.vault.azure.net. Key Vault's zone privatelink.vaultcore.azure.net maps to vault.azure.net (and
+    likewise in Azure Government and Azure China).
     """
     name = (record_name or "").lower()
     full = (record_fqdn or "").lower().rstrip(".")

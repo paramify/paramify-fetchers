@@ -57,9 +57,13 @@ schemas and the `paramify` CLI — not the internal code.
   on failed. VNets are read by id (linked, then peered) instead of every VNet in
   the tenant, and a failed lookup chunk leaves only its own VNets unknown (the
   links to them and the records of zones that resolve for them), not the whole
-  run. Status counts move, so **re-check any validator or query that asserts on
-  `private_endpoint_status`, `ip_address_statuses`, `backed_by` or the
-  `privatelink_records_*` summary counts.**
+  run. Key Vault records in Azure Government and Azure China
+  (`privatelink.vaultcore.usgovcloudapi.net`, `privatelink.vaultcore.azure.cn`)
+  now match their endpoints' `vault.usgovcloudapi.net` and `vault.azure.cn`
+  names instead of reading `ip_mismatch`. Status counts move, so **re-check any
+  validator or query that asserts on `private_endpoint_status`,
+  `ip_address_statuses`, `backed_by` or the `privatelink_records_*` summary
+  counts.**
 - **The private DNS zone and private endpoint fetchers' expanding queries
   parse.** Four Resource Graph queries put `mv-expand`'s row limit before the
   expanded column (`mv-expand limit 2000 x = ...`), which Resource Graph

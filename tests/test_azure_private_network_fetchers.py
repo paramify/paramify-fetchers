@@ -85,6 +85,8 @@ CORRECTLY_CONFIGURED = [
     # Key Vault's zone is not its public suffix: privatelink.vaultcore.azure.net
     # serves <vault>.vault.azure.net.
     ("privatelink.vaultcore.azure.net", "kv-prod", ["kv-prod.vault.azure.net"]),
+    ("privatelink.vaultcore.usgovcloudapi.net", "kv-prod", ["kv-prod.vault.usgovcloudapi.net"]),
+    ("privatelink.vaultcore.azure.cn", "kv-prod", ["kv-prod.vault.azure.cn"]),
     # AKS FQDNs keep the privatelink label.
     (
         "privatelink.eastus.azmk8s.io",
@@ -448,6 +450,8 @@ def test_link_projection_is_shared_with_dns_configuration():
     "zone,is_privatelink,suffix",
     [(BLOB, True, "blob.core.windows.net"),
      ("privatelink.vaultcore.azure.net", True, "vault.azure.net"),
+     ("privatelink.vaultcore.usgovcloudapi.net", True, "vault.usgovcloudapi.net"),
+     ("privatelink.vaultcore.azure.cn", True, "vault.azure.cn"),
      ("abc.privatelink.eastus.azmk8s.io", True, "abc.eastus.azmk8s.io"),
      ("privatelink-global.wvd.microsoft.com", True, "wvd.microsoft.com"),
      ("contoso.internal", False, "contoso.internal")],
@@ -890,6 +894,28 @@ def test_a_zone_group_upgrades_a_stale_or_unknown_network_verdict(other_rows, ne
     groups = (dns.zone_group_index({"pe-1": [_zone_group(ips=("10.0.0.4",))]}), frozenset())
     rec = _zone_record_with_groups("10.0.0.4", rows, [VNET], endpoint, groups, other_rows=other_rows)
     assert rec["private_endpoint_status"] == "backed" and rec["backed_by"] == ["zone_group"]
+
+
+GOV_VAULT_ZONE = "privatelink.vaultcore.usgovcloudapi.net"
+
+
+def test_a_government_key_vault_record_is_backed_by_its_own_endpoint():
+    # Without the Government alias the endpoint's own name read as another name (ip_mismatch), and that finding
+    # also kept the endpoint's own zone group from backing the record.
+    zone_id = f"{RG}/providers/Microsoft.Network/privateDnsZones/{GOV_VAULT_ZONE}"
+    endpoint = {"ip": "10.0.1.4", "private_endpoint_id": "pe-1", "fqdns": ["kv-prod.vault.usgovcloudapi.net"],
+                "subnet_id": f"{VNET}/subnets/pe"}
+    groups = (dns.zone_group_index({"pe-1": [_zone_group(zone_id, f"kv-prod.{GOV_VAULT_ZONE}", ("10.0.1.4",))]}),
+              frozenset())
+    out = dns.zone_record(
+        {"id": zone_id, "name": GOV_VAULT_ZONE}, [{"id": "link-0", "virtual_network_id": VNET}],
+        [_record("kv-prod", GOV_VAULT_ZONE, "10.0.1.4")], dns.endpoint_index([endpoint]),
+        dns.vnet_index([_vnet_row(VNET, "10.0.0.0/16", [NIC_CONFIG])]), DNS_SCOPES, APPROVED,
+        dns.holder_index([], []), zone_groups=groups,
+    )
+    [rec] = out["record_sets"]
+    assert rec["private_endpoint_status"] == "backed" and rec["backed_by"] == ["network", "zone_group"]
+    assert rec["zone_group_backed"] is True and rec["private_endpoint_ids"] == ["pe-1"]
 
 
 @pytest.mark.parametrize(
