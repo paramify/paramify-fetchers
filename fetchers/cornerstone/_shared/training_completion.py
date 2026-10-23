@@ -125,6 +125,31 @@ def _course_filter(names: Sequence[str]) -> str:
     return " or ".join(clauses)
 
 
+# Keep each catalog $filter inside the URL limit: three clauses per name plus
+# the $select list. 600 characters of names is about 1,500 characters of URL.
+_FILTER_NAME_BUDGET = 600
+
+
+def _name_chunks(names: Sequence[str]) -> List[List[str]]:
+    chunks: List[List[str]] = [[]]
+    used = 0
+    for name in names:
+        cost = len(name) * 3 + 60
+        if chunks[-1] and used + cost > _FILTER_NAME_BUDGET:
+            chunks.append([])
+            used = 0
+        chunks[-1].append(name)
+        used += cost
+    return chunks
+
+
+def _training_matches(row: Dict[str, Any], name: str) -> bool:
+    """The same rule as _course_filter, applied locally to map a row back to a name."""
+    if _GUID.match(name) and str(row.get("object_id") or "").lower() == name.lower():
+        return True
+    return name in (row.get("lo_title"), row.get("lo_training_ref"), row.get("course_code"))
+
+
 def parse_course_entries(names: Sequence[str]) -> List[Dict[str, Any]]:
     """"A|B, C" -> [{label: "A|B", names: [A, B]}, {label: "C", names: [C]}]."""
     entries = []
@@ -307,17 +332,25 @@ def collect_training_group(
     ctx = dict(client=client, group=group, labels=labels, retrain_days=retrain_days, review_days=review_days,
                population_filter=population_filter, status_ids=status_ids, collection=collection, now=now)
 
-    # 1. Resolve courses (any alternative of an entry may match).
-    resolved: Dict[str, List[Dict[str, Any]]] = {}
-    for entry in entries:
-        rows, stats = client.read_view(TRAINING_VIEW, TRAINING_SELECT, TRAINING_KEY, _course_filter(entry["names"]))
-        collection.append({**stats, "purpose": f"resolve course {entry['label']!r}"})
+    # 1. Resolve every course name in as few catalog queries as the URL limit
+    #    allows (one $count plus one page each), then map rows back to the
+    #    entries locally with the same exact-match rule the filter used.
+    all_names = [n for e in entries for n in e["names"]]
+    catalog_rows: List[Dict[str, Any]] = []
+    for chunk in _name_chunks(all_names):
+        rows, stats = client.read_view(TRAINING_VIEW, TRAINING_SELECT, TRAINING_KEY, _course_filter(chunk))
+        collection.append({**stats, "purpose": f"resolve {len(chunk)} course name(s)"})
         if rows is None:
             return _finish(data=None, **ctx)
-        for r in rows:
-            if r.get("object_id") is not None:
-                r["object_id"] = str(r["object_id"]).lower()
-        resolved[entry["label"]] = sorted(rows, key=lambda r: str(r.get("object_id")))
+        catalog_rows.extend(rows)
+    for r in catalog_rows:
+        if r.get("object_id") is not None:
+            r["object_id"] = str(r["object_id"]).lower()
+    resolved: Dict[str, List[Dict[str, Any]]] = {}
+    for entry in entries:
+        matched = {r["object_id"]: r for r in catalog_rows
+                   if any(_training_matches(r, n) for n in entry["names"])}
+        resolved[entry["label"]] = sorted(matched.values(), key=lambda r: str(r.get("object_id")))
 
     object_ids = sorted({r["object_id"] for rows in resolved.values() for r in rows if r.get("object_id")})
     # Server-supplied ids go into the next $filter unquoted (OData v4 Guid
@@ -370,11 +403,16 @@ def _course_entry(name: str, trainings: List[Dict[str, Any]], transcript: List[D
     measurable = bool(trainings)
     by_user: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
     removed = 0
+    without_user = 0
     for row in transcript:
         if str(row.get("transc_object_id")).lower() not in ids:
             continue
         if _truthy(row.get("is_removed")):
             removed += 1
+            continue
+        if row.get("transc_user_id") is None or str(row.get("transc_user_id")).strip() == "":
+            # A row with no user would otherwise become a phantom user "None".
+            without_user += 1
             continue
         by_user[row.get("transc_user_id")].append(row)
 
@@ -424,6 +462,7 @@ def _course_entry(name: str, trainings: List[Dict[str, Any]], transcript: List[D
         "trainings": catalog,
         "summary": {**_summary(ordered, measurable, population is not None),
                     "removed_registrations_excluded": removed if measurable else None,
+                    "rows_without_user_id_excluded": without_user if measurable else None,
                     "users_outside_population_excluded": (outside if measurable and population is not None
                                                           else None)},
         "users": ordered,

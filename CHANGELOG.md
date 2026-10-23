@@ -219,7 +219,9 @@ schemas and the `paramify` CLI — not the internal code.
   completion; `A|B` names alternatives for one course; GUIDs compare
   case-insensitively and rows read but unattributed fail the run; a URL the
   client refuses is a recorded failure, not a crash; paging and throttle
-  settings are declared on the category.
+  settings are declared on the category; rows with no user id are excluded and
+  counted; all course names resolve in one chunked catalog query; a token
+  refresh after a 401 no longer consumes a retry attempt.
 
 
 - **CI runs the tests on Python 3.15.** The test matrix is now 3.11 to 3.15.

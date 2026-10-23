@@ -615,15 +615,12 @@ def test_url_outside_views_is_recorded_not_raised(fake):
 
 def test_401_on_last_retry_is_not_authorized(fake, tmp_path, monkeypatch):
     calls = {"n": 0}
-    original = fake.get
 
     def flaky(url, **kw):
         calls["n"] += 1
         if calls["n"] <= csod_client.MAX_RETRIES:
             return FakeResponse(429, {}, {"Retry-After": "0"})
-        if calls["n"] == csod_client.MAX_RETRIES + 1:
-            return FakeResponse(401, {"error": {"message": "Unauthorized"}})
-        return original(url, **kw)
+        return FakeResponse(401, {"error": {"message": "Unauthorized"}})
     monkeypatch.setattr(csod_client.requests, "get", flaky)
     code, ev = run("security_awareness_training", tmp_path)
     assert code == 1 and ev["api_failures"][0]["status_code"] == 401
@@ -670,3 +667,53 @@ def test_expires_in_zero_is_not_an_hour(fake, tmp_path):
     client._token_expires_at = 0.0  # as a zero lifetime leaves it: already expired
     client.get_json("x", VIEWS + "vw_rpt_training", params={"$filter": "lo_title eq 'none'"})
     assert fake.token_calls == 2, "an expired token is renewed before the call"
+
+
+def test_rows_without_user_id_are_skipped_and_counted(fake, tmp_path):
+    fake.transcripts.append(tx(0, AWARENESS, reg=7, comp=1))
+    fake.transcripts[-1]["transc_user_id"] = None
+    code, ev = run("security_awareness_training", tmp_path)
+    assert code == 0
+    assert all(u["user_id"] is not None and u["user_id"] != "None" for u in ev["courses"][0]["users"])
+    assert ev["courses"][0]["summary"]["rows_without_user_id_excluded"] == 1
+    assert ev["courses"][0]["summary"]["users_in_scope"] == 9
+
+
+def test_course_names_resolve_in_one_query(fake, tmp_path, monkeypatch):
+    fake.trainings[1]["lo_title"] = "Insider Threat Awareness"
+    monkeypatch.setenv("CSOD_SECURITY_AWARENESS_COURSES", "Annual Security Awareness, Insider Threat Awareness")
+    code, ev = run("security_awareness_training", tmp_path)
+    assert code == 0 and ev["config_resolution"]["status"] == "resolved"
+    training_gets = [g for g in fake.gets if g["view"] == "vw_rpt_training"]
+    assert len(training_gets) == 2, "one $count and one page for both names together"
+    assert {t["object_id"] for t in ev["courses"][0]["trainings"]} == {AWARENESS}
+    assert {t["object_id"] for t in ev["courses"][1]["trainings"]} == {AWARENESS_OLD}
+
+
+def test_long_course_lists_are_chunked_under_the_url_limit():
+    import training_completion as tc
+    names = [f"Course number {i} with a fairly long descriptive title" for i in range(40)]
+    chunks = tc._name_chunks(names)
+    assert len(chunks) > 1 and sum(len(c) for c in chunks) == 40
+    from urllib.parse import urlencode
+    for chunk in chunks:
+        url = VIEWS + "vw_rpt_training?" + urlencode({"$select": ",".join(tc.TRAINING_SELECT),
+                                                      "$filter": tc._course_filter(chunk)})
+        assert len(url) < 2083
+
+
+def test_reauth_does_not_consume_a_retry(fake, tmp_path, monkeypatch):
+    calls = {"n": 0}
+    original = fake.get
+
+    def flaky(url, **kw):
+        calls["n"] += 1
+        if calls["n"] <= csod_client.MAX_RETRIES:
+            return FakeResponse(429, {}, {"Retry-After": "0"})
+        if calls["n"] == csod_client.MAX_RETRIES + 1:
+            return FakeResponse(401, {})
+        return original(url, **kw)
+    monkeypatch.setattr(csod_client.requests, "get", flaky)
+    code, ev = run("security_awareness_training", tmp_path)
+    assert code == 0, "a 401 on the last attempt still gets one fresh token and the retry succeeds"
+    assert fake.token_calls == 2

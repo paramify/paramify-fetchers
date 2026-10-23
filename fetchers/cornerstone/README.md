@@ -78,7 +78,7 @@ to 0%.
 
 | Step | View | Columns |
 |---|---|---|
-| Resolve each configured course | `vw_rpt_training` | `object_id`, `lo_title`, `lo_type`, `lo_version`, `lo_active`, `lo_status`, `lo_create_dt`, `lo_modified_dt`, `training_version_effective_dt`, `is_latest_training_version`, `course_code`, `lo_training_ref` |
+| Resolve the configured courses (all names in as few queries as the URL limit allows) | `vw_rpt_training` | `object_id`, `lo_title`, `lo_type`, `lo_version`, `lo_active`, `lo_status`, `lo_create_dt`, `lo_modified_dt`, `training_version_effective_dt`, `is_latest_training_version`, `course_code`, `lo_training_ref` |
 | Every registration for those courses | `vw_rpt_transcript` | `transc_user_id`, `transc_object_id`, `reg_num`, assigned / registered / start / completion / due dates, `user_lo_pct_complete`, `user_lo_pass`, `is_removed`, `archived`, `exempt_dt`, `is_assigned`, `is_required`, `is_latest_reg_num`, `user_lo_last_modified_dt` |
 | User population (optional) | `vw_rpt_user` | `user_id` only |
 
@@ -105,8 +105,8 @@ repeated nextLink, an empty page that still links onward, or hitting
 | `latest_registration.cornerstone_status_id` | Cornerstone's own status code, so the derived status can be checked against it |
 | `latest_registration` | Assigned, due and completed dates, `days_overdue`, passed, required, archived, exempt date |
 
-Removed registrations are excluded and counted in
-`summary.removed_registrations_excluded`.
+Removed registrations and rows with no user id are excluded and counted in
+`summary.removed_registrations_excluded` and `summary.rows_without_user_id_excluded`.
 
 ### Summary
 

@@ -366,7 +366,8 @@ class CsodClient:
         last_response: Any = None
         last_error: Optional[str] = None
         reauthed = False
-        for attempt in range(MAX_RETRIES + 1):
+        attempt = 0
+        while attempt <= MAX_RETRIES:
             try:
                 headers = self._headers(size)
             except CsodAuthError as e:
@@ -382,11 +383,14 @@ class CsodClient:
                 last_error, last_response = type(e).__name__, None
                 if attempt < MAX_RETRIES:
                     time.sleep(self._retry_delay(None, attempt))
+                    attempt += 1
                     continue
                 break
-            if response.status_code == 401 and not reauthed and attempt < MAX_RETRIES:
+            if response.status_code == 401 and not reauthed:
                 # Token expired or revoked: one fresh token, then give up. A 401
                 # that survives a fresh token means a missing scope or permission.
+                # The re-auth does not consume a retry attempt, so a 401 on the
+                # last attempt is still retried once and then reported as 401.
                 reauthed = True
                 self._token = None
                 continue
@@ -394,6 +398,7 @@ class CsodClient:
                 delay = self._retry_delay(response, attempt)
                 logger.warning("%s returned HTTP %s; retrying in %.1fs", operation, response.status_code, delay)
                 time.sleep(delay)
+                attempt += 1
                 continue
             last_response = response
             if 300 <= response.status_code < 400:
