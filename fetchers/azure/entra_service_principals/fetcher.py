@@ -53,8 +53,8 @@ from azure_common import (  # noqa: E402
     coverage_percentage,
     credential,
     failure_reason,
-    write_evidence,
     report_failure,
+    write_evidence,
 )
 from entra_graph import (  # noqa: E402
     aguard,
@@ -621,13 +621,14 @@ def add_access(records: list[dict], unmatched: list[dict], access: dict) -> None
     sp_owners, app_owners = access.get("sp_owners"), access.get("app_owners")
     assignments, grants = access.get("app_role_assignments"), access.get("grants")
     resources = access.get("resources") or {}
+    # An object missing from a second-pass read (deleted between the reads) is unknown, not empty.
     for r in records:
-        owners = None if sp_owners is None else _owner_records(sp_owners.get(r["id"], []))
+        owners = _owner_records((sp_owners or {}).get(r["id"]))
         app_id = r["application_object_id"]
         if not app_id:
             application_owners: list[dict] | None = []  # no app registration in this tenant
         else:
-            application_owners = None if app_owners is None else _owner_records(app_owners.get(app_id, []))
+            application_owners = _owner_records((app_owners or {}).get(app_id))
         r["owner_eligible"] = r["ownership"] not in (OWNER_MICROSOFT, OWNER_MANAGED_IDENTITY)
         r["owners"] = owners
         r["application_owners"] = application_owners
@@ -637,10 +638,11 @@ def add_access(records: list[dict], unmatched: list[dict], access: dict) -> None
             r["has_owner"] = bool(owners or application_owners)
         r["has_enabled_owner"] = _enabled_owner_flag(r["has_owner"], (owners or []) + (application_owners or []))
 
+        held = (assignments or {}).get(r["id"])
         app_perms = None
-        if assignments is not None:
+        if held is not None:
             app_perms = sorted(
-                (application_permission_record(a, resources) for a in assignments.get(r["id"], [])),
+                (application_permission_record(a, resources) for a in held),
                 key=lambda p: (
                     p["resource_display_name"] or "", p["permission"] or "", str(p["app_role_id"] or "")
                 ),
@@ -664,7 +666,7 @@ def add_access(records: list[dict], unmatched: list[dict], access: dict) -> None
         r["has_privileged_permission"] = _privileged_flag(app_perms, sp_grants)
 
     for a in unmatched:
-        owners = None if app_owners is None else _owner_records(app_owners.get(a["id"], []))
+        owners = _owner_records((app_owners or {}).get(a["id"]))
         a["owners"] = owners
         a["has_owner"] = None if owners is None else bool(owners)
         a["has_enabled_owner"] = _enabled_owner_flag(a["has_owner"], owners or [])

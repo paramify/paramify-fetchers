@@ -364,6 +364,21 @@ def test_only_disabled_owners_and_unread_owner_state(monkeypatch, tmp_path):
     assert evidence["summary"]["service_principals_with_only_disabled_owners"] is None
 
 
+def test_a_principal_missing_from_the_second_pass_reads_unknown(monkeypatch, tmp_path):
+    graph = FakeGraph(**_tenant())
+    # Deleted between the principal list and the owner and assignment reads.
+    for second_pass in (graph.sp_owners, graph.assignments):
+        second_pass.items = [o for o in second_pass.items if o.id != "sp-orphan"]
+    code, evidence, _ = _run(monkeypatch, tmp_path, graph)
+
+    assert code == 0
+    orphan = {r["id"]: r for r in evidence["results"]["service_principals"]}["sp-orphan"]
+    assert orphan["owners"] is None and orphan["has_owner"] is None
+    assert orphan["application_permissions"] is None and orphan["has_privileged_permission"] is None
+    # Unknown, so not counted as ownerless; the vendor app still is.
+    assert evidence["summary"]["service_principals_without_owner"] == 1
+
+
 def test_owners_past_the_expand_limit_are_read_per_object(monkeypatch, tmp_path):
     tenant = _tenant()
     tenant["app_owners"] = {"app-owned": [_user(f"u-{i}") for i in range(25)]}

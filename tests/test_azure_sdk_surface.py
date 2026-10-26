@@ -2403,6 +2403,19 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "names; without them every principal reads as ownerless and permission-free",
     ),
     (
+        "msgraph.generated.models.user",
+        "User",
+        ["odata_type", "display_name", "user_principal_name", "account_enabled"],
+        "azure/entra_service_principals — an owner's name and account state; without "
+        "them owner_details_readable reads false and the disabled-owner count null",
+    ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        ["odata_type", "display_name", "account_enabled"],
+        "azure/entra_service_principals — a service principal owner's name and account state",
+    ),
+    (
         "msgraph.generated.models.application",
         "Application",
         ["owners"],
