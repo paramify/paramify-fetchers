@@ -1,0 +1,24 @@
+key: sqlmi_audit_logs_exported_all_instances
+name: Azure SQL MI Audit Logs Exported on Every Instance
+type: AUTOMATED
+role: configuration
+statement: >
+  Every SQL managed instance (at least one) has a diagnostic setting exporting SQLSecurityAuditEvents (by
+  name, or through the audit or allLogs group): instances_audit_logs_exported equals
+  total_managed_instances, and the collection had no partial failure. Substantiates KSI-MLA-OSM (Audit Log
+  Collection and Alerts): "every SQL MI and database has auditing enabled or inherited as intended", the
+  export route. Does not prove auditing is on: it is started in T-SQL, which ARM cannot read (see
+  sqlmi_audit_events_arriving_all_instances), or that the destination is the approved workspace.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"instances_audit_logs_exported":\s*(?<instances_audit_logs_exported>[1-9]\d*),[\s\S]*?"total_managed_instances":\s*(?<total_managed_instances>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # instances_audit_logs_exported
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # total_managed_instances
+
+evidence_sets:
+  - EVD-AZURE-SQLMI-CONFIG
