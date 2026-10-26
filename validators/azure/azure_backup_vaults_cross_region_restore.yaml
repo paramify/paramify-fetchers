@@ -1,0 +1,24 @@
+key: azure_backup_vaults_cross_region_restore
+name: Recovery Services Vaults With Backups Restore Cross-Region
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Recovery Services vault that protects at least one item has Cross Region
+  Restore enabled, so its backups can be restored in the paired region. The
+  Azure Backup share of "Fail dependencies without regional redundancy or a
+  documented recovery method" (KSI-RPL-ABO). A vault protecting nothing is not
+  judged. It does not assert backup age against an RPO (the fetcher has no
+  backup-age field), that a cross-region restore was tested, or Backup vaults
+  (Microsoft.DataProtection). azure_backup_vault_redundancy_fields_present
+  proves the fields were there to count.
+
+# Violation count: CRR off, then the same vault's item count >= 1; the tempered scan stops at the next vault or the summary.
+regex: '"cross_region_restore_enabled":\s*false,(?:(?!"cross_region_restore_(?:enabled|vaults)")[\s\S])*?"total_protected_items":\s*[1-9]'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-BACKUP-RECOVERY
