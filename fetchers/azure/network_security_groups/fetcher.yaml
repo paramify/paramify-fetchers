@@ -55,7 +55,7 @@ evidence_set:
   reference_id: EVD-AZURE-NSG
   name: Azure Network Security Groups
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient):
+    Script: azure/network_security_groups/fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient):
     network_security_groups.list_all() (security_rules and default_security_rules),
     virtual_networks.list_all(), network_interfaces.list_all(). Reader is
     sufficient — all GETs. East-west segmentation, per workload subnet in

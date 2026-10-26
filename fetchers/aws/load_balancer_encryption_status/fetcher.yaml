@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-LB-ENC-STATUS
   name: Load Balancer Encryption Status
-  instructions: 'Script: fetcher.sh. Commands executed: aws elbv2 describe-load-balancers, aws elbv2 describe-listeners'
+  instructions: 'Script: aws/load_balancer_encryption_status/fetcher.sh. Commands executed: aws elbv2 describe-load-balancers, aws elbv2 describe-listeners'

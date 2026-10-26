@@ -34,7 +34,7 @@ evidence_set:
   reference_id: EVD-TRANSFER-TLS
   name: AWS Transfer Family TLS Enforcement
   instructions: >-
-    For each region, run `aws transfer list-servers` to enumerate Transfer Family
+    Script: aws/transfer_tls_enforcement/fetcher.sh. For each region, run `aws transfer list-servers` to enumerate Transfer Family
     servers, then `aws transfer describe-server --server-id <id>` to capture each
     server's Protocols (SFTP/FTPS/FTP/AS2) and SecurityPolicyName. Review that
     only TLS-protected protocols are enabled and that the security policy enforces

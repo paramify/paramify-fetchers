@@ -51,7 +51,7 @@ evidence_set:
   reference_id: EVD-AZURE-ACTIVITY-ALERTS
   name: Azure Activity Log Alerts
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-monitor MonitorManagementClient):
+    Script: azure/activity_log_alerts/fetcher.py. Azure SDK calls (azure-mgmt-monitor MonitorManagementClient):
     activity_log_alerts.list_by_subscription_id(). Then raw ARM GETs, following
     nextLink: Microsoft.Insights/actionGroups (api 2023-01-01) and
     Microsoft.AlertsManagement/actionRules — alert processing rules (2021-08-08);

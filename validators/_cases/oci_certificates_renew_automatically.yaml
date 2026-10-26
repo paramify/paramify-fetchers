@@ -1,0 +1,13 @@
+validator: oci_certificates_renew_automatically
+cases:
+  - name: every_renewable_certificate_has_a_rule
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_certificates": 3, "imported_certificates": 1, "certificates_requiring_manual_renewal": 0}}'
+
+  - name: one_renews_by_hand
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_certificates": 3, "certificates_requiring_manual_renewal": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"manual_renewal_certificates": 0}}'

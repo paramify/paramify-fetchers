@@ -48,6 +48,6 @@ evidence_set:
   reference_id: EVD-GCP-CLOUDSQL-NET
   name: Cloud SQL Network Configuration
   instructions: >
-    Script: fetcher.py. Google Cloud client library call: sqladmin
+    Script: gcp/cloud_sql_network_configuration/fetcher.py. Google Cloud client library call: sqladmin
     instances.list(). Instance IP addresses are not copied. One evidence
     file per project.
