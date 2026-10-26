@@ -43,6 +43,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Security posture, policy and backup | [azure_backup_recovery_status](#azure_backup_recovery_status) | `EVD-AZURE-BACKUP-RECOVERY` |
 | Security posture, policy and backup | [azure_defender_assessments](#azure_defender_assessments) | `EVD-AZURE-DEFENDER-ASSESSMENTS` |
 | Security posture, policy and backup | [azure_defender_plans](#azure_defender_plans) | `EVD-AZURE-DEFENDER` |
+| Security posture, policy and backup | [azure_defender_regulatory_compliance](#azure_defender_regulatory_compliance) | `EVD-AZURE-DEFENDER-REG-COMPLIANCE` |
 | Security posture, policy and backup | [azure_disk_encryption_status](#azure_disk_encryption_status) | `EVD-AZURE-DISK-ENC` |
 | Security posture, policy and backup | [azure_policy_assignments](#azure_policy_assignments) | `EVD-AZURE-POLICY-ASSIGN` |
 | Security posture, policy and backup | [azure_policy_compliance](#azure_policy_compliance) | `EVD-AZURE-POLICY-COMPLIANCE` |
@@ -2000,6 +2001,61 @@ Summary fields:
 - `plans_reporting_inheritance` — Number of plans for which Azure says whether the setting is inherited. Azure documents this for resource-level settings only, so on a subscription it is usually 0, and the two lists below are then empty because nothing was reported, not because nothing is inherited
 - `inherited_plans` — List of the names of the plans whose setting is inherited from a parent scope
 - `plans_inherited_from_management_group` — List of the names of the inherited plans whose parent scope is a management group
+
+
+### azure_defender_regulatory_compliance
+Short Description: Shows which controls of each Defender for Cloud compliance standard, such as the Microsoft cloud security benchmark, the subscription passes or fails, and the assessments behind each control.
+
+Script: fetchers/azure/defender_regulatory_compliance/fetcher.py
+
+Access: Reader or Security Reader on the subscription.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `regulatory_compliance_standards.list()` — every compliance standard the subscription is graded against, with its state; a "not registered" answer means Defender for Cloud is not in use, and a "no standard pricing bundle" answer means regulatory compliance isn't offered because no Defender plan is on the Standard tier
+- `regulatory_compliance_controls.list()` (per standard) — each control's state and assessment counts
+- `regulatory_compliance_assessments.list()` (per control) — the assessments behind each control, with their state and passed, failed, skipped and unsupported resource counts
+
+Output: `azure_defender_regulatory_compliance_<subscription>.json` — each compliance standard with its controls and the assessments behind each control, every level with its state and pass and fail counts, and whether regulatory compliance is in use at all.
+
+Summary fields:
+
+**What was checked?**
+- `provider_registration_status` — Whether Defender for Cloud's provider (Microsoft.Security) is registered on the subscription, judged from the standards list's answer: registered, not_registered (Defender for Cloud is not in use, so no standards are listed) or unknown (the read failed)
+- `regulatory_compliance_status` — Whether regulatory compliance answered, one of:
+  - available (the standards were listed)
+  - not_available_free_tier (no Defender plan is on the Standard tier, so Azure doesn't offer regulatory compliance and no standards are listed)
+  - provider_not_registered (Microsoft.Security isn't registered, so Defender for Cloud is not in use)
+  - unknown (the standards list failed, or there was no subscription or credential to read it with)
+- `total_standards` — Number of compliance standards the subscription is graded against
+
+**Does the subscription pass each compliance standard?**
+- `standards_by_state` — Number of compliance standards in each state, as Defender for Cloud grades them; Passed, Failed, Skipped and Unsupported are always present, even at 0, and any other state Azure returns, or Unknown when it returns none, is added:
+  - Passed (everything under it that Defender for Cloud can check passes)
+  - Failed (at least one control, assessment or resource under it fails)
+  - Skipped (Defender for Cloud marked it skipped rather than assessing it)
+  - Unsupported (Defender for Cloud can't assess it automatically)
+- `standards_failed` — List of the names of the compliance standards whose state is Failed
+
+**Which controls fail?**
+- `total_controls` — Number of controls listed across every compliance standard, a control counted once for each standard it sits in; a standard whose control list couldn't be read adds none, and the run reports a failure
+- `controls_by_state` — Number of controls, across every compliance standard, in each state (Passed, Failed, Skipped, Unsupported, and any other, as in `standards_by_state`), counted from the controls listed rather than the standard's own totals
+- `failed_controls` — Number of controls, across every compliance standard, whose state is Failed
+- `control_pass_percentage` — Percentage of graded controls that pass = Passed controls in `controls_by_state` / (Passed + Failed controls in `controls_by_state`) × 100 (a whole number, 0–100); 0 when the sum of Passed and Failed controls is 0. Skipped and Unsupported controls are left out of both
+
+**How many resources fail the assessments behind the controls?**
+- `total_assessments` — Number of assessments listed under every control of every compliance standard, an assessment counted once for each control it sits under
+- `assessments_by_state` — Number of assessments in each state (Passed, Failed, Skipped, Unsupported, and any other, as in `standards_by_state`)
+- `failed_resources` — Number of resource failures: the failed-resource counts of every listed assessment added up, so a resource failing several assessments, or an assessment under several controls, counts each time
+
+**Does the subscription pass the Microsoft cloud security benchmark?**
+- `mcsb_standard_present` — True if the Microsoft cloud security benchmark, Defender for Cloud's default standard, is among the compliance standards; false if not
+- `mcsb_state` — Whether the benchmark passes as a whole: its state (Passed, Failed, Skipped or Unsupported, as in `standards_by_state`); null if the benchmark isn't listed
+- `mcsb_total_controls` — Number of the benchmark's controls listed
+- `mcsb_passed_controls` — Number of the benchmark's controls whose state is Passed
+- `mcsb_failed_controls` — Number of the benchmark's controls whose state is Failed
+- `mcsb_control_pass_percentage` — Percentage of the benchmark's graded controls that pass = `mcsb_passed_controls` / (`mcsb_passed_controls` + `mcsb_failed_controls`) × 100 (a whole number, 0–100); 0 when `mcsb_passed_controls` + `mcsb_failed_controls` is 0, including when the benchmark isn't listed. Skipped and Unsupported controls are left out of both
+- `mcsb_failed_control_names` — List of the names of the benchmark's controls whose state is Failed
 
 
 ### azure_disk_encryption_status
