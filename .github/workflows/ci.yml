@@ -4,6 +4,7 @@ name: CI
 # is the contract (CLAUDE.md). These jobs gate it:
 #   test      — every fetcher.yaml / category file validates against its JSON Schema
 #   azure-sdk — the Azure SDK operation groups the fetchers read still exist
+#   oci-sdk   — the OCI fetchers run against recorded responses (needs the oci extra)
 #   smoke     — the CLI discovery surface works across all fetchers
 #   lint      — the framework's own code passes ruff + mypy
 #   secrets   — no credentials in the tree or its full git history
@@ -97,6 +98,38 @@ jobs:
       # filter — a gate that only sometimes runs is not a gate.
       - name: pytest (azure SDK surface)
         run: pytest -q tests/test_azure_sdk_surface.py
+
+  oci-sdk:
+    name: oci (fetchers + SDK surface)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # The only job that installs the oci extra. The `test` matrix deliberately
+      # does not, which means every tests/test_oci_*.py SKIPS there: each opens
+      # with pytest.importorskip("oci"), so the whole OCI suite would go green in
+      # CI having run nothing at all — the same false confidence the azure-sdk
+      # job above exists to remove.
+      - run: python -m pip install -e ".[dev,oci]"
+      - name: assert the oci extra actually installed
+        run: python -c "import oci, oci._vendor.requests"
+      # No credentials and no network: the fetchers run as subprocesses against
+      # recorded HTTP responses (fetchers/oci/tests/cassettes), replayed through
+      # the real SDK, so deserialization, pagination and the SDK's error classes
+      # all still run. ~11s for all seventeen.
+      - name: pytest (OCI fetchers, cross-check, SDK surface)
+        # A glob, not a list: two SDK-dependent test files added later were in no
+        # list, so they skipped in `test` and ran nowhere.
+        run: pytest -q tests/test_oci_*.py
+      # The field-name check against the SDK's generated models. Exits non-zero on
+      # a finding; a companion test (above) fails if a record function goes
+      # unregistered, so this cannot pass by having nothing left to check.
+      - name: oci schema check
+        run: python tools/oci_schema_check.py
 
   smoke:
     name: smoke (CLI discovery)

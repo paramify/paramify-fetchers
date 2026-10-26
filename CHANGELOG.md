@@ -12,6 +12,23 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Oracle Cloud Infrastructure category** (`fetchers/oci/`, fifteen
+  fetchers, `pip install -e '.[oci]'`). Authenticates with an API signing key
+  the runner injects as a secret (`OCI_PRIVATE_KEY` carries the PEM content,
+  never a path), or with an instance or resource principal where deployed;
+  walks the compartment tree beneath a chosen root; one evidence set per
+  fetcher. `oci_dependency_vulnerabilities` closes KSI-SCR-MIT, which no other
+  category evidences: Application Dependency Management audits and what their
+  ignore lists hide. The rest cover certificate renewal automation, Bastion
+  just-in-time access, Cloud Guard, Zero Trust Packet Routing, IAM
+  users/credentials/policies/password rules, Vault keys, volume and bucket
+  encryption, network reachability, instance hardening, audit/logging/events
+  and managed data services. Ships with 33 validators, recorded-response tests
+  that replay through the real SDK (`tests/test_oci_*`), a schema check against
+  the SDK's generated models (`tools/oci_schema_check.py`), a fault sweep
+  (`tools/oci_fault_sweep.py`) and a read-only collector policy in
+  `fetchers/oci/README.md`. Contributed by Stewart Clawson
+  (paramify/paramify-fetchers#87).
 - **A shared engine for ServiceNow Scripted REST endpoints.**
   `fetchers/servicenow/_shared/scripted_rest.py` does the request, the retries,
   the response checks and the write for every ServiceNow fetcher. A fetcher now

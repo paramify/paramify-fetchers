@@ -1,0 +1,13 @@
+validator: oci_no_unconditional_any_principal_grants
+cases:
+  - name: oci_no_unconditional_any_principal_grants_passes
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_policies": 4, "unconditional_any_principal_statements": 0}}'
+
+  - name: oci_no_unconditional_any_principal_grants_fails
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_policies": 4, "unconditional_any_principal_statements": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_policies": 4, "unconditional-any-principal-statements": 0}}'

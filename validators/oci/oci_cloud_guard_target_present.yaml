@@ -1,0 +1,19 @@
+key: oci_cloud_guard_target_present
+name: OCI Cloud Guard Target Present
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one Cloud Guard target was collected. Cloud Guard enabled with no
+  target assesses nothing, and its partner's percentage is computed over
+  targets, so an empty collection must not read as full coverage. Does NOT
+  assert anything about which detector rules are on. Fails when the summary
+  key is renamed and when the scope holds no target.
+regex: '"total_targets":\s*(?<total_targets>[1-9][0-9]*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-CLOUD-GUARD
