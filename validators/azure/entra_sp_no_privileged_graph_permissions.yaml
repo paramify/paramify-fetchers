@@ -1,0 +1,40 @@
+key: entra_sp_no_privileged_graph_permissions
+name: Entra Non-User Accounts Hold No Privileged Graph Permissions
+type: AUTOMATED
+role: configuration
+statement: >-
+  No service principal other than Microsoft's own apps holds a privileged Microsoft Graph application
+  permission or a delegated grant that includes a privileged Graph permission (the fetcher's lists:
+  rights to grant itself more access, take over sign-in, change security controls, or read or write
+  tenant-wide data), no Graph application permission is left unnamed, and both application permissions
+  and delegated grants were read. Substantiates workload identities holding only approved,
+  non-privileged API access (KSI-IAM-ELP). An approved integration that needs one of these permissions
+  still fails here and must be justified outside this evidence. Does NOT prove permissions on APIs
+  other than Microsoft Graph, Azure or directory roles held by service principals, or Microsoft's own
+  apps.
+
+# delegated_grants_readable guards the swallowed delegated-grant 403: the run still exits 0 then.
+regex: '"partial_failure":\s*false[\s\S]*?"application_permissions_readable":\s*(?<application_permissions_readable>true|false)[\s\S]*?"delegated_grants_readable":\s*(?<delegated_grants_readable>true|false)[\s\S]*?"service_principals_with_privileged_application_permissions":\s*(?<service_principals_with_privileged_application_permissions>\d+|null)[\s\S]*?"service_principals_with_privileged_delegated_grants":\s*(?<service_principals_with_privileged_delegated_grants>\d+|null)[\s\S]*?"unnamed_graph_application_permissions":\s*(?<unnamed_graph_application_permissions>\d+|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS true; MATCH_GROUP[3] EQUALS 0; MATCH_GROUP[4] EQUALS 0; MATCH_GROUP[5] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # application_permissions_readable
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # delegated_grants_readable
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # service_principals_with_privileged_application_permissions
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }   # service_principals_with_privileged_delegated_grants
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 5 }   # unnamed_graph_application_permissions
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-SERVICE-PRINCIPALS
