@@ -1,0 +1,62 @@
+validator: azure_appsvc_backups_meet_rpo
+cases:
+  - name: all_apps_within_rpo
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"settings": {"recovery_point_objective_hours": 24}}, "summary": {"all_web_apps_backed_up": true, "all_web_apps_meet_recovery_point_objective": true, "apps_meeting_recovery_point_objective": 3, "recovery_point_objective_hours": 24, "total_web_apps": 3}}}'
+
+  - name: all_apps_within_rpo_pretty
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "partial_failure": false
+          },
+          "results": {
+            "settings": {
+              "recovery_point_objective_hours": 24
+            }
+          },
+          "summary": {
+            "all_web_apps_backed_up": true,
+            "all_web_apps_meet_recovery_point_objective": true,
+            "apps_meeting_recovery_point_objective": 3,
+            "recovery_point_objective_hours": 24,
+            "total_web_apps": 3
+          }
+        }
+      }
+
+  - name: no_rpo_configured
+    expect: FAIL
+    note: >
+      The fetcher's default: no RPO set, so the RPO verdict is null.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"settings": {"recovery_point_objective_hours": null}}, "summary": {"all_web_apps_backed_up": true, "all_web_apps_meet_recovery_point_objective": null, "apps_meeting_recovery_point_objective": 0, "recovery_point_objective_hours": null, "total_web_apps": 3}}}'
+
+  - name: one_app_misses_rpo
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"settings": {"recovery_point_objective_hours": 24}}, "summary": {"all_web_apps_backed_up": true, "all_web_apps_meet_recovery_point_objective": false, "apps_meeting_recovery_point_objective": 3, "recovery_point_objective_hours": 24, "total_web_apps": 3}}}'
+
+  - name: one_app_rpo_unknown
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"settings": {"recovery_point_objective_hours": 24}}, "summary": {"all_web_apps_backed_up": true, "all_web_apps_meet_recovery_point_objective": null, "apps_meeting_recovery_point_objective": 3, "recovery_point_objective_hours": 24, "total_web_apps": 3}}}'
+
+  - name: one_app_not_backed_up
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"settings": {"recovery_point_objective_hours": 24}}, "summary": {"all_web_apps_backed_up": false, "all_web_apps_meet_recovery_point_objective": false, "apps_meeting_recovery_point_objective": 3, "recovery_point_objective_hours": 24, "total_web_apps": 3}}}'
+
+  - name: no_web_apps
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"settings": {"recovery_point_objective_hours": 24}}, "summary": {"all_web_apps_backed_up": null, "all_web_apps_meet_recovery_point_objective": null, "apps_meeting_recovery_point_objective": 3, "recovery_point_objective_hours": 24, "total_web_apps": 0}}}'
+
+  - name: partial_failure
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": true}, "summary": {"all_web_apps_backed_up": true, "all_web_apps_meet_recovery_point_objective": true, "apps_meeting_recovery_point_objective": 3, "recovery_point_objective_hours": 24, "total_web_apps": 3}}}'
+
+  - name: verdict_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"settings": {"recovery_point_objective_hours": 24}}, "summary": {"all_apps_meet_rpo": true, "all_web_apps_backed_up": true, "apps_meeting_recovery_point_objective": 3, "recovery_point_objective_hours": 24, "total_web_apps": 3}}}'
