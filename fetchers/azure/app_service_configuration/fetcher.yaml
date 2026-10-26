@@ -61,9 +61,7 @@ ksis:
   - KSI-SVC-ASM   # app settings and connection strings resolved from Key Vault
   - KSI-CNA-DFP   # basic-auth publishing on the SCM and FTP endpoints
   - KSI-SVC-PRR   # runtimes past end of support left enabled
-
-  # No SVC-VCM: client certificate mode is mTLS-adjacent, but this reports the
-  # setting, not automated validation of communications. Left an honest gap.
+  - KSI-SVC-VCM   # client certificate mode and managed identity
 
 evidence_set:
   reference_id: EVD-AZURE-APPSVC-CONFIG

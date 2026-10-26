@@ -109,7 +109,8 @@ schemas and the `paramify` CLI — not the internal code.
   which app settings and connection strings are Key Vault references and whether each
   resolves, and whether each declared runtime is past end of support, joined to App
   Service's own runtime stack list. All Reader GETs; no setting value is read. Existing
-  fields are unchanged.
+  fields are unchanged. Also maps to KSI-SVC-VCM (client certificate mode and managed
+  identity).
   - **Opt-in literal-secret scan.** With `scan_literal_secrets` on (off by default), it
     reads app settings and connection strings through config/list, which needs
     `Microsoft.Web/sites/config/list/action`, and lists the names of those holding a
