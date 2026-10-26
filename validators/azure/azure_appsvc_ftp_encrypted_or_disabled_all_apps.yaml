@@ -1,0 +1,21 @@
+key: azure_appsvc_ftp_encrypted_or_disabled_all_apps
+name: App Service Web Apps FTP Disabled Or FTPS Only
+type: AUTOMATED
+role: configuration
+statement: >
+  Every App Service web app has its FTP state set to Disabled or FtpsOnly, so no
+  app accepts plain FTP, and there is at least one web app. An app whose
+  configuration was not read is not counted and fails. The FTP share of "Fail
+  HTTP, weak TLS/ciphers…" for App Service (KSI-SVC-SIN). It does not assert that
+  basic-auth publishing is disabled, the FTPS TLS version, or function apps.
+
+# Backreference: ftp_encrypted_or_disabled_apps must equal a non-zero total_web_apps.
+regex: '^\s*\{(?=[\s\S]*?"partial_failure":\s*false)(?=[\s\S]*?"total_web_apps":\s*(?<total_web_apps>[1-9]\d*)\b)(?=[\s\S]*?"ftp_encrypted_or_disabled_apps":\s*\k<total_web_apps>(?!\d))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-APPSVC-CONFIG
