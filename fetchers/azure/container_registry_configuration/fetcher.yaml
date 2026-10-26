@@ -55,7 +55,7 @@ evidence_set:
   reference_id: EVD-AZURE-ACR-CONFIG
   name: Azure Container Registry Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-containerregistry
+    Script: azure/container_registry_configuration/fetcher.py. Azure SDK calls: azure-mgmt-containerregistry
     ContainerRegistryManagementClient.registries.list(), then azure-mgmt-monitor
     MonitorManagementClient.diagnostic_settings.list(resource_uri) per registry,
     preceded by ResourceManagementClient.providers.get("Microsoft.ContainerRegistry").

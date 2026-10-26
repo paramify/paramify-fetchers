@@ -1,0 +1,82 @@
+name: cornerstone_security_awareness_training
+version: 0.1.0
+description: >-
+  General security awareness training completion from Cornerstone Learning (Reporting API
+  vw_rpt_training and vw_rpt_transcript), for the course(s) named in config:
+  per user (Cornerstone numeric user id only) the latest registration status
+  (completed / exempt / in_progress / not_started / overdue / failed / withdrawn / not_assigned), last
+  completion date and whether it falls inside the retraining interval, plus
+  each course's version and last content change. A course name that matches
+  nothing in the catalog reports every metric as null (not 0) and
+  config_resolution names what did not resolve.
+category: cornerstone
+
+supports_targets: false
+
+config_schema:
+  courses:
+    type: string
+    required: true
+    env: CSOD_SECURITY_AWARENESS_COURSES
+    description: >-
+      Comma-separated Cornerstone courses to measure, each matched exactly
+      against the training title, the Training Reference Number or the Course
+      Code, or given as the training object id. Separate alternatives with "|"
+      so a yearly version rollover counts as one course
+      (e.g. "2026 Annual Security Awareness Training,Insider Threat Awareness").
+      Whitespace around each name is trimmed.
+  retraining_interval_days:
+    type: integer
+    required: false
+    default: 365
+    env: CSOD_RETRAINING_INTERVAL_DAYS
+    description: >-
+      A user whose most recent passed completion or exemption is older than
+      this many days (or who never completed) is reported as needs_retraining.
+  content_review_interval_days:
+    type: integer
+    required: false
+    default: 365
+    env: CSOD_CONTENT_REVIEW_INTERVAL_DAYS
+    description: >-
+      A course whose catalog entry has not changed (last modified or new
+      version effective) within this many days is flagged in
+      courses[].trainings[].content_changed_within_review_interval.
+  population_filter:
+    type: string
+    required: false
+    env: CSOD_SECURITY_AWARENESS_POPULATION_FILTER
+    description: >-
+      Optional OData $filter over vw_rpt_user naming who must take this
+      training: every active employee (the shared CSOD_USER_POPULATION_FILTER is normally enough). Overrides the shared CSOD_USER_POPULATION_FILTER for
+      this fetcher only. With a population, users who have no transcript record
+      are reported as not_assigned and the completion rate is over the whole
+      population; without one, the rate is null and the run reports
+      partial_or_empty.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: cornerstone_security_awareness_training.json
+
+# CSOD_CLIENT_ID / CSOD_CLIENT_SECRET and CSOD_PORTAL_URL are declared once on
+# the category (fetchers/_categories/cornerstone.yaml).
+secrets: []
+
+ksis:
+  - KSI-CED-RAT
+
+evidence_set:
+  reference_id: EVD-CORNERSTONE-SECURITY-AWARENESS-TRAINING
+  name: Cornerstone Security Awareness Training
+  instructions: >-
+    Script: cornerstone/security_awareness_training/fetcher.py. Read-only Cornerstone Reporting API calls: POST
+    /services/api/oauth2/token (client credentials), then GET
+    /services/api/x/odata/api/views/vw_rpt_training (resolve the configured
+    courses), vw_rpt_transcript (every registration for those courses), and optionally vw_rpt_user (the user population).
+    Each view is counted first ($count) and the collected rows are
+    de-duplicated and checked against that count.

@@ -1,0 +1,131 @@
+name: oci_audit_logging_events
+version: 0.1.0
+description: >-
+  Shows audit log retention, every log and Events rule in scope, which change categories are monitored, and whether each rule's notifications reach a confirmed subscriber.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_audit_logging_events.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect log groups, rules and topics from. Optional —
+      omit to collect from the tenancy root. Audit retention is tenancy-wide and
+      is read either way.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — an Events rule
+      and the topic it notifies can live in different compartments, and the
+      rule-to-subscriber join is only correct when both are read.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+  skip_audit_retention:
+    type: boolean
+    required: false
+    default: false
+    env: OCI_SKIP_AUDIT_RETENTION
+    description: >
+      Do not read the tenancy's audit retention period. Reading it needs the
+      {AUDIT_CONFIGURATION} permission, which also allows changing retention, so
+      a strictly read-only collector sets this. The call is then recorded in
+      metadata.skipped_calls and retention reported as null, and the run still
+      succeeds.
+
+secrets: []
+
+ksis:
+  - KSI-MLA-LET      # Which resources and event types are logged and monitored — the coverage matrix
+  - KSI-MLA-OSM      # Centralized audit trail and its retention
+
+evidence_set:
+  reference_id: EVD-OCI-AUDIT-LOGGING-EVENTS
+  name: Audit Retention, Logging Coverage and Change Monitoring
+  instructions: |
+    Script: oci/audit_logging_events/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope. Optional: AUDIT_CONFIGURATION on the tenancy to read audit retention (it also allows changing retention); without it, set skip_audit_retention and the retention fields read null.
+
+    Commands Executed:
+    - audit.get_configuration — the tenancy's audit retention period, unless skip_audit_retention is set
+    - identity.list_compartments — the compartments beneath the target
+    - logging.list_log_groups (per compartment) — log groups
+    - logging.list_logs (per log group) — each log, what it captures and whether it is enabled
+    - ons.list_topics (per compartment) — notification topics
+    - ons.list_subscriptions (per compartment) — subscriptions, joined to topics by topic id
+    - events.list_rules (per compartment) — Events rules
+    - events.get_rule (per rule) — each rule's actions, which the listing leaves out
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_audit_logging_events_<compartment>_<region>.json — the audit retention, every log group with its logs, every Events rule with its condition parsed into event types and its actions joined to topics and subscribers, and every topic with its subscriptions.
+
+    Summary fields:
+
+    How long is the audit trail kept?
+    - audit_retention_period_days — Number of days the tenancy keeps audit events; null when not read
+    - audit_meets_365_day_retention — True if audit_retention_period_days is 365 or more; false if less; null when not read
+    - audit_retention_skipped_by_configuration — True if skip_audit_retention was set so retention was deliberately not read; false otherwise
+
+    What is being logged?
+    - total_log_groups — Number of log groups
+    - total_logs — Number of logs across all log groups
+    - enabled_logs — Number of logs that are enabled
+    - disabled_logs — Number of logs that are disabled
+    - logged_services — List of OCI services with at least one enabled log (such as flowlogs or objectstorage)
+    - log_categories — List of log categories with at least one enabled log (such as read, write or all)
+    - shortest_log_retention_days — Number of days the enabled log with the shortest retention keeps entries; null when there is none
+
+    Which changes have an Events rule watching them?
+    - total_rules — Number of Events rules
+    - active_rules — Number of Events rules that are enabled and ACTIVE
+    - rules_with_unparseable_condition — Number of rules whose condition is not valid JSON; they are counted as matching nothing
+    - rules_using_wildcard_event_types — Number of rules whose condition uses an asterisk in an event type
+    - rules_with_data_filters — Number of active rules whose condition also filters on event data, so they fire for some resources only
+    - monitored_change_categories — List of change categories (iam_policy_changes, iam_group_changes, iam_user_changes, identity_provider_changes, idp_group_mapping_changes, local_user_authentication, vcn_changes, route_table_changes, security_list_changes, network_security_group_changes, network_gateway_changes, cloud_guard_problems) matched by at least one active rule
+    - unmonitored_change_categories — List of change categories matched by no active rule
+    - change_category_coverage_percentage — Percentage of the twelve change categories that are monitored = monitored categories / 12 × 100, a whole number
+    - change_category_detail — Whether each change category is monitored and notifying, with the names of the rules that match it
+
+    Does a monitored change reach a person?
+    - notifying_change_categories — List of monitored change categories where at least one matching rule notifies: the rule is active, has an enabled Notifications action, and that topic has an ACTIVE subscription
+    - monitored_but_not_notifying — List of change categories that are monitored but whose rules reach no confirmed subscriber
+    - change_category_notification_percentage — Percentage of the twelve change categories that are notifying = notifying categories / 12 × 100, a whole number
+    - active_rules_notifying_nobody — Number of active rules that reach no confirmed subscriber
+    - rules_delivering_only_to_streams_or_functions — Number of active rules whose only actions are Streaming or Functions, which deliver to code rather than to a person
+
+    Who is subscribed to the topics?
+    - total_topics — Number of notification topics
+    - topics_with_unreadable_subscriptions — Number of topics whose subscriptions could not be read; they count as notifying nobody
+    - topics_with_active_subscribers — Number of topics with at least one ACTIVE subscription
+    - topics_with_only_pending_subscriptions — Number of topics whose subscriptions are all unconfirmed (PENDING)
+    - topics_with_no_subscriptions — Number of topics with no subscription at all
+    - notification_protocols_in_use — List of protocols (EMAIL, SLACK, HTTPS and so on) used by active subscriptions

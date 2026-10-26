@@ -49,7 +49,7 @@ evidence_set:
   reference_id: EVD-AZURE-APPGW-TLS-LISTENERS
   name: Azure Application Gateway TLS Listeners
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-network
+    Script: azure/app_gateway_tls_listeners/fetcher.py. Azure SDK calls: azure-mgmt-network
     application_gateways.list_all() (the SDK pager follows nextLink), and an
     independent count from Resource Graph (`resources | where type =~
     'microsoft.network/applicationgateways' | count`). If the two counts differ,

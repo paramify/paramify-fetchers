@@ -49,7 +49,7 @@ evidence_set:
   reference_id: EVD-AZURE-DBRICKS-CONFIG
   name: Azure Databricks Workspace Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Databricks"),
+    Script: azure/databricks_workspace_configuration/fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Databricks"),
     then azure-mgmt-databricks AzureDatabricksManagementClient
     workspaces.list_by_subscription(). Reader is sufficient — both are GETs, and no
     Databricks workspace-API call is made.

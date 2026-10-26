@@ -85,7 +85,7 @@ evidence_set:
   reference_id: EVD-WIZ-FILE-INTEGRITY
   name: Wiz File Integrity Monitoring
   instructions: >-
-    Script: fetcher.py. Read-only service account (read:sensors,
+    Script: wiz/file_integrity_monitoring/fetcher.py. Read-only service account (read:sensors,
     read:detections; Wiz Runtime Sensor). Pages the sensors connection and the
     detections connection for the look-back window, keeping detections whose
     rule name matches the configured text. Summarizes sensor count, status,

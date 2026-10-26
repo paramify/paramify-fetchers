@@ -49,7 +49,7 @@ evidence_set:
   reference_id: EVD-AZURE-SQLMI-BACKUPS
   name: Azure SQL Managed Instance Backups
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-sql SqlManagementClient, api
+    Script: azure/sql_managed_instance_backups/fetcher.py. Azure SDK calls (azure-mgmt-sql SqlManagementClient, api
     2025-01-01, Reader is sufficient): managed_instances.list(),
     managed_databases.list_by_instance(),
     managed_backup_short_term_retention_policies.get(..., "default"),

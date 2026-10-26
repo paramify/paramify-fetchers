@@ -1,0 +1,75 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_iam_policies",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 3,
+      "fields": {
+        "PolicyName": 3,
+        "PolicyId": 3,
+        "Arn": 3,
+        "CreateDate": 3,
+        "UpdateDate": 3,
+        "Description": 0,
+        "PolicyDocument": 3,
+        "AttachedGroups": 1,
+        "AttachedUsers": 0,
+        "AttachedRoles": 2
+      }
+    },
+    {
+      "path": "results[].PolicyDocument.Statement[]",
+      "records": 3,
+      "fields": {
+        "Action": 3,
+        "Effect": 3,
+        "Resource": 3
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:12:21Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "PolicyName": "pft-scoped-read",
+        "PolicyId": "ANPAUH4SEBHZ5FEFLYKP6",
+        "Arn": "arn:aws:iam::111111111111:policy/pft-scoped-read",
+        "CreateDate": "2026-09-28T17:04:25+00:00",
+        "UpdateDate": "2026-09-28T17:04:25+00:00",
+        "Description": null,
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:ListBucket"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:s3:::pft-111111111111-e25deb-logs",
+                "arn:aws:s3:::pft-111111111111-e25deb-logs/*"
+              ]
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "AttachedGroups": [
+          "pft-readers"
+        ],
+        "AttachedUsers": [],
+        "AttachedRoles": []
+      }
+    ]
+  }
+}

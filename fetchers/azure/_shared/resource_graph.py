@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Union
 
-from azure_common import arm_client_kwargs, model_attr
+from azure_common import Collector, arm_client_kwargs, model_attr
 
 # The largest page Resource Graph serves; `$top` above it is rejected.
 PAGE_SIZE = 1000
@@ -20,13 +20,25 @@ def resource_graph_client(cred):
     return ResourceGraphClient(credential=cred, **arm_client_kwargs())
 
 
-def query_all(client, subscription_id: str, query: str) -> Dict[str, Any]:
+def query_all(client, subscription_id: Union[str, List[str], None], query: str) -> Dict[str, Any]:
     """Page `query` to the end; raise on truncation, non-termination or a short count.
 
     `query` must project `id` and order by it, or skip-token paging is unstable.
+    `subscription_id` is one subscription, a list, or None to leave the request unscoped,
+    which reads every subscription the credential can see (how a lookup resolves resources
+    outside the target subscription).
     """
-    from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions  # lazy
+    from azure.mgmt.resourcegraph.models import (  # lazy
+        QueryRequest,
+        QueryRequestOptions,
+    )
 
+    if subscription_id is None:
+        subscriptions = None
+    elif isinstance(subscription_id, str):
+        subscriptions = [subscription_id]
+    else:
+        subscriptions = list(subscription_id)
     rows: list[dict] = []
     total_records = None
     skip_token = None
@@ -35,7 +47,7 @@ def query_all(client, subscription_id: str, query: str) -> Dict[str, Any]:
     while True:
         response = client.resources(
             QueryRequest(
-                subscriptions=[subscription_id],
+                subscriptions=subscriptions,
                 query=query,
                 options=QueryRequestOptions(
                     top=PAGE_SIZE, skip_token=skip_token, result_format="objectArray"
@@ -58,3 +70,70 @@ def query_all(client, subscription_id: str, query: str) -> Dict[str, Any]:
             f"Resource Graph reported {total_records} rows but paging returned {len(rows)}"
         )
     return {"rows": rows, "total_records": total_records, "pages": pages}
+
+
+def quoted_ids(ids: List[str]) -> str:
+    """KQL verbatim string literals: inside @'...' a doubled quote is the escape and a backslash is literal."""
+    return ", ".join("@'" + i.replace("'", "''") + "'" for i in ids)
+
+
+# Ids per `id in~ (...)` lookup query.
+LOOKUP_CHUNK = 200
+
+
+def lookup_by_ids(client, ids, build_query, label: str, collector: Collector):
+    """Resource Graph rows keyed by lowercased id, plus the ids whose chunk failed.
+
+    Unscoped so resources in other readable subscriptions resolve. A failed chunk leaves only its own ids unknown.
+    """
+    unique = sorted({i.lower() for i in ids if i})
+    out, failed = {}, set()
+    for start in range(0, len(unique), LOOKUP_CHUNK):
+        chunk = unique[start : start + LOOKUP_CHUNK]
+        rows = collector.guard(
+            f"resourcegraph.resources ({label} {start + 1}-{start + len(chunk)})",
+            lambda: query_all(client, None, build_query(chunk))["rows"],
+        )
+        if rows is None:
+            failed.update(chunk)
+            continue
+        for row in rows:
+            row = {k: (None if v == "" else v) for k, v in row.items()}
+            out[(row.get("id") or "").lower()] = row
+    return out, failed
+
+
+READABLE_RESOURCE_GROUPS_QUERY = (
+    "ResourceContainers | where type =~ 'microsoft.resources/subscriptions/resourcegroups' "
+    "| project id = tolower(id) | order by id asc"
+)
+
+
+def readable_scopes(cred, collector: Collector) -> Optional[Dict[str, set]]:
+    """The subscriptions and resource groups the credential can read; None when either listing failed.
+
+    Both are needed to call a missing resource deleted: Reader on one resource group of
+    another subscription still lists that subscription, and a resource in one of its
+    other groups is unreadable, not gone.
+    """
+
+    def _subscriptions() -> set:
+        from azure.mgmt.subscription import SubscriptionClient  # lazy
+
+        client = SubscriptionClient(cred, **arm_client_kwargs())
+        return {
+            (model_attr(sub, "subscription_id") or "").lower()
+            for sub in client.subscriptions.list()
+        }
+
+    subscriptions = collector.guard("subscription.subscriptions.list", _subscriptions)
+    groups = collector.guard(
+        "resourcegraph.resources (readable resource groups)",
+        lambda: {
+            r.get("id")
+            for r in query_all(resource_graph_client(cred), None, READABLE_RESOURCE_GROUPS_QUERY)["rows"]
+        },
+    )
+    if subscriptions is None or groups is None:
+        return None
+    return {"subscriptions": subscriptions, "resource_groups": groups}

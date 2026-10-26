@@ -25,4 +25,4 @@ ksis:
 evidence_set:
   reference_id: EVD-S1-ACTIVITY
   name: SentinelOne Activities
-  instructions: 'Script: activityfetcher.py. Calls /web/api/v2.1/activities with activityTypes filter (cursor pagination), aggregates activityType counts and primary descriptions, writes JSON and CSV summary.'
+  instructions: 'Script: sentinelone/activities/fetcher.py. Calls /web/api/v2.1/activities with activityTypes filter (cursor pagination), aggregates activityType counts and primary descriptions, writes JSON and CSV summary.'

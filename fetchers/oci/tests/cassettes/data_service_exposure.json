@@ -1,0 +1,388 @@
+{
+ "interactions": [
+  {
+   "key": "GET identity/20160918/compartments?accessLevel=ACCESSIBLE&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy&compartmentIdInSubtree=true&lifecycleState=ACTIVE",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"id\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"name\": \"fetcher-test\", \"description\": \"Scratch compartment for Paramify fetcher verification\", \"timeCreated\": \"2026-09-10T19:08:22.162Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-10T19:08:22.039Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"name\": \"fetcher-test-apps\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-21T19:21:42.963Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:21:42.895Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa\", \"id\": \"ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua\", \"name\": \"fetcher-test-web\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-21T19:21:54.020Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-21T19:21:53.946Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}, {\"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"id\": \"ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a\", \"name\": \"fetcher-test-zone\", \"description\": \"paramify fetcher test\", \"timeCreated\": \"2026-09-15T20:08:18.463Z\", \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:08:18.390Z\"}}, \"systemTags\": {}, \"isAccessible\": true, \"lifecycleState\": \"ACTIVE\"}]"
+  },
+  {
+   "key": "GET identity/20160918/availabilityDomains?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"id\": \"ocid1.availabilitydomain.oc1..aaaaaaaaupx7ga46w4xbb3fnkoh7rtyumacyb3ek6bw7bt3qff3mgt3mbrlq\", \"name\": \"qQyy:PHX-AD-1\"}, {\"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"id\": \"ocid1.availabilitydomain.oc1..aaaaaaaac7uydq54rcymamzauv5pd23qk2g2vqlrfu5jd3y6i6qxpvvzkf7a\", \"name\": \"qQyy:PHX-AD-2\"}, {\"compartmentId\": \"ocid1.tenancy.oc1..aaaaaaaatenancy\", \"id\": \"ocid1.availabilitydomain.oc1..aaaaaaaakemzo4ywaynz573sk4jpvwuqi7vmcuxajxfv4jjj2pthez3j2hbq\", \"name\": \"qQyy:PHX-AD-3\"}]"
+  },
+  {
+   "key": "GET database/20160918/autonomousDatabases?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET database/20160918/dbSystems?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET integration/20190131/integrationInstances?compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.tenancy.oc1..aaaaaaaatenancy",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET database/20160918/autonomousDatabases?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"accessTypes\": null, \"actualUsedDataStorageSizeInTBs\": 0.006642520427703857, \"adScheduledForUpdate\": null, \"additionalAttributes\": null, \"additionalDatabaseStatus\": null, \"allocatedStorageSizeInTBs\": 0.0078125, \"apexDetails\": {\"apexVersion\": \"26.1.4\", \"ordsVersion\": \"26.2.3.237.1104\"}, \"arePrimaryWhitelistedIpsUsed\": null, \"autoRefreshFrequencyInSeconds\": null, \"autoRefreshPointLagInSeconds\": null, \"autonomousContainerDatabaseId\": null, \"autonomousDatabaseMaintenanceWindow\": {\"availabilityDomain\": \"qQyy:PHX-AD-3\", \"dayOfWeek\": {\"name\": \"SATURDAY\"}, \"isMaintenanceWindowChangeScheduled\": null, \"maintenanceEndTime\": \"22:00\", \"maintenanceStartTime\": \"20:00\"}, \"autonomousMaintenanceScheduleType\": \"REGULAR\", \"availabilityDomain\": \"qQyy:PHX-AD-3\", \"availableUpgradeVersions\": [\"23ai\", \"26ai\"], \"backupConfig\": {\"manualBackupBucketName\": null, \"manualBackupType\": \"NONE\"}, \"backupDestination\": null, \"backupRetentionPeriodInDays\": 60, \"byolComputeCountLimit\": null, \"characterSet\": \"AL32UTF8\", \"cloneTableSpaceList\": null, \"cloneType\": null, \"clusterPlacementGroupId\": null, \"compartmentId\": \"ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq\", \"computeCount\": 1.0, \"computeModel\": \"ECPU\", \"connectionStrings\": {\"allConnectionStrings\": {\"HIGH\": \"adb.us-phoenix-1.oraclecloud.com:1522/g988032b1532827_fetchertest_high.adb.oraclecloud.com\", \"MEDIUM\": \"adb.us-phoenix-1.oraclecloud.com:1522/g988032b1532827_fetchertest_medium.adb.oraclecloud.com\", \"LOW\": \"adb.us-phoenix-1.oraclecloud.com:1522/g988032b1532827_fetchertest_low.adb.oraclecloud.com\", \"TPURGENT\": \"adb.us-phoenix-1.oraclecloud.com:1522/g988032b1532827_fetchertest_tpurgent.adb.oraclecloud.com\", \"TP\": \"adb.us-phoenix-1.oraclecloud.com:1522/g988032b1532827_fetchertest_tp.adb.oraclecloud.com\"}, \"dedicated\": null, \"high\": \"adb.us-phoenix-1.oraclecloud.com:1522/g988032b1532827_fetchertest_high.adb.oraclecloud.com\", \"low\": \"adb.us-phoenix-1.oraclecloud.com:1522/g988032b1532827_fetchertest_low.adb.oraclecloud.com\", \"medium\": \"adb.us-phoenix-1.oraclecloud.com:1522/g988032b1532827_fetchertest_medium.adb.oraclecloud.com\", \"profiles\": [{\"consumerGroup\": \"HIGH\", \"displayName\": \"fetchertest_high\", \"hostFormat\": \"FQDN\", \"isRegional\": null, \"protocol\": \"TCPS\", \"sessionMode\": \"DIRECT\", \"syntaxFormat\": \"LONG\", \"tlsAuthentication\": \"MUTUAL\", \"value\": \"(description= (retry_count=20)(retry_delay=3)(address=(protocol=tcps)(port=1522)(host=adb.us-phoenix-1.oraclecloud.com))(connect_data=(service_name=g988032b1532827_fetchertest_high.adb.oraclecloud.com))(security=(ssl_server_dn_match=yes)))\"}, {\"consumerGroup\": \"MEDIUM\", \"displayName\": \"fetchertest_medium\", \"hostFormat\": \"FQDN\", \"isRegional\": null, \"protocol\": \"TCPS\", \"sessionMode\": \"DIRECT\", \"syntaxFormat\": \"LONG\", \"tlsAuthentication\": \"MUTUAL\", \"value\": \"(description= (retry_count=20)(retry_delay=3)(address=(protocol=tcps)(port=1522)(host=adb.us-phoenix-1.oraclecloud.com))(connect_data=(service_name=g988032b1532827_fetchertest_medium.adb.oraclecloud.com))(security=(ssl_server_dn_match=yes)))\"}, {\"consumerGroup\": \"LOW\", \"displayName\": \"fetchertest_low\", \"hostFormat\": \"FQDN\", \"isRegional\": null, \"protocol\": \"TCPS\", \"sessionMode\": \"DIRECT\", \"syntaxFormat\": \"LONG\", \"tlsAuthentication\": \"MUTUAL\", \"value\": \"(description= (retry_count=20)(retry_delay=3)(address=(protocol=tcps)(port=1522)(host=adb.us-phoenix-1.oraclecloud.com))(connect_data=(service_name=g988032b1532827_fetchertest_low.adb.oraclecloud.com))(security=(ssl_server_dn_match=yes)))\"}]}, \"connectionUrls\": {\"a2aUrl\": null, \"apexUrl\": \"https://G988032B1532827-FETCHERTEST.adb.us-phoenix-1.oraclecloudapps.com/ords/apex\", \"databaseTransformsUrl\": \"https://G988032B1532827-FETCHERTEST.adb.us-phoenix-1.oraclecloudapps.com/odi/?sso=true\", \"essbaseUrl\": null, \"graalUrl\": null, \"graphStudioUrl\": \"https://G988032B1532827-FETCHERTEST.adb.us-phoenix-1.oraclecloudapps.com/graphstudio/?sso=true\", \"machineLearningNotebookUrl\": \"https://G988032B1532827-FETCHERTEST.adb.us-phoenix-1.oraclecloudapps.com/oml/?sso=true\", \"machineLearningUserManagementUrl\": \"https://G988032B1532827-FETCHERTEST.adb.us-phoenix-1.oraclecloudapps.com/omlusers/\", \"mcpUrl\": null, \"mongoDbUrl\": null, \"ordsUrl\": \"https://G988032B1532827-FETCHERTEST.adb.us-phoenix-1.oraclecloudapps.com/ords/\", \"spatialStudioUrl\": \"https://G988032B1532827-FETCHERTEST.adb.us-phoenix-1.oraclecloudapps.com/spatialstudio/\", \"sqlDevWebUrl\": \"https://G988032B1532827-FETCHERTEST.adb.us-phoenix-1.oraclecloudapps.com/ords/sql-developer\"}, \"cpgIdScheduledForUpdate\": null, \"cpuCoreCount\": 0, \"customerContacts\": null, \"dataSafeStatus\": \"NOT_REGISTERED\", \"dataStorageSizeInGBs\": 20, \"dataStorageSizeInTBs\": null, \"databaseEdition\": null, \"databaseManagementStatus\": null, \"dataguardRegionType\": null, \"dbActions\": [\"WORKSHEET\", \"ADP_DATA_LOAD\", \"REST_WORKSHOP\"], \"dbName\": \"fetchertest\", \"dbToolsDetails\": [{\"computeCount\": null, \"estimatedConcurrentSessions\": null, \"isEnabled\": true, \"maxIdleTimeInMinutes\": null, \"name\": \"APEX\"}, {\"computeCount\": 2.0, \"estimatedConcurrentSessions\": null, \"isEnabled\": true, \"maxIdleTimeInMinutes\": 30, \"name\": \"DATA_TRANSFORMS\"}, {\"computeCount\": null, \"estimatedConcurrentSessions\": null, \"isEnabled\": true, \"maxIdleTimeInMinutes\": null, \"name\": \"DATABASE_ACTIONS\"}], \"dbVersion\": \"19c\", \"dbWorkload\": \"OLTP\", \"definedTags\": {\"Oracle-Tags\": {\"CreatedBy\": \"default/user364102@example.com\", \"CreatedOn\": \"2026-09-15T20:08:15.492Z\"}}, \"disasterRecoveryRegionType\": null, \"displayName\": \"fetcher-test-adb\", \"encryptionKey\": {\"provider\": \"ORACLE_MANAGED\", \"timeActivated\": null}, \"encryptionKeyHistoryEntry\": [{\"encryptionKey\": {\"provider\": \"ORACLE_MANAGED\", \"timeActivated\": null}, \"timeActivated\": \"2026-09-15T20:09:03.840Z\"}], \"encryptionKeyLocationDetails\": null, \"externalAuthentication\": null, \"failedDataRecoveryInSeconds\": null, \"fawInstanceId\": null, \"freeformTags\": {\"paramify-fetcher-test\": \"1\"}, \"id\": \"ocid1.autonomousdatabase.oc1.phx.anyhqljtjt3ioqqab4od7zbm3g6nvqs4ckkouzuhsq6rk7wk2z2th2flfpaq\", \"inMemoryAreaInGBs\": null, \"inMemoryPercentage\": null, \"includedCompute\": 0.0, \"includedDataStorageInTBs\": 0.0, \"infrastructureType\": null, \"isAccessControlEnabled\": null, \"isAutoScalingEnabled\": false, \"isAutoScalingForStorageEnabled\": false, \"isBackupRetentionLocked\": false, \"isDataGuardEnabled\": false, \"isDedicated\": false, \"isDevTier\": null, \"isFreeTier\": true, \"isLocalDataGuardEnabled\": false, \"isMemberOfDedicatedPool\": null, \"isMtlsConnectionRequired\": true, \"isOracleServiceGatewayAllowed\": false, \"isPreview\": false, \"isReconnectCloneEnabled\": false, \"isRefreshableClone\": null, \"isRegisteredAsCustomerOwnedContainer\": false, \"isRemoteDataGuardEnabled\": false, \"isTelemetryStreamingEnabled\": false, \"isTimehouseEnabled\": false, \"isVirtualClone\": null, \"keyHistoryEntry\": [{\"id\": \"ORACLE_MANAGED_KEY\", \"kmsKeyVersionId\": null, \"timeActivated\": \"2026-09-15T20:09:03.840Z\", \"vaultId\": null}], \"keyStoreId\": null, \"keyStoreWalletName\": null, \"kmsKeyId\": \"ORACLE_MANAGED_KEY\", \"kmsKeyLifecycleDetails\": null, \"kmsKeyVersionId\": null, \"licenseModel\": \"LICENSE_INCLUDED\", \"lifecycleDetails\": null, \"lifecycleState\": \"AVAILABLE\", \"localAdgAutoFailoverMaxDataLossLimit\": null, \"localAdgResourcePoolLeaderId\": null, \"localDisasterRecoveryType\": null, \"localStandbyDb\": null, \"longTermBackupSchedule\": null, \"maintenanceTargetComponent\": \"Dictionary\", \"memoryPerComputeUnitInGBs\": null, \"memoryPerOracleComputeUnitInGBs\": null, \"ncharacterSet\": \"AL16UTF16\", \"netServicesArchitecture\": null, \"nextLongTermBackupTimeStamp\": null, \"nsgIds\": null, \"ocpuCount\": null, \"openMode\": \"READ_WRITE\", \"operationsInsightsStatus\": \"NOT_ENABLED\", \"peerDbIds\": null, \"permissionLevel\": \"UNRESTRICTED\", \"preferredCommunicationLanguageLocale\": null, \"privateEndpoint\": null, \"privateEndpointIp\": null, \"privateEndpointLabel\": null, \"provisionableCpus\": null, \"publicConnectionUrls\": null, \"publicEndpoint\": null, \"refreshableMode\": null, \"refreshableStatus\": null, \"remoteDisasterRecoveryConfiguration\": null, \"remoteDisasterRecoveryPotentialDataLoss\": null, \"resourcePoolLeaderId\": null, \"resourcePoolSummary\": {\"availableComputeCapacity\": null, \"availableStorageCapacityInTBs\": null, \"isDisabled\": true, \"poolSize\": null, \"poolStorageSizeInTBs\": null, \"totalComputeCapacity\": null}, \"role\": null, \"scheduledMaintenanceWindow\": null, \"scheduledOperations\": null, \"securityAttributes\": {}, \"serviceConsoleUrl\": null, \"shouldSkipResourcePoolSizeQuota\": false, \"sourceId\": null, \"sqlWebDeveloperUrl\": null, \"standbyDb\": null, \"standbyWhitelistedIps\": null, \"subnetId\": null, \"subscriptionId\": null, \"supportedRegionsToCloneTo\": [\"IAD\", \"SJC\", \"YYZ\"], \"systemTags\": {\"orcl-cloud\": {\"free-tier-retained\": \"true\"}}, \"timeCreated\": \"2026-09-15T20:08:15.510Z\", \"timeDataGuardRoleChanged\": null, \"timeDeletionOfFreeAutonomousDatabase\": null, \"timeDisasterRecoveryRoleChanged\": null, \"timeEarliestAvailableAdUpdate\": \"2026-09-21T18:20:00.000Z\", \"timeEarliestAvailableCpgUpdate\": null, \"timeEarliestAvailableDbVersionUpgrade\": \"2026-09-21T18:20:00.000Z\", \"timeLatestAvailableAdUpdate\": \"2026-10-21T17:50:00.000Z\", \"timeLatestAvailableCpgUpdate\": null, \"timeLatestAvailableDbVersionUpgrade\": \"2026-11-20T17:50:00.000Z\", \"timeLocalDataGuardEnabled\": null, \"timeMaintenanceBegin\": \"2026-09-26T20:00:00.000Z\", \"timeMaintenanceEnd\": \"2026-09-26T22:00:00.000Z\", \"timeMaintenancePauseUntil\": null, \"timeOfAutoRefreshStart\": null, \"timeOfJoiningResourcePool\": null, \"timeOfLastBackup\": null, \"timeOfLastFailover\": null, \"timeOfLastRefresh\": null, \"timeOfLastRefreshPoint\": null, \"timeOfLastSwitchover\": null, \"timeOfNextRefresh\": null, \"timeReclamationOfFreeAutonomousDatabase\": \"2026-09-22T21:40:53.171Z\", \"timeScheduledAdUpdate\": null, \"timeScheduledCpgUpdate\": null, \"timeScheduledDbVersionUpgrade\": null, \"timeScheduledMaintenanceWindowUpdate\": null, \"timeTerminated\": null, \"timeUndeleted\": null, \"timeUntilReconnectCloneEnabled\": null, \"totalAutoBackupStorageSizeInGBs\": 9.0, \"totalBackupStorageSizeInGBs\": 9.0, \"usedDataStorageSizeInGBs\": null, \"usedDataStorageSizeInTBs\": null, \"vanityConnectionUrls\": null, \"vanityUrlDetails\": {\"apiGatewayId\": null, \"isDisabled\": true, \"vanityUrlHostName\": null}, \"vaultId\": null, \"whitelistedIps\": null}]"
+  },
+  {
+   "key": "GET database/20160918/dbSystems?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET integration/20190131/integrationInstances?compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaanfroufif64cl4ioefw7nhp72orq6edgww7p7jelwxtke3kc6kfmq",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET database/20160918/autonomousDatabases?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET database/20160918/dbSystems?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET integration/20190131/integrationInstances?compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaauyyrgi4npgbdjizctxr44xwuxgqg7t5qvo62dexpexbvqjup3qfa",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET database/20160918/autonomousDatabases?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET database/20160918/dbSystems?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET integration/20190131/integrationInstances?compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaaf37vriubyvizcwvqrvfxxth2f3uziqe6eotp6xbl5kmyxxyt4cua",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET database/20160918/autonomousDatabases?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET database/20160918/dbSystems?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET integration/20190131/integrationInstances?compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/mountTargets?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-1&compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-2&compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET filestorage/20171215/fileSystems?availabilityDomain=qQyy:PHX-AD-3&compartmentId=ocid1.compartment.oc1..aaaaaaaaxpeot4ayldur7kif7aivqfbiipbuxa43yweigd4kujs7oum3dq4a",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[]"
+  },
+  {
+   "key": "GET identity/20160918/tenancies/ocid1.tenancy.oc1..aaaaaaaatenancy/regionSubscriptions",
+   "status": 200,
+   "headers": {
+    "Content-Type": "application/json"
+   },
+   "body": "[{\"regionKey\": \"PHX\", \"regionName\": \"us-phoenix-1\", \"status\": \"READY\", \"isHomeRegion\": true}]"
+  }
+ ]
+}

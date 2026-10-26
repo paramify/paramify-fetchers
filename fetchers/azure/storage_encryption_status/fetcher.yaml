@@ -50,6 +50,6 @@ evidence_set:
   reference_id: EVD-AZURE-STORAGE-ENC
   name: Azure Storage Encryption
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-storage StorageManagementClient):
+    Script: azure/storage_encryption_status/fetcher.py. Azure SDK calls (azure-mgmt-storage StorageManagementClient):
     storage_accounts.list(), blob_services.get_service_properties(),
     file_services.get_service_properties().

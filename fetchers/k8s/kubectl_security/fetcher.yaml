@@ -26,4 +26,4 @@ ksis:
 evidence_set:
   reference_id: EVD-KUBECTL-SECURITY
   name: Kubectl Security
-  instructions: 'Script: kubectl_security.sh. Commands executed: kubectl get clusterroles, kubectl get clusterrolebindings, kubectl get networkpolicies'
+  instructions: 'Script: k8s/kubectl_security/fetcher.sh. Commands executed: kubectl get clusterroles, kubectl get clusterrolebindings, kubectl get networkpolicies'

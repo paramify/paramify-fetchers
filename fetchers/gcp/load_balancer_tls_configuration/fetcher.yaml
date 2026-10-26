@@ -46,6 +46,6 @@ evidence_set:
   reference_id: EVD-GCP-LB-TLS
   name: Load Balancer TLS Configuration
   instructions: >
-    Script: fetcher.py. Google Cloud client library calls: compute
+    Script: gcp/load_balancer_tls_configuration/fetcher.py. Google Cloud client library calls: compute
     targetHttpsProxies.aggregatedList(), targetSslProxies.list(),
     sslPolicies.aggregatedList(). One evidence file per project.
