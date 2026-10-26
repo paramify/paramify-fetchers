@@ -75,7 +75,7 @@ def test_changelog_disagreement_is_flagged(market):
 @pytest.mark.parametrize("pid,expected", [
     ("FR0000000005XL", ("C", "cso_pkg")),
     ("FR0000000001", ("D", "changelog")),
-    ("FR0000000003", ("A", "derived")),   # LI-SaaS, changelog class Unknown
+    ("FR0000000003", ("B", "derived")),   # LI-SaaS, changelog class Unknown: B, as FedRAMP classes LI-SaaS
     ("FR0000000002", ("C", "derived")),
     ("FR9999999999", (None, None)),
 ])
@@ -116,3 +116,129 @@ def test_parse_pairs():
     assert mp.parse_pairs("Okta Gov=fr2131856836, A=B=FR1", "X") == [("Okta Gov", "FR2131856836"), ("A=B", "FR1")]
     with pytest.raises(mp.CollectionError):
         mp.parse_pairs("no id here", "X")
+
+
+# -- review fixes ------------------------------------------------------------
+
+def test_class_keeps_a_trailing_qualifier():
+    assert mp.normalize_class("Class B (Low)") == "B"
+    assert mp.normalize_class("C") == "C"
+    assert mp.normalize_class("Unknown") is None
+
+
+def test_feed_age_is_never_negative(market):
+    market.now = datetime(2026, 10, 12, 1, 55, tzinfo=timezone.utc)  # 5 minutes before the older stamp
+    assert market.feed()["feed_age_hours"] == 0
+
+
+@pytest.mark.parametrize("pid", ["FR1", "MSO365MTA", "AGENCYHUDSAAS"])
+def test_no_reissue_for_a_non_standard_id(market, pid):
+    assert market.replacements(pid) == []
+
+
+def test_reissue_must_be_base_plus_letters(market):
+    market.products["FR00000000041"] = mp_product("FR00000000041", "Lookalike")  # 11 digits: not a re-issue
+    assert market.replacements("FR0000000004") == ["FR0000000004A"]
+
+
+def test_id_in_name(market):
+    market.products["FR260215856"] = mp_product("FR260215856", "Nine Digit Cloud")
+    market.products["MSO365MTA"] = mp_product("MSO365MTA", "Odd Id Cloud")
+    assert market.id_in_name("Paramify Cloud (FR2428769635XL)") == "FR2428769635XL"
+    assert market.id_in_name("Nine Digit Cloud (FR260215856)") == "FR260215856"
+    assert market.id_in_name("Office (MSO365MTA)") == "MSO365MTA"
+    assert market.id_in_name("Good Cloud") is None
+
+
+def test_impact_hint_prefers_the_most_specific_level(market):
+    market.products["FR0000000010"] = mp_product("FR0000000010", "Dual Cloud", impact="Moderate")
+    market.products["FR0000000010XL"] = mp_product("FR0000000010XL", "Dual Cloud", impact="20x Moderate")
+    assert market.match_name("Dual Cloud - 20x Moderate")[:2] == ("FR0000000010XL", "name_impact_level")
+    assert market.match_name("Dual Cloud - Moderate")[:2] == ("FR0000000010", "name_impact_level")
+
+
+def test_per_vendor_file_names_do_not_collide(market, tmp_path):
+    records = [market.record("Okta (Gov)", "FR0000000001"), market.record("Okta Gov", "FR0000000002")]
+    paths = mp.write_outputs(tmp_path, "stem", records, market, "per_vendor")
+    assert len({p.name for p in paths}) == 2
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["stem_okta_gov.json", "stem_okta_gov_fr0000000002.json"]
+
+
+def test_output_mode_rejects_unknown(monkeypatch):
+    monkeypatch.setenv("FEDRAMP_OUTPUT_MODE", "per_project")
+    with pytest.raises(mp.CollectionError) as err:
+        mp.output_mode_from_env()
+    assert err.value.code == "bad_config"
+
+
+def mp_product(pid, cso, impact="Moderate"):
+    return product(pid, cso, impact=impact)
+
+
+# -- workspace fetcher -------------------------------------------------------
+
+_ws_spec = importlib.util.spec_from_file_location(
+    "fedramp_workspace_fetcher",
+    ROOT / "fetchers" / "fedramp_marketplace" / "workspace_vendor_certification_status" / "fetcher.py",
+)
+ws = importlib.util.module_from_spec(_ws_spec)
+_ws_spec.loader.exec_module(ws)
+
+
+def element(name, eid, subtype="COM_FEDRAMP_SYSTEM"):
+    return {"id": eid, "name": name, "subtype": subtype}
+
+
+def test_build_records(market):
+    elements = [
+        element("Good Cloud", "e1"),
+        element("Good Cloud", "e2"),                       # same name: one vendor
+        element("Pinned (FR0000000002)", "e3"),            # ID in the name
+        element("Ready Cloud", "e4"),                      # override beats the name match
+        element("Nobody Cloud", "e5"),                     # matches nothing
+        element("Some SaaS", "e6", subtype="COM_SAAS"),    # subtype not selected
+    ]
+    records = ws.build_records(market, elements, ["COM_FEDRAMP_SYSTEM"], {"ready cloud": "FR0000000001"})
+    by_name = {r["vendor_name"]: r for r in records}
+    assert sorted(by_name) == ["Good Cloud", "Nobody Cloud", "Pinned (FR0000000002)", "Ready Cloud"]
+    assert by_name["Good Cloud"]["paramify_element_ids"] == ["e1", "e2"]
+    assert by_name["Good Cloud"]["match_method"] == "name"
+    assert (by_name["Pinned (FR0000000002)"]["match_method"], by_name["Pinned (FR0000000002)"]["package_id"]) == ("id_in_name", "FR0000000002")
+    assert (by_name["Ready Cloud"]["match_method"], by_name["Ready Cloud"]["package_id"]) == ("config_override", "FR0000000001")
+    unmatched = by_name["Nobody Cloud"]
+    assert (unmatched["package_id"], unmatched["certification_state"], unmatched["package_id_resolves"]) == (None, mp.NOT_LISTED, False)
+    s = mp.summarize(records)
+    assert (s["vendors_total"], s["vendors_unresolved"], s["vendors_delisted_or_not_listed"]) == (4, 1, 1)
+
+
+class FakeResponse:
+    def __init__(self, status, body):
+        self.status_code, self._body = status, body
+        self.text = body if isinstance(body, str) else ""
+
+    def json(self):
+        if isinstance(self._body, str):
+            raise ValueError("not json")
+        return self._body
+
+
+@pytest.mark.parametrize("status,body,code", [
+    (401, {}, "auth_failed"),
+    (403, {}, "not_authorized"),
+    (500, "boom", "target_unreachable"),
+    (200, "<html>", "target_unreachable"),
+    (200, [], "target_unreachable"),
+    (200, {"elements": [element("A", "1")], "nextCursor": "abc"}, "partial_failure"),
+    (200, {"elements": [element("A", "1")], "total": 40}, "partial_failure"),
+])
+def test_fetch_elements_failures(monkeypatch, status, body, code):
+    monkeypatch.setattr(ws.requests, "get", lambda *a, **k: FakeResponse(status, body))
+    with pytest.raises(ws.CollectionError) as err:
+        ws.fetch_elements("https://example.test/api/v0", "t", 5)
+    assert err.value.code == code
+
+
+def test_fetch_elements_single_page(monkeypatch):
+    body = {"elements": [element("A", "1"), element("B", "2")], "total": 2, "hasMore": False}
+    monkeypatch.setattr(ws.requests, "get", lambda *a, **k: FakeResponse(200, body))
+    assert len(ws.fetch_elements("https://example.test/api/v0", "t", 5)) == 2

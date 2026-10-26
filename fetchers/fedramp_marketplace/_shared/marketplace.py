@@ -67,9 +67,10 @@ CHANGELOG_STATUS = {
     "Final Program Review": IN_PROCESS,
 }
 
-# Fallback only, for a package FedRAMP publishes no class for.
+# Fallback only, for a package FedRAMP publishes no class for. LI-SaaS is B
+# because that is the class FedRAMP's own changelog gives LI-SaaS packages.
 DERIVED_CLASS = {
-    "LI-SaaS": "A",
+    "LI-SaaS": "B",
     "Low": "B",
     "20x Low": "B",
     "Moderate": "C",
@@ -78,8 +79,11 @@ DERIVED_CLASS = {
     "20x High": "D",
 }
 
-PACKAGE_ID_PATTERN = re.compile(r"\b(FR\d{10}[A-Z]{0,3}|F\d{10}[A-Z]{0,3})\b")
-_CLASS_PATTERN = re.compile(r"^(?:Class\s+)?([A-D])$", re.IGNORECASE)
+PACKAGE_ID_PATTERN = re.compile(r"\b(FR\d{9,10}[A-Z]{0,3}|F\d{10}[A-Z]{0,3})\b")
+# The digits-only base of a standard package ID; only these can have a re-issue.
+_BASE_ID_PATTERN = re.compile(r"^(?:FR\d{9,10}|F\d{10})$")
+_REISSUE_SUFFIX = re.compile(r"[A-Z]{1,3}")
+_CLASS_PATTERN = re.compile(r"^(?:Class\s+)?([A-D])\b", re.IGNORECASE)
 
 
 class CollectionError(Exception):
@@ -194,7 +198,9 @@ class Marketplace:
         # fail if either one stopped refreshing.
         stamps = [_parse_time(self.data_last_change), _parse_time(self.changelog_exported)]
         known = [s for s in stamps if s is not None]
-        age = int((self.now - min(known)).total_seconds() // 3600) if len(known) == len(stamps) else None
+        # Floored at 0: a runner clock behind FedRAMP's export would otherwise
+        # write -1, which the freshness regex cannot match.
+        age = max(0, int((self.now - min(known)).total_seconds() // 3600)) if len(known) == len(stamps) else None
         return {
             "source_urls": self.source_urls,
             "data_last_change": self.data_last_change,
@@ -243,12 +249,36 @@ class Marketplace:
         return (derived, "derived") if derived else (None, None)
 
     def replacements(self, package_id: str) -> List[str]:
-        """Listed IDs that look like a re-issue of this one (FR2000863987 -> FR2000863987A)."""
-        prefix = re.sub(r"(?<=\d)[A-Z]+$", "", package_id)
+        """Listed IDs that look like a re-issue of this one (FR2000863987 -> FR2000863987A).
+
+        Only a standard ID (FR + 9-10 digits, or F + 10 digits) has a base, and a
+        re-issue is that base plus 1-3 letters, so FR1 suggests nothing and
+        MSO365MTA is not taken for a re-issue of MSO365MT.
+        """
+        base = re.sub(r"(?<=\d)[A-Z]+$", "", package_id)
+        if not _BASE_ID_PATTERN.match(base):
+            return []
         return sorted(
             pid for pid in self.products
-            if pid != package_id and pid.startswith(prefix) and self.listing_state(pid) == CERTIFIED
+            if pid != package_id
+            and pid.startswith(base)
+            and (pid == base or _REISSUE_SUFFIX.fullmatch(pid[len(base):]))
+            and self.listing_state(pid) == CERTIFIED
         )
+
+    def id_in_name(self, name: str) -> Optional[str]:
+        """A package ID written in a vendor name, e.g. "Paramify Cloud (FR2428769635XL)".
+
+        Any word containing a digit that FedRAMP knows as a package ID counts
+        (some listed IDs are not FR-shaped, such as MSO365MTA); otherwise the
+        standard ID pattern.
+        """
+        for token in re.findall(r"[A-Za-z0-9]+", name):
+            token = token.upper()
+            if any(ch.isdigit() for ch in token) and (token in self.products or token in self.changelog):
+                return token
+        match = PACKAGE_ID_PATTERN.search(name.upper())
+        return match.group(1) if match else None
 
     def record(self, vendor_name: str, package_id: str, **extra: Any) -> Dict[str, Any]:
         state, disagree = self.state(package_id)
@@ -319,7 +349,14 @@ class Marketplace:
         best = [pid for pid in ranked if STATE_RANK.get(self.listing_state(pid) or "", 9) == best_rank]
         if len(best) == 1:
             return best[0], "name_preferred_state", hits
-        hinted = [pid for pid in best if _mentions(hint or name, self.products[pid].get("impact_level"))]
+        mentioned = {
+            pid: _norm(self.products[pid].get("impact_level"))
+            for pid in best
+            if _mentions(hint or name, self.products[pid].get("impact_level"))
+        }
+        # Keep only the most specific level named: "20x moderate" beats "moderate".
+        longest = max((len(level) for level in mentioned.values()), default=0)
+        hinted = [pid for pid, level in mentioned.items() if len(level) == longest]
         if len(hinted) == 1:
             return hinted[0], "name_impact_level", hits
         return None, "ambiguous", hits
@@ -392,9 +429,18 @@ def write_outputs(
 ) -> List[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     if output_mode == "per_vendor" and vendors:
-        targets = [
-            (f"{file_stem}_{sanitize_for_filename(v['vendor_name'])}.json", [v]) for v in vendors
-        ]
+        targets = []
+        used = set()
+        for v in vendors:
+            name = f"{file_stem}_{sanitize_for_filename(v['vendor_name'])}"
+            if name in used:
+                name = f"{name}_{sanitize_for_filename(v.get('package_id') or 'unmatched')}"
+            suffix = 2
+            unique = name
+            while unique in used:
+                unique, suffix = f"{name}_{suffix}", suffix + 1
+            used.add(unique)
+            targets.append((f"{unique}.json", [v]))
     else:
         targets = [(f"{file_stem}.json", vendors)]
     paths = []

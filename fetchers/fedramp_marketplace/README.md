@@ -21,7 +21,7 @@ latest status change and a link to its listing at
   is true. FedRAMP publishes no corrective action plan (CAP) status.
 - `certification_class` A–D and `class_source`: the CSO-PKG overview
   (`cso_pkg`), else the changelog's `cert_class` (`changelog`), else derived
-  from impact level (`derived`: LI-SaaS A, Low B, Moderate C, High D).
+  from impact level (`derived`: LI-SaaS B, Low B, Moderate C, High D).
 - `package_id_resolves` is false for an unknown ID, a delisted ID with a
   certified re-issue (named in `suggested_package_ids`, never substituted), and
   a workspace element no listing matches.

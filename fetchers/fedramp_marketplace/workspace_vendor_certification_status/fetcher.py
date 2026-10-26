@@ -16,7 +16,6 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from marketplace import (  # noqa: E402
     MARKETPLACE_PRODUCT_URL,
     NOT_LISTED,
-    PACKAGE_ID_PATTERN,
     CollectionError,
     Marketplace,
     fail,
@@ -30,6 +29,12 @@ logger = logging.getLogger("fedramp_marketplace_workspace_vendor_certification_s
 FILE_STEM = "fedramp_marketplace_workspace_vendor_certification_status"
 DEFAULT_API_BASE_URL = "https://app.paramify.com/api/v0"
 DEFAULT_SUBTYPES = "COM_FEDRAMP_SYSTEM"
+
+# GET /elements documents no paging. If a response ever carries one of these
+# markers, the list is longer than one page, and reporting the first page as
+# the whole workspace would let an unchecked vendor pass every validator.
+_PAGING_KEYS = ("next", "nextCursor", "nextPageToken", "nextPage", "cursor", "hasMore", "has_more")
+_TOTAL_KEYS = ("total", "totalCount", "total_count")
 
 
 def fetch_elements(base_url: str, token: str, timeout: int) -> List[Dict[str, Any]]:
@@ -50,11 +55,22 @@ def fetch_elements(base_url: str, token: str, timeout: int) -> List[Dict[str, An
             "target_unreachable",
         )
     try:
-        elements = response.json().get("elements")
-    except (ValueError, AttributeError) as exc:
-        raise CollectionError(f"GET {url} returned a body with no `elements` object", "target_unreachable") from exc
+        body = response.json()
+    except ValueError as exc:
+        raise CollectionError(f"GET {url} returned a body that is not JSON", "target_unreachable") from exc
+    elements = body.get("elements") if isinstance(body, dict) else None
     if not isinstance(elements, list):
         raise CollectionError(f"GET {url} returned a body with no `elements` list", "target_unreachable")
+
+    markers = [k for k in _PAGING_KEYS if body.get(k) not in (None, False, "", 0, [])]
+    totals = [body[k] for k in _TOTAL_KEYS if isinstance(body.get(k), int) and body[k] > len(elements)]
+    if markers or totals:
+        raise CollectionError(
+            f"GET {url} returned {len(elements)} elements with paging markers "
+            f"({', '.join(markers + [f'total={t}' for t in totals])}); this fetcher reads one page "
+            "and will not report a partial workspace as complete",
+            "partial_failure",
+        )
     return elements
 
 
@@ -75,11 +91,11 @@ def build_records(
             "element_subtype": group[0].get("subtype"),
             "paramify_element_ids": sorted(e.get("id") for e in group if e.get("id")),
         }
-        named_id = PACKAGE_ID_PATTERN.search(name)
+        named_id = market.id_in_name(name)
         if name.lower() in overrides:
             package_id, how, candidates = overrides[name.lower()], "config_override", []
         elif named_id:
-            package_id, how, candidates = named_id.group(1), "id_in_name", []
+            package_id, how, candidates = named_id, "id_in_name", []
         else:
             package_id, how, candidates = market.match_name(name)
 
@@ -141,7 +157,7 @@ def main() -> int:
             )
         paths = write_outputs(
             output_dir, FILE_STEM, records, market, output_mode,
-            vendor_source="paramify_workspace", element_subtypes=subtypes,
+            vendor_source="paramify_workspace", element_subtypes=subtypes, elements_read=len(elements),
         )
     except CollectionError as exc:
         return fail(output_dir, FILE_STEM, str(exc), exc.code, "collect workspace FedRAMP vendors")
