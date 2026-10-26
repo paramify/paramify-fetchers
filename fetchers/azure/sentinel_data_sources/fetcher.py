@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_rest import (  # noqa: E402
+    LAW_API,
     SI_API,
     SI_PREVIEW_API,
     QueryError,
@@ -59,7 +60,21 @@ _BARE_TABLE = re.compile(
     r"^\s*([A-Za-z_]\w*)\s*\|\s*summarize\s+Time\s*=\s*max\(\s*TimeGenerated\s*\)\s*\|\s*where\s+isnotempty\(\s*Time\s*\)\s*$"
 )
 _FIRST_NAME = re.compile(r"[A-Za-z_]\w*")
+# Words that open a query without naming its table.
+_KQL_OPENERS = frozenset({
+    "union", "let", "search", "find", "print", "range", "datatable", "table", "materialize", "evaluate",
+    "externaldata", "external_table",
+})
 QUERY_BATCH = 100
+# Basic and Auxiliary tables answer only /search: union * on /query skips them, and naming one fails to resolve.
+QUERYABLE_PLAN = "Analytics"
+
+# Connection kinds whose Content Hub definition has another id: this kind is Entra ID Protection, not the Entra ID logs connector.
+KIND_DEFINITION = {"AzureActiveDirectory": "AzureActiveDirectoryIdentityProtection"}
+DEFENDER_XDR_ALERT_PRODUCTS = (
+    '"Microsoft Defender Advanced Threat Protection", "Office 365 Advanced Threat Protection", '
+    '"Azure Advanced Threat Protection", "Microsoft Cloud App Security", "Microsoft 365 Defender", "Microsoft Defender XDR"'
+)
 
 # Built-in connection kinds and what they fill, for a connection whose connector definition isn't installed.
 BUILT_IN_DATA_TYPES: Dict[str, List[Tuple[str, str]]] = {
@@ -81,7 +96,7 @@ BUILT_IN_DATA_TYPES: Dict[str, List[Tuple[str, str]]] = {
     ],
     "MicrosoftThreatProtection": [
         ("SecurityIncident", 'SecurityIncident | where ProviderName in ("Microsoft 365 Defender", "Microsoft XDR")'),
-        ("SecurityAlert", "SecurityAlert"),
+        ("SecurityAlert", f"SecurityAlert | where ProductName in ({DEFENDER_XDR_ALERT_PRODUCTS})"),
     ],
     "ThreatIntelligence": [("ThreatIntelligenceIndicator", "ThreatIntelligenceIndicator")],
     "ThreatIntelligenceTaxii": [("ThreatIntelligenceIndicator", "ThreatIntelligenceIndicator")],
@@ -158,7 +173,11 @@ def connections(stable: List[Dict[str, Any]], preview: Optional[List[Dict[str, A
 
 def query_table(query: str) -> Optional[str]:
     first = _FIRST_NAME.search(query)
-    return first.group(0) if first else None
+    return first.group(0) if first and first.group(0).lower() not in _KQL_OPENERS else None
+
+
+def definition_of(kind: Optional[str]) -> Optional[str]:
+    return KIND_DEFINITION.get(kind or "", kind)
 
 
 def definition_data_types(ui: Dict[str, Any]) -> List[Tuple[str, str]]:
@@ -182,7 +201,7 @@ def link(definition: Dict[str, Any], conns: List[Dict[str, Any]]) -> List[str]:
     for c in conns:
         props = (c["_raw"].get("properties") or {})
         if (
-            (c["kind"] or "").lower() == name
+            (definition_of(c["kind"]) or "").lower() == name
             or (props.get("connectorDefinitionName") or "").lower() == name
             or (mtp_alerts and c["kind"] == "MicrosoftThreatProtection" and "alerts" in c["enabled_data_types"])
         ):
@@ -205,36 +224,42 @@ def connector_catalog(
                 "connections": link(d, conns),
                 "_data_types": definition_data_types(ui),
             })
-    defined = {(c["id"] or "").lower() for c in catalog}
+    defined = {(c["id"] or "").lower() for c in catalog if c["id"]}
+    built_in: Dict[str, Dict[str, Any]] = {}
     for c in conns:
         definition = ((c["_raw"].get("properties") or {}).get("connectorDefinitionName") or "").lower()
-        if (c["kind"] or "").lower() in defined or definition in defined:
+        kind_id = definition_of(c["kind"])
+        if (kind_id or "").lower() in defined or (definition and definition in defined):
             continue
-        catalog.append({
-            "id": c["kind"],
+        entry = built_in.setdefault((kind_id or "").lower(), {
+            "id": kind_id,
             "title": None,
             "definition": "built_in" if c["kind"] in BUILT_IN_DATA_TYPES else "unknown",
-            "connections": [c["name"]],
+            "connections": [],
             "_data_types": [(n, q + LAST_DATA_SUFFIX) for n, q in BUILT_IN_DATA_TYPES.get(c["kind"] or "", [])],
         })
-    return sorted(catalog, key=lambda c: (c["id"] or "").lower())
+        entry["connections"].append(c["name"])
+    return sorted(catalog + list(built_in.values()), key=lambda c: (c["id"] or "").lower())
 
 
 Pending = List[Tuple[Tuple[int, int], str, str]]
 
 
-def last_data_queries(catalog: List[Dict[str, Any]], ingested: Dict[str, Any]) -> Tuple[Dict[Tuple[int, int], Any], Pending]:
-    """Answers taken straight from table ingestion, and the filtered queries still to run (tables with data only)."""
+def last_data_queries(
+    catalog: List[Dict[str, Any]], ingested: Dict[str, Any], plans: Optional[Dict[str, str]]
+) -> Tuple[Dict[Tuple[int, int], Any], Pending]:
+    """Answers taken straight from table ingestion, and the queries still to run; a table on a plan /query can't read is left unmeasured."""
     known: Dict[Tuple[int, int], Any] = {}
     pending = []
     for ci, c in enumerate(catalog):
         for di, (name, query) in enumerate(c["_data_types"]):
             table = query_table(query)
-            if table not in ingested:
-                known[(ci, di)] = None
-            elif _BARE_TABLE.match(query):
+            plan = (plans or {}).get(table or "")
+            if table in ingested and _BARE_TABLE.match(query):
                 known[(ci, di)] = ingested[table]
-            else:
+            elif plan == QUERYABLE_PLAN and table not in ingested:
+                known[(ci, di)] = None
+            elif plan in (None, QUERYABLE_PLAN):  # parser functions, union and let queries run as written
                 pending.append(((ci, di), query, f"{c['id']}: {name}"))
     return known, pending
 
@@ -282,12 +307,13 @@ def finish_catalog(catalog: List[Dict[str, Any]], answers: Optional[Dict[Tuple[i
         times = [d["last_data_received"] for d in data_types if d["last_data_received"]]
         unmeasured = answers is None or any((ci, di) not in answers for di in range(len(data_types)))
         rows = [health[ids[n]] for n in c["connections"] if ids.get(n) and ids[n] in health]
+        worst = next((r for r in rows if (r["status"] or "").lower() != "success"), rows[0] if rows else None)
         out.append({
             **{k: v for k, v in c.items() if not k.startswith("_")},
             "data_types": data_types,
             "last_data_received": max(times) if times else None,
             "connected": True if times else (None if unmeasured or not data_types else False),
-            "health_status": rows[0]["status"] if rows else None,
+            "health_status": worst["status"] if worst else None,
         })
     return out
 
@@ -326,6 +352,13 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         f"securityinsights.dataConnectorDefinitions.list({ws['name']})",
         lambda: client.list(f"{path}/dataConnectorDefinitions", SI_API),
     )
+    listed = collector.guard(
+        f"operationalinsights.tables.list({ws['name']})", lambda: client.list(f"{ws['id']}/tables", LAW_API)
+    )
+    plans = (
+        {t["name"]: (t.get("properties") or {}).get("plan") or QUERYABLE_PLAN for t in listed if t.get("name")}
+        if listed is not None else None
+    )
     rows = None
     if ws.get("customer_id"):
         rows = collector.guard(
@@ -348,15 +381,21 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
 
     conns = connections(connectors, preview) if connectors is not None else []
     catalog = connector_catalog(preview, definitions or [], conns)
+    for c in catalog:
+        if c["definition"] in ("content_hub", "codeless") and not c["_data_types"]:
+            notes.append(f"connector {c['id']} has no data type with a usable last-data query, so it reads as unmeasured")
+    complete = connectors is not None and preview is not None and definitions is not None
     answers = None
     if tables is not None:
         ingested = {t["table"]: t["last_ingested"] for t in tables}
-        known, pending = last_data_queries(catalog, ingested)
+        known, pending = last_data_queries(catalog, ingested, plans)
         found = collector.guard(
             f"loganalytics.query(connector last data, {ws['name']})",
             lambda: run_last_data(client, ws["customer_id"], pending, days, notes),
         ) if pending else {}
-        answers = {**known, **found} if found is not None else None
+        # Without the table plans, an empty answer may be a Basic table /query can't read.
+        answers = {k: v for k, v in {**known, **(found or {})}.items() if v or plans is not None}
+    measured = answers is not None and plans is not None and complete
     health_on = any(t["table"] == HEALTH_TABLE for t in tables or []) if tables is not None else None
     health_rows = None
     if health_on:
@@ -371,14 +410,18 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     return {
         "ingestion_window_days": days,
         "data_connectors": projected,
-        "data_connectors_total": len(projected) if connectors is not None else None,
+        "data_connectors_total": len(projected) if connectors is not None and preview is not None else None,
         "connectors": finished,
-        "connectors_total": len(finished),
-        "connectors_connected": sum(1 for c in finished if c["connected"] is True) if answers is not None else None,
-        "connectors_not_connected": [c["id"] for c in finished if c["connected"] is False] if answers is not None else None,
+        "connectors_total": len(finished) if complete else None,
+        "connectors_connected": sum(1 for c in finished if c["connected"] is True) if measured else None,
+        "connectors_not_connected": [c["id"] for c in finished if c["connected"] is False] if measured else None,
         "health_monitoring": health_on,
         "connector_health": health,
+        "connectors_unhealthy": (
+            sum(1 for h in health if (h["status"] or "").lower() != "success") if health is not None else None
+        ),
         "tables": tables,
+        "tables_not_measured": sorted(n for n, p in plans.items() if p != QUERYABLE_PLAN) if plans is not None else None,
         "source_tables": sources if tables is not None else None,
         "sources_ingesting": len(sources) if tables is not None else None,
         "alert_products": products if tables is not None else None,
@@ -387,19 +430,23 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     }
 
 
+def _total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]:
+    """Sum over the workspaces that have the field; None when none does, so an unknown never reads as zero."""
+    values = [w[field] for w in workspaces if w.get(field) is not None]
+    return sum(len(v) if isinstance(v, list) else v for v in values) if values else None
+
+
 def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
     counts = [w.get("sources_ingesting") for w in workspaces if w.get("sources_ingesting") is not None]
     return {
         "min_sources_ingesting": min(counts) if counts else None,
         "workspaces_with_2plus_sources": sum(1 for c in counts if c >= 2),
         "workspaces_with_no_sources": sum(1 for c in counts if c == 0),
-        "data_connectors_total": sum(w.get("data_connectors_total") or 0 for w in workspaces),
-        "connectors_connected": sum(w.get("connectors_connected") or 0 for w in workspaces),
-        "connectors_not_connected": sum(len(w.get("connectors_not_connected") or []) for w in workspaces),
+        "data_connectors_total": _total(workspaces, "data_connectors_total"),
+        "connectors_connected": _total(workspaces, "connectors_connected"),
+        "connectors_not_connected": _total(workspaces, "connectors_not_connected"),
         "workspaces_with_health_monitoring": sum(1 for w in workspaces if w.get("health_monitoring") is True),
-        "connectors_unhealthy": sum(
-            1 for w in workspaces for h in w.get("connector_health") or [] if (h.get("status") or "").lower() != "success"
-        ),
+        "connectors_unhealthy": _total(workspaces, "connectors_unhealthy"),
     }
 
 

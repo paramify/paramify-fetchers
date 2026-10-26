@@ -78,6 +78,11 @@ def table(columns, rows):
                         "rows": rows}]}
 
 
+def law_tables(names, basic=()):
+    return {"value": [{"name": n, "properties": {"plan": "Analytics"}} for n in names]
+            + [{"name": n, "properties": {"plan": "Basic"}} for n in basic]}
+
+
 class Resp:
     def __init__(self, status, body, headers=None):
         self.status_code, self._body = status, body
@@ -109,7 +114,11 @@ class FakeAzure:
                  "properties": {"tenantId": "t", "dataTypes": {"exchange": {"state": "Enabled"},
                                                                "teams": {"state": "Disabled"}}}},
             ]},
+            (f"{SI_A}/dataConnectors", "2025-10-01-preview"): {"value": []},
             (f"{SI_A}/dataConnectorDefinitions", "2025-09-01"): {"value": []},
+            (f"{WS_A}/tables", "2023-09-01"): law_tables(
+                ["AzureActivity", "SecurityAlert", "Usage", "Heartbeat", "SigninLogs", "AuditLogs", "OfficeActivity",
+                 "SentinelHealth", "SecurityIncident", "McasShadowItReporting", "MyCcp_CL"], basic=["StorageBlobLogs"]),
             (f"{SI_A}/alertRules", "2025-09-01"): {
                 "value": [rule("fusion", "Fusion", True, "f71aba3d-28fb-450b-b192-4e76a83015c8")],
                 "nextLink": f"https://management.azure.com{SI_A}/alertRules?api-version=2025-09-01&$skipToken=p2"},
@@ -356,13 +365,17 @@ def connectors_workspace(azure):
 
 def test_data_sources_last_data_per_connector(azure, tmp_path):
     connectors_workspace(azure)
-    # Filtered data types on tables with data, in catalog order: ASC alerts, MDATP alerts, Exchange, Teams.
-    azure.queries.insert(0, ("ParamifyIndex", table(["Time", "ParamifyIndex"], [[iso(NOW), 1], [iso(NOW), 2]])))
+    # Filtered data types on tables with data, in catalog order: ASC alerts, MDATP alerts, Defender XDR alerts, Exchange, Teams.
+    azure.queries.insert(0, ("ParamifyIndex", table(["Time", "ParamifyIndex"], [[iso(NOW), 1], [iso(NOW), 2], [iso(NOW), 3]])))
     code, ev = run("sentinel_data_sources", tmp_path)
     assert code == 0 and ev["metadata"]["partial_failure"] is False
     ws = ws_a(ev)
     union = next(q for _, _, q in azure.calls if "ParamifyIndex" in q)
-    assert "\u200b" not in union and union.count("ParamifyIndex =") == 4  # bare tables come from the ingestion query
+    # Bare tables come from the ingestion query; listed tables with no data aren't queried.
+    assert "\u200b" not in union and union.count("ParamifyIndex =") == 5
+    assert "AuditLogs" not in union and "MyCcp_CL" not in union
+    # Sentinel's own analytics alerts in SecurityAlert don't count for Defender XDR.
+    assert 'SecurityAlert | where ProductName in ("Microsoft Defender Advanced Threat Protection"' in union
     assert [(c["name"], c["seen_in"]) for c in ws["data_connectors"]] == [
         ("asc", ["stable"]), ("mtp", ["preview"]), ("o365", ["stable", "preview"]), ("ccp1", ["preview"])]
     by_id = {c["id"]: c for c in ws["connectors"]}
@@ -410,6 +423,112 @@ def test_data_sources_without_health_monitoring(azure, tmp_path):
     assert [c["id"] for c in ws["connectors"]] == ["AzureSecurityCenter", "Office365"]
     assert all(c["definition"] == "built_in" for c in ws["connectors"])
     assert not any("SentinelHealth" in q for _, _, q in azure.calls if q)
+    # No health data is unknown, not zero unhealthy.
+    assert ws["connectors_unhealthy"] is None and ev["summary"]["connectors_unhealthy"] is None
+
+
+def test_data_sources_parser_union_and_basic_table_queries(azure, tmp_path):
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [
+        ui_connector("SophosXGFirewall", [("Syslog (SophosXGFirewall)", "SophosXGFirewall ")]),
+        ui_connector("Wiz", [("WizIssues_CL", "union isfuzzy=true \n(WizIssues_CL),\n(WizIssuesV2_CL)")]),
+        ui_connector("AzureStorage", [("StorageBlobLogs", "StorageBlobLogs")]),
+        ui_connector("Broken", [("x", "{{tableName}}")])]}
+    # Pending, in catalog order: ASC alerts (no data), then the parser function and the union, which both have data.
+    azure.queries.insert(0, ("ParamifyIndex", table(["Time", "ParamifyIndex"], [[iso(NOW), 1], [iso(NOW), 2]])))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    union = next(q for _, _, q in azure.calls if "ParamifyIndex" in q)
+    assert code == 0 and "SophosXGFirewall" in union and "WizIssues_CL" in union and "StorageBlobLogs" not in union
+    assert by_id["SophosXGFirewall"]["connected"] is True and by_id["Wiz"]["connected"] is True
+    assert by_id["Wiz"]["data_types"][0]["table"] is None
+    # A Basic-plan table can't be read with /query, so it is unmeasured rather than empty.
+    assert by_id["AzureStorage"]["connected"] is None and ws["tables_not_measured"] == ["StorageBlobLogs"]
+    assert by_id["Broken"]["connected"] is None and any("connector Broken" in n for n in ws["notes"])
+    assert "Broken" not in ws["connectors_not_connected"] and "AzureStorage" not in ws["connectors_not_connected"]
+
+
+def test_data_sources_entra_id_protection_and_grouped_built_ins(azure, tmp_path):
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = {"value": [
+        ui_connector("AzureActiveDirectory", [("SigninLogs", "SigninLogs")])]}
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-09-01")]["value"] += [
+        {"id": f"{SI_A}/dataConnectors/ipc", "name": "ipc", "kind": "AzureActiveDirectory",
+         "properties": {"dataTypes": {"alerts": {"state": "Enabled"}}}},
+        {"id": f"{SI_A}/dataConnectors/o365-b", "name": "o365-b", "kind": "Office365", "properties": {}}]
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    by_id = {c["id"]: c for c in ws["connectors"]}
+    # The AzureActiveDirectory connection kind is Entra ID Protection, not the Entra ID logs connector.
+    assert by_id["AzureActiveDirectory"]["connections"] == []
+    ipc = by_id["AzureActiveDirectoryIdentityProtection"]
+    assert (ipc["definition"], ipc["connections"], [d["name"] for d in ipc["data_types"]]) == (
+        "built_in", ["ipc"], ["SecurityAlert (IPC)"])
+    assert [c["id"] for c in ws["connectors"]].count("Office365") == 1 and by_id["Office365"]["connections"] == ["o365", "o365-b"]
+
+
+def test_data_sources_health_shows_the_worst_connection(azure, tmp_path):
+    connectors_workspace(azure)
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"].append(
+        {"id": f"{SI_A}/dataConnectors/ccp2", "name": "ccp2", "kind": "RestApiPoller",
+         "properties": {"connectorDefinitionName": "MyCcp"}})
+    azure.queries.insert(0, ("SentinelResourceType", table(
+        ["SentinelResourceId", "TimeGenerated", "Status", "Reason", "Description", "SentinelResourceKind", "SentinelResourceName"],
+        [[f"{SI_A}/dataConnectors/ccp1", iso(NOW), "Success", None, None, "RestApiPoller", "ccp1"],
+         [f"{SI_A}/dataConnectors/ccp2", iso(NOW), "Failure", "Unauthorized", "token expired", "RestApiPoller", "ccp2"]])))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    ccp = next(c for c in ws["connectors"] if c["id"] == "MyCcp")
+    assert ccp["connections"] == ["ccp1", "ccp2"] and ccp["health_status"] == "Failure"
+    assert ws["connectors_unhealthy"] == 1 and ev["summary"]["connectors_unhealthy"] == 1
+
+
+def test_data_sources_batches_map_rows_back(azure, tmp_path, monkeypatch):
+    monkeypatch.setattr(MODS["sentinel_data_sources"], "QUERY_BATCH", 2)
+    connectors_workspace(azure)
+    # Batches: [ASC, MDATP], [Defender XDR alerts, Exchange], [Teams]; ParamifyIndex is per batch.
+    azure.queries.insert(0, ("ParamifyIndex", [table(["Time", "ParamifyIndex"], [[iso(NOW), 1]]),
+                                               table(["Time", "ParamifyIndex"], [[iso(NOW), 1]]),
+                                               table(["Time", "ParamifyIndex"], [])]))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    by_id = {c["id"]: c for c in ws_a(ev)["connectors"]}
+    assert code == 0 and sum("ParamifyIndex" in q for _, _, q in azure.calls if q) == 3
+    assert by_id["MicrosoftDefenderAdvancedThreatProtection"]["connected"] is True
+    assert by_id["AzureSecurityCenter"]["connected"] is False
+    assert [d["last_data_received"] is not None for d in by_id["Office365"]["data_types"]] == [True, False]
+
+
+def test_data_sources_failed_last_data_query_keeps_ingestion_answers(azure, tmp_path):
+    connectors_workspace(azure)
+    azure.queries.insert(0, ("ParamifyIndex", Resp(403, {"error": {"code": "Forbidden", "message": "no"}})))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    by_id = {c["id"]: c for c in ws_a(ev)["connectors"]}
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert by_id["AzureActiveDirectory"]["connected"] is True  # SigninLogs, from the ingestion query
+    assert by_id["AzureSecurityCenter"]["connected"] is None
+
+
+def test_data_sources_incomplete_listings_read_null(azure, tmp_path):
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")] = Resp(
+        400, {"error": {"code": "InvalidApiVersionParameter", "message": "retired"}})
+    azure.arm[(f"{WS_A}/tables", "2023-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ws["notes"][0].startswith("preview listing")
+    assert (ws["connectors_total"], ws["connectors_connected"], ws["connectors_not_connected"]) == (None, None, None)
+    assert ws["data_connectors_total"] is None and ws["tables_not_measured"] is None
+    # Without the table plans, no data can't be told from a Basic table.
+    assert all(c["connected"] is None for c in ws["connectors"])
+    assert {k: ev["summary"][k] for k in ("data_connectors_total", "connectors_connected", "connectors_not_connected")} == {
+        "data_connectors_total": None, "connectors_connected": None, "connectors_not_connected": None}
+
+
+def test_data_sources_unknown_ingestion_reads_null(azure, tmp_path):
+    azure.queries[0] = ("union withsource=ParamifySourceTable", Resp(403, {"error": {"code": "Forbidden", "message": "no"}}))
+    code, ev = run("sentinel_data_sources", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ws["health_monitoring"] is None and ws["connectors_unhealthy"] is None
+    assert {k: ev["summary"][k] for k in ("connectors_connected", "connectors_not_connected", "connectors_unhealthy")} == {
+        "connectors_connected": None, "connectors_not_connected": None, "connectors_unhealthy": None}
 
 
 def test_analytics_rules_merge_preview_kinds(azure, tmp_path):
