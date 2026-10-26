@@ -51,7 +51,7 @@ evidence_set:
     - keys.list() and keys.get() (per key) — keys, their dates and rotation policy
     - secrets.list() (per vault) — secret names and expiry dates, never values
     - KeyClient.list_properties_of_keys() and get_key_rotation_policy() (per vault, per key) — rotation policies on the data plane
-    - CertificateClient.list_properties_of_certificates() and get_certificate_policy() (per vault, per certificate) — certificate expiry and renewal policy; on the list, a 401 or 403 is that vault's not_authorized answer and any other error fails the run; on a policy read, a 401, 403 or 404 leaves that one certificate with policy_readable false and auto_renew_enabled null, and any other error fails the run
+    - CertificateClient.list_properties_of_certificates() and get_certificate_policy() (per vault, per certificate) — certificate expiry and renewal policy; certificates not yet issued (still pending) are not listed; on the list, a 401 or 403 is that vault's not_authorized answer and any other error fails the run; on a policy read, a 401, 403 or 404 leaves that one certificate with policy_readable false and auto_renew_enabled null, and any other error fails the run
     - certificates.list() (App Service) — App Service certificates, their expiry and source; a failure fails the run
 
     Output: azure_key_vault_key_rotation_<subscription>.json — every key vault's keys with their rotation policies, secrets with their expiry, and certificates with their expiry and renewal policy, plus every App Service certificate with its expiry and where it comes from; no key material, secret value, certificate body or PFX password is read.
@@ -87,7 +87,7 @@ evidence_set:
     Do Key Vault certificates renew themselves?
     - total_certificates — Number of certificates in the key vaults whose certificates could be listed
     - certificates_with_readable_policy — Number of Key Vault certificates whose policy could be read
-    - certificates_with_auto_renew — Number of Key Vault certificates whose policy has an AutoRenew lifetime action, so Key Vault renews them before they expire
+    - certificates_with_auto_renew — Number of Key Vault certificates whose policy has an AutoRenew lifetime action; Key Vault renews only self-signed and integrated-CA (DigiCert, GlobalSign) certificates, and each certificate's policy.issuer_name says which (Unknown means a CA Key Vault does not integrate with, so nothing renews it)
     - certificate_auto_renew_percentage — Percentage of Key Vault certificates with a readable policy that auto-renew = certificates_with_auto_renew / certificates_with_readable_policy × 100 (a whole number, 0–100); 0 when certificates_with_readable_policy is 0. Certificates whose policy couldn't be read, and vaults that refused the list, are left out of both
 
     Are certificates expired or about to expire?
@@ -99,7 +99,7 @@ evidence_set:
     Where do App Service certificates come from?
     - total_app_service_certificates — Number of App Service certificates in the subscription
     - app_service_certificates_by_source — Number of App Service certificates from each source, with every source listed and 0 when it has none:
-      - key_vault (synced from a Key Vault secret; the record's key_vault_certificate_auto_renew is that vault certificate's auto-renew, or null when the vault's certificates couldn't be read or it holds no certificate of that name, as for an App Service Certificate order)
+      - key_vault (synced from a Key Vault secret; the record's key_vault_certificate_auto_renew is that vault certificate's auto-renew, or null when the vault's certificates or that certificate's policy couldn't be read, the vault is not in this subscription, or it holds no certificate of that name, as for an App Service Certificate order)
       - managed (an App Service managed certificate, recognised by its canonical name or domain validation method; App Service renews it)
       - uploaded (an uploaded PFX file that nobody renews)
     - app_service_certificates_key_vault_sync_failing — Number of Key Vault-backed App Service certificates whose last sync from the vault failed (an error status such as KeyVaultSecretDoesNotExist); Succeeded, pending (Initialized, WaitingOnCertificateOrder) and unknown statuses are not counted
