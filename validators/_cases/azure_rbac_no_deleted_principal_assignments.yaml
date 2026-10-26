@@ -1,0 +1,29 @@
+validator: azure_rbac_no_deleted_principal_assignments
+cases:
+  - name: no_deleted_principals
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-RESIDUAL-RESOURCES"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false},"results":{"orphaned_resources":[],"role_assignments":[{"orphan_kind":null,"principal_exists":true}]},"summary":{"deleted_principal_assignments":0,"foreign_principal_assignments":0,"identities_checked":4,"orphaned_resources":2,"orphans_by_kind":{"unattached_nic":2},"principal_check":"complete","principals_checked":20,"principals_missing":0,"role_assignments_checked":45,"slots_checked":2,"stale_slot_days":90,"total_orphans":2}},"schema_version":"1.0"}'
+
+  - name: deleted_principals_still_assigned
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-RESIDUAL-RESOURCES"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false},"results":{"orphaned_resources":[],"role_assignments":[{"orphan_kind":null,"principal_exists":true}]},"summary":{"deleted_principal_assignments":35,"foreign_principal_assignments":0,"identities_checked":4,"orphaned_resources":2,"orphans_by_kind":{"deleted_principal_assignment":35,"unattached_nic":2},"principal_check":"complete","principals_checked":20,"principals_missing":22,"role_assignments_checked":45,"slots_checked":2,"stale_slot_days":90,"total_orphans":37}},"schema_version":"1.0"}'
+
+  - name: lookup_failed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-RESIDUAL-RESOURCES"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":true},"results":{"orphaned_resources":[],"role_assignments":[{"orphan_kind":null,"principal_exists":true}]},"summary":{"deleted_principal_assignments":0,"foreign_principal_assignments":0,"identities_checked":4,"orphaned_resources":2,"orphans_by_kind":{"unattached_nic":2},"principal_check":"failed","principals_checked":20,"principals_missing":0,"role_assignments_checked":45,"slots_checked":2,"stale_slot_days":90,"total_orphans":2}},"schema_version":"1.0"}'
+
+  - name: lookup_failed_flag_only
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-RESIDUAL-RESOURCES"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false},"results":{"orphaned_resources":[],"role_assignments":[{"orphan_kind":null,"principal_exists":true}]},"summary":{"deleted_principal_assignments":0,"foreign_principal_assignments":0,"identities_checked":4,"orphaned_resources":2,"orphans_by_kind":{"unattached_nic":2},"principal_check":"failed","principals_checked":20,"principals_missing":0,"role_assignments_checked":45,"slots_checked":2,"stale_slot_days":90,"total_orphans":2}},"schema_version":"1.0"}'
+
+  - name: never_ran
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-RESIDUAL-RESOURCES"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":true},"results":{},"summary":{"deleted_principal_assignments":0,"foreign_principal_assignments":0,"identities_checked":4,"orphaned_resources":2,"orphans_by_kind":{"unattached_nic":2},"principal_check":"not_run","principals_checked":20,"principals_missing":0,"role_assignments_checked":0,"slots_checked":2,"stale_slot_days":90,"total_orphans":2}},"schema_version":"1.0"}'
+
+  - name: partial_failure_flagged
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-RESIDUAL-RESOURCES"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":true},"results":{"orphaned_resources":[],"role_assignments":[{"orphan_kind":null,"principal_exists":true}]},"summary":{"deleted_principal_assignments":0,"foreign_principal_assignments":0,"identities_checked":4,"orphaned_resources":2,"orphans_by_kind":{"unattached_nic":2},"principal_check":"complete","principals_checked":20,"principals_missing":0,"role_assignments_checked":45,"slots_checked":2,"stale_slot_days":90,"total_orphans":2}},"schema_version":"1.0"}'
+
+  - name: deleted_count_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-RESIDUAL-RESOURCES"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false},"results":{"orphaned_resources":[],"role_assignments":[{"orphan_kind":null,"principal_exists":true}]},"summary":{"deleted_principal_grants":0,"foreign_principal_assignments":0,"identities_checked":4,"orphaned_resources":2,"orphans_by_kind":{"unattached_nic":2},"principal_check":"complete","principals_checked":20,"principals_missing":0,"role_assignments_checked":45,"slots_checked":2,"stale_slot_days":90,"total_orphans":2}},"schema_version":"1.0"}'
