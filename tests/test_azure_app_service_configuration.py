@@ -110,15 +110,24 @@ def test_no_cipher_suite_minimum_allows_every_suite():
     assert record["allows_non_forward_secret_cipher_suites"] is True
 
 
-def test_minimum_at_last_ecdhe_gcm_suite_blocks_cbc_and_static_rsa():
-    record = appsvc.cipher_suite_record("1.2", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256")
-    assert len(record["allowed_tls_cipher_suites"]) == 6
+def test_minimum_at_ecdsa_256_gcm_suite_blocks_cbc_and_static_rsa():
+    record = appsvc.cipher_suite_record("1.2", "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384")
+    assert len(record["allowed_tls_cipher_suites"]) == 3
     assert record["allows_cbc_cipher_suites"] is False
     assert record["allows_non_forward_secret_cipher_suites"] is False
 
 
-def test_ecdsa_cbc_suite_sits_below_the_gcm_suites():
+def test_ecdsa_cbc_suite_sits_right_after_the_ecdsa_256_gcm_suite():
     record = appsvc.cipher_suite_record("1.2", "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256")
+    assert record["allowed_tls_cipher_suites"][-2:] == [
+        "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256"]
+    assert record["allows_cbc_cipher_suites"] is True
+    assert record["allows_non_forward_secret_cipher_suites"] is False
+
+
+def test_gcm_minimum_below_the_ecdsa_cbc_suite_still_allows_cbc():
+    record = appsvc.cipher_suite_record("1.2", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256")
+    assert len(record["allowed_tls_cipher_suites"]) == 7
     assert record["allows_cbc_cipher_suites"] is True
     assert record["allows_non_forward_secret_cipher_suites"] is False
 
@@ -276,7 +285,7 @@ def web_client(scm=None, ftp=None, app_refs=None, conn_refs=None, stacks=None, s
             list_connection_strings=never_called if strings is None else per_app(strings, ns(properties={})),
             list=lambda: [site("web-a"), site("web-b"), site("func", kind="functionapp")],
             get_configuration=per_app({
-                "web-a": config(min_tls_cipher_suite="TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"),
+                "web-a": config(min_tls_cipher_suite="TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"),
                 "web-b": config(net_framework_version="v6.0", php_version="5.6"),
             }),
             get_auth_settings_v2_without_secrets=per_app({}, ns(platform=None, global_validation=None)),

@@ -65,15 +65,15 @@ FTP_ENCRYPTED_STATES = ("Disabled", "FtpsOnly")
 # live); "Internet" is the service tag for the whole public Internet.
 ALL_ADDRESSES = ("any", "*", "0.0.0.0/0", "::/0", "internet")
 
-# App Service's fixed cipher suite order, strongest first; a minimum blocks every suite after it.
+# App Service's fixed cipher suite order (the SDK's TlsCipherSuites enum); a minimum blocks every suite after it.
 TLS_CIPHER_SUITE_ORDER = (
     "TLS_AES_256_GCM_SHA384",
     "TLS_AES_128_GCM_SHA256",
     "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256",
     "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
     "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
     "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-    "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256",
     "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
     "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
     "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
