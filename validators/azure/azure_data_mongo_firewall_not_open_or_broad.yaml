@@ -5,12 +5,14 @@ role: configuration
 statement: >
   No MongoDB vCore cluster's firewall rules together admit every IPv4 address or more than a /8, and
   every cluster's firewall rules were read. A cluster with public access disabled, no rules, or a
-  /8-or-smaller allow-list passes. Does not assert that the admitted ranges are approved
+  /8-or-smaller allow-list passes. Also requires exactly 1 cluster with public network access
+  disabled, the count the organization asked for: change it when a cluster is added, removed or
+  opened. Does not assert that the admitted ranges are approved
   interconnections. Supports Coverage row 104 (Trusted Connection Review / KSI-CNA-RNT) (proposed
   mapping, not yet audited).
 
-regex: '"mongo_clusters_firewall_allow_all":\s*(?<mongo_clusters_firewall_allow_all>\d+)[\s\S]*?"mongo_clusters_firewall_broad":\s*(?<mongo_clusters_firewall_broad>\d+)[\s\S]*?"mongo_clusters_public_access_unknown":\s*(?<mongo_clusters_public_access_unknown>\d+)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0
+regex: '"mongo_clusters_firewall_allow_all":\s*(?<mongo_clusters_firewall_allow_all>\d+)[\s\S]*?"mongo_clusters_firewall_broad":\s*(?<mongo_clusters_firewall_broad>\d+)[\s\S]*?"mongo_clusters_public_access_disabled":\s*(?<mongo_clusters_public_access_disabled>\d+)[\s\S]*?"mongo_clusters_public_access_unknown":\s*(?<mongo_clusters_public_access_unknown>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 1; MATCH_GROUP[4] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
     criteria: NOT_EQUALS
@@ -22,6 +24,9 @@ validation_rules:
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
   - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
 

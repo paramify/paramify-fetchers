@@ -2,16 +2,24 @@ validator: azure_data_services_no_local_auth
 cases:
   - name: compliant
     expect: PASS
-    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"event_hub_namespaces_local_auth_enabled":0,"mongo_clusters_native_auth_enabled":0}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"event_hub_namespaces_local_auth_enabled":0,"event_hub_namespaces_shared_key_full_control":0,"mongo_clusters_native_auth_enabled":0}}}'
 
   - name: event_hub_namespaces_local_auth_enabled_nonzero
     expect: FAIL
-    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"event_hub_namespaces_local_auth_enabled":1,"mongo_clusters_native_auth_enabled":0}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"event_hub_namespaces_local_auth_enabled":1,"event_hub_namespaces_shared_key_full_control":0,"mongo_clusters_native_auth_enabled":0}}}'
 
   - name: mongo_clusters_native_auth_enabled_nonzero
     expect: FAIL
-    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"event_hub_namespaces_local_auth_enabled":0,"mongo_clusters_native_auth_enabled":1}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"event_hub_namespaces_local_auth_enabled":0,"event_hub_namespaces_shared_key_full_control":0,"mongo_clusters_native_auth_enabled":1}}}'
 
   - name: event_hub_namespaces_local_auth_enabled_renamed
     expect: FAIL
-    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"event_hub_namespaces_local_auth_enabled_renamed":0,"mongo_clusters_native_auth_enabled":0}}}'
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"event_hub_namespaces_local_auth_enabled_renamed":0,"event_hub_namespaces_shared_key_full_control":0,"mongo_clusters_native_auth_enabled":0}}}'
+
+  - name: event_hub_namespaces_shared_key_full_control_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"event_hub_namespaces_local_auth_enabled":0,"event_hub_namespaces_shared_key_full_control":1,"mongo_clusters_native_auth_enabled":0}}}'
+
+  - name: event_hub_namespaces_shared_key_full_control_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"event_hub_namespaces_local_auth_enabled":0,"event_hub_namespaces_shared_key_full_control_renamed":0,"mongo_clusters_native_auth_enabled":0}}}'
