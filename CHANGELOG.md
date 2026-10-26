@@ -12,6 +12,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **A shared engine for ServiceNow Scripted REST endpoints.**
+  `fetchers/servicenow/_shared/scripted_rest.py` does the request, the retries,
+  the response checks and the write for every ServiceNow fetcher. A fetcher now
+  only declares its endpoint: the URL variable, the watermark parameter, and,
+  for an endpoint that pages, the page size and where the records are. Paging
+  by limit and offset is new. The fetcher README tells you how to add an
+  endpoint.
+- **`servicenow_cases` and `servicenow_changes` have `evidence_set` blocks**
+  (`EVD-SERVICENOW-CASES`, `EVD-SERVICENOW-CHANGES`). Before, `paramify upload`
+  skipped their evidence and counted it as an error.
+
 - **Evidence samples for 84 fetchers.** Each one is a `sample.json` beside the
   fetcher's `fetcher.yaml`. A sample shows one sanitized record from a live run
   in a test account, for AWS, Azure, GCP and the demo fetchers. Use
@@ -132,6 +143,18 @@ schemas and the `paramify` CLI — not the internal code.
   KSI-RPL-ABO and KSI-RPL-TRC. Existing fields and keys are unchanged.
 
 ### Fixed
+
+- **`servicenow_cases` and `servicenow_changes` no longer report a failed
+  collection as a success.** A 200 response that is not JSON, for example a
+  single sign-on or instance hibernation page, and a response whose
+  `result.status` is not `success` now fail the run, and no evidence is
+  written. Before, the fetcher saved the response and exited 0.
+- **The ServiceNow fetchers give the correct failure code.** HTTP 429 is
+  `rate_limited`, 5xx is `target_unreachable`, and other 4xx are `bad_config`.
+  Before, all of them were `partial_failure`. A redirect is not followed. It
+  fails the run with `bad_config`. A URL that is not `https://` is refused,
+  because basic auth sends the password with each request. HTTP 429 and 5xx
+  responses are retried.
 
 - **`azure_private_dns_zone_configuration` matches a record's IP only in the
   networks its zone resolves for** (0.1.0 → 0.2.0). An IP was matched against
