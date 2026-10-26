@@ -79,7 +79,7 @@ evidence_set:
     - Microsoft Graph GET /groups/{id}/transitiveMembers on the beta endpoint (per group holding a role) — who holds the role through the group; beta because v1.0 member reads are known to leave out service principals
     - Microsoft Graph POST /directoryObjects/getByIds — the service principals holding a role, and which assigned principals no longer exist
 
-    Output: azure_entra_dormant_identities_<subscription>.json — every user and every role-holding service principal with its last sign-in and the roles it holds, plus each deleted principal that an Azure role assignment still names.
+    Output: azure_entra_dormant_identities_<subscription>.json — each user holding a role, each dormant user and each guest, and each role-holding service principal, with its last sign-in and the roles it holds, plus each deleted principal that an Azure role assignment still names; the user counts come from every user, but other users aren't listed.
 
     Summary fields:
 

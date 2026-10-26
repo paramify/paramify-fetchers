@@ -212,6 +212,11 @@ def service_principal_record(sp: dict, activity: Optional[dict], activity_ok: bo
     }
 
 
+def _listed(user: dict) -> bool:
+    """Users written to the evidence: role holders, dormant users and guests; the rest are only counted."""
+    return bool(user["directory_roles"] or user["azure_roles"] or user["dormant"] or user["is_guest"])
+
+
 def _held(found: bool, ok: bool) -> Optional[bool]:
     """A holding found is certain; none found is only certain when the read succeeded."""
     return True if found else (False if ok else None)
@@ -489,9 +494,10 @@ def collect(client, subscription_id: str, collector) -> tuple:
                 azure.get(pid, []),
             ))
     sp_records.sort(key=lambda r: ((r["display_name"] or "").lower(), r["id"] or ""))
-    logger.info("Collected %d user(s), %d role-holding service principal(s), %d deleted principal(s)",
-                len(user_records), len(sp_records), len(deleted))
-    return _results(tenant_id, user_records, sp_records, deleted, now), summarize(
+    listed = [u for u in user_records if _listed(u)]
+    logger.info("Collected %d user(s) (%d listed), %d role-holding service principal(s), %d deleted principal(s)",
+                len(user_records), len(listed), len(sp_records), len(deleted))
+    return _results(tenant_id, listed, sp_records, deleted, now), summarize(
         user_records, sp_records, deleted, status, days
     )
 

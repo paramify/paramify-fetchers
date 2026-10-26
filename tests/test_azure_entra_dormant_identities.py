@@ -241,6 +241,20 @@ def test_inactive_guest_and_deleted_role_holders(monkeypatch):
     assert gone["id"] == "gone-1" and gone["principal_types_recorded"] == ["User"]
 
 
+def test_an_active_member_without_a_role_is_counted_not_listed(monkeypatch):
+    graph, arm, objects = _tenant()
+    # None of these holds a role; only the dormant member and the guest are listed.
+    graph["/users"] += [_user("u-plain", last=2), _user("u-idle", last=200), _user("u-guest-plain", last=1, guest=True)]
+    results, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects))
+
+    listed = {u["id"] for u in results["users"]}
+    assert "u-plain" not in listed and {"u-idle", "u-guest-plain"} <= listed
+    assert len(listed) == 10
+    assert s["users_checked"] == 11 and s["enabled_users"] == 9
+    assert s["dormant_users"] == 4 and s["guest_users"] == 2
+    assert s["users_holding_roles"] == 8
+
+
 def test_a_service_principals_own_creation_date_wins_and_none_means_no_grace(monkeypatch):
     graph, arm, objects = _tenant()
     objects["sp-new"] = _sp("sp-new", "app-new", created=3)

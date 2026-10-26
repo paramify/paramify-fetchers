@@ -14,11 +14,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`azure_entra_dormant_identities`** (`EVD-AZURE-ENTRA-DORMANT-IDENTITIES`) —
   whether any dormant, never-used, guest or deleted user or service principal still
-  holds an Entra directory role or an Azure role in the subscription. Lists every
-  user with its creation date, last successful sign-in and roles (direct or through
-  a group), every role-holding service principal with its last sign-in as a client,
-  and every deleted principal (a deleted group included) an Azure role assignment
-  still names. Dormant is no successful sign-in in `ENTRA_DORMANT_DAYS` days (90
+  holds an Entra directory role or an Azure role in the subscription. Lists each
+  user holding a role, each dormant user and each guest with its creation date,
+  last successful sign-in and roles (direct or through a group); the user counts
+  come from every user. Also lists every role-holding service principal with its
+  last sign-in as a client, and every deleted principal (a deleted group
+  included) an Azure role assignment still names. Dormant is no successful sign-in in `ENTRA_DORMANT_DAYS` days (90
   by default); an account or app created within that many days isn't dormant
   yet. Only this tenant's own apps read dormant with no sign-in as a client on
   record; managed identities and other tenants' apps read unknown. Without
