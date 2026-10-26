@@ -1,0 +1,24 @@
+key: oci_no_publicly_reachable_data_services
+name: OCI No Publicly Reachable Data Services
+type: AUTOMATED
+role: configuration
+statement: >
+  No Autonomous Database, NFS export or Integration instance is reachable from
+  the whole internet: no database outside a VCN without an allow-list (or with
+  one that admits 0.0.0.0/0), no export whose source is 0.0.0.0/0, no public
+  integration endpoint without an IP or VCN allow-list. Does NOT assert
+  anything about the encryption key or mTLS, which the evidence reports
+  separately. Pair with oci_data_services_readable. Fails when any service is
+  reachable, and when the summary key is renamed.
+regex: '"publicly_reachable_resources":\s*(?<publicly_reachable_resources>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-DATA-SERVICE-EXPOSURE

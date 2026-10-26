@@ -1,0 +1,13 @@
+validator: oci_dependency_audit_present
+cases:
+  - name: audits_completed
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_audits": 3, "audits_completed": 3}}'
+
+  - name: no_audit_completed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_audits": 1, "audits_completed": 0}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"audits_finished": 3}}'
