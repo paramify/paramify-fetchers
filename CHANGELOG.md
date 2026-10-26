@@ -115,18 +115,22 @@ schemas and the `paramify` CLI — not the internal code.
   listed in `tables_not_measured`, and data types on them read as unmeasured. A
   connector is `connected` when any data type received data, and lists the
   connections that feed it, including the Defender XDR connection for alert
-  products it carries. Where Sentinel health monitoring is on, `connector_health`
-  holds each connection's latest SentinelHealth status and reason, and each
-  connector shows the worst of its connections. `data_connectors` now also lists
+  products it carries. An `alert_only` connector, whose data types are all
+  SecurityAlert queries (Defender for Identity, Defender for Cloud Apps,
+  Defender for Cloud, Entra ID Protection), is quiet rather than not connected
+  when no alert fired in the window. Where Sentinel health monitoring is on,
+  `connector_health` holds each connection's latest SentinelHealth status and
+  reason, and each connector shows the worst of its connections.
+  `data_connectors` now also lists
   kinds only the preview listing returns, such as Defender XDR
   (`MicrosoftThreatProtection`), with `seen_in` saying which listing returned
   each, so `data_connectors_total` can rise. Workspaces also gain
   `connectors_total`, `connectors_connected`, `connectors_not_connected`,
-  `connectors_unhealthy`, `health_monitoring` and `notes`. The summary gains
-  `connectors_connected`, `connectors_not_connected`,
-  `workspaces_with_health_monitoring` and `connectors_unhealthy`, each null when
-  nothing could be measured, and `data_connectors_total` is now null rather than
-  0 in that case. The description and instructions use the plain-text layout.
+  `connectors_quiet`, `connectors_unhealthy`, `health_monitoring` and `notes`.
+  The summary gains `connectors_connected`, `connectors_not_connected`,
+  `connectors_quiet`, `workspaces_with_health_monitoring` and
+  `connectors_unhealthy`, each null when nothing could be measured, and
+  `data_connectors_total` is now null rather than 0 in that case. The description and instructions use the plain-text layout.
 - **`azure_front_door_origins` 0.5.0: Kudu and silent regions.** An app whose
   Kudu (scm) site has its own access restrictions
   (`scmIpSecurityRestrictionsUseMain` off) that let every public caller in is no

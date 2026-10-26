@@ -33,6 +33,8 @@ NON_SOURCE_TABLES = frozenset({
 })
 # SecurityAlert holds both other products' alerts (each a source) and Sentinel's own analytics alerts (not one).
 ALERTS_TABLE = "SecurityAlert"
+# Cloud Discovery logs are an opt-in extra on the Defender for Cloud Apps connector, which otherwise sends only alerts.
+ALERT_ONLY_EXTRAS = frozenset({"McasShadowItReporting"})
 SENTINEL_PRODUCTS = frozenset({"azure sentinel", "microsoft sentinel"})
 HEALTH_TABLE = "SentinelHealth"
 
@@ -305,12 +307,15 @@ def finish_catalog(catalog: List[Dict[str, Any]], answers: Optional[Dict[Tuple[i
             for di, (name, query) in enumerate(c["_data_types"])
         ]
         times = [d["last_data_received"] for d in data_types if d["last_data_received"]]
+        tables = {d["table"] for d in data_types}
         unmeasured = answers is None or any((ci, di) not in answers for di in range(len(data_types)))
         rows = [health[ids[n]] for n in c["connections"] if ids.get(n) and ids[n] in health]
         worst = next((r for r in rows if (r["status"] or "").lower() != "success"), rows[0] if rows else None)
         out.append({
             **{k: v for k, v in c.items() if not k.startswith("_")},
             "data_types": data_types,
+            # No alert in the window is normal for these, so they read as quiet rather than not connected.
+            "alert_only": ALERTS_TABLE in tables and tables <= {ALERTS_TABLE} | ALERT_ONLY_EXTRAS,
             "last_data_received": max(times) if times else None,
             "connected": True if times else (None if unmeasured or not data_types else False),
             "health_status": worst["status"] if worst else None,
@@ -414,7 +419,10 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         "connectors": finished,
         "connectors_total": len(finished) if complete else None,
         "connectors_connected": sum(1 for c in finished if c["connected"] is True) if measured else None,
-        "connectors_not_connected": [c["id"] for c in finished if c["connected"] is False] if measured else None,
+        "connectors_not_connected": (
+            [c["id"] for c in finished if c["connected"] is False and not c["alert_only"]] if measured else None
+        ),
+        "connectors_quiet": [c["id"] for c in finished if c["connected"] is False and c["alert_only"]] if measured else None,
         "health_monitoring": health_on,
         "connector_health": health,
         "connectors_unhealthy": (
@@ -445,6 +453,7 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
         "data_connectors_total": _total(workspaces, "data_connectors_total"),
         "connectors_connected": _total(workspaces, "connectors_connected"),
         "connectors_not_connected": _total(workspaces, "connectors_not_connected"),
+        "connectors_quiet": _total(workspaces, "connectors_quiet"),
         "workspaces_with_health_monitoring": sum(1 for w in workspaces if w.get("health_monitoring") is True),
         "connectors_unhealthy": _total(workspaces, "connectors_unhealthy"),
     }

@@ -269,7 +269,7 @@ Microsoft Sentinel:
 |---|---|
 | `azure_sentinel_analytics_rules` | Analytics rules per workspace: kind, state, severity, MITRE tactics and techniques, and whether Fusion is on |
 | `azure_sentinel_automation_rules` | Automation rules per workspace: triggers, conditions, state and actions |
-| `azure_sentinel_data_sources` | Data connectors per workspace with each one's last data received and health, and which tables received data in the ingestion window |
+| `azure_sentinel_data_sources` | Data connectors per workspace with each one's last data received and health (an alert-only connector with no alert reads quiet, not not connected), and which tables received data in the ingestion window |
 | `azure_sentinel_incidents` | Incidents in the lookback plus every open one: severity, status, classification, owner and time to close |
 
 Defender for Cloud and Azure Policy:
