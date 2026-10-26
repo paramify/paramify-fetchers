@@ -1,0 +1,24 @@
+key: azure_diag_all_resources_ingesting_recently
+name: Azure Log Analytics-Bound Resources All Ingesting Recently
+type: AUTOMATED
+role: configuration
+statement: >
+  Every log-emitting resource that exports to Log Analytics has a record in a destination workspace within
+  the ingestion lookback (7 days by default): all_log_analytics_resources_ingesting is true, none is unknown
+  or without records, at least one resource is ingesting, and the collection had no partial failure. A
+  destination that refused the read, or an unqueried Basic or Auxiliary table that could hold the logs,
+  reads unknown and fails. Substantiates KSI-MLA-OSM (Audit Log Collection and Alerts; Continuous
+  Monitoring Strategy): "Fail inventory resources with ... no recent ingestion" and "data is recently
+  ingested". Does not prove resources with no Log Analytics setting are covered (see
+  azure_diag_log_analytics_coverage_complete) or that the workspace is approved. An idle resource whose
+  logs are event-driven writes nothing and fails here too.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"all_log_analytics_resources_ingesting":\s*true,[\s\S]*?"resources_ingestion_unknown":\s*0,[\s\S]*?"resources_with_recent_ingestion":\s*[1-9]\d*,\s*"resources_without_recent_ingestion":\s*0\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-RESOURCE-DIAG-SETTINGS
