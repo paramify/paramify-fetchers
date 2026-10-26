@@ -45,12 +45,11 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 
 # Microsoft Graph permissions (application permission, admin consent):
-#   User.Read.All       — /users.
+#   Directory.Read.All  — /organization, /users, /directoryRoles and their members,
+#                         groups' transitive members, /applications and
+#                         /directoryObjects/getByIds. The Directory Readers role covers it.
 #   AuditLog.Read.All   — users' signInActivity and the service principal sign-in
 #                         activity report; both also need Entra ID P1 or P2.
-#   Directory.Read.All  — /directoryRoles and their members, groups' transitive
-#                         members, /applications and /directoryObjects/getByIds. The
-#                         Directory Readers role covers it.
 # Azure: Reader on the subscription for its tenant id, role assignments and definitions.
 # A denied read is recorded as an API failure and the run exits non-zero; without
 # sign-in activity the users and their roles are still listed and the dormancy
@@ -66,11 +65,12 @@ evidence_set:
   instructions: |
     Script: azure/entra_dormant_identities/fetcher.py
 
-    Access: Microsoft Graph User.Read.All, AuditLog.Read.All and Directory.Read.All (or the Directory Readers role) with an Entra ID P1 or P2 licence, and Reader on the subscription. Without AuditLog.Read.All or the licence, the users and their roles are still listed and the dormancy fields read null. The service principal sign-in report exists only in Microsoft's global cloud, so in US Government and China clouds service principal dormancy reads null. Run it with a credential from the subscription's own tenant: this tenant's own apps are told apart by the subscription's tenant id.
+    Access: Microsoft Graph Directory.Read.All (or the Directory Readers role) and AuditLog.Read.All with an Entra ID P1 or P2 licence, and Reader on the subscription. Without AuditLog.Read.All or the licence, the users and their roles are still listed and the dormancy fields read null. The service principal sign-in report exists only in Microsoft's global cloud, so in US Government and China clouds service principal dormancy reads null. The credential must sign in to the subscription's own tenant; if Microsoft Graph answers for another tenant, the run fails without reading the directory.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
     - GET /subscriptions/{id} — the subscription's tenant, to tell this tenant's own apps from other tenants'
+    - Microsoft Graph GET /organization — the tenant Microsoft Graph is signed in to, which must be the subscription's
     - Microsoft Graph GET /users with sign-in activity — every user, when it was created and when it last signed in (read again without sign-in activity if that is refused)
     - Microsoft Graph GET /applications — when each of this tenant's app registrations was created, for the grace period of a service principal with no creation date of its own
     - Microsoft Graph GET /reports/servicePrincipalSignInActivities on the beta endpoint — when each app or managed identity last signed in
@@ -85,11 +85,11 @@ evidence_set:
 
     What was checked?
     - dormant_after_days — Days without a successful sign-in after which an enabled identity counts as dormant (90 unless ENTRA_DORMANT_DAYS sets it)
-    - tenant_readable — True if the subscription's tenant id was read; false if not, and every service principal missing from the sign-in report reads unknown
+    - tenant_readable — True if the subscription's tenant id and the tenant Microsoft Graph is signed in to were both read, and match; false if not, and every service principal with no sign-in as a client reads unknown (on a mismatch nothing else is read and every count reads null)
     - users_readable — True if the user list was read, with or without sign-in activity; false if both reads failed, and every user count reads null
     - applications_readable — True if this tenant's app registrations were read; false if not, and a role-holding app of this tenant with no sign-in as a client and no creation date of its own reads unknown (see service_principals_holding_roles_dormancy_unknown)
-    - user_sign_in_activity — One of read, not_licensed or not_read: whether users' sign-in activity was read; not_licensed means the tenant has no Entra ID P1 or P2, not_read that it was refused or failed
-    - service_principal_sign_in_activity — One of read, not_licensed or not_read: whether the service principal sign-in activity report was read
+    - user_sign_in_activity — Whether users' sign-in activity was read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused or failed)
+    - service_principal_sign_in_activity — Whether the service principal sign-in activity report was read: read, not_licensed (the tenant has no Entra ID P1 or P2) or not_read (refused or failed)
     - directory_roles_readable — True if every directory role, its members and the members of groups holding one were read; false if any read of directory roles, their members or group members failed
     - azure_roles_readable — True if the subscription's Azure role assignments, role names and the members of groups holding one were read; false if any read of Azure role assignments, role names or group members failed
     - principal_lookup_readable — True if the directory lookup of role-holding service principals and assigned principals succeeded; false if it failed, and the service principal and deleted-principal fields read null
@@ -109,9 +109,9 @@ evidence_set:
     - guest_users — Number of guest (external) users; null if the user list wasn't read
     - dormant_users — Number of dormant users: enabled, with no successful sign-in in the last dormant_after_days days, or with none at all and created more than that many days ago; null if sign-in activity wasn't read
     - users_never_signed_in — Number of users with no sign-in attempt on record, successful or not, including new and disabled accounts; null if sign-in activity wasn't read
-    - dormant_service_principals_holding_roles — Number of enabled role-holding service principals with no sign-in as a client (app-only or on behalf of a user) in the last dormant_after_days days, or with none on record and created more than that many days ago; the creation date comes from the service principal, else its app registration in this tenant; a principal with neither gets no grace, or reads unknown if the app registrations couldn't be read. One missing from the report counts only if it's an app registered in this tenant; the rest missing from it are unknown. Null if the report, the roles or the lookup weren't read
+    - dormant_service_principals_holding_roles — Number of enabled role-holding service principals with no sign-in as a client (app-only or on behalf of a user) in the last dormant_after_days days, or with none on record and created more than that many days ago; the creation date comes from the service principal, else its app registration in this tenant; a principal with neither gets no grace, or reads unknown if the app registrations couldn't be read. One with no sign-in as a client on record counts only if it's an app registered in this tenant; the rest are unknown. Null if the report, the roles or the lookup weren't read
     - service_principals_holding_roles_without_recorded_sign_in — Number of role-holding service principals with no sign-in as a client in the report, including service principals whose dormancy is unknown; null if the report, the roles or the lookup weren't read
-    - service_principals_holding_roles_dormancy_unknown — Number of role-holding service principals whose dormancy can't be judged: managed identities, other tenants' apps (Microsoft's included) and apps with no owner organization that are missing from the sign-in report, since Microsoft doesn't document the report covering them; every one missing from it when the subscription's tenant couldn't be read; and this tenant's own apps with no sign-in as a client and no creation date of their own when the app registrations couldn't be read; null if the report, the roles or the lookup weren't read
+    - service_principals_holding_roles_dormancy_unknown — Number of role-holding service principals whose dormancy can't be judged: managed identities, other tenants' apps (Microsoft's included) and apps with no owner organization that have no sign-in as a client in the report, whether or not it lists them, since Microsoft doesn't document the report covering their client sign-ins; every one with no sign-in as a client when the tenant couldn't be read; and this tenant's own apps with no sign-in as a client and no creation date of their own when the app registrations couldn't be read; null if the report, the roles or the lookup weren't read
 
     Does any dormant, unused, guest or deleted identity hold a role?
     - dormant_users_holding_roles — Number of dormant users holding a directory role or an Azure role; null if sign-in activity or the roles weren't read

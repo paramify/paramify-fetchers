@@ -17,15 +17,17 @@ schemas and the `paramify` CLI — not the internal code.
   holds an Entra directory role or an Azure role in the subscription. Lists every
   user with its creation date, last successful sign-in and roles (direct or through
   a group), every role-holding service principal with its last sign-in as a client,
-  and every deleted principal an Azure role assignment still names. Dormant is no
-  successful sign-in in `ENTRA_DORMANT_DAYS` days (90 by default), with the same
-  grace for users, and for apps whose registration here was created more
-  recently. Only this tenant's own apps read dormant when missing from the
-  service principal sign-in report; managed identities and other tenants' apps
-  read unknown. Without sign-in activity the users and roles are still listed
-  and the dormancy figures read null, and every count reads null when a read it
-  needs was refused. `_shared/azure_rest.py` gains `graph_pages` and
-  `graph_list` for paged Graph reads on v1.0 or beta.
+  and every deleted principal (a deleted group included) an Azure role assignment
+  still names. Dormant is no successful sign-in in `ENTRA_DORMANT_DAYS` days (90
+  by default); an account or app created within that many days isn't dormant
+  yet. Only this tenant's own apps read dormant with no sign-in as a client on
+  record; managed identities and other tenants' apps read unknown. Without
+  sign-in activity the users and roles are still listed and the dormancy
+  figures read null, and every count reads null when a read it needs was
+  refused. If Microsoft Graph answers for another tenant than the
+  subscription's, the run fails without reading the directory.
+  `_shared/azure_rest.py` gains `graph_pages` and `graph_list` for paged Graph
+  reads on v1.0 or beta.
 - **Oracle Cloud Infrastructure category** (`fetchers/oci/`, fifteen
   fetchers, `pip install -e '.[oci]'`). Authenticates with an API signing key
   the runner injects as a secret (`OCI_PRIVATE_KEY` carries the PEM content,

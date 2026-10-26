@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
-from azure_rest import int_config, parse_time, run_subscription  # noqa: E402
+from azure_rest import ArmError, int_config, parse_time, run_subscription  # noqa: E402
 from entra_graph import is_privileged_role  # noqa: E402
 
 NAME = "azure_entra_dormant_identities"
@@ -179,9 +179,9 @@ def service_principal_record(sp: dict, activity: Optional[dict], activity_ok: bo
         sp.get("servicePrincipalType") != SP_TYPE_MANAGED_IDENTITY
         and (sp.get("appOwnerOrganizationId") or "").lower() == tenant_id.lower()
     )
-    # The report isn't documented to cover managed identities or other tenants' apps (Microsoft's
-    # included), so only this tenant's own apps read dormant when it has no entry for them.
-    if not activity_ok or (not in_report and not own_app):
+    # The report isn't documented to cover managed identities' or other tenants' apps' (Microsoft's
+    # included) sign-ins as a client, so only this tenant's own apps read dormant without one on record.
+    if not activity_ok or (since is None and not own_app):
         dormant = None
     elif since is not None:
         dormant = enabled and since > days
@@ -329,16 +329,28 @@ def _graph_list(client, collector, operation: str, path: str, version: str = "v1
     return collector.guard(operation, lambda: client.graph_list(path, version), default=None)
 
 
-def _group_members(client, collector, group_ids) -> Dict[str, List[dict]]:
-    # Beta lists service principals among members; v1.0 /members is known to leave them out.
-    out = {}
+def _members_operation(gid: str) -> str:
+    return f"graph.groups({gid}).transitiveMembers.get(beta)"
+
+
+def _group_members(client, collector, group_ids) -> tuple:
+    """Each group's user and service principal members, and the 404s held back until the lookup says why."""
+    out, not_found = {}, {}
+
+    def read(gid):
+        # Beta lists service principals among members; v1.0 /members is known to leave them out.
+        try:
+            return client.graph_list(f"/groups/{gid}/transitiveMembers?$select=id", "beta")
+        except ArmError as exc:
+            if exc.status != 404:
+                raise
+            not_found[gid] = exc
+            return []
+
     for gid in sorted(group_ids):
-        members = _graph_list(
-            client, collector, f"graph.groups({gid}).transitiveMembers.get(beta)",
-            f"/groups/{gid}/transitiveMembers?$select=id", "beta",
-        )
-        out[gid] = [m for m in members or [] if m.get("@odata.type") in (ODATA_USER, ODATA_SP)]
-    return out
+        members = collector.guard(_members_operation(gid), lambda gid=gid: read(gid), default=[])
+        out[gid] = [m for m in members if m.get("@odata.type") in (ODATA_USER, ODATA_SP)]
+    return out, not_found
 
 
 def _lookup(client, collector, ids: List[str]) -> Optional[Dict[str, dict]]:
@@ -363,7 +375,19 @@ def collect(client, subscription_id: str, collector) -> tuple:
     subscription = collector.guard("subscriptions.get", lambda: client.get(
         f"/subscriptions/{subscription_id}", SUBSCRIPTION_API), default=None) or {}
     tenant_id = subscription.get("tenantId")
-    status["tenant"] = READ if tenant_id else NOT_READ
+    # Graph reads the credential's tenant; in another one (Azure Lighthouse) every principal would read deleted.
+    orgs = _graph_list(client, collector, "graph.organization.get", "/organization?$select=id") or [{}]
+    graph_tenant = (orgs[0].get("id") or "").lower()
+    if tenant_id and graph_tenant and graph_tenant != tenant_id.lower():
+        collector.record("graph.organization.get", RuntimeError(
+            f"Microsoft Graph is signed in to tenant {graph_tenant}, but the subscription belongs to tenant "
+            f"{tenant_id.lower()}; sign in to the subscription's tenant"
+        ))
+        unread = dict.fromkeys(("tenant", "users", "applications", "user_sign_in_activity",
+                                "service_principal_sign_in_activity", "directory_roles", "azure_roles",
+                                "principal_lookup"), NOT_READ)
+        return _results(tenant_id, [], [], [], now), summarize([], [], [], unread, days)
+    status["tenant"] = READ if tenant_id and graph_tenant else NOT_READ
 
     before = len(collector.failures)
     users = _graph_list(client, collector, "graph.users.get(signInActivity)",
@@ -414,7 +438,7 @@ def collect(client, subscription_id: str, collector) -> tuple:
         for a in assignments if ((a.get("properties") or {}).get("principalType") or "").lower() == "group"
     }
     before = len(collector.failures)
-    group_members = _group_members(client, collector, groups)
+    group_members, groups_not_found = _group_members(client, collector, groups)
     if len(collector.failures) > before:
         status["directory_roles"] = status["azure_roles"] = NOT_READ
 
@@ -434,6 +458,13 @@ def collect(client, subscription_id: str, collector) -> tuple:
     before = len(collector.failures)
     found = _lookup(client, collector, lookup_ids) if lookup_ids else {}
     status["principal_lookup"] = READ if len(collector.failures) == before else NOT_READ
+    # A group whose members 404 is gone only if the lookup agrees, and then it's listed as deleted.
+    unexplained = {gid: exc for gid, exc in groups_not_found.items()
+                   if found is None or gid in found or gid not in lookup_ids}
+    for gid, exc in unexplained.items():
+        collector.record(_members_operation(gid), exc)
+    if unexplained:
+        status["directory_roles"] = status["azure_roles"] = NOT_READ
 
     readable = (status["directory_roles"] == READ, status["azure_roles"] == READ)
     user_records = sorted(
@@ -447,7 +478,8 @@ def collect(client, subscription_id: str, collector) -> tuple:
         if obj is not None and obj.get("@odata.type") == ODATA_SP:
             sp_records.append(service_principal_record(
                 obj, by_app.get((obj.get("appId") or "").lower()),
-                status["service_principal_sign_in_activity"] == READ, tenant_id,
+                status["service_principal_sign_in_activity"] == READ,
+                tenant_id if status["tenant"] == READ else None,
                 directory.get(pid, []), azure.get(pid, []), readable, days, now,
                 app_created.get((obj.get("appId") or "").lower()), status["applications"] == READ,
             ))
@@ -459,14 +491,19 @@ def collect(client, subscription_id: str, collector) -> tuple:
     sp_records.sort(key=lambda r: ((r["display_name"] or "").lower(), r["id"] or ""))
     logger.info("Collected %d user(s), %d role-holding service principal(s), %d deleted principal(s)",
                 len(user_records), len(sp_records), len(deleted))
-    results = {
+    return _results(tenant_id, user_records, sp_records, deleted, now), summarize(
+        user_records, sp_records, deleted, status, days
+    )
+
+
+def _results(tenant_id, users: List[dict], sps: List[dict], deleted: List[dict], now: datetime) -> dict:
+    return {
         "tenant_id": tenant_id,
-        "users": user_records,
-        "service_principals": sp_records,
+        "users": users,
+        "service_principals": sps,
         "deleted_principals": deleted,
         "evaluated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
-    return results, summarize(user_records, sp_records, deleted, status, days)
 
 
 def main() -> int:

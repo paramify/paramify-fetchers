@@ -1,7 +1,4 @@
-"""azure_entra_dormant_identities: inactive, guest and deleted identities that still hold a role.
-
-Synthetic Graph and ARM responses only: no SDK, no credentials, no network.
-"""
+"""azure_entra_dormant_identities against synthetic Graph and ARM responses: no SDK, credentials or network."""
 
 from __future__ import annotations
 
@@ -111,6 +108,7 @@ def _tenant():
         _user("u-off-never", enabled=False),
     ]
     graph = {
+        "/organization": [{"id": TENANT}],
         "/users": users,
         # This tenant's app registrations: where a service principal's creation date comes from.
         "/applications": [
@@ -304,6 +302,91 @@ def test_a_refused_subscription_read_leaves_every_missing_principal_unknown(monk
     assert sp["registered_in_this_tenant"] is None and sp["dormant"] is None
     assert s["service_principals_holding_roles_dormancy_unknown"] == 1
     assert s["no_inactive_identity_holds_a_role"] is None
+
+
+def test_graph_signed_in_to_another_tenant_reads_nothing_and_fails(monkeypatch):
+    graph, arm, objects = _tenant()
+    graph["/organization"] = [{"id": VENDOR_TENANT}]
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm, objects))
+
+    assert [f["operation"] for f in collector.failures] == ["graph.organization.get"]
+    assert VENDOR_TENANT in collector.failures[0]["message"]
+    assert results["users"] == results["service_principals"] == results["deleted_principals"] == []
+    assert s["tenant_readable"] is False and s["users_readable"] is False
+    assert s["users_checked"] is None and s["deleted_principals_holding_azure_roles"] is None
+    assert s["no_inactive_identity_holds_a_role"] is None
+
+
+def test_an_unread_graph_tenant_leaves_every_principal_without_a_client_sign_in_unknown(monkeypatch):
+    graph, arm, objects = _tenant()
+    results, s, collector = _collect(monkeypatch, FakeClient(graph, arm, objects, errors={"/organization": DENIED}))
+
+    assert [f["operation"] for f in collector.failures] == ["graph.organization.get"]
+    assert s["tenant_readable"] is False
+    sps = {r["id"]: r for r in results["service_principals"]}
+    assert sps["sp-unused"]["registered_in_this_tenant"] is None and sps["sp-unused"]["dormant"] is None
+    assert sps["sp-idle"]["dormant"] is True  # judged on its client sign-in
+
+
+def test_an_assignment_to_a_deleted_group_is_listed_not_a_failure(monkeypatch):
+    azure_rest = sys.modules["azure_rest"]
+    graph, arm, objects = _tenant()
+    graph["/directoryRoles/r-ga/members"] = []
+    graph["/directoryRoles/r-dr/members"] = []
+    arm["roleAssignments"] = [_assignment("a1", "u-active"), _assignment("a2", "g-gone", ptype="Group")]
+    gone = azure_rest.ArmError(404, "Request_ResourceNotFound", "Resource 'g-gone' does not exist.")
+    results, s, collector = _collect(
+        monkeypatch, FakeClient(graph, arm, objects, errors={"/groups/g-gone/transitiveMembers": gone})
+    )
+
+    assert collector.failures == []
+    assert s["directory_roles_readable"] is True and s["azure_roles_readable"] is True
+    (deleted,) = results["deleted_principals"]
+    assert deleted["id"] == "g-gone" and deleted["principal_types_recorded"] == ["Group"]
+    assert s["deleted_principals_holding_azure_roles"] == 1 and s["users_holding_roles"] == 1
+    assert s["no_inactive_identity_holds_a_role"] is False
+
+
+def test_a_404_on_a_group_the_directory_still_has_is_a_failure(monkeypatch):
+    azure_rest = sys.modules["azure_rest"]
+    graph, arm, objects = _tenant()
+    lag = azure_rest.ArmError(404, "Request_ResourceNotFound", "Resource 'g-ops' does not exist.")
+    _, s, collector = _collect(monkeypatch, FakeClient(graph, arm, objects, errors={"/groups/g-ops/transitiveMembers": lag}))
+
+    assert [f["operation"] for f in collector.failures] == ["graph.groups(g-ops).transitiveMembers.get(beta)"]
+    assert s["azure_roles_readable"] is False and s["guest_users_holding_roles"] is None
+    assert s["deleted_principals_holding_azure_roles"] is None
+
+
+def test_a_404_on_a_directory_role_group_is_a_failure(monkeypatch):
+    azure_rest = sys.modules["azure_rest"]
+    graph, arm, objects = _tenant()
+    gone = azure_rest.ArmError(404, "Request_ResourceNotFound", "Resource 'g-admins' does not exist.")
+    _, s, collector = _collect(
+        monkeypatch, FakeClient(graph, arm, objects, errors={"/groups/g-admins/transitiveMembers": gone})
+    )
+    assert [f["operation"] for f in collector.failures] == ["graph.groups(g-admins).transitiveMembers.get(beta)"]
+    assert s["directory_roles_readable"] is False
+
+
+def test_other_tenants_apps_listed_only_as_a_resource_are_unknown(monkeypatch):
+    graph, arm, objects = _tenant()
+    graph["/reports/servicePrincipalSignInActivities"] += [
+        {"appId": "app-ms", "resourceSignInActivity": {"lastSignInDateTime": _ago(1)},
+         "lastSignInActivity": {"lastSignInDateTime": _ago(1)}},
+        {"appId": "app-mi-new", "applicationAuthenticationResourceSignInActivity": {"lastSignInDateTime": _ago(2)},
+         "lastSignInActivity": {"lastSignInDateTime": _ago(2)}},
+        {"appId": "app-unused", "resourceSignInActivity": {"lastSignInDateTime": _ago(1)}},
+    ]
+    results, s, _ = _collect(monkeypatch, FakeClient(graph, arm, objects))
+
+    sps = {r["id"]: r for r in results["service_principals"]}
+    assert sps["sp-ms"]["in_sign_in_activity_report"] is True and sps["sp-ms"]["dormant"] is None
+    assert sps["sp-mi-new"]["dormant"] is None
+    # This tenant's own app with no sign-in as a client is still judged.
+    assert sps["sp-unused"]["dormant"] is True
+    assert s["dormant_service_principals_holding_roles"] == 2
+    assert s["service_principals_holding_roles_dormancy_unknown"] == 3
 
 
 def test_dormancy_threshold_is_configurable(monkeypatch):

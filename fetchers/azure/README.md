@@ -79,17 +79,18 @@ instead of Reader.
 ### Microsoft Graph
 
 Application permissions on the identity, with admin consent. The Entra fetchers are
-tenant-scoped.
+tenant-scoped, except `azure_entra_dormant_identities`, which takes a subscription
+and reads the tenant it belongs to.
 
 | Permission | Needed by |
 |---|---|
 | `Application.Read.All` | `azure_entra_app_registrations`, `azure_entra_service_principals` |
 | `Policy.Read.All` | `azure_entra_conditional_access_policies`, `azure_entra_authentication_policy` |
-| `Directory.Read.All` | `azure_entra_authentication_policy` (group settings, subscribed SKUs), `azure_entra_mfa_status` (users, role members), `azure_entra_privileged_roles`, `azure_residual_resources` (principal lookup) |
-| `AuditLog.Read.All` | `azure_entra_mfa_status` (sign-in activity and the registration report) |
+| `Directory.Read.All` | `azure_entra_authentication_policy` (group settings, subscribed SKUs), `azure_entra_mfa_status` (users, role members), `azure_entra_privileged_roles`, `azure_residual_resources` (principal lookup), `azure_entra_dormant_identities` (users, role members, app registrations, principal lookup) |
+| `AuditLog.Read.All` | `azure_entra_mfa_status` (sign-in activity and the registration report), `azure_entra_dormant_identities` (users' and service principals' sign-in activity) |
 | `Directory.Read.All` (optional) | `azure_log_analytics_deletion_rights`: principal names; without it the grants are listed by id |
 | `Application.Read.All` (optional) | `azure_managed_identity_configuration`: each identity's Graph app permissions; without it `graph_access` reads `not_authorized` and the run succeeds |
-| `Organization.Read.All` (optional) | Every `azure_entra_*` fetcher: tenant name and domain; without it the tenant id comes from `AZURE_TENANT_ID`, and the run fails only if that is unset too |
+| `Organization.Read.All` (optional) | Every `azure_entra_*` fetcher but `azure_entra_dormant_identities`: tenant name and domain; without it the tenant id comes from `AZURE_TENANT_ID`, and the run fails only if that is unset too |
 
 For the Entra fetchers, narrower permissions can stand in for `Directory.Read.All`;
 each call's Microsoft Graph reference page lists them.
@@ -184,6 +185,7 @@ Identity and access:
 | `azure_entra_conditional_access_policies` | Conditional Access policies: state (on, report-only, off), included and excluded users, groups, roles and apps, conditions, grant and session controls |
 | `azure_entra_mfa_status` | Each user's enabled state, last sign-in and MFA capability, with coverage for admins, members and guests |
 | `azure_entra_privileged_roles` | Activated directory roles and their holders, with Global Administrators counted and tenant-wide admin roles flagged |
+| `azure_entra_dormant_identities` | Users and service principals holding a directory role or an Azure role in the subscription, with their last sign-in: dormant, never-used, guest and deleted identities flagged |
 | `azure_rbac_role_assignments` | Role assignments at the subscription and above, and separately below it, with Owner, Contributor, User Access Administrator and RBAC Administrator flagged |
 | `azure_rbac_custom_roles` | Custom role definitions with their full permission sets, flagged for wildcards and for permissions that allow privilege escalation |
 | `azure_managed_identity_configuration` | Managed identities: attached resources, federated credentials, Azure roles judged by their permissions, and Microsoft Graph app permissions |
