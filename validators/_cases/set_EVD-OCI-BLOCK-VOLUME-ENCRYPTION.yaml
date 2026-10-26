@@ -1,0 +1,17 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them. A zero cannot prove the zero was measured — only the set, with its integrity partner, can.
+evidence_set: EVD-OCI-BLOCK-VOLUME-ENCRYPTION
+cases:
+  - name: every_volume_under_a_customer_key
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_volumes": 4, "volumes_with_oracle_managed_key": 0}}}'
+
+  - name: a_volume_under_oracles_key
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_volumes": 4, "volumes_with_oracle_managed_key": 1}}}'
+
+  - name: nothing_was_collected
+    expect: FAIL
+    note: >
+      The posture validator reads a zero and passes; oci_volume_inventory_present fails because nothing was counted.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_volumes": 0, "volumes_with_oracle_managed_key": 0}}}'

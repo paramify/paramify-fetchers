@@ -1,0 +1,20 @@
+key: oci_cloud_guard_enabled
+name: OCI Cloud Guard Enabled
+type: AUTOMATED
+role: configuration
+statement: >
+  Cloud Guard is switched on for the tenancy — the continuous self-assessment
+  every other finding in this evidence set depends on. Asserts the literal
+  true the fetcher writes from status ENABLED; DISABLED writes false and a
+  failed configuration read writes null, and both fail here. Does NOT assert
+  that any target is assessed; oci_cloud_guard_targets_assess_configuration
+  covers that. Fails when the summary key is renamed.
+regex: '"cloud_guard_enabled":\s*(?<cloud_guard_enabled>true)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-CLOUD-GUARD

@@ -35,4 +35,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CLOUDFORMATION-DRIFT
   name: AWS CloudFormation Drift
-  instructions: 'Script: fetcher.sh. Commands executed: aws cloudformation describe-stacks.'
+  instructions: 'Script: aws/cloudformation_drift/fetcher.sh. Commands executed: aws cloudformation describe-stacks.'

@@ -28,4 +28,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DD-INCIDENT-TIMELINES
   name: Datadog Incident Timelines
-  instructions: 'Calls GET /api/v2/incidents then GET /api/v2/incidents/{id}/timeline for each. Lookback window controlled by DATADOG_INCIDENTS_LOOKBACK_DAYS (default 90). Writes JSON timeline data.'
+  instructions: 'Script: datadog/incident_timelines/fetcher.py. Calls GET /api/v2/incidents then GET /api/v2/incidents/{id}/timeline for each. Lookback window controlled by DATADOG_INCIDENTS_LOOKBACK_DAYS (default 90). Writes JSON timeline data.'

@@ -34,4 +34,4 @@ ksis:
 evidence_set:
   reference_id: EVD-DATABASE-HA
   name: Database High Availability
-  instructions: 'Script: fetcher.sh. Commands executed: aws rds describe-db-instances, aws rds describe-db-clusters'
+  instructions: 'Script: aws/database_high_availability/fetcher.sh. Commands executed: aws rds describe-db-instances, aws rds describe-db-clusters'

@@ -49,7 +49,7 @@ evidence_set:
   reference_id: EVD-AZURE-VPN-GATEWAY-CONFIG
   name: Azure VPN Gateway and Connection Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-resource resource_groups.list(), then per resource
+    Script: azure/vpn_gateway_configuration/fetcher.py. Azure SDK calls: azure-mgmt-resource resource_groups.list(), then per resource
     group azure-mgmt-network virtual_network_gateways.list(rg), virtual_network_gateway_connections.list(rg)
     and local_network_gateways.list(rg) (these operations have no subscription-wide list), then
     virtual_network_gateway_connections.get(rg, name) per connection, because connection_status is only

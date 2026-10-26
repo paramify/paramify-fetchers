@@ -51,7 +51,7 @@ evidence_set:
   reference_id: EVD-AZURE-FRONTDOOR-WAF
   name: Azure Front Door WAF Policies
   instructions: >
-    Script: fetcher.py. Azure SDK call (azure-mgmt-frontdoor FrontDoorManagementClient):
+    Script: azure/front_door_waf_policies/fetcher.py. Azure SDK call (azure-mgmt-frontdoor FrontDoorManagementClient):
     policies.list_by_subscription(), kept to sku Standard_AzureFrontDoor /
     Premium_AzureFrontDoor (classic Front Door policies are counted in
     skipped_policies_by_sku, not evaluated); managed_rule_sets.list() for Microsoft's
