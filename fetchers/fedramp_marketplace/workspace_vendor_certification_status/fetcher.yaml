@@ -74,7 +74,7 @@ evidence_set:
 
     certification_state, certification_class and class_source,
     package_id_resolves, summary and feed are as in
-    EVD-FEDRAMP-VENDOR-CERTIFICATION: the changelog wins when it disagrees
-    with data.json, class comes from the CSO-PKG, else the changelog, else is
+    EVD-FEDRAMP-VENDOR-CERTIFICATION: the changelog's latest transition
+    decides the state (missing from data.json alone is not a delisting), class comes from the CSO-PKG, else the changelog, else is
     derived from impact level (LI-SaaS B, Low B, Moderate C, High D), and
     FedRAMP publishes no CAP status.

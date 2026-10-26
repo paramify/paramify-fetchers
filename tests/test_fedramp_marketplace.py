@@ -47,6 +47,8 @@ def market():
         row("FR0000000006", "FedRAMP In Process", "2025-01-01"),
         row("FR0000000006", "FedRAMP Certified", "2026-09-01"),
         row("FR0000000007", "FedRAMP Certified (In Remediation)", "2026-07-22"),
+        row("FR0000000011", "FedRAMP In Process", "2026-08-01"),
+        row("FR0000000011", "FedRAMP Certified", "2026-10-20"),
     ]
     data = {"meta": {"last_change": "2026-10-12T02:00:00Z"}, "data": {"Products": products}}
     changelog = {"metadata": {"export_timestamp": "2026-10-12T20:00:00Z"}, "data": {"certprocessstatuschangelog": rows}}
@@ -59,7 +61,8 @@ def market():
     ("FR0000000001", mp.CERTIFIED),
     ("FR0000000002", mp.READY),
     ("FR0000000003", mp.DELISTED),        # listed, but the changelog says delisted
-    ("FR0000000004", mp.DELISTED),        # dropped from data.json
+    ("FR0000000004", mp.DELISTED),        # dropped from data.json, changelog says delisted
+    ("FR0000000011", mp.CERTIFIED),       # certified in the changelog, not in data.json yet
     ("FR0000000006", mp.CERTIFIED),       # changelog newer than data.json
     ("FR0000000007", mp.IN_REMEDIATION),
     ("FR9999999999", mp.NOT_LISTED),
@@ -244,3 +247,9 @@ def test_fetch_elements_single_page(monkeypatch):
     body = {"elements": [element("A", "1"), element("B", "2")], "total": 2, "hasMore": False}
     monkeypatch.setattr(ws.requests, "get", lambda *a, **k: FakeResponse(200, body))
     assert len(ws.fetch_elements("https://example.test/api/v0", "t", 5)) == 2
+
+
+def test_absent_from_data_json_is_not_delisted(market):
+    record = market.record("New", "FR0000000011")
+    assert (record["certification_state"], record["status_sources_disagree"]) == (mp.CERTIFIED, True)
+    assert (record["package_id_resolves"], record["suggested_package_ids"]) == (True, [])

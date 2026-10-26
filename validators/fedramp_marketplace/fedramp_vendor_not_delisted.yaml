@@ -4,7 +4,7 @@ type: AUTOMATED
 role: configuration
 statement: No third-party vendor package checked has been delisted from, or is missing from, the FedRAMP Marketplace.
 
-# Delisted means dropped from data.json or a latest changelog row of "No Status Found (Delisted)"; FedRAMP's two files lag each other, so either signal counts.
+# Delisted means a latest changelog row of "No Status Found (Delisted)", which is what fedramp.gov/marketplace follows (the listing returns 404). Missing from data.json alone is not a delisting: data.json lags the changelog and omits live packages. not_listed (an ID FedRAMP has never recorded) also counts here.
 #
 # Reads the fetcher's own count in `summary`, which is written ahead of the
 # vendor list, so MATCH_GROUP's first match is always the summary. The

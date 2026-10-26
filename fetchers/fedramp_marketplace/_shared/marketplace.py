@@ -221,19 +221,27 @@ class Marketplace:
         return LISTING_STATUS.get(product.get("status")) if product else None
 
     def state(self, package_id: str) -> Tuple[str, bool]:
-        """(certification_state, status_sources_disagree)."""
-        listed = package_id in self.products
+        """(certification_state, status_sources_disagree).
+
+        fedramp.gov/marketplace follows the changelog's latest transition: a
+        package whose latest row is delisted returns 404 there, and any other
+        status has a live page, even when data.json has not caught up or omits
+        the package entirely (recent certifications, and some old IDs that
+        have a re-issue). So the changelog decides for every package it knows,
+        and absence from data.json alone is not a delisting. data.json decides
+        only for a package the changelog has never recorded.
+        """
         change = self.latest_change(package_id)
         change_state = CHANGELOG_STATUS[change["to_status"]] if change else None
         listing_state = self.listing_state(package_id)
-        if not listed:
-            return (DELISTED if change else NOT_LISTED), False
-        if change_state in (DELISTED, IN_REMEDIATION):
-            return change_state, listing_state != change_state
-        if change_state is None:
+        if change_state is not None:
+            if package_id not in self.products:
+                # Missing from data.json is a disagreement unless the changelog agrees it is gone.
+                return change_state, change_state != DELISTED
+            return change_state, listing_state is not None and listing_state != change_state
+        if package_id in self.products:
             return listing_state or NOT_LISTED, False
-        # The changelog is the newer, per-transition record; it wins a tie-break.
-        return change_state, listing_state is not None and listing_state != change_state
+        return NOT_LISTED, False
 
     def certification_class(self, package_id: str) -> Tuple[Optional[str], Optional[str]]:
         """(class, class_source), from the most authoritative source FedRAMP publishes."""
@@ -249,7 +257,7 @@ class Marketplace:
         return (derived, "derived") if derived else (None, None)
 
     def replacements(self, package_id: str) -> List[str]:
-        """Listed IDs that look like a re-issue of this one (FR2000863987 -> FR2000863987A).
+        """Listed IDs that look like a re-issue of this one (FR2023864279 -> FR2023864279A).
 
         Only a standard ID (FR + 9-10 digits, or F + 10 digits) has a base, and a
         re-issue is that base plus 1-3 letters, so FR1 suggests nothing and

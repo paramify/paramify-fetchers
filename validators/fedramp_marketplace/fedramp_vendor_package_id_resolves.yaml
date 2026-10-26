@@ -4,7 +4,7 @@ type: AUTOMATED
 role: configuration
 statement: Every third-party vendor checked resolves to a current FedRAMP package ID, with no unknown ID, no replaced ID and no workspace element left unmatched.
 
-# A delisted ID with a certified re-issue (FR2000863987 -> FR2000863987A) is unresolved; the evidence names the new ID in suggested_package_ids.
+# A delisted ID with a certified re-issue (FR2023864279 -> FR2023864279A) is unresolved; the evidence names the new ID in suggested_package_ids.
 #
 # Reads the fetcher's own count in `summary`, which is written ahead of the
 # vendor list, so MATCH_GROUP's first match is always the summary. The

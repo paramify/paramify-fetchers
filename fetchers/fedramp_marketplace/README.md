@@ -15,15 +15,17 @@ latest status change and a link to its listing at
 ## What a record says
 
 - `certification_state`: `certified`, `in_process`, `ready`, `in_remediation`,
-  `delisted` or `not_listed`. A package dropped from `data.json` or whose latest
-  changelog row is "No Status Found (Delisted)" is delisted. When the two files
-  disagree the changelog's latest transition wins and `status_sources_disagree`
-  is true. FedRAMP publishes no corrective action plan (CAP) status.
+  `delisted` or `not_listed`, from the changelog's latest transition, which is
+  what fedramp.gov/marketplace shows: a latest row of "No Status Found
+  (Delisted)" is delisted. `data.json` lags the changelog and omits some live
+  packages, so it decides only for a package the changelog has never recorded;
+  missing from `data.json` alone is not a delisting. `status_sources_disagree`
+  is true when `data.json` shows a different state or omits an active package. FedRAMP publishes no corrective action plan (CAP) status.
 - `certification_class` A–D and `class_source`: the CSO-PKG overview
   (`cso_pkg`), else the changelog's `cert_class` (`changelog`), else derived
   from impact level (`derived`: LI-SaaS B, Low B, Moderate C, High D).
 - `package_id_resolves` is false for an unknown ID, a delisted ID with a
-  certified re-issue (named in `suggested_package_ids`, never substituted), and
+  certified re-issue (FR2023864279 -> FR2023864279A, named in `suggested_package_ids`, never substituted), and
   a workspace element no listing matches.
 - `summary` holds the counts the validators read; `feed.feed_age_hours` is the
   age of the older of the two status files.
