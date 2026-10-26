@@ -44,10 +44,12 @@ this order, recorded in `match_method`:
 3. The element name against each listing's **product** name (`cso`, the
    service offering, or `<company> <product>`), never the company name alone
    (a product named exactly like its company, such as `911inform`, still
-   matches as a product). If nothing matches, the name is retried without one
-   trailing qualifier: ` - <qualifier>` (a spaced hyphen or en/em dash, last
-   segment only), `: <qualifier>` or `(<qualifier>)`. An unspaced hyphen such
-   as `Cloud-Native` is not a qualifier.
+   matches as a product). If nothing matches, the name is retried without
+   exactly one trailing qualifier: a final `(<qualifier>)`, or else whatever
+   follows the last ` - ` (spaced hyphen or en/em dash) or `:`. So
+   `A - B (High)` is retried as `A - B`, and a product name that itself holds
+   a dash or parentheses keeps them. An unspaced hyphen such as `Cloud-Native`
+   is not a qualifier.
 4. **Impact level first.** A qualifier that names an impact level
    (`X (High)`, `X - 20x Moderate`) names the offering, so only a listing at
    exactly that level can match, even when it is the only candidate. If none
@@ -55,8 +57,14 @@ this order, recorded in `match_method`:
    than resolved to a listing certified at a different level; `Moderate` and
    `20x Moderate` count as different levels. Without such a qualifier, several
    matches are narrowed to the most specific level the name mentions.
-5. **Then certification state**, from the changelog as fedramp.gov shows it:
-   certified over in process over ready.
+5. **One level only.** If the listings left still span more than one impact
+   level, the element is ambiguous. For example, a bare `Paramify Cloud` is
+   listed at High (FedRAMP Ready) and at 20x Moderate (certified). Choosing
+   the certified one would claim certification for a level the customer may
+   not use, so name the level (`Paramify Cloud (20x Moderate)`) or set an
+   override.
+6. **Then certification state**, among listings at that one level, from the
+   changelog as fedramp.gov shows it: certified over in process over ready.
 
 A name that matches only a company, such as `Google LLC (Gmail)` or a bare
 `Salesforce`, is reported unmatched (`company_only`), because a company name

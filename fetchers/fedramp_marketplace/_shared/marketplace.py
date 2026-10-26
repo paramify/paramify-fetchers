@@ -86,7 +86,11 @@ PACKAGE_ID_PATTERN = re.compile(r"\b(FR\d{9,10}[A-Z]{0,3}|F\d{10}[A-Z]{0,3})\b")
 # The digits-only base of a standard package ID; only these can have a re-issue.
 _BASE_ID_PATTERN = re.compile(r"^(?:FR\d{9,10}|F\d{10})$")
 _REISSUE_SUFFIX = re.compile(r"[A-Z]{1,3}")
-_QUALIFIER = re.compile(r"^(?P<base>.+?)\s*(?:\([^()]*\)|\s[-–—]\s(?:(?!\s[-–—]\s).)+|:\s*[^:]+)\s*$")
+# One trailing qualifier: a final "(x)", else whatever follows the LAST spaced
+# dash (" - x", " – x", " — x") or colon. An unspaced hyphen ("Cloud-Native")
+# is not a delimiter.
+_TRAILING_PARENS = re.compile(r"^(?P<base>.*\S)\s*\([^()]*\)$")
+_DELIMITER = re.compile(r"\s[-–—]\s|:")
 _CLASS_PATTERN = re.compile(r"^(?:Class\s+)?([A-D])\b", re.IGNORECASE)
 
 
@@ -365,11 +369,13 @@ class Marketplace:
         the element is unmatched as impact_level_mismatch rather than resolved
         to a listing certified at another level. Without such a qualifier,
         several matches are narrowed to the most specific level the name
-        mentions. What remains is narrowed by certification state from the
-        changelog (certified > in process > ready), the same state
-        fedramp.gov shows. Anything still ambiguous is returned unmatched. A
-        name that matches only a company is returned unmatched as
-        company_only, with that company's listings as candidates.
+        mentions. If the listings left still span more than one impact level,
+        the element is ambiguous: certification state never chooses a level.
+        Listings at one level are narrowed by certification state from the
+        changelog (certified > in process > ready), the same state fedramp.gov
+        shows. Anything still ambiguous is returned unmatched. A name that
+        matches only a company is returned unmatched as company_only, with
+        that company's listings as candidates.
         """
         hits = self._listings_named(name)
         hint = ""
@@ -409,7 +415,13 @@ class Marketplace:
             else:
                 pool = hits
 
-        # 2. Certification state, from the changelog as fedramp.gov shows it.
+        # 2. The listings left must be one offering at one level. If they span
+        # several levels the name never chose one, and preferring the certified
+        # listing would claim certification for a level the customer may not use.
+        if len({_norm(self.products[pid].get("impact_level")) for pid in pool}) > 1:
+            return None, "ambiguous", hits
+
+        # 3. Certification state, from the changelog as fedramp.gov shows it.
         def rank(pid: str) -> int:
             return STATE_RANK.get(self.state(pid)[0], 9)
 
@@ -449,9 +461,18 @@ def _level_named(text: str) -> Optional[str]:
 
 
 def strip_qualifier(name: str) -> str:
-    """The name without one trailing qualifier ("A - B - C" -> "A - B"); the name itself if it has none."""
-    match = _QUALIFIER.match(name.strip())
-    return match.group("base").strip() if match else name.strip()
+    """The name without exactly one trailing qualifier; the name itself if it has none.
+
+    "A - B - C" -> "A - B", "A - B (C)" -> "A - B", "A: B - C" -> "A: B",
+    "A - B: C" -> "A - B". Only the last qualifier goes, so a product name
+    that itself contains a dash or parentheses keeps them.
+    """
+    text = name.strip()
+    match = _TRAILING_PARENS.match(text)
+    if match:
+        return match.group("base").strip()
+    cuts = [m for m in _DELIMITER.finditer(text) if text[: m.start()].strip() and text[m.end():].strip()]
+    return text[: cuts[-1].start()].strip() if cuts else text
 
 
 def _norm(value: Any) -> str:

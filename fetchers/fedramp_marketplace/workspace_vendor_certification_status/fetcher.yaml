@@ -66,16 +66,18 @@ evidence_set:
     element name (id_in_name), else its name against each listing's product
     name (name): cso, the service offering, or "<company> <product>", never
     the company name alone. If nothing matches, the name is retried without
-    one trailing qualifier: " - <qualifier>" (spaced hyphen or en/em dash,
-    last segment), ": <qualifier>" or "(<qualifier>)"; an unspaced hyphen is
-    not a qualifier. Impact level decides first: a qualifier naming a level
+    exactly one trailing qualifier: a final "(<qualifier>)", or else what
+    follows the last spaced hyphen or en/em dash, or colon; an unspaced hyphen
+    is not a qualifier. Impact level decides first: a qualifier naming a level
     ("X (High)") matches only a listing at exactly that level, even a sole
     candidate, and is otherwise unmatched (impact_level_mismatch) rather than
     resolved to a listing certified at another level; without one, several
     listings are narrowed to the most specific level the name mentions
-    (name_impact_level). What remains prefers certified over in process, then
-    ready, by the changelog state (name_preferred_state). A name that matches
-    only a company is unmatched (company_only).
+    (name_impact_level). Listings left at more than one level make the
+    element ambiguous: certification state never chooses a level for it.
+    Among listings at one level, certified is preferred over in process,
+    then ready, by the changelog state (name_preferred_state). A name that
+    matches only a company is unmatched (company_only).
     Anything unmatched or still ambiguous is reported with package_id null,
     certification_state not_listed and the candidates in
     suggested_package_ids; it fails the certification and package-ID checks

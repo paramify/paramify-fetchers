@@ -94,10 +94,11 @@ def test_replaced_id_is_suggested_not_substituted(market):
     assert record["marketplace_url"] == "https://www.fedramp.gov/marketplace/products/FR0000000004/"
 
 
-def test_name_match_prefers_certified_listing(market):
-    # A qualifier's impact level decides first; with no level named, the certified listing wins.
+def test_name_match_needs_a_level_when_listings_span_levels(market):
+    # Twin Cloud is listed at High (Ready) and 20x Moderate (certified). A qualifier picks the level;
+    # a bare name is ambiguous, because preferring the certified listing would choose a level for the customer.
     assert market.match_name("Twin Cloud - 20x Moderate")[:2] == ("FR0000000005XL", "name_impact_level")
-    assert market.match_name("Twin Cloud")[:2] == ("FR0000000005XL", "name_preferred_state")
+    assert market.match_name("Twin Cloud") == (None, "ambiguous", ["FR0000000005", "FR0000000005XL"])
 
 
 def test_name_match_uses_impact_level_then_gives_up(market):
@@ -329,7 +330,7 @@ def test_named_level_must_match_exactly(market, name, expected):
 def test_state_preference_follows_the_changelog(market):
     # FR0000000003 "Still Listed": data.json Authorized, changelog delisted.
     # A sibling data.json still shows In Process, which the changelog has certified.
-    market.products["FR0000000030"] = product("FR0000000030", "Still Listed", status="FedRAMP In Process")
+    market.products["FR0000000030"] = product("FR0000000030", "Still Listed", status="FedRAMP In Process", impact="LI-SaaS")
     market.changelog["FR0000000030"] = [row("FR0000000030", "FedRAMP Certified", "2026-10-01")]
     assert market.match_name("Still Listed")[:2] == ("FR0000000030", "name_preferred_state")
 
@@ -344,3 +345,30 @@ def test_reissue_is_picked_by_changelog_state(market):
     record = market.record("Moved", "FR0000000040XL")
     assert (record["certification_state"], record["package_id_resolves"], record["suggested_package_ids"]) == (
         mp.DELISTED, False, ["FR0000000040"])
+
+
+# -- second re-audit fixes -----------------------------------------------------
+
+@pytest.mark.parametrize("raw,stripped", [
+    ("A - B (C)", "A - B"),                  # mixed delimiters: only the final "(C)" goes
+    ("A: B - C", "A: B"),
+    ("A - B: C", "A - B"),
+    ("Federal Service – Supporting Services (FS-SS) (High)", "Federal Service – Supporting Services (FS-SS)"),
+    ("Name (X) - High", "Name (X)"),
+    ("Trailing -", "Trailing -"),           # nothing after the delimiter: not a qualifier
+])
+def test_strip_removes_exactly_one_qualifier(raw, stripped):
+    assert mp.strip_qualifier(raw) == stripped
+
+
+def test_nested_product_name_keeps_its_own_parentheses(market):
+    market.products["FR0000000050"] = product("FR0000000050", "Federal Service", impact="High")
+    market.products["FR0000000051"] = product("FR0000000051", "Federal Service – Supporting Services (FS-SS)", impact="High")
+    assert market.match_name("Federal Service – Supporting Services (FS-SS) (High)")[:2] == ("FR0000000051", "name")
+
+
+def test_one_level_pool_is_still_ranked_by_state(market):
+    # Two listings of one product at the same level: the changelog-certified one wins.
+    market.products["FR0000000060"] = product("FR0000000060", "Same Level Cloud", status="FedRAMP Ready")
+    market.products["FR0000000061"] = product("FR0000000061", "Same Level Cloud")
+    assert market.match_name("Same Level Cloud")[:2] == ("FR0000000061", "name_preferred_state")
