@@ -1,0 +1,25 @@
+validator: entra_admin_mfa_coverage_complete
+cases:
+  - name: all_admins_mfa_capable
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_mfa_coverage_percentage":100,"admin_role_membership_readable":true,"admin_users":3,"admin_users_without_mfa":0,"admin_users_without_registration_details":0,"mfa_capable_admin_users":3}}}'
+
+  - name: one_admin_without_mfa
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_mfa_coverage_percentage":66,"admin_role_membership_readable":true,"admin_users":3,"admin_users_without_mfa":1,"admin_users_without_registration_details":0,"mfa_capable_admin_users":2}}}'
+
+  - name: no_admins_found
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_mfa_coverage_percentage":0,"admin_role_membership_readable":true,"admin_users":0,"admin_users_without_mfa":0,"admin_users_without_registration_details":0,"mfa_capable_admin_users":0}}}'
+
+  - name: admin_roles_unreadable
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_mfa_coverage_percentage":null,"admin_role_membership_readable":false,"admin_users":null,"admin_users_without_mfa":null,"admin_users_without_registration_details":0,"mfa_capable_admin_users":null}}}'
+
+  - name: many_admins_all_capable
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_mfa_coverage_percentage":100,"admin_role_membership_readable":true,"admin_users":12,"admin_users_without_mfa":0,"admin_users_without_registration_details":0,"mfa_capable_admin_users":12}}}'
+
+  - name: admin_users_without_mfa_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_users":3,"admins_without_mfa":0}}}'
