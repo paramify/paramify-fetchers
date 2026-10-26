@@ -38,7 +38,7 @@ evidence_set:
   reference_id: EVD-FEDRAMP-VENDOR-CERTIFICATION
   name: FedRAMP Vendor Certification Status
   instructions: >-
-    Script: fetcher.py. Three unauthenticated GETs of FedRAMP's published
+    Script: fedramp_marketplace/vendor_certification_status/fetcher.py. Three unauthenticated GETs of FedRAMP's published
     marketplace data (github.com/FedRAMP/marketplace-fedramp-gov-data):
     data.json, fedramp-status-changelog.json and fedramp-frc-cso-pkg.json. Each
     configured package ID is looked up in all three.

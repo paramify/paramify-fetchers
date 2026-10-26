@@ -52,7 +52,7 @@ evidence_set:
   reference_id: EVD-FEDRAMP-WORKSPACE-VENDOR-CERTIFICATION
   name: FedRAMP Workspace Vendor Certification Status
   instructions: >-
-    Script: fetcher.py. GET /elements from the Paramify REST API, keeping the
+    Script: fedramp_marketplace/workspace_vendor_certification_status/fetcher.py. GET /elements from the Paramify REST API, keeping the
     configured subtypes (COM_FEDRAMP_SYSTEM by default); elements sharing a
     name are one vendor, and elements_read is how many elements the call
     returned. /elements documents no paging, so a response showing more pages

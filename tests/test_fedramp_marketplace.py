@@ -133,6 +133,8 @@ def test_feed_age_is_never_negative(market):
 
 @pytest.mark.parametrize("pid", ["FR1", "MSO365MTA", "AGENCYHUDSAAS"])
 def test_no_reissue_for_a_non_standard_id(market, pid):
+    for lookalike in ("FR1000000001", "MSO365MT", "AGENCYHUD"):  # certified listings sharing a prefix
+        market.products[lookalike] = mp_product(lookalike, "Lookalike")
     assert market.replacements(pid) == []
 
 
