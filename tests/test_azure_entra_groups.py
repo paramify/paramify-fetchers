@@ -294,18 +294,37 @@ def test_owners_read_without_user_read_all_leave_the_disabled_owner_figure_null(
     assert {g["id"]: g for g in evidence["results"]["groups"]}["g-mixed"]["has_enabled_owner"] is None
 
 
-def test_one_user_missing_its_type_or_state_nulls_the_guest_and_disabled_figures_tenant_wide(monkeypatch, tmp_path):
-    for partial in (_user("u-1", user_type=None), _user("u-1", enabled=None)):
-        tenant = _tenant()
-        tenant["members"]["g-admins"] = [partial, _user("u-guest", guest=True)]
-        _, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
-        s = evidence["summary"]
-        assert s["member_details_readable"] is False
-        assert s["groups_with_guest_members"] is None
-        assert s["role_assignable_groups_with_guest_members"] is None
-        # g-dyn's disabled member came back in full, but the tenant figure still reads null.
-        assert s["groups_with_disabled_user_members"] is None
-        assert s["total_direct_memberships"] == 9
+def test_one_user_with_no_user_type_nulls_only_the_guest_figures_tenant_wide(monkeypatch, tmp_path):
+    tenant = _tenant()
+    # Older accounts can have no userType; their account state still counts.
+    tenant["members"]["g-admins"] = [_user("u-1", user_type=None), _user("u-guest", guest=True)]
+    code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
+
+    assert code == 0
+    s = evidence["summary"]
+    assert s["member_details_readable"] is False
+    assert s["groups_with_guest_members"] is None
+    assert s["role_assignable_groups_with_guest_members"] is None
+    assert s["groups_with_disabled_user_members"] == 1
+    assert s["total_direct_memberships"] == 9
+    by_id = {g["id"]: g for g in evidence["results"]["groups"]}
+    assert by_id["g-admins"]["guest_member_count"] is None
+    assert by_id["g-admins"]["disabled_user_member_count"] == 0
+
+
+def test_one_user_with_no_account_state_nulls_only_the_disabled_figures_tenant_wide(monkeypatch, tmp_path):
+    tenant = _tenant()
+    tenant["members"]["g-admins"] = [_user("u-1", enabled=None), _user("u-guest", guest=True)]
+    code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
+
+    assert code == 0
+    s = evidence["summary"]
+    assert s["member_details_readable"] is False
+    # g-dyn's disabled member came back in full, but the tenant figure still reads null.
+    assert s["groups_with_disabled_user_members"] is None
+    assert s["groups_with_guest_members"] == 1
+    assert s["role_assignable_groups_with_guest_members"] == 1
+    assert s["total_direct_memberships"] == 9
 
 
 def test_a_service_principal_owner_returned_as_an_id_only_leaves_the_disabled_owner_figure_null(
@@ -363,6 +382,7 @@ def test_users_read_without_user_read_all_leave_guest_figures_null(monkeypatch, 
     assert s["member_details_readable"] is False
     assert s["groups_with_guest_members"] is None
     assert s["role_assignable_groups_with_guest_members"] is None
+    assert s["groups_with_disabled_user_members"] is None
     assert s["groups_with_nested_groups"] == 1
 
 

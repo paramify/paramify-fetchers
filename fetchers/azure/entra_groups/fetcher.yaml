@@ -86,7 +86,7 @@ evidence_set:
     - total_groups — Number of groups in the tenant; a group that is neither security- nor mail-enabled (rare) is in none of the four kind counts, so the four may not add up to the total
     - groups_readable — True if the whole group list was read; false if any page failed, and every count reads null, since a partial list would pass for the whole tenant
     - members_readable — True if every group's members were read, apart from hidden_membership_groups_unread; false if any member read failed, and the member fields read null
-    - member_details_readable — True if every user member came back with a sign-in name, account state and guest status; false if members couldn't be read or any one user came back without them (Graph returns users as an id only when User.Read.All isn't granted), and the guest and disabled-user fields then read null for the whole tenant
+    - member_details_readable — True if every user member came back with its guest status and account state; false if members couldn't be read or any one user came back without one of them (Graph returns users as an id only when User.Read.All isn't granted, and older accounts can have no guest status). A missing guest status nulls the guest fields for the whole tenant, and a missing account state nulls the disabled-user field
     - owners_readable — True if every group's owners (the users or service principals who can manage the group) were read; false if any owner read failed, and the owner fields read null
     - owner_details_readable — True if owners were read and every owner came back with its account state (enabled or disabled); false if not (User.Read.All or Application.Read.All isn't granted), and groups_with_only_disabled_owners reads null
 
@@ -99,7 +99,7 @@ evidence_set:
     Which groups can hold directory roles?
     - role_assignable_groups — Number of groups that can be assigned an Entra directory role (only Privileged Role Administrators and Global Administrators can change their membership)
     - role_assignable_groups_without_owner — Number of role-assignable groups with no owner; null if owners couldn't be read
-    - role_assignable_groups_with_guest_members — Number of role-assignable groups with at least one guest user as a member; null if member details couldn't be read
+    - role_assignable_groups_with_guest_members — Number of role-assignable groups with at least one guest user as a member; null if any user member's guest status couldn't be read
     - users_in_role_assignable_groups — Number of distinct users who are direct members of a role-assignable group; null if members couldn't be read
 
     How is membership managed?
@@ -120,7 +120,7 @@ evidence_set:
     Who is in them?
     - total_direct_memberships — Number of direct member entries across all groups (a user in three groups counts three times); null if members couldn't be read
     - empty_groups — Number of groups with no members; null if members couldn't be read
-    - groups_with_guest_members — Number of groups with at least one guest user as a member; null if member details couldn't be read
-    - groups_with_disabled_user_members — Number of groups with at least one disabled user as a member; null if member details couldn't be read
+    - groups_with_guest_members — Number of groups with at least one guest user as a member; null if any user member's guest status couldn't be read
+    - groups_with_disabled_user_members — Number of groups with at least one disabled user as a member; null if any user member's account state couldn't be read
     - groups_with_nested_groups — Number of groups with another group as a direct member; null if members couldn't be read
     - groups_with_service_principal_members — Number of groups with an app or managed identity as a direct member; null if members couldn't be read

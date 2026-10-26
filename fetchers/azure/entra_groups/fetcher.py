@@ -138,13 +138,10 @@ def group_kind(group: dict) -> str:
     return KIND_DISTRIBUTION if mail else KIND_OTHER
 
 
-def _limited(users: list[dict]) -> bool:
-    """A user read without User.Read.All comes back as an id and a type only; a nested
-    $select can also drop fields silently (a Graph known issue)."""
-    return any(
-        u["user_principal_name"] is None or u["user_type"] is None or u["account_enabled"] is None
-        for u in users
-    )
+def _known(users: list[dict], field: str) -> bool:
+    """A user read without User.Read.All comes back as an id and a type only, a nested $select
+    can drop fields silently (a Graph known issue), and older accounts can have no userType."""
+    return all(u[field] is not None for u in users)
 
 
 def owners_in_graph(group: dict) -> bool:
@@ -175,7 +172,9 @@ def group_record(group: dict, members: list[dict] | None, owners: list[dict] | N
     def count(kind):
         return None if members is None else sum(1 for m in members if m["principal_type"] == kind)
 
-    details = members is not None and not _limited(users)
+    # Guest figures need every user's userType, disabled figures every user's accountEnabled.
+    guests_known = members is not None and _known(users, "user_type")
+    states_known = members is not None and _known(users, "account_enabled")
     guests = sum(1 for u in users if u["user_type"] == USER_TYPE_GUEST)
     disabled = sum(1 for u in users if u["account_enabled"] is False)
     return {
@@ -202,8 +201,8 @@ def group_record(group: dict, members: list[dict] | None, owners: list[dict] | N
         "group_member_count": count("Group"),
         "service_principal_member_count": count("ServicePrincipal"),
         "device_member_count": count("Device"),
-        "guest_member_count": guests if details else None,
-        "disabled_user_member_count": disabled if details else None,
+        "guest_member_count": guests if guests_known else None,
+        "disabled_user_member_count": disabled if states_known else None,
         "owners_in_graph": visible_owners,
         "owners": owners,
         "owner_count": None if owners is None else len(owners),
@@ -242,7 +241,8 @@ def summarize(
         return value if ok else None
 
     read = [r for r in records if r["members"] is not None]
-    details_ok = members_readable and all(r["guest_member_count"] is not None for r in read)
+    guests_ok = members_readable and all(r["guest_member_count"] is not None for r in read)
+    states_ok = members_readable and all(r["disabled_user_member_count"] is not None for r in read)
     owner_details_ok = owners_readable and all(
         o["account_enabled"] is not None for r in records for o in r["owners"] or []
     )
@@ -253,7 +253,7 @@ def summarize(
         "total_groups": len(records),
         "groups_readable": groups_readable,
         "members_readable": members_readable,
-        "member_details_readable": details_ok,
+        "member_details_readable": guests_ok and states_ok,
         "owners_readable": owners_readable,
         "owner_details_readable": owner_details_ok,
         # --- what kinds of groups exist ---
@@ -267,7 +267,7 @@ def summarize(
             owners_readable, n(lambda r: r["has_owner"] is False, role_assignable)
         ),
         "role_assignable_groups_with_guest_members": when(
-            details_ok, n(lambda r: r["guest_member_count"], role_assignable)
+            guests_ok, n(lambda r: r["guest_member_count"], role_assignable)
         ),
         "users_in_role_assignable_groups": when(
             members_readable,
@@ -296,9 +296,9 @@ def summarize(
             members_readable, sum(r["member_count"] or 0 for r in records)
         ),
         "empty_groups": when(members_readable, n(lambda r: r["member_count"] == 0)),
-        "groups_with_guest_members": when(details_ok, n(lambda r: r["guest_member_count"])),
+        "groups_with_guest_members": when(guests_ok, n(lambda r: r["guest_member_count"])),
         "groups_with_disabled_user_members": when(
-            details_ok, n(lambda r: r["disabled_user_member_count"])
+            states_ok, n(lambda r: r["disabled_user_member_count"])
         ),
         "groups_with_nested_groups": when(members_readable, n(lambda r: r["group_member_count"])),
         "groups_with_service_principal_members": when(
