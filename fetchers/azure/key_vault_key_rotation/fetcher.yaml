@@ -35,6 +35,7 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 
 ksis:
   - KSI-SVC-ASM
+  - KSI-SVC-SIN
 
 evidence_set:
   reference_id: EVD-AZURE-KEYVAULT-ROTATION

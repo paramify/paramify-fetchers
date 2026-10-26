@@ -117,8 +117,8 @@ schemas and the `paramify` CLI — not the internal code.
   Microsoft.Web `providers.get()` fails the run. Summary adds certificate and App
   Service certificate counts, expired and expiring-within-30-days counts, and
   `certificate_auto_renew_percentage` over readable policies. Adds the
-  `azure-keyvault-certificates` dependency to the `azure` extra. Existing fields are
-  unchanged. A read-only production run with Reader exercised the `not_authorized`
+  `azure-keyvault-certificates` dependency to the `azure` extra. Also mapped to
+  `KSI-SVC-SIN`. Existing fields are unchanged. A read-only production run with Reader exercised the `not_authorized`
   path and the App Service list; readable vault certificates and managed or uploaded
   App Service certificates are proven by synthetic tests only.
 - **`azure_front_door_origins` 0.5.0: Kudu and silent regions.** An app whose
