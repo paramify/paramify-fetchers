@@ -580,6 +580,21 @@ def test_main_exits_zero_when_the_scan_is_denied_everywhere(monkeypatch, tmp_pat
     assert summary["apps_with_literal_secrets"] is None and summary["literal_secret_settings"] is None
 
 
+def test_main_logs_the_saved_evidence_before_reporting_a_failure(monkeypatch, tmp_path):
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.delenv(appsvc.SCAN_ENV, raising=False)
+    monkeypatch.setattr(appsvc, "resolve_subscription", lambda c: {"subscription_id": SUB, "subscription_source": "env"})
+    monkeypatch.setattr(appsvc, "credential", lambda: object())
+    monkeypatch.setattr(appsvc, "provider_registration_status", lambda *a: "registered")
+    monkeypatch.setattr(appsvc, "web_client", lambda *a: web_client(scm={"web-a": DENIED}))
+    monkeypatch.setattr(appsvc, "_attach_diagnostic_settings", lambda *a: None)
+    events = []
+    monkeypatch.setattr(appsvc.logger, "info", lambda msg, *a: events.append(msg % a))
+    monkeypatch.setattr(appsvc, "report_failure", lambda *a: events.append("report_failure"))
+    assert appsvc.main() == 1
+    assert events[-2].startswith("Evidence saved to ") and events[-1] == "report_failure"
+
+
 def test_read_only_lock_reads_not_read_with_a_reason_not_a_failure(monkeypatch):
     locked = Exception("(ScopeLocked) The scope cannot perform POST operation because of a read-only lock")
     client = web_client(settings={"web-a": locked}, strings={})
