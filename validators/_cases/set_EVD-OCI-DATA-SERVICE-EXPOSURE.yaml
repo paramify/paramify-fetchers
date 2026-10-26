@@ -1,0 +1,17 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them. A zero reachable count is only an answer when the listings were read.
+evidence_set: EVD-OCI-DATA-SERVICE-EXPOSURE
+cases:
+  - name: nothing_reachable
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"data_services_readable": true, "publicly_reachable_resources": 0}}}'
+
+  - name: a_database_open_to_the_internet
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"data_services_readable": true, "publicly_reachable_resources": 1}}}'
+
+  - name: listings_could_not_be_read
+    expect: FAIL
+    note: >
+      Every compartment's listing failed; the zero is from nothing looked at, and oci_data_services_readable fails.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"data_services_readable": false, "publicly_reachable_resources": 0}}}'

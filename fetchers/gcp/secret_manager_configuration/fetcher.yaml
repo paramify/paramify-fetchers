@@ -46,6 +46,6 @@ evidence_set:
   reference_id: EVD-GCP-SECRETMGR-CONFIG
   name: Secret Manager Configuration
   instructions: >
-    Script: fetcher.py. Google Cloud client library calls: secretmanager
+    Script: gcp/secret_manager_configuration/fetcher.py. Google Cloud client library calls: secretmanager
     secrets.list(), then versions.list() and getIamPolicy() per secret.
     AccessSecretVersion is never called. One evidence file per project.

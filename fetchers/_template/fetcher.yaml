@@ -5,7 +5,7 @@
 
 name: <category>_<short_name>            # globally unique (e.g. okta_phishing_resistant_mfa)
 version: 0.1.0                            # 0.x.y for pre-contract-conformant ports
-description: <one or two sentences describing what evidence this collects>
+description: <one sentence of at most 30 words on what the evidence shows>   # docs/authoring_fetcher_guide.md
 category: <category>                      # matches the parent directory
 
 runtime:

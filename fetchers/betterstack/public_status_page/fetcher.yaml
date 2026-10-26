@@ -60,7 +60,7 @@ evidence_set:
   reference_id: EVD-BETTERSTACK-PUBLIC-STATUS-PAGE
   name: Better Stack Public Status Page
   instructions: >
-    Script: fetcher.py. One unauthenticated GET of <status_page_url>/index.json,
+    Script: betterstack/public_status_page/fetcher.py. One unauthenticated GET of <status_page_url>/index.json,
     the JSON document the hosted Better Stack status page renders itself from.
     No credential is sent and none is needed.
 

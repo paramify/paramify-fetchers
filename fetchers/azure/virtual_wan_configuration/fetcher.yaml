@@ -49,7 +49,7 @@ evidence_set:
   reference_id: EVD-AZURE-VIRTUAL-WAN-CONFIG
   name: Azure Virtual WAN, Hub and VPN Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient), all subscription-wide:
+    Script: azure/virtual_wan_configuration/fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient), all subscription-wide:
     virtual_wans.list(), virtual_hubs.list(), vpn_gateways.list(), vpn_sites.list(),
     p2_s_vpn_gateways.list(), vpn_server_configurations.list(). Connections and site-link connections are
     read from each VPN gateway's own properties. Fields are projected from an allow-list, so the shared_key

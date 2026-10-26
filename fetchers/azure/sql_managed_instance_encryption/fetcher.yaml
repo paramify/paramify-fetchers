@@ -44,7 +44,7 @@ evidence_set:
   reference_id: EVD-AZURE-SQLMI-ENCRYPTION
   name: Azure SQL Managed Instance Encryption
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-sql SqlManagementClient, api
+    Script: azure/sql_managed_instance_encryption/fetcher.py. Azure SDK calls (azure-mgmt-sql SqlManagementClient, api
     2025-01-01, Reader is sufficient): managed_instances.list(),
     managed_instance_encryption_protectors.get(..., "current"),
     managed_databases.list_by_instance(), and
