@@ -494,18 +494,20 @@ def test_data_sources_entra_id_protection_and_grouped_built_ins(azure, tmp_path)
 
 def test_data_sources_health_shows_the_worst_connection(azure, tmp_path):
     connectors_workspace(azure)
-    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"].append(
-        {"id": f"{SI_A}/dataConnectors/ccp2", "name": "ccp2", "kind": "RestApiPoller",
-         "properties": {"connectorDefinitionName": "MyCcp"}})
+    azure.arm[(f"{SI_A}/dataConnectors", "2025-10-01-preview")]["value"] += [
+        {"id": f"{SI_A}/dataConnectors/{n}", "name": n, "kind": "RestApiPoller", "properties": {"connectorDefinitionName": "MyCcp"}}
+        for n in ("ccp2", "ccp3")]
+    # A Warning listed first doesn't hide a Failure.
     azure.queries.insert(0, ("SentinelResourceType", table(
         ["SentinelResourceId", "TimeGenerated", "Status", "Reason", "Description", "SentinelResourceKind", "SentinelResourceName"],
         [[f"{SI_A}/dataConnectors/ccp1", iso(NOW), "Success", None, None, "RestApiPoller", "ccp1"],
-         [f"{SI_A}/dataConnectors/ccp2", iso(NOW), "Failure", "Unauthorized", "token expired", "RestApiPoller", "ccp2"]])))
+         [f"{SI_A}/dataConnectors/ccp2", iso(NOW), "Warning", "Throttled", "slow", "RestApiPoller", "ccp2"],
+         [f"{SI_A}/dataConnectors/ccp3", iso(NOW), "Failure", "Unauthorized", "token expired", "RestApiPoller", "ccp3"]])))
     code, ev = run("sentinel_data_sources", tmp_path)
     ws = ws_a(ev)
     ccp = next(c for c in ws["connectors"] if c["id"] == "MyCcp")
-    assert ccp["connections"] == ["ccp1", "ccp2"] and ccp["health_status"] == "Failure"
-    assert ws["connectors_unhealthy"] == 1 and ev["summary"]["connectors_unhealthy"] == 1
+    assert ccp["connections"] == ["ccp1", "ccp2", "ccp3"] and ccp["health_status"] == "Failure"
+    assert ws["connectors_unhealthy"] == 2 and ev["summary"]["connectors_unhealthy"] == 2
 
 
 def test_data_sources_batches_map_rows_back(azure, tmp_path, monkeypatch):
@@ -531,6 +533,9 @@ def test_data_sources_failed_last_data_query_keeps_ingestion_answers(azure, tmp_
     assert code == 1 and ev["metadata"]["partial_failure"] is True
     assert by_id["AzureActiveDirectory"]["connected"] is True  # SigninLogs, from the ingestion query
     assert by_id["AzureSecurityCenter"]["connected"] is None
+    # The counts are unknown, not partial.
+    for counts in (ws_a(ev), ev["summary"]):
+        assert [counts[k] for k in ("connectors_connected", "connectors_not_connected", "connectors_quiet")] == [None] * 3
 
 
 def test_data_sources_incomplete_listings_read_null(azure, tmp_path):

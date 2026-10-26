@@ -37,6 +37,8 @@ ALERTS_TABLE = "SecurityAlert"
 ALERT_ONLY_EXTRAS = frozenset({"McasShadowItReporting"})
 SENTINEL_PRODUCTS = frozenset({"azure sentinel", "microsoft sentinel"})
 HEALTH_TABLE = "SentinelHealth"
+# Worst first for a connector fed by several connections; any other status, null included, sits between Warning and Success.
+HEALTH_RANK = {"failure": 3, "warning": 2, "success": 0}
 
 INGESTION_QUERY = (
     "union withsource=ParamifySourceTable * "
@@ -310,7 +312,7 @@ def finish_catalog(catalog: List[Dict[str, Any]], answers: Optional[Dict[Tuple[i
         tables = {d["table"] for d in data_types}
         unmeasured = answers is None or any((ci, di) not in answers for di in range(len(data_types)))
         rows = [health[ids[n]] for n in c["connections"] if ids.get(n) and ids[n] in health]
-        worst = next((r for r in rows if (r["status"] or "").lower() != "success"), rows[0] if rows else None)
+        worst = max(rows, key=lambda r: HEALTH_RANK.get((r["status"] or "").lower(), 1), default=None)
         out.append({
             **{k: v for k, v in c.items() if not k.startswith("_")},
             "data_types": data_types,
@@ -391,6 +393,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             notes.append(f"connector {c['id']} has no data type with a usable last-data query, so it reads as unmeasured")
     complete = connectors is not None and preview is not None and definitions is not None
     answers = None
+    found: Optional[Dict[Tuple[int, int], Any]] = {}
     if tables is not None:
         ingested = {t["table"]: t["last_ingested"] for t in tables}
         known, pending = last_data_queries(catalog, ingested, plans)
@@ -400,7 +403,8 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         ) if pending else {}
         # Without the table plans, an empty answer may be a Basic table /query can't read.
         answers = {k: v for k, v in {**known, **(found or {})}.items() if v or plans is not None}
-    measured = answers is not None and plans is not None and complete
+    # A failed last-data query leaves the counts unknown, not partial.
+    measured = answers is not None and found is not None and plans is not None and complete
     health_on = any(t["table"] == HEALTH_TABLE for t in tables or []) if tables is not None else None
     health_rows = None
     if health_on:
