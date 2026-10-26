@@ -170,7 +170,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `si-11`
 
-*4 fetchers:* [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`azure_monitor_fired_alerts`](../fetchers/azure/monitor_fired_alerts), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`splunk_role_index_access`](../fetchers/splunk/role_index_access)
+*3 fetchers:* [`azure_log_analytics_workspaces`](../fetchers/azure/log_analytics_workspaces), [`azure_rbac_role_assignments`](../fetchers/azure/rbac_role_assignments), [`splunk_role_index_access`](../fetchers/splunk/role_index_access)
 
 #### `KSI-MLA-EVC` — Evaluating Configurations
 
@@ -556,7 +556,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_log_storage_immutability`](../fetchers/azure/log_storage_immutability) | `KSI-MLA-OSM` |
 | [`azure_managed_identity_configuration`](../fetchers/azure/managed_identity_configuration) | `KSI-IAM-ELP`, `KSI-IAM-SNU` |
 | [`azure_managed_redis_configuration`](../fetchers/azure/managed_redis_configuration) | `KSI-CNA-OFA`, `KSI-CNA-RNT`, `KSI-IAM-SNU`, `KSI-SVC-SIN` |
-| [`azure_monitor_fired_alerts`](../fetchers/azure/monitor_fired_alerts) | `KSI-MLA-ALA`, `KSI-MLA-RVL` |
+| [`azure_monitor_fired_alerts`](../fetchers/azure/monitor_fired_alerts) | `KSI-MLA-RVL` |
 | [`azure_mysql_configuration`](../fetchers/azure/mysql_configuration) | `KSI-CNA-MAT`, `KSI-CNA-OFA`, `KSI-MLA-LET`, `KSI-RPL-ABO`, `KSI-SVC-SIN` |
 | [`azure_network_flow_logs`](../fetchers/azure/network_flow_logs) | `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`azure_network_security_groups`](../fetchers/azure/network_security_groups) | `KSI-CNA-DFP`, `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-ULN` |

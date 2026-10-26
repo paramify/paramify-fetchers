@@ -35,7 +35,6 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-MLA-ALA      # Authorizing log access — the users and identities that acted on each alert, from its history
   - KSI-MLA-RVL      # Reviewing logs — fired alerts are acknowledged and closed, and rules that never fire stand out
 
 evidence_set:
