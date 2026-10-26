@@ -1,0 +1,27 @@
+key: azure_activity_log_alerts_cover_operations_routed
+name: Azure Activity Log Alerts Cover Monitored Operations and Route
+type: AUTOMATED
+role: configuration
+statement: >
+  Every monitored control-plane operation (the fetcher's list: NSG and rule, policy assignment, public IP,
+  security solution and SQL firewall rule create/update/delete) has an enabled activity log alert; no
+  activity log alert is disabled; every enabled one (at least one) routes to an enabled receiver
+  (alerts_routing_to_enabled_receiver equals enabled_alerts); none is suppressed or possibly suppressed by a
+  processing rule; and the collection had no partial failure. Substantiates KSI-MLA-ALA (Logical Access
+  Review): "every required security event has an enabled alert rule with an active notification
+  destination" and "Fail disabled rules", read as alerting. The operation list is the fetcher's default,
+  not the organization's required events. Does not prove an alert was tested or anything about access to
+  log data.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"alerts_possibly_suppressed":\s*0,[\s\S]*?"alerts_routing_to_enabled_receiver":\s*(?<alerts_routing_to_enabled_receiver>\d+),[\s\S]*?"alerts_suppressed":\s*0,[\s\S]*?"all_monitored_operations_covered":\s*true,[\s\S]*?"disabled_alerts":\s*0,\s*"enabled_alerts":\s*(?<enabled_alerts>[1-9]\d*),'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # alerts_routing_to_enabled_receiver
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # enabled_alerts
+
+evidence_sets:
+  - EVD-AZURE-ACTIVITY-ALERTS
