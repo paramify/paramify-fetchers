@@ -1,0 +1,16 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them.
+evidence_set: EVD-OCI-DEP-VULNS
+cases:
+  - name: audited_and_nothing_masked
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"audits_completed": 2, "audits_where_suppression_lowered_severity": 0}}}'
+
+  - name: the_live_tenancy_masks_a_critical
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"audits_completed": 3, "audits_where_suppression_lowered_severity": 1}}}'
+
+  - name: no_audits_at_all
+    expect: FAIL
+    note: nothing masked because nothing was scanned
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"audits_completed": 0, "audits_where_suppression_lowered_severity": 0}}}'

@@ -55,4 +55,4 @@ ksis:
 evidence_set:
   reference_id: EVD-GITLAB-MR-SUMMARY
   name: GitLab Merge Request Summary
-  instructions: 'Script: gitlab_merge_request_summary.sh. Commands executed: GitLab API to list merge requests, approvals, and discussions with pagination'
+  instructions: 'Script: gitlab/merge_request_summary/fetcher.py. Commands executed: GitLab API to list merge requests, approvals, and discussions with pagination'

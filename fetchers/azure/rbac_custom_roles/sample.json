@@ -1,0 +1,135 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_rbac_custom_roles",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.custom_roles[]",
+      "records": 1,
+      "fields": {
+        "action_count": 1,
+        "assignable_scope_count": 1,
+        "assignable_scopes": 1,
+        "can_administer_resource_locks": 1,
+        "can_assign_roles": 1,
+        "can_escalate_privileges": 1,
+        "can_write_role_definitions": 1,
+        "created_on": 1,
+        "data_action_count": 1,
+        "description": 1,
+        "has_all_actions_wildcard": 1,
+        "has_data_actions": 1,
+        "has_not_actions": 1,
+        "has_root_assignable_scope": 1,
+        "has_wildcard_action": 1,
+        "id": 1,
+        "is_contributor_equivalent": 1,
+        "is_owner_equivalent": 1,
+        "permissions": 1,
+        "privilege_escalation_actions": 0,
+        "role_definition_guid": 1,
+        "role_name": 1,
+        "role_type": 1,
+        "updated_on": 1,
+        "wildcard_actions": 1
+      }
+    },
+    {
+      "path": "results.custom_roles[].permissions[]",
+      "records": 1,
+      "fields": {
+        "actions": 1,
+        "data_actions": 0,
+        "not_actions": 1,
+        "not_data_actions": 0
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:10:36Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "custom_roles": [
+        {
+          "action_count": 2,
+          "assignable_scope_count": 1,
+          "assignable_scopes": [
+            "/subscriptions/00000000-0000-4000-8000-111111111111"
+          ],
+          "can_administer_resource_locks": false,
+          "can_assign_roles": false,
+          "can_escalate_privileges": false,
+          "can_write_role_definitions": false,
+          "created_on": "2026-08-14 18:47:49.017473+00:00",
+          "data_action_count": 0,
+          "description": "Benign custom role so rbac_custom_roles has a definition to report.",
+          "has_all_actions_wildcard": false,
+          "has_data_actions": false,
+          "has_not_actions": true,
+          "has_root_assignable_scope": false,
+          "has_wildcard_action": false,
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/providers/Microsoft.Authorization/roleDefinitions/00000000-0000-4000-8000-222222222222",
+          "is_contributor_equivalent": false,
+          "is_owner_equivalent": false,
+          "permissions": [
+            {
+              "actions": [
+                "Microsoft.Storage/storageAccounts/read",
+                "Microsoft.Network/networkSecurityGroups/read"
+              ],
+              "data_actions": [],
+              "not_actions": [
+                "Microsoft.Storage/storageAccounts/listKeys/action"
+              ],
+              "not_data_actions": []
+            }
+          ],
+          "privilege_escalation_actions": [],
+          "role_definition_guid": "00000000-0000-4000-8000-222222222222",
+          "role_name": "pf-test-evidence-reader",
+          "role_type": "CustomRole",
+          "updated_on": "2026-08-14 18:47:49.017473+00:00",
+          "wildcard_actions": {
+            "control_plane": [],
+            "data_plane": []
+          }
+        }
+      ],
+      "privilege_escalation_actions_checked": {
+        "Microsoft.Authorization/denyAssignments/write": "can write deny assignments that shield resources from others",
+        "Microsoft.Authorization/roleAssignments/write": "can assign any role to any principal, including Owner",
+        "Microsoft.Authorization/roleDefinitions/write": "can rewrite the permissions of a role it already holds"
+      },
+      "provider_registration_status": "registered"
+    },
+    "summary": {
+      "builtin_role_definitions": 940,
+      "contributor_equivalent_custom_roles": 0,
+      "custom_role_definitions": 1,
+      "custom_roles_administering_resource_locks": 0,
+      "custom_roles_that_can_assign_roles": 0,
+      "custom_roles_that_can_write_role_definitions": 0,
+      "custom_roles_with_all_actions_wildcard": 0,
+      "custom_roles_with_data_actions": 0,
+      "custom_roles_with_escalation_names": [],
+      "custom_roles_with_not_actions": 1,
+      "custom_roles_with_privilege_escalation": 0,
+      "custom_roles_with_root_assignable_scope": 0,
+      "custom_roles_with_wildcard_actions": 0,
+      "least_privilege_custom_roles": 1,
+      "least_privilege_percentage": 100,
+      "owner_equivalent_custom_roles": 0,
+      "provider_registration_status": "registered",
+      "total_role_definitions": 941
+    }
+  }
+}

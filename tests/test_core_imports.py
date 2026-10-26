@@ -157,6 +157,4 @@ def test_the_check_can_fail() -> None:
 
 def test_stdlib_names_are_available() -> None:
     """sys.stdlib_module_names is the whole basis for skipping stdlib imports."""
-    if not hasattr(sys, "stdlib_module_names"):  # pragma: no cover — 3.10+
-        pytest.skip("needs Python 3.10+")
     assert "json" in sys.stdlib_module_names
