@@ -160,7 +160,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2.2`, `cm-8.3`, `sc-13`, `sc-23`, `si-7`, `si-7.1`, `sr-10`
 
-*6 fetchers:* [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration), [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration), [`azure_vm_hardening_status`](../fetchers/azure/vm_hardening_status), [`gcp_compute_instance_configuration`](../fetchers/gcp/compute_instance_configuration), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`wiz_file_integrity_monitoring`](../fetchers/wiz/file_integrity_monitoring)
+*5 fetchers:* [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration), [`azure_vm_hardening_status`](../fetchers/azure/vm_hardening_status), [`gcp_compute_instance_configuration`](../fetchers/gcp/compute_instance_configuration), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`wiz_file_integrity_monitoring`](../fetchers/wiz/file_integrity_monitoring)
 
 ### MLA — Monitoring, Logging, and Auditing  (5/5)
 
@@ -525,7 +525,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_app_gateway_tls_listeners`](../fetchers/azure/app_gateway_tls_listeners) | `KSI-CNA-MAT`, `KSI-SVC-SIN` |
 | [`azure_app_gateway_waf`](../fetchers/azure/app_gateway_waf) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-RVP` |
 | [`azure_app_service_backups`](../fetchers/azure/app_service_backups) | `KSI-RPL-ABO` |
-| [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration) | `KSI-CNA-DFP`, `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-ULN`, `KSI-IAM-SNU`, `KSI-MLA-LET`, `KSI-SVC-ASM`, `KSI-SVC-EIS`, `KSI-SVC-PRR`, `KSI-SVC-SIN`, `KSI-SVC-VRI` |
+| [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration) | `KSI-CNA-DFP`, `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-ULN`, `KSI-IAM-SNU`, `KSI-MLA-LET`, `KSI-SVC-ASM`, `KSI-SVC-EIS`, `KSI-SVC-PRR`, `KSI-SVC-SIN` |
 | [`azure_app_service_plans`](../fetchers/azure/app_service_plans) | `KSI-CNA-OFA` |
 | [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status) | `KSI-RPL-ABO` |
 | [`azure_change_provenance`](../fetchers/azure/change_provenance) | `KSI-CMT-RMV` |

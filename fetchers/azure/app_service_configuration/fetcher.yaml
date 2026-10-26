@@ -51,7 +51,7 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-SVC-SIN   # HTTPS-only, minimum TLS version, FTP/FTPS state
+  - KSI-SVC-SIN   # HTTPS-only, minimum TLS version and cipher suites, FTP/FTPS state
   - KSI-CNA-MAT   # public network access and VNet integration
   - KSI-IAM-SNU   # managed identity
   - KSI-SVC-EIS   # declared runtime versions — the supported-runtime control
@@ -61,7 +61,6 @@ ksis:
   - KSI-SVC-ASM   # app settings and connection strings resolved from Key Vault
   - KSI-CNA-DFP   # basic-auth publishing on the SCM and FTP endpoints
   - KSI-SVC-PRR   # runtimes past end of support left enabled
-  - KSI-SVC-VRI   # TLS cipher suites still allowed: CBC and non-forward-secret
 
   # No SVC-VCM: client certificate mode is mTLS-adjacent, but this reports the
   # setting, not automated validation of communications. Left an honest gap.
