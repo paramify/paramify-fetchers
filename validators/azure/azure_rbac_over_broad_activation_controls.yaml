@@ -1,0 +1,36 @@
+key: azure_rbac_over_broad_activation_controls
+name: Azure Over-Broad Role Activation Requires MFA, Approval and Justification Within 8 Hours
+type: AUTOMATED
+role: configuration
+statement: >-
+  On the subscription, PIM activation of each over-broad Azure role (Owner, Contributor, User Access
+  Administrator, Role Based Access Control Administrator) requires MFA (or a Conditional Access
+  authentication context), someone's approval and a justification, and none can be activated for more
+  than 8 hours; the settings of all four roles were read and PIM is available. Substantiates that
+  Azure-role activation requires MFA, approval, justification and a bounded duration (KSI-IAM-JIT). 8
+  hours is a placeholder for the organization's maximum. Does NOT prove the settings of a management
+  group or resource group, MFA that Conditional Access requires at sign-in, or that anyone is eligible
+  (azure_rbac_no_permanent_over_broad_assignments).
+
+# The fetcher leaves the lists and the hours null unless all four roles' settings were read.
+regex: '"partial_failure":\s*false[\s\S]*?"max_over_broad_activation_hours":\s*(?<max_over_broad_activation_hours>[0-7](?:\.\d+)?|8(?:\.0+)?)(?![\d.])[\s\S]*?"over_broad_roles_activation_without_approval":\s*(?<over_broad_roles_activation_without_approval>\[[^\]]*\]|null)[\s\S]*?"over_broad_roles_activation_without_justification":\s*(?<over_broad_roles_activation_without_justification>\[[^\]]*\]|null)[\s\S]*?"over_broad_roles_activation_without_mfa_or_auth_context":\s*(?<over_broad_roles_activation_without_mfa_or_auth_context>\[[^\]]*\]|null)[\s\S]*?"pim_available":\s*(?<pim_available>true|false|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS []; MATCH_GROUP[3] EQUALS []; MATCH_GROUP[4] EQUALS []; MATCH_GROUP[5] EQUALS true
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # over_broad_roles_activation_without_approval
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "[]" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # over_broad_roles_activation_without_justification
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "[]" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }   # over_broad_roles_activation_without_mfa_or_auth_context
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "[]" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 5 }   # pim_available
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+
+evidence_sets:
+  - EVD-AZURE-RBAC-ASSIGNMENTS
