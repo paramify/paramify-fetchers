@@ -57,7 +57,7 @@ evidence_set:
   reference_id: EVD-AZURE-KEYVAULT-CFG
   name: Azure Key Vault Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-keyvault KeyVaultManagementClient):
+    Script: azure/key_vault_configuration/fetcher.py. Azure SDK calls (azure-mgmt-keyvault KeyVaultManagementClient):
     vaults.list_by_subscription(). Then per vault (azure-mgmt-monitor<7
     MonitorManagementClient): diagnostic_settings.list(resource_uri=<vault resource
     id without the leading slash>). Reader is sufficient — both are GETs. Management

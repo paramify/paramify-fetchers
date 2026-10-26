@@ -27,7 +27,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urlparse
@@ -118,6 +118,8 @@ class ParamifyClient:
             "automated": True,
             # Envelopes written before the field existed carry no frequency.
             "frequency": es.get("frequency") or DEFAULT_EVIDENCE_FREQUENCY,
+            # The frequency schedule counts from the day the set is created.
+            "startDate": date.today().isoformat(),
         }
         if es.get("description"):
             body["description"] = es["description"]

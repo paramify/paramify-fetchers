@@ -50,7 +50,7 @@ evidence_set:
   reference_id: EVD-AZURE-FUNCAPP-CONFIG
   name: Azure Function App Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Web"), then
+    Script: azure/function_app_configuration/fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Web"), then
     azure-mgmt-web WebSiteManagementClient web_apps.list(), get_configuration(),
     list_host_keys() and list_application_settings() per function app. The last two are
     POST /action calls needing Microsoft.Web/sites/host/listkeys/action and

@@ -1,0 +1,63 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_backup_recovery_high_availability",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 3,
+      "fields": {
+        "Type": 3,
+        "SnapshotInfo": 2,
+        "PolicyInfo": 1
+      }
+    },
+    {
+      "path": "results[].SnapshotInfo.Tags[]",
+      "records": 6,
+      "fields": {
+        "Key": 6,
+        "Value": 6
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:10:55Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "Type": "EBS_Snapshot",
+        "SnapshotInfo": {
+          "Tags": [
+            {
+              "Key": "Project",
+              "Value": "example-example-profile"
+            }
+          ],
+          "StorageTier": "standard",
+          "TransferType": "standard",
+          "CompletionTime": "2026-09-28T17:05:08.876000+00:00",
+          "FullSnapshotSizeInBytes": 0,
+          "SnapshotId": "snap-015018e7b409c2b97",
+          "VolumeId": "vol-0f59747775ea40019",
+          "State": "completed",
+          "StartTime": "2026-09-28T17:04:26.532000+00:00",
+          "Progress": "100%",
+          "OwnerId": "111111111111",
+          "Description": "",
+          "VolumeSize": 1,
+          "Encrypted": true,
+          "KmsKeyId": "arn:aws:kms:us-east-2:111111111111:key/00000000-0000-4000-8000-222222222222"
+        }
+      }
+    ]
+  }
+}

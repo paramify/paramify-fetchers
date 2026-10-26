@@ -55,7 +55,7 @@ evidence_set:
   reference_id: EVD-AZURE-REDIS-CACHE-CONFIG
   name: Azure Cache for Redis Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-redis RedisManagementClient):
+    Script: azure/redis_cache_configuration/fetcher.py. Azure SDK calls (azure-mgmt-redis RedisManagementClient):
     redis.list_by_subscription() for every cache, then per cache firewall_rules.list,
     access_policy.list, access_policy_assignment.list, patch_schedules.list_by_redis_resource and
     linked_server.list (resource_group, cache), plus azure-mgmt-monitor

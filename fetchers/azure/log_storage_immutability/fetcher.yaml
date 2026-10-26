@@ -47,7 +47,7 @@ evidence_set:
   reference_id: EVD-AZURE-LOG-STORAGE-IMMUTABILITY
   name: Azure Log Storage Immutability
   instructions: >
-    Script: fetcher.py. ARM REST, Microsoft.Storage api-version 2023-05-01:
+    Script: azure/log_storage_immutability/fetcher.py. ARM REST, Microsoft.Storage api-version 2023-05-01:
     storageAccounts, each account's blobServices/default/containers and
     blobServices/default. Log containers are found by the names Azure Monitor
     creates (insights-logs-, insights-activity-logs, insights-metrics-, am-).

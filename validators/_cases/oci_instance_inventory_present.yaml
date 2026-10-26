@@ -1,0 +1,16 @@
+validator: oci_instance_inventory_present
+cases:
+  - name: oci_instance_inventory_present_passes
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"instances_with_legacy_metadata_endpoint": 0, "total_instances": 3}}'
+
+  - name: oci_instance_inventory_present_fails
+    expect: FAIL
+    note: >
+      The point of the validator: its partners' zeros are only meaningful when
+      something was counted.
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"instances_with_legacy_metadata_endpoint": 0, "total_instances": 0}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"instances_with_legacy_metadata_endpoint": 0, "total-instances": 3}}'

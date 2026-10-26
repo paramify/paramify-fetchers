@@ -1,0 +1,26 @@
+# Set-level: every validator naming this reference_id, combined the way
+# Paramify combines them. A validator that reads a zero cannot prove the
+# zero was measured — only the set, with its integrity partner, can.
+evidence_set: EVD-OCI-OBJECT-STORAGE-BUCKETS
+cases:
+  - name: no_bucket_reachable_by_anyone
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_buckets": 5, "public_buckets": 0, "buckets_private_but_reachable_by_par": 0}}}'
+
+  - name: a_public_bucket
+    expect: FAIL
+    note: >
+      the live tenancy's staged posture when these were authored
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_buckets": 5, "public_buckets": 1, "buckets_private_but_reachable_by_par": 0}}}'
+
+  - name: a_private_bucket_with_a_live_par
+    expect: FAIL
+    note: >
+      Access type says NoPublicAccess and the bucket is still readable by URL. oci_no_public_buckets passes here; only oci_no_buckets_reachable_by_par fails.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_buckets": 5, "public_buckets": 0, "buckets_private_but_reachable_by_par": 1}}}'
+
+  - name: nothing_was_collected
+    expect: FAIL
+    note: >
+      The case the integrity role exists for. Both posture validators read a zero and pass; oci_bucket_inventory_present fails because nothing was counted, so the set fails. Delete it and this goes green while proving nothing.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"summary": {"total_buckets": 0, "public_buckets": 0, "buckets_private_but_reachable_by_par": 0}}}'
