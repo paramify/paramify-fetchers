@@ -22,13 +22,15 @@ schemas and the `paramify` CLI — not the internal code.
   - the effective members of Project Collection Administrators, Project
     Collection Service Accounts, Project Collection Build Administrators and each
     project's Project, Build, Release and Endpoint Administrators, with the path
-    of nested groups to each and whether it crosses an Entra group;
+    of nested groups to each and whether it is held only through an Entra group;
   - users inactive past `AZURE_DEVOPS_INACTIVE_DAYS` (default 90), counting a
-    never-used account from the day it was added.
+    never-used account from the day it was added, and people deleted in Entra ID
+    who are still in the organization.
 
   Azure DevOps memberships never expire; `entra_groups_granting_privilege` names
-  the Entra groups to check for PIM. Read-only PAT scopes: Graph and Member
-  Entitlement Management; or an Entra identity that is an organization member.
+  the Entra groups to check for PIM. A summary field whose read failed is null,
+  not 0 or empty. Read-only PAT scopes: Graph and Member Entitlement Management;
+  or an Entra identity that is an organization member.
 - **`azure_devops_audit_streams`** (`EVD-AZURE-DEVOPS-AUDIT-STREAMS`): whether an
   Azure DevOps organization exports its audit log, which it otherwise keeps for
   90 days. Records:

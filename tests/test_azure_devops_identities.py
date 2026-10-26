@@ -91,10 +91,10 @@ GROUPS = [
     group("vssgp.wpa", "[Web]\\Project Administrators", WEB_DOMAIN),
     group("vssgp.wc", "[Web]\\Contributors", WEB_DOMAIN),
     group("vssgp.wba", "[Web]\\Build Administrators", WEB_DOMAIN),
-    group("aadgp.pa", "[TEAM FOUNDATION]\\Platform Admins", TENANT, origin="aad"),
+    # An Entra group's principalName is "[TEAM FOUNDATION]\<name>", as in the Groups - Create samples.
+    group("aadgp.pa", "[TEAM FOUNDATION]\\Platform Admins", origin="aad"),
 ]
-GROUPS[-1]["principalName"] = "platform-admins@example.com"
-GROUPS[-1]["displayName"] = "Platform Admins"
+PLATFORM_ADMINS = "[TEAM FOUNDATION]\\Platform Admins"
 
 MEMBERS = {
     "vssgp.pca": ["aad.alice", "vssgp.ops"],
@@ -204,7 +204,7 @@ def test_collects_the_organization_and_exits_zero(tmp_path):
     assert s["privileged_users"] == ["alice@example.com", "bob@example.com", "carol@partner.example"]
     assert s["privileged_service_principals"] == ["sp-object-id"]
     assert s["privileged_identities_only_through_entra_groups"] == 1
-    assert s["entra_groups_granting_privilege"] == ["platform-admins@example.com"]
+    assert s["entra_groups_granting_privilege"] == [PLATFORM_ADMINS]
     assert s["guest_privileged_users"] == ["carol@partner.example"]
 
 
@@ -220,8 +220,8 @@ def test_privileged_members_carry_the_path_and_whether_it_crosses_an_entra_group
     assert web["project"] == "Web" and web["members_complete"] is True
     bob = next(m for m in web["effective_members"] if m["name"] == "bob@example.com")
     assert bob["through_entra_group"] is True and bob["inactive"] is True
-    assert bob["via"] == ["[Web]\\Project Administrators", "platform-admins@example.com"]
-    assert web["entra_groups"] == ["platform-admins@example.com"]
+    assert bob["via"] == ["[Web]\\Project Administrators", PLATFORM_ADMINS]
+    assert web["entra_groups"] == [PLATFORM_ADMINS]
     assert next(m for m in web["effective_members"] if m["name"] == "sp-object-id")["kind"] == "service_principal"
 
 
@@ -230,6 +230,79 @@ def test_computed_and_enterprise_groups_are_not_expanded(tmp_path):
     read = {path.rsplit("/", 1)[-1] for _, _, path, _ in fake.calls if "/Memberships/" in path}
     assert read == {"vssgp.pca", "vssgp.ops", "vssgp.wpa", "vssgp.wc", "vssgp.wba", "aadgp.pa"}
     assert all(p.get("direction") == "down" for _, _, path, p in fake.calls if "/Memberships/" in path)
+
+
+def test_an_entra_group_named_under_team_foundation_is_read_not_skipped(tmp_path):
+    _, evidence, _, _ = run(tmp_path)
+    groups = {g["descriptor"]: g for g in evidence["results"]["groups"]}
+    assert groups["aadgp.pa"]["computed"] is False and groups["aadgp.pa"]["members_read"] is True
+    assert groups["vssgp.esa"]["computed"] is True
+    assert evidence["summary"]["privileged_identities_only_through_entra_groups"] == 1
+
+
+def test_a_member_with_an_azure_devops_path_is_not_entra_only(tmp_path, monkeypatch):
+    leads = group("vssgp.rel", "[Web]\\Release Leads", WEB_DOMAIN)
+    monkeypatch.setitem(MEMBERS, "vssgp.wpa", ["aadgp.pa", "aadsp.deploy", "vssgp.rel"])
+    monkeypatch.setitem(MEMBERS, "vssgp.rel", ["aad.bob"])
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/graph/groups")] = Resp(body={"value": GROUPS + [leads]})
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/graph/Memberships/vssgp.rel")] = \
+        lambda params: Resp(body=membership_rows("vssgp.rel"))
+    _, evidence, _, _ = run(tmp_path, fake)
+    web = privileged_group(evidence, "[Web]\\Project Administrators")
+    bob = next(m for m in web["effective_members"] if m["name"] == "bob@example.com")
+    assert bob["through_entra_group"] is False
+    assert bob["via"] == ["[Web]\\Project Administrators", "[Web]\\Release Leads"]
+    assert evidence["summary"]["privileged_identities_only_through_entra_groups"] == 0
+
+
+def test_refused_groups_leave_the_privilege_fields_unknown(tmp_path):
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/graph/groups")] = err(403, "TF400813: no.")
+    code, evidence, _, _ = run(tmp_path, fake)
+    assert code == 1
+    s = evidence["summary"]
+    for field in ("groups_total", "entra_groups_total", "groups_not_read", "privileged_groups",
+                  "privileged_groups_not_fully_read", "privileged_members_by_group", "privileged_identities",
+                  "privileged_users", "privileged_service_principals",
+                  "privileged_identities_only_through_entra_groups", "entra_groups_granting_privilege",
+                  "inactive_privileged_users", "guest_privileged_users"):
+        assert s[field] is None, field
+    assert s["users_total"] == 5 and s["inactive_users"] == ["bob@example.com", "dave@example.com"]
+    alice = identity(evidence, "alice@example.com")
+    assert (alice["groups"], alice["direct_groups"], alice["privileged_groups"]) == (None, None, None)
+
+
+def test_refused_users_leave_the_people_fields_unknown(tmp_path):
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/graph/users")] = err(403, "TF400813: no.")
+    code, evidence, _, _ = run(tmp_path, fake)
+    assert code == 1
+    s = evidence["summary"]
+    for field in ("users_total", "guest_users", "users_by_origin", "users_deleted_in_origin",
+                  "service_identities_total", "guest_privileged_users"):
+        assert s[field] is None, field
+    # Entitled people still come from the user entitlements.
+    assert s["privileged_users"] == ["alice@example.com", "bob@example.com", "carol@partner.example"]
+    assert s["inactive_users"] == ["bob@example.com", "dave@example.com"]
+
+
+def test_sign_in_disabled_counts_disabled_and_deleted_users(tmp_path):
+    fake = FakeADO()
+    page = fake.routes[("vsaex.dev.azure.com", "/contoso/_apis/userentitlements")]["e2"]._body["items"]
+    page[0] = entitlement(DAVE, status="deleted", created=ago(days=400))
+    _, evidence, _, _ = run(tmp_path, fake)
+    assert evidence["summary"]["users_with_sign_in_disabled"] == 2
+    assert evidence["summary"]["inactive_users"] == ["bob@example.com"]
+    assert identity(evidence, "dave@example.com")["can_sign_in"] is False
+
+
+def test_people_deleted_in_their_identity_source_are_listed(tmp_path, monkeypatch):
+    monkeypatch.setitem(DAVE, "isDeletedInOrigin", True)
+    _, evidence, _, _ = run(tmp_path)
+    assert evidence["summary"]["users_deleted_in_origin"] == ["dave@example.com"]
+    assert identity(evidence, "dave@example.com")["deleted_in_origin"] is True
+    assert identity(evidence, "alice@example.com")["deleted_in_origin"] is False
 
 
 def test_each_identity_lists_direct_and_inherited_groups(tmp_path):
@@ -280,8 +353,15 @@ def test_refused_entitlements_name_the_scope_and_leave_the_rest(tmp_path):
     assert failure["operation"] == "userentitlements.list"
     assert "PAT scope needed: Member Entitlement Management (Read)" in failure["message"]
     s = evidence["summary"]
-    assert s["last_access_collected"] is False and s["inactive_users"] == []
+    assert s["last_access_collected"] is False
+    for field in ("inactive_users", "users_never_accessed", "users_with_sign_in_disabled", "users_by_access_level",
+                  "inactive_privileged_users"):
+        assert s[field] is None, field
     assert s["privileged_users"] == ["alice@example.com", "bob@example.com", "carol@partner.example"]
+    bob = identity(evidence, "bob@example.com")
+    assert (bob["inactive"], bob["never_accessed"], bob["can_sign_in"]) == (None, None, None)
+    web = privileged_group(evidence, "[Web]\\Project Administrators")
+    assert next(m for m in web["effective_members"] if m["name"] == "bob@example.com")["inactive"] is None
 
 
 def test_an_unread_nested_group_marks_the_privileged_group_incomplete(tmp_path):
@@ -293,7 +373,7 @@ def test_an_unread_nested_group_marks_the_privileged_group_incomplete(tmp_path):
     assert web["members_complete"] is False
     assert [m["name"] for m in web["effective_members"]] == ["sp-object-id"]
     s = evidence["summary"]
-    assert s["groups_not_read"] == ["platform-admins@example.com"]
+    assert s["groups_not_read"] == [PLATFORM_ADMINS]
     assert s["privileged_groups_not_fully_read"] == ["[Web]\\Project Administrators"]
 
 
@@ -306,14 +386,15 @@ def test_as_an_entra_identity_a_refusal_names_the_missing_permission(tmp_path, m
     code, evidence, _, _ = run(tmp_path, fake)
     assert code == 1 and evidence["metadata"]["auth_mode"] == "entra"
     assert "Entra identity lacks permission" in evidence["metadata"]["api_failures"][0]["message"]
-    assert evidence["summary"]["service_principals_total"] == 0
+    assert evidence["summary"]["service_principals_total"] is None
     assert evidence["summary"]["users_total"] == 5
 
 
 def test_a_missing_organization_is_bad_config(tmp_path):
     fake = FakeADO()
     fake.routes[("vssps.dev.azure.com", "/contoso/_apis/graph/users")] = Resp(404, {"message": "Not found."})
-    _, evidence, _, _ = run(tmp_path, fake)
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 1 and status["code"] == "bad_config"
     failure = evidence["metadata"]["api_failures"][0]
     assert failure["operation"] == "graph.users.list" and "not found" in failure["message"]
     assert failure["type"] == "ValueError"

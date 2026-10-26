@@ -40,6 +40,7 @@ PRIVILEGED_GROUPS = {
 }
 # Computed groups hold everyone; their members are not read.
 COMPUTED_GROUPS = {"project collection valid users", "project valid users"}
+SIGN_IN_BLOCKED = {"disabled", "deleted", "pendingdisabled"}
 PROJECT_DOMAIN = "vstfs:///classification/teamproject/"
 # Subject descriptor prefixes.
 KINDS = {"aad": "user", "msa": "user", "bnd": "user", "imp": "user", "aadsp": "service_principal",
@@ -125,6 +126,9 @@ def privileged(group: Dict[str, Any]) -> bool:
 
 
 def computed(group: Dict[str, Any]) -> bool:
+    # Entra groups are also named "[TEAM FOUNDATION]\<name>"; only Azure DevOps ones there are enterprise-level.
+    if entra_group(group):
+        return False
     return (str(group.get("displayName") or "").lower() in COMPUTED_GROUPS
             or str(group.get("principalName") or "").upper().startswith("[TEAM FOUNDATION]"))
 
@@ -154,16 +158,27 @@ def last_access(raw: Any) -> Optional[datetime]:
     return when if when and when.year > 1900 else None
 
 
+def inactive(human: bool, entitled: bool, can_sign_in: Optional[bool], stale: Optional[bool]) -> Optional[bool]:
+    """Judged for people with an entitlement only; None when that can't be told."""
+    if not human or not entitled:
+        return None
+    if can_sign_in is False:
+        return False
+    return None if can_sign_in is None or stale is None else stale
+
+
 def identity_record(subject: Dict[str, Any], entitlement: Optional[Dict[str, Any]], now: datetime,
                     threshold: int) -> Dict[str, Any]:
     level = (entitlement or {}).get("accessLevel") or {}
     created = parse_time((entitlement or {}).get("dateCreated"))
     accessed = last_access((entitlement or {}).get("lastAccessedDate"))
     kind = kind_of(subject.get("descriptor"))
+    human = kind == HUMAN
     cutoff = now - timedelta(days=threshold)
     status = str(level.get("status") or "").lower() or None
-    can_sign_in = status not in ("disabled", "deleted", "pendingdisabled")
-    stale = accessed < cutoff if accessed else bool(created and created < cutoff)
+    can_sign_in = status not in SIGN_IN_BLOCKED if status else None
+    stale = accessed < cutoff if accessed else (created < cutoff if created else None)
+    meta = str(subject.get("metaType") or "").lower() or None
     return {
         "descriptor": subject.get("descriptor"),
         "display_name": subject.get("displayName"),
@@ -173,15 +188,18 @@ def identity_record(subject: Dict[str, Any], entitlement: Optional[Dict[str, Any
         "origin": subject.get("origin"),
         "origin_id": subject.get("originId"),
         "meta_type": subject.get("metaType"),
+        "guest": meta == "guest" if human and meta else None,
+        "deleted_in_origin": subject.get("isDeletedInOrigin") is True,
         "application_id": subject.get("applicationId"),
         "access_level": level.get("licenseDisplayName"),
         "license_type": level.get("accountLicenseType"),
         "license_status": status,
+        "can_sign_in": can_sign_in,
         "date_created": iso(created),
         "last_accessed": iso(accessed),
-        "never_accessed": entitlement is not None and accessed is None,
+        "never_accessed": accessed is None if entitlement is not None else None,
         "days_since_last_access": (now - accessed).days if accessed else None,
-        "inactive": bool(entitlement is not None and kind == HUMAN and can_sign_in and stale),
+        "inactive": inactive(human, entitlement is not None, can_sign_in, stale),
     }
 
 
@@ -222,9 +240,9 @@ class Graph:
                 stack.extend(self.parents.get(group, ()))
         return found
 
-    def effective(self, root: str) -> Tuple[Dict[str, List[str]], Set[str], bool]:
+    def effective(self, root: str, cross_entra: bool = True) -> Tuple[Dict[str, List[str]], Set[str], bool]:
         """Each non-group member under `root` with the shortest path of groups to it, the Entra groups crossed,
-        and whether every group on the way was read."""
+        and whether every group on the way was read. With cross_entra=False, Entra groups are not entered."""
         paths: Dict[str, List[str]] = {}
         entra: Set[str] = set()
         complete = root not in self.unread
@@ -238,6 +256,8 @@ class Graph:
                 seen.add(member)
                 if kind_of(member) == "group" or member in self.groups:
                     if entra_group(self.groups.get(member) or {"descriptor": member}):
+                        if not cross_entra:
+                            continue
                         entra.add(member)
                     complete = complete and member not in self.unread and member in self.members
                     queue.append((member, path + [member]))
@@ -256,6 +276,8 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
     groups_raw = call(collector, "graph.groups.list", SCOPE_GRAPH,
                       lambda: client.list("_apis/graph/groups", GRAPH_API, service=GRAPH))
     entitled = call(collector, "userentitlements.list", SCOPE_ENTITLEMENTS, lambda: entitlements(client))
+    read = {"users": users is not None, "service_principals": principals is not None,
+            "groups": groups_raw is not None, "entitlements": entitled is not None}
 
     by_descriptor = {e["user"]["descriptor"]: e for e in entitled or []
                      if isinstance(e.get("user"), dict) and e["user"].get("descriptor")}
@@ -288,9 +310,11 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
     identities: Dict[str, Dict[str, Any]] = {}
     for descriptor, subject in subjects.items():
         record = identity_record(subject, by_descriptor.get(descriptor), now, threshold)
-        record["direct_groups"] = sorted((label(g) for g in graph.parents.get(descriptor, ())), key=str.lower)
-        record["groups"] = sorted((label(g) for g in graph.ancestors(descriptor)), key=str.lower)
-        record["privileged_groups"] = []
+        record["direct_groups"] = record["groups"] = record["privileged_groups"] = None
+        if read["groups"]:
+            record["direct_groups"] = sorted((label(g) for g in graph.parents.get(descriptor, ())), key=str.lower)
+            record["groups"] = sorted((label(g) for g in graph.ancestors(descriptor)), key=str.lower)
+            record["privileged_groups"] = []
         identities[descriptor] = record
 
     privileged_groups = []
@@ -298,10 +322,11 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         if not privileged(group):
             continue
         paths, entra, complete = graph.effective(descriptor)
+        # A member reached without an Entra group keeps that path, so Entra-only holders stand apart.
+        plain, _, _ = graph.effective(descriptor, cross_entra=False)
         members = []
         for member, path in sorted(paths.items(), key=lambda kv: label(kv[0]).lower()):
-            via = [label(g) for g in path]
-            through_entra = any(entra_group(groups.get(g) or {"descriptor": g}) for g in path[1:])
+            path = plain.get(member, path)
             record = identities.get(member)
             if record is not None:
                 record["privileged_groups"].append(group_label(group))
@@ -310,10 +335,10 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
                 "name": label(member),
                 "kind": kind_of(member),
                 "direct": len(path) == 1,
-                "via": via,
-                "through_entra_group": through_entra,
-                "inactive": bool(record and record["inactive"]),
-                "guest": bool(record and str(record["meta_type"] or "").lower() == "guest"),
+                "via": [label(g) for g in path],
+                "through_entra_group": member not in plain,
+                "inactive": record["inactive"] if record else None,
+                "guest": record["guest"] if record else None,
             })
         privileged_groups.append({
             **group_record(group),
@@ -322,7 +347,8 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
             "effective_members": members,
         })
     for record in identities.values():
-        record["privileged_groups"].sort(key=str.lower)
+        if record["privileged_groups"] is not None:
+            record["privileged_groups"].sort(key=str.lower)
 
     ordered = sorted(identities.values(), key=lambda r: (r["kind"], str(r["principal_name"] or r["display_name"] or "").lower()))
     group_list = sorted((group_record(g) for g in groups.values()), key=lambda g: g["name"].lower())
@@ -335,48 +361,57 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         "groups": group_list,
         "privileged_groups": privileged_groups,
     }
-    return results, summarize(ordered, group_list, privileged_groups, threshold, entitled is not None)
+    return results, summarize(ordered, group_list, privileged_groups, threshold, read)
 
 
-def summarize(identities, groups, privileged_groups, threshold: int, entitlements_read: bool) -> Dict[str, Any]:
+def summarize(identities, groups, privileged_groups, threshold: int, read: Dict[str, bool]) -> Dict[str, Any]:
+    """A field whose source call failed is None, never a zero or an empty list."""
     def name(r):
         return r["principal_name"] or r["display_name"] or r["descriptor"]
 
+    def names(rows) -> List[str]:
+        return sorted(rows, key=str.lower)
+
+    def known(*sources: str) -> Callable[[Any], Any]:
+        ok = all(read[s] for s in sources)
+        return lambda value: value if ok else None
+
+    users, entitled, grouped = known("users"), known("entitlements"), known("groups")
     people = [r for r in identities if r["kind"] == HUMAN]
     holders = {m["descriptor"]: m for g in privileged_groups for m in g["effective_members"]}
-    by_id = {r["descriptor"]: r for r in identities}
-    privileged_people = [by_id[d] for d in holders if d in by_id and by_id[d]["kind"] == HUMAN]
+    privileged_people = [m for m in holders.values() if m["kind"] == HUMAN]
     only_through_entra = {m["descriptor"] for g in privileged_groups for m in g["effective_members"]
                           if m["through_entra_group"]} - {m["descriptor"] for g in privileged_groups
                                                           for m in g["effective_members"] if not m["through_entra_group"]}
     return {
         "inactivity_threshold_days": threshold,
-        "users_total": len(people),
-        "guest_users": sum(1 for r in people if str(r["meta_type"] or "").lower() == "guest"),
-        "users_by_access_level": sorted_counts(Counter(r["access_level"] or "none" for r in people)),
-        "users_by_origin": sorted_counts(Counter(r["origin"] or "unknown" for r in people)),
-        "users_with_sign_in_disabled": sum(1 for r in people if r["license_status"] in ("disabled", "pendingdisabled")),
-        "service_principals_total": sum(1 for r in identities if r["kind"] == "service_principal"),
-        "service_identities_total": sum(1 for r in identities if r["kind"] == "service_identity"),
-        "groups_total": len(groups),
-        "entra_groups_total": sum(1 for g in groups if g["entra_group"]),
-        "groups_not_read": [g["name"] for g in groups if not g["members_read"] and not g["computed"]],
-        "last_access_collected": entitlements_read,
-        "inactive_users": sorted((name(r) for r in people if r["inactive"]), key=str.lower),
-        "users_never_accessed": sorted((name(r) for r in people if r["never_accessed"]), key=str.lower),
-        "privileged_groups": len(privileged_groups),
-        "privileged_groups_not_fully_read": [g["name"] for g in privileged_groups if not g["members_complete"]],
-        "privileged_members_by_group": {g["name"]: len(g["effective_members"]) for g in privileged_groups},
-        "privileged_identities": len(holders),
-        "privileged_users": sorted((name(r) for r in privileged_people), key=str.lower),
-        "privileged_service_principals": sorted(
-            (name(by_id[d]) for d in holders if d in by_id and by_id[d]["kind"] == "service_principal"), key=str.lower),
-        "privileged_identities_only_through_entra_groups": len(only_through_entra),
-        "entra_groups_granting_privilege": sorted({e for g in privileged_groups for e in g["entra_groups"]},
-                                                  key=str.lower),
-        "inactive_privileged_users": sorted((name(r) for r in privileged_people if r["inactive"]), key=str.lower),
-        "guest_privileged_users": sorted((name(r) for r in privileged_people
-                                          if str(r["meta_type"] or "").lower() == "guest"), key=str.lower),
+        "users_total": users(len(people)),
+        "guest_users": users(sum(1 for r in people if r["guest"])),
+        "users_by_access_level": entitled(sorted_counts(Counter(r["access_level"] or "unknown" for r in people))),
+        "users_by_origin": users(sorted_counts(Counter(r["origin"] or "unknown" for r in people))),
+        "users_with_sign_in_disabled": entitled(sum(1 for r in people if r["can_sign_in"] is False)),
+        "users_deleted_in_origin": users(names(name(r) for r in people if r["deleted_in_origin"])),
+        "service_principals_total": known("service_principals")(
+            sum(1 for r in identities if r["kind"] == "service_principal")),
+        "service_identities_total": users(sum(1 for r in identities if r["kind"] == "service_identity")),
+        "groups_total": grouped(len(groups)),
+        "entra_groups_total": grouped(sum(1 for g in groups if g["entra_group"])),
+        "groups_not_read": grouped([g["name"] for g in groups if not g["members_read"] and not g["computed"]]),
+        "last_access_collected": read["entitlements"],
+        "inactive_users": entitled(names(name(r) for r in people if r["inactive"])),
+        "users_never_accessed": entitled(names(name(r) for r in people if r["never_accessed"])),
+        "privileged_groups": grouped(len(privileged_groups)),
+        "privileged_groups_not_fully_read": grouped([g["name"] for g in privileged_groups if not g["members_complete"]]),
+        "privileged_members_by_group": grouped({g["name"]: len(g["effective_members"]) for g in privileged_groups}),
+        "privileged_identities": grouped(len(holders)),
+        "privileged_users": grouped(names(m["name"] for m in privileged_people)),
+        "privileged_service_principals": grouped(
+            names(m["name"] for m in holders.values() if m["kind"] == "service_principal")),
+        "privileged_identities_only_through_entra_groups": grouped(len(only_through_entra)),
+        "entra_groups_granting_privilege": grouped(names({e for g in privileged_groups for e in g["entra_groups"]})),
+        "inactive_privileged_users": known("groups", "entitlements")(
+            names(m["name"] for m in privileged_people if m["inactive"])),
+        "guest_privileged_users": known("groups", "users")(names(m["name"] for m in privileged_people if m["guest"])),
         "not_collected": dict(NOT_COLLECTED),
     }
 
