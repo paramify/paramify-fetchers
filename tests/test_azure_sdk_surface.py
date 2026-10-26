@@ -2496,6 +2496,44 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "azure/entra_service_principals — federated credentials arrive only via $expand",
     ),
     (
+        "msgraph.generated.models.group",
+        "Group",
+        [
+            "group_types",
+            "security_enabled",
+            "mail_enabled",
+            "is_assignable_to_role",
+            "membership_rule",
+            "membership_rule_processing_state",
+            "on_premises_sync_enabled",
+            "visibility",
+            "members",
+            "owners",
+        ],
+        "azure/entra_groups — a missing field reads as None, so every group would look "
+        "assigned, cloud-only and not role-assignable, or empty and ownerless",
+    ),
+    (
+        "msgraph.generated.groups.groups_request_builder",
+        "GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters",
+        ["select", "expand"],
+        "azure/entra_groups — members and owners arrive via $expand",
+    ),
+    (
+        "msgraph.generated.models.user",
+        "User",
+        ["odata_type", "user_principal_name", "user_type", "account_enabled"],
+        "azure/entra_groups — a missing field reads as None, so guest and disabled-user "
+        "figures read unknown; without odata_type no member is a user and they read 0",
+    ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        ["odata_type", "account_enabled"],
+        "azure/entra_groups — service principal members and owners; without account_enabled "
+        "groups_with_only_disabled_owners reads unknown",
+    ),
+    (
         "msgraph.generated.models.authentication_methods_policy",
         "AuthenticationMethodsPolicy",
         ["authentication_method_configurations", "policy_migration_state", "registration_enforcement"],
@@ -3759,6 +3797,20 @@ def test_graph_admin_membership_builders_present() -> None:
     assert getattr(group, "transitive_members", None) is not None, (
         "groups.by_group_id(...).transitive_members is gone.\n"
         "  affected fetchers: azure/entra_mfa_status — admins via a group would be missed"
+    )
+
+
+def test_graph_group_member_builders_present() -> None:
+    """The per-group builders azure/entra_groups reads past the $expand limit."""
+    client = _build("msgraph", "GraphServiceClient")
+    group = client.groups.by_group_id("00000000-0000-0000-0000-000000000000")
+    assert callable(getattr(group.owners, "with_url", None)), (
+        "groups.by_group_id(...).owners.with_url is gone; the beta owner read needs it.\n"
+        "  affected fetchers: azure/entra_groups"
+    )
+    assert callable(getattr(group.members, "with_url", None)), (
+        "groups.by_group_id(...).members.with_url is gone; the beta member read needs it.\n"
+        "  affected fetchers: azure/entra_groups"
     )
 
 

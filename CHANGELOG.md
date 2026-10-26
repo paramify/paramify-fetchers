@@ -12,6 +12,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_groups`** (`EVD-AZURE-ENTRA-GROUPS`) — every Entra ID group with
+  its members and owners, its kind, whether it can hold directory roles, and
+  whether membership is set by a rule (dynamic, with paused rules flagged), by hand
+  or synced from on-premises. Summarizes role-assignable groups without an owner or
+  with guests, groups without an owner or with only disabled owners, and groups
+  holding guests, disabled users, nested groups or service principals. Members and
+  owners past `$expand`'s 20-item limit are read from beta, since v1.0 leaves out
+  service principals. Groups whose owners Graph doesn't return (synced,
+  distribution, mail-enabled security) are left out of the owner figures, a
+  hidden-membership group with no visible members reads unknown, and a partial
+  group list nulls every count. Needs GroupMember.Read.All (or Directory.Read.All);
+  User.Read.All, Member.Read.Hidden and Application.Read.All are optional, and
+  without User.Read.All the guest, disabled-user and disabled-owner figures read
+  null.
 - **Oracle Cloud Infrastructure category** (`fetchers/oci/`, fifteen
   fetchers, `pip install -e '.[oci]'`). Authenticates with an API signing key
   the runner injects as a secret (`OCI_PRIVATE_KEY` carries the PEM content,
