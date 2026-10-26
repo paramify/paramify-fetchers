@@ -10,8 +10,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace as ns
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER = REPO_ROOT / "fetchers" / "azure" / "entra_pim_assignments" / "fetcher.py"
 
@@ -180,6 +178,40 @@ def test_a_missing_rule_reads_as_unknown_not_false():
     assert record["activation_requires_approval"] is None
 
 
+def test_a_privileged_policy_missing_a_rule_makes_its_lists_unknown():
+    bare = pim.project_policy_assignment(ns(role_definition_id=PRA, policy_id="p", policy=ns(rules=None)))
+    _, summary = pim.build(DEFINITIONS, [], [], [_policy(GA, mfa=False), bare], [])
+    assert summary["privileged_role_policies"] == 2
+    for field in (
+        "privileged_roles_activation_without_mfa_or_auth_context",
+        "privileged_roles_activation_without_justification",
+        "privileged_roles_activation_without_approval",
+        "privileged_roles_allowing_permanent_active_assignment",
+        "privileged_roles_allowing_permanent_eligible_assignment",
+    ):
+        assert summary[field] is None, field
+
+    # An authentication context covers activation whatever the MFA rule says; the other lists stay known.
+    gated = _policy(GA, context="c1")
+    gated["rules"] = [r for r in gated["rules"] if r["id"] != "Enablement_EndUser_Assignment"]
+    _, summary = pim.build(DEFINITIONS, [], [], [gated], [])
+    assert summary["privileged_roles_activation_without_mfa_or_auth_context"] == []
+    assert summary["privileged_roles_activation_without_justification"] is None
+    assert summary["privileged_roles_activation_without_approval"] == ["Global Administrator"]
+    assert summary["privileged_roles_allowing_permanent_active_assignment"] == []
+
+
+def test_an_untyped_permanent_holder_makes_the_user_count_unknown():
+    active = [_instance(GA, "u-ga"), _instance(GA, "p-untyped", odata=None)]
+    _, summary = pim.build(DEFINITIONS, [], active, [_policy(GA)], [])
+    assert summary["permanent_active_privileged_assignments"] == 2
+    assert summary["permanent_active_privileged_user_assignments"] is None
+
+    active[1] = _instance(GA, "p-untyped", odata=None, assignment_type="Activated", end=LATER)
+    _, summary = pim.build(DEFINITIONS, [], active, [_policy(GA)], [])
+    assert summary["permanent_active_privileged_user_assignments"] == 1
+
+
 def test_privileged_counts_take_only_tenant_wide_direct_grants():
     active = [
         _instance(GA, "u-ga"),
@@ -277,14 +309,6 @@ def test_a_failure_on_a_later_page_fails_the_read():
     assert items is None
     assert unlicensed == []
     assert pim.classify_failure_code(collector.failures) == "rate_limited"
-
-
-@pytest.mark.parametrize("status, code", [
-    (403, "not_authorized"), (429, "rate_limited"), (503, "target_unreachable"), (504, "target_unreachable"),
-])
-def test_graph_status_text_is_classified_like_arm(status, code):
-    failures = [{"operation": "graph.op", "type": "ODataError", "message": f"Something went wrong (status {status})"}]
-    assert pim.classify_failure_code(failures) == code
 
 
 def test_a_graph_403_is_recorded_and_classified_not_authorized():

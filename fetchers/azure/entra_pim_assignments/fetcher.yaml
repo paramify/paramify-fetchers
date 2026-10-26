@@ -89,21 +89,21 @@ evidence_set:
     Who holds a privileged role right now, and for how long?
     - active_assignments — Number of active assignments (a role held now) across all directory roles, including activations of an eligible assignment
     - active_privileged_assignments — Number of active assignments to privileged roles
-    - active_privileged_by_standing — Number of active privileged-role assignments of each kind:
+    - active_privileged_by_standing — Number of active privileged-role assignments for each kind:
       - permanent (assigned with no end date, so standing access; a group whose membership PIM for Groups manages also reads permanent when its role has no end date)
       - pim_activated (an eligible holder activated it, so it ends after the activation time)
       - time_bound (assigned directly with an end date)
     - permanent_active_privileged_assignments — Number of active privileged-role assignments with no end date that were not activated through PIM
-    - permanent_active_privileged_user_assignments — Number of permanent active privileged-role assignments held by users (not groups or apps)
+    - permanent_active_privileged_user_assignments — Number of permanent active privileged-role assignments held by users (not groups or apps); null if a holder's type wasn't returned
     - principals_with_permanent_privileged_access — Number of distinct users, groups and apps holding a privileged role permanently
     - privileged_roles_with_permanent_active_holders — List of privileged role names held permanently by at least one user, group or app
     - global_administrator_permanent_active — Number of permanent active Global Administrator assignments
     - privileged_assignments_scoped_below_tenant — Number of eligible and active assignments of privileged roles scoped to an administrative unit or a single object, which the privileged counts leave out
 
     Does activating a privileged role require MFA, a reason, approval and a time limit?
-    - privileged_roles_activation_without_mfa_or_auth_context — List of privileged role names whose activation needs neither MFA nor a Conditional Access authentication context
-    - privileged_roles_activation_without_justification — List of privileged role names whose activation doesn't ask for a reason
-    - privileged_roles_activation_without_approval — List of privileged role names whose activation doesn't need someone's approval
+    - privileged_roles_activation_without_mfa_or_auth_context — List of privileged role names whose activation needs neither MFA nor a Conditional Access authentication context; null if a privileged role's policy didn't say whether activation needs MFA
+    - privileged_roles_activation_without_justification — List of privileged role names whose activation doesn't ask for a reason; null if a privileged role's policy didn't say whether activation needs one
+    - privileged_roles_activation_without_approval — List of privileged role names whose activation doesn't need someone's approval; null if a privileged role's policy didn't say whether activation needs approval
     - max_privileged_activation_hours — Hours: the longest maximum activation time set on any privileged role; null if no privileged role sets one
-    - privileged_roles_allowing_permanent_active_assignment — List of privileged role names whose policy lets an admin assign the role permanently as active, with no end date
-    - privileged_roles_allowing_permanent_eligible_assignment — List of privileged role names whose policy lets an admin make someone permanently eligible, with no end date
+    - privileged_roles_allowing_permanent_active_assignment — List of privileged role names whose policy lets an admin assign the role permanently as active, with no end date; null if a privileged role's policy didn't say whether an active assignment needs an end date
+    - privileged_roles_allowing_permanent_eligible_assignment — List of privileged role names whose policy lets an admin make someone permanently eligible, with no end date; null if a privileged role's policy didn't say whether an eligible assignment needs an end date

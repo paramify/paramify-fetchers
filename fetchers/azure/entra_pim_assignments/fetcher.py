@@ -262,6 +262,16 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
     def names(records, pred=lambda r: True):
         return sorted({r["role_name"] or r["role_definition_id"] or "" for r in records if pred(r)})
 
+    def policy_names(field, flagged, pred=lambda p: True):
+        """Null if any privileged policy left the rule unknown, so a missing rule never reads as clean."""
+        if any(p[field] is None and pred(p) for p in priv_policies):
+            return None
+        return names(priv_policies, lambda p: p[field] is flagged and pred(p))
+
+    permanent_users = None if any(a["principal_type"] is None for a in priv_permanent) else sum(
+        1 for a in priv_permanent if a["principal_type"] == "User"
+    )
+
     return {
         "pim_available": True,
         "eligible_assignments": len(eligible),
@@ -275,25 +285,21 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
             s: sum(1 for a in priv_active if a["standing"] == s) for s in ("permanent", "pim_activated", "time_bound")
         },
         "permanent_active_privileged_assignments": len(priv_permanent),
-        "permanent_active_privileged_user_assignments": sum(1 for a in priv_permanent if a["principal_type"] == "User"),
+        "permanent_active_privileged_user_assignments": permanent_users,
         "principals_with_permanent_privileged_access": len({a["principal_id"] for a in priv_permanent}),
         "privileged_roles_with_permanent_active_holders": names(priv_permanent),
         "global_administrator_eligible": sum(1 for e in eligible if e["is_global_administrator"]),
         "global_administrator_permanent_active": sum(1 for a in priv_permanent if a["is_global_administrator"]),
         "privileged_assignments_scoped_below_tenant": len(below_tenant),
         "privileged_role_policies": len(priv_policies),
-        "privileged_roles_activation_without_mfa_or_auth_context": names(
-            priv_policies, lambda p: p["activation_requires_mfa"] is False and not p["activation_authentication_context"]
+        "privileged_roles_activation_without_mfa_or_auth_context": policy_names(
+            "activation_requires_mfa", False, lambda p: not p["activation_authentication_context"]
         ),
-        "privileged_roles_activation_without_justification": names(
-            priv_policies, lambda p: p["activation_requires_justification"] is False
-        ),
-        "privileged_roles_activation_without_approval": names(priv_policies, lambda p: p["activation_requires_approval"] is False),
-        "privileged_roles_allowing_permanent_active_assignment": names(
-            priv_policies, lambda p: p["permanent_active_assignment_allowed"] is True
-        ),
-        "privileged_roles_allowing_permanent_eligible_assignment": names(
-            priv_policies, lambda p: p["permanent_eligible_assignment_allowed"] is True
+        "privileged_roles_activation_without_justification": policy_names("activation_requires_justification", False),
+        "privileged_roles_activation_without_approval": policy_names("activation_requires_approval", False),
+        "privileged_roles_allowing_permanent_active_assignment": policy_names("permanent_active_assignment_allowed", True),
+        "privileged_roles_allowing_permanent_eligible_assignment": policy_names(
+            "permanent_eligible_assignment_allowed", True
         ),
         "max_privileged_activation_hours": max(
             (p["activation_maximum_hours"] for p in priv_policies if p["activation_maximum_hours"] is not None), default=None

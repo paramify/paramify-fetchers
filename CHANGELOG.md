@@ -24,7 +24,9 @@ schemas and the `paramify` CLI — not the internal code.
   apart in `privileged_assignments_scoped_below_tenant`. A tenant without Entra ID
   P2 reads `pim_available: false`, keeps the reads that succeeded, and the run
   succeeds; when any read fails the summary gives no figures, so a denied read
-  never reads as zero standing admins. Needs `RoleManagement.Read.Directory`.
+  never reads as zero standing admins. A holder whose type wasn't returned, or a
+  privileged role's policy missing a rule, makes the matching user count or role
+  list null rather than clean. Needs `RoleManagement.Read.Directory`.
 - **`checkov_bicep`** (`EVD-CHECKOV-BICEP`) runs `checkov --framework bicep,arm`
   over a cloned repo, typically one hosted in Azure DevOps, using a PAT with
   Code (Read). It records Bicep and ARM checks together, each tagged with its
