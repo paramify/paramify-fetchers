@@ -69,7 +69,7 @@ evidence_set:
   reference_id: EVD-AZURE-ENTRA-SERVICE-PRINCIPALS
   name: Microsoft Entra ID Service Principals and Non-User Account Credentials
   instructions: >
-    Script: fetcher.py. Microsoft Graph calls (permission: Application.Read.All):
+    Script: azure/entra_service_principals/fetcher.py. Microsoft Graph calls (permission: Application.Read.All):
     GET /servicePrincipals with
     $select=id,appId,displayName,servicePrincipalType,accountEnabled,appOwnerOrganizationId,alternativeNames,passwordCredentials,keyCredentials;
     GET /applications with $select=id,appId,displayName,passwordCredentials,keyCredentials

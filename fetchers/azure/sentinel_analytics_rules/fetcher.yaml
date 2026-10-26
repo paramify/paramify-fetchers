@@ -54,7 +54,7 @@ evidence_set:
   reference_id: EVD-AZURE-SENTINEL-ANALYTICS-RULES
   name: Azure Sentinel Analytics Rules
   instructions: >
-    Script: fetcher.py. ARM REST per Sentinel workspace: alertRules at
+    Script: azure/sentinel_analytics_rules/fetcher.py. ARM REST per Sentinel workspace: alertRules at
     api-version 2025-09-01 and 2025-10-01-preview, merged by rule id (seen_in
     records which listing returned each), plus alertRuleTemplates at 2025-09-01.
     enabled is properties.enabled. Fusion is kind Fusion or template

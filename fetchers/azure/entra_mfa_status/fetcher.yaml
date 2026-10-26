@@ -74,7 +74,7 @@ evidence_set:
   reference_id: EVD-AZURE-ENTRA-MFA
   name: Microsoft Entra ID MFA Coverage
   instructions: >
-    Script: fetcher.py. Microsoft Graph calls: GET /users with
+    Script: azure/entra_mfa_status/fetcher.py. Microsoft Graph calls: GET /users with
     $select=id,displayName,userPrincipalName,accountEnabled,userType,signInActivity;
     GET /reports/authenticationMethods/userRegistrationDetails; GET /directoryRoles,
     then GET /directoryRoles/{id}/members per privileged role and

@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-SSM-PATCH
   name: AWS SSM Patch Compliance
-  instructions: 'Script: fetcher.sh. Commands executed: aws ssm describe-instance-information, aws ssm list-resource-compliance-summaries --filters Key=ComplianceType,Values=Patch.'
+  instructions: 'Script: aws/ssm_patch_compliance/fetcher.sh. Commands executed: aws ssm describe-instance-information, aws ssm list-resource-compliance-summaries --filters Key=ComplianceType,Values=Patch.'

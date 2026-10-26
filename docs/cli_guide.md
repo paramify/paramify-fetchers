@@ -71,6 +71,19 @@ paramify tui                   # the terminal UI
 > Back-compat: `python -m framework.runner <cmd>` and `python -m framework.tui`
 > still work. They do exactly the same as the matching `paramify` subcommands.
 
+### Tab completion
+
+To complete commands and options with Tab, install completion for your shell
+once, then open a new shell:
+
+```bash
+paramify --install-completion
+```
+
+`paramify samples show <Tab>` also completes fetcher names. It lists only the
+fetchers that have a sample. `paramify` must be on your `PATH` (for example, an
+active virtual environment) when you press Tab.
+
 ## Preflight with `paramify doctor`
 
 Before a real run, `paramify doctor <manifest>` examines the environment:
@@ -86,7 +99,7 @@ into CI:
 
 ```text
 $ paramify doctor examples/minimal_run.yaml
-✅ Python 3.11.9 (need ≥ 3.10)
+✅ Python 3.11.9 (need ≥ 3.11)
 
 Required CLIs:
   ✅ curl     /usr/bin/curl  (okta)

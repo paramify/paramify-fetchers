@@ -1,0 +1,19 @@
+key: oci_policy_inventory_present
+name: OCI IAM Policy Inventory Present
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one IAM policy was collected. Its partners conclude from zeros — no
+  broad grant, no unconditional any-user grant — and zeros are equally what an
+  empty collection produces. Every tenancy holds at least the default admin
+  policy, so a zero here means the listing was not read. Does NOT assert
+  anything about posture. Fails when the summary key is renamed.
+regex: '"total_policies":\s*(?<total_policies>[1-9][0-9]*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-IAM-POLICIES

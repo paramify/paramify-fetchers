@@ -1,0 +1,72 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_block_storage_encryption_status",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.storage_inventory.ebs[]",
+      "records": 2,
+      "fields": {
+        "name": 2,
+        "type": 2,
+        "encrypted": 2,
+        "kms_key_id": 2,
+        "state": 2,
+        "size_gb": 2
+      }
+    },
+    {
+      "path": "results.storage_inventory.efs[]",
+      "records": 2,
+      "fields": {
+        "name": 2,
+        "type": 2,
+        "encrypted": 2,
+        "kms_key_id": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:11:08Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "ebs_default_settings": {
+        "encryption_enabled_by_default": false,
+        "default_kms_key_id": "alias/aws/ebs"
+      },
+      "storage_inventory": {
+        "ebs": [
+          {
+            "name": "vol-0f59747775ea40019",
+            "type": "ebs",
+            "encrypted": true,
+            "kms_key_id": "arn:aws:kms:us-east-2:111111111111:key/00000000-0000-4000-8000-222222222222",
+            "state": "available",
+            "size_gb": 1
+          }
+        ],
+        "efs": [
+          {
+            "name": "fs-0a3f090d638eabc5d",
+            "type": "efs",
+            "encrypted": true,
+            "kms_key_id": "arn:aws:kms:us-east-2:111111111111:key/00000000-0000-4000-8000-333333333333"
+          }
+        ]
+      },
+      "summary": {
+        "total_storage": 4,
+        "encrypted_storage": 2,
+        "encryption_percentage": 50
+      }
+    }
+  }
+}
