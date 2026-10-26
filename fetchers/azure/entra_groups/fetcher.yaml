@@ -75,7 +75,8 @@ evidence_set:
     - Microsoft Graph GET /organization — the tenant's name and domain
     - Microsoft Graph GET /groups, expanding members — every group, how its membership is managed, and its members
     - Microsoft Graph GET /groups, expanding owners — who owns each group (Graph allows one expansion per request)
-    - Microsoft Graph GET /groups/{id}/members and GET /groups/{id}/owners on the beta endpoint (only for a group whose expansion returned 20, its limit) — the whole list; beta because v1.0 leaves out service principals
+    - Microsoft Graph GET /groups/{id}/members — a group's whole member list when the expansion stopped at its limit of 20 (beta, since v1.0 leaves out service principals)
+    - Microsoft Graph GET /groups/{id}/owners — a group's whole owner list when the expansion stopped at its limit of 20 (beta, as for members)
 
     Output: azure_entra_groups_<tenant>.json — each group with its kind, whether it can hold directory roles, how its membership is managed, and its members and owners.
 

@@ -263,19 +263,22 @@ def test_owners_past_the_expand_limit_are_reread_from_beta(monkeypatch, tmp_path
 
 
 def test_hidden_membership_without_visible_members_reads_unknown(monkeypatch, tmp_path):
-    tenant = _tenant()
-    tenant["group_models"].append(
-        _group("g-hidden", "Board", types=["Unified"], mail=True, visibility="HiddenMembership")
-    )
-    code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
+    # Microsoft documents both spellings.
+    for visibility in ("HiddenMembership", "Hiddenmembership"):
+        tenant = _tenant()
+        tenant["group_models"].append(
+            _group("g-hidden", "Board", types=["Unified"], mail=True, visibility=visibility)
+        )
+        code, evidence, _ = _run(monkeypatch, tmp_path, FakeGraph(**tenant))
 
-    assert code == 0
-    s = evidence["summary"]
-    assert s["hidden_membership_groups"] == 1 and s["hidden_membership_groups_unread"] == 1
-    assert s["empty_groups"] == 1
-    assert s["member_details_readable"] is True
-    hidden = {g["id"]: g for g in evidence["results"]["groups"]}["g-hidden"]
-    assert hidden["members"] is None and hidden["member_count"] is None and hidden["hidden_members_unread"] is True
+        assert code == 0
+        s = evidence["summary"]
+        assert s["hidden_membership_groups"] == 1 and s["hidden_membership_groups_unread"] == 1
+        assert s["empty_groups"] == 1
+        assert s["member_details_readable"] is True
+        hidden = {g["id"]: g for g in evidence["results"]["groups"]}["g-hidden"]
+        assert hidden["members"] is None and hidden["member_count"] is None
+        assert hidden["hidden_members_unread"] is True
 
 
 def test_owners_read_without_user_read_all_leave_the_disabled_owner_figure_null(monkeypatch, tmp_path):

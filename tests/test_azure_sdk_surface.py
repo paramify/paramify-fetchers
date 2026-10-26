@@ -2422,9 +2422,16 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     (
         "msgraph.generated.models.user",
         "User",
-        ["user_principal_name", "user_type", "account_enabled"],
+        ["odata_type", "user_principal_name", "user_type", "account_enabled"],
         "azure/entra_groups — a missing field reads as None, so guest and disabled-user "
-        "figures read unknown",
+        "figures read unknown; without odata_type no member is a user and they read 0",
+    ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        ["odata_type", "account_enabled"],
+        "azure/entra_groups — service principal members and owners; without account_enabled "
+        "groups_with_only_disabled_owners reads unknown",
     ),
     (
         "msgraph.generated.models.authentication_methods_policy",

@@ -58,7 +58,8 @@ EXPAND_LIMIT = 20
 GROUP_TYPE_UNIFIED = "Unified"
 GROUP_TYPE_DYNAMIC = "DynamicMembership"
 RULE_PAUSED = "Paused"
-VISIBILITY_HIDDEN_MEMBERSHIP = "HiddenMembership"
+# Microsoft documents both "HiddenMembership" and "Hiddenmembership"; compared casefolded.
+VISIBILITY_HIDDEN_MEMBERSHIP = "hiddenmembership"
 USER_TYPE_GUEST = "Guest"
 
 KIND_MICROSOFT_365 = "microsoft_365"
@@ -162,7 +163,7 @@ def _enabled_owner(owners: list[dict] | None) -> bool | None:
 
 
 def group_record(group: dict, members: list[dict] | None, owners: list[dict] | None) -> dict:
-    hidden = group.get("visibility") == VISIBILITY_HIDDEN_MEMBERSHIP
+    hidden = (group.get("visibility") or "").lower() == VISIBILITY_HIDDEN_MEMBERSHIP
     # Without Member.Read.Hidden, Graph returns a hidden group's members as an empty list, no error.
     hidden_unread = hidden and members == []
     visible_owners = owners_in_graph(group)
