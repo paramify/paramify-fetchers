@@ -1,0 +1,19 @@
+key: entra_pim_privileged_role_policies_read
+name: Entra PIM Privileged Role Policies Read
+type: AUTOMATED
+role: integrity
+statement: >-
+  The tenant-wide PIM policy of at least one privileged Entra ID directory role was read, and the
+  collection was complete. Integrity partner of
+  entra_pim_activation_requires_mfa_approval_justification: with no privileged policy read, the
+  fetcher's activation lists read [] and would look compliant. Asserts nothing about posture.
+
+regex: '"partial_failure":\s*false[\s\S]*?"collection_complete":\s*true[\s\S]*?"privileged_role_policies":\s*(?<privileged_role_policies>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-PIM-ASSIGNMENTS

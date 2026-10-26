@@ -1,0 +1,32 @@
+key: entra_pim_activation_requires_mfa_approval_justification
+name: Entra Privileged Role Activation Requires MFA, Approval and Justification Within 8 Hours
+type: AUTOMATED
+role: configuration
+statement: >-
+  Activating any privileged Entra ID directory role through PIM requires MFA (or a Conditional Access
+  authentication context), someone's approval and a justification, and no privileged role can be
+  activated for more than 8 hours; every privileged role's tenant-wide policy stated each rule.
+  Substantiates that activation requires MFA, approval, justification and a bounded duration
+  (KSI-IAM-JIT, KSI-MLA-ALA). 8 hours is a placeholder for the organization's maximum. Relies on
+  entra_pim_privileged_role_policies_read. Does NOT prove MFA that Conditional Access requires at
+  sign-in, who the approvers are, ticket numbers, or policies scoped below the tenant.
+
+# Threshold in the regex: max_privileged_activation_hours at most 8 (null, from an unread rule, does not match).
+regex: '"partial_failure":\s*false[\s\S]*?"collection_complete":\s*true[\s\S]*?"max_privileged_activation_hours":\s*(?<max_privileged_activation_hours>[0-7](?:\.\d+)?|8(?:\.0+)?)(?![\d.])[\s\S]*?"privileged_roles_activation_without_approval":\s*(?<privileged_roles_activation_without_approval>\[[^\]]*\]|null)[\s\S]*?"privileged_roles_activation_without_justification":\s*(?<privileged_roles_activation_without_justification>\[[^\]]*\]|null)[\s\S]*?"privileged_roles_activation_without_mfa_or_auth_context":\s*(?<privileged_roles_activation_without_mfa_or_auth_context>\[[^\]]*\]|null)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[2] EQUALS []; MATCH_GROUP[3] EQUALS []; MATCH_GROUP[4] EQUALS []
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # privileged_roles_activation_without_approval
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "[]" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # privileged_roles_activation_without_justification
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "[]" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }   # privileged_roles_activation_without_mfa_or_auth_context
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "[]" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-PIM-ASSIGNMENTS
