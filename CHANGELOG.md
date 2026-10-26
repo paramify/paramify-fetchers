@@ -102,6 +102,27 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_app_service_configuration` 0.3.0: cipher suites, basic-auth publishing, Key Vault
+  references and runtime end of support.** Each web app now reports its minimum TLS cipher
+  suite and the suites still allowed (whether CBC or static-RSA suites remain), the SCM site's
+  minimum TLS version, whether basic-auth publishing is allowed on the SCM and FTP endpoints,
+  which app settings and connection strings are Key Vault references and whether each
+  resolves, and whether each declared runtime is past end of support, joined to App
+  Service's own runtime stack list. All Reader GETs; no setting value is read. Existing
+  fields are unchanged. Also maps to KSI-SVC-VCM (client certificate mode and managed
+  identity).
+  - **Opt-in literal-secret scan.** With `scan_literal_secrets` on (off by default), it
+    reads app settings and connection strings through config/list, which needs
+    `Microsoft.Web/sites/config/list/action`, and lists the names of those holding a
+    literal secret instead of a Key Vault or App Configuration reference, each with the
+    reason (`credential_in_value` or `secret_like_name`). Values are classified in memory
+    and never written. A 403 reads `not_authorized` for that app and a ReadOnly lock's 409
+    reads `not_read`; neither is a collection failure. When apps exist but none could be
+    scanned, the secret counts are null rather than 0. The same read supplies a Windows
+    app's Node version (`WEBSITE_NODE_DEFAULT_VERSION`, matched to the Node stack only and
+    written only when it is a version number) to runtime support; without it, a Windows
+    app on the default .NET Framework v4.0 reads as unknown rather than supported.
+    Production sites only; deployment slots are not read.
 - **`azure_front_door_origins` 0.5.0: Kudu and silent regions.** An app whose
   Kudu (scm) site has its own access restrictions
   (`scmIpSecurityRestrictionsUseMain` off) that let every public caller in is no
