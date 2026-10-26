@@ -7,7 +7,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from azure_common import (
     Collector,
@@ -276,15 +276,19 @@ def workspace_identity(ws: Dict[str, Any]) -> Dict[str, Any]:
     return {k: ws.get(k) for k in ("id", "name", "resource_group", "location", "retention_in_days", "sentinel_onboarded")}
 
 
-def table_retention_days(client: AzureRestClient, workspace_id: str, table: str, default: Optional[int]) -> Optional[int]:
-    """Interactive (queryable) retention of one table; older rows are gone, not absent."""
+def table_retention(client: AzureRestClient, workspace_id: str, table: str, default: Optional[int]) -> Tuple[bool, Optional[int]]:
+    """Whether one table exists (404 if not), and its interactive (queryable) retention; older rows are gone, not absent."""
     try:
         days = dig(client.get(f"{workspace_id}/tables/{table}", LAW_API), "properties", "retentionInDays")
     except ArmError as exc:
         if exc.status == 404:
-            return default
+            return False, default
         raise
-    return days if isinstance(days, int) and days > 0 else default
+    return True, days if isinstance(days, int) and days > 0 else default
+
+
+def table_retention_days(client: AzureRestClient, workspace_id: str, table: str, default: Optional[int]) -> Optional[int]:
+    return table_retention(client, workspace_id, table, default)[1]
 
 
 def int_config(env: str, default: int) -> int:

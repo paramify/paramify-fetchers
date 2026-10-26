@@ -49,7 +49,7 @@ evidence_set:
   reference_id: EVD-AZURE-APPGW-WAF
   name: Azure Application Gateway WAF
   instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-network
+    Script: azure/app_gateway_waf/fetcher.py. Azure SDK calls: azure-mgmt-network
     application_gateways.list_all(), web_application_firewall_policies.list_all(),
     and web_application_firewall_policies.get() for a referenced policy that
     list_all did not return (another subscription). A Resource Graph count of

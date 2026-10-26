@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-EC2-PUBLIC-EXPOSURE
   name: EC2 Public Exposure
-  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 describe-instances.'
+  instructions: 'Script: aws/ec2_public_exposure/fetcher.sh. Commands executed: aws ec2 describe-instances.'

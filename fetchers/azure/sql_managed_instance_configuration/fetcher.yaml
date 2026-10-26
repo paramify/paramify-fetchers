@@ -50,7 +50,7 @@ evidence_set:
   reference_id: EVD-AZURE-SQLMI-CONFIG
   name: Azure SQL Managed Instance Configuration
   instructions: >
-    Script: fetcher.py. Azure SDK calls (Reader is sufficient):
+    Script: azure/sql_managed_instance_configuration/fetcher.py. Azure SDK calls (Reader is sufficient):
     azure-mgmt-sql SqlManagementClient (api 2025-01-01) managed_instances.list(),
     managed_instance_administrators.list_by_instance(),
     managed_instance_azure_ad_only_authentications.list_by_instance(); and

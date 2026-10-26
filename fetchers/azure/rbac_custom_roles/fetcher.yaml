@@ -48,7 +48,7 @@ evidence_set:
   reference_id: EVD-AZURE-RBAC-CUSTOM-ROLES
   name: Azure RBAC Custom Role Definitions
   instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-authorization
+    Script: azure/rbac_custom_roles/fetcher.py. Azure SDK calls (azure-mgmt-authorization
     AuthorizationManagementClient):
     role_definitions.list(scope="/subscriptions/{id}"), reading assignableScopes and
     permissions[{actions, notActions, dataActions, notDataActions}]; and

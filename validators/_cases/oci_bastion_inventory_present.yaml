@@ -1,0 +1,13 @@
+validator: oci_bastion_inventory_present
+cases:
+  - name: a_bastion_collected
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_bastions": 1}}'
+
+  - name: none_collected
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_bastions": 0}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"bastion_count": 1}}'

@@ -1,0 +1,106 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_cloud_sql_backup_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.instances[]",
+      "records": 1,
+      "fields": {
+        "availability_type": 1,
+        "backup_enabled": 1,
+        "backup_location": 0,
+        "backup_start_time": 1,
+        "binary_log_enabled": 1,
+        "create_time": 1,
+        "database_version": 1,
+        "deletion_protection_enabled": 1,
+        "failover_replica_available": 1,
+        "failover_replica_name": 0,
+        "high_availability": 1,
+        "instance_type": 1,
+        "is_primary": 1,
+        "master_instance_name": 0,
+        "name": 1,
+        "pitr_toggle_enabled": 1,
+        "point_in_time_recovery_enabled": 1,
+        "read_replica_count": 1,
+        "read_replica_names": 0,
+        "region": 1,
+        "retained_backup_count": 1,
+        "retention_unit": 1,
+        "secondary_zone": 0,
+        "state": 1,
+        "transaction_log_retention_days": 1,
+        "transactional_log_storage_state": 1,
+        "zone": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:54:37Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "instances": [
+        {
+          "availability_type": "ZONAL",
+          "backup_enabled": true,
+          "backup_location": null,
+          "backup_start_time": "03:00",
+          "binary_log_enabled": true,
+          "create_time": "2026-08-17T16:20:57.300Z",
+          "database_version": "MYSQL_8_0",
+          "deletion_protection_enabled": false,
+          "failover_replica_available": false,
+          "failover_replica_name": null,
+          "high_availability": false,
+          "instance_type": "CLOUD_SQL_INSTANCE",
+          "is_primary": true,
+          "master_instance_name": null,
+          "name": "example-sql",
+          "pitr_toggle_enabled": false,
+          "point_in_time_recovery_enabled": true,
+          "read_replica_count": 0,
+          "read_replica_names": [],
+          "region": "us-central1",
+          "retained_backup_count": 7,
+          "retention_unit": "COUNT",
+          "secondary_zone": null,
+          "state": "RUNNABLE",
+          "transaction_log_retention_days": 3,
+          "transactional_log_storage_state": "CLOUD_STORAGE",
+          "zone": "us-central1-c"
+        }
+      ]
+    },
+    "summary": {
+      "backup_enabled_instances": 1,
+      "backup_enabled_percentage": 100,
+      "cloud_sql_api_readable": true,
+      "deletion_protection_instances": 0,
+      "high_availability_instances": 0,
+      "high_availability_percentage": 0,
+      "instances_with_failover_replica": 0,
+      "instances_with_read_replicas": 0,
+      "maximum_retained_backup_count": 7,
+      "maximum_transaction_log_retention_days": 3,
+      "minimum_retained_backup_count": 7,
+      "minimum_transaction_log_retention_days": 3,
+      "point_in_time_recovery_instances": 1,
+      "point_in_time_recovery_percentage": 100,
+      "primary_instances": 1,
+      "read_replica_instances": 0,
+      "total_instances": 1,
+      "zonal_primary_instances": 1
+    }
+  }
+}
