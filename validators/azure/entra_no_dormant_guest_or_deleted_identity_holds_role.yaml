@@ -1,0 +1,63 @@
+key: entra_no_dormant_guest_or_deleted_identity_holds_role
+name: Entra No Dormant, Guest, Disabled Or Deleted Identity Holds A Role
+type: AUTOMATED
+role: configuration
+statement: >-
+  No Entra ID identity that should have lost its access still holds a directory role or an Azure role
+  that applies in the subscription: no dormant user (no successful sign-in in the last 90 days or
+  fewer), no enabled user that never signed in past that grace period, no guest user, no disabled user
+  or service principal, no dormant service principal, and no deleted principal still named by an Azure
+  role assignment. Users' and service principals' sign-in activity, the tenant and this tenant's app
+  registrations were all read, and the dormancy window is at most 90 days. Substantiates failing
+  dormant, guest or orphaned identities with retained access (KSI-IAM-ELP, KSI-IAM-AAM). Every guest
+  holding any role fails, including an approved vendor guest. Service principals whose dormancy can't
+  be judged (managed identities and other tenants' apps with no client sign-in on record) are not
+  judged; their count is service_principals_holding_roles_dormancy_unknown. Does NOT prove
+  PIM-eligible roles, roles scoped to an administrative unit, or that each account maps to a current
+  person.
+
+# Reads the component counts rather than no_dormant_guest_or_deleted_identity_holds_a_role, which is
+# null whenever any role-holding service principal's dormancy is unknown (any managed identity with a role).
+# Threshold in the regex: dormant_after_days 1-90.
+regex: '"partial_failure":\s*false[\s\S]*?"applications_readable":\s*(?<applications_readable>true|false)[\s\S]*?"deleted_principals_holding_azure_roles":\s*(?<deleted_principals_holding_azure_roles>\d+|null)[\s\S]*?"disabled_service_principals_holding_roles":\s*(?<disabled_service_principals_holding_roles>\d+|null)[\s\S]*?"disabled_users_holding_roles":\s*(?<disabled_users_holding_roles>\d+|null)[\s\S]*?"dormant_after_days":\s*(?<dormant_after_days>[1-8]?\d|90)(?!\d)[\s\S]*?"dormant_service_principals_holding_roles":\s*(?<dormant_service_principals_holding_roles>\d+|null)[\s\S]*?"dormant_users_holding_roles":\s*(?<dormant_users_holding_roles>\d+|null)[\s\S]*?"guest_users_holding_roles":\s*(?<guest_users_holding_roles>\d+|null)[\s\S]*?"never_signed_in_users_holding_roles":\s*(?<never_signed_in_users_holding_roles>\d+|null)[\s\S]*?"service_principal_sign_in_activity":\s*"(?<service_principal_sign_in_activity>[a-z_]+)"[\s\S]*?"tenant_readable":\s*(?<tenant_readable>true|false)[\s\S]*?"user_sign_in_activity":\s*"(?<user_sign_in_activity>[a-z_]+)"'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS true; MATCH_GROUP[2] EQUALS 0; MATCH_GROUP[3] EQUALS 0; MATCH_GROUP[4] EQUALS 0; MATCH_GROUP[6] EQUALS 0; MATCH_GROUP[7] EQUALS 0; MATCH_GROUP[8] EQUALS 0; MATCH_GROUP[9] EQUALS 0; MATCH_GROUP[10] EQUALS read; MATCH_GROUP[11] EQUALS true; MATCH_GROUP[12] EQUALS read
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # applications_readable
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # deleted_principals_holding_azure_roles
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 3 }   # disabled_service_principals_holding_roles
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 4 }   # disabled_users_holding_roles
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 6 }   # dormant_service_principals_holding_roles
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 7 }   # dormant_users_holding_roles
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 8 }   # guest_users_holding_roles
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 9 }   # never_signed_in_users_holding_roles
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 10 }   # service_principal_sign_in_activity
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "read" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 11 }   # tenant_readable
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "true" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 12 }   # user_sign_in_activity
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "read" }
+
+evidence_sets:
+  - EVD-AZURE-ENTRA-DORMANT-IDENTITIES
