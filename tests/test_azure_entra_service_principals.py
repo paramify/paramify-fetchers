@@ -319,6 +319,14 @@ def test_tenant_data_permissions_are_privileged_only_as_application_permissions(
     assert delegated["privileged_scopes"] == ["Application.ReadWrite.OwnedBy"]
 
 
+def test_privileged_names_match_in_any_case():
+    resources = {"sp-graph": {"app_id": GRAPH_APP_ID, "display_name": "Microsoft Graph", "app_roles": {}}}
+    delegated = sps.delegated_grant_record(
+        {"resource_id": "sp-graph", "scope": "directory.readwrite.all mail.read User.Read"}, resources
+    )
+    assert delegated["privileged_scopes"] == ["directory.readwrite.all"]
+
+
 def test_an_unnamed_permission_is_unknown_on_graph_and_not_privileged_elsewhere():
     resources = {
         "sp-graph": {"app_id": GRAPH_APP_ID, "display_name": "Microsoft Graph", "app_roles": {}},

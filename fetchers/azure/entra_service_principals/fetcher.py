@@ -200,6 +200,9 @@ TENANT_DATA_GRAPH_PERMISSIONS = frozenset(
     }
 )
 PRIVILEGED_APPLICATION_GRAPH_PERMISSIONS = PRIVILEGED_GRAPH_PERMISSIONS | TENANT_DATA_GRAPH_PERMISSIONS
+# Matched case-insensitively: a grant made through the API may store a scope in any case.
+_PRIVILEGED_APPLICATION_KEYS = frozenset(p.lower() for p in PRIVILEGED_APPLICATION_GRAPH_PERMISSIONS)
+_PRIVILEGED_DELEGATED_KEYS = frozenset(p.lower() for p in PRIVILEGED_GRAPH_PERMISSIONS)
 
 
 # --- projections: the only code here that touches a Graph model ---
@@ -542,8 +545,8 @@ def _owner_records(owners: list[dict] | None) -> list[dict] | None:
 
 
 def is_privileged_permission(resource_app_id, permission, application: bool = True) -> bool:
-    listed = PRIVILEGED_APPLICATION_GRAPH_PERMISSIONS if application else PRIVILEGED_GRAPH_PERMISSIONS
-    return resource_app_id == MICROSOFT_GRAPH_APP_ID and permission in listed
+    listed = _PRIVILEGED_APPLICATION_KEYS if application else _PRIVILEGED_DELEGATED_KEYS
+    return resource_app_id == MICROSOFT_GRAPH_APP_ID and str(permission or "").lower() in listed
 
 
 def application_permission_record(assignment: dict, resources: dict) -> dict:
