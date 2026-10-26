@@ -1,7 +1,7 @@
 # Azure
 
 Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
-Azure DevOps with Microsoft's Python SDKs and REST APIs. All 73 fetchers are
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 74 fetchers are
 read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
 or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
 [Install](../../README.md#install)).
@@ -289,6 +289,7 @@ Inventory and change:
 | `azure_resource_inventory` | Every resource from Resource Graph with type, location, tags and SKU, plus its Defender for Cloud coverage |
 | `azure_residual_resources` | Leftovers: unattached disks, NICs and public IPs, unused NSGs, empty resource groups, stale slots, unused identities, assignments to deleted principals |
 | `azure_change_provenance` | Every control-plane change in the last 14 days, attributed to a pipeline, a manual deployment or a direct edit |
+| `azure_app_service_deployments` | How each web app and slot is deployed: Kudu records, slot swaps and publishing-credential use with who and when, deployment source, and how each slot differs from production |
 
 Azure DevOps:
 

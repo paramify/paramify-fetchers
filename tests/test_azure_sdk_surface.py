@@ -1897,6 +1897,27 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["repo_url", "branch", "is_manual_integration", "is_git_hub_action", "deployment_rollback_enabled"],
         "azure/app_service_deployments — a renamed repo_url reads as 'no source control'",
     ),
+    (
+        "azure.mgmt.web.models",
+        "SiteConfig",
+        ["min_tls_version", "scm_min_tls_version", "min_tls_cipher_suite", "ftps_state", "http20_enabled",
+         "remote_debugging_enabled", "linux_fx_version", "windows_fx_version", "net_framework_version",
+         "java_version", "java_container", "java_container_version", "php_version", "python_version",
+         "node_version"],
+        "azure/app_service_deployments — a renamed field reads as None on both sides, so every slot matches production",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteProperties",
+        ["https_only", "client_cert_enabled", "public_network_access"],
+        "azure/app_service_deployments — a renamed field reads as None on both sides, so every slot matches production",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "IpSecurityRestriction",
+        ["subnet_mask"],
+        "azure/app_service_deployments — compared rule by rule between a slot and production",
+    ),
     # SiteConfigResource (get_configuration) nests these under `properties`,
     # a SiteConfig; the resource flattens it for attribute access.
     (
@@ -2538,6 +2559,12 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         ["claims", "caller", "correlation_id", "event_data_id", "resource_id", "operation_name", "status",
          "event_timestamp"],
         "azure/app_service_deployments — a renamed caller reads as an unattributed swap or download",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "LocalizableString",
+        ["value"],
+        "azure/app_service_deployments — operation_name and status; a rename reads every event as unclassified",
     ),
     (
         "azure.mgmt.monitor.models",
