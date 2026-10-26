@@ -1,0 +1,22 @@
+key: azure_alert_rules_all_fired_in_window
+name: Azure Monitor Enabled Alert Rules All Fired in Window
+type: AUTOMATED
+role: configuration
+statement: >
+  Every enabled Azure Monitor alert rule the subscription lists (metric, log search, smart detector and
+  activity log; at least one) fired at least one alert in the 30-day window: enabled_rules_never_fired is
+  0, and the collection had no partial failure. Firing stands in for "tested": a rule that fired has a
+  working condition. Substantiates KSI-MLA-ALA (Logical Access Review): "Fail ... rules not tested within
+  the required frequency", read as alerting. Fails on quiet rules whose condition never held. Does not
+  prove a deliberate test event was raised, that the notification arrived, or anything about access to
+  log data, which is what KSI-MLA-ALA itself asks.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"enabled_alert_rules":\s*[1-9]\d*,\s*"enabled_rules_never_fired":\s*0,'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-MONITOR-FIRED-ALERTS

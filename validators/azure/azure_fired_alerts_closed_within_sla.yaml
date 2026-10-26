@@ -1,0 +1,23 @@
+key: azure_fired_alerts_closed_within_sla
+name: Azure Monitor Fired Alerts Closed Within SLA
+type: AUTOMATED
+role: configuration
+statement: >
+  Every Azure Monitor alert closed in the 30-day window was closed within 168 hours of firing
+  (max_hours_to_close), with every fired alert listed, every alert's history read, and no partial
+  failure; when no alert closed in the window, none may be open (alerts_open 0), so a window of fired,
+  never-closed alerts fails. 168 hours is a placeholder, not the organization's SLA. Substantiates
+  KSI-MLA-RVL (Audit Log Collection and Alerts; Continuous Monitoring; Continuous Monitoring Strategy;
+  Security Event Notifications): "Fail alerts ... not reviewed and closed within SLA", the alert half.
+  Does not prove open alerts are younger than the SLA when some alert did close (the oldest open alert is
+  a timestamp a regex cannot age), per-severity targets, or anything about Sentinel incidents.
+
+regex: '"partial_failure":\s*false\b[\s\S]*?"alert_histories_unread":\s*0,[\s\S]*?"alerts_open":\s*(?:0,[\s\S]*?"all_alerts_listed":\s*true,[\s\S]*?"max_hours_to_close":\s*null|\d+,[\s\S]*?"all_alerts_listed":\s*true,[\s\S]*?"max_hours_to_close":\s*(?:(?:1[0-5]\d|16[0-7]|[1-9]?\d)(?:\.\d+)?|168(?:\.0+)?)(?![\d.eE]))'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-MONITOR-FIRED-ALERTS
